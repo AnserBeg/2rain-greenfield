@@ -42,9 +42,11 @@ const suiteDefinitions = [
     discoveryPattern: 'test/compiler/**/*.test.ts',
     excludedFiles: ['test/compiler/performance-budget.test.ts'],
     expectedFiles: [
+      'test/compiler/adopted-language-shape.test.ts',
       'test/compiler/compiler-semantic-profile.test.ts',
       'test/compiler/determinism.test.ts',
       'test/compiler/disclosure-tier-projection.test.ts',
+      'test/compiler/field-kind-projection.test.ts',
       'test/compiler/freeze-b.test.ts',
       'test/compiler/g2-module-conformance.test.ts',
       'test/compiler/g2-module-storage.test.ts',
@@ -65,6 +67,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/integration/catalog-runtime.test.ts',
       'test/integration/disclosure-tier-round-trip.test.ts',
+      'test/integration/field-kind-round-trip.test.ts',
       'test/integration/location-runtime.test.ts',
       'test/integration/module-runtime.test.ts',
       'test/integration/module-storage-transition.test.ts',

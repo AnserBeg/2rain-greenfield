@@ -32,6 +32,7 @@ test('Location definition compiles into every walking-slice projection with life
   const definition = locationModuleDefinition() as {
     assertions: Array<Record<string, unknown>>;
     entities: Array<Record<string, unknown>>;
+    languageVersion: string;
     fields: Array<{
       fieldId: string;
       fieldType: {
@@ -98,20 +99,24 @@ test('Location definition compiles into every walking-slice projection with life
   assert.equal(locationType.label, 'Location type');
   assert.equal(locationType.presence, 'required');
   assert.equal(locationType.fieldType.kind, 'enumFieldType');
+  // `schemaVersion` is derived from the definition under test, not written by
+  // hand: node-version purity means every node in this package carries the
+  // package's own version, so the fact under test is that these options are
+  // NODES OF THIS PACKAGE -- which a literal states only by coincidence.
   assert.deepEqual(locationType.fieldType.options, [
     {
       kind: 'enumOption',
       label: 'Warehouse',
       optionId: `${LOCATION_IDS.namespace}:option.warehouse`,
       orderKey: 10,
-      schemaVersion: 'v4',
+      schemaVersion: definition.languageVersion,
     },
     {
       kind: 'enumOption',
       label: 'Store',
       optionId: `${LOCATION_IDS.namespace}:option.store`,
       orderKey: 20,
-      schemaVersion: 'v4',
+      schemaVersion: definition.languageVersion,
     },
   ]);
   assert.deepEqual(definition.capabilityRequirements, [
@@ -130,7 +135,7 @@ test('Location definition compiles into every walking-slice projection with life
         'reporting',
         'verification',
       ],
-      schemaVersion: 'v4',
+      schemaVersion: definition.languageVersion,
       supportStatus: 'supported',
     },
   ]);

@@ -83,22 +83,27 @@ test('the conformance fixture is definition data, not emitted module TypeScript'
   const names = readdirSync(fixtureDirectory).sort();
   assert.deepEqual(names, [
     'definitions.ts',
+    // `ux-picker`. Definition data like its sibling: one field of every
+    // canonical kind, layered onto `ordinaryModuleV2`. It is held to the same
+    // two bans below, which is why it is inventoried rather than exempted.
+    'field-kinds.ts',
     'package.json',
     'v1-v2.release.structural.golden.json',
     'v1-v2.transition.structural.golden.json',
   ]);
-  const definition = readFileSync(
-    join(fixtureDirectory, 'definitions.ts'),
-    'utf8',
-  );
-  assert.doesNotMatch(
-    definition,
-    /from\s+['"](?:pg|postgres|@north-star\/runtime|@north-star\/postgres-provider)/,
-  );
-  assert.doesNotMatch(
-    definition,
-    /(?:class|function)\s+\w*(?:Handler|Executor|Gateway|Repository|Service)\b/,
-  );
+  for (const name of ['definitions.ts', 'field-kinds.ts']) {
+    const definition = readFileSync(join(fixtureDirectory, name), 'utf8');
+    assert.doesNotMatch(
+      definition,
+      /from\s+['"](?:pg|postgres|@north-star\/runtime|@north-star\/postgres-provider)/,
+      name,
+    );
+    assert.doesNotMatch(
+      definition,
+      /(?:class|function)\s+\w*(?:Handler|Executor|Gateway|Repository|Service)\b/,
+      name,
+    );
+  }
 
   const metamorphic = readFileSync(
     resolve('test/postgres/module-runtime.test.ts'),

@@ -375,21 +375,30 @@ test(
 // a 50.30 MiB peak when that lineage held five application entries.
 //
 // Both figures are now stale and the timeout is the reason to say so. The
-// lineage holds EIGHT application entries, and this test drives three tenants:
-// two for the gateway-persistence subject, plus `-source-edge`, which activates
-// a truncated lineage so ADR-0047 §6's source-changing direction has a real
-// edge to cross.
+// lineage holds NINE application entries, and this test drives TWO tenants,
+// both for the gateway-persistence subject.
 //
-// Measured against the 300s bound: 210.9s inside the full matrix at a8c9d07
-// (1.42x margin) and 117.6s standalone on a quiet machine (2.55x). Both are
-// recorded deliberately -- this workload is load-dependent, and quoting one
-// number without its conditions is how the 54.6s figure above went stale. The
-// matrix figure governs, because the matrix is where it has to pass.
+// THE SPLIT PRESCRIBED BELOW HAS BEEN TAKEN, by `LANG-ADOPT-v5`, and it took
+// two rounds because the first was measured standalone and the bound is
+// in-matrix. Adoption made the artifact's head source-changing rather than a
+// profile sibling, which swapped which ADR-0047 §6 rollback direction could
+// borrow the real head and which needed a served tenant of its own. Round one
+// moved the source-changing direction out and left three tenants here: 251.1s
+// standalone, 1.19x margin, and then a TIMEOUT at 300s in the matrix. Round two
+// moved the profile-only direction out as well. Both now live in
+// "ADR-0047 §6 refuses a profile-only rollback edge by name and leaves a
+// source-changing one eligible", and this test is back to the two tenants it
+// had before adoption.
 //
-// If this ever reds on timing, the fix is to split the `-source-edge` tenant
-// into its own test with its own lifecycle. It is NOT to raise the bound:
+// THE LESSON IS THE UNIT, not the number: a standalone measurement is not
+// evidence about this bound. The prior in-matrix figure was 210.9s at a8c9d07
+// against 117.6s standalone — a 1.79x load factor — and 251.1s standalone
+// against that factor was never going to fit. Quote the in-matrix figure or
+// quote nothing; that is also how the 54.6s figure above went stale.
+//
+// If this reds on timing again, split again. It is NOT to raise the bound:
 // that widens what starvation is permitted to look like, which is the standing
-// prohibition this repository already carries.
+// prohibition this repository carries.
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
   { timeout: 300_000 },
@@ -550,7 +559,7 @@ test(
           const isolated = await listParty(tenantB);
           assert.equal(isolated.listCoverage?.totalCount, 0);
           assert.deepEqual(isolated.records, []);
-          tenantB = await assertIntermediateBecomesServingOnlyAfterVerification(
+          tenantB = await reopenServingRuntime(
             tenantB,
             compiledApplication,
             databaseUrl,
@@ -2850,104 +2859,187 @@ async function assertBoundedInstallMatchesFullReplaySchema(
   }
 }
 
-async function assertIntermediateBecomesServingOnlyAfterVerification(
+/**
+ * Reopen the tenant's runtime on the recorded lineage.
+ *
+ * This was `assertIntermediateBecomesServingOnlyAfterVerification` and carried
+ * BOTH ADR-0047 §6 rollback directions. `LANG-ADOPT-v5` moved them out: each
+ * needs its own served tenant, three fresh installs exceeded this test's 300 s
+ * bound in-matrix, and that test's standing instruction is to split rather than
+ * raise the bound. The intermediate-becomes-serving fact this name claimed is
+ * asserted by the caller, through `refusedIntermediateRoots`.
+ */
+async function reopenServingRuntime(
   runtime: ComposedApplicationRuntime,
   compiledApplication: unknown,
   databaseUrl: string,
   tenantSlug: string,
 ): Promise<ComposedApplicationRuntime> {
-  const compiled = parseCompiledApplication(compiledApplication);
-  const target = compiled.applications.at(-2);
-  assert.ok(target);
   await runtime.close();
-
-  // DIRECTION 1 -- the refusal FIRES on a profile-only edge. The serving head
-  // and `at(-2)` share a normalized definition (ADR-0047 §4), so they share one
-  // package revision and the revision graph has no edge to reverse. The target
-  // IS the immediate predecessor -- the index check passes and control reaches
-  // the authorization -- so this must NOT borrow
-  // ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR (ADR-0047 §6).
-  assert.equal(
-    target.normalizedDefinitionBytes.byteLength,
-    compiled.application.normalizedDefinitionBytes.byteLength,
-    'direction 1 is only meaningful across a profile-only edge; the head and at(-2) differ in source',
-  );
-  assert.ok(
-    equalNormalizedDefinition(
-      target.normalizedDefinitionBytes,
-      compiled.application.normalizedDefinitionBytes,
-    ),
-    'this direction is only meaningful while the head is a profile sibling',
-  );
-  await assert.rejects(
-    createRuntime(compiledApplication, databaseUrl, tenantSlug, {
-      kind: 'rollback',
-      targetReleaseRoot: target.compiled.releaseRoot,
-    }),
-    (error: unknown) => {
-      assert.ok(error instanceof ReleaseReverseTransitionRefusal);
-      assert.equal(error.code, 'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE');
-      assert.match(error.message, /shares its package revision/u);
-      return true;
-    },
-    'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
-  );
-
-  // DIRECTION 2 -- the refusal does NOT fire on a source-changing edge, and the
-  // ADR-0046 observation this helper exists for is preserved rather than
-  // dropped. Truncating the lineage to the last source-changing head restores
-  // exactly the pair this asserted before the profile entry was appended: an
-  // eligible rollback whose verification refuses the pre-existing unusable
-  // search BY NAME. Without this the profile edge would have silently taken a
-  // real ADR-0046 gate out of the suite.
-  const sourceChangingLineage = withoutProfileSiblingHead(compiledApplication);
-  const truncated = parseCompiledApplication(sourceChangingLineage);
-  const sourceChangingTarget = truncated.applications.at(-2);
-  assert.ok(sourceChangingTarget);
-  assert.ok(
-    !equalNormalizedDefinition(
-      sourceChangingTarget.normalizedDefinitionBytes,
-      truncated.application.normalizedDefinitionBytes,
-    ),
-    'direction 2 must cross an edge whose endpoints differ in source',
-  );
-  // The tenant must already be serving the truncated head before the rollback
-  // is eligible at all: on a fresh tenant `activeLineageIndex` is still the
-  // fresh-install intermediate, so the index check at the FIRST refusal site
-  // fires and control never reaches the authorization this direction is about.
-  const sourceEdgeSlug = `${tenantSlug}-source-edge`;
-  const sourceEdgeRuntime = await createRuntime(
-    sourceChangingLineage,
-    databaseUrl,
-    sourceEdgeSlug,
-  );
-  assert.equal(
-    sourceEdgeRuntime.releaseRoot,
-    truncated.application.compiled.releaseRoot,
-  );
-  await sourceEdgeRuntime.close();
-
-  const historicalSearchQueryId = 'northstar.app:query.stock_count_line_search';
-  await assert.rejects(
-    createRuntime(sourceChangingLineage, databaseUrl, sourceEdgeSlug, {
-      kind: 'rollback',
-      targetReleaseRoot: sourceChangingTarget.compiled.releaseRoot,
-    }),
-    (error: unknown) => {
-      assert.ok(
-        !(error instanceof ReleaseReverseTransitionRefusal),
-        `a source-changing edge must not raise a reverse-transition refusal, got ${String((error as { code?: string }).code)}`,
-      );
-      assert.ok(error instanceof ModuleRuntimeInterpreterError);
-      assert.equal(error.code, 'MODULE_SEARCH_CAPABILITY_UNAVAILABLE');
-      assert.equal(error.subjectId, historicalSearchQueryId);
-      return true;
-    },
-    'ADR-0046: rollback remains eligible, while verification of its pre-existing unusable search refuses by name',
-  );
 
   return createRuntime(compiledApplication, databaseUrl, tenantSlug);
 }
+
+// SPLIT OUT of "composed product activates through the kernel" by `LANG-ADOPT-v5`,
+// and the split is that test's own standing instruction rather than a new idea:
+//
+//   "If this ever reds on timing, the fix is to split the `-source-edge` tenant
+//    into its own test with its own lifecycle. It is NOT to raise the bound."
+//
+// BOTH ADR-0047 §6 rollback directions now live here, and it took two rounds to
+// get there. Adoption made the artifact's head source-changing rather than a
+// profile sibling, which swapped which direction could borrow the real head:
+// the profile-only one suddenly needed a served tenant of its own. Moving only
+// the source-changing direction out left the parent driving three tenants; that
+// measured 251.1s standalone and then TIMED OUT at 300s IN-MATRIX, where the
+// parent's own comment records a 1.79x load factor over standalone. So the
+// second direction followed the first, the parent is back to its two
+// gateway-persistence tenants, and each direction has its own budget.
+//
+// They belong together anyway: each is the other's discriminating half. Direction
+// 1 alone is satisfied by a refusal that fires on every edge; direction 2 alone
+// is satisfied by one that fires on none.
+test(
+  'ADR-0047 §6 refuses a profile-only rollback edge by name and leaves a source-changing one eligible',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'lang-adopt-v5-rollback-edges',
+      async ({ connection }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const databaseUrl = connectionUrl(connection);
+        const tenantSlug = 'composed-tenant-b';
+        // DIRECTION 1 -- the refusal FIRES on a profile-only edge. A serving head and
+        // its predecessor that share a normalized definition (ADR-0047 §4) share one
+        // package revision, so the revision graph has no edge to reverse. The target
+        // IS the immediate predecessor -- the index check passes and control reaches
+        // the authorization -- so this must NOT borrow
+        // ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR (ADR-0047 §6).
+        //
+        // THE EDGE IS LOCATED, NOT ASSUMED TO BE AT THE END -- corrected by
+        // `LANG-ADOPT-v5`. This read `at(-2)` against the real head and asserted the
+        // pair shared a definition, which held only while the profile-adoption entry
+        // WAS the head. Its sibling below already knew that was fragile: direction 2
+        // manufactures a truncated lineage precisely because the head was a profile
+        // sibling. Direction 1 needed the mirror image and did not have it, so an
+        // authored-source adoption turned a real ADR-0047 §6 gate into a premise
+        // failure. The profile-only edge is still in the lineage; only its position
+        // moved.
+        const profileEdgeLineage =
+          throughProfileSiblingHead(compiledApplication);
+        const profileEdge = parseCompiledApplication(profileEdgeLineage);
+        const target = profileEdge.applications.at(-2);
+        assert.ok(target);
+        assert.ok(
+          equalNormalizedDefinition(
+            target.normalizedDefinitionBytes,
+            profileEdge.application.normalizedDefinitionBytes,
+          ),
+          'this direction is only meaningful while the head is a profile sibling',
+        );
+        // The tenant must already serve that head for the rollback to be eligible at
+        // all, exactly as direction 2 records below.
+        const profileEdgeSlug = `${tenantSlug}-profile-edge`;
+        const profileEdgeRuntime = await createRuntime(
+          profileEdgeLineage,
+          databaseUrl,
+          profileEdgeSlug,
+        );
+        assert.equal(
+          profileEdgeRuntime.releaseRoot,
+          profileEdge.application.compiled.releaseRoot,
+        );
+        await profileEdgeRuntime.close();
+        await assert.rejects(
+          createRuntime(profileEdgeLineage, databaseUrl, profileEdgeSlug, {
+            kind: 'rollback',
+            targetReleaseRoot: target.compiled.releaseRoot,
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+            assert.equal(error.code, 'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE');
+            assert.match(error.message, /shares its package revision/u);
+            return true;
+          },
+          'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
+        );
+
+        // DIRECTION 2 -- the refusal does NOT fire on a source-changing edge, and the
+        // ADR-0046 observation this helper exists for is preserved rather than
+        // dropped. Truncating the lineage to the last source-changing head restores
+        // exactly the pair this asserted before the profile entry was appended: an
+        // eligible rollback whose verification refuses the pre-existing unusable
+        // search BY NAME. Without this the profile edge would have silently taken a
+        // real ADR-0046 gate out of the suite.
+        // Truncated THROUGH the profile edge and then past it, so the head is the
+        // last entry before the profile sibling and the target is the release that
+        // still carries the unusable search. `withoutProfileSiblingHead` alone no
+        // longer reaches it: with a source-changing head it returns the lineage
+        // unchanged, and the resulting edge crosses two post-search-capability
+        // releases where there is nothing for verification to refuse. Measured --
+        // that spelling produced "Missing expected rejection" rather than a red that
+        // named a real regression.
+        const sourceChangingLineage = withoutProfileSiblingHead(
+          throughProfileSiblingHead(compiledApplication),
+        );
+        const truncated = parseCompiledApplication(sourceChangingLineage);
+        const sourceChangingTarget = truncated.applications.at(-2);
+        assert.ok(sourceChangingTarget);
+        assert.ok(
+          !equalNormalizedDefinition(
+            sourceChangingTarget.normalizedDefinitionBytes,
+            truncated.application.normalizedDefinitionBytes,
+          ),
+          'direction 2 must cross an edge whose endpoints differ in source',
+        );
+        // The tenant must already be serving this head before the rollback is
+        // eligible at all: on a fresh tenant `activeLineageIndex` is still the
+        // fresh-install intermediate, so the index check at the FIRST refusal site
+        // fires and control never reaches the authorization this direction is about.
+        //
+        // `tenantSlug` already serves it. Until `LANG-ADOPT-v5` the artifact's head
+        // WAS a profile sibling, so this direction had to install a second tenant on
+        // a truncated lineage to find a source-changing edge; now the head is itself
+        // source-changing and the caller's tenant is already the right one. That
+        // matters beyond tidiness -- direction 1 needs a fresh install of its own now,
+        // and two fresh installs in one test exceed the 300 s budget.
+        const sourceEdgeSlug = `${tenantSlug}-source-edge`;
+        const sourceEdgeRuntime = await createRuntime(
+          sourceChangingLineage,
+          databaseUrl,
+          sourceEdgeSlug,
+        );
+        assert.equal(
+          sourceEdgeRuntime.releaseRoot,
+          truncated.application.compiled.releaseRoot,
+        );
+        await sourceEdgeRuntime.close();
+
+        const historicalSearchQueryId =
+          'northstar.app:query.stock_count_line_search';
+        await assert.rejects(
+          createRuntime(sourceChangingLineage, databaseUrl, sourceEdgeSlug, {
+            kind: 'rollback',
+            targetReleaseRoot: sourceChangingTarget.compiled.releaseRoot,
+          }),
+          (error: unknown) => {
+            assert.ok(
+              !(error instanceof ReleaseReverseTransitionRefusal),
+              `a source-changing edge must not raise a reverse-transition refusal, got ${String((error as { code?: string }).code)}`,
+            );
+            assert.ok(error instanceof ModuleRuntimeInterpreterError);
+            assert.equal(error.code, 'MODULE_SEARCH_CAPABILITY_UNAVAILABLE');
+            assert.equal(error.subjectId, historicalSearchQueryId);
+            return true;
+          },
+          'ADR-0046: rollback remains eligible, while verification of its pre-existing unusable search refuses by name',
+        );
+      },
+    );
+  },
+);
 
 /**
  * The lineage with its trailing profile-sibling entries removed, so the head is
@@ -2966,6 +3058,38 @@ function withoutProfileSiblingHead(compiledApplication: unknown): unknown {
   ) {
     envelope.applications.pop();
   }
+  return envelope;
+}
+
+/**
+ * The mirror image, added by `LANG-ADOPT-v5`: the lineage truncated so its head
+ * IS a profile sibling — the successor of the last profile-only edge (ADR-0047
+ * §4), with every later entry dropped.
+ *
+ * Direction 1 above needs a serving head that shares a package revision with its
+ * predecessor. That was true of the real artifact for exactly one packet, and
+ * `withoutProfileSiblingHead` existed because its sibling direction already had
+ * the opposite problem. Both directions now name the edge they need instead of
+ * assuming the artifact's head happens to supply it.
+ */
+function throughProfileSiblingHead(compiledApplication: unknown): unknown {
+  const envelope = structuredClone(compiledApplication) as {
+    applications: { normalizedDefinitionBytesBase64: string }[];
+  };
+  const lastEdgeIndex = envelope.applications.reduce(
+    (found, entry, index) =>
+      index > 0 &&
+      entry.normalizedDefinitionBytesBase64 ===
+        envelope.applications[index - 1]!.normalizedDefinitionBytesBase64
+        ? index
+        : found,
+    -1,
+  );
+  assert.ok(
+    lastEdgeIndex > 0,
+    'the recorded lineage carries no profile-only edge, so ADR-0047 §6 has nothing to refuse',
+  );
+  envelope.applications.length = lastEdgeIndex + 1;
   return envelope;
 }
 
@@ -3825,34 +3949,14 @@ async function assertExactPartitionEvidence(
   );
 }
 
-/**
- * The last entry whose normalized definition differs from the head's -- the
- * previous SOURCE release, which is not the same as the previous lineage
- * position.
- *
- * ADR-0047 §4: the lineage also advances when the OUTPUT CONTRACT changes, so
- * adopting a compiler-semantic profile mints an entry that is byte-identical
- * in source to its predecessor and differs only in release root. `at(-2)` then
- * selects that definition-equal sibling instead of an actually-earlier
- * authored release. Callers that mean "the release before this source" say so
- * here; `at(-2)` keeps meaning "the previous entry" where that is intended.
- */
-function previousSourceRelease(
-  compiled: ReturnType<typeof parseCompiledApplication>,
-):
-  | ReturnType<typeof parseCompiledApplication>['applications'][number]
-  | undefined {
-  const headBytes = compiled.application.normalizedDefinitionBytes;
-  return compiled.applications
-    .slice(0, -1)
-    .findLast(
-      (release) =>
-        !equalNormalizedDefinition(
-          release.normalizedDefinitionBytes,
-          headBytes,
-        ),
-    );
-}
+// DELETED by `LANG-ADOPT-v5`: `previousSourceRelease`, whose only caller now
+// pins its pair by release root instead.
+//
+// It solved a real problem -- `at(-2)` selects the definition-equal sibling that
+// an ADR-0047 §4 profile adoption mints -- but it solved it by making the answer
+// depend on where the head happens to be, which is the same defect one step out.
+// Both spellings answer "which entry is near the end"; neither answers "which
+// entry carries the change this control is about".
 
 function equalNormalizedDefinition(
   left: Uint8Array,
@@ -3881,14 +3985,262 @@ async function assertAttributedSearchCapabilityScenarioDelta(
   compiledApplication: unknown,
 ): Promise<void> {
   const compiled = parseCompiledApplication(compiledApplication);
-  // This delta is attributed to an authored-source change, so it must read the
-  // last entry whose definition actually differs -- see previousSourceRelease.
-  const previousRelease = previousSourceRelease(compiled);
-  assert.ok(previousRelease);
-  const previous = releaseVerificationBinding(previousRelease.compiled);
-  const current = releaseVerificationBinding(compiled.application.compiled);
+  // PINNED BY IDENTITY, NOT BY POSITION -- corrected by `LANG-ADOPT-v5`.
+  //
+  // This read `previousSourceRelease(compiled)` against the lineage HEAD, which
+  // named the right pair only while the search-capability entry WAS the head.
+  // The delta it asserts is a historical fact about one recorded transition;
+  // "the head and the last entry before it that differs" is a description of
+  // where that transition happened to sit, and it silently re-points at a
+  // different pair the moment any authored change lands. `LANG-ADOPT-v5`
+  // appended one and this read 163 where it expected 168, while the transition
+  // it exists to guard had not moved at all.
+  //
+  // It is the second control in this repository found addressing lineage
+  // entries by position; the other is "consecutive lineage entries may share a
+  // normalized definition" in `compiler-semantic-profile.test.ts`.
+  const SEARCH_CAPABILITY_SOURCE_ROOT =
+    '4b254f50b2f558e96b98325467ae339a4bd6492d9691ccb464eb88d1b53f3bb1';
+  const SEARCH_CAPABILITY_TARGET_ROOT =
+    'd726ad313780bc595c97a0ecb30c9eaec84984e4a19fa28c2e8f5361e7edf12e';
+  // The ADR-0047 §4 entry minted by adopting compiler-semantic profile v1: its
+  // normalized definition is byte-identical to the target above and only its
+  // release root differs.
+  const PROFILE_ONLY_SUCCESSOR_ROOT =
+    'b0177bf482a73235eb1308eaf17bde3b0a3f4b23d2a9c9c59f7af23d1c9a2bbb';
+  const releaseByRoot = (releaseRoot: string) => {
+    const release = compiled.applications.find(
+      (candidate) => candidate.compiled.releaseRoot === releaseRoot,
+    );
+    assert.ok(
+      release,
+      `the recorded lineage no longer contains ${releaseRoot}; history is append-only, so a missing root is a rewrite rather than a stale pin`,
+    );
+    return release;
+  };
+  const previous = releaseVerificationBinding(
+    releaseByRoot(SEARCH_CAPABILITY_SOURCE_ROOT).compiled,
+  );
+  const current = releaseVerificationBinding(
+    releaseByRoot(SEARCH_CAPABILITY_TARGET_ROOT).compiled,
+  );
   assert.equal(previous.plan.scenarios.length, 168);
   assert.equal(current.plan.scenarios.length, 163);
+
+  // The pinned pair must still be CONSECUTIVE, or "this transition removed five
+  // scenarios" is a claim about a span rather than an edge and some later entry
+  // could be doing the removing.
+  const rootOrder = compiled.applications.map(
+    (release) => release.compiled.releaseRoot,
+  );
+  assert.equal(
+    rootOrder.indexOf(SEARCH_CAPABILITY_TARGET_ROOT),
+    rootOrder.indexOf(SEARCH_CAPABILITY_SOURCE_ROOT) + 1,
+  );
+
+  // And the head is checked separately, which is what the position-addressed
+  // version was conflating. Nothing after the pinned pair changed an entity, a
+  // query or an operation, so no LATER entry may change what the plan verifies.
+  //
+  // WRITTEN FROM THE MEASUREMENT, and the first attempt at this assertion was
+  // wrong. Asserting the head's scenario IDs equal the pinned target's failed:
+  // adoption holds the count at 163 and holds the verified content identical,
+  // while RE-IDENTIFYING a large fraction of the scenarios, because a scenario
+  // id is a fingerprint over version-stamped nodes. So the content is compared
+  // by what each scenario verifies, and the identity churn is asserted as the
+  // separate fact it is.
+  const headBinding = releaseVerificationBinding(compiled.application.compiled);
+  const verifiedContent = (
+    scenarios: readonly { entityId: string; kind: string; subjectId: string }[],
+  ) =>
+    scenarios
+      .map(
+        (scenario) =>
+          `${scenario.kind}|${scenario.entityId}|${scenario.subjectId}`,
+      )
+      .toSorted();
+  assert.deepEqual(
+    verifiedContent(headBinding.plan.scenarios),
+    verifiedContent(current.plan.scenarios),
+    'no entry after the pinned pair changes what the release verifies',
+  );
+
+  // A language adoption changes recorded scenario IDENTITIES; a
+  // compiler-semantic profile adoption does not. ADR-0047 §8 publishes exact
+  // cardinalities, so they are asserted exactly -- review round 4 found this
+  // control proving neither, with `.some(...)` for "69" and a subset check for
+  // "0".
+  //
+  // MEASURED WHILE BUILDING THIS, and it corrected the ADR: there is NO key
+  // that distinguishes all 163 scenarios except the id itself. Every
+  // combination of the recorded non-id fields -- kind, entityId, subjectId,
+  // probePolarity, targetEntityId, provider -- collapses to 105 unique values.
+  // So "69 scenarios were re-identified" is not expressible: under the best
+  // available key only 11 signatures map to a different id, while the raw
+  // id-set difference is 69. The well-defined fact is the id-set difference,
+  // and that is what 69 means.
+  const scenarioIds = (
+    scenarios: readonly { scenarioId: string }[],
+  ): string[] => scenarios.map((scenario) => scenario.scenarioId).toSorted();
+  const verifiedContentOf = (
+    scenarios: readonly { entityId: string; kind: string; subjectId: string }[],
+  ): string[] =>
+    scenarios
+      .map(
+        (scenario) =>
+          `${scenario.kind}|${scenario.entityId}|${scenario.subjectId}`,
+      )
+      .toSorted();
+
+  const headScenarios = headBinding.plan.scenarios;
+  const profileEdgeScenarios = releaseVerificationBinding(
+    releaseByRoot(PROFILE_ONLY_SUCCESSOR_ROOT).compiled,
+  ).plan.scenarios;
+
+  assert.equal(current.plan.scenarios.length, 163);
+  assert.equal(headScenarios.length, 163);
+  assert.equal(profileEdgeScenarios.length, 163);
+
+  // WHAT is verified does not move -- compared as a MULTISET, because the
+  // signature is not unique and a set comparison would silently tolerate a
+  // scenario being dropped while a duplicate signature covered for it.
+  assert.deepEqual(
+    verifiedContentOf(headScenarios),
+    verifiedContentOf(current.plan.scenarios),
+    'no entry after the pinned pair changes what the release verifies',
+  );
+
+  // THE SEMANTIC KEY, DERIVED FROM THE PRODUCTION SCENARIO OBJECT.
+  //
+  // Round 7 refuted the previous version of this control and the ADR ruling
+  // built on it. It used a hand-picked six-field tuple -- kind, entityId,
+  // subjectId, probePolarity, targetEntityId, provider -- and called that
+  // "every recorded non-id field". It is not. The recorded scenarios carry
+  // fifteen distinct fields across seven kinds, and `declaredEvidence` alone
+  // adds `assertionId`, `evidenceKind`, `expectedOutcome`,
+  // `expectedDiagnosticCode` and a full `invocation`; `uniquenessFold` adds
+  // `nfkcPolicy`.
+  //
+  // The old tuple therefore COLLAPSED exactly the 69 `declaredEvidence`
+  // scenarios into 11 groups, and the packet read that collapse as evidence
+  // that scenarios are indistinguishable by meaning. They are not: it was the
+  // projection that lost the distinction, not the data.
+  //
+  // Derived from the object rather than a field list, so a scenario kind added
+  // later is included automatically instead of silently dropped. Only the two
+  // GENERATED identity fields are excluded, and `schemaVersion` is normalized
+  // wherever it appears -- recursively, because `invocation` nests canonical
+  // references that carry their own stamps, and those stamps are exactly what
+  // moves.
+  const semanticKey = (scenario: unknown): string => {
+    const normalize = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(normalize);
+      if (typeof value === 'object' && value !== null) {
+        return Object.fromEntries(
+          Object.entries(value)
+            .filter(
+              ([key]) => key !== 'scenarioId' && key !== 'scenarioFingerprint',
+            )
+            .map(([key, entry]) => [
+              key,
+              key === 'schemaVersion' ? '<version>' : normalize(entry),
+            ]),
+        );
+      }
+      return value;
+    };
+    return JSON.stringify(normalize(scenario));
+  };
+
+  // A key that distinguishes every scenario in BOTH plans. The previous claim
+  // -- that none exists but the id itself -- was an artifact of the lossy tuple.
+  const targetBySemantic = new Map(
+    current.plan.scenarios.map((scenario) => [
+      semanticKey(scenario),
+      scenario.scenarioId,
+    ]),
+  );
+  const headBySemantic = new Map(
+    headScenarios.map((scenario) => [
+      semanticKey(scenario),
+      scenario.scenarioId,
+    ]),
+  );
+  assert.equal(targetBySemantic.size, 163);
+  assert.equal(headBySemantic.size, 163);
+
+  // A TOTAL BIJECTION across the language adoption: every scenario in one plan
+  // has exactly one counterpart in the other under a version-normalized reading
+  // of its whole payload. Evidence CAN be re-keyed by meaning.
+  assert.deepEqual(
+    [...headBySemantic.keys()].toSorted(),
+    [...targetBySemantic.keys()].toSorted(),
+    'the language adoption preserves every scenario semantically; only identities move',
+  );
+
+  // Of those 163 pairs, exactly 69 are issued under a new id, and every one is
+  // a `declaredEvidence` scenario -- the only kind carrying an `invocation`,
+  // whose nested canonical references carry the version stamps the fingerprint
+  // covers. That is the mechanism, measured rather than inferred.
+  const reidentified = [...targetBySemantic].filter(
+    ([key, scenarioId]) => headBySemantic.get(key) !== scenarioId,
+  );
+  assert.equal(reidentified.length, 69);
+  assert.deepEqual(
+    [
+      ...new Set(
+        reidentified.map(([key]) => (JSON.parse(key) as { kind: string }).kind),
+      ),
+    ],
+    ['declaredEvidence'],
+    'only scenarios carrying a version-stamped invocation are re-identified',
+  );
+
+  // ONE-PROPERTY NEGATIVE CONTROL on the comparison itself. Changing a field
+  // the OLD tuple omitted must change the semantic key; otherwise this control
+  // repeats the defect it was written to fix.
+  const [sampleDeclared] = current.plan.scenarios.filter(
+    (scenario) => scenario.kind === 'declaredEvidence',
+  );
+  assert.ok(sampleDeclared);
+  for (const omitted of [
+    'assertionId',
+    'evidenceKind',
+    'expectedOutcome',
+  ] as const) {
+    const mutated = { ...sampleDeclared, [omitted]: 'MUTATED' };
+    assert.notEqual(
+      semanticKey(mutated),
+      semanticKey(sampleDeclared),
+      `the semantic key must observe ${omitted}; the six-field tuple did not`,
+    );
+  }
+  // ...while a change to a GENERATED identity field must not, or the key would
+  // report every re-identification as a semantic difference and the bijection
+  // above would be unobservable.
+  assert.equal(
+    semanticKey({ ...sampleDeclared, scenarioId: 'MUTATED' }),
+    semanticKey(sampleDeclared),
+  );
+
+  // EXACTLY 69 recorded ids do not appear in the other plan, which is the
+  // number ADR-0047 §8 publishes.
+  const targetIdSet = new Set(scenarioIds(current.plan.scenarios));
+  const headIdSet = new Set(scenarioIds(headScenarios));
+  assert.equal(
+    [...targetIdSet].filter((scenarioId) => !headIdSet.has(scenarioId)).length,
+    69,
+    'a language adoption changes exactly the ids whose fingerprint covers a version-stamped node',
+  );
+
+  // EXACTLY 0 across the ADR-0047 §4 profile-only edge, asserted as identity of
+  // the whole sorted id list rather than as a subset, so an added or replaced
+  // scenario cannot pass.
+  assert.deepEqual(
+    scenarioIds(profileEdgeScenarios),
+    scenarioIds(current.plan.scenarios),
+    'a compiler-semantic profile adoption changes no scenario identity; only the source axis does',
+  );
 
   const changes = [
     {
@@ -3930,7 +4282,7 @@ async function assertAttributedSearchCapabilityScenarioDelta(
   );
 
   const derivePrevious = verificationScenarioDeriver(
-    previousRelease.compiled,
+    releaseByRoot(SEARCH_CAPABILITY_SOURCE_ROOT).compiled,
     previous,
   );
   assert.ok(derivePrevious);

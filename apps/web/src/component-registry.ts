@@ -19,7 +19,9 @@ import {
 } from './message-render.js';
 import { readCompiledSurfaceDataBinding } from './surface-contract.js';
 import type {
+  CompiledFieldOption,
   CompiledSurfaceDefinition,
+  CompiledSurfaceField,
   CompiledSurfaceOperationBinding,
   CompiledSurfaceSlot,
   SurfaceOperationIntent,
@@ -733,7 +735,7 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${renderFormFields(context.surface, record)}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
 }
@@ -1068,6 +1070,200 @@ function declaredStatusRoles(surface: CompiledSurfaceDefinition): string {
         `<span class="status-pill" data-status-role="${escapeHtml(role)}">${escapeHtml(role)}</span>`,
     )
     .join('');
+}
+
+/**
+ * Above this many options an enum renders as a `datalist`-backed input rather
+ * than a `select`. A short closed list is faster to operate as a menu; a long
+ * one is faster to type into, and `datalist` gives that typeahead with **no
+ * script at all** -- which is the whole reason it is the carrier here.
+ * ADR-0036 §2 authorises exactly four client behaviours and a scripted combobox
+ * is none of them, so the choice was between a native control and nothing.
+ */
+const ENUM_SELECT_MAXIMUM_OPTIONS = 5;
+
+/**
+ * The compiled surface says what a field IS; this decides what it looks like.
+ *
+ * When the manifest carries no per-field kinds -- every profile version before
+ * the unadopted v2, which is every recorded release today -- every field falls
+ * back to the bare text box that was here before. **That fallback exists only
+ * for manifests BELOW the field-capability floor.** It is not a compatibility
+ * guarantee and nothing may be argued from it: a manifest that carries `fields`
+ * declares surface-manifest capability version 3, and a reader without field
+ * support must refuse it rather than fall back to this branch.
+ *
+ * This paragraph previously said the fallback was why `minimumVersion` did not
+ * have to move. It has moved. The version is what prevents an unaware reader
+ * from serving a field-bearing manifest; the fallback only serves the older
+ * ones.
+ *
+ * What this does NOT do is decide how the form BEHAVES. Required-ness, inline
+ * validation, chunking and string-to-typed normalisation are `U7`'s.
+ *
+ * **The line between the two moved once, under review, and the correction is
+ * worth keeping.** Choosing a control that cannot express a field's declared
+ * domain is not deferring to `U7`; it is destroying the value before `U7` can
+ * see it. So a control here must admit everything the declaration admits, and
+ * where no native control does, the carrier stays lossless and the refusal is
+ * named rather than absorbed.
+ */
+function renderFormFields(
+  surface: CompiledSurfaceDefinition,
+  record: SemanticRecordDto | null,
+): string {
+  const fieldsById = new Map(
+    (surface.fields ?? []).map((field) => [field.fieldId, field]),
+  );
+  return surface.fieldIds
+    .map((fieldId, index) => {
+      const control = renderFormControl(
+        fieldsById.get(fieldId),
+        fieldId,
+        index,
+        record ? record.values[fieldId] : undefined,
+      );
+      return `<label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control}</label>`;
+    })
+    .join('');
+}
+
+function renderFormControl(
+  field: CompiledSurfaceField | undefined,
+  fieldId: string,
+  index: number,
+  value: unknown,
+): string {
+  const name = `value:${escapeHtml(fieldId)}`;
+  const current = renderInputValue(value);
+  if (!field) {
+    return `<input name="${name}" value="${current}" autocomplete="off">`;
+  }
+  const kind = ` data-field-kind="${field.kind}"`;
+  switch (field.kind) {
+    case 'enumFieldType':
+      return renderEnumControl(field.options, name, kind, index, value);
+    case 'booleanFieldType':
+      return renderBooleanControl(name, kind, value);
+    case 'dateFieldType':
+      // The only temporal kind a native control admits whole: `calendar` and
+      // `timezoneSemantics` are single-valued in the canonical schema, and
+      // `type="date"` emits exactly the `YYYY-MM-DD` the write path validates.
+      return `<input type="date"${kind} name="${name}" value="${current}" autocomplete="off">`;
+    case 'dateTimeFieldType':
+      return renderDateTimeControl(field, name, kind, current);
+    case 'timeFieldType':
+      // Without a step a time input defaults to 60 seconds and silently REFUSES
+      // `12:34:56`, which is the value the contract requires. The step comes from
+      // the declared precision -- `1` second, `0.001` millisecond -- so the
+      // control admits the declared domain and nothing wider.
+      return `<input type="time" step="${field.temporal.precision === 'millisecond' ? '0.001' : '1'}"${kind} name="${name}" value="${current}" autocomplete="off">`;
+    case 'integerFieldType':
+      return `<input type="number" inputmode="numeric" step="1"${kind} name="${name}" value="${current}" autocomplete="off">`;
+    case 'exactDecimalFieldType':
+    case 'moneyFieldType':
+    case 'quantityFieldType':
+      // `step="any"` rather than a scale-derived step: the manifest carries the
+      // kind, not the scale, and a guessed step REJECTS values the field admits.
+      return `<input type="number" inputmode="decimal" step="any"${kind} name="${name}" value="${current}" autocomplete="off">`;
+    case 'textFieldType':
+      return `<input type="text"${kind} name="${name}" value="${current}" autocomplete="off">`;
+  }
+}
+
+/**
+ * No native control expresses a canonical date-time, so this refuses one by name
+ * and keeps the carrier lossless.
+ *
+ * `datetime-local` is local time WITHOUT timezone information. A `utcInstant`
+ * needs its trailing `Z` and an `offsetDateTime` needs a real `±HH:MM` the user
+ * supplies; neither is expressible, and the control would additionally drop
+ * seconds and milliseconds at its default 60-second step. Rendering it would
+ * destroy the stored value on any edit -- silently, and before `U7` could
+ * normalise anything.
+ *
+ * So the control is a text carrier, which round-trips the canonical string
+ * exactly, and the refusal is DECLARED on the element: `data-refused-control`
+ * names what was not offered and the declared domain says why. That is
+ * ADR-0044's shape -- structural absence, declared and observable -- rather than
+ * silent inability. It is deliberately not a message: `ux-grammar` closes
+ * message placement over `page | slot` and reserves any field-level anchor for
+ * `U7`, so inventing one here would coin the vocabulary that ADR forbids.
+ */
+function renderDateTimeControl(
+  // Narrowed to the one branch that HAS a declared date-time domain. The wider
+  // parameter compiled before the type discriminated on kind, and it is what let
+  // the domain be optional here -- a control that could silently render without
+  // the two facts it exists to declare.
+  field: Extract<CompiledSurfaceField, { kind: 'dateTimeFieldType' }>,
+  name: string,
+  kind: string,
+  current: string,
+): string {
+  const { precision, timezoneSemantics } = field.temporal;
+  return `<input type="text"${kind} data-refused-control="datetime-local" data-timezone-semantics="${timezoneSemantics}" data-precision="${precision}" name="${name}" value="${current}" autocomplete="off">`;
+}
+
+/**
+ * A boolean is a `select`, not a checkbox, and the reason is that a checkbox
+ * cannot count to three.
+ *
+ * An optional boolean has three states -- `true`, `false`, and no value stated --
+ * and a checkbox has two. The first cut of this rendered a checkbox beside a
+ * hidden `value="false"`, which made `null`, absent and `false` render
+ * identically AND post `"false"`, so editing an unrelated field on the same form
+ * silently rewrote a stored `null` to `false`. That is information destroyed
+ * upstream of normalisation, where `U7` cannot recover it.
+ *
+ * The blank option is the third state, and that is the whole of its job.
+ *
+ * It previously carried a second argument -- that an untouched field posts `""`
+ * here exactly as a bare text box does, so old and new readers submit alike --
+ * and the capability floor was said to depend on it. **That argument is
+ * withdrawn.** Submission equivalence between readers is not a supported
+ * invariant of this renderer and must not be relied on when changing a control
+ * or allocating the next floor; surface-manifest version 3 is what keeps an
+ * unaware reader away from a field-bearing manifest.
+ *
+ * The blank stays present even when the field is REQUIRED. A create form has no
+ * value yet, and a two-option select would preselect `true` -- materializing a
+ * default is the one thing this layer must never do. What `required` means for
+ * submission is `U7`'s.
+ */
+function renderBooleanControl(
+  name: string,
+  kind: string,
+  value: unknown,
+): string {
+  const option = (optionValue: string, label: string): string =>
+    `<option value="${optionValue}"${value === (optionValue === 'true') && typeof value === 'boolean' ? ' selected' : ''}>${label}</option>`;
+  return `<select${kind} name="${name}" autocomplete="off"><option value=""></option>${option('true', 'Yes')}${option('false', 'No')}</select>`;
+}
+
+function renderEnumControl(
+  options: readonly CompiledFieldOption[],
+  name: string,
+  kind: string,
+  index: number,
+  value: unknown,
+): string {
+  if (options.length <= ENUM_SELECT_MAXIMUM_OPTIONS) {
+    // The blank option is not decoration. Without it a select silently posts
+    // its first option for a field the record never had a value for, which is
+    // materializing a default at the one layer that is supposed to carry only
+    // what was declared.
+    const chosen = options.map(
+      (option) =>
+        `<option value="${escapeHtml(option.optionId)}"${option.optionId === value ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
+    );
+    return `<select${kind} name="${name}" autocomplete="off"><option value=""></option>${chosen.join('')}</select>`;
+  }
+  const listId = `surface-field-options-${String(index)}`;
+  const suggestions = options.map(
+    (option) =>
+      `<option value="${escapeHtml(option.optionId)}">${escapeHtml(option.label)}</option>`,
+  );
+  return `<input${kind} name="${name}" value="${renderInputValue(value)}" list="${listId}" autocomplete="off"><datalist id="${listId}">${suggestions.join('')}</datalist>`;
 }
 
 function renderInputValue(value: unknown): string {

@@ -150,15 +150,29 @@ test('an undeclared tier resolves in the projection while staying absent upstrea
  * premise; this closes the conclusion, which was previously guarded by nothing:
  * raising flat v2 from 1 to 2 survived every other control in this packet.
  */
-test('the flat v2 surface projection still requires capability version 1', () => {
+/**
+ * **`U5b`'s argument is unchanged; its conclusion no longer decides the floor.**
+ * Corrected by `ux-picker`, which put a second field on v2.
+ *
+ * The tier reasoning still holds exactly as written: a reader that drops
+ * `disclosureTier` renders every slot expanded, which is what `always` means, so
+ * it under-defers rather than conceals, and the tier alone never needed a
+ * version. But v2 now also carries `fields`, and a reader that cannot read those
+ * must refuse the payload rather than render a form it cannot describe -- so any
+ * v2 projection requires version 3.
+ *
+ * This assertion is now about what v2 CARRIES, not about the tier. Remove
+ * `fields` from v2 and the tier argument puts it back at 1 on its own reasoning.
+ */
+test('a v2 surface projection requires the capability version its fields need', () => {
   assert.deepEqual(
     surfaceProjectionReference(COMPILER_SEMANTIC_PROFILE_V2_VERSION)
       .requiredRuntimeCapability,
     {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
-      minimumVersion: 1,
+      minimumVersion: 3,
     },
-    'emitting the tier does not raise the reader requirement: a reader that drops it under-defers rather than conceals, so version 1 stays honest. Grouped navigation keeps the version-2 branch.',
+    'v2 carries per-field kinds; a reader that cannot read them must refuse rather than render a form it cannot describe',
   );
 });
 
@@ -172,6 +186,6 @@ test('the tier vocabulary is exactly the three granted values', () => {
   assert.deepEqual(
     [...DISCLOSURE_TIERS],
     ['always', 'progressive', 'onDemand'],
-    'surfaceManifestPayload keeps surface-manifest minimumVersion at 1 because no tier value means "hide". Adding a tier requires re-deriving that argument, and the assertion above, before changing this list.',
+    'the tier does not raise the surface-manifest floor because no tier value means "hide". Adding a tier requires re-deriving that argument before changing this list, independently of the version `fields` now allocates.',
   );
 });

@@ -19,15 +19,26 @@ export const LANGUAGE_VERSION = LANGUAGE_VERSIONS.v2;
 /** The newest readable version. Readable is not the same as adopted. */
 export const LATEST_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v5;
 /**
- * The version the default compiler profile selects. Moved to v4 by the
- * LANG-ADOPT packet: adoption is an application-wide artifact event, absorbed
- * exactly once, on the `4c` precedent ("definition was free, only adoption
- * cost"). Every product module declares v4 together, because node-version
- * purity is uniform within a package revision -- a v4 module in a v3
- * application is refused, and so is the reverse. Historical releases keep the
- * version they were compiled at.
+ * The version the default compiler profile selects. Moved to v5 by
+ * `LANG-ADOPT-v5`, and to v4 by `LANG-ADOPT` before it: adoption is an
+ * application-wide artifact event, absorbed exactly once, on the `4c`
+ * precedent ("definition was free, only adoption cost"). Every product module
+ * declares v5 together, because node-version purity is uniform within a
+ * package revision -- a v5 module in a v4 application is refused, and so is
+ * the reverse. Historical releases keep the version they were compiled at.
+ *
+ * THIS CONSTANT IS NOT THE ARTIFACT EVENT, and `LANG-ADOPT-v5` measured that
+ * rather than inheriting it. Moving this line and its normalization pair alone
+ * leaves `check:app-release` green with byte-identical `app.authored.json` and
+ * `app.compiled.json`: the release path takes `languageVersion` from the
+ * normalized definition's own bytes (`compile-app-release.ts`
+ * `compileNormalizedDefinition`), not from the profile. What mints a lineage
+ * entry is the AUTHORED edit -- the six `const version` declarations in
+ * `packages/domain/src`. Moving this constant without them is adoption that
+ * looks done and is not; moving them without this constant reds the
+ * composed-package assertion in `canonical-contracts-purity`.
  */
-export const ADOPTED_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v4;
+export const ADOPTED_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v5;
 export const SUPPORTED_LANGUAGE_VERSIONS = Object.freeze([
   LEGACY_LANGUAGE_VERSION,
   PREVIOUS_LANGUAGE_VERSION,
@@ -59,7 +70,7 @@ export const LATEST_NORMALIZATION_PROFILE_VERSION =
   NORMALIZATION_PROFILE_VERSIONS.v5;
 /** Paired with ADOPTED_LANGUAGE_VERSION; see that constant. */
 export const ADOPTED_NORMALIZATION_PROFILE_VERSION =
-  NORMALIZATION_PROFILE_VERSIONS.v4;
+  NORMALIZATION_PROFILE_VERSIONS.v5;
 export const SUPPORTED_NORMALIZATION_PROFILE_VERSIONS = Object.freeze([
   LEGACY_NORMALIZATION_PROFILE_VERSION,
   PREVIOUS_NORMALIZATION_PROFILE_VERSION,

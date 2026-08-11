@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  ADOPTED_LANGUAGE_VERSION,
+  ADOPTED_NORMALIZATION_PROFILE_VERSION,
+} from '../../packages/canonical-model/src/index.js';
+import {
   PROJECTION_FAMILY_IDS,
   type StorageTransitionEnvelope,
 } from '../../packages/compiler/src/index.js';
@@ -53,10 +57,15 @@ test('Party definition compiles into every walking-slice projection with no dele
   assert.equal(definition.surfaces.length, 6);
   assert.equal(definition.assertions.length, 2);
   assert.equal(definition.relations.length, 1);
-  assert.equal(definition.languageVersion, 'v4');
+  // Derived from the ADOPTED constants rather than written by hand. The check
+  // depends on "this module declares the version the application adopted", not
+  // on which version that happens to be, so the literal was the defect and the
+  // pairing is the fact: a module that moves without the constant, or a
+  // constant that moves without the module, fails here.
+  assert.equal(definition.languageVersion, ADOPTED_LANGUAGE_VERSION);
   assert.equal(
     definition.normalizationProfileVersion,
-    'northstar.normalization/v4',
+    ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
   assert.deepEqual(
     new Set(definition.queries.map((query) => query.queryType)),

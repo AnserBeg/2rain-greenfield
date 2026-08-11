@@ -8,10 +8,12 @@ import {
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   compileApplication,
   type CompileSuccess,
+  type CompilerSemanticProfileVersion,
   type ContentAddressedArtifact,
 } from '../../packages/compiler/src/index.js';
 import {
@@ -65,6 +67,10 @@ import {
   FIXTURE_IDS,
   ordinaryModuleV1,
 } from '../fixtures/g2/module-conformance/definitions.js';
+import {
+  EVERY_KIND_FIELD_IDS,
+  everyFieldKindModule,
+} from '../fixtures/g2/module-conformance/field-kinds.js';
 
 const tenantA = 'a1000000-0000-4000-8000-000000000001';
 const tenantB = 'b1000000-0000-4000-8000-000000000001';
@@ -395,6 +401,165 @@ test('human-confirmed forms render the authoritative operation read-back without
   assert.equal(executor.operationCalls.length, 2);
 });
 
+const EVERY_KIND_FORM = `${FIXTURE_IDS.namespace}:surface.master_form`;
+
+async function everyKindFormHtml(
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
+  seed?: (executor: InMemoryGenericExecutor) => string,
+): Promise<string> {
+  const compiled = compileFixture(
+    everyFieldKindModule(),
+    compilerSemanticProfileVersion,
+  );
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const recordId = seed?.(executor);
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const url = `/?surface=${encodeURIComponent(EVERY_KIND_FORM)}${recordId ? `&record=${encodeURIComponent(recordId)}` : ''}`;
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    url,
+    semanticGateways(policy, executor),
+  );
+  assert.equal(rendered.statusCode, 200);
+  return rendered.html;
+}
+
+function controlFor(html: string, fieldId: string): string {
+  const form = html.slice(html.indexOf('<div class="form-fields">'));
+  const opening = form.indexOf(`name="value:${fieldId}"`);
+  assert.notEqual(opening, -1, `${fieldId} has no control in the rendered form`);
+  const start = form.lastIndexOf('<label>', opening);
+  const end = form.indexOf('</label>', opening);
+  assert.ok(start !== -1 && end !== -1, `${fieldId} control is not in a label`);
+  return form.slice(start, end);
+}
+
+/**
+ * The admission the packet owes: every kind the reader recognises renders the
+ * control its type calls for, on ONE form, from a real compile.
+ *
+ * Read per field rather than over the whole document -- `controlFor` slices the
+ * one `<label>` that owns the field's name -- so a single correct control
+ * elsewhere on the page cannot satisfy another field's assertion.
+ */
+test('a v2 form renders the control each canonical field kind calls for', async () => {
+  const html = await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
+  const expected: readonly (readonly [string, RegExp])[] = [
+    [EVERY_KIND_FIELD_IDS.due, /<input type="date" /],
+    [EVERY_KIND_FIELD_IDS.count, /<input type="number" inputmode="numeric" /],
+    [EVERY_KIND_FIELD_IDS.price, /<input type="number" inputmode="decimal" /],
+    [
+      FIXTURE_IDS.fieldIds.parentAmount,
+      /<input type="number" inputmode="decimal" /,
+    ],
+    [EVERY_KIND_FIELD_IDS.weight, /<input type="number" inputmode="decimal" /],
+    [EVERY_KIND_FIELD_IDS.active, /<select /],
+    [FIXTURE_IDS.fieldIds.parentName, /<input type="text" /],
+    [EVERY_KIND_FIELD_IDS.grade, /<select /],
+    [EVERY_KIND_FIELD_IDS.region, /<input [^>]*list="/],
+  ];
+  for (const [fieldId, control] of expected) {
+    assert.match(controlFor(html, fieldId), control, fieldId);
+  }
+  // The blank option is what keeps a select from posting its first option for a
+  // field the record never had a value for.
+  assert.match(
+    controlFor(html, EVERY_KIND_FIELD_IDS.grade),
+    /<select [^>]*><option value=""><\/option>/,
+  );
+});
+
+/**
+ * The correction a review blocked this packet for. A control that cannot express
+ * the field's declared domain destroys the value before `U7` can normalise it,
+ * so the discriminants have to reach the renderer and the renderer has to use
+ * them.
+ */
+test('a temporal control admits its declared precision and timezone semantics', async () => {
+  const html = await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
+
+  // A time input defaults to a 60-second step and silently refuses 12:34:56.
+  // Two fields of one kind differing ONLY in declared precision must differ here.
+  assert.match(
+    controlFor(html, FIXTURE_IDS.fieldIds.parentLocalTime),
+    /<input type="time" step="1" /,
+  );
+  assert.match(
+    controlFor(html, EVERY_KIND_FIELD_IDS.preciseTime),
+    /<input type="time" step="0\.001" /,
+  );
+
+  // `datetime-local` is local time with no timezone information, so neither a
+  // utcInstant's `Z` nor a real offset survives it. Refused BY NAME, with the
+  // declared domain on the element, and the carrier left lossless.
+  for (const [fieldId, semantics, precision] of [
+    [FIXTURE_IDS.fieldIds.parentUtcInstant, 'utcInstant', 'millisecond'],
+    [EVERY_KIND_FIELD_IDS.offsetMoment, 'offsetDateTime', 'second'],
+  ] as const) {
+    const control = controlFor(html, fieldId);
+    assert.match(control, /<input type="text" /, fieldId);
+    assert.doesNotMatch(control, /type="datetime-local"/u, fieldId);
+    assert.match(control, /data-refused-control="datetime-local"/u, fieldId);
+    assert.match(
+      control,
+      new RegExp(`data-timezone-semantics="${semantics}"`, 'u'),
+      fieldId,
+    );
+    assert.match(
+      control,
+      new RegExp(`data-precision="${precision}"`, 'u'),
+      fieldId,
+    );
+  }
+});
+
+/**
+ * An optional boolean has THREE states and a checkbox has two. The first cut
+ * rendered a checkbox beside a hidden `value="false"`, so `null`, absent and
+ * `false` all rendered unchecked and all posted `"false"` -- an unrelated edit
+ * on the same form rewrote a stored `null` to `false`, upstream of anywhere
+ * `U7` could recover it.
+ */
+test('an optional boolean keeps its three states distinguishable', async () => {
+  const seeded = async (value: boolean | null | undefined) =>
+    controlFor(
+      await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION, (executor) =>
+        executor.seedValues(
+          tenantA,
+          value === undefined
+            ? {}
+            : { [EVERY_KIND_FIELD_IDS.active]: value },
+        ),
+      ),
+      EVERY_KIND_FIELD_IDS.active,
+    );
+
+  const absent = await seeded(undefined);
+  const explicitNull = await seeded(null);
+  const no = await seeded(false);
+  const yes = await seeded(true);
+
+  // No hidden sibling anywhere: nothing posts a value the record did not have.
+  for (const control of [absent, explicitNull, no, yes]) {
+    assert.doesNotMatch(control, /type="hidden"/u);
+    assert.doesNotMatch(control, /type="checkbox"/u);
+    assert.match(control, /<select [^>]*><option value=""><\/option>/u);
+  }
+  // Absent and null both select the blank; false and true select their own.
+  assert.doesNotMatch(absent, /selected/u);
+  assert.doesNotMatch(explicitNull, /selected/u);
+  assert.match(no, /<option value="false" selected>No<\/option>/u);
+  assert.doesNotMatch(no, /<option value="true" selected>/u);
+  assert.match(yes, /<option value="true" selected>Yes<\/option>/u);
+  assert.doesNotMatch(yes, /<option value="false" selected>/u);
+});
+
 test('a capability command is artifact-bound, render-minted, and deliberately confirmed', async () => {
   const definition = ordinaryModuleV1();
   const capabilityId = `${FIXTURE_IDS.namespace}:capability.post`;
@@ -573,6 +738,30 @@ class InMemoryGenericExecutor
     this.tenantRecords(tenantId).set(
       recordId,
       record(recordId, name, FIXTURE_IDS.entityIds.parent),
+    );
+    return recordId;
+  }
+
+  /**
+   * Seeds a record carrying real typed values. `seed` above stores one string,
+   * which is enough for a title but cannot express a JSON `true` -- and a
+   * checkbox that renders `checked` only for a boolean cannot be observed
+   * against a record whose boolean is the string "true".
+   */
+  seedValues(
+    tenantId: string,
+    values: Readonly<Record<string, ImmutableJsonValue>>,
+  ): string {
+    const recordId = randomUUID();
+    this.tenantRecords(tenantId).set(
+      recordId,
+      Object.freeze({
+        archived: false,
+        entityId: FIXTURE_IDS.entityIds.parent,
+        recordId,
+        revision: 1,
+        values: Object.freeze({ ...values }),
+      }),
     );
     return recordId;
   }
@@ -906,6 +1095,11 @@ function decode(value: ContentAddressedArtifact): Record<string, unknown> {
 
 function compileFixture(
   definition: Record<string, unknown> = ordinaryModuleV1(),
+  // Defaults to whatever the profile constant carries, so every existing caller
+  // keeps compiling exactly as before. Passed explicitly only by the field-kind
+  // tests, which need the unadopted v2 -- nothing they compile is recorded, so
+  // no lineage entry is minted (ADR-0047 §4a).
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion = MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion,
 ): CompileSuccess {
   const normalized = normalizeApplicationPackage(definition);
   const result = compileApplication({
@@ -919,6 +1113,7 @@ function compileFixture(
     // Version-from-artifact: compile the fixture at the version it declares.
     profile: {
       ...MODULE_COMPILER_PROFILE,
+      compilerSemanticProfileVersion,
       languageVersion: normalized.languageVersion,
       normalizationProfileVersion: normalized.normalizationProfileVersion,
     },

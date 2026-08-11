@@ -3334,7 +3334,19 @@ async function roleFacts(client: PoolClient): Promise<{
   };
 }
 
-function parseMutationInput(
+/**
+ * Exported so a gate can ask the REAL write path whether an input is acceptable
+ * without standing up a database.
+ *
+ * This is the first thing `#executeOperation` does (`:311`), before a
+ * connection is taken, and it is where every compiled value contract is
+ * enforced -- enum membership, decimal precision and scale, ISO date, time and
+ * date-time shape against the declared precision and timezone semantics. A
+ * browser round trip that asserts what a form SUBMITS is asserting a proxy
+ * unless something decides whether the provider would accept it; this is that
+ * decision, not a copy of it.
+ */
+export function parseMutationInput(
   definition:
     | RegisteredRecordOperationDefinition
     | RegisteredTransitionOperationDefinition,

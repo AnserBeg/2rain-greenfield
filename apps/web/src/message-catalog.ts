@@ -121,6 +121,15 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Surface binding unreadable',
     subject: null,
   },
+  INVALID_SURFACE_FIELD: {
+    consequence: 'blocking',
+    detail:
+      'A surface in the pinned release describes its fields in a way this runtime cannot render a control for.',
+    nextAction: null,
+    placements: ['page'],
+    sentence: 'Compiled field description unreadable',
+    subject: null,
+  },
   INVALID_SURFACE_MANIFEST: {
     consequence: 'blocking',
     detail:

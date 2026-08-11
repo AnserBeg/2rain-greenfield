@@ -10,6 +10,7 @@ import {
   canonicalize,
   canonicalizeAndHash,
   evaluateLegalEntityScopeSelection,
+  languageHasLegalEntityQueryScope,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
   parseVersionedAuthoredApplicationPackageJson,
@@ -32,6 +33,7 @@ import { compilerInput, mustCompile, projectionPayload } from './helpers.js';
 import { V3_AGGREGATE_IDS, v3AggregateModule } from './v3-definition.js';
 import {
   V4_SCOPE_IDS,
+  adoptedScopedModule,
   legalEntityScope,
   parameterDefinition,
   requireQuery,
@@ -438,16 +440,29 @@ test('cutting v4 leaves v3 output byte-identical', () => {
 
   const v3 = normalizedBytesFor(v3AggregateModule());
   // The unmodified default profile still compiles an ADOPTED-version package.
-  // LANG-ADOPT moved adoption to v4, so the adopted-version fixture is the v4
-  // one; using the v3 module here would assert that the default profile
-  // compiles an UNADOPTED version, which is the opposite of this control.
+  // Using an unadopted-version module here would assert the opposite of this
+  // control, so the fixture must FOLLOW adoption rather than name a version.
+  //
+  // It named `v4ScopedModule()`, which was the adopted-version fixture for
+  // exactly one adoption cycle. `LANG-ADOPT-v5` moved adoption to v5 and this
+  // arm went red as `failed` -- node-version purity refusing a v4 package under
+  // a v5 profile -- while the v3 freeze it guards had not moved at all. That is
+  // the `LANG-ADOPT` (v4) row's recorded latent firing: a fixture that passes
+  // only because module and adopted version coincide.
+  //
+  // The precondition is named rather than assumed: this fixture carries a
+  // legal-entity scope operand, which no version before v4 declares.
+  assert.equal(
+    languageHasLegalEntityQueryScope(ADOPTED_LANGUAGE_VERSION),
+    true,
+  );
   assert.equal(
     compileApplication({
       dependencies: [],
       expectedActiveRelease: null,
       kind: 'compilerInput',
       limits: { ...DEFAULT_COMPILER_LIMITS },
-      normalizedDefinitionBytes: normalizedBytesFor(v4ScopedModule()),
+      normalizedDefinitionBytes: normalizedBytesFor(adoptedScopedModule()),
       profile: { ...DEFAULT_COMPILER_PROFILE },
     }).status,
     'compiled',

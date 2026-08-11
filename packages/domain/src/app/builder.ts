@@ -3,8 +3,8 @@ import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
 
-const version = 'v4' as const;
-const normalizationProfileVersion = 'northstar.normalization/v4' as const;
+const version = 'v5' as const;
+const normalizationProfileVersion = 'northstar.normalization/v5' as const;
 
 export const APPLICATION_NAMESPACE = 'northstar.app' as const;
 

@@ -574,6 +574,84 @@ function operationCatalogPayload(
   };
 }
 
+type NormalizedField = NormalizedApplicationPackage['fields'][number];
+
+/**
+ * The declared domain of a field, projected losslessly enough that a control can
+ * admit all of it and no more.
+ *
+ * **The first cut of this carried `kind` and enum `options` only, and that was
+ * wrong** -- a review found the comment claiming nothing else changes the
+ * control while two temporal discriminants decide whether a control can express
+ * the value at all. `timeFieldType.precision`, `dateTimeFieldType.precision` and
+ * `dateTimeFieldType.timezoneSemantics` are canonical declarations: a stored
+ * `2026-08-09T12:34:56.789Z` or a `-06:00` offset is simply not representable
+ * by a control that does not know them, and both temporal inputs default to a
+ * 60-second step, so seconds and milliseconds fail native validation before any
+ * normalization gets a chance. Carrying them is not implementing `U7`'s form
+ * behaviour; it is what gives `U7` a contract without a hole in it.
+ *
+ * `temporal` deliberately mirrors the operation input contract's already-ratified
+ * shape (`operationInputContract` below), value for value. One fact, one
+ * spelling, in both directions of the seam.
+ *
+ * `required` is carried for the same reason and **the renderer does not branch
+ * on it.** A boolean's legal state count is not derivable from `kind`: an
+ * optional one has three states (`true`, `false`, unset) and a required one has
+ * two, and the difference is invisible to every consumer without this. `U7` owns
+ * what to DO about required-ness; this owns not throwing the fact away.
+ *
+ * Each optional key is present exactly when its kind calls for it -- `options`
+ * iff `enumFieldType`, `temporal` iff a temporal kind -- so a reader that finds
+ * one missing has read a malformed payload rather than a field without choices
+ * or without precision.
+ */
+function surfaceManifestField(field: NormalizedField): {
+  readonly fieldId: string;
+  readonly kind: NormalizedField['fieldType']['kind'];
+  readonly options?: readonly {
+    readonly label: string;
+    readonly optionId: string;
+  }[];
+  readonly required: boolean;
+  readonly temporal?: {
+    readonly precision: 'millisecond' | 'second' | null;
+    readonly timezoneSemantics:
+      'calendarDate' | 'localWallTime' | 'offsetDateTime' | 'utcInstant';
+  };
+} {
+  return {
+    fieldId: field.fieldId,
+    kind: field.fieldType.kind,
+    ...(field.fieldType.kind === 'enumFieldType'
+      ? {
+          options: field.fieldType.options.map((option) => ({
+            label: option.label,
+            optionId: option.optionId,
+          })),
+        }
+      : {}),
+    required: field.presence === 'required',
+    ...(field.fieldType.kind === 'dateFieldType'
+      ? { temporal: { precision: null, timezoneSemantics: 'calendarDate' } }
+      : field.fieldType.kind === 'timeFieldType'
+        ? {
+            temporal: {
+              precision: field.fieldType.precision,
+              timezoneSemantics: 'localWallTime',
+            },
+          }
+        : field.fieldType.kind === 'dateTimeFieldType'
+          ? {
+              temporal: {
+                precision: field.fieldType.precision,
+                timezoneSemantics: field.fieldType.timezoneSemantics,
+              },
+            }
+          : {}),
+  };
+}
+
 function surfaceManifestPayload(
   packageRevision: NormalizedApplicationPackage,
   queryById: Map<string, NormalizedApplicationPackage['queries'][number]>,
@@ -586,6 +664,13 @@ function surfaceManifestPayload(
   readonly requiredRuntimeCapability: RuntimeCapabilityRequirement;
 } {
   const navigation = surfaceNavigationTree(packageRevision);
+  const fieldById = new Map(
+    packageRevision.fields.map((field) => [field.fieldId, field]),
+  );
+  // One condition, read by both the emission below and the capability floor, so
+  // the floor cannot drift from what the payload actually carries.
+  const emitsFieldKinds =
+    compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION;
   // Load-bearing compatibility fence: labelling grouped output as v0 lets
   // v0 readers ignore the tree and silently reconstruct unreachable overflow.
   const payloadSchemaVersion = navigation
@@ -596,13 +681,38 @@ function surfaceManifestPayload(
       kind: 'surfaceManifestPayload',
       ...(navigation ? { navigation } : {}),
       schemaVersion: payloadSchemaVersion,
-      surfaces: packageRevision.surfaces.map((surface) => ({
-        archetype: surface.archetype,
-        dataSourceQueryId: surface.dataSource.targetId,
-        fieldIds:
+      surfaces: packageRevision.surfaces.map((surface) => {
+        const fieldIds =
           queryById
             .get(surface.dataSource.targetId)
-            ?.selections.map((selection) => selection.field.targetId) ?? [],
+            ?.selections.map((selection) => selection.field.targetId) ?? [];
+        return {
+        archetype: surface.archetype,
+        dataSourceQueryId: surface.dataSource.targetId,
+        fieldIds,
+        // Gated on the UNADOPTED v2, exactly as `disclosureTier` is one level
+        // down: readable and unemitted, so no recorded release root moves.
+        //
+        // Nothing is defaulted. Every canonical field DECLARES a `fieldType`,
+        // so there is no absent kind to invent -- the projection carries what
+        // the definition already says and stops. What can be absent is the
+        // whole key, under every profile that is not v2, and a reader must see
+        // that absence rather than a materialized default.
+        //
+        // `flatMap` drops a field the package does not declare. Normalization
+        // refuses that package first (`CANON_REFERENCE_UNRESOLVED`), so the
+        // drop is unreachable today; it is written this way rather than with an
+        // assertion because the observable consequence belongs at the reader,
+        // where a short `fields` against a full `fieldIds` is refused by name
+        // instead of rendering half a form as bare text boxes.
+        ...(emitsFieldKinds
+          ? {
+              fields: fieldIds.flatMap((fieldId) => {
+                const field = fieldById.get(fieldId);
+                return field ? [surfaceManifestField(field)] : [];
+              }),
+            }
+          : {}),
         label: surface.label,
         lifecycle: surface.lifecycle,
         slots: surface.slots.map((slot) => ({
@@ -626,7 +736,8 @@ function surfaceManifestPayload(
         ...(packageRevision.languageVersion === LANGUAGE_VERSION
           ? { surfaceRole: surface.surfaceRole ?? null }
           : {}),
-      })),
+        };
+      }),
     },
     payloadSchemaVersion,
     // `minimumVersion` stays 1 when the tier is emitted, and that is honest on a
@@ -637,9 +748,27 @@ function surfaceManifestPayload(
     // what `always` means, so it under-defers rather than concealing. The
     // condition is that no tier value ever means "hide"; the moment one does,
     // this needs re-deriving. Recorded, not fixed (U5b review item 3).
+    //
+    // **`fields` ALLOCATES version 3 rather than arguing its way to staying at
+    // 1, and that is a deliberate retreat from a claim this packet could not
+    // hold.** The argument was available -- a reader that drops `fields` renders
+    // bare text boxes, which is under-featured rather than wrong -- but it is
+    // only true while both readers SUBMIT the same entries for the same user
+    // action, and that is a claim about what a BROWSER does with rendered
+    // markup. Two attempts to hold it failed: the first shipped a hidden
+    // `value="false"` sibling that posted different bytes than the older reader,
+    // and the second asserted equivalence through a regex over server HTML that
+    // synthesised what it believed a browser would submit -- no successful-control
+    // rules, no disabled-state behaviour, no form ownership. A control marked
+    // `disabled`, which a real browser omits entirely, kept that gate green.
+    //
+    // A version number costs nothing and needs no instrument. The floor now says
+    // what is true by construction: a reader that does not understand `fields`
+    // must not serve this payload. Nothing downstream has to be trusted to
+    // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
-      minimumVersion: navigation ? 2 : 1,
+      minimumVersion: emitsFieldKinds ? 3 : navigation ? 2 : 1,
     },
   };
 }
