@@ -472,6 +472,23 @@ single failing test:
 | The retired-variable refusal deleted | 1 red — the retired-variable test |
 | **The settle step removed from shutdown** | 1 red — the in-flight signal test |
 | **Ownership recorded AFTER the awaited `docker run` — the exact round-2 defect** | 1 red — the in-flight signal test |
+| **`process.exit(failures.length > 0 ? 1 : code)` → `process.exit(code)`** | 1 red — the stop-failure test |
+| **The `COMPOSED_APPLICATION_SHUTDOWN_FAILED` writes deleted** | 1 red — the stop-failure test |
+| **The `dev:stop` hint deleted** | 1 red — the stop-failure test |
+| A failing stop with the diagnostics intact (admission twin) | **stays green at exit 0** |
+
+Round 3 review found the shutdown controls stopped one layer short, and it was
+right: `runShutdown`'s tests observed the helper's returned failures, while the
+externally visible behaviour — writing the diagnostic and choosing exit 1 —
+lives in `main.ts` *after* that helper returns. Both of the cheapest broken
+trees it named were verified green against the round-3 controls before the fix:
+deleting the exit-code choice, and deleting the diagnostic writes. The
+spawned-entry-point harness is now parameterised on whether `docker stop`
+succeeds, and a failing stop is observed **at the process boundary** — exit
+code and stderr — with an admission twin proving a clean shutdown still exits
+0 and stays quiet. The stub's failing stop deliberately returns a
+*non-absence* error, because `stopContainer` treats "no such container" as
+success and an absence message would prove nothing.
 
 Round 2 review found the release-binding controls exercised only one of that
 test's three checks: deleting the operation-ID or field-ID assertion would have
@@ -489,6 +506,10 @@ field that exists but belongs to another entity.
 
 **Still NOT verified by any control:**
 
+- **`application.close()` rejecting is still only proved at the helper
+  boundary.** The failing-stop path is now observed at the process boundary;
+  the rejecting-close path is not, because reaching it needs a started
+  application and the stub harness never gets one.
 - **The hand-run observations in §5 remain hand-run.** SIGTERM-mid-startup,
   EADDRINUSE and the database-failure case were observed at `fa1b024` and are
   not reproducible from the tree. What IS now reproducible is the harder case

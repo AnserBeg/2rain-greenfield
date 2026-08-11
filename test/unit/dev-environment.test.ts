@@ -389,38 +389,54 @@ test('a failing container command still leads to a stop, and is not itself a fai
   );
 });
 
-test('a signal while the container command is in flight leaves no container behind', async (t) => {
-  // The window round 2 review identified: SIGTERM arrives while
-  // `docker run --detach` is still executing. The process must not exit until
-  // that command settles and the container it created has been stopped.
-  //
-  // `docker` is stubbed rather than real, so this runs in the unit suite with
-  // no daemon, no image pull and no port binding. The stub's marker file
-  // stands in for the container: if it survives the run, a real container
-  // would have survived too.
+/**
+ * Spawns the real dev entry point against a stubbed `docker` on PATH.
+ *
+ * The stub is what makes these runnable in the unit suite: no daemon, no image
+ * pull, no port binding. Its marker file stands in for the container — if the
+ * marker survives, a real container would have survived too.
+ *
+ * `stop` behaviour is a parameter because the two facts under test are
+ * different: whether cleanup HAPPENS, and whether a cleanup that FAILS is
+ * reported. The second is only observable at the process boundary, which is
+ * why these spawn the entry point instead of calling `runShutdown` directly.
+ */
+function spawnDevEntryPoint(options: {
+  readonly runSeconds: string;
+  readonly stopFails: boolean;
+}): {
+  readonly child: ReturnType<typeof spawn>;
+  readonly log: string;
+  readonly marker: string;
+  readonly root: string;
+  readonly stderr: () => string;
+  readonly exit: Promise<number | null>;
+} {
   const root = mkdtempSync(join(tmpdir(), 'dev-lifecycle-'));
   const log = join(root, 'docker.log');
   const marker = join(root, 'container');
+  const stop = options.stopFails
+    ? // Deliberately NOT an absence error: `stopContainer` treats "no such
+      // container" as success, so an absence message here would prove nothing.
+      `echo "Error response from daemon: cannot stop container" >&2; exit 1`
+    : `if [ -e "${marker}" ]; then rm "${marker}"; fi; exit 0`;
   writeFileSync(
     join(root, 'docker'),
     [
       '#!/usr/bin/env bash',
       `echo "$1" >> "${log}"`,
       'case "$1" in',
-      // No pre-existing container, so the run arm is taken.
       '  container) echo "Error: No such container: stub" >&2; exit 1 ;;',
-      // Blocks, so the signal lands mid-flight. The marker appears only after.
-      `  run) sleep 1.5; : > "${marker}"; echo run-end >> "${log}"; exit 0 ;;`,
-      `  stop) if [ -e "${marker}" ]; then rm "${marker}"; exit 0; ` +
-        'else echo "Error: No such container: stub" >&2; exit 1; fi ;;',
-      // Never ready, so nothing proceeds to the database or the HTTP port.
+      `  run) sleep ${options.runSeconds}; : > "${marker}"; ` +
+        `echo run-end >> "${log}"; exit 0 ;;`,
+      `  stop) ${stop} ;;`,
       '  exec) exit 1 ;;',
       '  *) exit 0 ;;',
       'esac',
     ].join('\n'),
     { mode: 0o755 },
   );
-
+  let stderr = '';
   const child = spawn(
     process.execPath,
     ['--import', 'tsx', resolve('apps/api/src/main.ts')],
@@ -432,21 +448,40 @@ test('a signal while the container command is in flight leaves no container behi
         PATH: `${root}:${process.env.PATH ?? ''}`,
         PORT: '4999',
       },
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
     },
   );
-  const exited = new Promise<void>((done) => child.once('exit', () => done()));
-  try {
-    // Poll for the command to be in flight rather than sleeping a guessed
-    // interval; the assertion below is meaningless if the signal lands early.
-    const deadline = Date.now() + 30_000;
-    while (
-      Date.now() < deadline &&
-      !(existsSync(log) && readFileSync(log, 'utf8').includes('run'))
-    ) {
-      await new Promise((done) => setTimeout(done, 25));
+  child.stderr?.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString('utf8');
+  });
+  const exit = new Promise<number | null>((done) => {
+    child.once('exit', (code) => done(code));
+  });
+  return { child, exit, log, marker, root, stderr: () => stderr };
+}
+
+async function waitForDockerVerb(
+  log: string,
+  verb: string,
+  timeoutMilliseconds = 30_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() < deadline) {
+    if (existsSync(log) && readFileSync(log, 'utf8').includes(verb)) {
+      return readFileSync(log, 'utf8');
     }
-    const observed = existsSync(log) ? readFileSync(log, 'utf8') : '';
+    await new Promise((done) => setTimeout(done, 25));
+  }
+  return existsSync(log) ? readFileSync(log, 'utf8') : '';
+}
+
+test('a signal while the container command is in flight leaves no container behind', async () => {
+  // The window round 2 review identified: SIGTERM arrives while
+  // `docker run --detach` is still executing. The process must not exit until
+  // that command settles and the container it created has been stopped.
+  const dev = spawnDevEntryPoint({ runSeconds: '1.5', stopFails: false });
+  try {
+    const observed = await waitForDockerVerb(dev.log, 'run');
     assert.ok(
       observed.includes('run'),
       `docker run never started: ${observed}`,
@@ -455,13 +490,13 @@ test('a signal while the container command is in flight leaves no container behi
       !observed.includes('run-end'),
       'the run completed before the signal, so the in-flight window was not exercised',
     );
-    child.kill('SIGTERM');
-    await exited;
+    dev.child.kill('SIGTERM');
+    await dev.exit;
   } finally {
-    child.kill('SIGKILL');
+    dev.child.kill('SIGKILL');
   }
 
-  const transcript = readFileSync(log, 'utf8');
+  const transcript = readFileSync(dev.log, 'utf8');
   assert.ok(
     transcript.includes('run-end'),
     'shutdown did not wait for the in-flight container command to settle',
@@ -471,8 +506,71 @@ test('a signal while the container command is in flight leaves no container behi
     'no container stop was issued for a container this process created',
   );
   assert.ok(
-    !existsSync(marker),
+    !existsSync(dev.marker),
     'the container outlived the process that created it',
   );
-  rmSync(root, { force: true, recursive: true });
+  rmSync(dev.root, { force: true, recursive: true });
+});
+
+test('the dev command exits non-zero and says so when the container stop fails', async () => {
+  // Round 3 review: the helper test proves `runShutdown` REPORTS a failing
+  // stop. It does not prove the dev command acts on that report. Deleting the
+  // exit-code choice or the diagnostic writes in main.ts left every other
+  // control green, so this observes both at the process boundary.
+  const dev = spawnDevEntryPoint({ runSeconds: '0', stopFails: true });
+  let code: number | null;
+  try {
+    await waitForDockerVerb(dev.log, 'run-end');
+    dev.child.kill('SIGTERM');
+    code = await dev.exit;
+  } finally {
+    dev.child.kill('SIGKILL');
+  }
+
+  assert.ok(
+    readFileSync(dev.log, 'utf8').includes('stop'),
+    'the stop was never attempted, so its failure was not what was measured',
+  );
+  assert.equal(
+    code,
+    1,
+    'a failed container stop must exit non-zero; the user is otherwise told the leak did not happen',
+  );
+  assert.match(
+    dev.stderr(),
+    /COMPOSED_APPLICATION_SHUTDOWN_FAILED/u,
+    'a failed container stop must be reported on stderr',
+  );
+  assert.match(
+    dev.stderr(),
+    /dev:stop/u,
+    'the diagnostic must name the command that clears the leak',
+  );
+  rmSync(dev.root, { force: true, recursive: true });
+});
+
+test('the dev command exits zero and stays quiet when the container stop succeeds', async () => {
+  // The admission twin for the test above: without it, a dev command that
+  // always exited 1 and always printed the diagnostic would satisfy it.
+  const dev = spawnDevEntryPoint({ runSeconds: '0', stopFails: false });
+  let code: number | null;
+  try {
+    await waitForDockerVerb(dev.log, 'run-end');
+    dev.child.kill('SIGTERM');
+    code = await dev.exit;
+  } finally {
+    dev.child.kill('SIGKILL');
+  }
+
+  assert.equal(code, 0, 'a clean shutdown must exit zero');
+  assert.doesNotMatch(
+    dev.stderr(),
+    /COMPOSED_APPLICATION_SHUTDOWN_FAILED/u,
+    'a clean shutdown must not report a shutdown failure',
+  );
+  assert.ok(
+    !existsSync(dev.marker),
+    'the container outlived the process that created it',
+  );
+  rmSync(dev.root, { force: true, recursive: true });
 });
