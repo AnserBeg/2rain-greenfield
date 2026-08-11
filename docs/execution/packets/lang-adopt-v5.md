@@ -695,10 +695,46 @@ reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
 was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
 the reason its rule exists.
 
-## Gates
+## Gates — one full matrix, green at the re-frozen SHA
 
-**The `6e0b56c` matrix is SUPERSEDED** by review round 6, which changed
-executable content in two test files. Fresh matrix owed.
+`FULL_MATRIX_PASS_SHA=5ebd680`, tree clean, typecheck clean.
+**589 assertions, 0 failures, `MATRIX_EXIT=0` read from inside the log.**
+
+| Step | Result |
+|---|---|
+| `check:demo-release`, `check:app-release` | pass — shell root held, lineage reproduces 9/9 |
+| unit / compiler / performance | green |
+| integration / agent / architecture | green |
+| contracts / postgres / locale | green |
+| browser | 67 passed (2.7m) |
+| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, **427 first-party observations** |
+| `check:reachability` | **PASS** — **100/100** test files, 10 producer artifacts |
+
+**Compile-budget gate MEASURED:** `cpu_idle_pct=99.2`, best-of-5 wall
+**2414.7 ms** against 5000 ms.
+
+### Ten matrices
+
+| Run | Result | Cause |
+|---|---|---|
+| 1 | FAIL | a third hand-written copy of the compiler suite's file list |
+| 2 | FAIL | `test:postgres` timeouts — a split sized against a STANDALONE measurement while the bound is IN-MATRIX |
+| 3-5, 7, 8 | green | each superseded by a review round finding a control defect |
+| 6 | green **under mutation** | the P6 measurement — the greenness WAS the finding |
+| 9 | green | superseded by review round 6 |
+| 10 | green | this one |
+
+Two failed on defects this packet introduced. **Six green runs were superseded
+by review rounds finding control defects the matrix cannot see. A vacuous
+control is green by construction — that is why the deletion tables exist and why
+matrix-green was never going to settle this.**
+
+**The wrapper reported "exit code 0" on every failed run.** `MATRIX_EXIT` was
+read from inside the log each time.
+
+`pnpm lint` reports **7 errors and `prettier --check` drifts, both pre-existing
+on `main` at `5aa2d2c` and neither in the matrix command**
+(`unrun-quality-gates`). This packet adds zero of either.
 
 ### A matrix pre-flight instrument, for the next lane
 
