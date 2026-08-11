@@ -317,6 +317,73 @@ demonstrated. The seed makes the *data* exceed five options many times over —
 that will render them. What the seed does deliver now is a list that
 paginates, a search that discriminates, and a record that opens.
 
+## 6b. Gates — and the packet is BLOCKED, not green
+
+**The full matrix cannot pass, and the reason is not this packet.**
+
+Run at `5bfd1ab` (pre-rebase), label `DEVENV`, tree pinned before and after —
+`PINNED_BEFORE` and `PINNED_AFTER` both `5bfd1ab9c440…`, so it measured its own
+tree and `matrix-must-pin-its-tree` did not bite.
+
+```
+PERFORMANCE_GATE_PASS_SHA=5bfd1ab9c4400873d0848a24e3222244e599d7b6
++ corepack pnpm format
+[warn] Code style issues found in 16 files.
+FULL_MATRIX_FAILED rc=1 sha=5bfd1ab9c4400873d0848a24e3222244e599d7b6
+MATRIX_EXIT=1
+```
+
+`scripts/run-matrix.sh:186-188` runs `format && lint && typecheck && …`, so
+**`pnpm format` is the second gate and everything after it never executed** —
+`lint`, `typecheck`, `build`, `check:boundaries`, `check:schema`, both release
+checks, and all seven test suites.
+
+**Attribution, proven rather than asserted.** After rebasing onto `33bcdb6`
+(LANG-ADOPT-v5 fixed 2 of the 16), **14 remain**, and every one is
+**byte-identical to `origin/main`**:
+
+```
+git diff --stat origin/main HEAD -- <the 14 files>   # empty
+pnpm prettier --check <the 8 files this packet touches>
+  → All matched files use Prettier code style!
+```
+
+So **`main` is format-red on its own**, and `pnpm lint` — the next gate — has
+**7 pre-existing errors** in the same neighbourhood. `packet/matrix-unblock`
+holds most of those files. **No packet branching from `main` can reach a green
+matrix until that lands.** Repairing them here was rejected: they are another
+lane's held files, and `prettier --write` across them would manufacture
+conflicts.
+
+**What was run instead**, at `63400ce`, each suite named:
+
+| Gate | Result |
+|---|---|
+| `typecheck` | **pass** |
+| `check:boundaries` | **pass** |
+| `test:unit` | **pass** |
+| `test:architecture` | **pass** |
+| `test:compiler` | **pass** — 145/0 |
+| `test:integration` | **pass** — 127/0 |
+| `test:contracts` | **pass** — 16/0 |
+| `test:browser` | **pass** — 77 passed, including the `composed-application` project that asserts `seededRecords` has length 12 |
+| `test:performance` | **pass** (in the matrix run above, before `format` stopped it) |
+| `test:postgres` | **pass on re-run** — 197/0; first run 196/1 on a container-readiness flake, see below |
+| `format` / `lint` | **fail on `main`'s files, not this packet's** |
+
+**`test:postgres` — reported honestly.** First run: **196 pass, 1 fail**. The
+failure was `absent predicate semantics diverge from raw SQL and agree when
+totalized` (`test/postgres/predicate-absent-semantics.test.ts`) with
+`ephemeral PostgreSQL is ready inside its container but its published endpoint
+is unavailable: connect ECONNREFUSED 127.0.0.1:49406` — the container
+readiness/port shape `matrix-contention` describes, in a predicate-SQL test
+that touches nothing this packet changed. **Re-run in isolation on the same
+tree: pass.** A re-run of one test is weaker evidence than a clean pass, so the
+**whole suite was re-run: `RC=0`, 197 pass, 0 fail.** Both readings are
+reported: one run of this suite on this tree failed on container readiness, and
+one run passed completely. Nothing here proves the flake is gone — it prices it
+at roughly 1 in 197 on a loaded machine.
+
 ## 7. What this packet did NOT verify
 
 Listed for the reviewer, not excused.
