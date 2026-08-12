@@ -4,7 +4,9 @@ Date: 2026-08-10
 Tier: Critical
 Status: evidence_ready
 Base: `eb02adf` · Reviewed candidate: `7f42380` (tag `ux-picker-reviewed-r5`)
-Integrated: `0c5fa8df305373c31fa17abeb23608ad86142202`
+Integrated: `0c5fa8df305373c31fa17abeb23608ad86142202` (the conflict-producing
+merge; parents `7f42380` and `194871f`)
+Re-merged onto moved `main`: `eb37fc6` · Closure: `d9c9196`
 
 ## Why this record exists in this shape
 
@@ -189,7 +191,7 @@ last row is the one that matters.
 | Arm 2 `5892e99` | defect **in production** | yes — one production defect plus the double |
 | Arm 3 `56762ce` | **regression introduced by the previous round's fix** | yes, and it is an override that beats the three questions: a probe's `git checkout --` destroyed the round's own implementation |
 | Arm 4 `89e2f1c` | same class, and the fixes **subsumed** rather than sat beside | yes — each correction moved up a level: bind one discriminant → derive the branch from the table → derive the vocabulary from the table too |
-| Merge arm `eb37fc6` | **new class**, merge-only | yes — see below |
+| Merge arm (resolution `0c5fa8d`, reviewed at `eb37fc6`) | **new class**, merge-only | yes — see below |
 
 **The lane's earlier self-assessment was wrong and the arm corrected it.** I had
 written that rounds 4 and 5 were "both prose overstating code", which under the
@@ -201,11 +203,22 @@ defects.** The record says so rather than my summary of it.
 
 ## The merge-only selector-control class — Critical, write path
 
-**A new class, not a continuation of `ux-picker`'s.** The conflicting form did
-not exist on either reviewed parent: `pur1-intent-limit` (ADR-0051) replaced
-`name="intent"` with `name="operationId"` and `ux-picker` replaced the inline
-bare-input map with `renderFormFields(...)`, both inside the same template
-literal in `renderSections`. The union of the two is an artifact no arm had seen.
+**A new class, not a continuation of `ux-picker`'s.**
+
+**Provenance, corrected by the merge arm after this record got it wrong.** The
+conflict-producing resolution is **`0c5fa8d`**, whose parents are `7f42380`
+(`name="intent"` with `renderFormFields`) and `194871f` (`name="operationId"`
+with the inline bare-input map) — the two opposing halves. `pur1-intent-limit`
+(ADR-0051) had replaced `name="intent"` with `name="operationId"`, and
+`ux-picker` had replaced the bare-input map with `renderFormFields(...)`, both
+inside the same template literal in `renderSections`.
+
+**`eb37fc6` did not create that resolution; it INHERITED it.** Its parents
+`b8949f9` and `a38a97e` carry the identical `component-registry.ts` blob
+`abb270ee`, and their merge base is `0c5fa8d`. This record originally named
+`eb37fc6` as the resolving merge and the review prompt repeated that, which
+steered the arm — the arm caught it and said so. The union of the two halves is
+an artifact no arm had seen until this one; the merge that made it is `0c5fa8d`.
 
 **Blast radius is Critical and it is on the write path.** The merge control
 asserted the first four posted keys **by position** — never the value, never the
@@ -221,9 +234,12 @@ rather than by prefix. Leading-key order is kept as a separate, weaker statement
 because order remains load-bearing for last-value-wins.
 
 **Verified with the doctrine's own instrument — revert each parent's half alone.**
-Baseline 2 passed; parent 2's half reverted (`intent` alongside `operationId`)
-reds; the duplicate-`operationId` scenario reds; parent 1's half reverted (bare
-inputs) reds.
+The halves are `0c5fa8d`'s, not `eb37fc6`'s: `eb37fc6`'s parents both already
+contain the union, so a literal revert of either proves nothing. Reverting
+`194871f`'s half (`intent` rendered alongside `operationId`) reds; reverting
+`7f42380`'s half (bare inputs, no typed controls) reds; the duplicate
+-`operationId` scenario reds. Baseline 2 passed, which is what proves the probe
+found its subject at all.
 
 **And the resolution's two halves are guarded by two different tests.** Reverting
 to bare inputs does NOT red `CLAIM 1`, because that test asserts encoding — a
@@ -242,11 +258,24 @@ all 0 fail 0 cancelled; `check:app-release` and `check:demo-release` clean;
 `check:reachability` PASS 101/101. `pnpm lint` carries 7 errors byte-identical on
 `main`, predating this branch; the matrix runs neither lint nor typecheck.
 
-Integration is a `--no-ff` merge with `main` at `194871f`, so the reviewed
-candidate `7f42380` remains an ancestor. One semantic conflict, resolved as the
-union of both packets: `pur1-intent-limit`'s `name="operationId"` addressing
-(ADR-0051) with this packet's `renderFormFields`. **That resolution has not been
-reviewed** and is the subject of the merge arm.
+Integration `0c5fa8d` is a `--no-ff` merge with `main` at `194871f`, so the
+reviewed candidate `7f42380` remains an ancestor. One semantic conflict, resolved
+as the union of both packets: `pur1-intent-limit`'s `name="operationId"`
+addressing (ADR-0051) with this packet's `renderFormFields`. **That resolution
+was reviewed by the merge arm and its selector-control defect is closed** — see
+the class section above.
+
+**Closure gates, separate from the integration gates above.** `main` moved 63
+commits, so `eb37fc6` re-merged onto `a38a97e` and `d9c9196` carries the
+selector-control closure. Full matrix green at **`d9c9196`**, tree pinned before
+and after, 25m48s: unit 106 · compiler 145 · performance 5 · integration 127 ·
+agent 3 · architecture 141 · contracts 16 · postgres 197 · locale 1 ·
+observability 11, all 0 fail 0 cancelled; browser 77 passed;
+`check:reachability` PASS 102/102. An earlier run at `eb37fc6` went red on
+`table-behavior.spec.ts` with `ephemeral PostgreSQL was not ready within
+30000ms`; reclaiming 111 leaked Docker volumes (119 → 8) turned the same tree
+green, which is a data point for `matrix-machine-decay` rather than for this
+packet.
 
 ## Known limitations, declared
 
