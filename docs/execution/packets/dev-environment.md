@@ -277,8 +277,12 @@ boolean-returning helper and exited 0. What is written above was true only of
 the happy path. Now:
 
 - handlers are installed **before** the container starts;
-- `containerExists` flips when `docker run` returns, not when the endpoint is
-  healthy;
+- **`containerAttempted` is set synchronously BEFORE the create/start command
+  is launched, and the pending command is retained**; shutdown waits that
+  command out before stopping. Recording ownership after the awaited
+  `docker run` was the round-2 defect; recording it before is necessary but not
+  sufficient, because the stop would then race ahead of the creation it undoes.
+  There is no `containerExists` variable in the final tree;
 - startup is wrapped, and `startComposedApplication` closes its runtime if
   seeding or `listen` throws, so the caller is never handed nothing to close;
 - shutdown runs each step independently, collects failures, prints them, and
@@ -313,10 +317,15 @@ container-bearing path, or a third registry producer.*
 
 **This packet fires none of the three, and the reason is the finding in §1.**
 
-- **No new test entry point.** No `*.test.ts` or `*.spec.ts` is added, and no
-  suite script is added. **`test-inventory-third-copy` therefore does not
-  apply** — there is no new test file for its three inventories to disagree
-  about.
+- **No new test ENTRY POINT** — no suite script is added, so the trigger does
+  not fire on that axis. **But one new test FILE is added**,
+  `test/unit/dev-environment.test.ts`, so **`test-inventory-third-copy` does
+  apply and was honoured**: it is registered in all three inventories that row
+  names — `package.json`'s `test:unit`, `repository-hygiene`'s reviewed list,
+  and `test/helpers/reachability-producers.ts`. *(An earlier revision of this
+  record said no test file was added and the row did not apply. That was
+  written before the controls existed and was false by the time it shipped;
+  round 5 caught it.)*
 - **No new registry producer.**
 - **No new container-bearing path.** The container-bearing path is
   `apps/api/src/main.ts`, and it has stood up a container since `G2-P5e`. This
@@ -376,68 +385,61 @@ demonstrated. The seed makes the *data* exceed five options many times over —
 that will render them. What the seed does deliver now is a list that
 paginates, a search that discriminates, and a record that opens.
 
-## 6b. Gates — the full matrix is GREEN
+## 6b. Gates — the full matrix is GREEN at the candidate SHA
 
-**`FULL_MATRIX_PASS_SHA=e19d3b1ffe8fa5746d541e520992c103256dd65d`,
-`MATRIX_EXIT=0`.** Label `DEVENV2`. Tree pinned before and after — both
-`e19d3b1ffe8fa5746d541e520992c103256dd65d` — so it measured its own tree and
-`matrix-must-pin-its-tree` did not bite.
+**This section describes the FINAL tree only.** Earlier revisions accumulated
+one round's SHAs after another; round 5 blocked on exactly that, because an
+integrator following a stale acceptance SHA would verify the wrong tree.
 
-Suite totals from inside the log, 0 failures anywhere: performance 5, unit
-**120**, compiler 145, integration 127, agent 3, architecture 141, contracts
-16, postgres **197**, locale 1, browser **77 passed**, plus 11 in the
-load-tolerant tail. `check:language-coverage`, `check:reachability` and the
-security scans all ran.
+| | |
+|---|---|
+| **Candidate SHA** | `e0f25521fa60e92858fff9bfbfb7b462e46cd9bc` |
+| **Base** | `8cab25a2a434b75d3dc732bd5bf40dbaa8536524` (`main`) |
+| **Matrix** | `FULL_MATRIX_PASS_SHA=e0f25521fa60e92858fff9bfbfb7b462e46cd9bc` |
+| **Exit** | `MATRIX_EXIT=0` |
+| **Tree pin** | `PINNED_BEFORE` and `PINNED_AFTER` both `e0f2552` |
+| **Failures** | **0**, every suite |
 
-**Read one detail honestly:** the log contains three `TEST_GATE_LOCK_BUSY`
-lines. All three are **TAP comments** (`#`-prefixed) emitted by
-`test-lock-observability`'s own controls against
-`/tmp/north-star-*-control-33264` with 0s timeouts — that suite deliberately
-provokes lock-busy. `grep -c '^TEST_GATE_LOCK_BUSY'` is **0**: the matrix never
-hit lock-busy itself. `lockout-reads-as-silence` warns about missing a real
-one; this is the mirror case, and the discriminator is the `#` prefix and the
-`-control-` lock path.
-
-**Two runs, both reported.** The first attempt refused before testing anything:
-`COMPILE_BUDGET_INDETERMINATE: observed CPU idle 59.8% is below required 90.0%`.
-That was not this packet's code and not a repository command — `ps --sort=-pcpu`
-found **six `ccd-cli` agent sessions at `--effort xhigh`** holding ~75% of CPU.
-The second attempt was launched by a poller that waits for ≥93% idle and a free
-lock; it took the window at **95% idle** and passed. Filed as
-`foreign-detector-misses-cpu-heavy-gates`.
-
-### The prior blocker, and how it cleared
-
-Earlier rounds could not reach a green matrix: `pnpm format` is
-`run-matrix.sh`'s second gate, and 14 files failed it on `main` with 7 lint
-errors behind them — every one byte-identical to `origin/main`, none touched by
-this packet. `packet/matrix-unblock` landed and both now pass unchanged. That
-row (`main-is-format-and-lint-red`) is closed by its integration, not by
+Suite totals from inside the log: performance 5, unit **120**, compiler 145,
+integration 127, agent 3, architecture 141, contracts 16, postgres **197**,
+locale 1, browser **77 passed**, plus 11 in the load-tolerant tail.
+`check:language-coverage`, `check:reachability` and the security scans all ran.
+`format` and `lint` pass — `packet/matrix-unblock` landed the repair for the 14
+format and 7 lint failures that had made a green matrix unreachable from `main`
+for every lane, and that row is closed by its integration rather than by
 anything here.
 
-### The integrable tip is not the matrix SHA, and why that is admissible
-
-`main` advanced to `090f1cc` after the green run — **one docs-only commit**
-(`ADR-0052`, ledger, review-log, current-plan). The branch was rebased onto it,
-producing `25754ab`.
+**The closeout commit above this SHA is docs-only.** The evidence that the
+`e0f2552` matrix still applies is the empty executable diff:
 
 ```
-$ git diff --name-only e19d3b1 25754ab | grep -v '^docs/'
+$ git diff --name-only e0f2552 HEAD -- . ':!docs'
         (empty)
 ```
 
-**The executable content is identical**, so under AGENTS.md §6 the `e19d3b1`
-run is the acceptance run for `25754ab`; a second pass over the same bytes
-observes nothing. `main` is an ancestor of `25754ab`, so integration is a
-fast-forward and the integrated SHA will be `25754ab` itself.
+Written against `HEAD` deliberately rather than a literal successor SHA: this
+record IS the closeout commit, so any SHA quoted here is stale the moment the
+commit is created or amended. The check is the invariant, not the hash.
 
-The docs merge was verified rather than assumed: nothing of `main`'s was lost,
-the amended `dev-environment` row is a superset of `main`'s (4,148 → 7,388
-characters, retaining its naming section), and `ledger.md`, `review-log.md` and
-`docs/decisions/` are untouched by this packet.
+Under AGENTS.md §6 a run over an identical executable tree observes nothing
+new, so `e0f2552`'s matrix is the acceptance run for the closeout tip. `main`
+is an ancestor, so integration is a fast-forward.
 
-**Re-verified live at `25754ab`:** 176 records, `1–100 of 119` items, 45
-parties, 12 locations, clean `Exited (0)` on SIGTERM.
+**Read one detail honestly:** the log contains three `TEST_GATE_LOCK_BUSY`
+lines. All three are **TAP comments** (`#`-prefixed) from
+`test-lock-observability`'s own controls against `*-control-*` lock paths with
+0s timeouts — that suite provokes lock-busy deliberately.
+`grep -c '^TEST_GATE_LOCK_BUSY'` is **0**: the matrix never hit it.
+`lockout-reads-as-silence` warns about missing a real one; this is the mirror
+case, and the discriminator is the `#` prefix and the `-control-` path.
+
+**Windows spent, and why.** Two runs refused before testing anything with
+`COMPILE_BUDGET_INDETERMINATE` (59.8% and 84.6% idle against a 90% floor). In
+neither case was a repository command responsible: `ps --sort=-pcpu` found
+**six `ccd-cli` agent sessions at `--effort xhigh`** holding ~75% of CPU — the
+orchestration tooling starving its own gate. Filed as
+`foreign-detector-misses-cpu-heavy-gates`. Subsequent runs were launched by a
+poller that waits for ≥93% idle and a free lock.
 
 ## 7. What this packet did NOT verify
 
@@ -445,7 +447,7 @@ Listed for the reviewer, not excused. Rewritten after round 1, which found two
 claims in the previous version of this list that were themselves wrong.
 
 **Now covered by committed controls** (`test/unit/dev-environment.test.ts`,
-8 tests, registered in all three inventories `test-inventory-third-copy`
+**14 tests**, registered in all three inventories `test-inventory-third-copy`
 names). Each was driven red one at a time, and each mutation isolates to a
 single failing test:
 
@@ -475,8 +477,12 @@ trees it named were verified green against the round-3 controls before the fix:
 deleting the exit-code choice, and deleting the diagnostic writes. The
 spawned-entry-point harness is now parameterised on whether `docker stop`
 succeeds, and a failing stop is observed **at the process boundary** — exit
-code and stderr — with an admission twin, a **successful** stop, proving a
-clean shutdown still exits 0 and stays quiet.
+code and stderr — with an admission twin, a **successful** stop. **What that
+twin proves, exactly:** the process exits 0, stderr contains neither
+`COMPOSED_APPLICATION_SHUTDOWN_FAILED` nor the `dev:stop` cleanup hint, and no
+container survives. It does **not** prove stderr is empty; other output remains
+admissible. An earlier revision claimed the twin proved the shutdown "stays
+quiet", which is wider than the assertions.
 
 **Round 4 (closure-only) returned BLOCK on that twin, and it was right.** The
 twin asserted exit 0, no `COMPOSED_APPLICATION_SHUTDOWN_FAILED`, and no
