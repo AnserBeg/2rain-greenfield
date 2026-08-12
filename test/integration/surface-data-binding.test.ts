@@ -1061,6 +1061,232 @@ test('an entity with no create operation reports unavailable, not empty', async 
   );
 });
 
+/**
+ * Review round 2: the browser validated only the relation slice, so it still
+ * bound catalogs the gateway refuses on TOP-LEVEL contract shape. Each case
+ * mutates one property the relation parser never inspects, and asserts the
+ * browser refuses it -- which it can only do by running the complete pinned
+ * operation authority.
+ */
+test('the browser refuses contracts malformed outside the relation slice', async () => {
+  const policy = new RecordingPolicy('ALLOW');
+  const compiled = compileFixture();
+  const projections = runtimeProjections(compiled);
+
+  const forge = (
+    mutate: (operation: Record<string, unknown>) => void,
+  ): ImmutableJsonValue => {
+    const payload = structuredClone(projections.operation.payload) as {
+      operations: Record<string, unknown>[];
+    };
+    const operation = payload.operations.find(
+      (candidate) => candidate.operationId === CHILD_CREATE_OPERATION,
+    );
+    assert.ok(operation);
+    mutate(operation);
+    return payload as unknown as ImmutableJsonValue;
+  };
+
+  const read = async (payload: ImmutableJsonValue) => {
+    const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+      new AuthenticatedRequestEntryAdapter(async () =>
+        identity(tenantA, environmentA, principalA),
+      ),
+      {
+        async load(context): Promise<LoadedRequestRuntimeDefinition> {
+          return {
+            environmentId: context.environmentId,
+            pointer: { fence: 1, pointerId },
+            projections: {
+              ...projections,
+              operation: { ...projections.operation, payload },
+            },
+            release: { contentHash: compiled.releaseRoot, releaseId },
+            tenantId: context.tenantId,
+          };
+        },
+      },
+      policy,
+    );
+    const view = await issuedView(entry, 'a');
+    const manifest = readCompiledSurfaceManifest(view);
+    const surface = manifest.surfaces.find(
+      (candidate) => candidate.surfaceId === CHILD_FORM_SURFACE,
+    );
+    assert.ok(surface);
+    return readCompiledSurfaceDataBinding(view, surface);
+  };
+
+  // ADMISSION TWIN.
+  assert.equal(
+    (await read(forge(() => undefined))).relationInputs.status,
+    'known',
+  );
+
+  const refusals: ReadonlyArray<
+    readonly [string, (operation: Record<string, unknown>) => void]
+  > = [
+    [
+      'fields set to null',
+      (operation) => {
+        (operation.inputContract as Record<string, unknown>).fields = null;
+      },
+    ],
+    [
+      'writableFieldIds omitted',
+      (operation) => {
+        delete (operation.inputContract as Record<string, unknown>)
+          .writableFieldIds;
+      },
+    ],
+    [
+      'an unknown top-level contract key',
+      (operation) => {
+        (operation.inputContract as Record<string, unknown>).forged = 1;
+      },
+    ],
+    [
+      'a non-string closed argument key',
+      (operation) => {
+        (
+          operation.inputContract as Record<string, unknown>
+        ).closedArgumentKeys = ['recordId', 'relations', 'values', 7];
+      },
+    ],
+    [
+      'a repeated field identity',
+      (operation) => {
+        const contract = operation.inputContract as Record<string, unknown>;
+        const fields = contract.fields as unknown[];
+        contract.fields = [fields[0], structuredClone(fields[0])];
+      },
+    ],
+    [
+      'a repeated operation identity',
+      (operation) => {
+        void operation;
+      },
+    ],
+  ];
+
+  for (const [reason, mutate] of refusals) {
+    if (reason === 'a repeated operation identity') continue;
+    await assert.rejects(
+      read(forge(mutate)),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof SurfaceProjectionError,
+          `${reason}: the BROWSER must refuse, got ${String(error)}`,
+        );
+        return true;
+      },
+      reason,
+    );
+  }
+
+  // Operation identity is a KEY in the browser's own Map, so a repeat silently
+  // overwrote one binding while the gateway refused the whole catalog.
+  const duplicated = structuredClone(projections.operation.payload) as {
+    operations: Record<string, unknown>[];
+  };
+  const original = duplicated.operations.find(
+    (candidate) => candidate.operationId === CHILD_CREATE_OPERATION,
+  );
+  assert.ok(original);
+  duplicated.operations.push(structuredClone(original));
+  await assert.rejects(
+    read(duplicated as unknown as ImmutableJsonValue),
+    (error: unknown) => {
+      assert.ok(error instanceof SurfaceProjectionError);
+      return true;
+    },
+    'a repeated operation identity must refuse, not overwrite',
+  );
+});
+
+/**
+ * Review round 2: a create carrying NO input contract is a legitimate compiled
+ * state -- the projection emits one only for the current language version -- and
+ * it was being read as `known: []`, i.e. "this entity positively declares no
+ * relations". Three specimens, because two of them were previously conflated.
+ */
+test('a create with no contract is unavailable, not known-empty', async () => {
+  const policy = new RecordingPolicy('ALLOW');
+  const compiled = compileFixture();
+  const projections = runtimeProjections(compiled);
+
+  const read = async (payload: ImmutableJsonValue) => {
+    const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+      new AuthenticatedRequestEntryAdapter(async () =>
+        identity(tenantA, environmentA, principalA),
+      ),
+      {
+        async load(context): Promise<LoadedRequestRuntimeDefinition> {
+          return {
+            environmentId: context.environmentId,
+            pointer: { fence: 1, pointerId },
+            projections: {
+              ...projections,
+              operation: { ...projections.operation, payload },
+            },
+            release: { contentHash: compiled.releaseRoot, releaseId },
+            tenantId: context.tenantId,
+          };
+        },
+      },
+      policy,
+    );
+    const view = await issuedView(entry, 'a');
+    const manifest = readCompiledSurfaceManifest(view);
+    const surface = manifest.surfaces.find(
+      (candidate) => candidate.surfaceId === CHILD_FORM_SURFACE,
+    );
+    assert.ok(surface);
+    return readCompiledSurfaceDataBinding(view, surface).relationInputs;
+  };
+
+  const mutate = (
+    change: (operations: Record<string, unknown>[]) => void,
+  ): ImmutableJsonValue => {
+    const payload = structuredClone(projections.operation.payload) as {
+      operations: Record<string, unknown>[];
+    };
+    change(payload.operations);
+    return payload as unknown as ImmutableJsonValue;
+  };
+
+  // 1. create present WITH a contract -> known (admission twin).
+  assert.equal((await read(mutate(() => undefined))).status, 'known');
+
+  // 2. create present WITHOUT a contract -> unavailable. This is the state the
+  //    previous fix collapsed back into known-empty.
+  const contractless = await read(
+    mutate((operations) => {
+      const create = operations.find(
+        (operation) => operation.operationId === CHILD_CREATE_OPERATION,
+      );
+      assert.ok(create);
+      delete create.inputContract;
+    }),
+  );
+  assert.equal(
+    contractless.status,
+    'unavailable',
+    'a create with no contract carries no authority',
+  );
+
+  // 3. no create at all -> unavailable.
+  const noCreate = await read(
+    mutate((operations) => {
+      const index = operations.findIndex(
+        (operation) => operation.operationId === CHILD_CREATE_OPERATION,
+      );
+      operations.splice(index, 1);
+    }),
+  );
+  assert.equal(noCreate.status, 'unavailable');
+});
+
 class RecordingPolicy implements CurrentPolicyGateway {
   readonly calls: CurrentPolicyDecisionRequest[] = [];
 

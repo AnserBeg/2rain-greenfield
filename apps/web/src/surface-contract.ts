@@ -5,7 +5,10 @@ import {
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
 } from '../../../packages/compiler/src/protocol.js';
-import { parsePinnedOperationInputContract } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  assertPinnedOperationDefinition,
+  parsePinnedOperationInputContract,
+} from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type { PinnedOperationEffectKind } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type { RegisteredOperationDefinition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
@@ -443,6 +446,9 @@ export function readCompiledSurfaceDataBinding(
   const byOperationId = new Map<string, CompiledSurfaceOperationBinding>();
   const intentCount = new Map<SurfaceOperationIntent, number>();
   let relationInputs: readonly CompiledSurfaceRelationInput[] | null = null;
+  let sawCreate = false;
+  let authorityUnavailable = false;
+  const seenOperationIds = new Set<string>();
   for (const value of payload.operations) {
     const operation = parseOperationBinding(value);
     const entityId =
@@ -454,7 +460,13 @@ export function readCompiledSurfaceDataBinding(
     // property of the entity, and an update form must disclose that they are
     // frozen even where the create effect has been retired.
     if (operation.intent === 'create') {
-      if (relationInputs === null) {
+      sawCreate = true;
+      // A create with NO contract carries no authority, so the entity's
+      // authority is unavailable even though a create exists. `known` requires
+      // that EVERY create declared one and that they agree.
+      if (operation.relationInputs === null) {
+        authorityUnavailable = true;
+      } else if (relationInputs === null) {
         relationInputs = operation.relationInputs;
       } else if (
         !sameRelationInputs(relationInputs, operation.relationInputs)
@@ -477,6 +489,15 @@ export function readCompiledSurfaceDataBinding(
       );
     }
     intentCount.set(operation.intent, bound);
+    // Operation identities are keys here as well: `byOperationId` is a Map, so
+    // a repeat silently overwrites. The gateway refuses a duplicated operation
+    // id catalog-wide; this reader must not disagree with it.
+    if (seenOperationIds.has(operation.operationId)) {
+      throw invalidBinding(
+        'pinned operation catalog repeats an operation identity',
+      );
+    }
+    seenOperationIds.add(operation.operationId);
     byOperationId.set(
       operation.operationId,
       Object.freeze({
@@ -506,7 +527,7 @@ export function readCompiledSurfaceDataBinding(
     ),
     query,
     relationInputs:
-      relationInputs === null
+      !sawCreate || authorityUnavailable || relationInputs === null
         ? Object.freeze({ status: 'unavailable' as const })
         : Object.freeze({ relationInputs, status: 'known' as const }),
   });
@@ -1036,9 +1057,23 @@ function parseOperationBinding(value: unknown): {
     Record<string, RuntimeViewContract.ImmutableJsonValue>
   >;
   readonly readBackQueryId: string;
-  readonly relationInputs: readonly CompiledSurfaceRelationInput[];
+  readonly relationInputs: readonly CompiledSurfaceRelationInput[] | null;
   readonly tier: RegisteredOperationDefinition['tier'];
 } {
+  // The COMPLETE pinned-operation authority, run before this reader interprets
+  // anything. Without it the browser validated only the slice it consumed and
+  // bound catalogs the gateway refuses -- `fields: null`, absent
+  // `writableFieldIds`, an unknown top-level key, a non-string closed argument
+  // key. One artifact must not have two interpretations.
+  try {
+    assertPinnedOperationDefinition(value);
+  } catch (error) {
+    throw invalidBinding(
+      `pinned operation catalog contains an invalid operation: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   if (
     !isRecord(value) ||
     (value.confirmation !== 'none' && value.confirmation !== 'humanRequired') ||
@@ -1053,14 +1088,16 @@ function parseOperationBinding(value: unknown): {
       'pinned operation catalog contains an invalid operation',
     );
   }
-  const capabilityEffect = value.effect.kind === 'registeredCapabilityEffect';
-  const entity = isRecord(value.effect.entity) ? value.effect.entity : null;
-  const capability = isRecord(value.effect.capability)
-    ? value.effect.capability
-    : null;
+  // Read through a plain record view: the shared authority above has already
+  // narrowed `value` to a discriminated union, so reaching for the arm this
+  // reader wants is cleaner than re-narrowing at every access.
+  const effect = value.effect as Record<string, unknown>;
+  const capabilityEffect = effect.kind === 'registeredCapabilityEffect';
+  const entity = isRecord(effect.entity) ? effect.entity : null;
+  const capability = isRecord(effect.capability) ? effect.capability : null;
   const intent = capabilityEffect
     ? 'command'
-    : operationIntent(value.effect.kind);
+    : operationIntent(effect.kind as string);
   if (!intent) {
     throw invalidBinding(
       'pinned operation catalog contains a destructive or unknown effect',
@@ -1105,11 +1142,18 @@ function parseOperationBinding(value: unknown): {
  * admitting different artifacts, which is a defect this seam has already had
  * once.
  */
+/**
+ * Returns `null` when the operation declares NO input contract at all, which is
+ * a legitimate compiled state: the projection emits `inputContract` only for the
+ * current language version, so a historical create arrives without one. Reading
+ * that absence as an empty relation list is a positive assertion this reader
+ * cannot support, and it is what re-collapsed unknown into none once already.
+ */
 function parseRelationInputs(
   inputContract: unknown,
   effectKind: PinnedOperationEffectKind,
-): readonly CompiledSurfaceRelationInput[] {
-  if (inputContract === undefined) return Object.freeze([]);
+): readonly CompiledSurfaceRelationInput[] | null {
+  if (inputContract === undefined) return null;
   return Object.freeze(
     parsePinnedOperationInputContract(
       inputContract,

@@ -972,7 +972,7 @@ function readPinnedOperationCatalog(
   const operationIds = new Set<string>();
   const operations: RegisteredOperationDefinition[] = [];
   for (const operation of payload.operations) {
-    assertOperationDefinition(operation);
+    assertPinnedOperationDefinition(operation);
     if (operationIds.has(operation.operationId)) {
       throw new MalformedPinnedOperationCatalogError(
         'pinned operation catalog contains a duplicate operationId',
@@ -1078,7 +1078,19 @@ function assertCanonicalReference(
   }
 }
 
-function assertOperationDefinition(
+/**
+ * The COMPLETE pinned-operation authority, exported so every consumer validates
+ * the same artifact by the same rules.
+ *
+ * Three shapes preceded this and each stopped one layer too low: a relation
+ * ENTRY parser beside a gateway loop; then an effect-aware RELATION parser
+ * beside this private definition validator. In both, the browser called the
+ * narrow function and admitted catalogs this gateway refuses -- a contract with
+ * `fields: null`, a missing `writableFieldIds`, an unknown top-level key, or a
+ * non-string in `closedArgumentKeys`. The authority has to be the whole
+ * definition, because that is the unit the artifact is malformed at.
+ */
+export function assertPinnedOperationDefinition(
   value: unknown,
 ): asserts value is RegisteredOperationDefinition {
   const subject =
@@ -1347,11 +1359,26 @@ export function parsePinnedOperationInputContract(
       'pinned operation system input is admitted only on create effects',
     );
   }
-  // The closed argument key and the effect must agree in both directions: a
+  // The `relations` member is bound to the effect in both directions: a
   // contract cannot accept a `relations` argument it never declares, nor
   // declare relations it gives the caller no key to supply.
+  //
+  // The COMPLETE argument set is NOT bound here, and that is a deliberate stop
+  // rather than an oversight. Review asked for it, and it is a real defect: a
+  // create whose keys additionally name a mutation argument it never reads is
+  // admitted, and the writer then accepts that argument and ignores it, which
+  // is ADR-0041's accepted-and-ignored state. But the vocabulary naming those
+  // keys cannot live in this file. `owned gateway sources expose one authority
+  // each` fences this gateway from exactly that vocabulary, and
+  // `workspaceDependencyAllowed` forbids a runtime package importing the layer
+  // that emits the sets. Enforcing it needs a home this layer is
+  // architecturally denied, so it is ROUTED rather than smuggled in --
+  // see `relation-argument-set-unbound` in current-plan.md.
   const closedArgumentKeys = contract.closedArgumentKeys;
-  if (!Array.isArray(closedArgumentKeys)) {
+  if (
+    !Array.isArray(closedArgumentKeys) ||
+    !closedArgumentKeys.every((key) => typeof key === 'string')
+  ) {
     throw fail('pinned operation input contract has an invalid shape');
   }
   if (closedArgumentKeys.includes('relations') !== createEffect) {
@@ -1482,9 +1509,19 @@ function assertOperationInputContract(
   ) {
     throw invalid('pinned operation input contract has an invalid shape');
   }
+  // Field identities are keys too: the provider builds a Map from them, so a
+  // repeated fieldId silently discards every declaration but the last -- which
+  // may disagree on kind, bounds, requiredness or normalization.
+  const seenFieldIds = new Set<string>();
   for (const field of value.fields) {
     if (!isRecord(field)) {
       throw invalid('pinned field input contract must be an object');
+    }
+    if (typeof field.fieldId === 'string') {
+      if (seenFieldIds.has(field.fieldId)) {
+        throw invalid('pinned field inputs repeat a field identity');
+      }
+      seenFieldIds.add(field.fieldId);
     }
     assertExactKeys(
       field,
