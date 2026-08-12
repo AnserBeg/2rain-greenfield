@@ -29,7 +29,7 @@ import {
 } from '../../packages/runtime/src/semantic-gateway-api-adapters.js';
 import {
   MalformedPinnedOperationCatalogError,
-  parsePinnedRelationInputs,
+  parsePinnedOperationInputContract,
   MalformedSemanticOperationRequestError,
   NoSuchRegisteredCapabilityError,
   NoSuchRegisteredOperationError,
@@ -1983,6 +1983,8 @@ test('a forged relation input is refused by the gateway, not just by the parser'
  */
 test('the shared relation parser refuses every single-property forgery', () => {
   const fail = (message: string) => new Error(message);
+  const parse = (contract: unknown) =>
+    parsePinnedOperationInputContract(contract, 'createRecordEffect', fail);
   const base = {
     closedArgumentKeys: ['recordId', 'relations', 'values'],
     relationInputs: [
@@ -1996,7 +1998,7 @@ test('the shared relation parser refuses every single-property forgery', () => {
   };
 
   // Admission twin.
-  assert.deepEqual(parsePinnedRelationInputs(base, fail), [
+  assert.deepEqual(parse(base), [
     {
       archiveBehavior: 'restrict',
       relationId: 'northstar.bootstrap:relation.item_owner',
@@ -2004,6 +2006,24 @@ test('the shared relation parser refuses every single-property forgery', () => {
       targetEntityId: null,
     },
   ]);
+
+  // Admission twin for the uniqueness rule: two DISTINCT identities are legal,
+  // so the refusals below cannot be satisfied by a parser that rejects any
+  // second entry.
+  assert.equal(
+    parse({
+      ...base,
+      relationInputs: [
+        base.relationInputs[0],
+        {
+          ...base.relationInputs[0],
+          relationId: 'northstar.bootstrap:relation.item_site',
+        },
+      ],
+    }).length,
+    2,
+    'two distinct relation identities must be admitted',
+  );
 
   const forgeries: ReadonlyArray<readonly [string, unknown]> = [
     [
@@ -2062,6 +2082,40 @@ test('the shared relation parser refuses every single-property forgery', () => {
       },
     ],
     [
+      'an exact duplicate relation identity',
+      {
+        ...base,
+        relationInputs: [base.relationInputs[0], { ...base.relationInputs[0] }],
+      },
+    ],
+    [
+      'duplicate identities disagreeing on required',
+      {
+        ...base,
+        relationInputs: [
+          base.relationInputs[0],
+          { ...base.relationInputs[0], required: false },
+        ],
+      },
+    ],
+    [
+      'duplicate identities disagreeing on targetEntityId',
+      {
+        ...base,
+        relationInputs: [
+          {
+            ...base.relationInputs[0],
+            targetEntityId: 'northstar.bootstrap:entity.party',
+          },
+          {
+            ...base.relationInputs[0],
+            targetEntityId: 'northstar.bootstrap:entity.item',
+          },
+        ],
+        schemaVersion: 'northstar.module-input-contract/v3',
+      },
+    ],
+    [
       'a v3 contract minted with no relation to carry a target',
       {
         ...base,
@@ -2072,11 +2126,7 @@ test('the shared relation parser refuses every single-property forgery', () => {
   ];
 
   for (const [reason, contract] of forgeries) {
-    assert.throws(
-      () => parsePinnedRelationInputs(contract, fail),
-      /./,
-      `${reason} must be refused`,
-    );
+    assert.throws(() => parse(contract), /./, `${reason} must be refused`);
   }
 });
 

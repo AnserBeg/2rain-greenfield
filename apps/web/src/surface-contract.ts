@@ -5,7 +5,8 @@ import {
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
 } from '../../../packages/compiler/src/protocol.js';
-import { parsePinnedRelationInputs } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import { parsePinnedOperationInputContract } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import type { PinnedOperationEffectKind } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type { RegisteredOperationDefinition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   registeredSemanticQueryFromPinnedView,
@@ -307,27 +308,45 @@ export interface CompiledSurfaceOperationBinding {
  * that does not declare one.
  */
 export interface CompiledSurfaceRelationInput {
+  readonly archiveBehavior: 'restrict' | 'retainReference';
   readonly relationId: string;
   readonly required: boolean;
   readonly targetEntityId: string | null;
 }
+
+/**
+ * Either the entity's create-input relations, or an explicit absence. Modelled
+ * as a discriminated state so a consumer cannot silently read "unknown" as
+ * "none" -- ADR-0041's honoured-or-refused rule applied to a reader.
+ */
+export type EntityRelationAuthority =
+  | {
+      readonly relationInputs: readonly CompiledSurfaceRelationInput[];
+      readonly status: 'known';
+    }
+  | { readonly status: 'unavailable' };
 
 export interface CompiledSurfaceDataBinding {
   readonly displayFieldId: string | null;
   readonly operations: readonly CompiledSurfaceOperationBinding[];
   readonly query: RegisteredSemanticQueryDefinition;
   /**
-   * The ENTITY's create-input relations, not one operation's.
+   * The ENTITY's create-input relations, or an explicit statement that no
+   * authority for them exists.
    *
-   * Read from every create-effect operation for the entity regardless of
-   * lifecycle, and refused if any two disagree. Two earlier shapes were wrong:
-   * taking the active create binding alone drops the freeze disclosure on a
-   * release whose create has been retired, and taking whichever contract
-   * declared the MOST relations makes cardinality into authority, so a retired
-   * operation could outrank the executing one. Agreement is required instead,
-   * and disagreement refuses by name.
+   * `unavailable` is NOT the same as a known empty list, and collapsing the two
+   * was a defect: an entity with no create operation has nothing to learn its
+   * relations from, and returning `[]` there is a positive assertion the reader
+   * cannot support. A consumer must refuse, or render a declared unsupported
+   * state -- never treat unavailable as "this entity has no relations".
+   *
+   * When authority exists it is read from EVERY create-effect operation for the
+   * entity regardless of lifecycle, and disagreement refuses by name. Two
+   * earlier shapes were wrong: the active create binding alone drops the freeze
+   * disclosure on a release whose create is retired, and taking whichever
+   * contract declared the most relations makes cardinality into authority.
    */
-  readonly relationInputs: readonly CompiledSurfaceRelationInput[];
+  readonly relationInputs: EntityRelationAuthority;
 }
 
 export interface CompiledSurfaceManifest {
@@ -405,7 +424,7 @@ export function readCompiledSurfaceDataBinding(
       displayFieldId: null,
       operations: Object.freeze([]),
       query,
-      relationInputs: Object.freeze([]),
+      relationInputs: Object.freeze({ status: 'unavailable' as const }),
     });
   }
 
@@ -486,7 +505,10 @@ export function readCompiledSurfaceDataBinding(
       ),
     ),
     query,
-    relationInputs: relationInputs ?? Object.freeze([]),
+    relationInputs:
+      relationInputs === null
+        ? Object.freeze({ status: 'unavailable' as const })
+        : Object.freeze({ relationInputs, status: 'known' as const }),
   });
 }
 
@@ -1069,7 +1091,10 @@ function parseOperationBinding(value: unknown): {
       Record<string, RuntimeViewContract.ImmutableJsonValue>
     >,
     readBackQueryId: value.readBackQueryId,
-    relationInputs: parseRelationInputs(value.inputContract),
+    relationInputs: parseRelationInputs(
+      value.inputContract,
+      value.effect.kind as PinnedOperationEffectKind,
+    ),
     tier: value.tier,
   };
 }
@@ -1082,15 +1107,22 @@ function parseOperationBinding(value: unknown): {
  */
 function parseRelationInputs(
   inputContract: unknown,
+  effectKind: PinnedOperationEffectKind,
 ): readonly CompiledSurfaceRelationInput[] {
   if (inputContract === undefined) return Object.freeze([]);
-  return parsePinnedRelationInputs(inputContract, invalidBinding).map(
-    (relation) =>
+  return Object.freeze(
+    parsePinnedOperationInputContract(
+      inputContract,
+      effectKind,
+      invalidBinding,
+    ).map((relation) =>
       Object.freeze({
+        archiveBehavior: relation.archiveBehavior,
         relationId: relation.relationId,
         required: relation.required,
         targetEntityId: relation.targetEntityId,
       }),
+    ),
   );
 }
 
@@ -1104,7 +1136,11 @@ function sameRelationInputs(
       (relation, index) =>
         relation.relationId === right[index]?.relationId &&
         relation.required === right[index]?.required &&
-        relation.targetEntityId === right[index]?.targetEntityId,
+        relation.targetEntityId === right[index]?.targetEntityId &&
+        // archiveBehavior is compared too. Dropping it made two contracts that
+        // differ only on archive behaviour count as "agreement", which the
+        // phrase entity relation AUTHORITY does not survive.
+        relation.archiveBehavior === right[index]?.archiveBehavior,
     )
   );
 }

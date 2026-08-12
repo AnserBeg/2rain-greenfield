@@ -855,8 +855,13 @@ test('create contracts declaring different relations refuse rather than resolve 
   // ADMISSION TWIN: a second create declaring the SAME relations is agreement,
   // not disagreement, and must still bind.
   const agreeing = await read(withSecondCreate(() => undefined));
+  assert.equal(agreeing.relationInputs.status, 'known');
   assert.deepEqual(
-    agreeing.relationInputs.map((relation) => relation.relationId),
+    agreeing.relationInputs.status === 'known'
+      ? agreeing.relationInputs.relationInputs.map(
+          (relation) => relation.relationId,
+        )
+      : [],
     [REQUIRED_RELATION_ID],
     'identical create contracts agree and the entity keeps its relations',
   );
@@ -877,6 +882,182 @@ test('create contracts declaring different relations refuse rather than resolve 
       return true;
     },
     'disagreeing create contracts must refuse by name, not pick the longer one',
+  );
+});
+
+/**
+ * Browser/gateway contract PARITY. Raised in review: the browser called only the
+ * relation-entry parser, so every effect-aware rule -- relations are
+ * create-only, v3/v4 are create-only, the `relations` closed key agrees with the
+ * effect -- was applied by the gateway alone. One pinned artifact then had two
+ * interpretations: bindable at the surface, malformed at execution.
+ *
+ * Each case mutates exactly one gateway-only condition and asserts the BROWSER
+ * refuses before rendering or submission.
+ */
+test('the browser refuses every contract the gateway refuses', async () => {
+  const policy = new RecordingPolicy('ALLOW');
+  const compiled = compileFixture();
+  const projections = runtimeProjections(compiled);
+
+  const forge = (
+    mutate: (operation: Record<string, unknown>) => void,
+  ): ImmutableJsonValue => {
+    const payload = structuredClone(projections.operation.payload) as {
+      operations: Record<string, unknown>[];
+    };
+    const operation = payload.operations.find(
+      (candidate) => candidate.operationId === CHILD_CREATE_OPERATION,
+    );
+    assert.ok(
+      operation,
+      'the fixture must contribute a child create operation',
+    );
+    mutate(operation);
+    return payload as unknown as ImmutableJsonValue;
+  };
+
+  const read = async (payload: ImmutableJsonValue) => {
+    const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+      new AuthenticatedRequestEntryAdapter(async () =>
+        identity(tenantA, environmentA, principalA),
+      ),
+      {
+        async load(context): Promise<LoadedRequestRuntimeDefinition> {
+          return {
+            environmentId: context.environmentId,
+            pointer: { fence: 1, pointerId },
+            projections: {
+              ...projections,
+              operation: { ...projections.operation, payload },
+            },
+            release: { contentHash: compiled.releaseRoot, releaseId },
+            tenantId: context.tenantId,
+          };
+        },
+      },
+      policy,
+    );
+    const view = await issuedView(entry, 'a');
+    const manifest = readCompiledSurfaceManifest(view);
+    const surface = manifest.surfaces.find(
+      (candidate) => candidate.surfaceId === CHILD_FORM_SURFACE,
+    );
+    assert.ok(surface);
+    return readCompiledSurfaceDataBinding(view, surface);
+  };
+
+  // ADMISSION TWIN: the unmutated catalog must bind.
+  const baseline = await read(forge(() => undefined));
+  assert.equal(baseline.relationInputs.status, 'known');
+
+  const refusals: ReadonlyArray<
+    readonly [string, (operation: Record<string, unknown>) => void]
+  > = [
+    [
+      'relations declared on an update effect',
+      (operation) => {
+        (operation.effect as Record<string, unknown>).kind =
+          'updateRecordEffect';
+      },
+    ],
+    [
+      'a create contract omitting the relations closed key',
+      (operation) => {
+        (
+          operation.inputContract as Record<string, unknown>
+        ).closedArgumentKeys = ['recordId', 'values'];
+      },
+    ],
+    [
+      'a duplicated relation identity',
+      (operation) => {
+        const contract = operation.inputContract as Record<string, unknown>;
+        const relations = contract.relationInputs as unknown[];
+        contract.relationInputs = [relations[0], structuredClone(relations[0])];
+      },
+    ],
+  ];
+
+  for (const [reason, mutate] of refusals) {
+    await assert.rejects(
+      read(forge(mutate)),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof SurfaceProjectionError,
+          `${reason}: the BROWSER must refuse, got ${String(error)}`,
+        );
+        return true;
+      },
+      reason,
+    );
+  }
+});
+
+/**
+ * Raised in review: an entity with NO create operation has no authority for its
+ * relations, and reporting `[]` there is a positive assertion the reader cannot
+ * support -- indistinguishable from an entity whose create declares none.
+ */
+test('an entity with no create operation reports unavailable, not empty', async () => {
+  const policy = new RecordingPolicy('ALLOW');
+  const compiled = compileFixture();
+  const projections = runtimeProjections(compiled);
+
+  const withoutCreate = structuredClone(projections.operation.payload) as {
+    operations: Record<string, unknown>[];
+  };
+  withoutCreate.operations = withoutCreate.operations.filter(
+    (operation) => operation.operationId !== CHILD_CREATE_OPERATION,
+  );
+
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () =>
+      identity(tenantA, environmentA, principalA),
+    ),
+    {
+      async load(context): Promise<LoadedRequestRuntimeDefinition> {
+        return {
+          environmentId: context.environmentId,
+          pointer: { fence: 1, pointerId },
+          projections: {
+            ...projections,
+            operation: {
+              ...projections.operation,
+              payload: withoutCreate as unknown as ImmutableJsonValue,
+            },
+          },
+          release: { contentHash: compiled.releaseRoot, releaseId },
+          tenantId: context.tenantId,
+        };
+      },
+    },
+    policy,
+  );
+  const view = await issuedView(entry, 'a');
+  const manifest = readCompiledSurfaceManifest(view);
+  const surface = manifest.surfaces.find(
+    (candidate) => candidate.surfaceId === CHILD_FORM_SURFACE,
+  );
+  assert.ok(surface);
+
+  assert.equal(
+    readCompiledSurfaceDataBinding(view, surface).relationInputs.status,
+    'unavailable',
+    'no create operation means no authority, which is not the same as none',
+  );
+
+  // ADMISSION TWIN: with the create operation present the same tree is `known`,
+  // so this cannot pass against a reader that always reports unavailable.
+  const withCreate = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  assert.equal(
+    readCompiledSurfaceDataBinding(withCreate, surface).relationInputs.status,
+    'known',
   );
 });
 

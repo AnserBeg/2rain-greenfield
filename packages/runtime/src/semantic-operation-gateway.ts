@@ -1251,51 +1251,13 @@ function assertOperationDefinition(
   }
   if (hasInputContract) {
     assertOperationInputContract(value.inputContract);
-    const createEffect = value.effect.kind === 'createRecordEffect';
-    const version = value.inputContract.schemaVersion;
-    if (
-      (version === 'northstar.module-input-contract/v2' ||
-        version === 'northstar.module-input-contract/v4') &&
-      !createEffect
-    ) {
-      throw invalid(
-        'pinned operation system input is admitted only on create effects',
-      );
-    }
-    // ADR-0052 s4 says relations are create-only, and the provider ENFORCES
-    // that by hardcoding `relations: {}` on every non-create branch. Until this
-    // check existed the catalog parser did not, so a fully shaped contract
-    // declaring a REQUIRED relation on an update effect was admitted -- and the
-    // provider then validated its hardcoded empty relations against that
-    // declaration, making every update of that entity unsatisfiable by any
-    // representable input. An optional one was admitted and silently ignored.
-    // Both are ADR-0041's accepted-and-ignored state, so the artifact is
-    // refused here rather than discovered at execution.
-    if (value.inputContract.relationInputs.length > 0 && !createEffect) {
-      throw invalid(
-        'pinned relation inputs are admitted only on create effects',
-      );
-    }
-    if (
-      (version === 'northstar.module-input-contract/v3' ||
-        version === 'northstar.module-input-contract/v4') &&
-      !createEffect
-    ) {
-      throw invalid(
-        'pinned relation targets are admitted only on create effects',
-      );
-    }
-    // The closed argument key and the declaration must agree in both
-    // directions, so a contract cannot accept a `relations` argument it never
-    // declares, nor declare relations it gives the caller no key to supply.
-    if (
-      value.inputContract.closedArgumentKeys.includes('relations') !==
-      createEffect
-    ) {
-      throw invalid(
-        'pinned relation argument key and operation effect disagree',
-      );
-    }
+    // One effect-aware authority. Every relation and closed-key rule lives in
+    // it, so this gateway and the browser cannot admit different artifacts.
+    parsePinnedOperationInputContract(
+      value.inputContract,
+      value.effect.kind as PinnedOperationEffectKind,
+      invalid,
+    );
   }
 }
 
@@ -1324,7 +1286,81 @@ export interface PinnedRelationInput {
  * may legitimately declare relations without targets, and refusing those would
  * break every historical contract.
  */
-export function parsePinnedRelationInputs(
+/** The effect kinds a pinned operation may declare. */
+export type PinnedOperationEffectKind =
+  | 'archiveRecordEffect'
+  | 'createRecordEffect'
+  | 'registeredCapabilityEffect'
+  | 'restoreRecordEffect'
+  | 'transitionStateEffect'
+  | 'updateRecordEffect';
+
+/**
+ * The ONE authority on a pinned operation's relation contract, and the only
+ * function any consumer should call.
+ *
+ * It is EFFECT-AWARE on purpose. An earlier shape exported only the relation
+ * ENTRY parser and left the effect rules -- relations are create-only, v3/v4 are
+ * create-only, the `relations` closed key agrees with the effect -- inside the
+ * gateway's own definition assertion. The browser called the entry parser alone,
+ * so an update contract declaring relations, or a create contract omitting the
+ * `relations` key, was accepted at the surface boundary and refused at the
+ * execution boundary. One artifact, two interpretations: exactly the split a
+ * shared authority exists to prevent.
+ *
+ * Callers pass the effect kind because the contract's legality is not a property
+ * of the contract alone.
+ */
+export function parsePinnedOperationInputContract(
+  inputContract: unknown,
+  effectKind: PinnedOperationEffectKind,
+  fail: (message: string) => Error,
+): readonly PinnedRelationInput[] {
+  const relationInputs = parseRelationInputEntries(inputContract, fail);
+  const contract = inputContract as Record<string, unknown>;
+  const version = contract.schemaVersion;
+  const createEffect = effectKind === 'createRecordEffect';
+
+  // ADR-0052 s4: relations are create-only, and the provider ENFORCES that by
+  // hardcoding `relations: {}` on every non-create branch. Without this, a
+  // contract declaring a REQUIRED relation on an update effect is admitted --
+  // and the provider then validates its hardcoded empty relations against that
+  // declaration, leaving no representable input able to satisfy any update of
+  // the entity. An optional one is admitted and silently ignored. Both are
+  // ADR-0041's accepted-and-ignored state.
+  if (relationInputs.length > 0 && !createEffect) {
+    throw fail('pinned relation inputs are admitted only on create effects');
+  }
+  if (
+    (version === 'northstar.module-input-contract/v3' ||
+      version === 'northstar.module-input-contract/v4') &&
+    !createEffect
+  ) {
+    throw fail('pinned relation targets are admitted only on create effects');
+  }
+  if (
+    (version === 'northstar.module-input-contract/v2' ||
+      version === 'northstar.module-input-contract/v4') &&
+    !createEffect
+  ) {
+    throw fail(
+      'pinned operation system input is admitted only on create effects',
+    );
+  }
+  // The closed argument key and the effect must agree in both directions: a
+  // contract cannot accept a `relations` argument it never declares, nor
+  // declare relations it gives the caller no key to supply.
+  const closedArgumentKeys = contract.closedArgumentKeys;
+  if (!Array.isArray(closedArgumentKeys)) {
+    throw fail('pinned operation input contract has an invalid shape');
+  }
+  if (closedArgumentKeys.includes('relations') !== createEffect) {
+    throw fail('pinned relation argument key and operation effect disagree');
+  }
+  return relationInputs;
+}
+
+function parseRelationInputEntries(
   inputContract: unknown,
   fail: (message: string) => Error,
 ): readonly PinnedRelationInput[] {
@@ -1353,6 +1389,7 @@ export function parsePinnedRelationInputs(
       'pinned operation input contract declares relation targets without a relation',
     );
   }
+  const seenRelationIds = new Set<string>();
   return Object.freeze(
     relationInputs.map((relation) => {
       if (!isRecord(relation)) {
@@ -1384,6 +1421,17 @@ export function parsePinnedRelationInputs(
       ) {
         throw fail('pinned relation input contract has an invalid shape');
       }
+      // A relation identity is a KEY everywhere downstream: the web wire builds
+      // `relations` as a record keyed by relation id, and the provider builds a
+      // Map keyed by the same id. Two entries sharing an identity are therefore
+      // unrepresentable -- one submitted value cannot independently satisfy two
+      // declarations, and a picker cannot tell which target the identity names.
+      // A well-formed release will not produce this, but these readers exist to
+      // validate forged artifacts, so upstream correctness is not the guarantee.
+      if (seenRelationIds.has(relation.relationId)) {
+        throw fail('pinned relation inputs repeat a relation identity');
+      }
+      seenRelationIds.add(relation.relationId);
       return Object.freeze({
         archiveBehavior: relation.archiveBehavior,
         relationId: relation.relationId,
@@ -1502,10 +1550,6 @@ function assertOperationInputContract(
       throw invalid('pinned field temporal contract has an invalid shape');
     }
   }
-  // The ONLY relation-input validation in this gateway. Deliberately not
-  // duplicated here: a second loop is how the browser and this gateway drifted
-  // into admitting different artifacts.
-  parsePinnedRelationInputs(value, invalid);
   if (hasSystemInput) {
     if (!isRecord(value.systemInput)) {
       throw invalid('pinned operation system input must be an object');
