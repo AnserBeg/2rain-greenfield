@@ -886,13 +886,40 @@ No new test file: this lands in the existing toolchain contract, which
   that deleting `transitionEffect` was preferable to wiring it in; the tier
   check's existing tests pass either way, because `!capabilityEffect` and the
   wired form agree on every input the suite exercises.
-- **Anything about `lang-adopt-v5`'s tree.** See below.
 
-## Sequencing note for the orchestrator
+**The two largest omissions were missing from this list until the post-confirm
+audit, which is the same failure by omission that the prose corrections were
+about.** Both are accepted gaps, both ruled by the user at the round-4 split,
+and both are stated in full there:
 
-`packet/lang-adopt-v5` is active and holds two of the reformatted files
+- **The pin is UNGATED.** Nothing in the shipped tree observes that the
+  formatter selector stays exact. Reverting the two specifier strings passes
+  `--frozen-lockfile` at exit 0 and leaves `pnpm format` green, so the removal
+  is invisible to the whole matrix and drift returns at the next lockfile
+  refresh. Round 1 blocked on exactly this; it is reopened deliberately.
+- **Implementation identity is not observed anywhere.** Nothing attests that
+  the formatter bytes are the implementation the lockfile names.
+  `packages.<pkg>.resolution` integrity and the `.pnpmfile` custom-resolver,
+  fetcher and `importPackage` hooks are an unread authority plane.
+
+- **`lang-adopt-v5`'s tree, at the time this was written.** It has since merged
+  to `main` as `cb2690f` and this packet merged and resolved against it; see
+  the integration section.
+
+## Sequencing note for the orchestrator — DISCHARGED, kept for the ruling in it
+
+> **No action is owed from this section.** `lang-adopt-v5` merged to `main` as
+> `cb2690f`, this packet merged `main` and resolved the one conflict
+> semantically, and the acceptance matrix is green over the result. It is kept
+> because the correction inside it — what the derived-artifact rule does and
+> does not cover — is a ruling the next lane to hit a formatting conflict will
+> need, and because deleting a corrected error hides that it was made.
+>
+> *Present tense below describes the state when it was written.*
+
+`packet/lang-adopt-v5` was active and held two of the reformatted files
 (`packages/canonical-model/src/constants.ts`,
-`test/architecture/canonical-contracts-purity.test.ts`) — and, as it turns
+`test/architecture/canonical-contracts-purity.test.ts`) — and, as it turned
 out, more than two, since the file set is fourteen rather than seven.
 
 **Corrected after review round 1.** The first version of this note said that
