@@ -568,6 +568,15 @@ test('the dev command exits zero and stays quiet when the container stop succeed
     /COMPOSED_APPLICATION_SHUTDOWN_FAILED/u,
     'a clean shutdown must not report a shutdown failure',
   );
+  // Without this, moving the hint outside its `failures.length > 0` branch
+  // keeps both process tests green while every successful shutdown tells the
+  // operator their container may still be running. The hint is failure-only,
+  // and that placement is the thing under test.
+  assert.doesNotMatch(
+    dev.stderr(),
+    /dev:stop/u,
+    'a clean shutdown must not suggest cleanup for a leak that did not occur',
+  );
   assert.ok(
     !existsSync(dev.marker),
     'the container outlived the process that created it',

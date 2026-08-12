@@ -464,7 +464,8 @@ single failing test:
 | **`process.exit(failures.length > 0 ? 1 : code)` → `process.exit(code)`** | 1 red — the stop-failure test |
 | **The `COMPOSED_APPLICATION_SHUTDOWN_FAILED` writes deleted** | 1 red — the stop-failure test |
 | **The `dev:stop` hint deleted** | 1 red — the stop-failure test |
-| A failing stop with the diagnostics intact (admission twin) | **stays green at exit 0** |
+| **The `dev:stop` hint moved outside its `failures.length > 0` branch** | 1 red — the clean-shutdown twin |
+| A **successful** stop with the diagnostics intact (admission twin) | **stays green at exit 0, stderr quiet** |
 
 Round 3 review found the shutdown controls stopped one layer short, and it was
 right: `runShutdown`'s tests observed the helper's returned failures, while the
@@ -474,8 +475,19 @@ trees it named were verified green against the round-3 controls before the fix:
 deleting the exit-code choice, and deleting the diagnostic writes. The
 spawned-entry-point harness is now parameterised on whether `docker stop`
 succeeds, and a failing stop is observed **at the process boundary** — exit
-code and stderr — with an admission twin proving a clean shutdown still exits
-0 and stays quiet. The stub's failing stop deliberately returns a
+code and stderr — with an admission twin, a **successful** stop, proving a
+clean shutdown still exits 0 and stays quiet.
+
+**Round 4 (closure-only) returned BLOCK on that twin, and it was right.** The
+twin asserted exit 0, no `COMPOSED_APPLICATION_SHUTDOWN_FAILED`, and no
+surviving container — but **never that stderr lacks the `dev:stop` hint**. So
+moving the hint out of its `failures.length > 0 && containerAttempted` branch
+left **14/14 green** while every successful shutdown would falsely tell the
+operator their container may still be running. Verified before fixing. The
+assertion is added, and the hint's *placement* is now pinned from both sides:
+making it unconditional reds the twin, deleting it reds the failure test. The
+same round found this table describing the twin as "a failing stop"; it is
+`stopFails: false`, a successful one, and the row is corrected above. The stub's failing stop deliberately returns a
 *non-absence* error, because `stopContainer` treats "no such container" as
 success and an absence message would prove nothing.
 
