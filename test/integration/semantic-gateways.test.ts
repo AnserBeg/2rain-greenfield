@@ -1855,6 +1855,127 @@ test('relation declarations are admitted only on create effects', async () => {
 });
 
 /**
+ * Proves the shared parser is LOAD-BEARING inside this gateway, not merely
+ * called by it. The prior attempt's shared call was deletion-dead: every
+ * condition it checked was independently checked around it, so removing it
+ * removed no gateway check and the "one authority" claim was decorative.
+ *
+ * Verified by construction: deleting `parsePinnedRelationInputs(value, invalid)`
+ * from `assertOperationInputContract` reds this test and nothing else. A test
+ * that calls the parser directly cannot establish that, which is why this one
+ * goes through `SemanticOperationGateway.invoke`.
+ */
+test('a forged relation input is refused by the gateway, not just by the parser', async () => {
+  const forge = (
+    relationInputs: readonly unknown[],
+    schemaVersion = 'northstar.module-input-contract/v1',
+  ): ImmutableJsonValue => {
+    const catalog = structuredClone(operationCatalogWith(operationId)) as {
+      operations: Record<string, unknown>[];
+    };
+    const operation = catalog.operations[0]!;
+    operation.effect = {
+      entity: {
+        kind: 'entityReference',
+        schemaVersion: 'v5',
+        targetId: 'northstar.bootstrap:entity.item',
+      },
+      kind: 'createRecordEffect',
+      schemaVersion: 'v5',
+    };
+    operation.inputContract = {
+      closedArgumentKeys: ['recordId', 'relations', 'values'],
+      fields: [],
+      relationInputs,
+      schemaVersion,
+      writableFieldIds: [],
+    };
+    return catalog as unknown as ImmutableJsonValue;
+  };
+
+  const invoke = async (payload: ImmutableJsonValue) => {
+    const fixture = createFixture({
+      operationPayload: payload,
+      queryPayload: queryCatalogWith(queryId),
+    });
+    const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+      Promise.resolve(value),
+    );
+    return new SemanticOperationGateway(
+      fixture.policy,
+      undefined,
+      fixture.operationMediation,
+    ).invoke(
+      view,
+      operationRequest,
+      fixture.operationMediation.issueInvocation(view, 'API'),
+    );
+  };
+
+  const wellFormed = {
+    archiveBehavior: 'restrict',
+    relationId: 'northstar.bootstrap:relation.item_owner',
+    required: true,
+  };
+
+  // ADMISSION TWIN: the same catalog with a well-formed relation must NOT be
+  // refused as malformed, or every case below passes vacuously.
+  try {
+    await invoke(forge([wellFormed]));
+  } catch (error) {
+    assert.ok(
+      !(error instanceof MalformedPinnedOperationCatalogError),
+      `a well-formed relation must be admitted, got: ${String(error)}`,
+    );
+  }
+
+  const forgeries: ReadonlyArray<readonly [string, ImmutableJsonValue]> = [
+    [
+      'archiveBehavior removed',
+      forge([
+        {
+          relationId: wellFormed.relationId,
+          required: true,
+        },
+      ]),
+    ],
+    [
+      'an invented archiveBehavior',
+      forge([{ ...wellFormed, archiveBehavior: 'cascade' }]),
+    ],
+    ['an unknown relation-entry key', forge([{ ...wellFormed, extra: 1 }])],
+    [
+      'a noncanonical relationId',
+      forge([{ ...wellFormed, relationId: 'not a canonical id' }]),
+    ],
+    [
+      'a v1 contract carrying a v3-only targetEntityId',
+      forge([
+        { ...wellFormed, targetEntityId: 'northstar.bootstrap:entity.party' },
+      ]),
+    ],
+    [
+      'a v3 contract missing targetEntityId',
+      forge([wellFormed], 'northstar.module-input-contract/v3'),
+    ],
+  ];
+
+  for (const [reason, payload] of forgeries) {
+    await assert.rejects(
+      invoke(payload),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof MalformedPinnedOperationCatalogError,
+          `${reason}: expected the GATEWAY to refuse, got ${String(error)}`,
+        );
+        return true;
+      },
+      reason,
+    );
+  }
+});
+
+/**
  * The parser-divergence guard. Every case is a SINGLE-property mutation that a
  * subset parser would admit while this gateway refused it -- the exact split
  * that shipped once, where the browser accepted five forgeries the gateway
