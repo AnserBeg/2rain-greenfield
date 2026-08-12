@@ -12,11 +12,12 @@ Tier: Critical (it changes compiled operation-contract output)
 > packet 1 of 3 from the `ux-reference-picker` re-charter.**
 >
 > **Settled by packet 1 (§1, §2, §3, §4's enforcement):** the contract carries
-> the target, one complete parser is the only relation-input validator in the
-> platform and both consumers call it, create-only is enforced as an artifact
-> invariant, and entity relation authority is enforced agreement rather than a
-> cardinality heuristic. Each is backed by a negative control verified to red
-> alone.
+> the target; one EFFECT-AWARE parser owns every relation rule and both the
+> gateway and the browser call it; relation identities are unique; create-only
+> is enforced as an artifact invariant at both boundaries; and entity relation
+> authority is enforced agreement over the whole entry, with the absence of any
+> authority reported explicitly rather than collapsed into an empty list. Each
+> is backed by a negative control verified to red alone.
 >
 > **NOT yet satisfied, and owed by `relation-scoped-enumeration` (packet 2):**
 >
@@ -127,11 +128,30 @@ presence of the list. The only additional version-level rule is that `v3`/`v4`
 cannot be minted vacuously: a contract claiming to carry targets must have at
 least one relation input to carry them on.
 
-**One parser, not two — and it is load-bearing, not decorative.**
-`parsePinnedRelationInputs` is the **only** relation-input validation anywhere in
-the platform: the gateway keeps no second loop, so deleting its call stops the
-gateway validating relation inputs at all. That is verified by construction
-rather than asserted — removing the call reds exactly one gateway-level test.
+**One parser, not two — and it is EFFECT-AWARE, because a relation contract's
+legality is not a property of the contract alone.**
+`parsePinnedOperationInputContract(inputContract, effectKind, fail)` owns every
+relation rule: entry shape, the version axes, relation identity uniqueness,
+relations-are-create-only, v3/v4-are-create-only, the `systemInput` create-only
+rule, and the `relations` closed-key biconditional. Both the gateway and the
+browser's surface contract call it and consume its result.
+
+**Two earlier shapes were wrong, and the second is the subtler one.** The first
+exported a parser that validated a strict SUBSET of the gateway's checks while
+leaving the gateway's own loop in place, so the browser accepted five
+single-property forgeries the gateway refused. The second — corrected here —
+exported the relation *entry* parser as though it were the authority, but kept
+the effect-aware rules inside the gateway's definition assertion, which only the
+gateway calls. An update contract declaring relations, or a create contract
+omitting the `relations` key, was then **bindable at the surface boundary and
+malformed at the execution boundary**: one artifact, two interpretations. A
+shared parser that does not own the whole rule is not an authority either.
+
+**Relation identities are unique.** The web wire builds `relations` as a record
+keyed by relation id and the provider builds a Map keyed by the same id, so two
+entries sharing an identity are unrepresentable downstream — one submitted value
+cannot satisfy two declarations, and a picker cannot tell which target the
+identity names.
 
 **An earlier attempt got this wrong in a way worth recording.** It exported a
 shared function that validated a strict SUBSET of what the gateway checked and
