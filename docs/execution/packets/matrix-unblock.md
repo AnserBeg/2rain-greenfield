@@ -434,7 +434,41 @@ and defending against deliberate package-manager code is explicitly out of
 scope. Any future gate here must claim only what it observes — which is the
 failure this packet made three times.
 
-## Gates — ACCEPTANCE MATRIX, GREEN at `f09e2db`
+## Gates — ACCEPTANCE MATRIX, GREEN at `cefb269` (post-split)
+
+```
+PERFORMANCE_GATE_PASS_SHA=cefb269305436a4027c46338906d5fe9d0c5230b
+FULL_MATRIX_PASS_SHA=cefb269305436a4027c46338906d5fe9d0c5230b
+```
+
+Ran 18:26:31-18:44:21, green on the first attempt, **zero `not ok` lines**.
+Log: `/tmp/matrix-matrix-unblock-cefb2693.log`.
+
+| Step | Result |
+| --- | --- |
+| `format` / `lint` / `typecheck` / `build` | pass — the two that were red are green |
+| the four `check:*` | pass |
+| `test:performance` | 5 pass, 0 fail |
+| `test:unit` | 106 pass, 0 fail |
+| `test:compiler` | 145 pass, 0 fail |
+| `test:integration` | **127** pass, 0 fail — 132 minus the five reverted gate tests |
+| `test:agent` | 3 pass, 0 fail |
+| `test:architecture` | 141 pass, 0 fail |
+| `test:contracts` | 16 pass, 0 fail |
+| `test:postgres` | 197 pass, 0 fail |
+| `test:locale` | 1 pass, 0 fail |
+| `test:browser` | 77 passed (2.0m) |
+| observability producer | 11 pass, 0 fail |
+| `check:language-coverage` | PASS — 2050 obligations |
+| `check:reachability` | PASS — 102/102 test files |
+| security scans | passed |
+
+### Superseded matrix at `f09e2db` (pre-split)
+
+Retained as the record of what was measured while the gate was still in the
+candidate.
+
+## Superseded gate matrix — `f09e2db`
 
 ```
 PERFORMANCE_GATE_PASS_SHA=f09e2dbadeb63f098f5c39522f92961da1992308
