@@ -467,7 +467,16 @@ single failing test:
 | **The `COMPOSED_APPLICATION_SHUTDOWN_FAILED` writes deleted** | 1 red — the stop-failure test |
 | **The `dev:stop` hint deleted** | 1 red — the stop-failure test |
 | **The `dev:stop` hint moved outside its `failures.length > 0` branch** | 1 red — the clean-shutdown twin |
-| A **successful** stop with the diagnostics intact (admission twin) | **stays green at exit 0, stderr quiet** |
+| A **successful** stop with the diagnostics intact (admission twin) | **stays green**: exit 0; stderr contains neither `COMPOSED_APPLICATION_SHUTDOWN_FAILED` nor the `dev:stop` cleanup hint; no container survives |
+
+**The test's own title is still broader than its assertions**, and that is
+recorded rather than repaired: `test/unit/dev-environment.test.ts:552` reads
+*"exits zero and stays quiet when the container stop succeeds"*, while the
+assertions exclude only the two diagnostics above and never require stderr to
+be empty. Renaming it would change executable content and forfeit this
+closeout's docs-only status — which is what carries the `e0f2552` matrix
+forward. Whoever next touches that file should narrow the title to match; it is
+a naming defect, not a coverage one.
 
 Round 3 review found the shutdown controls stopped one layer short, and it was
 right: `runShutdown`'s tests observed the helper's returned failures, while the
