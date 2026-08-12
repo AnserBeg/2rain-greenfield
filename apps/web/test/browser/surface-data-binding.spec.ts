@@ -1188,16 +1188,24 @@ class BrowserFixtureExecutor
    * did the opposite. Requiring the argument does not fix that behaviour -- it
    * makes every site state which one it has.
    *
-   * `IGNORES_PROVIDER_REFUSALS` is a live defect at the two sites that reach the
-   * operation branch, not a preference. The real parser refuses
-   * `ordinaryModuleV1`'s create with `MODULE_REQUIRED_FIELD_MISSING` on
-   * `master_number` -- a required field that surface never renders, so its form
-   * cannot submit it -- and two tests below observe "Create complete" for an
-   * operation production cannot perform. That is pre-existing, it is a different
-   * instance from the wire gaps `ux-picker` routed, and closing it means
-   * reconciling a surface with its entity's input contract. Routed to the
-   * `double-must-honour-refusal` sweep; deliberately not fixed here, because
-   * fixing it inside this lease would widen the packet past its charter.
+   * `IGNORES_PROVIDER_REFUSALS` is a live defect at the TWO create journeys that
+   * reach the operation branch, and INERT everywhere else. A review established
+   * the difference, correcting an earlier note here that was wrong about it:
+   * the flag changes nothing at the capability-command, duplicate-create and
+   * invalid-operation-id sites, because `parseMutationInput` is never reached
+   * there. Registered-capability operations route to `RecordingCapabilityExecutor`
+   * rather than this executor's mutation branch, and the other two are refused
+   * while the compiled surface binding is built, before any executor runs.
+   *
+   * Where it IS live: the real parser refuses `ordinaryModuleV1`'s create with
+   * `MODULE_REQUIRED_FIELD_MISSING` on `master_number` -- a required field that
+   * surface never renders, so its form cannot submit it -- and the two
+   * assertions marked `KNOWN_FALSE_GREEN` below observe "Create complete" for an
+   * operation production cannot perform. Pre-existing, a different instance from
+   * the wire gaps `ux-picker` routed, and closing it means reconciling a surface
+   * with its entity's input contract. Routed to `double-must-honour-refusal`;
+   * deliberately not fixed here, because fixing it inside this lease would widen
+   * the packet past its charter.
    */
   constructor(
     private readonly failedQueryId: string | null,

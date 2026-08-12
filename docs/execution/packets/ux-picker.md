@@ -176,6 +176,63 @@ route rather than fix.
 code — which is why both were fixed *in code* rather than by writing a smaller
 sentence.
 
+## Convergence record — which criterion licensed each round
+
+`review-tiers`' convergence section was superseded on 2026-08-10, after these
+rounds ran, and its backstop requires the licensing criterion to be named in the
+packet record from round three onward. Named here, against the new rule, and the
+last row is the one that matters.
+
+| round | criterion | licensed? |
+|---|---|---|
+| Arm 1 `3dd8f10` | defect **in production** | yes — three production defects |
+| Arm 2 `5892e99` | defect **in production** | yes — one production defect plus the double |
+| Arm 3 `56762ce` | **regression introduced by the previous round's fix** | yes, and it is an override that beats the three questions: a probe's `git checkout --` destroyed the round's own implementation |
+| Arm 4 `89e2f1c` | same class, and the fixes **subsumed** rather than sat beside | yes — each correction moved up a level: bind one discriminant → derive the branch from the table → derive the vocabulary from the table too |
+| Merge arm `eb37fc6` | **new class**, merge-only | yes — see below |
+
+**The lane's earlier self-assessment was wrong and the arm corrected it.** I had
+written that rounds 4 and 5 were "both prose overstating code", which under the
+new rule licenses exactly one narrowing round. The reviewer refused that framing:
+one candidate did not contain the production implementation its claim described,
+and the next retained independent temporal vocabularies capable of making the
+static type admit a value the runtime parser refused. **Those are code-state
+defects.** The record says so rather than my summary of it.
+
+## The merge-only selector-control class — Critical, write path
+
+**A new class, not a continuation of `ux-picker`'s.** The conflicting form did
+not exist on either reviewed parent: `pur1-intent-limit` (ADR-0051) replaced
+`name="intent"` with `name="operationId"` and `ux-picker` replaced the inline
+bare-input map with `renderFormFields(...)`, both inside the same template
+literal in `renderSections`. The union of the two is an artifact no arm had seen.
+
+**Blast radius is Critical and it is on the write path.** The merge control
+asserted the first four posted keys **by position** — never the value, never the
+cardinality, never the absence of the retired vocabulary. Append a second
+`operationId` after `expectedRevision` and every assertion stayed green, while
+`readFormSubmission` builds its record with `Object.fromEntries`, so the LAST
+duplicate wins. **An update form would have addressed the create operation.**
+
+Closed with both arms on the same rendered field-bearing form: exactly one
+rendered `operationId` control carrying the update operation and zero rendered
+`intent` controls; and the submitted multiset asserted by value and cardinality
+rather than by prefix. Leading-key order is kept as a separate, weaker statement,
+because order remains load-bearing for last-value-wins.
+
+**Verified with the doctrine's own instrument — revert each parent's half alone.**
+Baseline 2 passed; parent 2's half reverted (`intent` alongside `operationId`)
+reds; the duplicate-`operationId` scenario reds; parent 1's half reverted (bare
+inputs) reds.
+
+**And the resolution's two halves are guarded by two different tests.** Reverting
+to bare inputs does NOT red `CLAIM 1`, because that test asserts encoding — a
+bare input still carries `value="…"`, `checkValidity()` on plain text is always
+true, and the posted entries are unchanged. The typed-control half is held by
+`compiled field kinds render as real browser controls`. **Anyone re-running the
+revert instrument must grep both tests**, or they will read a survivor that is an
+artifact of their own scope. That cost this lane one probe cycle.
+
 ## Gates
 
 Full CI matrix green at the integrated SHA `0c5fa8d`, tree pinned before and
