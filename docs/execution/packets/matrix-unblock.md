@@ -6,6 +6,18 @@ Tier: Critical (ruled by review round 4; the charter said Behavioral)
 Branch: `packet/matrix-unblock`
 Base: `194871f` (`origin/main` at cut; verified, not assumed)
 
+> **READ THIS BEFORE THE HISTORY BELOW.** This packet ships **the pin, the
+> reformat and the seven lint fixes — and nothing else**. The toolchain gate
+> described at length in the round 1-4 sections was **reverted at the round-4
+> split**; `test/integration/toolchain-contract.test.ts` is byte-identical to
+> `main`. Every present-tense sentence in those sections describing what "the
+> contract" checks is a record of a candidate that no longer exists.
+>
+> **The pin is ungated.** Reverting the two specifier strings still passes
+> `--frozen-lockfile` and leaves `pnpm format` green, so its removal is
+> invisible to the matrix and drift returns at the next lockfile refresh. That
+> is an accepted, recorded gap — see the round-4 split.
+
 ## Outcome
 
 `pnpm format` and `pnpm lint` are green. They are the first two steps of the
@@ -222,9 +234,11 @@ change was not demonstrated in that same run. The round-1 clean-room control
 already showed a range selector resolving to 3.9.6; the two together are what
 support the drift conclusion.
 
-### The correction
+### The correction — SUPERSEDED, this contract was reverted at the round-4 split
 
-The contract now rejects any `pnpm-workspace.yaml` override capable of claiming
+*Present tense below describes the round-2 candidate, not the shipped tree.*
+
+The contract rejected any `pnpm-workspace.yaml` override capable of claiming
 the **root** prettier dependency, whatever its value — an exact-but-different
 override too, since that would make the version that runs differ from the
 version this file reports as authoritative. A `parent>prettier` key scopes to
@@ -281,9 +295,10 @@ answer**. That list has no natural end: manifest, workspace overrides, two
 override sub-forms, pnpmfile hooks, patches.
 
 Every one of those has to pass through the root importer's recorded edge in
-`pnpm-lock.yaml` to take effect. So the contract now observes that outcome —
-the manifest declares an exact version, the lockfile's effective **specifier**
-equals it, and the resolved **version** equals it.
+`pnpm-lock.yaml` to take effect, so the round-3 contract observed that outcome
+— the manifest declares an exact version, the lockfile's effective
+**specifier** equals it, and the resolved **version** equals it. **That
+contract was reverted at the round-4 split and is not in the shipped tree.**
 
 The whole `pnpm-workspace.yaml` reader and the `claimsRootFormatter`
 discriminator are deleted.
@@ -750,8 +765,15 @@ brought is that instruction executed.
 
 They are also **this packet's thesis reproducing itself while the packet was in
 flight**: `main` accrued two more format-failing files across 41 commits
-because the caret was still there. The pin and its gate land in this branch, so
-this is the last time the set grows for that reason.
+because the caret was still there.
+
+**Corrected after the confirm arm.** This paragraph used to end *"The pin and
+its gate land in this branch, so this is the last time the set grows for that
+reason."* At the pre-split candidate that was the intent. **Round 4 split the
+packet and the gate was reverted; only the pin lands, ungated**, so nothing in
+this branch stops the set growing again the next time a lane refreshes the
+lockfile. The sentence read as a current-tense guarantee sitting directly above
+the sections that correctly call that gap open.
 
 ## Review round 1 — BLOCK
 
@@ -774,7 +796,8 @@ Put to the user as a scope decision the lane could not make. Ruled:
    for finding 2 — 19 paths in total. The lease crossing stands as a recorded
    process failure, not as retroactive authority: the lane should have stopped
    and issued a bridge request on discovering fourteen format-failing files.
-2. **The pin gate lands in this packet**, not a follow-up.
+2. **The pin gate lands in this packet**, not a follow-up. — **later reversed
+   by the round-4 split ruling; the gate was reverted and re-chartered.**
 3. **`lang-adopt-v5` integrates first.** This packet then rebases onto the new
    `main`, re-runs `format:write` over the merged tree, and takes its full
    matrix there. The overlap dissolves rather than being resolved by anyone.
