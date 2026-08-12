@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --import tsx src/main.ts"
+    "dev": "node --import tsx src/main.ts",
+    "dev:reset": "node --import tsx src/dev-container-cli.ts reset",
+    "dev:stop": "node --import tsx src/dev-container-cli.ts stop"
   },
   "dependencies": {
     "@north-star/postgres-provider": "workspace:*",

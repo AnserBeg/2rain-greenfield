@@ -10,11 +10,23 @@ import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 
+import {
+  composedApplicationSeed,
+  type ComposedApplicationSeedProfile,
+} from '../../../packages/domain/src/app/seed.js';
+
 export interface ComposedApplicationServerOptions {
   readonly databaseUrl: string;
   readonly host?: string;
   readonly port?: number;
   readonly rollbackReleaseRoot?: string;
+  /**
+   * Which authored seed to install. Defaults to `demo`, the small fixed
+   * fixture the browser suite asserts against; the dev entry point asks for
+   * `distributor`, which is a superset carrying enough volume to judge the
+   * surfaces by eye.
+   */
+  readonly seedProfile?: ComposedApplicationSeedProfile;
   readonly tenantSlug?: string;
 }
 
@@ -88,22 +100,41 @@ export async function startComposedApplication(
       : {}),
     tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
-  const seededRecords = await seedComposedApplication(runtime);
-  const server = createSurfaceRuntimeServer(runtime.entry, {
-    operationGateway: runtime.operationGateway,
-    operationMediation: runtime.operationMediation,
-    queryGateway: runtime.queryGateway,
-  });
+  // Everything after the runtime exists must hand it back closed on failure.
+  // Seeding is 176 operations and `listen` can fail with EADDRINUSE; either
+  // one previously threw past an open runtime, leaving the caller with no
+  // object to close and its pools and container still held.
+  let seededRecords: readonly ComposedApplicationSeedReceipt[];
+  let server: Server;
   const host = options.host ?? '127.0.0.1';
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(options.port ?? 4174, host, () => {
-      server.off('error', reject);
-      resolve();
+  try {
+    seededRecords = await seedComposedApplication(
+      runtime,
+      options.seedProfile ?? 'demo',
+    );
+    server = createSurfaceRuntimeServer(runtime.entry, {
+      operationGateway: runtime.operationGateway,
+      operationMediation: runtime.operationMediation,
+      queryGateway: runtime.queryGateway,
     });
-  });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(options.port ?? 4174, host, () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
+  } catch (error) {
+    await runtime.close();
+    throw error;
+  }
   const address = server.address();
   if (!address || typeof address === 'string') {
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
     await runtime.close();
     throw new Error('composed application server has no TCP address');
   }
@@ -124,83 +155,15 @@ export async function startComposedApplication(
   });
 }
 
-const applicationNamespace = 'northstar.app';
-
-const demoSeed = Object.freeze([
-  seedEntry('party', 1, {
-    party_contact_summary: 'Purchasing · ap@alpine.example',
-    party_name: 'Alpine Office Supply',
-    party_number: 'P-1001',
-  }),
-  seedEntry('party', 2, {
-    party_contact_summary: 'Wholesale · orders@northwind.example',
-    party_name: 'Northwind Goods',
-    party_number: 'P-1002',
-  }),
-  seedEntry('party', 3, {
-    party_contact_summary: 'Local delivery · hello@prairie.example',
-    party_name: 'Prairie Paper Co.',
-    party_number: 'P-1003',
-  }),
-  seedEntry('party', 4, {
-    party_contact_summary: 'Preferred supplier · team@summit.example',
-    party_name: 'Summit Industrial',
-    party_number: 'P-1004',
-  }),
-  seedEntry('item', 11, {
-    item_base_unit: 'EA',
-    item_description: 'Recycled ruled notebook, 80 pages',
-    item_name: 'Field notebook',
-    item_sku: 'OFF-100',
-  }),
-  seedEntry('item', 12, {
-    item_base_unit: 'BOX',
-    item_description: 'Black fine-point pens, pack of twelve',
-    item_name: 'Fine-point pen set',
-    item_sku: 'OFF-120',
-  }),
-  seedEntry('item', 13, {
-    item_base_unit: 'EA',
-    item_description: 'Adjustable task lamp, forest green',
-    item_name: 'Task lamp',
-    item_sku: 'OFF-210',
-  }),
-  seedEntry('item', 14, {
-    item_base_unit: 'PACK',
-    item_description: 'Compostable shipping labels, pack of 100',
-    item_name: 'Shipping labels',
-    item_sku: 'OPS-310',
-  }),
-  seedEntry('location', 21, {
-    location_code: 'CAL-WH',
-    location_name: 'Calgary warehouse',
-    location_type: `${applicationNamespace}:option.warehouse`,
-  }),
-  seedEntry('location', 22, {
-    location_code: 'EDM-ST',
-    location_name: 'Edmonton store',
-    location_type: `${applicationNamespace}:option.store`,
-  }),
-  seedEntry('location', 23, {
-    location_code: 'VAN-WH',
-    location_name: 'Vancouver warehouse',
-    location_type: `${applicationNamespace}:option.warehouse`,
-  }),
-  seedEntry('location', 24, {
-    location_code: 'YYC-ST',
-    location_name: 'Beltline store',
-    location_type: `${applicationNamespace}:option.store`,
-  }),
-]);
-
 async function seedComposedApplication(
   runtime: ComposedApplicationRuntime,
+  profile: ComposedApplicationSeedProfile,
 ): Promise<readonly ComposedApplicationSeedReceipt[]> {
   return runtime.entry.run(
     { headers: { authorization: 'local-demo-seed' } },
     async (view) => {
       const receipts: ComposedApplicationSeedReceipt[] = [];
-      for (const seed of demoSeed) {
+      for (const seed of composedApplicationSeed(profile)) {
         const result = await runtime.operationGateway.invoke(
           view,
           {
@@ -230,25 +193,4 @@ async function seedComposedApplication(
       return Object.freeze(receipts);
     },
   );
-}
-
-function seedEntry(
-  localEntity: 'item' | 'location' | 'party',
-  ordinal: number,
-  values: Readonly<Record<string, string>>,
-) {
-  const suffix = String(ordinal).padStart(12, '0');
-  return Object.freeze({
-    idempotencyKey: `72000000-0000-4000-8000-${suffix}`,
-    operationId: `${applicationNamespace}:operation.${localEntity}_create`,
-    recordId: `71000000-0000-4000-8000-${suffix}`,
-    values: Object.freeze(
-      Object.fromEntries(
-        Object.entries(values).map(([localField, value]) => [
-          `${applicationNamespace}:field.${localField}`,
-          value,
-        ]),
-      ),
-    ),
-  });
 }
