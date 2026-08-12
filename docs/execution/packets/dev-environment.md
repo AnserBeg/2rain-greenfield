@@ -376,79 +376,68 @@ demonstrated. The seed makes the *data* exceed five options many times over —
 that will render them. What the seed does deliver now is a list that
 paginates, a search that discriminates, and a record that opens.
 
-## 6b. Gates — and the packet is BLOCKED, not green
+## 6b. Gates — the full matrix is GREEN
 
-**The full matrix cannot pass, and the reason is not this packet.**
+**`FULL_MATRIX_PASS_SHA=e19d3b1ffe8fa5746d541e520992c103256dd65d`,
+`MATRIX_EXIT=0`.** Label `DEVENV2`. Tree pinned before and after — both
+`e19d3b1ffe8fa5746d541e520992c103256dd65d` — so it measured its own tree and
+`matrix-must-pin-its-tree` did not bite.
 
-Run at `5bfd1ab` (pre-rebase), label `DEVENV`, tree pinned before and after —
-`PINNED_BEFORE` and `PINNED_AFTER` both `5bfd1ab9c440…`, so it measured its own
-tree and `matrix-must-pin-its-tree` did not bite.
+Suite totals from inside the log, 0 failures anywhere: performance 5, unit
+**120**, compiler 145, integration 127, agent 3, architecture 141, contracts
+16, postgres **197**, locale 1, browser **77 passed**, plus 11 in the
+load-tolerant tail. `check:language-coverage`, `check:reachability` and the
+security scans all ran.
+
+**Read one detail honestly:** the log contains three `TEST_GATE_LOCK_BUSY`
+lines. All three are **TAP comments** (`#`-prefixed) emitted by
+`test-lock-observability`'s own controls against
+`/tmp/north-star-*-control-33264` with 0s timeouts — that suite deliberately
+provokes lock-busy. `grep -c '^TEST_GATE_LOCK_BUSY'` is **0**: the matrix never
+hit lock-busy itself. `lockout-reads-as-silence` warns about missing a real
+one; this is the mirror case, and the discriminator is the `#` prefix and the
+`-control-` lock path.
+
+**Two runs, both reported.** The first attempt refused before testing anything:
+`COMPILE_BUDGET_INDETERMINATE: observed CPU idle 59.8% is below required 90.0%`.
+That was not this packet's code and not a repository command — `ps --sort=-pcpu`
+found **six `ccd-cli` agent sessions at `--effort xhigh`** holding ~75% of CPU.
+The second attempt was launched by a poller that waits for ≥93% idle and a free
+lock; it took the window at **95% idle** and passed. Filed as
+`foreign-detector-misses-cpu-heavy-gates`.
+
+### The prior blocker, and how it cleared
+
+Earlier rounds could not reach a green matrix: `pnpm format` is
+`run-matrix.sh`'s second gate, and 14 files failed it on `main` with 7 lint
+errors behind them — every one byte-identical to `origin/main`, none touched by
+this packet. `packet/matrix-unblock` landed and both now pass unchanged. That
+row (`main-is-format-and-lint-red`) is closed by its integration, not by
+anything here.
+
+### The integrable tip is not the matrix SHA, and why that is admissible
+
+`main` advanced to `090f1cc` after the green run — **one docs-only commit**
+(`ADR-0052`, ledger, review-log, current-plan). The branch was rebased onto it,
+producing `25754ab`.
 
 ```
-PERFORMANCE_GATE_PASS_SHA=5bfd1ab9c4400873d0848a24e3222244e599d7b6
-+ corepack pnpm format
-[warn] Code style issues found in 16 files.
-FULL_MATRIX_FAILED rc=1 sha=5bfd1ab9c4400873d0848a24e3222244e599d7b6
-MATRIX_EXIT=1
+$ git diff --name-only e19d3b1 25754ab | grep -v '^docs/'
+        (empty)
 ```
 
-`scripts/run-matrix.sh:186-188` runs `format && lint && typecheck && …`, so
-**`pnpm format` is the second gate and everything after it never executed** —
-`lint`, `typecheck`, `build`, `check:boundaries`, `check:schema`, both release
-checks, and all seven test suites.
+**The executable content is identical**, so under AGENTS.md §6 the `e19d3b1`
+run is the acceptance run for `25754ab`; a second pass over the same bytes
+observes nothing. `main` is an ancestor of `25754ab`, so integration is a
+fast-forward and the integrated SHA will be `25754ab` itself.
 
-**Attribution, proven rather than asserted.** After rebasing onto `33bcdb6`
-(LANG-ADOPT-v5 fixed 2 of the 16), **14 remain**, and every one is
-**byte-identical to `origin/main`**:
+The docs merge was verified rather than assumed: nothing of `main`'s was lost,
+the amended `dev-environment` row is a superset of `main`'s (4,148 → 7,388
+characters, retaining its naming section), and `ledger.md`, `review-log.md` and
+`docs/decisions/` are untouched by this packet.
 
-```
-git diff --stat origin/main HEAD -- <the 14 files>   # empty
-pnpm prettier --check <the 8 files this packet touches>
-  → All matched files use Prettier code style!
-```
-
-So **`main` is format-red on its own**, and `pnpm lint` — the next gate — has
-**7 pre-existing errors** in the same neighbourhood. `packet/matrix-unblock`
-holds most of those files. **No packet branching from `main` can reach a green
-matrix until that lands.** Repairing them here was rejected: they are another
-lane's held files, and `prettier --write` across them would manufacture
-conflicts.
-
-**What was run instead.** Round 1's set at `63400ce`, then the full set again
-at `fa1b024` after the revision, plus the five gates round 1 review named as
-never having run. Every one green except `format` and `lint`:
-
-| Gate | Result |
-|---|---|
-| `typecheck` | **pass** |
-| `check:boundaries` | **pass** |
-| `test:unit` | **pass** — 114/0, up from 106 with the 8 new controls |
-| `test:architecture` | **pass** |
-| `test:compiler` | **pass** — 145/0 |
-| `test:integration` | **pass** — 127/0 |
-| `test:contracts` | **pass** — 16/0 |
-| `test:browser` | **pass** — 77 passed, including the `composed-application` project that asserts `seededRecords` has length 12 |
-| `test:performance` | **pass** (in the matrix run above, before `format` stopped it) |
-| `test:postgres` | **pass** — 197/0 at `fa1b024`; at `63400ce` one run was 196/1 on a container-readiness flake and a re-run was 197/0, see below |
-| `build` | **pass** — named by round 1 as material to the ESM change |
-| `check:schema` | **pass** |
-| `check:demo-release` | **pass** |
-| `check:app-release` | **pass** |
-| `test:locale` | **pass** |
-| `format` / `lint` | **fail on `main`'s files, not this packet's** |
-
-**`test:postgres` — reported honestly.** First run: **196 pass, 1 fail**. The
-failure was `absent predicate semantics diverge from raw SQL and agree when
-totalized` (`test/postgres/predicate-absent-semantics.test.ts`) with
-`ephemeral PostgreSQL is ready inside its container but its published endpoint
-is unavailable: connect ECONNREFUSED 127.0.0.1:49406` — the container
-readiness/port shape `matrix-contention` describes, in a predicate-SQL test
-that touches nothing this packet changed. **Re-run in isolation on the same
-tree: pass.** A re-run of one test is weaker evidence than a clean pass, so the
-**whole suite was re-run: `RC=0`, 197 pass, 0 fail.** Both readings are
-reported: one run of this suite on this tree failed on container readiness, and
-one run passed completely. Nothing here proves the flake is gone — it prices it
-at roughly 1 in 197 on a loaded machine.
+**Re-verified live at `25754ab`:** 176 records, `1–100 of 119` items, 45
+parties, 12 locations, clean `Exited (0)` on SIGTERM.
 
 ## 7. What this packet did NOT verify
 
