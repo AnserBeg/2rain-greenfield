@@ -381,6 +381,34 @@ The template, and the correction that produced it:
 Naming a false green does not make it valid evidence — it makes it findable.
 Routed to `double-must-honour-refusal`, whose first specimens these are.
 
+### The lane-process finding, which is the one the arms actually kept finding
+
+**Three separate claims in this packet outran what git or the source said, and
+each was caught by a reviewer reading the artifact rather than by the lane
+checking it:**
+
+1. A commit whose message described an implementation the commit did not contain
+   (`56762ce`) — found by `git show --stat`.
+2. A rationale asserting `parseMutationInput` behaves differently at three test
+   sites, when it is never reached there at all — found by following the routing.
+3. The merge provenance: this record named `eb37fc6` as the conflict-producing
+   merge and the review prompt repeated it, **steering the arm**. `eb37fc6`'s
+   parents carry the identical blob and their merge base is `0c5fa8d`, which is
+   the merge that actually resolved it.
+
+**The common cause is not carelessness about code — it is writing the narrative
+from memory of what was done rather than from what the repository records.** The
+correction that worked every time is the one the reviewers used: `git show
+--stat`, `rev-parse`, `merge-base`, and reading the routing rather than assuming
+it. The lane only did that after being caught.
+
+`review-tiers`' convergence section names this exact disposition: *"If successive
+rounds keep finding things the lane's own checklist would have caught, the defect
+is in the lane's process, not the code. Route it to doctrine and stop spending
+arms on it."* Routed here rather than corrected a fourth time. **The cheap
+standing rule it implies: every provenance or containment claim in a record or a
+review prompt is quoted from a command, not from recall.**
+
 ## Relation measurement — the deliverable that chartered the next packet
 
 Measured, not built, and it refuted the queue row's framing twice.
