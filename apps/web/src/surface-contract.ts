@@ -201,7 +201,10 @@ export type CompiledSurfaceField =
       readonly options: readonly CompiledFieldOption[];
     })
   | (CompiledFieldCommon & {
-      readonly kind: Exclude<CompiledFieldKind, CompiledTemporalKind | 'enumFieldType'>;
+      readonly kind: Exclude<
+        CompiledFieldKind,
+        CompiledTemporalKind | 'enumFieldType'
+      >;
     });
 export type SurfaceOperationIntent =
   'archive' | 'command' | 'create' | 'restore' | 'update';
@@ -873,7 +876,9 @@ function parseSurfaceField(
     );
   }
   if (!Array.isArray(value.options)) {
-    throw invalidField(`${at} (${value.fieldId}) declares a non-array option list`);
+    throw invalidField(
+      `${at} (${value.fieldId}) declares a non-array option list`,
+    );
   }
   const options = value.options.map((option) => {
     if (
@@ -986,12 +991,13 @@ function parseOperationBinding(value: unknown): {
     );
   }
   const capabilityEffect = value.effect.kind === 'registeredCapabilityEffect';
-  const transitionEffect = value.effect.kind === 'transitionStateEffect';
   const entity = isRecord(value.effect.entity) ? value.effect.entity : null;
   const capability = isRecord(value.effect.capability)
     ? value.effect.capability
     : null;
-  const intent = capabilityEffect ? 'command' : operationIntent(value.effect.kind);
+  const intent = capabilityEffect
+    ? 'command'
+    : operationIntent(value.effect.kind);
   if (!intent) {
     throw invalidBinding(
       'pinned operation catalog contains a destructive or unknown effect',

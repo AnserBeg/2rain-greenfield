@@ -87,7 +87,8 @@ function assertPostedIdOnlySelects(source: string): void {
  * firing — it proved a property of the fixture, not of the check.
  */
 test('binding-authority red: a passed-onward id and a never-read id are both observed', () => {
-  const passing = 'const operation = boundOperation(binding, submission.operationId);';
+  const passing =
+    'const operation = boundOperation(binding, submission.operationId);';
 
   // The arm that shows the predicate can pass, asserted FIRST so the three
   // reds below cannot be a check that simply refuses everything.
@@ -144,7 +145,10 @@ test('the gateway request is built where the submission is not in scope', () => 
     'utf8',
   );
 
-  const request = functionBody(runtime, 'export function semanticOperationRequestFor(');
+  const request = functionBody(
+    runtime,
+    'export function semanticOperationRequestFor(',
+  );
   assert.doesNotMatch(request, /submission/);
   assert.doesNotMatch(request, /\.\.\./);
   assert.match(request, /operationId: operation\.operationId/);

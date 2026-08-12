@@ -161,17 +161,20 @@ type MutableSurface = {
 async function viewWithCorruptedForm(
   corrupt: (surface: MutableSurface) => void,
 ): Promise<RequestRuntimeView> {
-  return viewOf(compileAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION), (projections) => {
-    const payload = structuredClone(projections.surface.payload) as {
-      surfaces: MutableSurface[];
-    };
-    const surface = payload.surfaces.find(
-      (entry) => entry.surfaceId === FORM_SURFACE,
-    );
-    assert.ok(surface?.fields, 'the v2 payload must carry a form to corrupt');
-    corrupt(surface);
-    return { ...projections, surface: { ...projections.surface, payload } };
-  });
+  return viewOf(
+    compileAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION),
+    (projections) => {
+      const payload = structuredClone(projections.surface.payload) as {
+        surfaces: MutableSurface[];
+      };
+      const surface = payload.surfaces.find(
+        (entry) => entry.surfaceId === FORM_SURFACE,
+      );
+      assert.ok(surface?.fields, 'the v2 payload must carry a form to corrupt');
+      corrupt(surface);
+      return { ...projections, surface: { ...projections.surface, payload } };
+    },
+  );
 }
 
 function refusal(view: RequestRuntimeView): SurfaceProjectionError {
@@ -235,7 +238,9 @@ test('the reader vocabulary is exactly the canonical field-type vocabulary', () 
  * everything.
  */
 test('a v2 payload survives the production reader with its kinds and options', async () => {
-  const surface = formOf(await viewOf(compileAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION)));
+  const surface = formOf(
+    await viewOf(compileAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION)),
+  );
   assert.ok(surface.fields, 'the reader dropped the compiled field kinds');
   assert.deepEqual(
     surface.fields.map((field) => field.fieldId),
@@ -245,7 +250,10 @@ test('a v2 payload survives the production reader with its kinds and options', a
   assert.equal(byId.get(EVERY_KIND_FIELD_IDS.due)?.kind, 'dateFieldType');
   assert.equal(byId.get(EVERY_KIND_FIELD_IDS.active)?.kind, 'booleanFieldType');
   assert.equal(byId.get(EVERY_KIND_FIELD_IDS.price)?.kind, 'moneyFieldType');
-  assert.equal(byId.get(EVERY_KIND_FIELD_IDS.weight)?.kind, 'quantityFieldType');
+  assert.equal(
+    byId.get(EVERY_KIND_FIELD_IDS.weight)?.kind,
+    'quantityFieldType',
+  );
   assert.equal(optionsOf(byId, EVERY_KIND_FIELD_IDS.grade).length, 5);
   assert.equal(optionsOf(byId, EVERY_KIND_FIELD_IDS.region).length, 6);
   assert.equal(
@@ -395,7 +403,9 @@ test('RED: the reader refuses a timezone spelling its kind cannot carry', async 
   for (const [fieldId, kind, wrongSpelling] of cases) {
     const error = refusal(
       await viewWithCorruptedForm((surface) => {
-        const field = surface.fields?.find((entry) => entry.fieldId === fieldId);
+        const field = surface.fields?.find(
+          (entry) => entry.fieldId === fieldId,
+        );
         assert.ok(field?.temporal, fieldId);
         field.temporal.timezoneSemantics = wrongSpelling;
       }),

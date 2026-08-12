@@ -549,8 +549,9 @@ function operationCatalogPayload(
                   // the whole guarantee the carrier exists to provide. This is
                   // the same exclusion `systemInput` already applies to
                   // `legalEntityId`.
-                  (fieldsByEntity.get(operation.effect.entity.targetId) ?? [])
-                    .filter((field) => !stateFieldIds.has(field.fieldId))
+                  (
+                    fieldsByEntity.get(operation.effect.entity.targetId) ?? []
+                  ).filter((field) => !stateFieldIds.has(field.fieldId))
                 : [],
               'entity' in operation.effect
                 ? (relationsByEntity.get(operation.effect.entity.targetId) ??
@@ -686,55 +687,58 @@ function surfaceManifestPayload(
             .get(surface.dataSource.targetId)
             ?.selections.map((selection) => selection.field.targetId) ?? [];
         return {
-        archetype: surface.archetype,
-        dataSourceQueryId: surface.dataSource.targetId,
-        fieldIds,
-        // Gated on the UNADOPTED v2, exactly as `disclosureTier` is one level
-        // down: readable and unemitted, so no recorded release root moves.
-        //
-        // Nothing is defaulted. Every canonical field DECLARES a `fieldType`,
-        // so there is no absent kind to invent -- the projection carries what
-        // the definition already says and stops. What can be absent is the
-        // whole key, under every profile that is not v2, and a reader must see
-        // that absence rather than a materialized default.
-        //
-        // `flatMap` drops a field the package does not declare. Normalization
-        // refuses that package first (`CANON_REFERENCE_UNRESOLVED`), so the
-        // drop is unreachable today; it is written this way rather than with an
-        // assertion because the observable consequence belongs at the reader,
-        // where a short `fields` against a full `fieldIds` is refused by name
-        // instead of rendering half a form as bare text boxes.
-        ...(emitsFieldKinds
-          ? {
-              fields: fieldIds.flatMap((fieldId) => {
-                const field = fieldById.get(fieldId);
-                return field ? [surfaceManifestField(field)] : [];
-              }),
-            }
-          : {}),
-        label: surface.label,
-        lifecycle: surface.lifecycle,
-        slots: surface.slots.map((slot) => ({
-          contentReferenceId: slot.content.targetId,
-          // Gated on the UNADOPTED v2, so this is readable and unemitted: no
-          // recorded entry compiles under v2, and every release root holds.
-          // `?? DEFAULT_DISCLOSURE_TIER` resolves an absent declaration at
-          // projection time rather than by materializing it into the
-          // normalized definition, which is what keeps those roots stable --
-          // the `surfaceRole` precedent one line below does exactly the same.
-          ...(compilerSemanticProfileVersion ===
-          COMPILER_SEMANTIC_PROFILE_V2_VERSION
-            ? { disclosureTier: slot.disclosureTier ?? DEFAULT_DISCLOSURE_TIER }
+          archetype: surface.archetype,
+          dataSourceQueryId: surface.dataSource.targetId,
+          fieldIds,
+          // Gated on the UNADOPTED v2, exactly as `disclosureTier` is one level
+          // down: readable and unemitted, so no recorded release root moves.
+          //
+          // Nothing is defaulted. Every canonical field DECLARES a `fieldType`,
+          // so there is no absent kind to invent -- the projection carries what
+          // the definition already says and stops. What can be absent is the
+          // whole key, under every profile that is not v2, and a reader must see
+          // that absence rather than a materialized default.
+          //
+          // `flatMap` drops a field the package does not declare. Normalization
+          // refuses that package first (`CANON_REFERENCE_UNRESOLVED`), so the
+          // drop is unreachable today; it is written this way rather than with an
+          // assertion because the observable consequence belongs at the reader,
+          // where a short `fields` against a full `fieldIds` is refused by name
+          // instead of rendering half a form as bare text boxes.
+          ...(emitsFieldKinds
+            ? {
+                fields: fieldIds.flatMap((fieldId) => {
+                  const field = fieldById.get(fieldId);
+                  return field ? [surfaceManifestField(field)] : [];
+                }),
+              }
             : {}),
-          orderKey: slot.orderKey,
-          slot: slot.slot,
-          slotId: slot.slotId,
-        })),
-        statusRoles: surface.statusRoles,
-        surfaceId: surface.surfaceId,
-        ...(packageRevision.languageVersion === LANGUAGE_VERSION
-          ? { surfaceRole: surface.surfaceRole ?? null }
-          : {}),
+          label: surface.label,
+          lifecycle: surface.lifecycle,
+          slots: surface.slots.map((slot) => ({
+            contentReferenceId: slot.content.targetId,
+            // Gated on the UNADOPTED v2, so this is readable and unemitted: no
+            // recorded entry compiles under v2, and every release root holds.
+            // `?? DEFAULT_DISCLOSURE_TIER` resolves an absent declaration at
+            // projection time rather than by materializing it into the
+            // normalized definition, which is what keeps those roots stable --
+            // the `surfaceRole` precedent one line below does exactly the same.
+            ...(compilerSemanticProfileVersion ===
+            COMPILER_SEMANTIC_PROFILE_V2_VERSION
+              ? {
+                  disclosureTier:
+                    slot.disclosureTier ?? DEFAULT_DISCLOSURE_TIER,
+                }
+              : {}),
+            orderKey: slot.orderKey,
+            slot: slot.slot,
+            slotId: slot.slotId,
+          })),
+          statusRoles: surface.statusRoles,
+          surfaceId: surface.surfaceId,
+          ...(packageRevision.languageVersion === LANGUAGE_VERSION
+            ? { surfaceRole: surface.surfaceRole ?? null }
+            : {}),
         };
       }),
     },

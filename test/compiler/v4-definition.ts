@@ -1,4 +1,8 @@
-import { LANGUAGE_VERSIONS } from '../../packages/canonical-model/src/index.js';
+import {
+  ADOPTED_LANGUAGE_VERSION,
+  ADOPTED_NORMALIZATION_PROFILE_VERSION,
+  LANGUAGE_VERSIONS,
+} from '../../packages/canonical-model/src/index.js';
 import { FIXTURE_IDS } from '../fixtures/g2/module-conformance/definitions.js';
 
 import { V3_AGGREGATE_IDS, v3AggregateModule } from './v3-definition.js';
@@ -43,6 +47,50 @@ export function v4ScopedModule(): MutableModule {
     'nonEmptySet',
     V4_SCOPE_IDS.rowScopeParameter,
   );
+  return definition;
+}
+
+/**
+ * The scoped fixture restamped to whatever version the application has
+ * ADOPTED. Added by `LANG-ADOPT-v5`.
+ *
+ * A control that asks "does the unmodified DEFAULT profile still compile a
+ * package?" needs a package at the adopted version, because node-version purity
+ * refuses any other. Written as `v4ScopedModule()` that control passed only
+ * while adoption happened to be v4 -- the coincidence the `LANG-ADOPT` (v4)
+ * ledger row recorded as a latent, in its own words: "four fixture compilers
+ * still pin the profile and pass only because module and adopted version
+ * coincide at v4."
+ *
+ * The caller must check `languageHasLegalEntityQueryScope(ADOPTED_LANGUAGE_VERSION)`
+ * first: this fixture carries a scope operand, which no version before v4
+ * declares. Naming that dependency at the call site is deliberate -- deriving
+ * from `SUPPORTED_LANGUAGE_VERSIONS` instead would silently admit v3, which is
+ * the mistake `5g3-sm-impl` made and an existing forgery control caught.
+ */
+export function adoptedScopedModule(): MutableModule {
+  return scopedModuleAt(
+    ADOPTED_LANGUAGE_VERSION,
+    ADOPTED_NORMALIZATION_PROFILE_VERSION,
+  );
+}
+
+/**
+ * The scoped fixture at an arbitrary version, so a control can compare the SAME
+ * authored shape either side of a version boundary. The caller owns the pairing
+ * of language version and normalization profile, which `CANON_VERSION_MIXED`
+ * checks: passing a mismatched pair is refused rather than silently repaired.
+ */
+export function scopedModuleAt(
+  languageVersion: string,
+  normalizationProfileVersion: string,
+): MutableModule {
+  const definition = replaceVersion(
+    v4ScopedModule(),
+    LANGUAGE_VERSIONS.v4,
+    languageVersion,
+  ) as MutableModule;
+  definition.normalizationProfileVersion = normalizationProfileVersion;
   return definition;
 }
 

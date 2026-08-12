@@ -2070,7 +2070,6 @@ function derivedStateFieldDefinition(
     schemaVersion: machine.schemaVersion,
     searchable: false,
   } as unknown as VersionedNormalizedApplicationPackage['fields'][number];
-
 }
 
 function derivedStateField(

@@ -1,7 +1,9 @@
-// Canonical language v4 is the query-operand language. This is unrelated to
-// Inventory dependency-set v4, which versions the posting capability inputs.
-const version = 'v4' as const;
-const normalizationProfileVersion = 'northstar.normalization/v4' as const;
+// Canonical language v5 is the materialized-state-field language, adopted
+// application-wide by `LANG-ADOPT-v5`. This is unrelated to Inventory
+// dependency-set v4, which versions the posting capability inputs and does not
+// move with the language.
+const version = 'v5' as const;
+const normalizationProfileVersion = 'northstar.normalization/v5' as const;
 
 export const INVENTORY_NAMESPACE = 'northstar.inventory' as const;
 

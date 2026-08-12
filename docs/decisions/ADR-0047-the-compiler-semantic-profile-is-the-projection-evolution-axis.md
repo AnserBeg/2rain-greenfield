@@ -302,3 +302,120 @@ sibling does not re-break the `at(-2)` class — and
   mechanism.
 - The probe measured that only release roots and the surface-manifest projection
   move; `storage-target.manifest.*` and `storage-target.chunk.*` are stable.
+
+## §8 — A language adoption re-identifies verification scenarios; a profile adoption does not
+
+Added 2026-08-10 by `LANG-ADOPT-v5`, from a measurement it was not looking for.
+
+### The measurement
+
+Across the canonical-language v4 → v5 adoption, on the recorded application
+lineage:
+
+| | |
+|---|---|
+| scenario count | **163 → 163** |
+| `kind \| entityId \| subjectId` multiset | **identical** |
+| recorded ids absent from the other plan | **69 of 163** |
+| ids changed by the ADR-0047 §4 profile-only edge (entry 6 → 7) | **0 of 163** |
+
+**CORRECTED THREE TIMES. The decision below stands; the reasoning that first
+supported it was wrong, and the third correction reverses it.**
+
+The first two corrections narrowed *"69 scenarios re-identified"* and then fixed
+an arithmetic slip, both on the premise that **no key distinguishes all 163
+scenarios except the id itself.** That premise was FALSE, and it was false for a
+self-inflicted reason: the key used to establish it was a hand-picked tuple of
+six fields — `kind`, `entityId`, `subjectId`, `probePolarity`, `targetEntityId`,
+`provider` — described as "every recorded non-id field". It is not.
+
+Recorded scenarios carry **fifteen** distinct fields across seven kinds.
+`declaredEvidence` alone adds `assertionId`, `evidenceKind`, `expectedOutcome`,
+`expectedDiagnosticCode` and a full `invocation`; `uniquenessFold` adds
+`nfkcPolicy`. The tuple therefore collapsed exactly the 69 `declaredEvidence`
+scenarios into 11 groups, and that collapse — an artifact of the projection —
+was read as a property of the data.
+
+**Measured from the production scenario object, excluding only the two generated
+identity fields and normalizing `schemaVersion` recursively:**
+
+| | |
+|---|---|
+| semantic-key uniqueness, v4 plan | **163 of 163** |
+| semantic-key uniqueness, v5 plan | **163 of 163** |
+| semantic key sets across the adoption | **identical — a total bijection** |
+| scenarios re-identified | **69, every one `declaredEvidence`** |
+| `assertionId` + `evidenceKind` alone distinguishes those 69 | **69 of 69** |
+
+**So evidence CAN be re-keyed by meaning.** Every scenario in the v4 plan has
+exactly one counterpart in the v5 plan under a version-normalized reading of its
+whole payload. The earlier claim that re-keying is impossible, and that
+recording the language version is therefore "the only handle there is", is
+withdrawn.
+
+**The mechanism, now measured rather than inferred:** `declaredEvidence` is the
+only kind carrying an `invocation`, and an invocation nests canonical references
+that carry their own version stamps. Those stamps are fingerprint inputs, so
+precisely that population re-fingerprints. Every other kind carries no
+version-bearing payload and keeps its identity. The 69 is not a coincidence and
+not an ambiguity — it is the count of scenarios that reference a versioned node.
+
+### Why this is consequential rather than curious
+
+`PUR-2` and `SAL-2` both key posting evidence by scenario id. Durable
+verification evidence recorded before an adoption therefore matches only
+partially afterwards — and the failure is silent in every direction a gate
+currently looks: the plan is the same size, verifies the same subjects, and
+produces the same outcomes. The orphaned fraction surfaces as evidence that
+"was never recorded" for scenarios that were, in fact, recorded and executed.
+
+This is the shape `LANG-ADOPT-v5` spent three review rounds on, one layer out: a
+fact that holds under every count while its identity moves underneath.
+
+### Decision
+
+**Evidence carries the language version it was recorded under, and a
+re-identification is detected rather than prevented.** Scenario identity is NOT
+made adoption-stable.
+
+**RE-JUSTIFIED after the third correction, because the original argument was
+withdrawn.** The decision no longer rests on re-keying being impossible — it is
+demonstrably possible, by total bijection. It rests on three things that survive
+the correction:
+
+1. **Stable ids across the boundary would assert a false equivalence.** A v4 and
+   a v5 storage target verify different bytes; v5 materializes a state field v4
+   does not. An identity deliberately omitting the version cannot distinguish
+   *the same scenario* from *a scenario that now verifies something else* —
+   ADR-0047 §1's reasoning about `semanticProfileDigest`, one level down. That
+   divergence lands exactly where `PUR-1`'s first state machine does.
+
+2. **Re-keying is possible but nothing does it.** The bijection requires a
+   recursive version-normalizing comparison over the entire scenario payload,
+   including nested invocation references. No evidence reader performs one. A
+   capability that exists only in a test is not a property of the system.
+
+3. **The version stamp is the cheap signal that a re-key is needed at all.**
+   Without it a partial id match is indistinguishable from missing evidence;
+   with it, the boundary is legible and the expensive comparison can be run
+   deliberately.
+
+The rejected alternative — excluding version stamps from the fingerprint so ids
+survive adoption — is refused on (1).
+
+### Owed, and not built here
+
+`LANG-ADOPT-v5` measured this and ruled it; it did not implement it, because
+durable evidence is `PUR-2`'s subject area and this packet ships no purchasing
+entity. What is owed:
+
+- verification evidence records the `languageVersion` of the release it was
+  recorded against;
+- a reader comparing evidence across releases that differ in language version
+  reports the boundary explicitly rather than reporting unmatched scenarios;
+- a control that reds when evidence from one language version is silently
+  credited to another.
+
+Until that lands, **a language adoption partially orphans durable verification
+evidence, and nothing observes it.** That sentence is the row's content, not a
+prediction.

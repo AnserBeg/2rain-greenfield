@@ -1074,11 +1074,14 @@ function assertCanonicalReference(
 function assertOperationDefinition(
   value: unknown,
 ): asserts value is RegisteredOperationDefinition {
-  const subject = isRecord(value) && typeof value.operationId === 'string'
-    ? value.operationId
-    : '<unidentified operation>';
+  const subject =
+    isRecord(value) && typeof value.operationId === 'string'
+      ? value.operationId
+      : '<unidentified operation>';
   const effectKind =
-    isRecord(value) && isRecord(value.effect) && typeof value.effect.kind === 'string'
+    isRecord(value) &&
+    isRecord(value.effect) &&
+    typeof value.effect.kind === 'string'
       ? value.effect.kind
       : '<unidentified effect>';
   const invalid = (message: string): MalformedPinnedOperationCatalogError =>
@@ -1189,7 +1192,11 @@ function assertOperationDefinition(
       'effect.transition',
       invalid,
     );
-    assertCanonicalId(value.effect.stateFieldId, 'effect.stateFieldId', invalid);
+    assertCanonicalId(
+      value.effect.stateFieldId,
+      'effect.stateFieldId',
+      invalid,
+    );
     assertCanonicalId(value.effect.fromStateId, 'effect.fromStateId', invalid);
     assertCanonicalId(value.effect.toStateId, 'effect.toStateId', invalid);
   } else {

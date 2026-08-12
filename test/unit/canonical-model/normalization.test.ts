@@ -14,6 +14,7 @@ import {
   LATEST_LANGUAGE_VERSION,
   LATEST_NORMALIZATION_PROFILE_VERSION,
   languageHasLegalEntityQueryScope,
+  languageHasMaterializedStateFields,
   languageHasV3Features,
   NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSIONS,
@@ -30,6 +31,7 @@ import {
   parseVersionedAuthoredApplicationPackageJson,
   type V3AuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
+import { languageUsesModuleProjectionShape } from '../../../packages/compiler/src/index.js';
 import {
   V3_AGGREGATE_IDS,
   v3AggregateModule,
@@ -131,21 +133,24 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     NORMALIZATION_PROFILE_VERSIONS.v2,
   );
   // Newest-readable and compiled-at are deliberately apart while a version is
-  // cut and unadopted. LANG-ADOPT adopted v4 and they were briefly equal;
-  // `5g3-sm-impl` cut v5 for ADR-0050's materialized state field and did NOT
-  // adopt it, so they are apart again -- that is the normal cycle, not a
-  // collapse. This pair is the adoption ratchet: it must fail loudly on every
-  // cut and every adoption, so the artifact churn is absorbed deliberately
-  // rather than discovered.
+  // cut and unadopted, and EQUAL between an adoption and the next cut. Both
+  // states are normal; neither is a collapse. LANG-ADOPT adopted v4 and they
+  // were briefly equal; `5g3-sm-impl` cut v5 for ADR-0050's materialized state
+  // field without adopting it, which put them apart; `LANG-ADOPT-v5` adopted
+  // it, which puts them together again. This pair is the adoption ratchet: it
+  // must fail loudly on every cut and every adoption, so the artifact churn is
+  // absorbed deliberately rather than discovered. UPDATE it to the true new
+  // values; never relax it to a relation between the two constants, because
+  // "LATEST is at or after ADOPTED" holds in both states and observes neither.
   assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v5);
   assert.equal(
     LATEST_NORMALIZATION_PROFILE_VERSION,
     NORMALIZATION_PROFILE_VERSIONS.v5,
   );
-  assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v4);
+  assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v5);
   assert.equal(
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
-    NORMALIZATION_PROFILE_VERSIONS.v4,
+    NORMALIZATION_PROFILE_VERSIONS.v5,
   );
   assert.deepEqual(SUPPORTED_LANGUAGE_VERSIONS, [
     LANGUAGE_VERSIONS.experimentalV0,
@@ -163,13 +168,128 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     NORMALIZATION_PROFILE_VERSIONS.v4,
     NORMALIZATION_PROFILE_VERSIONS.v5,
   ]);
-  // Feature levels are cumulative in both directions that matter: v4 answers
-  // yes to every v3 question, and only v4 answers yes to the operand question.
+  // Feature levels are cumulative in both directions that matter: a later
+  // version answers yes to every earlier question, and the version below the
+  // one that introduced a feature answers no. Each predicate is asserted at
+  // its introducing version, at the version above it, and at the version
+  // below -- the third is what fails when a cut drops a released rule.
   assert.equal(languageHasV3Features(LANGUAGE_VERSIONS.v3), true);
   assert.equal(languageHasV3Features(LANGUAGE_VERSIONS.v4), true);
+  assert.equal(languageHasV3Features(LANGUAGE_VERSIONS.v5), true);
   assert.equal(languageHasV3Features(LANGUAGE_VERSION), false);
   assert.equal(languageHasLegalEntityQueryScope(LANGUAGE_VERSIONS.v4), true);
+  assert.equal(languageHasLegalEntityQueryScope(LANGUAGE_VERSIONS.v5), true);
   assert.equal(languageHasLegalEntityQueryScope(LANGUAGE_VERSIONS.v3), false);
+  // v5's own feature predicate. `5g3-sm-impl` added it and no test read it:
+  // its only readers were four production call sites, so the version this
+  // packet adopts had its distinguishing predicate unasserted.
+  assert.equal(languageHasMaterializedStateFields(LANGUAGE_VERSIONS.v5), true);
+  assert.equal(languageHasMaterializedStateFields(LANGUAGE_VERSIONS.v4), false);
+  assert.equal(languageHasMaterializedStateFields(LANGUAGE_VERSIONS.v3), false);
+  // The adopted version answers yes, which is the fact the rest of this packet
+  // depends on and the one a future adoption must re-observe.
+  assert.equal(
+    languageHasMaterializedStateFields(ADOPTED_LANGUAGE_VERSION),
+    true,
+  );
+
+  // THE MODULE-PROJECTION MEMBERSHIP, which no authored package can reach.
+  //
+  // `languageUsesModuleProjectionShape` decides three things for a package
+  // revision: whether the reporting family is REQUIRED, whether the
+  // reporting-entity invariant is checked, and whether lowered physical
+  // mappings are validated. Every one is a self-check over the compiler's own
+  // output, and the compiler satisfies all three by construction.
+  //
+  // Measured: `LANG-ADOPT-v5` removed v5 from that list and ran the FULL
+  // matrix — unit, compiler, performance, integration, agent, architecture,
+  // contracts, postgres, locale, browser, and both closing gates. It stayed
+  // GREEN at 589 assertions, byte-identical to the unmutated run. A v5 package
+  // was silently exempted from physical-mapping validation and nothing in the
+  // repository noticed.
+  //
+  // The specimen review asked for -- a v5 package with an invalid physical
+  // mapping, otherwise valid -- is NOT constructible: physical names are
+  // fixed-length hashes, so neither `COMPILER_PHYSICAL_NAME_COLLISION` nor
+  // `COMPILER_PHYSICAL_NAME_TOO_LONG` can be produced from authored input.
+  // A disabled safety net is invisible unless you also introduce the fault it
+  // catches. So the witness is the membership, asserted here.
+  assert.equal(
+    languageUsesModuleProjectionShape(ADOPTED_LANGUAGE_VERSION),
+    true,
+  );
+  // Derived across the whole supported list rather than spot-checked, so the
+  // NEXT cut inherits the assertion instead of needing one. The boundary is
+  // v2: v0-experimental and v1 predate the module projection shape.
+  const moduleShapeIntroducedAt =
+    SUPPORTED_LANGUAGE_VERSIONS.indexOf(LANGUAGE_VERSION);
+  assert.ok(moduleShapeIntroducedAt > 0);
+  for (const [index, supported] of SUPPORTED_LANGUAGE_VERSIONS.entries()) {
+    assert.equal(
+      languageUsesModuleProjectionShape(supported),
+      index >= moduleShapeIntroducedAt,
+      `${supported} must ${index >= moduleShapeIntroducedAt ? 'carry' : 'not carry'} the module projection shape`,
+    );
+  }
+
+  // THE SUCCESSOR ARM, which no ordinary call can reach today.
+  //
+  // `5g3-sm-impl` rewrote this predicate from an exact `featureLevel === 'v5'`
+  // to the ORDERED "at or after the introducing version", so a v6 cut inherits
+  // the rule with nothing to remember. `LANG-ADOPT-v5`'s deletion table then
+  // narrowed `candidate >= introducedAt` back to `=== introducedAt` -- exactly
+  // the defect that rewrite fixed -- and NOTHING RED, across `test:unit` and the
+  // full compiler suite. It could not: v5 is the last supported version, so the
+  // two forms agree on every value that exists, and the three assertions above
+  // agree with them. The packet recorded that as a structural survivor.
+  //
+  // REVIEW CORRECTED THAT. Unreachable by an ordinary call is not the same as
+  // unobservable: the exported predicate's free bindings can be supplied. This
+  // evaluates THE REAL FUNCTION -- its own emitted body, not a shadow copy of
+  // the rule and not an assertion about its source tokens -- against a
+  // synthetic supported list that HAS a successor.
+  const underBindings = (
+    supported: readonly string[],
+    versions: Record<string, string>,
+  ): ((languageVersion: string) => boolean) =>
+    // The subject IS the production body. Re-implementing the rule here would
+    // be the shadow predicate this control exists to avoid, and asserting on
+    // the source tokens would pin the spelling rather than the behaviour.
+    new Function(
+      'SUPPORTED_LANGUAGE_VERSIONS',
+      'LANGUAGE_VERSIONS',
+      `return (${languageHasMaterializedStateFields.toString()});`,
+    )(supported, versions) as (languageVersion: string) => boolean;
+
+  // Faithfulness first: under the REAL bindings the harness must answer exactly
+  // as the export does. Without this the assertions below could be measuring a
+  // body that no longer resembles what ships.
+  const faithful = underBindings(
+    SUPPORTED_LANGUAGE_VERSIONS,
+    LANGUAGE_VERSIONS,
+  );
+  for (const supported of SUPPORTED_LANGUAGE_VERSIONS) {
+    assert.equal(
+      faithful(supported),
+      languageHasMaterializedStateFields(supported),
+      `harness disagrees with the export at ${supported}`,
+    );
+  }
+
+  // Now the same body against a list with a version ABOVE the introducing one.
+  const withSuccessor = underBindings(
+    [LANGUAGE_VERSIONS.v4, LANGUAGE_VERSIONS.v5, 'v6'],
+    { ...LANGUAGE_VERSIONS },
+  );
+  assert.equal(withSuccessor(LANGUAGE_VERSIONS.v4), false);
+  assert.equal(withSuccessor(LANGUAGE_VERSIONS.v5), true);
+  // THIS is the arm that dies when the ordering test is narrowed to equality,
+  // and the only one that can. It is the whole reason the rewrite happened.
+  assert.equal(
+    withSuccessor('v6'),
+    true,
+    'a version after the introducing one must inherit the rule; narrowing "at or after" to "exactly" reds here and nowhere else',
+  );
 
   const authored = parseAuthoredApplicationPackageJson(
     readFileSync(fixturePath),
