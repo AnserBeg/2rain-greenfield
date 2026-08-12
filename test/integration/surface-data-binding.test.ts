@@ -702,6 +702,184 @@ test('a capability command is artifact-bound, render-minted, and deliberately co
   assert.equal(executor.operationCalls.length, 0);
 });
 
+const CHILD_FORM_SURFACE = `${FIXTURE_IDS.namespace}:surface.master_role_form`;
+const CHILD_CREATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_create`;
+const REQUIRED_RELATION_ID = `${FIXTURE_IDS.namespace}:relation.master_role_parent`;
+
+/**
+ * The write wire this whole re-charter exists to reach: `operationInput` builds
+ * a `relations` key, so a create through a REQUIRED relation is satisfiable.
+ * Before it, no module with a required relation could be created from any web
+ * surface -- and `master_role_parent` has declared `required: true` since long
+ * before this packet.
+ *
+ * Rendering the control is `relation-scoped-enumeration`'s, so this posts the
+ * relation directly rather than reading it off a form.
+ */
+test('a create submission carries its relations into the operation input', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const parentRecordId = executor.seed(tenantA, 'Northwind');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+
+  await submitSurfaceRuntimeIntent(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+    {
+      idempotencyKey: randomUUID(),
+      operationId: CHILD_CREATE_OPERATION,
+      recordId: randomUUID(),
+      [`relation:${REQUIRED_RELATION_ID}`]: parentRecordId,
+      [`value:${FIXTURE_IDS.fieldIds.childRole}`]: FIXTURE_IDS.optionIds.owner,
+    },
+    semanticGateways(policy, executor),
+  );
+
+  assert.equal(
+    executor.operationCalls.length,
+    1,
+    'the create must execute rather than refuse',
+  );
+  const input = asRecord(executor.operationCalls[0]!.input);
+  assert.deepEqual(
+    input.relations,
+    { [REQUIRED_RELATION_ID]: parentRecordId },
+    'the relation must arrive keyed by relation id, carrying the chosen record',
+  );
+});
+
+/**
+ * An unselected relation is OMITTED, not sent as "". Posting "" would reach the
+ * provider's `uuidRecord` and fail as a malformed uuid, which is a different
+ * and less honest refusal than the declared MODULE_REQUIRED_RELATION_MISSING.
+ */
+test('an empty relation selection is omitted rather than sent as a blank', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+
+  await submitSurfaceRuntimeIntent(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+    {
+      idempotencyKey: randomUUID(),
+      operationId: CHILD_CREATE_OPERATION,
+      recordId: randomUUID(),
+      [`relation:${REQUIRED_RELATION_ID}`]: '',
+      [`value:${FIXTURE_IDS.fieldIds.childRole}`]: FIXTURE_IDS.optionIds.owner,
+    },
+    semanticGateways(policy, executor),
+  );
+
+  if (executor.operationCalls.length > 0) {
+    const input = asRecord(executor.operationCalls[0]!.input);
+    assert.deepEqual(
+      input.relations,
+      {},
+      'a blank selection contributes no relation key at all',
+    );
+  }
+});
+
+/**
+ * Entity relation authority must be AGREEMENT, not cardinality. The prior
+ * attempt took whichever create contract declared the most relations, so a
+ * retired operation could outrank the executing one and the browser would post
+ * a contract the provider does not honour.
+ */
+test('create contracts declaring different relations refuse rather than resolve by size', async () => {
+  const policy = new RecordingPolicy('ALLOW');
+  const compiled = compileFixture();
+  const projections = runtimeProjections(compiled);
+
+  const withSecondCreate = (
+    mutateClone: (clone: Record<string, unknown>) => void,
+  ): ImmutableJsonValue => {
+    const payload = structuredClone(projections.operation.payload) as {
+      operations: Record<string, unknown>[];
+    };
+    const original = payload.operations.find(
+      (operation) => operation.operationId === CHILD_CREATE_OPERATION,
+    );
+    assert.ok(original, 'the fixture must contribute a child create operation');
+    const clone = structuredClone(original) as Record<string, unknown>;
+    clone.operationId = `${CHILD_CREATE_OPERATION}_retired`;
+    clone.lifecycle = 'retired';
+    mutateClone(clone);
+    payload.operations.push(clone);
+    return payload as unknown as ImmutableJsonValue;
+  };
+
+  const read = async (payload: ImmutableJsonValue) => {
+    const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+      new AuthenticatedRequestEntryAdapter(async () =>
+        identity(tenantA, environmentA, principalA),
+      ),
+      {
+        async load(context): Promise<LoadedRequestRuntimeDefinition> {
+          return {
+            environmentId: context.environmentId,
+            pointer: { fence: 1, pointerId },
+            projections: {
+              ...projections,
+              operation: { ...projections.operation, payload },
+            },
+            release: { contentHash: compiled.releaseRoot, releaseId },
+            tenantId: context.tenantId,
+          };
+        },
+      },
+      policy,
+    );
+    const view = await issuedView(entry, 'a');
+    const manifest = readCompiledSurfaceManifest(view);
+    const surface = manifest.surfaces.find(
+      (candidate) => candidate.surfaceId === CHILD_FORM_SURFACE,
+    );
+    assert.ok(surface);
+    return readCompiledSurfaceDataBinding(view, surface);
+  };
+
+  // ADMISSION TWIN: a second create declaring the SAME relations is agreement,
+  // not disagreement, and must still bind.
+  const agreeing = await read(withSecondCreate(() => undefined));
+  assert.deepEqual(
+    agreeing.relationInputs.map((relation) => relation.relationId),
+    [REQUIRED_RELATION_ID],
+    'identical create contracts agree and the entity keeps its relations',
+  );
+
+  await assert.rejects(
+    read(
+      withSecondCreate((clone) => {
+        (clone.inputContract as Record<string, unknown>).relationInputs = [];
+        (clone.inputContract as Record<string, unknown>).closedArgumentKeys = [
+          'recordId',
+          'values',
+        ];
+      }),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof SurfaceProjectionError);
+      assert.equal(error.code, 'INVALID_SURFACE_BINDING');
+      return true;
+    },
+    'disagreeing create contracts must refuse by name, not pick the longer one',
+  );
+});
+
 class RecordingPolicy implements CurrentPolicyGateway {
   readonly calls: CurrentPolicyDecisionRequest[] = [];
 
