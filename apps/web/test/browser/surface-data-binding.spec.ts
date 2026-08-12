@@ -378,14 +378,37 @@ test('CLAIM 1: the browser encodes the rendered strings, in the compiled order',
     }, SEEDED[FIXTURE_IDS.fieldIds.parentUtcInstant]!),
   ).toBe('');
 
+  // THE RENDERED ARM. Exactly one selector control, carrying the update
+  // operation, and zero of the retired vocabulary. This proves the OLD half is
+  // not present -- a presence check alone cannot, because `operationId` being
+  // there does not exclude `intent` being there too, and both is precisely what
+  // a half-reverted merge produces.
+  const form = page.locator('#surface-record-form');
+  expect(
+    await form.locator('[name="operationId"]').evaluateAll((nodes) =>
+      nodes.map((node) => (node as HTMLInputElement).value),
+    ),
+  ).toEqual([`${FIXTURE_IDS.namespace}:operation.master_update`]);
+  await expect(form.locator('[name="intent"]')).toHaveCount(0);
+
   const posted = capturePost(page);
   await page.getByRole('button', { name: 'Save' }).click();
-  const entries = [...new URLSearchParams(await posted).entries()];
+  const params = new URLSearchParams(await posted);
+  const entries = [...params.entries()];
   const valueEntries = entries.filter(([key]) => key.startsWith('value:'));
 
-  // `operationId`, not `intent`: ADR-0051 (`pur1-intent-limit`) made the write
-  // path address an operation rather than an intent, and this packet merged onto
-  // that. The order still matters -- `readFormSubmission` is last-value-wins.
+  // THE SUBMITTED ARM, as an exact multiset rather than a prefix. A review found
+  // the prefix check satisfiable by a form that posts the WRONG operation: append
+  // a second `operationId` after the four asserted keys and every assertion here
+  // stayed green, while `readFormSubmission` builds its record with
+  // `Object.fromEntries`, so the LAST duplicate wins. An update form would then
+  // address the create operation. Cardinality and value, not position.
+  expect(params.getAll('operationId')).toEqual([
+    `${FIXTURE_IDS.namespace}:operation.master_update`,
+  ]);
+  expect(params.getAll('intent')).toEqual([]);
+  // Order still matters for last-value-wins, so the leading shape is kept as a
+  // separate, weaker statement rather than as the selector check.
   expect(entries.map(([key]) => key).slice(0, 4)).toEqual([
     'operationId',
     'idempotencyKey',
