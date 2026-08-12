@@ -1,8 +1,8 @@
 # matrix-unblock — the matrix reaches its suites again, and the formatter stops drifting
 
-Status: evidence ready — round-3 findings closed, full matrix green at
-`f09e2db`. Tier disputed: round 3 argues Critical, the charter says Behavioral
-Tier: Behavioral
+Status: SPLIT at review round 4. This packet is now the unblock work alone —
+pin, reformat, lint. The toolchain gate is reverted and re-chartered.
+Tier: Critical (ruled by review round 4; the charter said Behavioral)
 Branch: `packet/matrix-unblock`
 Base: `194871f` (`origin/main` at cut; verified, not assumed)
 
@@ -52,8 +52,13 @@ clean. `pnpm-workspace.yaml` carries `overrides` for `brace-expansion` and
 **That last observation used to end "so the pin is the only mechanism in play",
 and review round 2 was right to call that out.** It is a measured fact about
 one SHA, not an invariant — a workspace override added tomorrow would rebind
-the formatter with the manifest untouched. It is now an invariant because the
-toolchain contract enforces it; see round 2 below.
+the formatter with the manifest untouched.
+
+**It is still not an invariant, and after the round-4 split this packet does
+not make it one.** The toolchain gate that tried to is reverted and
+re-chartered; see the split below. The pin holds against the failure this
+packet actually observed — a caret plus a lockfile refresh — and is unguarded
+against anything that rebinds the edge some other way.
 
 ## OPEN — the lane crossed its path lease and did not stop
 
@@ -340,6 +345,94 @@ test-only delta that creates an invariant changes what a deterministic gate
 claims to prove. That is a live disagreement with the tier this packet has
 carried since its charter, and it is the orchestrator's to settle — the lane
 has not re-tiered itself.
+
+## Review round 4 — BLOCK, and the packet SPLITS here
+
+Round 4 blocked, ruled the tier **Critical**, and directed a re-charter rather
+than a fifth continuation. **All three findings were verified by this lane
+against its own tree before any action**, and all three hold. The reviewer is
+now four-for-four across this packet.
+
+**Finding 1 — the gate never observed what it claimed to.** The contract read
+the root importer's `specifier` and `version` and asserted that "every
+repository-controlled authority must pass through" them. False in pinned pnpm
+11.9.0: package identity lives on a **separate plane**, and the current
+lockfile shows both at once —
+
+```
+importers: .: devDependencies: prettier: {specifier: 3.9.5, version: 3.9.5}
+packages:  prettier@3.9.5: {resolution: {integrity: sha512-/FVl766Lp…}}
+```
+
+The integrity hash — the thing that actually identifies the bytes — was never
+read. `.pnpmfile` `afterAllResolved`, custom resolvers/fetchers and
+`importPackage` operate on that plane. The `readPackage` control proved one
+pnpmfile mechanism, and the packet generalised from it to all of them.
+
+**Finding 2 — none of the three assertions dies alone.** Measured directly,
+which is the repository's own deletion test:
+
+| Assertion deleted | Committed suite |
+| --- | --- |
+| specifier-equality | **6 pass, 0 fail** |
+| version-equality | **6 pass, 0 fail** |
+| exactness (duplicated from an earlier test) | **6 pass, 0 fail** |
+
+Every live control — the override spellings, the pnpmfile hook, the patch, the
+caret regression — was a throwaway-tree mutation logged under `/tmp`. **By the
+standard round 1 set against this very packet — "an uncommitted harness is not
+evidence" — the gate's negative evidence did not exist in the repository.** The
+lane disclosed this in the round-4 prompt; it did not fix it.
+
+**Finding 3 — two false statements were still in the shipped source.** The
+record withdrew the "less code" claim; `toolchain-contract.test.ts:143` still
+said *"It is also strictly less code."* And lines 41-43 still told a maintainer
+that manifest-versus-lockfile agreement need not be asserted because frozen
+install rejects disagreement — which rounds 2 and 3 disproved, and which reads
+as "the specifier-equality assertion is redundant" directly above the assertion
+that exists because it is not.
+
+### The split, and what it is based on
+
+**The deliverable has been green and finding-free since round 1.** The pin, the
+twenty-file reformat and the seven lint fixes drew no finding in rounds 2, 3 or
+4, and round 4 explicitly declined to reopen them. **Every finding in three
+review rounds was against the gate**, which had grown into a Critical invariant
+about package-manager resolution semantics — different work, attached to an
+unblock packet.
+
+Meanwhile `main` was still format-red at fourteen files and every packet in the
+repository was still unable to reach its suites.
+
+**Ruled by the user, 2026-08-11: split.** The gate is reverted to its original
+ten-line form, byte-identical to `main`. This packet is the unblock work alone.
+The gate is re-chartered as its own Critical packet with round 4's five
+one-property controls specified from the start.
+
+### KNOWINGLY REOPENED: round-1 finding 2
+
+**The pin ships ungated.** Round 1 blocked on exactly this and it is being
+accepted deliberately rather than resolved, because four review rounds
+established that closing it properly is a Critical packet of its own and the
+unblock cannot keep waiting on it.
+
+What that leaves true: reverting the two specifier strings passes
+`pnpm install --frozen-lockfile` at exit 0 and leaves `pnpm format` green, so
+the pin's removal is invisible to the matrix. The drift returns at the next
+lockfile refresh. **This is a recorded, accepted gap, not an oversight.**
+
+### STATED LIMITATION: implementation identity is not observed
+
+Ruled by the user, 2026-08-11: recorded as a limitation, not queued as a
+packet.
+
+Nothing in this repository attests that the formatter *bytes* are the
+implementation the lockfile names. `packages.<pkg>.resolution` integrity and
+the `.pnpmfile` custom-resolver, fetcher and `importPackage` hooks are an
+unobserved authority plane. The project's threat model is **accidental drift**,
+and defending against deliberate package-manager code is explicitly out of
+scope. Any future gate here must claim only what it observes — which is the
+failure this packet made three times.
 
 ## Gates — ACCEPTANCE MATRIX, GREEN at `f09e2db`
 
