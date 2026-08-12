@@ -5,6 +5,7 @@ import {
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
 } from '../../../packages/compiler/src/protocol.js';
+import { parsePinnedRelationInputs } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type { RegisteredOperationDefinition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   registeredSemanticQueryFromPinnedView,
@@ -300,10 +301,33 @@ export interface CompiledSurfaceOperationBinding {
   >;
 }
 
+/**
+ * A relation the entity accepts as create input. `targetEntityId` names the
+ * entity whose records are candidates, and is `null` on a generation-1 artifact
+ * that does not declare one.
+ */
+export interface CompiledSurfaceRelationInput {
+  readonly relationId: string;
+  readonly required: boolean;
+  readonly targetEntityId: string | null;
+}
+
 export interface CompiledSurfaceDataBinding {
   readonly displayFieldId: string | null;
   readonly operations: readonly CompiledSurfaceOperationBinding[];
   readonly query: RegisteredSemanticQueryDefinition;
+  /**
+   * The ENTITY's create-input relations, not one operation's.
+   *
+   * Read from every create-effect operation for the entity regardless of
+   * lifecycle, and refused if any two disagree. Two earlier shapes were wrong:
+   * taking the active create binding alone drops the freeze disclosure on a
+   * release whose create has been retired, and taking whichever contract
+   * declared the MOST relations makes cardinality into authority, so a retired
+   * operation could outrank the executing one. Agreement is required instead,
+   * and disagreement refuses by name.
+   */
+  readonly relationInputs: readonly CompiledSurfaceRelationInput[];
 }
 
 export interface CompiledSurfaceManifest {
@@ -381,6 +405,7 @@ export function readCompiledSurfaceDataBinding(
       displayFieldId: null,
       operations: Object.freeze([]),
       query,
+      relationInputs: Object.freeze([]),
     });
   }
 
@@ -398,15 +423,29 @@ export function readCompiledSurfaceDataBinding(
 
   const byOperationId = new Map<string, CompiledSurfaceOperationBinding>();
   const intentCount = new Map<SurfaceOperationIntent, number>();
+  let relationInputs: readonly CompiledSurfaceRelationInput[] | null = null;
   for (const value of payload.operations) {
     const operation = parseOperationBinding(value);
     const entityId =
       operation.entityId ??
       registeredSemanticQueryFromPinnedView(view, operation.readBackQueryId)
         ?.sourceEntityId;
-    if (operation.lifecycle !== 'active' || entityId !== query.sourceEntityId) {
-      continue;
+    if (entityId !== query.sourceEntityId) continue;
+    // Lifecycle-independent on purpose: the relations an entity carries are a
+    // property of the entity, and an update form must disclose that they are
+    // frozen even where the create effect has been retired.
+    if (operation.intent === 'create') {
+      if (relationInputs === null) {
+        relationInputs = operation.relationInputs;
+      } else if (
+        !sameRelationInputs(relationInputs, operation.relationInputs)
+      ) {
+        throw invalidBinding(
+          'surface entity has create operations declaring different relation inputs',
+        );
+      }
     }
+    if (operation.lifecycle !== 'active') continue;
     // The KNOWN LIMIT comment that stood here is deleted rather than moved:
     // it said an entity carrying a release AND a cancel "binds neither and
     // refuses by name", and named the rendering question as owed. That is what
@@ -447,6 +486,7 @@ export function readCompiledSurfaceDataBinding(
       ),
     ),
     query,
+    relationInputs: relationInputs ?? Object.freeze([]),
   });
 }
 
@@ -974,6 +1014,7 @@ function parseOperationBinding(value: unknown): {
     Record<string, RuntimeViewContract.ImmutableJsonValue>
   >;
   readonly readBackQueryId: string;
+  readonly relationInputs: readonly CompiledSurfaceRelationInput[];
   readonly tier: RegisteredOperationDefinition['tier'];
 } {
   if (
@@ -1028,8 +1069,44 @@ function parseOperationBinding(value: unknown): {
       Record<string, RuntimeViewContract.ImmutableJsonValue>
     >,
     readBackQueryId: value.readBackQueryId,
+    relationInputs: parseRelationInputs(value.inputContract),
     tier: value.tier,
   };
+}
+
+/**
+ * Delegates to the operation gateway's parser rather than reimplementing it. An
+ * independent reader here is exactly how a browser and a gateway drift into
+ * admitting different artifacts, which is a defect this seam has already had
+ * once.
+ */
+function parseRelationInputs(
+  inputContract: unknown,
+): readonly CompiledSurfaceRelationInput[] {
+  if (inputContract === undefined) return Object.freeze([]);
+  return parsePinnedRelationInputs(inputContract, invalidBinding).map(
+    (relation) =>
+      Object.freeze({
+        relationId: relation.relationId,
+        required: relation.required,
+        targetEntityId: relation.targetEntityId,
+      }),
+  );
+}
+
+function sameRelationInputs(
+  left: readonly CompiledSurfaceRelationInput[],
+  right: readonly CompiledSurfaceRelationInput[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (relation, index) =>
+        relation.relationId === right[index]?.relationId &&
+        relation.required === right[index]?.required &&
+        relation.targetEntityId === right[index]?.targetEntityId,
+    )
+  );
 }
 
 function operationLabel(operationId: string): string {
