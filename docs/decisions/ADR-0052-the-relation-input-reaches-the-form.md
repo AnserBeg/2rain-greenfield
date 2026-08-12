@@ -8,30 +8,29 @@ wire that makes the create half reachable and carries that ruling into a
 decision record.
 Tier: Critical (it changes compiled operation-contract output)
 
-> **NOT SATISFIED BY ANY SHIPPED IMPLEMENTATION — annotated 2026-08-10 after
-> `ux-reference-picker` returned BLOCK at round 2 and re-chartered.**
+> **PARTIALLY SATISFIED — updated 2026-08-12 by `relation-contract-integrity`,
+> packet 1 of 3 from the `ux-reference-picker` re-charter.**
 >
-> Read the decisions below as the *intent*, not as a description of `main` or of
-> any branch. Four statements in this document are known wrong or unenforced, and
-> they must be amended before the re-chartered work starts:
+> **Settled by packet 1 (§1, §2, §3, §4's enforcement):** the contract carries
+> the target, one complete parser is the only relation-input validator in the
+> platform and both consumers call it, create-only is enforced as an artifact
+> invariant, and entity relation authority is enforced agreement rather than a
+> cardinality heuristic. Each is backed by a negative control verified to red
+> alone.
+>
+> **NOT yet satisfied, and owed by `relation-scoped-enumeration` (packet 2):**
 >
 > - **§7's claim that a picker caller cannot supply a legal-entity scope is
->   FALSE.** The request runtime already carries the selected value. Because the
->   implementation excluded scoped target lists on that false premise, and every
->   first-party inventory target list IS scoped, three of the four form surfaces
->   this ADR's own Context cites remained uncreatable. Only `party_role` was fixed.
-> - **§4's create-only rule is not an artifact invariant.** The catalog parser
->   admits relation inputs on update/archive/restore/transition effects, which the
->   provider then cannot satisfy — ADR-0041's accepted-and-ignored state.
-> - **§2's "one parser, not two" overstates.** The shared function is a strict
->   subset of the gateway's own validation, so the browser accepts forgeries the
->   gateway refuses.
-> - **§2's table still labels v1/v2 "no relation inputs"**, contradicting the
->   corrected prose directly below it, and **§3's "the shipped app is unchanged"
->   overclaims** — browser behaviour changed even though compiled bytes did not.
+>   FALSE**, and until packet 2 lands, **no picker is rendered at all**. Every
+>   first-party inventory target list is legal-entity-scoped, so a picker that
+>   excludes scoped lists leaves `inventory_transaction_line_form`,
+>   `stock_count_form` and `stock_count_line_form` uncreatable. Packet 1
+>   deliberately ships **no renderer**, so the ADR's consequence — that a module
+>   with a required relation becomes web-creatable — is **not yet true**.
+> - §5's refusal behaviour and §6's control shape are packet 2's to implement.
 >
 > Tracked as `relation-picker-rechartered` in `docs/execution/current-plan.md`.
-> The reviewed candidate is preserved at tag `ux-reference-picker-reviewed-r2`.
+> The blocked first attempt is preserved at tag `ux-reference-picker-reviewed-r2`.
 
 ## Context
 
@@ -107,8 +106,12 @@ So both axes are named:
 
 | | no `systemInput` | `systemInput` |
 |---|---|---|
-| **no relation inputs** | `v1` | `v2` |
-| **relation inputs with targets** | `v3` | `v4` |
+| **no relation TARGETS** (no relations, or relations without targets) | `v1` | `v2` |
+| **relation inputs carrying targets** | `v3` | `v4` |
+
+The left column is deliberately not "no relation inputs" — that wording was
+wrong and is corrected here. A generation-1 `v1` contract may carry relation
+inputs; what it may not carry is `targetEntityId`.
 
 Both biconditionals are enforced: `systemInput` present iff `v2` or `v4`, and
 **`targetEntityId` carried on every relation input iff `v3` or `v4`.** A contract
@@ -124,11 +127,19 @@ presence of the list. The only additional version-level rule is that `v3`/`v4`
 cannot be minted vacuously: a contract claiming to carry targets must have at
 least one relation input to carry them on.
 
-**One parser, not two.** `parsePinnedRelationInputs` in the operation gateway is
-the sole authority on these rules, and both the gateway and the browser's surface
-contract call it. An independent second reader is exactly how a forged `v1`
-contract carrying a `v3`-only `targetEntityId` gets admitted by one consumer and
-refused by another.
+**One parser, not two — and it is load-bearing, not decorative.**
+`parsePinnedRelationInputs` is the **only** relation-input validation anywhere in
+the platform: the gateway keeps no second loop, so deleting its call stops the
+gateway validating relation inputs at all. That is verified by construction
+rather than asserted — removing the call reds exactly one gateway-level test.
+
+**An earlier attempt got this wrong in a way worth recording.** It exported a
+shared function that validated a strict SUBSET of what the gateway checked and
+left the gateway's own loop in place. The browser then accepted five
+single-property forgeries the gateway refused — a missing `archiveBehavior`, an
+unknown key, an invented `archiveBehavior`, a noncanonical `relationId`, a blank
+`targetEntityId` — and deleting the shared call removed no gateway check
+whatsoever. A shared parser that is not the only parser is not an authority.
 
 An operation with no relations is therefore **byte-identical** to what it emitted
 before this ADR, which is what keeps the change scoped to definitions that
@@ -142,9 +153,13 @@ is gated on `COMPILER_SEMANTIC_PROFILE_V2_VERSION`, which is cut and **not
 adopted**.
 
 The consequence is stated plainly rather than buried: **no recorded lineage entry
-moves, every release root holds, `check:app-release` verifies clean — and the
-picker does not appear in the running application until v2 is adopted.** The wire
-is proven at v2 by round trip; reaching the shipped app is an adoption event.
+moves, every release root holds, and `check:app-release` verifies clean.**
+
+**What does NOT follow, and was overclaimed once:** that the shipped application
+is unchanged. Compiled bytes are unchanged, but browser behaviour is not
+necessarily so — the reader now surfaces entity relation inputs that no earlier
+binding exposed. "The artifact is byte-identical" and "the application behaves
+identically" are different claims, and only the first is gated by the profile.
 
 This is not a workaround. It is the same discipline row `U5b` recorded for the
 disclosure tier ("cut `v2`, gate the field on it, leave adoption on `v1`… adoption
@@ -163,6 +178,18 @@ binding. A release whose create effect has been retired still has an update form
 and still has frozen relations; sourcing the disclosure from an active create
 operation would drop it exactly where an operator is most likely to be surprised.
 **Corrected 2026-08-10 after review.**
+
+**Enforced at the catalog parser as of `relation-contract-integrity`, not merely
+honoured by the compiler.** Relation inputs, and the `v3`/`v4` versions, are
+admitted only on `createRecordEffect`, and the `relations` argument key must
+agree with the effect in both directions. Before that, a fully shaped contract
+declaring a REQUIRED relation on an update effect was admitted — and the
+provider, which hardcodes `relations: {}` on its update branch, then validated
+that empty object against the declaration, leaving **no representable input that
+could satisfy any update of that entity**. An optional one was admitted and
+silently ignored. Both are ADR-0041's accepted-and-ignored state, reachable by a
+one-property mutation, so the artifact is refused rather than the failure
+discovered at execution.
 
 Relations are create-only all the way down: emitted only for
 `createRecordEffect`, absent from `updateRecordEffect`'s closed argument keys,
