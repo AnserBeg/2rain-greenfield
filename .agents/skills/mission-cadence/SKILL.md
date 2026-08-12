@@ -160,7 +160,7 @@ splits the packet: land what is already green as its own reviewable increment,
 and move the unfinished seam into a charter of its own with the discovered
 constraints written in from the start.
 
-This mirrors the two-REVISE cap in `review-tiers`, and for the same reason —
+This mirrors the convergence criteria in `review-tiers`, and for the same reason —
 "a review that keeps finding more of the same class is a signal the charter is
 mis-scoped, not that the code is wrong." Stops carry that signal even more
 clearly, because each one is a constraint the charter's author did not know

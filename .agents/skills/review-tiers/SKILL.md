@@ -141,14 +141,87 @@ Otherwise:
 
 ## Convergence (anti-spiral)
 
-- At most **two** REVISE rounds. On reaching a third, or on any round that
-  produces only out-of-scope or immaterial findings, STOP: freeze the best
-  candidate, triage the open findings, and surface to the user. Do not keep
-  looping.
-- A review that keeps finding "more of the same class" is a signal the charter
-  is mis-scoped, not that the code is wrong. Re-scope or escalate; do not chase.
+**Superseded 2026-08-10. The old rule was "at most two REVISE rounds." Counting
+rounds is the wrong instrument: it stopped packets that were converging and it
+let packets that were spiralling run to five and six arms anyway. What predicts
+a wasted round is not how many have happened — it is WHERE the defect sits,
+WHETHER its class is new, and above all WHETHER the previous fix subsumed the
+last one or merely sat beside it.**
+
+Ask three questions of every round after the first.
+
+### 1. Where does the defect live?
+
+- **In production** → **CONTINUE.** A round that finds a production defect has
+  paid for itself regardless of its number. `lock-obs` found a lock bypassable
+  through a trusted inherited environment variable at round 2 and a *regression
+  introduced by round 3's own fix* at round 4. `5g3-sm-impl` found a declared
+  permission that reached nothing at round 1 and a sixth version omission at
+  round 2. None of those should have been capped.
+- **In the control** → go to question 2. This is where judgement is needed.
+- **In the claim's prose, not the code** → **ONE narrowing round, then STOP.**
+  When a lane's own summary is "my prose overstated my code", the fix is the
+  sentence. Rewrite the claim from the measurement and ship. Do not re-open the
+  implementation to make the old sentence true.
+
+### 2. Is the class new, or the same one again?
+
+- **New class** → **CONTINUE.** Independent failure modes are what more arms buy.
+- **Same class, new instance** → go to question 3. **This is the decision.**
+
+### 3. Did the last fix SUBSUME the previous one, or sit BESIDE it?
+
+**This is the load-bearing test, and it is answerable by looking at the two
+fixes side by side.**
+
+- **Subsuming (converging) → CONTINUE.** Each fix is strictly more general than
+  the one before, so the class is being closed rather than patched.
+  `LANG-ADOPT-v5` is the worked example: a textual strip that deleted its own
+  subject → parse the AST instead; a rename that changed the subject's name →
+  resolve import bindings rather than identifier spellings; a glob that never
+  reached the subject → pin the subject by name. **Three rounds, three erasure
+  modes, and each fix moved up a level rather than adding a case.** That packet
+  was right to run three rounds and the old cap would have stopped it at two.
+- **Enumerating (diverging) → STOP and route the class.** Each fix sits beside
+  the last: another specimen, another predicate, another entry in a list.
+  `U5b` ruled a narrower predicate five times and each narrower predicate was
+  escaped. `5g3-sm-impl` rounds 3–5 added specimens to one table when the
+  correct move was to narrow the claim. **In both, the shape survived every
+  correction, which is the definition of a mis-scoped charter.**
+
+### Two overrides that beat all three questions
+
+- **A regression introduced by the previous round's fix → ALWAYS CONTINUE**, and
+  require a control for the fix itself. Corrections are being shipped without
+  evidence, and stopping leaves a live regression in the tree. This is
+  `lock-obs` round 4.
+- **Blast radius raises the bar for stopping.** A permission that is declared and
+  unreachable, a lock that can be bypassed, a write path that corrupts — keep
+  going. Label ordering does not earn a fourth arm; route it. Tier the
+  continuation by what being wrong costs, not by how interesting the finding is.
+
+### What STOP means — it is never "ship it broken"
+
+**Route the class to a queue row, narrow the claim to what was actually
+measured, and declare the limit where a reader will hit it.** `U5b` is the model:
+capped, routed to `U5c`, and it shipped a **refusal** as its feature rather than
+a half-built rule. A stopped packet states what it does not know.
+
+### The backstop, which is a forcing function and not a wall
+
+**From round three onward, the orchestrator must write down which criterion
+licenses continuing — in the packet record, naming it.** If no criterion fits,
+that is the stop. The count no longer ends the review; it triggers the
+justification. **An orchestrator who cannot name the criterion is chasing.**
+
+### Still binding regardless of round
+
 - Each new round addresses only the in-scope, material findings from the prior
   round — never newly invented broader scrutiny.
+- **If successive rounds keep finding things the lane's own checklist would have
+  caught — the deletion question, a one-property mutation, a presence/absence
+  pair — the defect is in the lane's process, not the code.** Route it to
+  doctrine and stop spending arms on it.
 
 ## Fresh-naive mechanics (still binding)
 
@@ -198,9 +271,9 @@ The orchestrator wrote that charter, corrected it twice, and was still wrong the
 third time. A single reviewer looping on the same question cannot surface that;
 it is not the question they were asked.
 
-**So: after a packet reaches the two-REVISE cap for a second time, the
-orchestrator may commission the second arm as an INDEPENDENT SCOPE REVIEW rather
-than a confirm.** Its charter asks *"is this packet being asked the right
+**So: whenever the convergence criteria say STOP because the fixes are
+enumerating rather than subsuming, the orchestrator may commission the next arm
+as an INDEPENDENT SCOPE REVIEW rather than a confirm.** Its charter asks *"is this packet being asked the right
 question?"* — not *"is this code correct?"* It reviews the ruling, the charter
 and the packet record, and it may conclude the orchestrator is wrong.
 
