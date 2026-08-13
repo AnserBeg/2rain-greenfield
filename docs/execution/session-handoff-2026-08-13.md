@@ -8,7 +8,9 @@ Read in this order: `AGENTS.md` → this file → `docs/execution/current-plan.m
 **starting at the TRIAGE section at the top** → `.agents/skills/review-tiers/SKILL.md`
 → `.agents/skills/mission-cadence/SKILL.md`.
 
-**`main` is at `9009876`.** Machine free at time of writing: 0 lock holders, load 0.20.
+**`main` was at `9009876` when this was drafted; this file's own commit made it
+`3509ce8`.** Do not trust either — run `git rev-parse origin/main`. Machine free at
+time of writing: 0 lock holders, load 0.20.
 
 ---
 
@@ -56,10 +58,29 @@ table**.
 `af3462c`) · `dev-environment` (accepted, `4f31ea9`) · **`LANG-ADOPT-v5`
 (ACCEPTED — it is no longer a blocker).**
 
-### `PUR-1` now has exactly ONE blocker
-**`relation-scoped-enumeration`** — the record picker that makes a required
-relation fillable. **Until it lands, a purchase order cannot be given a supplier
-from any web surface.**
+### `PUR-1`'s blockers — CORRECTED 2026-08-13, later the same day
+
+**This section originally said `relation-scoped-enumeration` was the only one. That
+was wrong.** See `current-plan.md`'s TRIAGE section, *"TIER 1 SPLITS IN TWO"*, for the
+measurement. There are three, and they are ordered:
+
+1. **`form-wire-semantics`** (chartered 2026-08-13, unblocked, runs first) —
+   `form-write-untyped-wire` + `form-empty-means-nothing`. Until it lands, a
+   purchase-order form with one blank optional date cannot be submitted at all.
+2. **Compiler-semantic profile v2 adoption** — not previously priced as a `PUR-1`
+   blocker. `ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION` is still v1
+   (`packages/compiler/src/compiler.ts:100`), and `targetEntityId` rides the v2 gate
+   (`packages/compiler/src/projections.ts:1100-1103`), so **no relation in the shipped
+   artifact carries a target and no picker can resolve a list.** A lineage-minting
+   event under ADR-0047 §4; it also carries `U5b`'s deferred `disclosureTier`
+   obligation.
+3. **`relation-scoped-enumeration`** — the record picker itself, which cannot be
+   built usefully before (2). **Until it lands, a purchase order cannot be given a
+   supplier from any web surface.**
+
+**The relation WIRE is no longer missing** — `relation-contract-integrity` (`87c667a`)
+landed it. What is missing is a renderer and the profile. `EntityRelationAuthority`
+currently has zero consumers outside `surface-contract.ts`.
 
 ### The blocked predecessor, preserved and NOT to be resumed
 `ux-reference-picker` returned **BLOCK at round 2** with an explicit instruction
