@@ -6,7 +6,7 @@ Status: accepted
 Base: `eb02adf` · Reviewed candidate: `7f42380` (tag `ux-picker-reviewed-r5`)
 Integrated: `0c5fa8df305373c31fa17abeb23608ad86142202` (the conflict-producing
 merge; parents `7f42380` and `194871f`)
-Re-merged onto moved `main`: `eb37fc6` · Closure: `d9c9196` · Accepted at: `f6d148a`
+Re-merged onto moved `main`: `eb37fc6` · Closure: `d9c9196` · Accepted at: `97a31c5`
 
 ## Why this record exists in this shape
 
