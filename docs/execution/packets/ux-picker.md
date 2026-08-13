@@ -6,7 +6,7 @@ Status: accepted
 Base: `eb02adf` · Reviewed candidate: `7f42380` (tag `ux-picker-reviewed-r5`)
 Integrated: `0c5fa8df305373c31fa17abeb23608ad86142202` (the conflict-producing
 merge; parents `7f42380` and `194871f`)
-Re-merged onto moved `main`: `eb37fc6` · Closure: `d9c9196` · Accepted at: `2bb4153`
+Re-merged onto moved `main`: `eb37fc6` · Closure: `d9c9196` · Accepted at: `af3462ccc921bc460a9e5827fec8154393e66673`
 
 ## Why this record exists in this shape
 
@@ -380,6 +380,24 @@ The template, and the correction that produced it:
 
 Naming a false green does not make it valid evidence — it makes it findable.
 Routed to `double-must-honour-refusal`, whose first specimens these are.
+
+### An instrument reading one thing while its name claims another — third instance
+
+`check-review-record.sh` reads `docs/execution/review-log.md` **from the working
+tree**, not from the branch it walks. `REVIEW_RECORD_BRANCH=origin/main` changes
+which commits it enumerates and does not change which log it reads.
+
+**So the same recorded SHA produced FAIL in this lane's worktree and OK in the
+orchestrator's, simultaneously.** The lane's tree predated the commit carrying
+the record; the walk saw the commits, the log did not have the row, and the
+message — *"no recorded SHA contains it"* — describes a containment failure
+rather than a stale file. Merging `main` first made it pass, which is the fix and
+also the tell.
+
+**Related trap in the same script, measured by the orchestrator at a cost of two
+attempts:** `:116` reads `grep -oE '[0-9a-f]{40}'`, so a 7-character SHA in a
+review-log row is **silently ignored** and fails identically to writing no row at
+all. Record full SHAs, and re-run the gate before pushing rather than after.
 
 ### The lane-process finding, which is the one the arms actually kept finding
 
