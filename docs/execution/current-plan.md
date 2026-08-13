@@ -1,5 +1,61 @@
 # Current plan — active execution state
 
+## TRIAGE — 2026-08-13. Read this before the queue.
+
+**The queue holds 134 rows and they all looked equally live. They are not.** Every
+row below is classified against ONE question: **does this block an office worker
+receiving inventory and sending it out?** Rows not named here are **DORMANT** —
+not deleted, not wrong, and not competing for a slot until the inventory path
+ships. **A dormant row may be promoted the moment something makes it block; it
+must not be worked because it surfaced during an unrelated packet, which is how
+the queue reached 134.**
+
+**Why this was needed, measured:** on 2026-08-13, 73 commits landed on `main` and
+**13 touched product code**. Two Critical *trunk* defects were found that day — a
+write-path control missing from `main`, and a gate that cannot scope containment —
+and **neither was on the queue**; both were found by a lane refusing to trust a
+stated fact. Meanwhile the rows that would have predicted them sat among 134 that
+all read as equally urgent.
+
+### TIER 1 — blocks receiving inventory. Nothing else competes with these.
+
+| row | why it blocks |
+|---|---|
+| `relation-picker-rechartered` | **`PUR-1`'s last blocker.** `ux-reference-picker` returned BLOCK at round 2 and re-chartered into this. |
+| `required-relation-uncreatable` | A purchase order needs a supplier; a module with a required relation **cannot be created from any web surface**. |
+| `relation-scoped-enumeration` | The picker that actually makes a required relation fillable. |
+| `form-empty-means-nothing` | **A blank optional date or quantity posts `""` and every non-text kind refuses it** — one empty field makes the whole purchase-order form unsubmittable. |
+| `form-write-untyped-wire` | `booleanFieldType` demands a native boolean and no form can send one, so **no boolean has ever been writable**. |
+| `relation-refusal-unnamed` | When the form cannot offer a required relation it refuses as `QUERY_*`, so the operator cannot act on what they are told. |
+
+### TIER 2 — an operator can work, but badly. Immediately after `PUR-1`.
+
+`ux-list-usability` (100 items, no search box, forward-only pagination) ·
+`surface-command-order` (Cancel renders before Release on the purchase order's own
+command bar) · `relation-update-fork` (supplier frozen after create — must be
+**visible**, not discovered) · `ux-clutter` (labels leaking compiler vocabulary).
+
+### TIER 3 — taxes every packet, and one of them makes our evidence unsound.
+
+| row | why it is here and not dormant |
+|---|---|
+| `container-pressure-forges-outcomes` | **The highest-value infrastructure row.** Docker volume pressure produces a **WRONG release-activation outcome, not merely a slow one** — so a matrix result is not trustworthy without knowing the container state it ran under. Everything else in this tier costs time; this one costs correctness. |
+| `merge-direction-hides-packet-work` | Put a Critical write-path control off trunk while the gate reported OK. Two lanes produced the shape independently. |
+| `gate-reads-a-different-thing-than-its-name` | Three instruments in one day read a different tree, format or unit than their name claims. |
+| `unrun-quality-gates` | `main` was **format-red on 2026-08-13** and nothing gated it; fixed at the time, still ungated. |
+| `leak-guard-orphan` + `matrix-machine-decay` | The container/volume tax: 12.96GB reclaimed once and the suite still ~1.29x above baseline. |
+
+### Everything else is DORMANT
+
+That is roughly 115 rows — the G2/G3 backlog (`5g3-*`, `1b`–`1g`, `4a`–`4c`,
+`5a`/`5b`, `9`–`11`), the `U`-series UX programme, the language and coverage-ledger
+rows, and most matrix ergonomics. **Several are genuinely good work and none of
+them helps an office worker receive a part.**
+
+**The standing rule this triage enforces:** a finding that surfaces during a packet
+gets **filed and left**, not worked, unless it is Tier 1. Filing is not handling —
+and treating it as handling is what produced a queue nobody can read.
+
 **Read this after AGENTS.md and before proposing or running any packet.** It is the
 narrative companion to `ledger.md`: the ledger records what each packet *was*, this
 records what we are doing *next* and *why*. Update it whenever the queue changes;
