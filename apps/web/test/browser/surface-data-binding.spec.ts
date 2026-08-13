@@ -385,9 +385,11 @@ test('CLAIM 1: the browser encodes the rendered strings, in the compiled order',
   // a half-reverted merge produces.
   const form = page.locator('#surface-record-form');
   expect(
-    await form.locator('[name="operationId"]').evaluateAll((nodes) =>
-      nodes.map((node) => (node as HTMLInputElement).value),
-    ),
+    await form
+      .locator('[name="operationId"]')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => (node as HTMLInputElement).value),
+      ),
   ).toEqual([`${FIXTURE_IDS.namespace}:operation.master_update`]);
   await expect(form.locator('[name="intent"]')).toHaveCount(0);
 
