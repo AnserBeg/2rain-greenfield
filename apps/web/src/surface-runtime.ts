@@ -664,6 +664,32 @@ function dataState(
   }
 }
 
+/** Namespaces relation controls so they cannot collide with `value:` fields. */
+const RELATION_SUBMISSION_PREFIX = 'relation:';
+
+function relationInput(
+  submission: SurfaceRuntimeSubmission,
+): Readonly<Record<string, string>> {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(submission)
+        .filter(
+          (entry): entry is [string, string] =>
+            entry[0].startsWith(RELATION_SUBMISSION_PREFIX) &&
+            typeof entry[1] === 'string' &&
+            entry[1] !== '',
+        )
+        .map(
+          (entry) =>
+            [
+              entry[0].slice(RELATION_SUBMISSION_PREFIX.length),
+              entry[1],
+            ] as const,
+        ),
+    ),
+  );
+}
+
 function operationInput(
   surface: CompiledSurfaceDefinition,
   intent: SurfaceOperationIntent,
@@ -680,7 +706,20 @@ function operationInput(
     ),
   );
   if (intent === 'create') {
-    return { recordId: submission.recordId ?? '', values };
+    // ADR-0052: relations travel as a sibling of `values`, keyed by relation id
+    // and carrying record ids as strings. `parseMutationInput` reads them
+    // through `uuidRecord`, so a string is the native form and no coercion is
+    // owed -- unlike field values, whose typed-wire question is `U7`'s.
+    //
+    // An unselected relation is OMITTED rather than sent as "". That keeps the
+    // refusal for a missing REQUIRED relation where it is already declared and
+    // discriminating -- on the provider, by name -- instead of turning it into
+    // a uuid-parse failure on an empty string.
+    return {
+      recordId: submission.recordId ?? '',
+      relations: relationInput(submission),
+      values,
+    };
   }
   const recordId = submission.recordId ?? '';
   const expectedRevision = Number.parseInt(

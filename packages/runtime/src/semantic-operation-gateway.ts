@@ -178,9 +178,16 @@ export interface RegisteredOperationInputContract {
     readonly archiveBehavior: 'restrict' | 'retainReference';
     readonly relationId: string;
     readonly required: boolean;
+    // Present exactly at the generation-2 versions (v3/v4). A generation-1
+    // artifact is still readable, and is refused if it carries the key it never
+    // declared.
+    readonly targetEntityId?: string;
   }[];
   readonly schemaVersion:
-    'northstar.module-input-contract/v1' | 'northstar.module-input-contract/v2';
+    | 'northstar.module-input-contract/v1'
+    | 'northstar.module-input-contract/v2'
+    | 'northstar.module-input-contract/v3'
+    | 'northstar.module-input-contract/v4';
   readonly systemInput?: RegisteredOperationSystemInput;
   readonly writableFieldIds: readonly string[];
 }
@@ -965,7 +972,7 @@ function readPinnedOperationCatalog(
   const operationIds = new Set<string>();
   const operations: RegisteredOperationDefinition[] = [];
   for (const operation of payload.operations) {
-    assertOperationDefinition(operation);
+    assertPinnedOperationDefinition(operation);
     if (operationIds.has(operation.operationId)) {
       throw new MalformedPinnedOperationCatalogError(
         'pinned operation catalog contains a duplicate operationId',
@@ -1071,7 +1078,19 @@ function assertCanonicalReference(
   }
 }
 
-function assertOperationDefinition(
+/**
+ * The COMPLETE pinned-operation authority, exported so every consumer validates
+ * the same artifact by the same rules.
+ *
+ * Three shapes preceded this and each stopped one layer too low: a relation
+ * ENTRY parser beside a gateway loop; then an effect-aware RELATION parser
+ * beside this private definition validator. In both, the browser called the
+ * narrow function and admitted catalogs this gateway refuses -- a contract with
+ * `fields: null`, a missing `writableFieldIds`, an unknown top-level key, or a
+ * non-string in `closedArgumentKeys`. The authority has to be the whole
+ * definition, because that is the unit the artifact is malformed at.
+ */
+export function assertPinnedOperationDefinition(
   value: unknown,
 ): asserts value is RegisteredOperationDefinition {
   const subject =
@@ -1244,16 +1263,212 @@ function assertOperationDefinition(
   }
   if (hasInputContract) {
     assertOperationInputContract(value.inputContract);
-    if (
-      value.inputContract.schemaVersion ===
-        'northstar.module-input-contract/v2' &&
-      value.effect.kind !== 'createRecordEffect'
-    ) {
-      throw invalid(
-        'pinned operation system input is admitted only on create effects',
-      );
-    }
+    // One effect-aware authority. Every relation and closed-key rule lives in
+    // it, so this gateway and the browser cannot admit different artifacts.
+    parsePinnedOperationInputContract(
+      value.inputContract,
+      value.effect.kind as PinnedOperationEffectKind,
+      invalid,
+    );
   }
+}
+
+export interface PinnedRelationInput {
+  readonly archiveBehavior: 'restrict' | 'retainReference';
+  readonly relationId: string;
+  readonly required: boolean;
+  readonly targetEntityId: string | null;
+}
+
+/**
+ * The ONE authority on what a pinned relation input may say, and the ONLY place
+ * relation inputs are validated anywhere in the platform.
+ *
+ * This gateway and the browser's surface contract both consume relation inputs.
+ * A prior attempt exported a parser that validated a strict SUBSET of what this
+ * gateway checked and left the gateway's own loop in place; the browser then
+ * accepted five single-property forgeries the gateway refused, and deleting the
+ * shared call removed no gateway check at all. So this function is deliberately
+ * COMPLETE and the gateway keeps no second loop: delete the call below and the
+ * gateway stops validating relation inputs entirely, which is what makes the
+ * shared authority load-bearing rather than decorative.
+ *
+ * `targetEntityId` is carried on EVERY relation input iff the contract is v3 or
+ * v4. A non-empty relation list does NOT imply v3/v4 — a generation-1 artifact
+ * may legitimately declare relations without targets, and refusing those would
+ * break every historical contract.
+ */
+/** The effect kinds a pinned operation may declare. */
+export type PinnedOperationEffectKind =
+  | 'archiveRecordEffect'
+  | 'createRecordEffect'
+  | 'registeredCapabilityEffect'
+  | 'restoreRecordEffect'
+  | 'transitionStateEffect'
+  | 'updateRecordEffect';
+
+/**
+ * The ONE authority on a pinned operation's relation contract, and the only
+ * function any consumer should call.
+ *
+ * It is EFFECT-AWARE on purpose. An earlier shape exported only the relation
+ * ENTRY parser and left the effect rules -- relations are create-only, v3/v4 are
+ * create-only, the `relations` closed key agrees with the effect -- inside the
+ * gateway's own definition assertion. The browser called the entry parser alone,
+ * so an update contract declaring relations, or a create contract omitting the
+ * `relations` key, was accepted at the surface boundary and refused at the
+ * execution boundary. One artifact, two interpretations: exactly the split a
+ * shared authority exists to prevent.
+ *
+ * Callers pass the effect kind because the contract's legality is not a property
+ * of the contract alone.
+ */
+export function parsePinnedOperationInputContract(
+  inputContract: unknown,
+  effectKind: PinnedOperationEffectKind,
+  fail: (message: string) => Error,
+): readonly PinnedRelationInput[] {
+  const relationInputs = parseRelationInputEntries(inputContract, fail);
+  const contract = inputContract as Record<string, unknown>;
+  const version = contract.schemaVersion;
+  const createEffect = effectKind === 'createRecordEffect';
+
+  // ADR-0052 s4: relations are create-only, and the provider ENFORCES that by
+  // hardcoding `relations: {}` on every non-create branch. Without this, a
+  // contract declaring a REQUIRED relation on an update effect is admitted --
+  // and the provider then validates its hardcoded empty relations against that
+  // declaration, leaving no representable input able to satisfy any update of
+  // the entity. An optional one is admitted and silently ignored. Both are
+  // ADR-0041's accepted-and-ignored state.
+  if (relationInputs.length > 0 && !createEffect) {
+    throw fail('pinned relation inputs are admitted only on create effects');
+  }
+  if (
+    (version === 'northstar.module-input-contract/v3' ||
+      version === 'northstar.module-input-contract/v4') &&
+    !createEffect
+  ) {
+    throw fail('pinned relation targets are admitted only on create effects');
+  }
+  if (
+    (version === 'northstar.module-input-contract/v2' ||
+      version === 'northstar.module-input-contract/v4') &&
+    !createEffect
+  ) {
+    throw fail(
+      'pinned operation system input is admitted only on create effects',
+    );
+  }
+  // The `relations` member is bound to the effect in both directions: a
+  // contract cannot accept a `relations` argument it never declares, nor
+  // declare relations it gives the caller no key to supply.
+  //
+  // The COMPLETE argument set is NOT bound here, and that is a deliberate stop
+  // rather than an oversight. Review asked for it, and it is a real defect: a
+  // create whose keys additionally name a mutation argument it never reads is
+  // admitted, and the writer then accepts that argument and ignores it, which
+  // is ADR-0041's accepted-and-ignored state. But the vocabulary naming those
+  // keys cannot live in this file. `owned gateway sources expose one authority
+  // each` fences this gateway from exactly that vocabulary, and
+  // `workspaceDependencyAllowed` forbids a runtime package importing the layer
+  // that emits the sets. Enforcing it needs a home this layer is
+  // architecturally denied, so it is ROUTED rather than smuggled in --
+  // see `relation-argument-set-unbound` in current-plan.md.
+  const closedArgumentKeys = contract.closedArgumentKeys;
+  if (
+    !Array.isArray(closedArgumentKeys) ||
+    !closedArgumentKeys.every((key) => typeof key === 'string')
+  ) {
+    throw fail('pinned operation input contract has an invalid shape');
+  }
+  if (closedArgumentKeys.includes('relations') !== createEffect) {
+    throw fail('pinned relation argument key and operation effect disagree');
+  }
+  return relationInputs;
+}
+
+function parseRelationInputEntries(
+  inputContract: unknown,
+  fail: (message: string) => Error,
+): readonly PinnedRelationInput[] {
+  if (!isRecord(inputContract)) {
+    throw fail('pinned operation input contract must be an object');
+  }
+  const schemaVersion = inputContract.schemaVersion;
+  const carriesTargets =
+    schemaVersion === 'northstar.module-input-contract/v3' ||
+    schemaVersion === 'northstar.module-input-contract/v4';
+  if (
+    schemaVersion !== 'northstar.module-input-contract/v1' &&
+    schemaVersion !== 'northstar.module-input-contract/v2' &&
+    !carriesTargets
+  ) {
+    throw fail('pinned operation input contract declares an unknown version');
+  }
+  const relationInputs = inputContract.relationInputs;
+  if (!Array.isArray(relationInputs)) {
+    throw fail('pinned operation input contract has an invalid shape');
+  }
+  // A version claiming to carry relation targets must have a relation to carry
+  // them on, so v3/v4 cannot be minted vacuously.
+  if (carriesTargets && relationInputs.length === 0) {
+    throw fail(
+      'pinned operation input contract declares relation targets without a relation',
+    );
+  }
+  const seenRelationIds = new Set<string>();
+  return Object.freeze(
+    relationInputs.map((relation) => {
+      if (!isRecord(relation)) {
+        throw fail('pinned relation input contract must be an object');
+      }
+      assertExactKeys(
+        relation,
+        carriesTargets
+          ? ['archiveBehavior', 'relationId', 'required', 'targetEntityId']
+          : ['archiveBehavior', 'relationId', 'required'],
+        fail,
+      );
+      assertCanonicalId(
+        relation.relationId,
+        'inputContract.relationInputs.relationId',
+        fail,
+      );
+      if (carriesTargets) {
+        assertCanonicalId(
+          relation.targetEntityId,
+          'inputContract.relationInputs.targetEntityId',
+          fail,
+        );
+      }
+      if (
+        (relation.archiveBehavior !== 'restrict' &&
+          relation.archiveBehavior !== 'retainReference') ||
+        typeof relation.required !== 'boolean'
+      ) {
+        throw fail('pinned relation input contract has an invalid shape');
+      }
+      // A relation identity is a KEY everywhere downstream: the web wire builds
+      // `relations` as a record keyed by relation id, and the provider builds a
+      // Map keyed by the same id. Two entries sharing an identity are therefore
+      // unrepresentable -- one submitted value cannot independently satisfy two
+      // declarations, and a picker cannot tell which target the identity names.
+      // A well-formed release will not produce this, but these readers exist to
+      // validate forged artifacts, so upstream correctness is not the guarantee.
+      if (seenRelationIds.has(relation.relationId)) {
+        throw fail('pinned relation inputs repeat a relation identity');
+      }
+      seenRelationIds.add(relation.relationId);
+      return Object.freeze({
+        archiveBehavior: relation.archiveBehavior,
+        relationId: relation.relationId,
+        required: relation.required,
+        targetEntityId: carriesTargets
+          ? (relation.targetEntityId as string)
+          : null,
+      });
+    }),
+  );
 }
 
 function assertOperationInputContract(
@@ -1279,9 +1494,12 @@ function assertOperationInputContract(
   );
   if (
     (value.schemaVersion !== 'northstar.module-input-contract/v1' &&
-      value.schemaVersion !== 'northstar.module-input-contract/v2') ||
+      value.schemaVersion !== 'northstar.module-input-contract/v2' &&
+      value.schemaVersion !== 'northstar.module-input-contract/v3' &&
+      value.schemaVersion !== 'northstar.module-input-contract/v4') ||
     hasSystemInput !==
-      (value.schemaVersion === 'northstar.module-input-contract/v2') ||
+      (value.schemaVersion === 'northstar.module-input-contract/v2' ||
+        value.schemaVersion === 'northstar.module-input-contract/v4') ||
     !Array.isArray(value.closedArgumentKeys) ||
     !Array.isArray(value.fields) ||
     !Array.isArray(value.relationInputs) ||
@@ -1291,9 +1509,19 @@ function assertOperationInputContract(
   ) {
     throw invalid('pinned operation input contract has an invalid shape');
   }
+  // Field identities are keys too: the provider builds a Map from them, so a
+  // repeated fieldId silently discards every declaration but the last -- which
+  // may disagree on kind, bounds, requiredness or normalization.
+  const seenFieldIds = new Set<string>();
   for (const field of value.fields) {
     if (!isRecord(field)) {
       throw invalid('pinned field input contract must be an object');
+    }
+    if (typeof field.fieldId === 'string') {
+      if (seenFieldIds.has(field.fieldId)) {
+        throw invalid('pinned field inputs repeat a field identity');
+      }
+      seenFieldIds.add(field.fieldId);
     }
     assertExactKeys(
       field,
@@ -1357,29 +1585,6 @@ function assertOperationInputContract(
     );
     if (!isTemporalContract(field.fieldKind, field.temporal)) {
       throw invalid('pinned field temporal contract has an invalid shape');
-    }
-  }
-  for (const relation of value.relationInputs) {
-    if (!isRecord(relation)) {
-      throw invalid('pinned relation input contract must be an object');
-    }
-    assertExactKeys(
-      relation,
-      ['archiveBehavior', 'relationId', 'required'],
-      invalid,
-    );
-    assertCanonicalId(
-      relation.relationId,
-      'inputContract.relationInputs.relationId',
-      invalid,
-    );
-    if (
-      !['restrict', 'retainReference'].includes(
-        String(relation.archiveBehavior),
-      ) ||
-      typeof relation.required !== 'boolean'
-    ) {
-      throw invalid('pinned relation input contract has an invalid shape');
     }
   }
   if (hasSystemInput) {

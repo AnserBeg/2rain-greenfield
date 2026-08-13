@@ -29,6 +29,7 @@ import {
 } from '../../packages/runtime/src/semantic-gateway-api-adapters.js';
 import {
   MalformedPinnedOperationCatalogError,
+  parsePinnedOperationInputContract,
   MalformedSemanticOperationRequestError,
   NoSuchRegisteredCapabilityError,
   NoSuchRegisteredOperationError,
@@ -1710,6 +1711,424 @@ function queryCatalogWith(registeredQueryId: string): ImmutableJsonValue {
     schemaVersion: 'northstar.query-catalog-payload/v0-provisional',
   };
 }
+
+/**
+ * ADR-0052 s4 says relations are create-only, and the PROVIDER enforces it by
+ * hardcoding `relations: {}` on every non-create branch. Until this invariant
+ * existed the catalog parser did not, so a fully shaped contract declaring a
+ * REQUIRED relation on an update effect was admitted -- and the provider then
+ * validated its hardcoded empty relations against that declaration, leaving no
+ * representable input that could satisfy an update. ADR-0041's forbidden
+ * accepted-and-ignored state, reachable by a ONE-PROPERTY mutation.
+ *
+ * Each case below varies exactly one property from an admitted baseline, and
+ * the baseline itself is asserted admitted, so a parser that refused
+ * everything could not pass this test.
+ */
+test('relation declarations are admitted only on create effects', async () => {
+  const relation = Object.freeze({
+    archiveBehavior: 'restrict',
+    relationId: 'northstar.bootstrap:relation.item_owner',
+    required: true,
+  });
+
+  const build = (
+    mutate: (operation: Record<string, unknown>) => void,
+  ): ImmutableJsonValue => {
+    const catalog = structuredClone(operationCatalogWith(operationId)) as {
+      operations: Record<string, unknown>[];
+    };
+    const operation = catalog.operations[0]!;
+    // Baseline: a create effect whose contract legitimately carries a relation.
+    operation.effect = {
+      entity: {
+        kind: 'entityReference',
+        schemaVersion: 'v5',
+        targetId: 'northstar.bootstrap:entity.item',
+      },
+      kind: 'createRecordEffect',
+      schemaVersion: 'v5',
+    };
+    operation.inputContract = {
+      closedArgumentKeys: ['recordId', 'relations', 'values'],
+      fields: [],
+      relationInputs: [structuredClone(relation)],
+      schemaVersion: 'northstar.module-input-contract/v1',
+      writableFieldIds: [],
+    };
+    mutate(operation);
+    return catalog as unknown as ImmutableJsonValue;
+  };
+
+  const readCatalog = async (payload: ImmutableJsonValue) => {
+    const fixture = createFixture({
+      operationPayload: payload,
+      queryPayload: queryCatalogWith(queryId),
+    });
+    const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+      Promise.resolve(value),
+    );
+    return new SemanticOperationGateway(
+      fixture.policy,
+      undefined,
+      fixture.operationMediation,
+    ).invoke(
+      view,
+      operationRequest,
+      fixture.operationMediation.issueInvocation(view, 'API'),
+    );
+  };
+
+  // ADMISSION TWIN. Without this, every assertion below is satisfied by a
+  // parser that refuses all catalogs.
+  await assert.doesNotReject(async () => {
+    try {
+      await readCatalog(build(() => undefined));
+    } catch (error) {
+      assert.ok(
+        !(error instanceof MalformedPinnedOperationCatalogError),
+        `the create baseline must be ADMITTED, got: ${String(error)}`,
+      );
+    }
+  }, 'a relation on a create effect is legitimate and must be admitted');
+
+  const refusals: ReadonlyArray<
+    readonly [string, (operation: Record<string, unknown>) => void]
+  > = [
+    [
+      'a REQUIRED relation on an update effect makes every update unsatisfiable',
+      (operation) => {
+        operation.effect = {
+          entity: {
+            kind: 'entityReference',
+            schemaVersion: 'v5',
+            targetId: 'northstar.bootstrap:entity.item',
+          },
+          kind: 'updateRecordEffect',
+          schemaVersion: 'v5',
+        };
+        (
+          operation.inputContract as Record<string, unknown>
+        ).closedArgumentKeys = ['expectedRevision', 'patch', 'recordId'];
+      },
+    ],
+    [
+      'an OPTIONAL relation on an update effect is accepted then ignored',
+      (operation) => {
+        operation.effect = {
+          entity: {
+            kind: 'entityReference',
+            schemaVersion: 'v5',
+            targetId: 'northstar.bootstrap:entity.item',
+          },
+          kind: 'updateRecordEffect',
+          schemaVersion: 'v5',
+        };
+        const contract = operation.inputContract as Record<string, unknown>;
+        contract.closedArgumentKeys = ['expectedRevision', 'patch', 'recordId'];
+        contract.relationInputs = [{ ...relation, required: false }];
+      },
+    ],
+    [
+      'a create contract declaring relations without the relations key',
+      (operation) => {
+        (
+          operation.inputContract as Record<string, unknown>
+        ).closedArgumentKeys = ['recordId', 'values'];
+      },
+    ],
+  ];
+
+  for (const [reason, mutate] of refusals) {
+    await assert.rejects(
+      readCatalog(build(mutate)),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof MalformedPinnedOperationCatalogError,
+          `${reason}: expected refusal, got ${String(error)}`,
+        );
+        return true;
+      },
+      reason,
+    );
+  }
+});
+
+/**
+ * Proves the shared parser is LOAD-BEARING inside this gateway, not merely
+ * called by it. The prior attempt's shared call was deletion-dead: every
+ * condition it checked was independently checked around it, so removing it
+ * removed no gateway check and the "one authority" claim was decorative.
+ *
+ * Verified by construction: deleting `parsePinnedRelationInputs(value, invalid)`
+ * from `assertOperationInputContract` reds this test and nothing else. A test
+ * that calls the parser directly cannot establish that, which is why this one
+ * goes through `SemanticOperationGateway.invoke`.
+ */
+test('a forged relation input is refused by the gateway, not just by the parser', async () => {
+  const forge = (
+    relationInputs: readonly unknown[],
+    schemaVersion = 'northstar.module-input-contract/v1',
+  ): ImmutableJsonValue => {
+    const catalog = structuredClone(operationCatalogWith(operationId)) as {
+      operations: Record<string, unknown>[];
+    };
+    const operation = catalog.operations[0]!;
+    operation.effect = {
+      entity: {
+        kind: 'entityReference',
+        schemaVersion: 'v5',
+        targetId: 'northstar.bootstrap:entity.item',
+      },
+      kind: 'createRecordEffect',
+      schemaVersion: 'v5',
+    };
+    operation.inputContract = {
+      closedArgumentKeys: ['recordId', 'relations', 'values'],
+      fields: [],
+      relationInputs,
+      schemaVersion,
+      writableFieldIds: [],
+    };
+    return catalog as unknown as ImmutableJsonValue;
+  };
+
+  const invoke = async (payload: ImmutableJsonValue) => {
+    const fixture = createFixture({
+      operationPayload: payload,
+      queryPayload: queryCatalogWith(queryId),
+    });
+    const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+      Promise.resolve(value),
+    );
+    return new SemanticOperationGateway(
+      fixture.policy,
+      undefined,
+      fixture.operationMediation,
+    ).invoke(
+      view,
+      operationRequest,
+      fixture.operationMediation.issueInvocation(view, 'API'),
+    );
+  };
+
+  const wellFormed = {
+    archiveBehavior: 'restrict',
+    relationId: 'northstar.bootstrap:relation.item_owner',
+    required: true,
+  };
+
+  // ADMISSION TWIN: the same catalog with a well-formed relation must NOT be
+  // refused as malformed, or every case below passes vacuously.
+  try {
+    await invoke(forge([wellFormed]));
+  } catch (error) {
+    assert.ok(
+      !(error instanceof MalformedPinnedOperationCatalogError),
+      `a well-formed relation must be admitted, got: ${String(error)}`,
+    );
+  }
+
+  const forgeries: ReadonlyArray<readonly [string, ImmutableJsonValue]> = [
+    [
+      'archiveBehavior removed',
+      forge([
+        {
+          relationId: wellFormed.relationId,
+          required: true,
+        },
+      ]),
+    ],
+    [
+      'an invented archiveBehavior',
+      forge([{ ...wellFormed, archiveBehavior: 'cascade' }]),
+    ],
+    ['an unknown relation-entry key', forge([{ ...wellFormed, extra: 1 }])],
+    [
+      'a noncanonical relationId',
+      forge([{ ...wellFormed, relationId: 'not a canonical id' }]),
+    ],
+    [
+      'a v1 contract carrying a v3-only targetEntityId',
+      forge([
+        { ...wellFormed, targetEntityId: 'northstar.bootstrap:entity.party' },
+      ]),
+    ],
+    [
+      'a v3 contract missing targetEntityId',
+      forge([wellFormed], 'northstar.module-input-contract/v3'),
+    ],
+  ];
+
+  for (const [reason, payload] of forgeries) {
+    await assert.rejects(
+      invoke(payload),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof MalformedPinnedOperationCatalogError,
+          `${reason}: expected the GATEWAY to refuse, got ${String(error)}`,
+        );
+        return true;
+      },
+      reason,
+    );
+  }
+});
+
+/**
+ * The parser-divergence guard. Every case is a SINGLE-property mutation that a
+ * subset parser would admit while this gateway refused it -- the exact split
+ * that shipped once, where the browser accepted five forgeries the gateway
+ * rejected. These run against the one shared function both consumers call.
+ */
+test('the shared relation parser refuses every single-property forgery', () => {
+  const fail = (message: string) => new Error(message);
+  const parse = (contract: unknown) =>
+    parsePinnedOperationInputContract(contract, 'createRecordEffect', fail);
+  const base = {
+    closedArgumentKeys: ['recordId', 'relations', 'values'],
+    relationInputs: [
+      {
+        archiveBehavior: 'restrict',
+        relationId: 'northstar.bootstrap:relation.item_owner',
+        required: true,
+      },
+    ],
+    schemaVersion: 'northstar.module-input-contract/v1',
+  };
+
+  // Admission twin.
+  assert.deepEqual(parse(base), [
+    {
+      archiveBehavior: 'restrict',
+      relationId: 'northstar.bootstrap:relation.item_owner',
+      required: true,
+      targetEntityId: null,
+    },
+  ]);
+
+  // Admission twin for the uniqueness rule: two DISTINCT identities are legal,
+  // so the refusals below cannot be satisfied by a parser that rejects any
+  // second entry.
+  assert.equal(
+    parse({
+      ...base,
+      relationInputs: [
+        base.relationInputs[0],
+        {
+          ...base.relationInputs[0],
+          relationId: 'northstar.bootstrap:relation.item_site',
+        },
+      ],
+    }).length,
+    2,
+    'two distinct relation identities must be admitted',
+  );
+
+  const forgeries: ReadonlyArray<readonly [string, unknown]> = [
+    [
+      'archiveBehavior removed',
+      {
+        ...base,
+        relationInputs: [
+          { relationId: base.relationInputs[0]!.relationId, required: true },
+        ],
+      },
+    ],
+    [
+      'an unknown relation-entry key',
+      { ...base, relationInputs: [{ ...base.relationInputs[0], extra: 1 }] },
+    ],
+    [
+      'an invented archiveBehavior',
+      {
+        ...base,
+        relationInputs: [
+          { ...base.relationInputs[0], archiveBehavior: 'cascade' },
+        ],
+      },
+    ],
+    [
+      'a noncanonical relationId',
+      {
+        ...base,
+        relationInputs: [
+          { ...base.relationInputs[0], relationId: 'not a canonical id' },
+        ],
+      },
+    ],
+    [
+      'a v1 contract carrying a v3-only targetEntityId',
+      {
+        ...base,
+        relationInputs: [
+          {
+            ...base.relationInputs[0],
+            targetEntityId: 'northstar.bootstrap:entity.party',
+          },
+        ],
+      },
+    ],
+    [
+      'a v3 contract missing targetEntityId',
+      { ...base, schemaVersion: 'northstar.module-input-contract/v3' },
+    ],
+    [
+      'a v3 contract with a blank targetEntityId',
+      {
+        ...base,
+        relationInputs: [{ ...base.relationInputs[0], targetEntityId: '' }],
+        schemaVersion: 'northstar.module-input-contract/v3',
+      },
+    ],
+    [
+      'an exact duplicate relation identity',
+      {
+        ...base,
+        relationInputs: [base.relationInputs[0], { ...base.relationInputs[0] }],
+      },
+    ],
+    [
+      'duplicate identities disagreeing on required',
+      {
+        ...base,
+        relationInputs: [
+          base.relationInputs[0],
+          { ...base.relationInputs[0], required: false },
+        ],
+      },
+    ],
+    [
+      'duplicate identities disagreeing on targetEntityId',
+      {
+        ...base,
+        relationInputs: [
+          {
+            ...base.relationInputs[0],
+            targetEntityId: 'northstar.bootstrap:entity.party',
+          },
+          {
+            ...base.relationInputs[0],
+            targetEntityId: 'northstar.bootstrap:entity.item',
+          },
+        ],
+        schemaVersion: 'northstar.module-input-contract/v3',
+      },
+    ],
+    [
+      'a v3 contract minted with no relation to carry a target',
+      {
+        ...base,
+        relationInputs: [],
+        schemaVersion: 'northstar.module-input-contract/v3',
+      },
+    ],
+  ];
+
+  for (const [reason, contract] of forgeries) {
+    assert.throws(() => parse(contract), /./, `${reason} must be refused`);
+  }
+});
 
 function operationCatalogWith(
   registeredOperationId: string,
