@@ -65,9 +65,13 @@ self-contained blocks — the writer has no context but the repository.
 
 > **STALE — DO NOT ACT ON THIS SECTION OR THE 2026-07-30 ADDENDUM BELOW.**
 > The lanes named here are G3-era and long finished. **Start at**
-> **[session-handoff-2026-08-08.md](session-handoff-2026-08-08.md)** — the live
-> entry point: current lanes, the goal and its blockers, orchestrator
-> behaviour, the errors this session made, and the traps waiting for you.
+> **[session-handoff-2026-08-13.md](session-handoff-2026-08-13.md)** — the live
+> entry point: current lanes, the goal and its ONE remaining blocker, the
+> queue triage, orchestrator behaviour, the errors that session made, and the
+> traps waiting for you. **Read `current-plan.md` starting at its TRIAGE
+> section — 134 rows, and about 115 of them are dormant.**
+> ([session-handoff-2026-08-08.md](session-handoff-2026-08-08.md) is accurate
+> for its own date but stale on lanes, the queue, and two pieces of doctrine.)
 > Then [current-plan.md](current-plan.md),
 > [purchasing-sales-v1-plan.md](purchasing-sales-v1-plan.md) and
 > [ui-ux-remaining.md](ui-ux-remaining.md).
