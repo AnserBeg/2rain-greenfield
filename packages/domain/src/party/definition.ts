@@ -467,6 +467,27 @@ function entitySurfaces(
         'opaqueSurfaceContentReference',
         ids.contentCapabilityId,
       ),
+      // The first authored disclosure tier, and a fact rather than a
+      // gate-satisfying gesture. `party_detail`'s keyFacts panel carries
+      // `party_number` and `party_name` -- an identifying business key and a
+      // required field -- so `ux-grammar`'s hard rule FORCES `always` here and
+      // would refuse any other value. Declaring it states what the compiler
+      // already enforces.
+      //
+      // Deliberately one slot. The sibling surfaces omit the tier and are
+      // interpreted as `always` identically; declaring it on all of them would
+      // add instances without adding evidence.
+      //
+      // Authored first by `U5b` and REVERTED there, on ADR-0047 §4a: under the
+      // then-adopted v1 profile the tier reached zero artifacts, so the entry it
+      // minted was a source change carrying no semantic delta -- exactly the
+      // shape §4a tells a packet not to mint. It lands here instead, in the
+      // packet that adopts v2, where the same one line finally reaches
+      // `surfaceManifestPayload` and the affected assertions are corrected once
+      // against a delta that means something.
+      ...(local === 'party' && suffix === 'detail' && slot === 'keyFacts'
+        ? { disclosureTier: 'always' as const }
+        : {}),
       kind: 'surfaceSlot',
       orderKey: (index + 1) * 10,
       schemaVersion: version,

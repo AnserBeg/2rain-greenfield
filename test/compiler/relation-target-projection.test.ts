@@ -155,21 +155,32 @@ test('a required relation carries its target entity at v2, and at no earlier ver
  * compares its release root; this gate proves the narrower fact it can observe,
  * which is that the adopted profile emits the pre-packet relation shape.
  */
-test('the adopted profile emits the pre-packet relation shape, pinned literally', () => {
-  const adopted = ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION;
+test('the v1 profile emits the pre-packet relation shape, pinned literally', () => {
+  // REVISITED BY `profile-v2-adoption`, on this test's own written instruction.
+  // The subject used to be `ADOPTED_...`, guarded by `adopted !== v2` with the
+  // note "this gate is meaningless once v2 is adopted; it must be revisited
+  // then". v2 is now adopted, so the subject is pinned to v1 LITERALLY.
+  //
+  // The property is unchanged and it is a property about HISTORY: entries 0-8
+  // are recorded under v0/v1, and the three-key relation input is the shape
+  // they must keep reproducing. Had this kept reading the adopted constant,
+  // both `deepEqual` blocks below would describe the same profile -- the
+  // four-key one -- and the test would fail loudly rather than silently, which
+  // is how this packet found it. The self-comparison hazard the file header
+  // records being caught in review on 2026-08-10 is the same one, mirrored.
   assert.notEqual(
-    adopted,
+    COMPILER_SEMANTIC_PROFILE_V1_VERSION,
     COMPILER_SEMANTIC_PROFILE_V2_VERSION,
-    'this gate is meaningless once v2 is adopted; it must be revisited then',
+    'the two pinned subjects must be different profiles or neither block discriminates',
   );
   assert.deepEqual(
-    requiredRelationInput(adopted),
+    requiredRelationInput(COMPILER_SEMANTIC_PROFILE_V1_VERSION),
     {
       archiveBehavior: 'restrict',
       relationId: REQUIRED_RELATION_ID,
       required: true,
     },
-    'exactly three keys, and no targetEntityId, at the adopted profile',
+    'exactly three keys, and no targetEntityId, at the historical v1 profile',
   );
   assert.deepEqual(
     requiredRelationInput(COMPILER_SEMANTIC_PROFILE_V2_VERSION),
@@ -185,7 +196,13 @@ test('the adopted profile emits the pre-packet relation shape, pinned literally'
 
 test('the input contract version names both optional shapes independently', () => {
   const v2Catalog = catalogAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
-  const adoptedCatalog = catalogAt(ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION);
+  // Pinned to v1 literally by `profile-v2-adoption` for the same reason as the
+  // test above: this was `catalogAt(ADOPTED_...)`, and adoption made that the
+  // v2 catalog, so the "keeps the pre-existing version" loop below would have
+  // been asserting v3 === v1 against the very catalog the first loop already
+  // covers. The contrast the test is named for is v1-vs-v2, not
+  // adopted-vs-latest.
+  const v1Catalog = catalogAt(COMPILER_SEMANTIC_PROFILE_V1_VERSION);
 
   const versionsFor = (catalog: OperationCatalog, withRelations: boolean) =>
     catalog.operations
@@ -213,11 +230,11 @@ test('the input contract version names both optional shapes independently', () =
       'an operation with no relations is unchanged by this ADR',
     );
   }
-  for (const version of versionsFor(adoptedCatalog, true)) {
+  for (const version of versionsFor(v1Catalog, true)) {
     assert.equal(
       version,
       MODULE_INPUT_CONTRACT_VERSION,
-      'an unadopted profile keeps the pre-existing version',
+      'a pre-v2 profile keeps the pre-existing version, which is what the recorded entries must reproduce',
     );
   }
 

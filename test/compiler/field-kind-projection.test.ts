@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   PROJECTION_FAMILY_IDS,
   type CompilerSemanticProfileVersion,
@@ -67,34 +68,44 @@ function formSurface(version: CompilerSemanticProfileVersion): ManifestSurface {
 }
 
 /**
- * The property everything below rests on. A field gated on the ADOPTED profile
- * version fails `check:app-release`; the same field gated on a cut-but-unadopted
- * version leaves the whole recorded lineage byte-identical (ADR-0047, measured
- * by `U5-design`). Asserted against the constant directly, because a compile
- * derives its profile from the artifact and cannot see this constant move.
+ * CORRECTED BY `profile-v2-adoption`. This was an adoption ratchet asserting
+ * `ADOPTED !== v2`, so that the packet which adopted would be forced to come
+ * here and look. It worked; this is that packet.
+ *
+ * What the ratchet protected is unchanged and still gated below: the per-field
+ * kinds ride v2 and reach NO profile earlier than v2, so every recorded entry
+ * compiled under v0 or v1 still reproduces its stored root. What changed is only
+ * which side of the line the adopted constant sits on.
  */
-test('per-field kinds ride the UNADOPTED compiler-semantic v2', () => {
-  assert.notEqual(
+test('per-field kinds ride compiler-semantic v2, which is now adopted', () => {
+  assert.equal(
     ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
     COMPILER_SEMANTIC_PROFILE_V2_VERSION,
-    'adopting v2 moves every recorded release root; `ux-picker` does not adopt',
+    'profile-v2-adoption moved the constant; per-field kinds now reach the serving head',
   );
 });
 
 /**
- * The refusal half: nothing reaches a recorded release. Every surface in the
- * adopted-profile manifest lacks the key ENTIRELY -- `Object.hasOwn`, not a
- * falsy read, because an empty array would also be a new byte in every
- * projection and would move the roots the gate exists to protect.
+ * The refusal half: the gated shape reaches no EARLIER profile. Every surface in
+ * a v1 manifest lacks the key ENTIRELY -- `Object.hasOwn`, not a falsy read,
+ * because an empty array would also be a new byte in every projection and would
+ * move the recorded roots this gate exists to protect.
+ *
+ * PINNED TO v1 LITERALLY by `profile-v2-adoption`, not read from the adopted
+ * constant. Before adoption those were the same version and the distinction did
+ * not matter; now they are different, and the fact worth gating is the one about
+ * the HISTORICAL profile -- entries 0-8 are recorded under v0/v1 and must keep
+ * reproducing. Reading the adopted constant here would silently retarget the
+ * gate at whatever is adopted next and stop guarding history at all.
  */
-test('the adopted profile emits no per-field kinds at all', () => {
-  const surfaces = surfacesAt(ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION);
+test('a pre-v2 profile emits no per-field kinds at all', () => {
+  const surfaces = surfacesAt(COMPILER_SEMANTIC_PROFILE_V1_VERSION);
   assert.ok(surfaces.length > 0, 'the fixture must project surfaces');
   for (const surface of surfaces) {
     assert.equal(
       Object.hasOwn(surface, 'fields'),
       false,
-      `${surface.surfaceId} must carry no compiled field kinds`,
+      `${surface.surfaceId} must carry no compiled field kinds at v1`,
     );
   }
 });
@@ -118,11 +129,24 @@ test('v2 emits one field entry per selected field, in the same order', () => {
  * ONE package differing only in profile version must produce different release
  * roots; if they did not, the emission would be doing nothing and every
  * assertion above would pass vacuously.
+ *
+ * REPOINTED TO v1 BY `profile-v2-adoption`, and this is the whole reason the
+ * repointing matters. The comparison used to read the adopted constant; adoption
+ * made that constant v2, so the assertion would have compiled the SAME profile
+ * twice and asserted a release root differs from itself. That is precisely the
+ * tautology review caught in `relation-target-projection.test.ts` in the other
+ * direction on 2026-08-10, where `catalogAt(ADOPTED)` vs `catalogAt(V1)` was one
+ * compilation compared with itself.
+ *
+ * The general hazard, worth stating once: an assertion whose two sides are the
+ * adopted constant and a literal version is one adoption away from becoming a
+ * tautology, and it goes green rather than red when it does. Pin BOTH sides to
+ * literals whenever the property is about the difference between two versions.
  */
-test('the v2 release root differs from the adopted one for the same package', () => {
+test('the v2 release root differs from the v1 root for the same package', () => {
   assert.notEqual(
     compileAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION).releaseRoot,
-    compileAt(ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION).releaseRoot,
+    compileAt(COMPILER_SEMANTIC_PROFILE_V1_VERSION).releaseRoot,
   );
 });
 
