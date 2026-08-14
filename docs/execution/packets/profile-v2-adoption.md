@@ -274,3 +274,57 @@ other lane is concurrently rewriting.
 Neither diff shows this. It is visible only by reading the compiled artifact
 against the other lane's reader. **Whoever lands second owes a full matrix at the
 integrated SHA including `test:browser`**, which is the suite that can observe it.
+
+## 9. The user-visible surface is NOT thin, and a browser test is the proof
+
+The packet charter says *"adoption's user-visible surface is thin by design, so
+say honestly what a person can and cannot observe."* **That is false for this
+adoption, and the honest answer is the opposite of the one the charter expected.**
+
+It was true of the v1 adoption, which carried no projection payload. v2 carries
+per-field kinds, and `renderFormControl` (`apps/web/src/component-registry.ts`)
+branches on exactly that:
+
+```
+if (!field) return `<input name="${name}" …>`;   // the v1 path — a bare text box
+switch (field.kind) { case 'enumFieldType': …<select>…  case 'booleanFieldType': …checkbox…
+                      case 'dateFieldType': …type="date"…  case 'timeFieldType': …type="time" step=… }
+```
+
+Under v1 the `fields` key was absent from every shipped manifest, so **every form
+field in the running application fell through to the bare-input branch**. Counted
+in the artifact this packet mints:
+
+| field kind | count | control before | control now |
+|---|---|---|---|
+| `textFieldType` | 107 | `<input>` | `<input>` (unchanged) |
+| `enumFieldType` | 28 | `<input>` | `<select>` |
+| `dateTimeFieldType` | 18 | `<input>` | date-time control |
+| `exactDecimalFieldType` | 14 | `<input>` | numeric control |
+| `integerFieldType` | 8 | `<input>` | numeric control |
+| `booleanFieldType` | 3 | `<input>` | checkbox |
+
+across nine first-party form surfaces. **A user typing `northstar.location:option.store`
+into a text box now picks "Store" from a dropdown.**
+
+This was not predicted by the lane and was not found by reading — it was found by
+`location-runtime.spec.ts` failing, which is the better outcome. The spec did
+`getByLabel('Location Type').fill(…)`; Playwright refused, naming the element:
+*"Element is not an `<input>` … locator resolved to `<select
+data-field-kind="enumFieldType">`"*. Corrected to `selectOption`, which preserves
+the assertion's meaning and changes only its shape.
+
+**The first matrix at `c843c0f` was RED and is reported as measured.** Three
+browser specs failed; the three did not share a cause:
+
+- **catalog-runtime, party-runtime — machine pressure, not this packet.** Both
+  pass on a quiet re-run. Both harnesses print their READY line immediately when
+  started standalone. Load average was 5.14 during the browser phase and docker
+  volumes grew 35 → 38 across the run. `container-pressure-forges-outcomes`'
+  subject; container state recorded rather than re-run blind, per the charter.
+- **location-runtime — real, and this packet's doing.** It reds on a quiet
+  machine too, with the `<select>` diagnostic above.
+
+Reading all three as one cause would have been wrong in both directions: it would
+have blamed the packet for two failures it did not cause, and excused the one it
+did.
