@@ -696,6 +696,46 @@ test('a form with no compiled field kinds still renders working text boxes', asy
   await expect(page.locator('#surface-record-form datalist')).toHaveCount(0);
 });
 
+test('a provider refusal cannot be manufactured into browser success', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  const surfaceUrl = `${baseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`;
+  await page.goto(surfaceUrl);
+  const form = (await page
+    .locator('#surface-record-form')
+    .evaluate((element: HTMLFormElement) =>
+      Object.fromEntries(
+        [...new FormData(element).entries()].map(([key, value]) => [
+          key,
+          String(value),
+        ]),
+      ),
+    )) as Record<string, string>;
+  form[`value:${FIXTURE_IDS.fieldIds.parentName}`] = 'Refused create';
+  delete form[`value:${FIXTURE_IDS.fieldIds.parentNumber}`];
+  const recordId = form.recordId;
+  assert.ok(recordId);
+  const before = executor.providerVerdicts.length;
+
+  const response = await page.request.post(surfaceUrl, {
+    form,
+    headers: { authorization: 'fixture-user' },
+  });
+
+  assert.equal(response.status(), 422);
+  assert.doesNotMatch(await response.text(), /Create complete/);
+  assert.deepEqual(executor.providerVerdicts.slice(before), [
+    {
+      accepted: false,
+      code: 'MODULE_REQUIRED_FIELD_MISSING',
+      stage: 'operation-input',
+      subjectId: FIXTURE_IDS.fieldIds.parentNumber,
+    },
+  ]);
+  assert.equal(executor.readRecord(recordId), null);
+});
+
 test('fixture list and form render live DTOs and reflect a semantic create', async ({
   page,
 }) => {
