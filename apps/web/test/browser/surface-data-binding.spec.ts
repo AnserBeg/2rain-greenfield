@@ -404,6 +404,42 @@ test('the string wire is normalised before the real provider parser admits it', 
   );
 });
 
+test('a create sets a boolean and omits a blank optional date', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  await page.goto(
+    `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+  );
+  await page.getByLabel('Master Name').fill('Boolean and blank date');
+  await page.getByLabel('Master Number').fill('WIRE-001');
+  await page
+    .locator(`[name="value:${EVERY_KIND_FIELD_IDS.active}"]`)
+    .selectOption('true');
+  const posted = capturePost(page);
+  const before = fieldKindExecutor.providerVerdicts.length;
+  await page.getByRole('button', { name: 'Save' }).click();
+
+  const params = new URLSearchParams(await posted);
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.active}`)).toBe('true');
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.due}`)).toBe('');
+  expect(params.get(`empty:${EVERY_KIND_FIELD_IDS.due}`)).toBe('nothing');
+  expect(fieldKindExecutor.providerVerdicts.slice(before)).toEqual([
+    {
+      accepted: true,
+      code: null,
+      stage: 'operation-input',
+      subjectId: null,
+    },
+  ]);
+  await expect(page.getByRole('status')).toContainText('Create complete');
+
+  const stored = fieldKindExecutor.readRecord(String(params.get('recordId')));
+  assert.ok(stored);
+  assert.equal(stored.values[EVERY_KIND_FIELD_IDS.active], true);
+  assert.equal(Object.hasOwn(stored.values, EVERY_KIND_FIELD_IDS.due), false);
+});
+
 test('an unrelated edit preserves both stored null and absent optional values', async ({
   page,
 }) => {
@@ -543,17 +579,35 @@ test('malformed boolean and empty intent are refused beside admitted twins', asy
 }) => {
   const recordId = fieldKindExecutor.seedTypedValues({});
   const surfaceUrl = formUrl(recordId);
-  const post = (form: Record<string, string>) =>
-    page.request.post(surfaceUrl, {
-      form: {
-        idempotencyKey: randomUUID(),
-        operationId: `${FIXTURE_IDS.namespace}:operation.master_update`,
-        recordId,
-        ...form,
-      },
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  await page.goto(surfaceUrl);
+  const renderedForm = (await page
+    .locator('#surface-record-form')
+    .evaluate((form: HTMLFormElement) =>
+      Object.fromEntries(
+        [...new FormData(form).entries()].map(([key, value]) => [
+          key,
+          String(value),
+        ]),
+      ),
+    )) as Record<string, string>;
+  const post = (
+    overrides: Record<string, string>,
+    omitted: readonly string[] = [],
+  ) => {
+    const form: Record<string, string> = {
+      ...renderedForm,
+      idempotencyKey: randomUUID(),
+      ...overrides,
+    };
+    for (const key of omitted) delete form[key];
+    return page.request.post(surfaceUrl, {
+      form,
       headers: { authorization: 'fixture-user' },
     });
+  };
 
+  const beforeMalformedBoolean = fieldKindExecutor.providerVerdicts.length;
   const malformedBoolean = await post({
     [`empty:${EVERY_KIND_FIELD_IDS.active}`]: 'clear',
     expectedRevision: '1',
@@ -561,6 +615,17 @@ test('malformed boolean and empty intent are refused beside admitted twins', asy
   });
   assert.equal(malformedBoolean.status(), 422);
   assert.match(await malformedBoolean.text(), /OPERATION_INPUT_INVALID/);
+  assert.equal(
+    fieldKindExecutor.providerVerdicts.length,
+    beforeMalformedBoolean,
+  );
+  assert.equal(
+    Object.hasOwn(
+      fieldKindExecutor.readRecord(recordId)?.values ?? {},
+      EVERY_KIND_FIELD_IDS.active,
+    ),
+    false,
+  );
 
   const admittedBoolean = await post({
     [`empty:${EVERY_KIND_FIELD_IDS.active}`]: 'clear',
@@ -581,6 +646,17 @@ test('malformed boolean and empty intent are refused beside admitted twins', asy
   });
   assert.equal(malformedIntent.status(), 422);
   assert.match(await malformedIntent.text(), /OPERATION_INPUT_INVALID/);
+  assert.equal(fieldKindExecutor.providerVerdicts.length, verdictCount);
+
+  const missingIntent = await post(
+    {
+      expectedRevision: '2',
+      [`value:${EVERY_KIND_FIELD_IDS.due}`]: '',
+    },
+    [`empty:${EVERY_KIND_FIELD_IDS.due}`],
+  );
+  assert.equal(missingIntent.status(), 422);
+  assert.match(await missingIntent.text(), /OPERATION_INPUT_INVALID/);
   assert.equal(fieldKindExecutor.providerVerdicts.length, verdictCount);
 
   const admittedNothing = await post({
@@ -1715,7 +1791,9 @@ function compileFixture(
 }
 
 function compileEveryFieldKindFixture(): CompileSuccess {
-  const normalized = normalizeApplicationPackage(everyFieldKindModule());
+  const authored = everyFieldKindModule();
+  exposeRequiredMasterNumber(authored);
+  const normalized = normalizeApplicationPackage(authored);
   const result = compileApplication({
     dependencies: [],
     expectedActiveRelease: null,

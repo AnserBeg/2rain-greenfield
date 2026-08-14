@@ -795,7 +795,9 @@ function formFieldMutation(
   rawEmptyIntent: string | undefined,
 ): FormFieldMutation {
   if (rawValue === undefined) {
-    if (rawEmptyIntent !== undefined) invalidFormSubmission();
+    if (rawEmptyIntent !== undefined || (field && !field.required)) {
+      invalidFormSubmission();
+    }
     return { kind: 'nothing' };
   }
 
