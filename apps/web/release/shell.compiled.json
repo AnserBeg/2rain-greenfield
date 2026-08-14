@@ -12,7 +12,9 @@
         "operations": [],
         "queries": [
           {
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "queryId": "northstar.shell:query.workspace_get"
           }
         ],
@@ -169,7 +171,7 @@
       "semanticDigest": "2e617336d2c715c98dafae27b8b0c5f3fe8e810fb86be335ea0bf48d3dae7e94"
     },
     "surface": {
-      "artifactRoot": "dc629fb7108dd7627e1fe11b70f0c283164d4976a11a2e08a442ff86d9f5f460",
+      "artifactRoot": "a58f47371abf1c46e19b4b8b59c9ea887eb8cbc6ba25dc106886dc8cc41373fb",
       "familyId": "northstar.compiler:projection-family.surface-manifest",
       "instanceId": "northstar.shell:projection.surface-manifest",
       "payload": {
@@ -179,83 +181,133 @@
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
+            "fields": [
+              {
+                "fieldId": "northstar.shell:field.workspace_name",
+                "kind": "textFieldType",
+                "required": false
+              }
+            ],
             "label": "Home",
             "lifecycle": "active",
             "slots": [
               {
                 "contentReferenceId": "northstar.shell:component.release_summary",
+                "disclosureTier": "always",
                 "orderKey": 10,
                 "slot": "exceptions",
                 "slotId": "northstar.shell:slot.home_exceptions"
               },
               {
                 "contentReferenceId": "northstar.shell:component.setup_checklist",
+                "disclosureTier": "always",
                 "orderKey": 20,
                 "slot": "setupChecklist",
                 "slotId": "northstar.shell:slot.home_setup"
               }
             ],
-            "statusRoles": ["inProgress", "success"],
+            "statusRoles": [
+              "inProgress",
+              "success"
+            ],
             "surfaceId": "northstar.shell:surface.a_home"
           },
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
+            "fields": [
+              {
+                "fieldId": "northstar.shell:field.workspace_name",
+                "kind": "textFieldType",
+                "required": false
+              }
+            ],
             "label": "Setup",
             "lifecycle": "active",
             "slots": [
               {
                 "contentReferenceId": "northstar.shell:component.setup_checklist",
+                "disclosureTier": "always",
                 "orderKey": 10,
                 "slot": "setupChecklist",
                 "slotId": "northstar.shell:slot.setup_checklist"
               }
             ],
-            "statusRoles": ["attention"],
+            "statusRoles": [
+              "attention"
+            ],
             "surfaceId": "northstar.shell:surface.b_setup"
           },
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
+            "fields": [
+              {
+                "fieldId": "northstar.shell:field.workspace_name",
+                "kind": "textFieldType",
+                "required": false
+              }
+            ],
             "label": "Unsupported component",
             "lifecycle": "active",
             "slots": [
               {
                 "contentReferenceId": "northstar.shell:component.future_insights",
+                "disclosureTier": "always",
                 "orderKey": 10,
                 "slot": "exceptions",
                 "slotId": "northstar.shell:slot.unsupported_component"
               }
             ],
-            "statusRoles": ["blocked"],
+            "statusRoles": [
+              "blocked"
+            ],
             "surfaceId": "northstar.shell:surface.c_unsupported"
           },
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
+            "fields": [
+              {
+                "fieldId": "northstar.shell:field.workspace_name",
+                "kind": "textFieldType",
+                "required": false
+              }
+            ],
             "label": "Renderer error",
             "lifecycle": "active",
             "slots": [
               {
                 "contentReferenceId": "northstar.shell:component.error_probe",
+                "disclosureTier": "always",
                 "orderKey": 10,
                 "slot": "exceptions",
                 "slotId": "northstar.shell:slot.error_probe"
               }
             ],
-            "statusRoles": ["blocked"],
+            "statusRoles": [
+              "blocked"
+            ],
             "surfaceId": "northstar.shell:surface.d_error"
           }
         ]
       },
       "payloadSchemaVersion": "northstar.surface-manifest-payload/v0-provisional",
-      "semanticDigest": "3883e8cac981c8de95b1aad28b52ce410a0ba122b8bf1603049d11b16dcb34b6"
+      "semanticDigest": "d51c611120203901adef6a1d912c45aeb174305f2bd198c5a5853da06d121e2f"
     }
   },
-  "releaseRoot": "bd5e590f6c174e9bdd63b1349d7092a54af94cbbcc826ce303c4d5d4d2c79026",
+  "releaseRoot": "db8ad88e42d35a4b38b326968bfacb337a06f56a8d3549496a3e3db772274a11",
   "schemaVersion": "northstar.web:compiled-shell-fixture/v1"
 }
