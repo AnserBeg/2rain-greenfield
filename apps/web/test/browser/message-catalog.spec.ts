@@ -543,7 +543,7 @@ const REAL_PATH_DRIVERS: Readonly<
  * missing is an executed request, so reachability for these rests on the
  * source-literal scan in `surface-runtime-contract.test.ts`.
  *
- * The 14 are **three different things, and calling them all "structural" was
+ * The 15 are **three different things, and calling them all "structural" was
  * wrong**:
  *
  * - **1 is intrinsically unreachable** — `INVALID_SURFACE_BINDING`. No request
@@ -552,7 +552,7 @@ const REAL_PATH_DRIVERS: Readonly<
  *   `INVALID_SURFACE_NAVIGATION`, `QUERY_LEGAL_ENTITY_SCOPE_REQUIRED`,
  *   `QUERY_NOT_FOUND`, `QUERY_UNAVAILABLE`, `QUERY_UNSUPPORTED`. Their
  *   reachability is observed; only the text assertion lives elsewhere.
- * - **8 are engineering calls about fixture cost and ownership** — the five
+ * - **9 are engineering calls about fixture cost and ownership** — the six
  *   `OPERATION_*` codes plus `QUERY_AMBIGUOUS`, `QUERY_PARAMETER_REQUIRED` and
  *   `QUERY_PERMISSION_DENIED`. Each needs the compile-and-serve gateway fixture
  *   another spec owns. Judgements, defensible, and not structural facts.
@@ -584,6 +584,11 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'Write path, same gateway fixture. Additionally needs a grant issued and ' +
     'then invalidated by changing the input between preview and confirm, which ' +
     'is a two-request journey the fixture above exists to support.',
+  OPERATION_INPUT_INVALID:
+    'Write path, and already driven by malformed-boolean and malformed-empty-' +
+    'intent requests beside their admission twins in surface-data-binding.spec.ts. ' +
+    'That file owns the compiled field-kind release and stateful executor needed ' +
+    'to prove the request is refused before semantic invocation.',
   OPERATION_PERMISSION_DENIED:
     'Write path, same gateway fixture, plus a denying CurrentPolicyGateway. ' +
     'Every server in this file composes an allow-policy because the codes it ' +

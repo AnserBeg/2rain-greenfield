@@ -2109,6 +2109,7 @@ test('the gateway request carries the resolved operation id and nothing from the
   const operation = Object.freeze({
     capabilityId: null,
     confirmation: 'none' as const,
+    inputFields: null,
     intent: 'command' as const,
     label: 'Release',
     operationId: `${FIXTURE_IDS.namespace}:operation.master_release`,

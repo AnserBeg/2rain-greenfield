@@ -51,7 +51,9 @@ test('real Party surface renders roles, creates, and archives/restores through t
     await page.goto(surfaceUrl(fixture.baseUrl, 'party_form'));
     await page.getByLabel('Party Number').fill('P-WEB-004');
     await page.getByLabel('Party Name').fill('Browser-created Party');
-    await page.getByLabel('Party Contact Summary').fill('created@example.test');
+    await page
+      .getByLabel('Party Contact Summary', { exact: true })
+      .fill('created@example.test');
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
     await expect(page.getByRole('status')).toContainText(

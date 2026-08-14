@@ -201,6 +201,15 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Access denied',
     subject: null,
   },
+  OPERATION_INPUT_INVALID: {
+    consequence: 'advisory',
+    detail:
+      'A submitted field value does not match the form input contract in this release.',
+    nextAction: 'Review the form choices, then save again.',
+    placements: ['page'],
+    sentence: 'Form input invalid',
+    subject: null,
+  },
   OPERATION_UNAVAILABLE: {
     consequence: 'blocking',
     detail: 'The semantic operation could not be completed safely.',
@@ -361,6 +370,7 @@ export type QueryDiagnosticCode = (typeof QUERY_DIAGNOSTIC_CODES)[number];
 export const OPERATION_DIAGNOSTIC_CODES = Object.freeze([
   'OPERATION_CONFIRMATION_REQUIRED',
   'OPERATION_CONFIRMATION_STALE',
+  'OPERATION_INPUT_INVALID',
   'OPERATION_PERMISSION_DENIED',
   'OPERATION_UNAVAILABLE',
   'OPERATION_UNSUPPORTED',

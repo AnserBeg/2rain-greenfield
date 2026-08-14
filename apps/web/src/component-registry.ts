@@ -22,6 +22,7 @@ import type {
   CompiledFieldOption,
   CompiledSurfaceDefinition,
   CompiledSurfaceField,
+  CompiledSurfaceInputField,
   CompiledSurfaceOperationBinding,
   CompiledSurfaceSlot,
   SurfaceOperationIntent,
@@ -735,7 +736,7 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${renderFormFields(context.surface, record)}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${renderFormFields(context.surface, operation, record)}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
 }
@@ -1108,24 +1109,79 @@ const ENUM_SELECT_MAXIMUM_OPTIONS = 5;
  * where no native control does, the carrier stays lossless and the refusal is
  * named rather than absorbed.
  */
+/**
+ * The string-only form wire's closed empty-control vocabulary. Exporting the
+ * prefix from the renderer keeps the HTML name and the submission reader on
+ * one spelling; the reader still validates every posted value at runtime.
+ */
+export const FORM_EMPTY_INTENT_PREFIX = 'empty:';
+
 function renderFormFields(
   surface: CompiledSurfaceDefinition,
+  operation: CompiledSurfaceOperationBinding,
   record: SemanticRecordDto | null,
 ): string {
   const fieldsById = new Map(
     (surface.fields ?? []).map((field) => [field.fieldId, field]),
   );
+  const inputFieldsById = new Map(
+    (operation.inputFields ?? []).map((field) => [field.fieldId, field]),
+  );
   return surface.fieldIds
     .map((fieldId, index) => {
+      const value = record ? record.values[fieldId] : undefined;
       const control = renderFormControl(
         fieldsById.get(fieldId),
         fieldId,
         index,
-        record ? record.values[fieldId] : undefined,
+        value,
       );
-      return `<label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control}</label>`;
+      const emptyIntent = renderEmptyIntentControl(
+        inputFieldsById.get(fieldId),
+        fieldId,
+        value,
+        record !== null,
+      );
+      return `<div class="form-field"><label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control}</label>${emptyIntent}</div>`;
     })
     .join('');
+}
+
+/**
+ * A blank control never has to guess between three different mutations.
+ *
+ * - `nothing` omits the field (create: no value stated; update: leave alone),
+ * - `clear` emits JSON null, and
+ * - `emptyText` emits the real text value `""`.
+ *
+ * All are native server-rendered choices. On update, the selected choice is
+ * derived only to preserve the stored state: null/absent stays `nothing`, an
+ * empty text stays `emptyText`, and a non-empty value becomes `clear` only if
+ * the operator also empties its primary control. No field value is invented.
+ */
+function renderEmptyIntentControl(
+  field: CompiledSurfaceInputField | undefined,
+  fieldId: string,
+  value: unknown,
+  updating: boolean,
+): string {
+  if (!field || field.required) return '';
+  const selected =
+    !updating || value === null || value === undefined
+      ? 'nothing'
+      : field.kind === 'textFieldType' && value === ''
+        ? 'emptyText'
+        : 'clear';
+  const option = (intent: string, label: string): string =>
+    `<option value="${intent}"${selected === intent ? ' selected' : ''}>${label}</option>`;
+  const options = [
+    option('nothing', updating ? 'Leave unchanged' : 'No value'),
+    ...(updating ? [option('clear', 'Clear stored value')] : []),
+    ...(field.kind === 'textFieldType'
+      ? [option('emptyText', 'Save an empty text value')]
+      : []),
+  ];
+  return `<label class="form-empty-intent"><span>When ${escapeHtml(fieldLabel(fieldId))} is blank</span><select name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" data-empty-intent-for="${escapeHtml(fieldId)}" autocomplete="off">${options.join('')}</select></label>`;
 }
 
 function renderFormControl(

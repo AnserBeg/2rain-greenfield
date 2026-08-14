@@ -13,6 +13,7 @@ import type { SemanticQueryGateway } from '../../../packages/runtime/src/semanti
 import { SHARED_LIST_QUERY_VERSION } from '../../../packages/runtime/src/list-behavior/index.js';
 
 import {
+  FORM_EMPTY_INTENT_PREFIX,
   renderRegisteredSurfaceComponent,
   surfaceSupportsRuntimeIntent,
   type SurfaceDataRenderState,
@@ -39,6 +40,7 @@ import {
   type CompiledNavigationTree,
   type CompiledSurfaceDataBinding,
   type CompiledSurfaceDefinition,
+  type CompiledSurfaceInputField,
   type SurfaceOperationIntent,
 } from './surface-contract.js';
 
@@ -267,7 +269,15 @@ export async function submitSurfaceRuntimeIntent(
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
   const intent = operation.intent;
-  const input = operationInput(selection.selected, intent, submission);
+  let input: SurfaceOperationInput;
+  try {
+    input = operationInput(selection.selected, operation, intent, submission);
+  } catch (error) {
+    if (error instanceof InvalidSurfaceSubmissionError) {
+      return operationDiagnostic('OPERATION_INPUT_INVALID', 422);
+    }
+    throw error;
+  }
   if (
     operation.confirmation === 'humanRequired' &&
     typeof submission.confirmationGrant !== 'string'
@@ -692,19 +702,11 @@ function relationInput(
 
 function operationInput(
   surface: CompiledSurfaceDefinition,
+  operation: CompiledSurfaceDataBinding['operations'][number],
   intent: SurfaceOperationIntent,
   submission: SurfaceRuntimeSubmission,
-): Record<string, number | string | Readonly<Record<string, string>>> {
-  const values = Object.freeze(
-    Object.fromEntries(
-      surface.fieldIds
-        .map((fieldId) => [fieldId, submission[`value:${fieldId}`]] as const)
-        .filter(
-          (entry): entry is readonly [string, string] =>
-            typeof entry[1] === 'string',
-        ),
-    ),
-  );
+): SurfaceOperationInput {
+  const values = fieldInput(surface, operation, intent, submission);
   if (intent === 'create') {
     // ADR-0052: relations travel as a sibling of `values`, keyed by relation id
     // and carrying record ids as strings. `parseMutationInput` reads them
@@ -729,6 +731,131 @@ function operationInput(
   return intent === 'update'
     ? { expectedRevision, patch: values, recordId }
     : { expectedRevision, recordId };
+}
+
+type SurfaceOperationInput = Record<
+  string,
+  RuntimeViewContract.ImmutableJsonValue
+>;
+
+type FormFieldMutation =
+  | { readonly kind: 'clear' }
+  | { readonly kind: 'nothing' }
+  | {
+      readonly kind: 'set';
+      readonly value: boolean | string;
+    };
+
+const EMPTY_INTENTS = Object.freeze(['clear', 'emptyText', 'nothing'] as const);
+type EmptyIntent = (typeof EMPTY_INTENTS)[number];
+
+class InvalidSurfaceSubmissionError extends Error {
+  override readonly name = 'InvalidSurfaceSubmissionError';
+}
+
+/**
+ * The form body is strings only. This is the single seam that turns those
+ * validated strings into the provider's JSON value domain.
+ *
+ * Its result is discriminated before the object is built, so `nothing`,
+ * `clear`, and `set` cannot collapse into the same provider input. The raw
+ * request still needs runtime validation because it is untrusted bytes; a
+ * malformed boolean or empty-intent spelling is refused before invocation.
+ */
+function fieldInput(
+  surface: CompiledSurfaceDefinition,
+  operation: CompiledSurfaceDataBinding['operations'][number],
+  intent: SurfaceOperationIntent,
+  submission: SurfaceRuntimeSubmission,
+): Readonly<Record<string, RuntimeViewContract.ImmutableJsonValue>> {
+  const fields = new Map(
+    (operation.inputFields ?? []).map((field) => [field.fieldId, field]),
+  );
+  const entries: Array<
+    readonly [string, RuntimeViewContract.ImmutableJsonValue]
+  > = [];
+  for (const fieldId of surface.fieldIds) {
+    const field = fields.get(fieldId);
+    const mutation = formFieldMutation(
+      field,
+      intent,
+      submission[`value:${fieldId}`],
+      submission[`${FORM_EMPTY_INTENT_PREFIX}${fieldId}`],
+    );
+    if (mutation.kind === 'nothing') continue;
+    entries.push([fieldId, mutation.kind === 'clear' ? null : mutation.value]);
+  }
+  return Object.freeze(Object.fromEntries(entries));
+}
+
+function formFieldMutation(
+  field: CompiledSurfaceInputField | undefined,
+  intent: SurfaceOperationIntent,
+  rawValue: string | undefined,
+  rawEmptyIntent: string | undefined,
+): FormFieldMutation {
+  if (rawValue === undefined) {
+    if (rawEmptyIntent !== undefined) invalidFormSubmission();
+    return { kind: 'nothing' };
+  }
+
+  if (!field) {
+    if (rawEmptyIntent !== undefined) invalidFormSubmission();
+    return { kind: 'set', value: rawValue };
+  }
+
+  const emptyIntent = readEmptyIntent(field, intent, rawEmptyIntent);
+  if (rawValue !== '') {
+    if (field.kind !== 'booleanFieldType') {
+      return { kind: 'set', value: rawValue };
+    }
+    if (rawValue === 'true') return { kind: 'set', value: true };
+    if (rawValue === 'false') return { kind: 'set', value: false };
+    invalidFormSubmission();
+  }
+
+  if (field.required) {
+    if (field.kind === 'textFieldType') {
+      return { kind: 'set', value: '' };
+    }
+    invalidFormSubmission();
+  }
+  switch (emptyIntent) {
+    case 'nothing':
+      return { kind: 'nothing' };
+    case 'clear':
+      return { kind: 'clear' };
+    case 'emptyText':
+      return { kind: 'set', value: '' };
+  }
+  invalidFormSubmission();
+}
+
+function readEmptyIntent(
+  field: CompiledSurfaceInputField,
+  operationIntent: SurfaceOperationIntent,
+  value: string | undefined,
+): EmptyIntent | null {
+  if (field.required) {
+    if (value !== undefined) invalidFormSubmission();
+    return null;
+  }
+  if (!EMPTY_INTENTS.includes(value as EmptyIntent)) {
+    invalidFormSubmission();
+  }
+  if (
+    (value === 'clear' && operationIntent !== 'update') ||
+    (value === 'emptyText' && field.kind !== 'textFieldType')
+  ) {
+    invalidFormSubmission();
+  }
+  return value as EmptyIntent;
+}
+
+function invalidFormSubmission(): never {
+  throw new InvalidSurfaceSubmissionError(
+    'form field submission does not match its pinned input contract',
+  );
 }
 
 // The wire's `intent` parser is deliberately gone rather than kept alongside
@@ -778,16 +905,13 @@ function boundOperation(
  */
 export function semanticOperationRequestFor(
   operation: CompiledSurfaceDataBinding['operations'][number],
-  input: Record<string, number | string | Readonly<Record<string, string>>>,
+  input: SurfaceOperationInput,
   confirmationGrant: string | null,
   idempotencyKey: string,
 ): {
   readonly confirmationGrant: string | null;
   readonly idempotencyKey: string;
-  readonly input: Record<
-    string,
-    number | string | Readonly<Record<string, string>>
-  >;
+  readonly input: SurfaceOperationInput;
   readonly operationId: string;
   readonly schemaVersion: typeof SEMANTIC_OPERATION_REQUEST_VERSION;
 } {
@@ -1189,7 +1313,9 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .key-facts-panel{grid-column:span 12}
 .record-fields dd{margin:var(--space-1) 0 0}
 .form-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4);margin:var(--space-4) 0}
+.form-field{display:grid;align-content:start;gap:var(--space-2)}
 .form-fields label{display:grid;gap:var(--space-1)}
+.form-fields .form-empty-intent{padding-top:var(--space-1)}
 .form-fields input,.form-fields select{width:100%;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .form-fields input[type="checkbox"]{width:24px;height:24px;min-height:24px;padding:0;justify-self:start;margin:10px 0}
 .form-fields input:focus-visible,.form-fields select:focus-visible,button:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
