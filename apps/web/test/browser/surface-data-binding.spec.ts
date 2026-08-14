@@ -8,11 +8,13 @@ import {
   normalizeApplicationPackage,
 } from '@north-star/canonical-model';
 import {
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   compileApplication,
   type CompileSuccess,
+  type CompilerSemanticProfileVersion,
   type ContentAddressedArtifact,
 } from '@north-star/compiler';
 import {
@@ -76,6 +78,9 @@ let missingDisplayRecordId: string;
 let fieldKindServer: Server;
 let fieldKindUrl: string;
 let fieldKindExecutor: BrowserFixtureExecutor;
+let adoptedFieldKindServer: Server;
+let adoptedFieldKindUrl: string;
+let adoptedFieldKindExecutor: BrowserFixtureExecutor;
 
 test.beforeAll(async () => {
   const compiled = compileFixture();
@@ -118,6 +123,33 @@ test.beforeAll(async () => {
     },
   );
   fieldKindUrl = await listen(fieldKindServer);
+
+  // The shipped profile-v1 shape is intentionally mixed: operation input
+  // fields are present, while surface field kinds are not. That is the path a
+  // real form uses today, so it gets its own server rather than being inferred
+  // from the profile-v2 renderer fixture above.
+  const adoptedFieldKindPolicy = allowPolicy();
+  adoptedFieldKindExecutor = new BrowserFixtureExecutor(null);
+  const adoptedFieldKindMediation = new SemanticOperationMediationAuthority();
+  adoptedFieldKindServer = createSurfaceRuntimeServer(
+    runtimeEntry(
+      compileEveryFieldKindFixture(COMPILER_SEMANTIC_PROFILE_V1_VERSION),
+      adoptedFieldKindPolicy,
+    ),
+    {
+      operationGateway: new SemanticOperationGateway(
+        adoptedFieldKindPolicy,
+        adoptedFieldKindExecutor,
+        adoptedFieldKindMediation,
+      ),
+      operationMediation: adoptedFieldKindMediation,
+      queryGateway: new SemanticQueryGateway(
+        adoptedFieldKindPolicy,
+        adoptedFieldKindExecutor,
+      ),
+    },
+  );
+  adoptedFieldKindUrl = await listen(adoptedFieldKindServer);
 });
 
 test('record title falls back to short identity when its compiled display value is absent', async ({
@@ -142,6 +174,11 @@ test.afterAll(async () => {
   });
   await new Promise<void>((resolve, reject) => {
     fieldKindServer.close((error) => (error ? reject(error) : resolve()));
+  });
+  await new Promise<void>((resolve, reject) => {
+    adoptedFieldKindServer.close((error) =>
+      error ? reject(error) : resolve(),
+    );
   });
 });
 
@@ -440,6 +477,50 @@ test('a create sets a boolean and omits a blank optional date', async ({
   assert.equal(Object.hasOwn(stored.values, EVERY_KIND_FIELD_IDS.due), false);
 });
 
+test('the adopted profile-v1 bare form converts a boolean and omits a blank date', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  await page.goto(
+    `${adoptedFieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+  );
+  await page.getByLabel('Master Name').fill('Adopted profile wire');
+  await page.getByLabel('Master Number').fill('WIRE-V1-001');
+  const active = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.active}"]`);
+  const due = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.due}"]`);
+  await expect(active).toHaveJSProperty('type', 'text');
+  await expect(due).toHaveJSProperty('type', 'text');
+  await active.fill('true');
+  await expect(
+    page.locator(`[name="empty:${EVERY_KIND_FIELD_IDS.due}"]`),
+  ).toHaveValue('nothing');
+
+  const posted = capturePost(page);
+  const before = adoptedFieldKindExecutor.providerVerdicts.length;
+  await page.getByRole('button', { name: 'Save' }).click();
+  const params = new URLSearchParams(await posted);
+
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.active}`)).toBe('true');
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.due}`)).toBe('');
+  expect(params.get(`empty:${EVERY_KIND_FIELD_IDS.due}`)).toBe('nothing');
+  expect(adoptedFieldKindExecutor.providerVerdicts.slice(before)).toEqual([
+    {
+      accepted: true,
+      code: null,
+      stage: 'operation-input',
+      subjectId: null,
+    },
+  ]);
+  await expect(page.getByRole('status')).toContainText('Create complete');
+
+  const stored = adoptedFieldKindExecutor.readRecord(
+    String(params.get('recordId')),
+  );
+  assert.ok(stored);
+  assert.equal(stored.values[EVERY_KIND_FIELD_IDS.active], true);
+  assert.equal(Object.hasOwn(stored.values, EVERY_KIND_FIELD_IDS.due), false);
+});
+
 test('an unrelated edit preserves both stored null and absent optional values', async ({
   page,
 }) => {
@@ -455,8 +536,80 @@ test('an unrelated edit preserves both stored null and absent optional values', 
 
   const stored = fieldKindExecutor.readRecord(recordId);
   assert.ok(stored);
+  assert.equal(
+    stored.values[FIXTURE_IDS.fieldIds.parentName],
+    'After unrelated edit',
+  );
   assert.equal(stored.values[EVERY_KIND_FIELD_IDS.active], null);
   assert.equal(Object.hasOwn(stored.values, EVERY_KIND_FIELD_IDS.due), false);
+});
+
+test('typed controls preserve and disclose every stored value they cannot display', async ({
+  page,
+}) => {
+  const unavailable = {
+    [EVERY_KIND_FIELD_IDS.active]: 'legacy-boolean',
+    [EVERY_KIND_FIELD_IDS.count]: 'not-a-number',
+    [EVERY_KIND_FIELD_IDS.due]: '2026-02-30',
+    [EVERY_KIND_FIELD_IDS.grade]: `${FIXTURE_IDS.namespace}:option.grade_retired`,
+    [EVERY_KIND_FIELD_IDS.preciseTime]: '25:00:00',
+  } as const;
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  const recordId = fieldKindExecutor.seedTypedValues({
+    [FIXTURE_IDS.fieldIds.parentName]: 'Before unavailable preservation',
+    [FIXTURE_IDS.fieldIds.parentNumber]: 'UNAVAILABLE-001',
+    ...unavailable,
+  });
+  await page.goto(formUrl(recordId));
+
+  for (const [fieldId, value] of Object.entries(unavailable)) {
+    const control = page.locator(`[name="value:${fieldId}"]`);
+    const emptyIntent = page.locator(`[name="empty:${fieldId}"]`);
+    await expect(control, fieldId).toHaveValue('');
+    await expect(emptyIntent, fieldId).toHaveValue('nothing');
+    expect(
+      await emptyIntent
+        .locator('option')
+        .evaluateAll((options) =>
+          options.map((option) => (option as HTMLOptionElement).value),
+        ),
+      fieldId,
+    ).toEqual(['nothing', 'clear']);
+    await expect(
+      page.locator(`[data-unavailable-value-for="${fieldId}"]`),
+      fieldId,
+    ).toContainText(JSON.stringify(value));
+  }
+
+  await page.getByLabel('Master Name').fill('After unavailable preservation');
+  const posted = capturePost(page);
+  const before = fieldKindExecutor.providerVerdicts.length;
+  await page.getByRole('button', { name: 'Save' }).click();
+  const params = new URLSearchParams(await posted);
+
+  for (const fieldId of Object.keys(unavailable)) {
+    expect(params.get(`value:${fieldId}`), fieldId).toBe('');
+    expect(params.get(`empty:${fieldId}`), fieldId).toBe('nothing');
+  }
+  expect(fieldKindExecutor.providerVerdicts.slice(before)).toEqual([
+    {
+      accepted: true,
+      code: null,
+      stage: 'operation-input',
+      subjectId: null,
+    },
+  ]);
+  await expect(page.getByRole('status')).toContainText('Update complete');
+
+  const stored = fieldKindExecutor.readRecord(recordId);
+  assert.ok(stored);
+  assert.equal(
+    stored.values[FIXTURE_IDS.fieldIds.parentName],
+    'After unavailable preservation',
+  );
+  for (const [fieldId, value] of Object.entries(unavailable)) {
+    assert.equal(stored.values[fieldId], value, fieldId);
+  }
 });
 
 test('blank plus explicit clear sends null while blank text can remain a real value', async ({
@@ -469,6 +622,9 @@ test('blank plus explicit clear sends null while blank text can remain a real va
   });
   await page.goto(formUrl(recordId));
   await page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.due}"]`).fill('');
+  await page
+    .locator(`[name="empty:${EVERY_KIND_FIELD_IDS.due}"]`)
+    .selectOption('clear');
   await page
     .locator(`[name="empty:${FIXTURE_IDS.fieldIds.parentNotes}"]`)
     .selectOption('emptyText');
@@ -556,19 +712,19 @@ test('an optional boolean renders and submits three states, with absent and null
     value: [''],
   });
   expect(await submitted(false, null)).toEqual({
-    emptyIntent: ['clear'],
+    emptyIntent: ['nothing'],
     stored: false,
     value: ['false'],
   });
   expect(await submitted(true, null)).toEqual({
-    emptyIntent: ['clear'],
+    emptyIntent: ['nothing'],
     stored: true,
     value: ['true'],
   });
   // And turning one off submits `false` rather than omitting the field, which is
   // what a checkbox could not express.
   expect(await submitted(true, 'false')).toEqual({
-    emptyIntent: ['clear'],
+    emptyIntent: ['nothing'],
     stored: false,
     value: ['false'],
   });
@@ -1838,7 +1994,9 @@ function compileFixture(
   return result as CompileSuccess;
 }
 
-function compileEveryFieldKindFixture(): CompileSuccess {
+function compileEveryFieldKindFixture(
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion = COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+): CompileSuccess {
   const authored = everyFieldKindModule();
   exposeRequiredMasterNumber(authored);
   const normalized = normalizeApplicationPackage(authored);
@@ -1852,7 +2010,7 @@ function compileEveryFieldKindFixture(): CompileSuccess {
     ),
     profile: {
       ...MODULE_COMPILER_PROFILE,
-      compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+      compilerSemanticProfileVersion,
       languageVersion: normalized.languageVersion,
       normalizationProfileVersion: normalized.normalizationProfileVersion,
     },

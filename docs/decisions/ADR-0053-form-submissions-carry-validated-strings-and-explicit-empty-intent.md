@@ -47,6 +47,14 @@ necessarily **detectable**, not unrepresentable. The closed field-kind union is
 read from the operation contract; the surface does not infer it and no compiler
 profile version changes.
 
+The adopted profile-v1 release shape deliberately mixes two authorities:
+operation input fields are present because they are gated on whether an
+operation writes fields, while per-surface field metadata is absent until
+compiler-semantic profile v2. A profile-v1 form therefore renders lossless bare
+text inputs but still renders the companion intent and converts booleans from
+the selected operation contract. Profile v2 changes the control, not the wire
+authority.
+
 ### 2. A blank optional control carries an explicit intent
 
 Every rendered optional field has a native companion `<select>` named
@@ -72,12 +80,20 @@ untrusted input, so its rejection remains **detectable**.
 
 The select is server-rendered and needs none of ADR-0036 §2's four authorised
 client behaviours. It never materialises a field default. Its selected option
-preserves only observed state: an absent or null value selects `nothing`, stored
-empty text selects `emptyText`, and a non-empty stored value selects `clear`
-only as the stated consequence *if the primary control is made blank*. A
-non-empty primary value remains `set` regardless of that conditional choice.
-Thus editing an unrelated field neither turns null into false nor clears a
-stored value.
+preserves only observed state: stored empty text selects `emptyText`; every
+other stored value defaults to `nothing`; and `clear` occurs only when the
+operator explicitly selects it. A non-empty primary value remains `set`
+regardless of the conditional choice beside it.
+
+This rule applies to the whole class of typed controls, not to one kind. If a
+profile-v2 boolean, short enum, date, time or number control cannot faithfully
+represent a stored value, the primary control is rendered blank, the exact
+stored JSON value is shown beside it, and its optional-field companion remains
+on `nothing`. Choosing a valid replacement is `set`; choosing `clear` remains
+available for an optional field. A required field that cannot be represented
+has no clear intent and is refused rather than rewritten. Thus editing an
+unrelated field neither invents a value nor clears one the control could not
+carry.
 
 ### 3. Refusal is before invocation and cannot partially apply
 
@@ -96,6 +112,10 @@ persist the parser's returned patch rather than the pre-validated request.
 - A native server-rendered form can set Yes or No, omit a blank optional
   non-text value, explicitly clear an optional value on update, and preserve
   empty text as text.
+- Profile-v1 bare inputs exercise the same operation-contract normalisation
+  today. The unavailable-typed-control case is unreachable at v1 and becomes
+  reachable when profile-v2 surface field metadata is adopted; it is therefore
+  controlled explicitly under v2 before adoption.
 - The selected operation's pinned input contract now reaches the web binding as
   a narrow list of field id, field kind and requiredness. It is derived from the
   existing operation catalog and changes no compiled bytes.

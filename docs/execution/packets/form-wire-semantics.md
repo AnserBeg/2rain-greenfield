@@ -46,14 +46,21 @@ invocation. Required non-text blanks are also refused. Required text and the
 explicit `emptyText` intent preserve `""` as a real value.
 
 The renderer uses only native server-rendered controls. It does not materialise
-a default, add script, or change compiler-semantic profile adoption.
+a default, add script, or change compiler-semantic profile adoption. A stored
+value that a profile-v2 typed control cannot carry is shown truthfully beside a
+blank primary control and defaults to `nothing`, never `clear`; clearing remains
+an explicit operator choice. This failure class is unreachable under the
+adopted profile v1's bare text controls and becomes reachable when the already
+queued profile-v2 adoption exposes typed controls.
 
 ## What changed
 
 - `surface-contract.ts` carries the field id, kind and requiredness from the
   already-pinned operation input contract into the selected web binding.
 - `component-registry.ts` renders the native optional-field companion without
-  inventing a field value.
+  inventing a field value. Update forms default every non-empty optional value
+  to `nothing`; typed controls that cannot display a stored value render blank
+  plus the exact stored JSON value as visible server-side context.
 - `surface-runtime.ts` normalises the string carrier once, before building the
   immutable provider input. A malformed field refuses the whole submission
   before the gateway can be called.
@@ -101,13 +108,15 @@ read-back in the fixture executor.
 |---|---|
 | String wire becomes a provider-acceptable native boolean | `the string wire is normalised before the real provider parser admits it` observes raw `"true"`, an accepted provider verdict, stored native `true`, and an omitted blank optional quantity. |
 | The user's create payoff works | `a create sets a boolean and omits a blank optional date` fills required values, chooses Yes, leaves the optional date blank, observes provider acceptance, rereads native `true`, and proves the date key is absent. |
-| An unrelated edit cannot rewrite null or absence | `an unrelated edit preserves both stored null and absent optional values` rereads both states after a different text field changes. |
+| The adopted profile-v1 seam works without typed surface metadata | `the adopted profile-v1 bare form converts a boolean and omits a blank date` observes text inputs for both fields, a working `empty:` companion, raw `"true"`, provider acceptance, stored native `true`, and no date key. |
+| An unrelated edit cannot rewrite null or absence | `an unrelated edit preserves both stored null and absent optional values` rereads both states and the exact changed text value after the accepted update. |
+| A typed control cannot destroy a value it cannot display | `typed controls preserve and disclose every stored value they cannot display` seeds a retired short-enum option plus unavailable boolean, date, time and number values; observes five blank live controls, five exact stored-value disclosures, five `nothing` intents, provider acceptance, the unrelated text change and all five original stored values. |
 | Clear and real empty text remain distinct | `blank plus explicit clear sends null while blank text can remain a real value` rereads `null` and `""` from one accepted update. |
 | Optional boolean state is not defaulted | `an optional boolean renders and submits three states, with absent and null identical` observes the raw value, its empty intent, and stored value for absent, null, false and true, plus true-to-false. |
-| Malformed input refuses atomically | `malformed boolean and empty intent are refused beside admitted twins` mutates one rendered property at a time: malformed boolean, unknown intent, missing companion and entire optional subject absent each return 422 before the provider verdict count changes; valid boolean and `nothing` twins are admitted. The pre-existing stored name stays unchanged. |
+| Malformed input refuses before provider invocation | `malformed boolean and empty intent are refused beside admitted twins` mutates one rendered property at a time: malformed boolean, unknown intent, missing companion and entire optional subject absent each return 422 before the provider verdict count changes; valid boolean and `nothing` twins are admitted. The fixture starts with no values, so this control does not claim preservation of a pre-existing name. |
 | The double cannot manufacture success | `a provider refusal cannot be manufactured into browser success` omits one required value from an otherwise rendered create, observes `MODULE_REQUIRED_FIELD_MISSING`, HTTP 422, no success status and no record; the neighbouring complete creates observe accepted provider verdicts and persisted records. |
 
-The focused browser file is 18/18 green. The matrix executes the same file and
+The focused browser file is 20/20 green. The matrix executes the same file and
 the composed-application bridges in its 79/79 browser result.
 
 ## Negative-control replay
@@ -130,6 +139,32 @@ restored before the matrix and are not counted as committed evidence.
 Each replay changed one relevant property and was required to fail for the
 intended reason. Because the writer chose them, the independent Critical arms
 must still challenge the controls rather than inherit this table.
+
+## Round-1 review adjudication
+
+The fresh-naive Codex xhigh arm reviewed
+`292934ba813e39c907fef1c2e78ee4a726d8e80c` and returned `REVISE`. The
+orchestrator upheld all three findings:
+
+1. **Production, widened:** a short enum whose historical value is absent from
+   current options was one member of a larger class. Profile-v2 boolean, date,
+   time and number controls can also sanitize a stored value to blank while the
+   companion's old default selected `clear`, so an unrelated Save emitted
+   `null`. Round 2 changes the default semantics for the whole optional-field
+   class and discloses every unavailable stored value; it does not special-case
+   enums.
+2. **Control:** all typed-value payoffs compiled under unadopted profile v2, so
+   none observed the adopted v1 combination of bare text controls with pinned
+   operation input fields. Round 2 adds that exact browser-to-parser-to-persisted
+   control.
+3. **Control/prose:** the unrelated-edit control did not assert that its text
+   edit persisted, and this record claimed a stored name survived malformed
+   submissions although that fixture seeded no name. Round 2 adds the persisted
+   text assertion and narrows the malformed-input claim to its observation.
+
+The required-number fixture repair, the refusal-honouring double, the two test
+bridges, the internal unrepresentability ruling and removal of the old stand-in
+were all upheld and were not reopened.
 
 ## Gates
 

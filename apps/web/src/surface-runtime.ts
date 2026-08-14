@@ -1318,6 +1318,8 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .form-field{display:grid;align-content:start;gap:var(--space-2)}
 .form-fields label{display:grid;gap:var(--space-1)}
 .form-fields .form-empty-intent{padding-top:var(--space-1)}
+.form-unavailable-value{display:block;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken);color:var(--ink-muted);font-size:var(--text-body);line-height:1.45}
+.form-unavailable-value code{color:var(--ink);overflow-wrap:anywhere}
 .form-fields input,.form-fields select{width:100%;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .form-fields input[type="checkbox"]{width:24px;height:24px;min-height:24px;padding:0;justify-self:start;margin:10px 0}
 .form-fields input:focus-visible,.form-fields select:focus-visible,button:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
