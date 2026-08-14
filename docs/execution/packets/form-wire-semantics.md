@@ -6,10 +6,10 @@ Tier: Critical
 
 Status: evidence_ready
 
-Base: `23e7ba3` (rebased from the original `adb5f38` cut as `origin/main`
-moved through four documentation/doctrine commits)
+Base: `d5159dd` (the round-2 branch merged current `origin/main` after the
+original `adb5f38` cut; the intervening commits are documentation/doctrine)
 
-Matrix SHA: `1a06b979958a962b6daff85b58969456b8de766b`
+Round-2 matrix SHA: `587aefefba2d5a7f23fcd2067841fd80afb1262b`
 
 ## Goal
 
@@ -177,7 +177,7 @@ Focused development gates:
 - `pnpm typecheck` — green.
 - `pnpm test:integration` — 137/137 green.
 - `pnpm exec playwright test --config apps/web/playwright.config.ts
-  apps/web/test/browser/surface-data-binding.spec.ts --reporter=list` — 18/18
+  apps/web/test/browser/surface-data-binding.spec.ts --reporter=list` — 20/20
   green.
 - focused composed-application Party and light/dark focus-ring replay — 3/3
   green, including 120/120 painted ring measurements in each scheme.
@@ -206,6 +206,41 @@ The `TEST_GATE_LOCK_BUSY` strings inside that log belong to the architecture
 suite's successful bounded-deadline negative controls; the actual matrix
 acquired and released its `form-wire-semantics` slot normally.
 
+### Round-2 matrix
+
+Round 2 first reached two honest environmental refusals at the unchanged SHA.
+The first acquisition stopped before any gate because the preceding
+`profile-v2-adoption` matrix had left its timed-out Catalog fixture container
+and owner process alive. The exact ephemeral container named by the guard was
+inspected and removed, and the bounded owner process was allowed to exit. The
+next attempt reached the performance gate but returned
+`COMPILE_BUDGET_INDETERMINATE`: another lane had begun a direct browser rerun
+outside the repository lock, and observed CPU idle was 80.8%, below the 90%
+floor. The gate instructed an exclusive rerun. After that browser process
+exited, fresh CPU samples read 95--99% idle.
+
+The full rerun started and ended with HEAD pinned to
+`587aefefba2d5a7f23fcd2067841fd80afb1262b` and passed:
+
+```text
+PERFORMANCE_GATE_PASS_SHA=587aefefba2d5a7f23fcd2067841fd80afb1262b
+compile-budget: best-of-5 cpu_ms=3031.3, budget_ms=5000, cpu_idle_pct=95.8
+test:postgres: 197/197 pass
+test:browser: 81/81 pass
+reachability: PASS (104/104 test files; 10 producer artifacts)
+security scans: PASS
+FULL_MATRIX_PASS_SHA=587aefefba2d5a7f23fcd2067841fd80afb1262b
+```
+
+The charter asked for `MATRIX_EXIT` from inside the log. The current
+`scripts/run-matrix.sh` does not emit that token anywhere; `rg MATRIX_EXIT` over
+the script and log returned zero. It appends repeated attempts for one SHA, so
+the same log honestly contains the earlier `PERFORMANCE_GATE_FAILED` followed
+by the later pass. The authoritative final markers are the pinned
+`PERFORMANCE_GATE_PASS_SHA` and `FULL_MATRIX_PASS_SHA` above, and the matrix
+process itself exited 0. This instrumentation mismatch is appended to the
+existing `matrix-evidence-truncated` queue row rather than fixed in this packet.
+
 While that run was in flight, `origin/main` advanced from `5ce4b7b` to
 `23e7ba3` through two more documentation/doctrine commits. The unpublished and
 unreviewed packet branch was rebased as `git-workflow` requires. The executable
@@ -217,9 +252,10 @@ changed doctrine was re-read before this record and the review prompt were
 finished.
 
 The checkpoint-only `bash scripts/check-parked-work.sh` governance check was
-also run after the rebase. It returns `parked-work: FAIL` on six pre-existing
+run again after the round-2 current-main merge. It returns `parked-work: FAIL`
+on six pre-existing
 stale branches: `packet/proj-disc`, `packet/ps-0`, `packet/ps-1`, `packet/ps-2`,
-`packet/pur-1` and `packet/u5-design` (5–7 days old and 242–325 commits behind).
+`packet/pur-1` and `packet/u5-design` (5–7 days old and 243–326 commits behind).
 This packet is current at zero behind. The stale branches need an orchestrator
 decision to integrate, rescue or delete; this writer did not mutate another
 packet's refs to make the checkpoint report green.
@@ -243,22 +279,24 @@ surfaces then stop at the already-routed `record:activity`
 lists expose no usable Edit/New path. That limitation belongs to the existing
 G2-P5d-c remaining-anatomy row and was not widened into this packet.
 
-The best available under-ten-minute payoff check is therefore the real browser
-form fixture:
+The best available under-ten-minute round-2 check is therefore the real browser
+form fixture, exercising both the adopted v1 seam and the future-v2 preservation
+case:
 
 ```bash
 cd /home/rvham/2rain-greenfield-formwire
 pnpm exec playwright test --config apps/web/playwright.config.ts \
   apps/web/test/browser/surface-data-binding.spec.ts \
-  --grep "a create sets a boolean and omits a blank optional date" \
+  --grep "adopted profile-v1 bare form|typed controls preserve" \
   --reporter=list
 ```
 
-Expected: `1 passed`. The test fills both required text fields, chooses Yes,
-leaves Due blank with `No value`, presses Save, observes `Create complete`, an
-accepted real provider-parser verdict, native `true` in the stored record and
-no stored Due key. It proves the generic form wire; it does **not** prove a
-seeded purchase-order or composed-product journey.
+Expected: `2 passed`. The v1 test submits raw `"true"` from a bare text input,
+leaves Due blank, observes real-parser acceptance, native stored `true`, and no
+Due key. The v2 test shows five exact unavailable stored values, edits a
+different field, observes provider acceptance, and rereads all five values
+unchanged. These prove the generic form path; they do **not** prove a seeded
+purchase-order or composed-product journey.
 
 For visual inspection of the current product shell:
 
@@ -315,7 +353,11 @@ triggers again after acceptance/integration.
 
 ## Review state
 
-No independent arm has reviewed this candidate yet. Critical cadence requires
-a fresh naive Codex xhigh arm followed, after any correction and a fresh freeze,
-by an independent Fable max arm on the identical SHA. Any executable change
-invalidates the matrix and prior review evidence.
+Round 1's fresh-naive Codex xhigh arm returned `REVISE` on
+`292934ba813e39c907fef1c2e78ee4a726d8e80c`; its three upheld findings and their
+round-2 corrections are recorded above. No independent arm has reviewed the
+round-2 candidate yet. Critical cadence requires a new fresh-naive Codex xhigh
+arm on the final frozen SHA, followed only after a Codex pass by an independent
+Fable max arm on the identical SHA. This lane writes that prompt and stops; it
+does not run its own review. Any executable change invalidates the matrix and
+prior review evidence.
