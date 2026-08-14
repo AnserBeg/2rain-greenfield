@@ -575,10 +575,15 @@ test('typed controls preserve and disclose every stored value they cannot displa
         ),
       fieldId,
     ).toEqual(['nothing', 'clear']);
-    await expect(
-      page.locator(`[data-unavailable-value-for="${fieldId}"]`),
+    const disclosure = page.locator(
+      `[data-unavailable-value-for="${fieldId}"]`,
+    );
+    await expect(disclosure, fieldId).toContainText(JSON.stringify(value));
+    assert.equal(
+      await control.getAttribute('aria-describedby'),
+      await disclosure.getAttribute('id'),
       fieldId,
-    ).toContainText(JSON.stringify(value));
+    );
   }
 
   await page.getByLabel('Master Name').fill('After unavailable preservation');

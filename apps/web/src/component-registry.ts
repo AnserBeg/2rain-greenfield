@@ -1139,9 +1139,9 @@ function renderFormFields(
         record !== null,
       );
       const unavailableValue = control.storedValueUnavailable
-        ? renderUnavailableStoredValue(fieldId, value)
+        ? renderUnavailableStoredValue(fieldId, index, value)
         : '';
-      return `<div class="form-field"><label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control.html}${unavailableValue}</label>${emptyIntent}</div>`;
+      return `<div class="form-field"><label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
     })
     .join('');
 }
@@ -1213,7 +1213,7 @@ function renderFormControl(
   // relying on each browser to sanitize the value after parsing the attribute.
   const renderedValue = storedValueUnavailable ? undefined : value;
   const current = renderInputValue(renderedValue);
-  const kind = ` data-field-kind="${field.kind}"`;
+  const kind = ` data-field-kind="${field.kind}"${storedValueUnavailable ? ` aria-describedby="${unavailableStoredValueId(index)}"` : ''}`;
   const html = (() => {
     switch (field.kind) {
       case 'enumFieldType':
@@ -1323,9 +1323,17 @@ function nativeNumberValue(value: string): boolean {
   );
 }
 
-function renderUnavailableStoredValue(fieldId: string, value: unknown): string {
+function unavailableStoredValueId(index: number): string {
+  return `surface-field-unavailable-${String(index)}`;
+}
+
+function renderUnavailableStoredValue(
+  fieldId: string,
+  index: number,
+  value: unknown,
+): string {
   const encoded = escapeHtml(JSON.stringify(value) ?? String(value));
-  return `<small class="form-unavailable-value" data-unavailable-value-for="${escapeHtml(fieldId)}"><strong>Stored value unavailable in this control:</strong> <code>${encoded}</code>. It will be left unchanged unless you choose a replacement or explicitly clear it.</small>`;
+  return `<small id="${unavailableStoredValueId(index)}" class="form-unavailable-value" data-unavailable-value-for="${escapeHtml(fieldId)}"><strong>Stored value unavailable in this control:</strong> <code>${encoded}</code>. It will be left unchanged unless you choose a replacement or explicitly clear it.</small>`;
 }
 
 /**
