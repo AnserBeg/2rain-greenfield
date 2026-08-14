@@ -177,6 +177,14 @@ therefore observes the same executable bytes now proposed for review; the
 changed doctrine was re-read before this record and the review prompt were
 finished.
 
+The checkpoint-only `bash scripts/check-parked-work.sh` governance check was
+also run after the rebase. It returns `parked-work: FAIL` on six pre-existing
+stale branches: `packet/proj-disc`, `packet/ps-0`, `packet/ps-1`, `packet/ps-2`,
+`packet/pur-1` and `packet/u5-design` (5–7 days old and 242–325 commits behind).
+This packet is current at zero behind. The stale branches need an orchestrator
+decision to integrate, rescue or delete; this writer did not mutate another
+packet's refs to make the checkpoint report green.
+
 ## Test it yourself
 
 There is no honest composed-application click path that demonstrates both
