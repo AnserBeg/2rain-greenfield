@@ -80,6 +80,16 @@ pasteable prompt as part of its report.** The user copies it straight into the
 reviewer. It is never a request for the orchestrator to write one, and never a
 file path — the user is moving text between tools.
 
+**The lane WRITES the prompt. The lane does not RUN it — binding, 2026-08-13.**
+Not in-process, not by shelling out to a reviewer CLI, and **not by spawning a
+subagent, task, or helper to do it.** The lane emits the prompt and **STOPS at the
+checkpoint**; the user runs the arm in a separate online reviewer and pastes the
+verdict back. **A verdict a lane obtained for itself is not a review** — it is the
+reviewed party marking its own work, which is exactly what the fresh-naive rule
+exists to prevent, and no amount of prompt quality repairs it. See `review-tiers`,
+"Reviews are run by the USER, in a separate online reviewer", including the single
+`local-confirm` exception, which belongs to the orchestrator and never to a lane.
+
 **Why the lane and not the orchestrator:** the mechanical parts of a review
 prompt are all things the lane alone measured — the verified SHA, the delta
 range, the tier and the reason for it, which suites ran, and above all *what
