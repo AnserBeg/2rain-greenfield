@@ -659,6 +659,14 @@ test('malformed boolean and empty intent are refused beside admitted twins', asy
   assert.match(await missingIntent.text(), /OPERATION_INPUT_INVALID/);
   assert.equal(fieldKindExecutor.providerVerdicts.length, verdictCount);
 
+  const absentField = await post({ expectedRevision: '2' }, [
+    `empty:${EVERY_KIND_FIELD_IDS.due}`,
+    `value:${EVERY_KIND_FIELD_IDS.due}`,
+  ]);
+  assert.equal(absentField.status(), 422);
+  assert.match(await absentField.text(), /OPERATION_INPUT_INVALID/);
+  assert.equal(fieldKindExecutor.providerVerdicts.length, verdictCount);
+
   const admittedNothing = await post({
     [`empty:${EVERY_KIND_FIELD_IDS.due}`]: 'nothing',
     expectedRevision: '2',
