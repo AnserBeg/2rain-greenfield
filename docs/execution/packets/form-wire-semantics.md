@@ -116,12 +116,13 @@ read-back in the fixture executor.
 | Malformed input refuses before provider invocation | `malformed boolean and empty intent are refused beside admitted twins` mutates one rendered property at a time: malformed boolean, unknown intent, missing companion and entire optional subject absent each return 422 before the provider verdict count changes; valid boolean and `nothing` twins are admitted. The fixture starts with no values, so this control does not claim preservation of a pre-existing name. |
 | The double cannot manufacture success | `a provider refusal cannot be manufactured into browser success` omits one required value from an otherwise rendered create, observes `MODULE_REQUIRED_FIELD_MISSING`, HTTP 422, no success status and no record; the neighbouring complete creates observe accepted provider verdicts and persisted records. |
 
-The focused browser file is 20/20 green. The matrix executes the same file and
-the composed-application bridges in its 79/79 browser result.
+The round-2 focused browser file is 20/20 green. The round-1 matrix executed its
+18-test predecessor inside the 79/79 browser result; the round-2 matrix result
+is recorded below after the new frozen executable SHA.
 
 ## Negative-control replay
 
-The committed controls above are the evidence. The writer also ran eight
+The committed controls above are the evidence. The writer also ran eleven
 author-chosen, ad-hoc mutation replays as supplementary causal checks; all were
 restored before the matrix and are not counted as committed evidence.
 
@@ -135,6 +136,9 @@ restored before the matrix and are not counted as committed evidence.
 | Repair the missing required number before measuring it | the same refusal control reports 200, covering repair-before-measurement |
 | Stop recording an accepted provider verdict / change its stage to an unrecognised shape | the exact acceptance observation reds on zero input / wrong shape |
 | Remove the required-number field from the compiled fixture | both converted creates red while waiting for the missing control, covering subject absence |
+| Restore `clear` as the default for a non-empty stored value | the unavailable-value control reds on the first companion's observed `clear` before submission |
+| Classify every typed stored value as displayable | the unavailable-value control reds because the exact stored-value disclosure and its accessible association are absent |
+| Pass raw `"true"` through the adopted v1 seam | the v1 control observes `MODULE_FIELD_VALUE_INVALID` instead of its exact accepted provider verdict |
 
 Each replay changed one relevant property and was required to fail for the
 intended reason. Because the writer chose them, the independent Critical arms
@@ -279,7 +283,7 @@ server with Ctrl-C in its terminal or `fuser -k 4174/tcp`.
   provider input parser; it is not a browser-to-PostgreSQL persistence journey.
   The separately required `test:postgres` suite is green, but it does not turn
   that browser test into such a journey.
-- The eight mutation replays were selected and interpreted by this writer.
+- The eleven mutation replays were selected and interpreted by this writer.
 - No usability study assessed the companion-select wording or whether office
   workers understand the three choices. Automated browser coverage establishes
   native operability, labelling and focus treatment only.
