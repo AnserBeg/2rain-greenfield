@@ -1131,15 +1131,16 @@ function renderFormFields(
     .map((fieldId, index) => {
       const value = record ? record.values[fieldId] : undefined;
       const field = fieldsById.get(fieldId);
+      const inputField = inputFieldsById.get(fieldId);
       const control = renderFormControl(field, fieldId, index, value);
       const emptyIntent = renderEmptyIntentControl(
-        inputFieldsById.get(fieldId),
+        inputField,
         fieldId,
         value,
         record !== null,
       );
       const unavailableValue = control.storedValueUnavailable
-        ? renderUnavailableStoredValue(fieldId, index, value)
+        ? renderUnavailableStoredValue(fieldId, index, inputField, value)
         : '';
       return `<div class="form-field"><label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
     })
@@ -1330,10 +1331,15 @@ function unavailableStoredValueId(index: number): string {
 function renderUnavailableStoredValue(
   fieldId: string,
   index: number,
+  inputField: CompiledSurfaceInputField | undefined,
   value: unknown,
 ): string {
   const encoded = escapeHtml(JSON.stringify(value) ?? String(value));
-  return `<small id="${unavailableStoredValueId(index)}" class="form-unavailable-value" data-unavailable-value-for="${escapeHtml(fieldId)}"><strong>Stored value unavailable in this control:</strong> <code>${encoded}</code>. It will be left unchanged unless you choose a replacement or explicitly clear it.</small>`;
+  const consequence =
+    inputField && !inputField.required
+      ? 'It will be left unchanged unless you choose a replacement or explicitly clear it.'
+      : 'Choose a valid replacement; saving this blank control is refused.';
+  return `<small id="${unavailableStoredValueId(index)}" class="form-unavailable-value" data-unavailable-value-for="${escapeHtml(fieldId)}"><strong>Stored value unavailable in this control:</strong> <code>${encoded}</code>. ${consequence}</small>`;
 }
 
 /**
