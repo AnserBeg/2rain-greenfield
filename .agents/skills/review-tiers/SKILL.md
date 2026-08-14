@@ -121,6 +121,18 @@ Every review spawn receives, and acts only within:
 
 A review prompt without an explicit charter is invalid; do not launch it.
 
+**This does not conflict with `mission-cadence`'s lane-written prompts, and the
+cross-reference is here because it read as a conflict for a week and a reviewer
+had to adjudicate it mid-review.** That skill requires every lane-written prompt
+to declare that **the lane** fenced nothing. **The charter is still mandatory and
+still the orchestrator's.** A lane may state its claims and its gaps; it may not
+narrow the review of its own work. A prompt whose scope was drawn by the reviewed
+party is invalid under this section however well written, and a prompt asserting
+that *nothing* bounds scope is invalid under it too — that wording is corrected.
+See `mission-cadence`, "The lane writes its own review prompt". `AGENTS.md` §1's
+authority order does not rank two same-level skills, so neither overrides the
+other; they are one rule stated from opposite ends.
+
 ## Findings triage (binding)
 
 A finding is actionable only if ALL of these hold:

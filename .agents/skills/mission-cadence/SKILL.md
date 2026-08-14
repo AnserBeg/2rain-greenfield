@@ -110,10 +110,32 @@ and loses fidelity at every hop.
 
 **Every lane-written prompt carries this clause verbatim:**
 
-> *Nothing in this prompt bounds your scope. It was written by the lane whose
-> work you are reviewing. Treat its framing as a claim under test, read
-> anything you judge relevant, and say so plainly if the prompt itself is
-> steering you.*
+> *This prompt was written by the lane whose work you are reviewing. **The lane
+> has fenced nothing.** Any scope stated here is the orchestrator's, and it
+> stands as a claim under test rather than a limit you may not question. Read
+> whatever you judge relevant to the decisive questions, say plainly if you think
+> the scope is drawn wrongly, and say plainly if the prompt itself is steering
+> you.*
+
+**CORRECTED 2026-08-13, and the old wording was a real contradiction rather than a
+clumsy sentence.** It used to open *"Nothing in this prompt bounds your scope."*
+`review-tiers` says the opposite in the same breath — a review needs **specific
+decisive questions**, *"find any way this could fail" is never a valid framing*,
+and **a review prompt without an explicit charter is invalid; do not launch it.**
+So a lane obeying this skill emitted a prompt the other binding skill called
+invalid, and `dev-environment`'s round-5 reviewer said so directly before
+reviewing to the narrower scope anyway. Filed as
+`review-prompt-clause-contradicts-scoping`; `AGENTS.md` §1's authority order does
+not settle a collision between two same-level skills, so they now cite each other.
+
+**The collision was never about whether scope exists — it is about WHO may draw
+it.** Scope is the orchestrator's; the reviewed party may not narrow its own
+review. The corrected clause says exactly that, so both rules hold at once: the
+charter bounds the review (`review-tiers`), and the lane is visibly not its
+author (this skill). **Do not resolve it by deleting either rule** — the drift
+each prevents is real. **An earlier orchestrator ruling on this question ("keep it
+verbatim, no edit") is withdrawn**: it was made without having read the filed row,
+which had already analysed the conflict correctly.
 
 **The orchestrator still adjudicates the verdict, still rules dispositions, and
 still writes any arm the lane cannot write neutrally** — an ADR arm, a
