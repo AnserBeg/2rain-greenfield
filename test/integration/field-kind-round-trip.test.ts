@@ -16,6 +16,7 @@ import {
 } from '../../packages/canonical-model/src/index.js';
 import {
   ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
@@ -466,13 +467,33 @@ test('RED: the reader refuses a field that does not declare whether it is requir
 });
 
 /**
- * The absence twin, and the shape every recorded release actually has. A reader
- * that invented `textFieldType` for an unadopted-profile payload would render a
- * form that looks right and is a lie about what the compiler said.
+ * The absence twin. A reader that invented `textFieldType` for a payload the
+ * compiler never described would render a form that looks right and is a lie
+ * about what the compiler said.
+ *
+ * REPOINTED TO v1 BY `profile-v2-adoption`. This read the adopted constant, and
+ * its own title claimed "the shape every recorded release actually has".
+ * Adoption made the adopted profile the one that DOES emit field kinds, so read
+ * through the constant this became the same subject as the presence tests above
+ * and would have proved nothing about absence at all.
+ *
+ * Pinned to v1 literally, and the sentence about recorded releases stays exactly
+ * true of it: lineage entries 0-8 are recorded under v0/v1 and carry no `fields`
+ * key. Entry 9, minted by this packet, is the first that does. Both halves of
+ * the round trip are therefore live -- presence at v2, absence at v1 -- which is
+ * what keeps the reader discriminating rather than merely permissive.
  */
-test('an absent field list stays absent through the reader at the adopted profile', async () => {
+test('an absent field list stays absent through the reader at a pre-v2 profile', async () => {
+  // Which of the two profiles this file exercises is the one a real request
+  // actually serves. Without this the file proves the reader handles presence
+  // and absence correctly while saying nothing about which it will meet.
+  assert.equal(
+    ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    'the presence half is the shipped half; absence below is the historical one',
+  );
   const manifest = readCompiledSurfaceManifest(
-    await viewOf(compileAt(ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION)),
+    await viewOf(compileAt(COMPILER_SEMANTIC_PROFILE_V1_VERSION)),
   );
   assert.ok(manifest.surfaces.length > 0);
   for (const surface of manifest.surfaces) {

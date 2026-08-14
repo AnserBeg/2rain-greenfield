@@ -222,7 +222,24 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     flatManifest.payloadSchemaVersion,
     FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 1);
+  // 1 -> 3 BY `profile-v2-adoption`, and this is a real compatibility move
+  // rather than a re-derived digest. The floor is
+  // `emitsFieldKinds ? 3 : navigation ? 2 : 1` (`projections.ts`), so adopting
+  // v2 raises it on EVERY manifest, flat or grouped -- 3 outranks the grouping
+  // bump of 2, which is why a flat manifest now reads 3 rather than 1.
+  //
+  // The field-kind packet allocated 3 deliberately, in preference to arguing
+  // that a reader dropping `fields` degrades safely: that argument is a claim
+  // about browser submission behaviour and two attempts to gate it failed.
+  //
+  // WHAT THIS PACKET DID NOT DO, stated because a reader will assume otherwise:
+  // nothing enforces this floor. The only comparison of `minimumVersion`
+  // anywhere is `compiler.ts`'s dependency validity check (safe integer, >= 1);
+  // the provider persists the value and the web reader passes it through, and
+  // no consumer refuses a manifest whose floor exceeds what it supports. So the
+  // number is currently a declaration, not a gate. Filed, not fixed -- see
+  // `current-plan.md`, `runtime-capability-floor-unenforced`.
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 3);
   assert.equal(flatCompact.navigationEntryIds.length, 4);
   assert.deepEqual(
     navigationRuleIds(
@@ -246,7 +263,17 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     groupedManifest.payloadSchemaVersion,
     GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 2);
+  // 2 -> 3 BY `profile-v2-adoption`. The grouped arm read 2 because
+  // `navigation` bumped it; field kinds outrank that, so both arms now read 3
+  // and the flat/grouped DISTINCTION in this floor is no longer observable.
+  //
+  // That loss is worth naming rather than absorbing: the pair of assertions used
+  // to discriminate 1-vs-2 and now discriminates nothing, so a regression that
+  // stopped bumping for `navigation` would keep both green. The grouping
+  // behaviour itself is still gated -- by `payloadSchemaVersion` immediately
+  // above and by `navigationSurfaceIds` immediately below -- so no property is
+  // left unguarded, but this particular assertion is now weaker than it reads.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 3);
   assert.equal(navigationSurfaceIds(grouped.entries).length, 12);
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -293,7 +320,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     overflowManifest.payloadSchemaVersion,
     GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
-  assert.equal(overflowManifest.requiredRuntimeCapability.minimumVersion, 2);
+  // 2 -> 3 BY `profile-v2-adoption`, the third and last site. All three arms of
+  // this test -- flat, grouped, overflow -- now read 3, for the reason recorded
+  // at the flat arm above.
+  assert.equal(overflowManifest.requiredRuntimeCapability.minimumVersion, 3);
   assert.equal(navigationSurfaceIds(overflow.entries).length, 6);
   assert.deepEqual(
     overflow.entries.map((entry) => entry.label),

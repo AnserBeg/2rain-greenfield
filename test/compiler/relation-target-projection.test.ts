@@ -156,6 +156,17 @@ test('a required relation carries its target entity at v2, and at no earlier ver
  * which is that the adopted profile emits the pre-packet relation shape.
  */
 test('the v1 profile emits the pre-packet relation shape, pinned literally', () => {
+  // The literal pins below say what each PROFILE emits. This says which of them
+  // actually ships, and without it the whole file is a statement about two
+  // hypotheticals. `targetEntityId` reaching the serving head is the fact
+  // `relation-scoped-enumeration` is unblocked by; if a later packet moved the
+  // adopted constant off v2, every assertion here would still pass while no
+  // shipped relation carried a target again.
+  assert.equal(
+    ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    'the four-key shape below is the one that ships, not merely one the compiler can produce',
+  );
   // REVISITED BY `profile-v2-adoption`, on this test's own written instruction.
   // The subject used to be `ADOPTED_...`, guarded by `adopted !== v2` with the
   // note "this gate is meaningless once v2 is adopted; it must be revisited
