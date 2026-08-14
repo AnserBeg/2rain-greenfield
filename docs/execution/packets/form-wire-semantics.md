@@ -1,10 +1,14 @@
 # form-wire-semantics — typed values and explicit empty intent on the form wire
 
-Date: 2026-08-14  
-Tier: Critical  
-Status: evidence_ready  
-Base: `5ce4b7b` (rebased from the original `adb5f38` cut after `origin/main`
-moved with documentation-only commits)  
+Date: 2026-08-14
+
+Tier: Critical
+
+Status: evidence_ready
+
+Base: `23e7ba3` (rebased from the original `adb5f38` cut as `origin/main`
+moved through four documentation/doctrine commits)
+
 Matrix SHA: `1a06b979958a962b6daff85b58969456b8de766b`
 
 ## Goal
@@ -162,6 +166,16 @@ FULL_MATRIX_PASS_SHA=1a06b979958a962b6daff85b58969456b8de766b
 The `TEST_GATE_LOCK_BUSY` strings inside that log belong to the architecture
 suite's successful bounded-deadline negative controls; the actual matrix
 acquired and released its `form-wire-semantics` slot normally.
+
+While that run was in flight, `origin/main` advanced from `5ce4b7b` to
+`23e7ba3` through two more documentation/doctrine commits. The unpublished and
+unreviewed packet branch was rebased as `git-workflow` requires. The executable
+diff from matrix SHA `1a06b979958a962b6daff85b58969456b8de766b` to the rebased
+candidate is empty under the repository's narrative-path exclusion
+(`docs/**`, `.agents/**`, `AGENTS.md`, `CLAUDE.md`, `learnings.md`). The matrix
+therefore observes the same executable bytes now proposed for review; the
+changed doctrine was re-read before this record and the review prompt were
+finished.
 
 ## Test it yourself
 
