@@ -121,6 +121,16 @@ silently.
   content is identical to the reviewed one — narrative paths excluded, per the
   check in `git-workflow` — the reviewed run is the acceptance run, because a
   second pass over the same bytes observes nothing.
+- **Integration is a `--no-ff` merge of the PACKET into `main`, and the direction
+  is a gate fact rather than a style preference.** `scripts/check-review-record.sh`
+  walks `--first-parent` and covers a merge through its **second** parent. Merging
+  `main` into the packet and then fast-forwarding puts the packet's own commits off
+  the first-parent chain, where **the review gate cannot see them** — the packet
+  lands with no review record and the gate reports nothing wrong. **Promoted here
+  from `git-workflow` on 2026-08-13 because two lanes produced the wrong shape
+  independently, which makes it the default outcome rather than a slip**, and
+  because one such merge carried a Critical write-path control onto `main`
+  uncovered by any record. `git-workflow` keeps the mechanics; this is the reason.
 - Every `*.test.ts` and `*.spec.ts` file must be proven reachable by executed-file evidence from successful CI-invoked suites.
 - A gate must **observe** the fact it asserts, never a proxy for it. Parsing a
   tool's output, inferring from a declaration, and matching a string are proxies;
