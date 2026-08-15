@@ -8,11 +8,13 @@ import {
   normalizeApplicationPackage,
 } from '@north-star/canonical-model';
 import {
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   compileApplication,
   type CompileSuccess,
+  type CompilerSemanticProfileVersion,
   type ContentAddressedArtifact,
 } from '@north-star/compiler';
 import {
@@ -69,25 +71,6 @@ const principalId = 'a3000000-0000-4000-8000-000000000003';
 const releaseId = 'd4000000-0000-4000-8000-000000000004';
 const pointerId = 'd5000000-0000-4000-8000-000000000005';
 
-/**
- * **Configuration, not evidence** -- and the distinction was a review finding.
- *
- * These name what a double DOES with a recorded refusal. They say nothing about
- * whether a given test ever reaches the operation branch where that matters, and
- * the earlier name pretended otherwise: `KNOWN_FALSE_GREEN` sat on five
- * construction sites while only two of them assert a manufactured success. The
- * other three -- the failed-data-slot, empty-data-slot and invalid-binding
- * fixtures -- exercise query and pre-operation refusal paths and never call the
- * provider at all, so labelling them as observing a refused operation succeed
- * was false in one direction, and a grep for the marker missed the real ones in
- * the other.
- *
- * `KNOWN_FALSE_GREEN` now appears beside the two ASSERTIONS that actually
- * observe it, where a sweep will find them.
- */
-const HONOURS_PROVIDER_REFUSALS = true;
-const IGNORES_PROVIDER_REFUSALS = false;
-
 let server: Server;
 let baseUrl: string;
 let executor: BrowserFixtureExecutor;
@@ -95,11 +78,14 @@ let missingDisplayRecordId: string;
 let fieldKindServer: Server;
 let fieldKindUrl: string;
 let fieldKindExecutor: BrowserFixtureExecutor;
+let adoptedFieldKindServer: Server;
+let adoptedFieldKindUrl: string;
+let adoptedFieldKindExecutor: BrowserFixtureExecutor;
 
 test.beforeAll(async () => {
   const compiled = compileFixture();
   const policy = allowPolicy();
-  executor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
+  executor = new BrowserFixtureExecutor(null);
   const operationMediation = new SemanticOperationMediationAuthority();
   executor.createSeed('Existing live master');
   missingDisplayRecordId = executor.createSeed();
@@ -119,10 +105,7 @@ test.beforeAll(async () => {
   // is minted (ADR-0047 §4a); it exists because the claim below -- that a date
   // field renders a DATE CONTROL -- can only be observed in a browser.
   const fieldKindPolicy = allowPolicy();
-  fieldKindExecutor = new BrowserFixtureExecutor(
-    null,
-    HONOURS_PROVIDER_REFUSALS,
-  );
+  fieldKindExecutor = new BrowserFixtureExecutor(null);
   const fieldKindMediation = new SemanticOperationMediationAuthority();
   fieldKindServer = createSurfaceRuntimeServer(
     runtimeEntry(compileEveryFieldKindFixture(), fieldKindPolicy),
@@ -140,6 +123,33 @@ test.beforeAll(async () => {
     },
   );
   fieldKindUrl = await listen(fieldKindServer);
+
+  // The shipped profile-v1 shape is intentionally mixed: operation input
+  // fields are present, while surface field kinds are not. That is the path a
+  // real form uses today, so it gets its own server rather than being inferred
+  // from the profile-v2 renderer fixture above.
+  const adoptedFieldKindPolicy = allowPolicy();
+  adoptedFieldKindExecutor = new BrowserFixtureExecutor(null);
+  const adoptedFieldKindMediation = new SemanticOperationMediationAuthority();
+  adoptedFieldKindServer = createSurfaceRuntimeServer(
+    runtimeEntry(
+      compileEveryFieldKindFixture(COMPILER_SEMANTIC_PROFILE_V1_VERSION),
+      adoptedFieldKindPolicy,
+    ),
+    {
+      operationGateway: new SemanticOperationGateway(
+        adoptedFieldKindPolicy,
+        adoptedFieldKindExecutor,
+        adoptedFieldKindMediation,
+      ),
+      operationMediation: adoptedFieldKindMediation,
+      queryGateway: new SemanticQueryGateway(
+        adoptedFieldKindPolicy,
+        adoptedFieldKindExecutor,
+      ),
+    },
+  );
+  adoptedFieldKindUrl = await listen(adoptedFieldKindServer);
 });
 
 test('record title falls back to short identity when its compiled display value is absent', async ({
@@ -164,6 +174,11 @@ test.afterAll(async () => {
   });
   await new Promise<void>((resolve, reject) => {
     fieldKindServer.close((error) => (error ? reject(error) : resolve()));
+  });
+  await new Promise<void>((resolve, reject) => {
+    adoptedFieldKindServer.close((error) =>
+      error ? reject(error) : resolve(),
+    );
   });
 });
 
@@ -287,10 +302,12 @@ const SEEDED = Object.freeze({
   [FIXTURE_IDS.fieldIds.parentName]: 'Round trip master',
 });
 
-let lastSubmission: readonly (readonly [string, string])[] = [];
-
 function formUrl(recordId: string): string {
   return `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(recordId)}`;
+}
+
+function fieldKindFormUrl(base: string, recordId: string): string {
+  return `${base}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(recordId)}`;
 }
 
 function capturePost(page: Page): Promise<string> {
@@ -301,33 +318,26 @@ function capturePost(page: Page): Promise<string> {
   });
 }
 
+async function readRenderedForm(page: Page): Promise<Record<string, string>> {
+  return (await page
+    .locator('#surface-record-form')
+    .evaluate((form: HTMLFormElement) =>
+      Object.fromEntries(
+        [...new FormData(form).entries()].map(([key, value]) => [
+          key,
+          String(value),
+        ]),
+      ),
+    )) as Record<string, string>;
+}
+
 async function idleValue(page: Page, fieldId: string): Promise<string> {
   return page
     .locator(`[name="value:${fieldId}"]`)
     .evaluate((element: HTMLInputElement | HTMLSelectElement) => element.value);
 }
 
-/**
- * **Four claims, four measurements, and the seam between them is the point.**
- *
- * The first version of this called itself a provider round trip and was not one:
- * the double recorded production's refusal and then merged the refused values
- * anyway, so its "authoritative reread" was a green manufactured by the
- * component whose refusal was the fact. The double now honours the refusal, and
- * the claim is decomposed into the four things actually observed:
- *
- *   1. browser encoding preserves the rendered strings;
- *   2. production currently REFUSES that encoding;
- *   3. the normalised encoding is accepted by `parseMutationInput`;
- *   4. given acceptance, the reread returns the seeded values.
- *
- * Claims 1-3 are observations. **Claim 4 is a stand-in**, named at the point of
- * use: it seeds from the stage production accepts, because no browser submission
- * of this surface is acceptable as submitted. What blocks it is routed and stays
- * routed -- `form-write-untyped-wire` and `form-empty-means-nothing` -- and this
- * packet does not pull either back into its lease.
- */
-test('CLAIM 1: the browser encodes the rendered strings, in the compiled order', async ({
+test('the string wire is normalised before the real provider parser admits it', async ({
   page,
 }) => {
   await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
@@ -417,8 +427,8 @@ test('CLAIM 1: the browser encodes the rendered strings, in the compiled order',
     'recordId',
     'expectedRevision',
   ]);
-  // One entry per field, no shadowing sibling, values byte-identical to what the
-  // controls rendered.
+  // One primary entry per field, no shadowing sibling. The raw carrier remains
+  // URL-encoded strings; typed booleans are deliberately not representable here.
   expect(valueEntries.length).toBe(
     new Set(valueEntries.map(([key]) => key)).size,
   );
@@ -428,88 +438,605 @@ test('CLAIM 1: the browser encodes the rendered strings, in the compiled order',
       fieldId,
     ).toEqual([`value:${fieldId}`, value]);
   }
-  lastSubmission = valueEntries;
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.active}`)).toBe('true');
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.weight}`)).toBe('');
+  expect(params.get(`empty:${EVERY_KIND_FIELD_IDS.weight}`)).toBe('nothing');
+  expect(fieldKindExecutor.providerVerdicts.at(-1)).toEqual({
+    accepted: true,
+    code: null,
+    stage: 'operation-input',
+    subjectId: null,
+  });
+  await expect(page.getByRole('status')).toContainText('Update complete');
+
+  const stored = fieldKindExecutor.readRecord(recordId);
+  assert.ok(stored);
+  assert.equal(stored.values[EVERY_KIND_FIELD_IDS.active], true);
+  assert.equal(
+    Object.hasOwn(stored.values, EVERY_KIND_FIELD_IDS.weight),
+    false,
+  );
 });
 
-/**
- * Production refuses what the browser just sent, and the page says so rather
- * than rendering a success. The double throws exactly what `parseMutationInput`
- * threw, so this is the real contract refusing, surfaced through the real
- * gateway and the real renderer.
- *
- * The middle stage is why this is attributable: coercing booleans alone is still
- * refused, so `""` for an unset non-text field is a SECOND gap rather than a
- * detail of the first.
- */
-test('CLAIM 2: production refuses that encoding, and the page shows it', async ({
+test('a create sets a boolean and omits a blank optional date', async ({
   page,
 }) => {
   await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
-  const recordId = fieldKindExecutor.seedTypedValues({
-    ...SEEDED,
-    [EVERY_KIND_FIELD_IDS.active]: true,
-  });
-  await page.goto(formUrl(recordId));
+  await page.goto(
+    `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+  );
+  await page.getByLabel('Master Name').fill('Boolean and blank date');
+  await page.getByLabel('Master Number').fill('WIRE-001');
+  await page
+    .locator(`[name="value:${EVERY_KIND_FIELD_IDS.active}"]`)
+    .selectOption('true');
+  const posted = capturePost(page);
   const before = fieldKindExecutor.providerVerdicts.length;
   await page.getByRole('button', { name: 'Save' }).click();
 
-  const verdicts = fieldKindExecutor.providerVerdicts.slice(before);
-  const stage = (name: string) =>
-    verdicts.find((entry) => entry.stage === name);
-  expect(stage('as-submitted')).toMatchObject({
-    accepted: false,
-    code: 'MODULE_FIELD_VALUE_INVALID',
-  });
-  expect(stage('booleans-coerced')).toMatchObject({
-    accepted: false,
-    code: 'MODULE_FIELD_VALUE_INVALID',
-  });
-  // Refused, not silently succeeded. The double no longer manufactures a green.
-  await expect(page.getByRole('alert')).toBeVisible();
-  await expect(page.getByRole('status')).toHaveCount(0);
+  const params = new URLSearchParams(await posted);
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.active}`)).toBe('true');
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.due}`)).toBe('');
+  expect(params.get(`empty:${EVERY_KIND_FIELD_IDS.due}`)).toBe('nothing');
+  expect(fieldKindExecutor.providerVerdicts.slice(before)).toEqual([
+    {
+      accepted: true,
+      code: null,
+      stage: 'operation-input',
+      subjectId: null,
+    },
+  ]);
+  await expect(page.getByRole('status')).toContainText('Create complete');
+
+  const stored = fieldKindExecutor.readRecord(String(params.get('recordId')));
+  assert.ok(stored);
+  assert.equal(stored.values[EVERY_KIND_FIELD_IDS.active], true);
+  assert.equal(Object.hasOwn(stored.values, EVERY_KIND_FIELD_IDS.due), false);
 });
 
-/**
- * The admission twin, decided by the real parser rather than by this file: with
- * `U7`'s normalisation stood in for -- empty strings read as "no value stated",
- * booleans coerced -- the SAME submission is accepted. That is what makes claim
- * 2's refusal attributable to the two named wire gaps and to nothing about the
- * temporal or enum encodings.
- */
-test('CLAIM 3: the normalised encoding is accepted by the real parser', async () => {
-  expect(lastSubmission.length).toBeGreaterThan(0);
-  const verdicts = fieldKindExecutor.providerVerdicts;
-  const normalised = verdicts.filter((entry) => entry.stage === 'normalised');
-  expect(normalised.length).toBeGreaterThan(0);
-  expect(normalised.at(-1)).toEqual({
-    accepted: true,
-    code: null,
-    stage: 'normalised',
-    subjectId: null,
-  });
+test('the adopted profile-v1 bare form converts a boolean and omits a blank date', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  await page.goto(
+    `${adoptedFieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+  );
+  await page.getByLabel('Master Name').fill('Adopted profile wire');
+  await page.getByLabel('Master Number').fill('WIRE-V1-001');
+  const active = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.active}"]`);
+  const due = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.due}"]`);
+  await expect(active).toHaveJSProperty('type', 'text');
+  await expect(due).toHaveJSProperty('type', 'text');
+  await active.fill('true');
+  await expect(
+    page.locator(`[name="empty:${EVERY_KIND_FIELD_IDS.due}"]`),
+  ).toHaveValue('nothing');
+
+  const posted = capturePost(page);
+  const before = adoptedFieldKindExecutor.providerVerdicts.length;
+  await page.getByRole('button', { name: 'Save' }).click();
+  const params = new URLSearchParams(await posted);
+
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.active}`)).toBe('true');
+  expect(params.get(`value:${EVERY_KIND_FIELD_IDS.due}`)).toBe('');
+  expect(params.get(`empty:${EVERY_KIND_FIELD_IDS.due}`)).toBe('nothing');
+  expect(adoptedFieldKindExecutor.providerVerdicts.slice(before)).toEqual([
+    {
+      accepted: true,
+      code: null,
+      stage: 'operation-input',
+      subjectId: null,
+    },
+  ]);
+  await expect(page.getByRole('status')).toContainText('Create complete');
+
+  const stored = adoptedFieldKindExecutor.readRecord(
+    String(params.get('recordId')),
+  );
+  assert.ok(stored);
+  assert.equal(stored.values[EVERY_KIND_FIELD_IDS.active], true);
+  assert.equal(Object.hasOwn(stored.values, EVERY_KIND_FIELD_IDS.due), false);
 });
 
-/**
- * **A stand-in observation, named here rather than in a comment.** No browser
- * submission of this surface is acceptable as submitted, so the record is seeded
- * from the stage production DOES accept and the reread is read off that. It
- * shows that the controls carry back what was stored; it does NOT show that a
- * browser submission produced the stored values, and nothing in this packet
- * shows that.
- */
-test('CLAIM 4 (stand-in): given acceptance, the reread returns the seeded values', async ({
+for (const profile of [
+  {
+    label: 'adopted profile v1',
+    runtime: () => ({
+      executor: adoptedFieldKindExecutor,
+      url: adoptedFieldKindUrl,
+    }),
+  },
+  {
+    label: 'explicit profile v2',
+    runtime: () => ({ executor: fieldKindExecutor, url: fieldKindUrl }),
+  },
+] as const) {
+  test(`multiline text survives an unrelated edit (${profile.label})`, async ({
+    page,
+  }) => {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const { executor: profileExecutor, url } = profile.runtime();
+    const notesId = FIXTURE_IDS.fieldIds.parentNotes;
+
+    const updateOptionalNotes = async (
+      storedNotes: ImmutableJsonValue,
+      changedName: string,
+      unavailable: boolean,
+    ): Promise<void> => {
+      const recordId = profileExecutor.seedTypedValues({
+        [FIXTURE_IDS.fieldIds.parentName]: 'Before text preservation',
+        [FIXTURE_IDS.fieldIds.parentNumber]: 'TEXT-PRESERVE-001',
+        [notesId]: storedNotes,
+      });
+      await page.goto(fieldKindFormUrl(url, recordId));
+
+      const control = page.locator(`[name="value:${notesId}"]`);
+      const disclosure = page.locator(
+        `[data-unavailable-value-for="${notesId}"]`,
+      );
+      if (unavailable) {
+        await expect(control).toHaveValue('');
+        await expect(disclosure).toContainText(JSON.stringify(storedNotes));
+        assert.equal(
+          await control.getAttribute('aria-describedby'),
+          await disclosure.getAttribute('id'),
+        );
+      } else {
+        await expect(control).toHaveValue(String(storedNotes));
+        await expect(disclosure).toHaveCount(0);
+      }
+      await expect(page.locator(`[name="empty:${notesId}"]`)).toHaveValue(
+        'nothing',
+      );
+
+      await page.getByLabel('Master Name', { exact: true }).fill(changedName);
+      const posted = capturePost(page);
+      const before = profileExecutor.providerVerdicts.length;
+      await page.getByRole('button', { name: 'Save' }).click();
+      const params = new URLSearchParams(await posted);
+      expect(params.get(`value:${notesId}`)).toBe(
+        unavailable ? '' : String(storedNotes),
+      );
+      expect(params.get(`empty:${notesId}`)).toBe('nothing');
+      expect(profileExecutor.providerVerdicts.slice(before)).toEqual([
+        {
+          accepted: true,
+          code: null,
+          stage: 'operation-input',
+          subjectId: null,
+        },
+      ]);
+      await expect(page.getByRole('status')).toContainText('Update complete');
+
+      const stored = profileExecutor.readRecord(recordId);
+      assert.ok(stored);
+      assert.equal(stored.values[FIXTURE_IDS.fieldIds.parentName], changedName);
+      assert.equal(stored.values[notesId], storedNotes);
+    };
+
+    const multiline = 'Call buyer\nConfirm purchase order';
+    // One-property admission neighbour: only the newline becomes a space.
+    await updateOptionalNotes(multiline, 'After multiline preservation', true);
+    await updateOptionalNotes(
+      multiline.replace('\n', ' '),
+      'After one-line admission',
+      false,
+    );
+    // A historical non-string must not become the string produced by the
+    // renderer; its same-spelling string neighbour remains displayable.
+    await updateOptionalNotes(17, 'After non-string preservation', true);
+    await updateOptionalNotes('17', 'After string admission', false);
+
+    // Required empty text is ordinarily a real value, so an unavailable stored
+    // value needs an explicit `nothing` marker as well. Otherwise rendering it
+    // blank would silently replace it with "" on the unrelated update.
+    const requiredRecordId = profileExecutor.seedTypedValues({
+      [FIXTURE_IDS.fieldIds.parentName]: multiline,
+      [FIXTURE_IDS.fieldIds.parentNumber]: 'BEFORE-REQUIRED-TEXT',
+    });
+    await page.goto(fieldKindFormUrl(url, requiredRecordId));
+    const requiredName = page.locator(
+      `[name="value:${FIXTURE_IDS.fieldIds.parentName}"]`,
+    );
+    await expect(requiredName).toHaveValue('');
+    await expect(
+      page.locator(
+        `[data-unavailable-value-for="${FIXTURE_IDS.fieldIds.parentName}"]`,
+      ),
+    ).toContainText(JSON.stringify(multiline));
+    await expect(
+      page.locator(`[name="empty:${FIXTURE_IDS.fieldIds.parentName}"]`),
+    ).toHaveValue('nothing');
+    await page
+      .getByLabel('Master Number', { exact: true })
+      .fill('AFTER-REQUIRED-TEXT');
+    const requiredPosted = capturePost(page);
+    const requiredBefore = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const requiredParams = new URLSearchParams(await requiredPosted);
+    expect(requiredParams.get(`value:${FIXTURE_IDS.fieldIds.parentName}`)).toBe(
+      '',
+    );
+    expect(requiredParams.get(`empty:${FIXTURE_IDS.fieldIds.parentName}`)).toBe(
+      'nothing',
+    );
+    expect(profileExecutor.providerVerdicts.slice(requiredBefore)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    const requiredStored = profileExecutor.readRecord(requiredRecordId);
+    assert.ok(requiredStored);
+    assert.equal(
+      requiredStored.values[FIXTURE_IDS.fieldIds.parentName],
+      multiline,
+    );
+    assert.equal(
+      requiredStored.values[FIXTURE_IDS.fieldIds.parentNumber],
+      'AFTER-REQUIRED-TEXT',
+    );
+
+    const replacementRecordId = profileExecutor.seedTypedValues({
+      [FIXTURE_IDS.fieldIds.parentName]: multiline,
+      [FIXTURE_IDS.fieldIds.parentNumber]: 'REPLACE-REQUIRED-TEXT',
+    });
+    await page.goto(fieldKindFormUrl(url, replacementRecordId));
+    await page
+      .locator(`[name="value:${FIXTURE_IDS.fieldIds.parentName}"]`)
+      .fill('Valid replacement');
+    const replacementPosted = capturePost(page);
+    const replacementBefore = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const replacementParams = new URLSearchParams(await replacementPosted);
+    expect(
+      replacementParams.get(`value:${FIXTURE_IDS.fieldIds.parentName}`),
+    ).toBe('Valid replacement');
+    expect(
+      replacementParams.get(`empty:${FIXTURE_IDS.fieldIds.parentName}`),
+    ).toBe('nothing');
+    expect(profileExecutor.providerVerdicts.slice(replacementBefore)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    assert.equal(
+      profileExecutor.readRecord(replacementRecordId)?.values[
+        FIXTURE_IDS.fieldIds.parentName
+      ],
+      'Valid replacement',
+    );
+  });
+
+  test(`required unavailable text can be replaced with empty text (${profile.label})`, async ({
+    page,
+  }) => {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const { executor: profileExecutor, url } = profile.runtime();
+    const nameId = FIXTURE_IDS.fieldIds.parentName;
+    const numberId = FIXTURE_IDS.fieldIds.parentNumber;
+    const recordId = profileExecutor.seedTypedValues({
+      [nameId]: 'Call buyer\nConfirm purchase order',
+      [numberId]: 'BEFORE-EMPTY-TEXT',
+    });
+    const surfaceUrl = fieldKindFormUrl(url, recordId);
+    await page.goto(surfaceUrl);
+
+    const emptyIntent = page.locator(`[name="empty:${nameId}"]`);
+    await expect(emptyIntent).toHaveValue('nothing');
+    expect(
+      await emptyIntent.locator('option').evaluateAll((options) =>
+        options.map((option) => ({
+          text: option.textContent?.trim() ?? '',
+          value: (option as HTMLOptionElement).value,
+        })),
+      ),
+    ).toEqual([
+      { text: 'Leave unchanged', value: 'nothing' },
+      { text: 'Save an empty text value', value: 'emptyText' },
+    ]);
+
+    const renderedForm = await readRenderedForm(page);
+    const original = profileExecutor.readRecord(recordId);
+    assert.ok(original);
+    const refuse = async (
+      mutate: (form: Record<string, string>) => void,
+    ): Promise<void> => {
+      const form = {
+        ...renderedForm,
+        idempotencyKey: randomUUID(),
+        [`value:${numberId}`]: 'AFTER-REFUSED-SUBMISSION',
+      };
+      mutate(form);
+      const beforeRefusal = profileExecutor.providerVerdicts.length;
+      const response = await page.request.post(surfaceUrl, {
+        form,
+        headers: { authorization: 'fixture-user' },
+      });
+      assert.equal(response.status(), 422);
+      assert.match(await response.text(), /OPERATION_INPUT_INVALID/);
+      assert.equal(profileExecutor.providerVerdicts.length, beforeRefusal);
+      const stored = profileExecutor.readRecord(recordId);
+      assert.ok(stored);
+      assert.equal(stored.revision, original.revision);
+      assert.deepEqual(stored.values, original.values);
+    };
+
+    // The native form is otherwise unchanged. The first three vary one posted
+    // property; the fourth removes the whole required-text subject, which is
+    // the subject-absence vacuity vector rather than two independent faults.
+    await refuse((form) => delete form[`empty:${nameId}`]);
+    await refuse((form) => {
+      form[`empty:${nameId}`] = 'clear';
+    });
+    await refuse((form) => delete form[`value:${nameId}`]);
+    await refuse((form) => {
+      delete form[`value:${nameId}`];
+      delete form[`empty:${nameId}`];
+    });
+
+    await emptyIntent.selectOption({ label: 'Save an empty text value' });
+    await page.locator(`[name="value:${numberId}"]`).fill('AFTER-EMPTY-TEXT');
+
+    const posted = capturePost(page);
+    const before = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const params = new URLSearchParams(await posted);
+    expect(params.get(`value:${nameId}`)).toBe('');
+    expect(params.get(`empty:${nameId}`)).toBe('emptyText');
+    expect(profileExecutor.providerVerdicts.slice(before)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    await expect(page.getByRole('status')).toContainText('Update complete');
+
+    const stored = profileExecutor.readRecord(recordId);
+    assert.ok(stored);
+    assert.equal(stored.values[nameId], '');
+    assert.equal(stored.values[numberId], 'AFTER-EMPTY-TEXT');
+  });
+
+  test(`representable required text remains intentionally blankable (${profile.label})`, async ({
+    page,
+  }) => {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const { executor: profileExecutor, url } = profile.runtime();
+    const nameId = FIXTURE_IDS.fieldIds.parentName;
+    const numberId = FIXTURE_IDS.fieldIds.parentNumber;
+    const recordId = profileExecutor.seedTypedValues({
+      [nameId]: 'Representable required text',
+      [numberId]: 'BEFORE-REPRESENTABLE-EMPTY',
+    });
+    await page.goto(fieldKindFormUrl(url, recordId));
+
+    const emptyIntent = page.locator(`[name="empty:${nameId}"]`);
+    await expect(emptyIntent).toHaveValue('emptyText');
+    expect(
+      await emptyIntent.locator('option').evaluateAll((options) =>
+        options.map((option) => ({
+          text: option.textContent?.trim() ?? '',
+          value: (option as HTMLOptionElement).value,
+        })),
+      ),
+    ).toEqual([
+      { text: 'Leave unchanged', value: 'nothing' },
+      { text: 'Save an empty text value', value: 'emptyText' },
+    ]);
+    await page.locator(`[name="value:${nameId}"]`).fill('');
+    await page.locator(`[name="value:${numberId}"]`).fill('AFTER-EMPTY');
+
+    const posted = capturePost(page);
+    const before = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const params = new URLSearchParams(await posted);
+    expect(params.get(`value:${nameId}`)).toBe('');
+    expect(params.get(`empty:${nameId}`)).toBe('emptyText');
+    expect(profileExecutor.providerVerdicts.slice(before)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    const stored = profileExecutor.readRecord(recordId);
+    assert.ok(stored);
+    assert.equal(stored.values[nameId], '');
+    assert.equal(stored.values[numberId], 'AFTER-EMPTY');
+  });
+
+  test(`required text remains real empty text on create (${profile.label})`, async ({
+    page,
+  }) => {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const { executor: profileExecutor, url } = profile.runtime();
+    const nameId = FIXTURE_IDS.fieldIds.parentName;
+    const numberId = FIXTURE_IDS.fieldIds.parentNumber;
+    await page.goto(
+      `${url}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+    );
+
+    await expect(page.locator(`[name="value:${nameId}"]`)).toHaveValue('');
+    await expect(page.locator(`[name="empty:${nameId}"]`)).toHaveCount(0);
+    await page.locator(`[name="value:${numberId}"]`).fill('CREATE-EMPTY-TEXT');
+
+    const renderedForm = await readRenderedForm(page);
+    const refusedRecordId = String(renderedForm.recordId);
+    const beforeRefusal = profileExecutor.providerVerdicts.length;
+    const refused = await page.request.post(
+      `${url}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+      {
+        form: {
+          ...renderedForm,
+          [`empty:${nameId}`]: 'emptyText',
+          idempotencyKey: randomUUID(),
+        },
+        headers: { authorization: 'fixture-user' },
+      },
+    );
+    assert.equal(refused.status(), 422);
+    assert.match(await refused.text(), /OPERATION_INPUT_INVALID/);
+    assert.equal(profileExecutor.providerVerdicts.length, beforeRefusal);
+    assert.equal(profileExecutor.readRecord(refusedRecordId), null);
+
+    const posted = capturePost(page);
+    const before = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const params = new URLSearchParams(await posted);
+    expect(params.get(`value:${nameId}`)).toBe('');
+    expect(params.getAll(`empty:${nameId}`)).toEqual([]);
+    expect(profileExecutor.providerVerdicts.slice(before)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    await expect(page.getByRole('status')).toContainText('Create complete');
+
+    const stored = profileExecutor.readRecord(String(params.get('recordId')));
+    assert.ok(stored);
+    assert.equal(stored.values[nameId], '');
+    assert.equal(stored.values[numberId], 'CREATE-EMPTY-TEXT');
+  });
+}
+
+test('an unrelated edit preserves both stored null and absent optional values', async ({
   page,
 }) => {
   await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
   const recordId = fieldKindExecutor.seedTypedValues({
-    ...SEEDED,
-    [EVERY_KIND_FIELD_IDS.active]: true,
+    [EVERY_KIND_FIELD_IDS.active]: null,
+    [FIXTURE_IDS.fieldIds.parentName]: 'Before unrelated edit',
   });
   await page.goto(formUrl(recordId));
-  for (const [fieldId, value] of Object.entries(SEEDED)) {
-    expect(await idleValue(page, fieldId), `reread ${fieldId}`).toBe(value);
+  await page
+    .getByLabel('Master Name', { exact: true })
+    .fill('After unrelated edit');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status')).toContainText('Update complete');
+
+  const stored = fieldKindExecutor.readRecord(recordId);
+  assert.ok(stored);
+  assert.equal(
+    stored.values[FIXTURE_IDS.fieldIds.parentName],
+    'After unrelated edit',
+  );
+  assert.equal(stored.values[EVERY_KIND_FIELD_IDS.active], null);
+  assert.equal(Object.hasOwn(stored.values, EVERY_KIND_FIELD_IDS.due), false);
+});
+
+test('typed controls preserve and disclose every stored value they cannot display', async ({
+  page,
+}) => {
+  const unavailable = {
+    [EVERY_KIND_FIELD_IDS.active]: 'legacy-boolean',
+    [EVERY_KIND_FIELD_IDS.count]: 'not-a-number',
+    [EVERY_KIND_FIELD_IDS.due]: '2026-02-30',
+    [EVERY_KIND_FIELD_IDS.grade]: `${FIXTURE_IDS.namespace}:option.grade_retired`,
+    [EVERY_KIND_FIELD_IDS.preciseTime]: '25:00:00',
+  } as const;
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  const recordId = fieldKindExecutor.seedTypedValues({
+    [FIXTURE_IDS.fieldIds.parentName]: 'Before unavailable preservation',
+    [FIXTURE_IDS.fieldIds.parentNumber]: 'UNAVAILABLE-001',
+    ...unavailable,
+  });
+  await page.goto(formUrl(recordId));
+
+  for (const [fieldId, value] of Object.entries(unavailable)) {
+    const control = page.locator(`[name="value:${fieldId}"]`);
+    const emptyIntent = page.locator(`[name="empty:${fieldId}"]`);
+    await expect(control, fieldId).toHaveValue('');
+    await expect(emptyIntent, fieldId).toHaveValue('nothing');
+    expect(
+      await emptyIntent
+        .locator('option')
+        .evaluateAll((options) =>
+          options.map((option) => (option as HTMLOptionElement).value),
+        ),
+      fieldId,
+    ).toEqual(['nothing', 'clear']);
+    const disclosure = page.locator(
+      `[data-unavailable-value-for="${fieldId}"]`,
+    );
+    await expect(disclosure, fieldId).toContainText(JSON.stringify(value));
+    assert.equal(
+      await control.getAttribute('aria-describedby'),
+      await disclosure.getAttribute('id'),
+      fieldId,
+    );
   }
-  expect(await idleValue(page, EVERY_KIND_FIELD_IDS.active)).toBe('true');
+
+  await page
+    .getByLabel('Master Name', { exact: true })
+    .fill('After unavailable preservation');
+  const posted = capturePost(page);
+  const before = fieldKindExecutor.providerVerdicts.length;
+  await page.getByRole('button', { name: 'Save' }).click();
+  const params = new URLSearchParams(await posted);
+
+  for (const fieldId of Object.keys(unavailable)) {
+    expect(params.get(`value:${fieldId}`), fieldId).toBe('');
+    expect(params.get(`empty:${fieldId}`), fieldId).toBe('nothing');
+  }
+  expect(fieldKindExecutor.providerVerdicts.slice(before)).toEqual([
+    {
+      accepted: true,
+      code: null,
+      stage: 'operation-input',
+      subjectId: null,
+    },
+  ]);
+  await expect(page.getByRole('status')).toContainText('Update complete');
+
+  const stored = fieldKindExecutor.readRecord(recordId);
+  assert.ok(stored);
+  assert.equal(
+    stored.values[FIXTURE_IDS.fieldIds.parentName],
+    'After unavailable preservation',
+  );
+  for (const [fieldId, value] of Object.entries(unavailable)) {
+    assert.equal(stored.values[fieldId], value, fieldId);
+  }
+});
+
+test('blank plus explicit clear sends null while blank text can remain a real value', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  const recordId = fieldKindExecutor.seedTypedValues({
+    [EVERY_KIND_FIELD_IDS.due]: '2026-08-09',
+    [FIXTURE_IDS.fieldIds.parentName]: 'Clear and empty text',
+  });
+  await page.goto(formUrl(recordId));
+  await page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.due}"]`).fill('');
+  await page
+    .locator(`[name="empty:${EVERY_KIND_FIELD_IDS.due}"]`)
+    .selectOption('clear');
+  await page
+    .locator(`[name="empty:${FIXTURE_IDS.fieldIds.parentNotes}"]`)
+    .selectOption('emptyText');
+  await page
+    .locator(`[name="value:${FIXTURE_IDS.fieldIds.parentNotes}"]`)
+    .fill('');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status')).toContainText('Update complete');
+
+  const stored = fieldKindExecutor.readRecord(recordId);
+  assert.ok(stored);
+  assert.equal(stored.values[EVERY_KIND_FIELD_IDS.due], null);
+  assert.equal(stored.values[FIXTURE_IDS.fieldIds.parentNotes], '');
 });
 
 /**
@@ -543,23 +1070,17 @@ test('an optional boolean renders and submits three states, with absent and null
     await expect(page.locator(`input[type="hidden"]${control}`)).toHaveCount(0);
   }
 
-  // SUBMISSION, all four states, because the claim above is about the render and
-  // this one is about the wire. They are not the same claim and the four-state
-  // sentence previously stood over a two-state measurement.
-  //
-  // What this control distinguishes is THREE things, not four: `true`, `false`,
-  // and "no value stated".
-  //
-  // **A stored `absent` and a stored `null` are identical here in BOTH places
-  // measured** -- both leave the blank option selected and both submit the empty
-  // string. An earlier version of this sentence said they were "distinguishable
-  // only in the render", and the specimen above disproves it: nothing in the
-  // boolean renderer adds a discriminator between them. Closing that difference
-  // is `form-empty-means-nothing`'s, not this packet's.
+  // SUBMISSION, all four stored states. The blank primary value is paired with a
+  // closed intent: `nothing` preserves either null or absence, while a non-empty
+  // primary value is a real set. No hidden default can rewrite null to false.
   const submitted = async (
     seeded: boolean | null | undefined,
     choose: string | null,
-  ): Promise<readonly string[]> => {
+  ): Promise<{
+    readonly emptyIntent: readonly string[];
+    readonly stored: ImmutableJsonValue | undefined;
+    readonly value: readonly string[];
+  }> => {
     const recordId = fieldKindExecutor.seedTypedValues(
       seeded === undefined ? {} : { [EVERY_KIND_FIELD_IDS.active]: seeded },
     );
@@ -567,19 +1088,153 @@ test('an optional boolean renders and submits three states, with absent and null
     if (choose !== null) await page.locator(control).selectOption(choose);
     const posted = capturePost(page);
     await page.getByRole('button', { name: 'Save' }).click();
-    return new URLSearchParams(await posted).getAll(
-      `value:${EVERY_KIND_FIELD_IDS.active}`,
-    );
+    const params = new URLSearchParams(await posted);
+    return {
+      emptyIntent: params.getAll(`empty:${EVERY_KIND_FIELD_IDS.active}`),
+      stored:
+        fieldKindExecutor.readRecord(recordId)?.values[
+          EVERY_KIND_FIELD_IDS.active
+        ],
+      value: params.getAll(`value:${EVERY_KIND_FIELD_IDS.active}`),
+    };
   };
 
   // Exactly one entry each time -- no hidden sibling shadowing the control.
-  expect(await submitted(undefined, null)).toEqual(['']);
-  expect(await submitted(null, null)).toEqual(['']);
-  expect(await submitted(false, null)).toEqual(['false']);
-  expect(await submitted(true, null)).toEqual(['true']);
+  expect(await submitted(undefined, null)).toEqual({
+    emptyIntent: ['nothing'],
+    stored: undefined,
+    value: [''],
+  });
+  expect(await submitted(null, null)).toEqual({
+    emptyIntent: ['nothing'],
+    stored: null,
+    value: [''],
+  });
+  expect(await submitted(false, null)).toEqual({
+    emptyIntent: ['nothing'],
+    stored: false,
+    value: ['false'],
+  });
+  expect(await submitted(true, null)).toEqual({
+    emptyIntent: ['nothing'],
+    stored: true,
+    value: ['true'],
+  });
   // And turning one off submits `false` rather than omitting the field, which is
   // what a checkbox could not express.
-  expect(await submitted(true, 'false')).toEqual(['false']);
+  expect(await submitted(true, 'false')).toEqual({
+    emptyIntent: ['nothing'],
+    stored: false,
+    value: ['false'],
+  });
+});
+
+test('malformed boolean and empty intent are refused beside admitted twins', async ({
+  page,
+}) => {
+  const recordId = fieldKindExecutor.seedTypedValues({});
+  const surfaceUrl = formUrl(recordId);
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  await page.goto(surfaceUrl);
+  const renderedForm = (await page
+    .locator('#surface-record-form')
+    .evaluate((form: HTMLFormElement) =>
+      Object.fromEntries(
+        [...new FormData(form).entries()].map(([key, value]) => [
+          key,
+          String(value),
+        ]),
+      ),
+    )) as Record<string, string>;
+  const post = (
+    overrides: Record<string, string>,
+    omitted: readonly string[] = [],
+  ) => {
+    const form: Record<string, string> = {
+      ...renderedForm,
+      idempotencyKey: randomUUID(),
+      ...overrides,
+    };
+    for (const key of omitted) delete form[key];
+    return page.request.post(surfaceUrl, {
+      form,
+      headers: { authorization: 'fixture-user' },
+    });
+  };
+
+  const beforeMalformedBoolean = fieldKindExecutor.providerVerdicts.length;
+  const malformedBoolean = await post({
+    [`empty:${EVERY_KIND_FIELD_IDS.active}`]: 'clear',
+    expectedRevision: '1',
+    [`value:${EVERY_KIND_FIELD_IDS.active}`]: 'yes',
+  });
+  assert.equal(malformedBoolean.status(), 422);
+  assert.match(await malformedBoolean.text(), /OPERATION_INPUT_INVALID/);
+  assert.equal(
+    fieldKindExecutor.providerVerdicts.length,
+    beforeMalformedBoolean,
+  );
+  assert.equal(
+    Object.hasOwn(
+      fieldKindExecutor.readRecord(recordId)?.values ?? {},
+      EVERY_KIND_FIELD_IDS.active,
+    ),
+    false,
+  );
+
+  const admittedBoolean = await post({
+    [`empty:${EVERY_KIND_FIELD_IDS.active}`]: 'clear',
+    expectedRevision: '1',
+    [`value:${EVERY_KIND_FIELD_IDS.active}`]: 'false',
+  });
+  assert.equal(admittedBoolean.status(), 200);
+  assert.equal(
+    fieldKindExecutor.readRecord(recordId)?.values[EVERY_KIND_FIELD_IDS.active],
+    false,
+  );
+
+  const verdictCount = fieldKindExecutor.providerVerdicts.length;
+  const malformedIntent = await post({
+    [`empty:${EVERY_KIND_FIELD_IDS.due}`]: 'mystery',
+    expectedRevision: '2',
+    [`value:${EVERY_KIND_FIELD_IDS.due}`]: '',
+  });
+  assert.equal(malformedIntent.status(), 422);
+  assert.match(await malformedIntent.text(), /OPERATION_INPUT_INVALID/);
+  assert.equal(fieldKindExecutor.providerVerdicts.length, verdictCount);
+
+  const missingIntent = await post(
+    {
+      expectedRevision: '2',
+      [`value:${EVERY_KIND_FIELD_IDS.due}`]: '',
+    },
+    [`empty:${EVERY_KIND_FIELD_IDS.due}`],
+  );
+  assert.equal(missingIntent.status(), 422);
+  assert.match(await missingIntent.text(), /OPERATION_INPUT_INVALID/);
+  assert.equal(fieldKindExecutor.providerVerdicts.length, verdictCount);
+
+  const absentField = await post({ expectedRevision: '2' }, [
+    `empty:${EVERY_KIND_FIELD_IDS.due}`,
+    `value:${EVERY_KIND_FIELD_IDS.due}`,
+  ]);
+  assert.equal(absentField.status(), 422);
+  assert.match(await absentField.text(), /OPERATION_INPUT_INVALID/);
+  assert.equal(fieldKindExecutor.providerVerdicts.length, verdictCount);
+
+  const admittedNothing = await post({
+    [`empty:${EVERY_KIND_FIELD_IDS.due}`]: 'nothing',
+    expectedRevision: '2',
+    [`value:${EVERY_KIND_FIELD_IDS.due}`]: '',
+  });
+  assert.equal(admittedNothing.status(), 200);
+  assert.equal(
+    Object.hasOwn(
+      fieldKindExecutor.readRecord(recordId)?.values ?? {},
+      EVERY_KIND_FIELD_IDS.due,
+    ),
+    false,
+  );
 });
 
 /**
@@ -604,6 +1259,46 @@ test('a form with no compiled field kinds still renders working text boxes', asy
   await expect(page.locator('#surface-record-form datalist')).toHaveCount(0);
 });
 
+test('a provider refusal cannot be manufactured into browser success', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  const surfaceUrl = `${baseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`;
+  await page.goto(surfaceUrl);
+  const form = (await page
+    .locator('#surface-record-form')
+    .evaluate((element: HTMLFormElement) =>
+      Object.fromEntries(
+        [...new FormData(element).entries()].map(([key, value]) => [
+          key,
+          String(value),
+        ]),
+      ),
+    )) as Record<string, string>;
+  form[`value:${FIXTURE_IDS.fieldIds.parentName}`] = 'Refused create';
+  delete form[`value:${FIXTURE_IDS.fieldIds.parentNumber}`];
+  const recordId = form.recordId;
+  assert.ok(recordId);
+  const before = executor.providerVerdicts.length;
+
+  const response = await page.request.post(surfaceUrl, {
+    form,
+    headers: { authorization: 'fixture-user' },
+  });
+
+  assert.equal(response.status(), 422);
+  assert.doesNotMatch(await response.text(), /Create complete/);
+  assert.deepEqual(executor.providerVerdicts.slice(before), [
+    {
+      accepted: false,
+      code: 'MODULE_REQUIRED_FIELD_MISSING',
+      stage: 'operation-input',
+      subjectId: FIXTURE_IDS.fieldIds.parentNumber,
+    },
+  ]);
+  assert.equal(executor.readRecord(recordId), null);
+});
+
 test('fixture list and form render live DTOs and reflect a semantic create', async ({
   page,
 }) => {
@@ -624,20 +1319,23 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
     page.getByRole('heading', { level: 1, name: 'New master' }),
   ).toBeVisible();
   await page.getByLabel('Master Name').fill('Browser-created master');
+  await page.getByLabel('Master Number').fill('BROWSER-001');
+  const before = executor.providerVerdicts.length;
   await page.getByRole('button', { name: 'Save' }).click();
 
-  // KNOWN_FALSE_GREEN: production REFUSES this create. `ordinaryModuleV1`
-  // declares `master_number` required while this surface's bound query
-  // selects only `master_name`, so the browser cannot submit it and
-  // `parseMutationInput` returns MODULE_REQUIRED_FIELD_MISSING. The executor
-  // is configured to IGNORE that refusal, so the success asserted below is
-  // manufactured and this is NOT valid evidence of semantic create
-  // behaviour. Routed: `double-must-honour-refusal`.
+  expect(executor.providerVerdicts.slice(before)).toEqual([
+    {
+      accepted: true,
+      code: null,
+      stage: 'operation-input',
+      subjectId: null,
+    },
+  ]);
   await expect(page.getByRole('status')).toContainText('Create complete');
   await expect(page.getByRole('status')).toContainText(
     'trust evidence is linked',
   );
-  await expect(page.getByLabel('Master Name')).toHaveValue(
+  await expect(page.getByLabel('Master Name', { exact: true })).toHaveValue(
     'Browser-created master',
   );
 
@@ -672,7 +1370,7 @@ test('compiler-valid one-slot Record surfaces retain fallback actions and feedba
 }) => {
   const compiled = compileFixture(false);
   const policy = allowPolicy();
-  const executor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
+  const executor = new BrowserFixtureExecutor(null);
   const operationMediation = new SemanticOperationMediationAuthority();
   const legacyServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -697,14 +1395,17 @@ test('compiler-valid one-slot Record surfaces retain fallback actions and feedba
       page.locator('[data-platform-slot="record:commandBar"]'),
     ).toHaveCount(0);
     await page.getByLabel('Master Name').fill('Legacy one-slot master');
+    await page.getByLabel('Master Number').fill('LEGACY-001');
+    const before = executor.providerVerdicts.length;
     await page.getByRole('button', { name: 'Save' }).click();
-    // KNOWN_FALSE_GREEN: production REFUSES this create. `ordinaryModuleV1`
-    // declares `master_number` required while this surface's bound query
-    // selects only `master_name`, so the browser cannot submit it and
-    // `parseMutationInput` returns MODULE_REQUIRED_FIELD_MISSING. The executor
-    // is configured to IGNORE that refusal, so the success asserted below is
-    // manufactured and this is NOT valid evidence of semantic create
-    // behaviour. Routed: `double-must-honour-refusal`.
+    expect(executor.providerVerdicts.slice(before)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
     await expect(page.getByRole('status')).toContainText('Create complete');
 
     await page
@@ -744,7 +1445,6 @@ test('a failed data slot stays inline while ready siblings render without JavaSc
   const policy = allowPolicy();
   const failingExecutor = new BrowserFixtureExecutor(
     `${FIXTURE_IDS.namespace}:query.master_get`,
-    IGNORES_PROVIDER_REFUSALS,
   );
   const operationMediation = new SemanticOperationMediationAuthority();
   const failingServer = createSurfaceRuntimeServer(
@@ -812,10 +1512,7 @@ test('an empty data slot is observably distinct from a failed slot', async ({
 }) => {
   const compiled = compileFixture();
   const policy = allowPolicy();
-  const emptyExecutor = new BrowserFixtureExecutor(
-    null,
-    IGNORES_PROVIDER_REFUSALS,
-  );
+  const emptyExecutor = new BrowserFixtureExecutor(null);
   const operationMediation = new SemanticOperationMediationAuthority();
   const emptyServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -857,10 +1554,7 @@ test('an invalid selected-surface binding remains page-level before slot composi
 }) => {
   const compiled = compileFixture(true, true);
   const policy = allowPolicy();
-  const invalidExecutor = new BrowserFixtureExecutor(
-    null,
-    IGNORES_PROVIDER_REFUSALS,
-  );
+  const invalidExecutor = new BrowserFixtureExecutor(null);
   const operationMediation = new SemanticOperationMediationAuthority();
   const invalidServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -916,7 +1610,7 @@ test('a record command bar renders every granted command as its own operable con
 }) => {
   const compiled = compileFixture(true, false, pushCommandOperations);
   const policy = allowPolicy();
-  const executor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
+  const executor = new BrowserFixtureExecutor(null);
   const recordId = executor.createSeed('Two-command master');
   const capabilityExecutors = COMMAND_ACTIONS.map(
     (action) =>
@@ -1013,10 +1707,7 @@ test('an intent rendered by one control still refuses a second operation by name
 }) => {
   const compiled = compileFixture(true, false, pushDuplicateCreate);
   const policy = allowPolicy();
-  const duplicateExecutor = new BrowserFixtureExecutor(
-    null,
-    IGNORES_PROVIDER_REFUSALS,
-  );
+  const duplicateExecutor = new BrowserFixtureExecutor(null);
   const operationMediation = new SemanticOperationMediationAuthority();
   const duplicateServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -1060,7 +1751,7 @@ test('a posted operation id outside the surface binding is refused', async ({
 }) => {
   const compiled = compileFixture(true, false, pushCommandOperations);
   const policy = allowPolicy();
-  const executor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
+  const executor = new BrowserFixtureExecutor(null);
   const recordId = executor.createSeed('Binding authority master');
   const capabilityExecutors = COMMAND_ACTIONS.map(
     (action) =>
@@ -1179,40 +1870,11 @@ class BrowserFixtureExecutor
   private readonly records = new Map<string, SemanticRecordDto>();
 
   /**
-   * **This double does NOT honour provider refusals in general, and the
-   * parameter has no default so that no construction site can be silent about
-   * it.**
-   *
-   * A review found the earlier framing false: with a defaulted `false`,
-   * `execute()` still recorded the refusal and then merged the rejected values,
-   * persisted them and returned `outcome: 'succeeded'` with a read-back. The
-   * class could be described as refusal-honouring while its default behaviour
-   * did the opposite. Requiring the argument does not fix that behaviour -- it
-   * makes every site state which one it has.
-   *
-   * `IGNORES_PROVIDER_REFUSALS` is a live defect at the TWO create journeys that
-   * reach the operation branch, and INERT everywhere else. A review established
-   * the difference, correcting an earlier note here that was wrong about it:
-   * the flag changes nothing at the capability-command, duplicate-create and
-   * invalid-operation-id sites, because `parseMutationInput` is never reached
-   * there. Registered-capability operations route to `RecordingCapabilityExecutor`
-   * rather than this executor's mutation branch, and the other two are refused
-   * while the compiled surface binding is built, before any executor runs.
-   *
-   * Where it IS live: the real parser refuses `ordinaryModuleV1`'s create with
-   * `MODULE_REQUIRED_FIELD_MISSING` on `master_number` -- a required field that
-   * surface never renders, so its form cannot submit it -- and the two
-   * assertions marked `KNOWN_FALSE_GREEN` below observe "Create complete" for an
-   * operation production cannot perform. Pre-existing, a different instance from
-   * the wire gaps `ux-picker` routed, and closing it means reconciling a surface
-   * with its entity's input contract. Routed to `double-must-honour-refusal`;
-   * deliberately not fixed here, because fixing it inside this lease would widen
-   * the packet past its charter.
+   * This double cannot report success after the real provider input parser
+   * refuses. There is no ignore-refusal mode: adding one would make the two
+   * states expressible again and recreate the false green this packet removes.
    */
-  constructor(
-    private readonly failedQueryId: string | null,
-    private readonly honourProviderRefusal: boolean,
-  ) {}
+  constructor(private readonly failedQueryId: string | null) {}
 
   /**
    * What the REAL provider decided about each operation input it was handed.
@@ -1226,9 +1888,13 @@ class BrowserFixtureExecutor
   readonly providerVerdicts: {
     accepted: boolean;
     code: string | null;
-    stage: 'as-submitted' | 'booleans-coerced' | 'normalised';
+    stage: 'operation-input';
     subjectId: string | null;
   }[] = [];
+
+  readRecord(recordId: string): SemanticRecordDto | null {
+    return this.records.get(recordId) ?? null;
+  }
 
   createSeed(name?: string): string {
     const recordId = randomUUID();
@@ -1280,81 +1946,31 @@ class BrowserFixtureExecutor
     void _request;
   }
 
-  /**
-   * Puts the submitted input past the REAL write path's value contracts three
-   * times, so each transformation's contribution is attributable instead of one
-   * lumped verdict.
-   *
-   * **Both transformations stand in for a mechanism that does not exist**, and
-   * recording all three stages is how this gate reports that rather than hiding
-   * it behind a stub that accepts anything. Measured here, in this order:
-   *
-   * - **as submitted** -- refused. A form posts strings, and two kinds of string
-   *   are not values: `"true"` where `booleanFieldType` demands a JSON boolean,
-   *   and `""` for every field the record has no value for, which no non-text
-   *   kind admits.
-   * - **booleans coerced** -- still refused, which is the point of the middle
-   *   stage: fixing the boolean alone is not enough.
-   * - **normalised** (empty strings omitted as "no value stated", booleans
-   *   coerced) -- accepted, so every temporal and enum value the controls
-   *   rendered survives the wire byte for byte.
-   *
-   * Neither gap is introduced by `ux-picker`; a bare text box posted `""` too.
-   * Both are `U7`'s Postel input normalisation, and whether an empty control
-   * means "leave alone" or "clear it" is a decision `U7` owns -- this stand-in
-   * takes the conservative reading and does not pretend to settle it.
-   */
   #askTheProvider(
     request: SemanticOperationExecutionRequest,
     input: Record<string, unknown>,
-  ): void {
-    const key = 'values' in input ? 'values' : 'patch';
-    const submitted = recordValue(input[key] ?? {});
-    const withValues = (
-      entries: readonly (readonly [string, unknown])[],
-    ): Record<string, unknown> => ({
-      ...input,
-      [key]: Object.fromEntries(entries),
-    });
-    const asBoolean = (value: unknown): unknown =>
-      value === 'true' ? true : value === 'false' ? false : value;
-    const entries = Object.entries(submitted);
-
-    for (const [stage, candidate] of [
-      ['as-submitted', input],
-      [
-        'booleans-coerced',
-        withValues(entries.map(([field, value]) => [field, asBoolean(value)])),
-      ],
-      [
-        'normalised',
-        withValues(
-          entries
-            .filter(([, value]) => value !== '')
-            .map(([field, value]) => [field, asBoolean(value)]),
-        ),
-      ],
-    ] as const) {
-      try {
-        parseMutationInput(
-          request.definition as Parameters<typeof parseMutationInput>[0],
-          candidate as unknown as ImmutableJsonValue,
-        );
-        this.providerVerdicts.push({
-          accepted: true,
-          code: null,
-          stage,
-          subjectId: null,
-        });
-      } catch (error) {
-        const known = error instanceof ModuleRuntimeInterpreterError;
-        this.providerVerdicts.push({
-          accepted: false,
-          code: known ? error.code : null,
-          stage,
-          subjectId: known ? error.subjectId : null,
-        });
-      }
+  ): ReturnType<typeof parseMutationInput> {
+    try {
+      const parsed = parseMutationInput(
+        request.definition as Parameters<typeof parseMutationInput>[0],
+        input as unknown as ImmutableJsonValue,
+      );
+      this.providerVerdicts.push({
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      });
+      return parsed;
+    } catch (error) {
+      const known = error instanceof ModuleRuntimeInterpreterError;
+      this.providerVerdicts.push({
+        accepted: false,
+        code: known ? error.code : null,
+        stage: 'operation-input',
+        subjectId: known ? error.subjectId : null,
+      });
+      throw error;
     }
   }
 
@@ -1400,30 +2016,9 @@ class BrowserFixtureExecutor
         : result;
     }
 
-    const input = recordValue(request.input);
-    // **Honoured only where the construction site asked for it.** This is NOT a
-    // refusal-honouring double in general: with `KNOWN_FALSE_GREEN` the recorded
-    // refusal is ignored and the branch below merges the rejected values,
-    // persists them and returns `outcome: 'succeeded'` with a read-back. That is
-    // ADR-0041's accepted-and-ignored state. It is live only where a test
-    // actually reaches this branch -- the two create journeys marked
-    // `KNOWN_FALSE_GREEN` below -- and naming it does not make them valid
-    // evidence of semantic create behaviour. See `double-must-honour-refusal`.
-    //
-    // An earlier version of this comment said the double honours the refusal it
-    // records, without qualification. It does not, and a reviewer had to read
-    // the branch to find that out.
-    this.#askTheProvider(request, input);
-    const asSubmitted = this.providerVerdicts.at(-3);
-    if (this.honourProviderRefusal && asSubmitted && !asSubmitted.accepted) {
-      throw new ModuleRuntimeInterpreterError(
-        asSubmitted.code ?? 'MODULE_FIELD_VALUE_INVALID',
-        'the real write path refuses this operation input',
-        asSubmitted.subjectId,
-      );
-    }
-    const values = recordValue(input.values ?? input.patch ?? {});
-    const recordId = String(input.recordId);
+    const parsed = this.#askTheProvider(request, recordValue(request.input));
+    const values = parsed.patch;
+    const recordId = parsed.recordId;
     const previous = this.records.get(recordId);
     const effect = request.definition.effect.kind;
     const stored: SemanticRecordDto = Object.freeze({
@@ -1719,12 +2314,33 @@ function pushCommandOperations(authored: Record<string, unknown>): void {
   );
 }
 
+/** Makes this browser fixture's create form capable of stating every required value. */
+function exposeRequiredMasterNumber(authored: Record<string, unknown>): void {
+  const queries = authored.queries as Array<Record<string, unknown>>;
+  const get = queries.find(
+    (query) => query.queryId === `${FIXTURE_IDS.namespace}:query.master_get`,
+  );
+  assert.ok(get);
+  (get.selections as Array<Record<string, unknown>>).push({
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
+      targetId: FIXTURE_IDS.fieldIds.parentNumber,
+    },
+    kind: 'querySelection',
+    orderKey: 20,
+    schemaVersion: FIXTURE_LANGUAGE_VERSION,
+    selectionId: `${FIXTURE_IDS.namespace}:selection.master_get_number`,
+  });
+}
+
 function compileFixture(
   withPartialAnatomy = true,
   withInvalidFormBinding = false,
   amend?: (authored: Record<string, unknown>) => void,
 ): CompileSuccess {
   const authored = ordinaryModuleV1();
+  exposeRequiredMasterNumber(authored);
   amend?.(authored);
   const surfaces = authored.surfaces as Array<Record<string, unknown>>;
   if (withPartialAnatomy) {
@@ -1777,8 +2393,12 @@ function compileFixture(
   return result as CompileSuccess;
 }
 
-function compileEveryFieldKindFixture(): CompileSuccess {
-  const normalized = normalizeApplicationPackage(everyFieldKindModule());
+function compileEveryFieldKindFixture(
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion = COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+): CompileSuccess {
+  const authored = everyFieldKindModule();
+  exposeRequiredMasterNumber(authored);
+  const normalized = normalizeApplicationPackage(authored);
   const result = compileApplication({
     dependencies: [],
     expectedActiveRelease: null,
@@ -1789,7 +2409,7 @@ function compileEveryFieldKindFixture(): CompileSuccess {
     ),
     profile: {
       ...MODULE_COMPILER_PROFILE,
-      compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+      compilerSemanticProfileVersion,
       languageVersion: normalized.languageVersion,
       normalizationProfileVersion: normalized.normalizationProfileVersion,
     },

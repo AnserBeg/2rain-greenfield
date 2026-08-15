@@ -10,7 +10,10 @@ import {
   parsePinnedOperationInputContract,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type { PinnedOperationEffectKind } from '../../../packages/runtime/src/semantic-operation-gateway.js';
-import type { RegisteredOperationDefinition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import type {
+  RegisteredOperationDefinition,
+  RegisteredOperationInputContract,
+} from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   registeredSemanticQueryFromPinnedView,
   type RegisteredQueryDefinition,
@@ -297,12 +300,24 @@ export interface CompiledNavigationTree {
 export interface CompiledSurfaceOperationBinding {
   readonly capabilityId: string | null;
   readonly confirmation: RegisteredOperationDefinition['confirmation'];
+  /**
+   * Provider-facing field kinds from the already-pinned operation catalog.
+   * Form normalization must not depend on profile-v2 surface metadata becoming
+   * adopted before it can write a boolean.
+   */
+  readonly inputFields: readonly CompiledSurfaceInputField[] | null;
   readonly intent: SurfaceOperationIntent;
   readonly label: string;
   readonly operationId: string;
   readonly precondition: Readonly<
     Record<string, RuntimeViewContract.ImmutableJsonValue>
   >;
+}
+
+export interface CompiledSurfaceInputField {
+  readonly fieldId: string;
+  readonly kind: RegisteredOperationInputContract['fields'][number]['fieldKind'];
+  readonly required: boolean;
 }
 
 /**
@@ -503,6 +518,7 @@ export function readCompiledSurfaceDataBinding(
       Object.freeze({
         capabilityId: operation.capabilityId,
         confirmation: operation.confirmation,
+        inputFields: operation.inputFields,
         intent: operation.intent,
         label: operationLabel(operation.operationId),
         operationId: operation.operationId,
@@ -1050,6 +1066,7 @@ function parseOperationBinding(value: unknown): {
   readonly capabilityId: string | null;
   readonly confirmation: RegisteredOperationDefinition['confirmation'];
   readonly entityId: string | null;
+  readonly inputFields: readonly CompiledSurfaceInputField[] | null;
   readonly intent: SurfaceOperationIntent;
   readonly lifecycle: RegisteredOperationDefinition['lifecycle'];
   readonly operationId: string;
@@ -1121,6 +1138,18 @@ function parseOperationBinding(value: unknown): {
     capabilityId: capabilityEffect ? String(capability!.targetId) : null,
     confirmation: value.confirmation,
     entityId: capabilityEffect ? null : String(entity!.targetId),
+    inputFields:
+      value.inputContract === undefined
+        ? null
+        : Object.freeze(
+            value.inputContract.fields.map((field) =>
+              Object.freeze({
+                fieldId: field.fieldId,
+                kind: field.fieldKind,
+                required: field.required,
+              }),
+            ),
+          ),
     intent,
     lifecycle: value.lifecycle,
     operationId: value.operationId,

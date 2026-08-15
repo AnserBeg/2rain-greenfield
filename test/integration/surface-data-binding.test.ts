@@ -150,6 +150,7 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
     const createdInput = asRecord(executor.operationCalls[0]!.input);
     const createdId = String(createdInput.recordId);
     const update = await postIntent(baseUrl, formSurface, {
+      [`empty:${FIXTURE_IDS.fieldIds.parentName}`]: 'emptyText',
       expectedRevision: '1',
       operationId: `${FIXTURE_IDS.namespace}:operation.master_update`,
       recordId: createdId,
@@ -374,6 +375,7 @@ test('human-confirmed forms render the authoritative operation read-back without
 
   const createInput = asRecord(executor.operationCalls[0]!.input);
   const updateSubmission = {
+    [`empty:${FIXTURE_IDS.fieldIds.parentName}`]: 'emptyText',
     expectedRevision: '1',
     idempotencyKey: randomUUID(),
     operationId: `${FIXTURE_IDS.namespace}:operation.master_update`,
@@ -2109,6 +2111,7 @@ test('the gateway request carries the resolved operation id and nothing from the
   const operation = Object.freeze({
     capabilityId: null,
     confirmation: 'none' as const,
+    inputFields: null,
     intent: 'command' as const,
     label: 'Release',
     operationId: `${FIXTURE_IDS.namespace}:operation.master_release`,

@@ -228,22 +228,18 @@ composedTest.describe('focus ring coverage', () => {
 
         // This pins a KNOWN ABSENCE, and it is not a coverage claim — the
         // distinction the confirm review named correctly. The unreached set is
-        // held by EXACT equality, never by an allowlist that can grow. `.list-page-link` renders
-        // only when a list has a next cursor, and no composed-application list
-        // seeds past its compiled `maximumResultCount`, so this packet cannot
-        // reach it; its ring is `--focus-ring-surface`, which five other selectors
-        // do measure on five grounds. An eleventh unreached selector, or this one
+        // held by EXACT equality, never by an allowlist that can grow.
+        // `.list-page-link` renders only when a list has a next cursor, and no
+        // composed-application list seeds past its compiled
+        // `maximumResultCount`, so this packet cannot reach it; its ring is
+        // `--focus-ring-surface`, which the reached selectors measure on the
+        // actual grounds above. A second unreached selector, or this one
         // becoming reachable, changes the array and reds either way.
-        // `.form-fields select` joined the unreached set with `ux-picker`, and
-        // for a reason that expires on a known event: a `select` renders only
-        // where the compiled surface carries per-field kinds, and those are
-        // gated on the UNADOPTED compiler-semantic v2, so no composed surface
-        // has one. Its ring is `--focus-ring-surface`, the same token five
-        // reached selectors measure on five grounds. **Adopting v2 must remove
-        // this entry** — it becomes reachable and this assertion reds, which is
-        // the intended signal rather than a regression.
+        //
+        // `.form-fields select` left this set when ADR-0053's native empty-intent
+        // select made the selector reachable without profile-v2 field metadata.
+        // Its light and dark measurements are now part of `measurementsRead`.
         assert.deepEqual(observed.selectorsWithoutSubject, [
-          '.form-fields select:focus-visible',
           '.list-page-link:focus-visible',
         ]);
         assert.deepEqual(result.violations, []);
@@ -1373,7 +1369,7 @@ async function partyLifecycleJourney(
   await page.getByLabel('Party Number').fill('P-BROWSER-REAL-001');
   await page.getByLabel('Party Name').fill('Browser-persisted Party');
   await page
-    .getByLabel('Party Contact Summary')
+    .getByLabel('Party Contact Summary', { exact: true })
     .fill('browser-persisted@example.test');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Create complete');
@@ -1447,7 +1443,7 @@ async function partyLifecycleJourney(
     page.getByRole('heading', { level: 1, name: 'Edit Party' }),
   ).toBeVisible();
   await page
-    .getByLabel('Party Contact Summary')
+    .getByLabel('Party Contact Summary', { exact: true })
     .fill('updated-after-navigation@example.test');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Update complete');

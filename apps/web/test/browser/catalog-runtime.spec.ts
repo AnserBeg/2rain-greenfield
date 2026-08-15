@@ -44,7 +44,9 @@ test('real Catalog surface creates an item and archives/restores through the gen
     await page.goto(surfaceUrl(fixture.baseUrl, 'item_form'));
     await page.getByLabel('SKU').fill('SKU-WEB-004');
     await page.getByLabel('Item Name').fill('Browser-created Item');
-    await page.getByLabel('Description').fill('Created through generic form');
+    await page
+      .getByLabel('Item Description', { exact: true })
+      .fill('Created through generic form');
     await page.getByLabel('Base Unit').fill('EA');
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');

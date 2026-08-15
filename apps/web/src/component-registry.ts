@@ -22,6 +22,7 @@ import type {
   CompiledFieldOption,
   CompiledSurfaceDefinition,
   CompiledSurfaceField,
+  CompiledSurfaceInputField,
   CompiledSurfaceOperationBinding,
   CompiledSurfaceSlot,
   SurfaceOperationIntent,
@@ -735,7 +736,7 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${renderFormFields(context.surface, record)}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${renderFormFields(context.surface, operation, record)}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
 }
@@ -1108,67 +1109,297 @@ const ENUM_SELECT_MAXIMUM_OPTIONS = 5;
  * where no native control does, the carrier stays lossless and the refusal is
  * named rather than absorbed.
  */
+/**
+ * The string-only form wire's closed empty-control vocabulary. Exporting the
+ * prefix from the renderer keeps the HTML name and the submission reader on
+ * one spelling; the reader still validates every posted value at runtime.
+ */
+export const FORM_EMPTY_INTENT_PREFIX = 'empty:';
+
 function renderFormFields(
   surface: CompiledSurfaceDefinition,
+  operation: CompiledSurfaceOperationBinding,
   record: SemanticRecordDto | null,
 ): string {
   const fieldsById = new Map(
     (surface.fields ?? []).map((field) => [field.fieldId, field]),
   );
+  const inputFieldsById = new Map(
+    (operation.inputFields ?? []).map((field) => [field.fieldId, field]),
+  );
   return surface.fieldIds
     .map((fieldId, index) => {
+      const value = record ? record.values[fieldId] : undefined;
+      const field = fieldsById.get(fieldId);
+      const inputField = inputFieldsById.get(fieldId);
       const control = renderFormControl(
-        fieldsById.get(fieldId),
+        field,
+        inputField,
         fieldId,
         index,
-        record ? record.values[fieldId] : undefined,
+        value,
       );
-      return `<label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control}</label>`;
+      const emptyIntent = renderEmptyIntentControl(
+        inputField,
+        fieldId,
+        value,
+        record !== null,
+        control.storedValueUnavailable,
+      );
+      const unavailableValue = control.storedValueUnavailable
+        ? renderUnavailableStoredValue(fieldId, index, inputField, value)
+        : '';
+      return `<div class="form-field"><label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
     })
     .join('');
 }
 
+/**
+ * A blank control never has to guess between three different mutations.
+ *
+ * - `nothing` omits the field (create: no value stated; update: leave alone),
+ * - `clear` emits JSON null, and
+ * - `emptyText` emits the real text value `""`.
+ *
+ * All are native server-rendered choices. On update, `nothing` is the safe
+ * default for every non-empty stored value: a non-empty primary control still
+ * wins as `set`, while a blank control cannot clear anything unless the
+ * operator explicitly chooses `clear`. Stored empty text selects `emptyText`.
+ * Every required text update gets the explicit `nothing | emptyText` choice,
+ * so the submission reader can require the companion from the pinned
+ * operation contract without knowing the record state that caused the render.
+ * `nothing` safely preserves an unavailable value; `emptyText` keeps ordinary
+ * required text intentionally blankable. An unavailable required non-text
+ * value needs only the hidden preservation marker. No field value is invented
+ * or destroyed by a control default.
+ */
+function renderEmptyIntentControl(
+  field: CompiledSurfaceInputField | undefined,
+  fieldId: string,
+  value: unknown,
+  updating: boolean,
+  storedValueUnavailable: boolean,
+): string {
+  if (!field) return '';
+  const option = (
+    intent: 'clear' | 'emptyText' | 'nothing',
+    label: string,
+    selectedIntent: 'clear' | 'emptyText' | 'nothing',
+  ): string =>
+    `<option value="${intent}"${selectedIntent === intent ? ' selected' : ''}>${label}</option>`;
+  const select = (options: readonly string[]): string =>
+    `<label class="form-empty-intent"><span>When ${escapeHtml(fieldLabel(fieldId))} is blank</span><select name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" data-empty-intent-for="${escapeHtml(fieldId)}" autocomplete="off">${options.join('')}</select></label>`;
+  if (field.required) {
+    if (!updating) return '';
+    if (field.kind === 'textFieldType') {
+      const selected =
+        storedValueUnavailable || value === null || value === undefined
+          ? 'nothing'
+          : 'emptyText';
+      return select([
+        option('nothing', 'Leave unchanged', selected),
+        option('emptyText', 'Save an empty text value', selected),
+      ]);
+    }
+    if (!storedValueUnavailable) return '';
+    return `<input type="hidden" name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" value="nothing" data-preserve-unavailable-for="${escapeHtml(fieldId)}">`;
+  }
+  const selected =
+    !updating || value === null || value === undefined
+      ? 'nothing'
+      : field.kind === 'textFieldType' && value === ''
+        ? 'emptyText'
+        : 'nothing';
+  const options = [
+    option('nothing', updating ? 'Leave unchanged' : 'No value', selected),
+    ...(updating ? [option('clear', 'Clear stored value', selected)] : []),
+    ...(field.kind === 'textFieldType'
+      ? [option('emptyText', 'Save an empty text value', selected)]
+      : []),
+  ];
+  return select(options);
+}
+
+interface RenderedFormControl {
+  readonly html: string;
+  /** The browser will sanitize or de-select this stored value to blank. */
+  readonly storedValueUnavailable: boolean;
+}
+
 function renderFormControl(
   field: CompiledSurfaceField | undefined,
+  inputField: CompiledSurfaceInputField | undefined,
   fieldId: string,
   index: number,
   value: unknown,
-): string {
+): RenderedFormControl {
   const name = `value:${escapeHtml(fieldId)}`;
-  const current = renderInputValue(value);
+  const storedValueUnavailable =
+    value !== null &&
+    value !== undefined &&
+    (field
+      ? !typedControlPreservesValue(field, value)
+      : inputField
+        ? !bareControlPreservesValue(inputField, value)
+        : false);
+  // Make the unavailable state deterministic in the rendered HTML rather than
+  // relying on each browser to sanitize the value after parsing the attribute.
+  const renderedValue = storedValueUnavailable ? undefined : value;
+  const describedBy = storedValueUnavailable
+    ? ` aria-describedby="${unavailableStoredValueId(index)}"`
+    : '';
   if (!field) {
-    return `<input name="${name}" value="${current}" autocomplete="off">`;
+    return {
+      html: `<input${describedBy} name="${name}" value="${renderInputValue(renderedValue)}" autocomplete="off">`,
+      storedValueUnavailable,
+    };
   }
-  const kind = ` data-field-kind="${field.kind}"`;
+  const current = renderInputValue(renderedValue);
+  const kind = ` data-field-kind="${field.kind}"${describedBy}`;
+  const html = (() => {
+    switch (field.kind) {
+      case 'enumFieldType':
+        return renderEnumControl(
+          field.options,
+          name,
+          kind,
+          index,
+          renderedValue,
+        );
+      case 'booleanFieldType':
+        return renderBooleanControl(name, kind, renderedValue);
+      case 'dateFieldType':
+        // The only temporal kind a native control admits whole: `calendar` and
+        // `timezoneSemantics` are single-valued in the canonical schema, and
+        // `type="date"` emits exactly the `YYYY-MM-DD` the write path validates.
+        return `<input type="date"${kind} name="${name}" value="${current}" autocomplete="off">`;
+      case 'dateTimeFieldType':
+        return renderDateTimeControl(field, name, kind, current);
+      case 'timeFieldType':
+        // Without a step a time input defaults to 60 seconds and silently REFUSES
+        // `12:34:56`, which is the value the contract requires. The step comes from
+        // the declared precision -- `1` second, `0.001` millisecond -- so the
+        // control admits the declared domain and nothing wider.
+        return `<input type="time" step="${field.temporal.precision === 'millisecond' ? '0.001' : '1'}"${kind} name="${name}" value="${current}" autocomplete="off">`;
+      case 'integerFieldType':
+        return `<input type="number" inputmode="numeric" step="1"${kind} name="${name}" value="${current}" autocomplete="off">`;
+      case 'exactDecimalFieldType':
+      case 'moneyFieldType':
+      case 'quantityFieldType':
+        // `step="any"` rather than a scale-derived step: the manifest carries the
+        // kind, not the scale, and a guessed step REJECTS values the field admits.
+        return `<input type="number" inputmode="decimal" step="any"${kind} name="${name}" value="${current}" autocomplete="off">`;
+      case 'textFieldType':
+        return `<input type="text"${kind} name="${name}" value="${current}" autocomplete="off">`;
+    }
+  })();
+  return {
+    html,
+    storedValueUnavailable,
+  };
+}
+
+/**
+ * Profile v1 has no typed surface metadata, but the selected operation still
+ * declares the provider-facing field kind. The fallback is a one-line text
+ * input, so it is faithful only when that carrier and the input contract agree
+ * on the stored value's runtime type and the browser will not sanitize it.
+ */
+function bareControlPreservesValue(
+  field: CompiledSurfaceInputField,
+  value: unknown,
+): boolean {
+  return field.kind === 'booleanFieldType'
+    ? typeof value === 'boolean'
+    : oneLineInputPreservesValue(value);
+}
+
+/**
+ * Whether the typed control's live IDL value can carry the stored value.
+ *
+ * This follows browser parsing, not provider admission. A value that the
+ * provider no longer admits may still remain visible in a lossless text
+ * carrier and will then refuse by name on submission; this classifier exists
+ * for the sharper failure where the browser silently turns the stored value
+ * into blank before the user touches it.
+ */
+function typedControlPreservesValue(
+  field: CompiledSurfaceField,
+  value: unknown,
+): boolean {
   switch (field.kind) {
-    case 'enumFieldType':
-      return renderEnumControl(field.options, name, kind, index, value);
     case 'booleanFieldType':
-      return renderBooleanControl(name, kind, value);
+      return typeof value === 'boolean';
+    case 'enumFieldType':
+      return (
+        oneLineInputPreservesValue(value) &&
+        (field.options.length > ENUM_SELECT_MAXIMUM_OPTIONS ||
+          field.options.some((option) => option.optionId === value))
+      );
     case 'dateFieldType':
-      // The only temporal kind a native control admits whole: `calendar` and
-      // `timezoneSemantics` are single-valued in the canonical schema, and
-      // `type="date"` emits exactly the `YYYY-MM-DD` the write path validates.
-      return `<input type="date"${kind} name="${name}" value="${current}" autocomplete="off">`;
-    case 'dateTimeFieldType':
-      return renderDateTimeControl(field, name, kind, current);
+      return typeof value === 'string' && nativeDateValue(value);
     case 'timeFieldType':
-      // Without a step a time input defaults to 60 seconds and silently REFUSES
-      // `12:34:56`, which is the value the contract requires. The step comes from
-      // the declared precision -- `1` second, `0.001` millisecond -- so the
-      // control admits the declared domain and nothing wider.
-      return `<input type="time" step="${field.temporal.precision === 'millisecond' ? '0.001' : '1'}"${kind} name="${name}" value="${current}" autocomplete="off">`;
+      return typeof value === 'string' && nativeTimeValue(value);
     case 'integerFieldType':
-      return `<input type="number" inputmode="numeric" step="1"${kind} name="${name}" value="${current}" autocomplete="off">`;
     case 'exactDecimalFieldType':
     case 'moneyFieldType':
     case 'quantityFieldType':
-      // `step="any"` rather than a scale-derived step: the manifest carries the
-      // kind, not the scale, and a guessed step REJECTS values the field admits.
-      return `<input type="number" inputmode="decimal" step="any"${kind} name="${name}" value="${current}" autocomplete="off">`;
+      return typeof value === 'string' && nativeNumberValue(value);
     case 'textFieldType':
-      return `<input type="text"${kind} name="${name}" value="${current}" autocomplete="off">`;
+    case 'dateTimeFieldType':
+      return oneLineInputPreservesValue(value);
   }
+}
+
+function oneLineInputPreservesValue(value: unknown): value is string {
+  return typeof value === 'string' && !/[\r\n]/u.test(value);
+}
+
+function nativeDateValue(value: string): boolean {
+  const match = /^(\d{4,})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= days[month - 1]!;
+}
+
+function nativeTimeValue(value: string): boolean {
+  const match = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/u.exec(value);
+  return (
+    match !== null &&
+    Number(match[1]) < 24 &&
+    Number(match[2]) < 60 &&
+    (match[3] === undefined || Number(match[3]) < 60)
+  );
+}
+
+function nativeNumberValue(value: string): boolean {
+  return (
+    /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/u.test(value) &&
+    Number.isFinite(Number(value))
+  );
+}
+
+function unavailableStoredValueId(index: number): string {
+  return `surface-field-unavailable-${String(index)}`;
+}
+
+function renderUnavailableStoredValue(
+  fieldId: string,
+  index: number,
+  inputField: CompiledSurfaceInputField | undefined,
+  value: unknown,
+): string {
+  const encoded = escapeHtml(JSON.stringify(value) ?? String(value));
+  const consequence =
+    inputField && !inputField.required
+      ? 'It will be left unchanged unless you choose a replacement or explicitly clear it.'
+      : 'It will be left unchanged unless you enter a valid replacement.';
+  return `<small id="${unavailableStoredValueId(index)}" class="form-unavailable-value" data-unavailable-value-for="${escapeHtml(fieldId)}"><strong>Stored value unavailable in this control:</strong> <code>${encoded}</code>. ${consequence}</small>`;
 }
 
 /**

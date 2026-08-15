@@ -123,10 +123,19 @@ silently.
   second pass over the same bytes observes nothing.
 - **Integration is a `--no-ff` merge of the PACKET into `main`, and the direction
   is a gate fact rather than a style preference.** `scripts/check-review-record.sh`
-  walks `--first-parent` and covers a merge through its **second** parent. Merging
-  `main` into the packet and then fast-forwarding puts the packet's own commits off
-  the first-parent chain, where **the review gate cannot see them** — the packet
-  lands with no review record and the gate reports nothing wrong. **Promoted here
+  walks `--first-parent` and covers a merge through its **second** parent. **Mechanism corrected
+  2026-08-15 after a third occurrence** — the earlier wording here said the wrong
+  direction puts the PACKET's commits off the first-parent chain. Measured, it does
+  the opposite: absorbing `main` into the packet and fast-forwarding puts the
+  packet's commits **on** the chain and pushes **`main`'s own history off it**
+  (`bc28c2f` and `d5159dd` went off-chain exactly this way). The gate still passes,
+  so the cost is not a missed record — it is that one `--no-ff` merge is covered by
+  ONE record through its second parent, while a fast-forward requires every
+  intermediate commit to be covered individually, and `git log --first-parent main`
+  stops being a readable one-stretch-per-packet history. **A rule three capable
+  lanes have now broken, written in two skills and here, will not be fixed by a
+  fourth restatement — it needs a gate**, asserting that each accepted packet's
+  reviewed SHA appears as a SECOND parent on `main`'s first-parent chain. **Promoted here
   from `git-workflow` on 2026-08-13 because two lanes produced the wrong shape
   independently, which makes it the default outcome rather than a slip**, and
   because one such merge carried a Critical write-path control onto `main`

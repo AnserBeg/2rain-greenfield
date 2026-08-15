@@ -78,13 +78,40 @@ it nowhere in particular.
 | Behavioral | codex `gpt-5.6-sol` high | one fresh naive codex xhigh review against the charter -> bounded fix loop |
 | Critical | codex `gpt-5.6-sol` xhigh | fresh naive codex xhigh against the charter to PASS, then Fable max confirm on the identical SHA |
 
-- Codex max effort is `xhigh` (there is no valid "ultra"). Fable runs via the
-  WSL binary. Both reviewer commands acquire the repository's shared test lock:
-  `node scripts/run-with-test-lock.mjs shared -- claude -p --model fable
-  --effort max`.
+### Reviews are run by the USER, in a separate online reviewer — BINDING, 2026-08-13
+
+**A lane never executes its own review arm.** Not in-process, not by shelling out
+to a reviewer CLI, and **not by spawning a subagent, task, or helper of any kind.**
+The same prohibition binds the orchestrator except for the narrow `local-confirm`
+case below.
+
+**The mechanism is always the same:** the lane freezes, writes the complete
+pasteable prompt into its report, and **STOPS**. The user copies that prompt into
+an online reviewer and pastes the verdict back. **A lane that reports a verdict it
+obtained itself has not been reviewed** — it has marked its own work, which is the
+entire failure the fresh-naive rule exists to prevent, and no amount of prompt
+hygiene repairs it.
+
+**This corrects earlier guidance in this skill**, which read *"Fable runs via the
+WSL binary. Both reviewer commands acquire the repository's shared test lock:
+`node scripts/run-with-test-lock.mjs shared -- claude -p --model fable --effort
+max`."* **That line is withdrawn.** It described a local invocation and, sitting
+directly under the tier table, read as an instruction to run the arm in the lane.
+Reviewer effort still matters — codex max effort is `xhigh`, there is no valid
+"ultra" — but **where the reviewer runs is not the lane's choice, and the answer
+is: not here.**
+
+**The one exception, and it is the orchestrator's alone.** When an owed arm cannot
+be obtained, the orchestrator may perform a `local-confirm` — recorded under that
+name in `review-log.md`, **with its limits written into the row**, always including
+that it was not fresh-naive. A `local-confirm` never upgrades a packet past
+`evidence_ready` on its own, and the independent arm stays owed. A lane may not
+perform one.
+
 - The Fable confirm is for Critical **logic**. For document/config packets it
   is optional — the human read or the deterministic gate is the real review.
-- If Fable is unavailable, a Critical-logic result stays `evidence_ready`.
+- If the confirm arm cannot be obtained, a Critical-logic result stays
+  `evidence_ready`. **Waiting is the correct outcome; self-review is not.**
 
 ## Proportionality — is a review even the right instrument?
 

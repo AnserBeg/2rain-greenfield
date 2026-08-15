@@ -265,10 +265,11 @@ test('unknown surface and malformed projection fail as rendered diagnostics', as
  */
 test('the message catalog honours the vocabulary it declares', () => {
   assert.equal(Object.isFrozen(SURFACE_MESSAGE_CATALOG), true);
-  // 27 -> 28 with `ux-picker`'s `INVALID_SURFACE_FIELD`. The count is pinned so
+  // 27 -> 28 with `ux-picker`'s `INVALID_SURFACE_FIELD`, then 29 with
+  // `form-wire-semantics`' `OPERATION_INPUT_INVALID`. The count is pinned so
   // registering a code is a deliberate, visible edit; moving it is the intended
   // cost of adding one, not a symptom.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 28);
+  assert.equal(SURFACE_MESSAGE_CODES.length, 29);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];
