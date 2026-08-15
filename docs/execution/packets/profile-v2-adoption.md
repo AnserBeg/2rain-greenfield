@@ -469,3 +469,69 @@ requires a bounded orchestrator-owned charter. That is a fair reading and the
 clause is doctrine-mandated for lanes, so the tension belongs to the
 orchestrator rather than to this packet. Recording it because a lane-written
 prompt carrying a clause the reviewer then overrides is worth someone noticing.
+
+## 12. Round 2 — the capability floor is honoured, with per-check attribution
+
+Round 1's REVISE is addressed inside the granted bridge
+(`packages/runtime/src/request-runtime-view.ts`,
+`packages/postgres-provider/src/request-runtime-view-service.ts`,
+`test/postgres/request-runtime-view.test.ts`) and nowhere else.
+
+### The independence, and what would have to change for the two to disagree
+
+The orchestrator's one caution was that a registry derived from
+`SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS` would restate what the parser
+already accepts — green forever, proving nothing. `SUPPORTED_RUNTIME_CAPABILITIES`
+is therefore **authored**, and its doc comment carries the answer rather than the
+assertion:
+
+> They disagree whenever a projection changes meaning without changing payload
+> shape, or changes shape in a way an older parser still accepts.
+
+Both surface bumps already are that shape, which is why this is a measured claim
+and not a hypothetical:
+
+| bump | payload parser | capability |
+|---|---|---|
+| 1 → 2 `navigation` | parses fine (additive) | must refuse — a v0 reader silently reconstructs unreachable overflow, a WRONG render |
+| 2 → 3 `fields` | parses fine (additive) | must refuse — a reader that drops it renders declared enums, dates and booleans as bare text boxes |
+
+In both, payload-schema support said yes while capability support had to say no.
+
+### The optional field, declared rather than glossed
+
+Making `requiredRuntimeCapability` **required** fails to typecheck in **16
+files** — two held by the live `form-wire-semantics` lane
+(`apps/web/test/browser/surface-data-binding.spec.ts`,
+`test/integration/surface-data-binding.test.ts`) and one outside the bridge
+(`release-verification-service.ts`). Those are hand-built fixtures and a
+verification path that never serves a request.
+
+So the field is optional and the **serving path populates it unconditionally**.
+What stays open: a future constructor can omit it and no type error says so.
+What does **not** stay open: a projection reaching a tenant without its floor
+compared. Closing the former is a mechanical 16-site sweep for its own packet.
+
+### Controls, and the mutations that prove each dies alone
+
+Four ad-hoc mutations, all self-chosen, run against the committed controls. **13
+pass / 0 fail** unmutated.
+
+| mutation | result | which control died |
+|---|---|---|
+| delete the capability check from `projectionFor` | 3 fail | both end-to-end refusals; **the seam control correctly survived** — it tests the function, not the wiring |
+| **move the check to AFTER `decodeCanonicalJson`** | 2 fail | **only** *the capability refusal precedes payload interpretation*. *…refuses by its own name* stayed `ok` |
+| `unsupportedRuntimeCapability` returns `null` always | 4 fail | the seam control **and** both end-to-end refusals |
+| drop the field from the returned projection | 2 fail | **only** *…serves, and carries its requirement* |
+
+**The second mutation is the one worth keeping.** It is the only one that
+isolates *position*: the check still fires, just later, so every refusal-by-name
+assertion stays green and exactly one control reds. Without it, "refuses before
+the payload is interpreted" would be a sentence rather than an observation.
+
+**The fourth matters for a different reason.** It mutates precisely the weakness
+the optional field leaves open — a constructor silently omitting the requirement
+— and the control catches what the type system deliberately cannot.
+
+Reported honestly as **0 committed harness, 4 ad-hoc, all author-chosen**. Per
+`review-tiers` that is worth strictly less than an independent replay.
