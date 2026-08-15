@@ -241,6 +241,14 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
       payload.kind = 'notASurfaceManifestPayload';
     },
   );
+  // A THIRD unsupported specimen, at 998 rather than 999 purely so it is a
+  // distinct release. Each of these controls activates its own release, and the
+  // pointer refuses re-activating the one already serving, so reusing 999 here
+  // fails on the swap constraint rather than on anything under test.
+  const unsupportedCapabilityForCorruption = withSurfaceCapabilityFloor(
+    grouped,
+    998,
+  );
 
   await withEphemeralPostgres(
     'request-runtime-view',
@@ -356,6 +364,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             [groupedBytes, mismatchedSurfaceVersion],
             [groupedBytes, unsupportedCapabilityFloor],
             [groupedBytes, unsupportedCapabilityAndBadPayload],
+            [groupedBytes, unsupportedCapabilityForCorruption],
           ],
         );
         const policy = new VersionedPolicyAdapter();
@@ -851,6 +860,49 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         // Same unsupported floor as the control above, plus a deleted chunk
         // link. The projection is now corrupt in a way provable on OPAQUE BYTES
         // — no payload interpretation required — so malformed must win.
+        // THE DEEPER INTEGRITY TWIN, added on round-3 review. The twin below
+        // deletes a chunk LINK, which is the FIRST check in the integrity
+        // sequence — so it only proves link-before-capability, and a gate moved
+        // to sit just after link validation but before artifact verification
+        // would keep it green while misreporting every later corruption as an
+        // under-supported reader.
+        //
+        // This one corrupts a byte of the stored chunk with the length held
+        // constant, so the link resolves, the artifact is present, and the
+        // descriptor still agrees — the loader reaches `verifyArtifact` and
+        // refuses on the content hash. Together the pair brackets the range:
+        // no placement earlier than artifact verification survives both.
+        //
+        // The remaining two checks (descriptor match, semantic digest) are NOT
+        // covered behaviourally and the claim is narrowed accordingly: admission
+        // recomputes the semantic digest from the chunk bytes
+        // (`release-repository.ts`), so a specimen disagreeing there cannot be
+        // seeded at all. Their ordering is source-path attribution, not an
+        // observation.
+        await t.test(
+          'a chunk failing artifact verification reports malformed, not unsupported capability',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[5]!,
+            );
+            await corruptSurfaceChunkBytes(pool, versionReleases[5]!.releaseId);
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'MALFORMED_REQUIRED_PROJECTION',
+              /artifact bytes, domain, or digest are invalid/,
+            );
+          },
+        );
+
         await t.test(
           'a corrupt projection reports malformed, not unsupported capability',
           async () => {
@@ -1339,6 +1391,54 @@ async function removeSurfaceChunkLink(
   } finally {
     await pool.query(
       'ALTER TABLE platform.tenant_release_chunk_links ENABLE RULE tenant_release_chunk_links_reject_delete',
+    );
+  }
+}
+
+/**
+ * Substitutes one byte of the surface projection's stored CHUNK, keeping the
+ * length identical so every table constraint still holds.
+ *
+ * The link resolves, the artifact is present, and the byte length and descriptor
+ * still agree — so the loader gets all the way to `verifyArtifact` and refuses on
+ * the content hash. That is strictly DEEPER in the integrity sequence than the
+ * deleted-link twin, which is the point: it kills a gate placed anywhere before
+ * artifact verification, not merely one placed before link validation.
+ */
+async function corruptSurfaceChunkBytes(
+  pool: pg.Pool,
+  releaseId: MintedUuid,
+): Promise<void> {
+  const chunk = await pool.query<{ chunk_hash: string }>(
+    `SELECT link.chunk_hash
+       FROM platform.tenant_release_chunk_links AS link
+       JOIN platform.tenant_release_projection_links AS projection
+         ON projection.release_id = link.release_id
+        AND projection.projection_instance_id = link.projection_instance_id
+      WHERE link.release_id = $1
+        AND projection.projection_family_id =
+          'northstar.compiler:projection-family.surface-manifest'`,
+    [releaseId],
+  );
+  const chunkHash = chunk.rows[0]?.chunk_hash;
+  assert.ok(chunkHash);
+  await pool.query(
+    'ALTER TABLE platform.release_artifact_blobs DISABLE RULE release_artifact_blobs_reject_update',
+  );
+  try {
+    // `set_byte` on the first byte, same length, so `byte_length =
+    // octet_length(canonical_bytes)` still holds and the ONLY broken property is
+    // the content hash.
+    await pool.query(
+      `UPDATE platform.release_artifact_blobs
+          SET canonical_bytes =
+                set_byte(canonical_bytes, 0, (get_byte(canonical_bytes, 0) + 1) % 256)
+        WHERE content_hash = $1`,
+      [chunkHash],
+    );
+  } finally {
+    await pool.query(
+      'ALTER TABLE platform.release_artifact_blobs ENABLE RULE release_artifact_blobs_reject_update',
     );
   }
 }
