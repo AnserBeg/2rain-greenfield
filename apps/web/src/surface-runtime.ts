@@ -817,6 +817,13 @@ function formFieldMutation(
   }
 
   if (field.required) {
+    // A rendered control may be blank because it cannot faithfully carry a
+    // historical stored value. On update the renderer pairs that blank with
+    // `nothing`, so an untouched required field is omitted rather than being
+    // rewritten as empty text. A non-empty replacement returns above as `set`.
+    if (emptyIntent === 'nothing') {
+      return { kind: 'nothing' };
+    }
     if (field.kind === 'textFieldType') {
       return { kind: 'set', value: '' };
     }
@@ -839,8 +846,9 @@ function readEmptyIntent(
   value: string | undefined,
 ): EmptyIntent | null {
   if (field.required) {
-    if (value !== undefined) invalidFormSubmission();
-    return null;
+    if (value === undefined) return null;
+    if (value === 'nothing' && operationIntent === 'update') return 'nothing';
+    invalidFormSubmission();
   }
   if (!EMPTY_INTENTS.includes(value as EmptyIntent)) {
     invalidFormSubmission();

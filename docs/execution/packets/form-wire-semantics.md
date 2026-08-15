@@ -47,11 +47,13 @@ explicit `emptyText` intent preserve `""` as a real value.
 
 The renderer uses only native server-rendered controls. It does not materialise
 a default, add script, or change compiler-semantic profile adoption. A stored
-value that a profile-v2 typed control cannot carry is shown truthfully beside a
-blank primary control and defaults to `nothing`, never `clear`; clearing remains
-an explicit operator choice. This failure class is unreachable under the
-adopted profile v1's bare text controls and becomes reachable when the already
-queued profile-v2 adoption exposes typed controls.
+value that the live control cannot faithfully round-trip is shown truthfully
+beside a blank primary control and resolves to `nothing`, never `clear`;
+clearing remains an explicit operator choice for an optional field. The
+selected operation contract makes that classification available even when
+profile v1 omits typed surface metadata. Profile-v1 bare inputs are one-line
+controls, not lossless carriers: line-bearing text and incompatible historical
+runtime types use the same preservation path as profile-v2 typed controls.
 
 ## What changed
 
@@ -59,11 +61,15 @@ queued profile-v2 adoption exposes typed controls.
   already-pinned operation input contract into the selected web binding.
 - `component-registry.ts` renders the native optional-field companion without
   inventing a field value. Update forms default every non-empty optional value
-  to `nothing`; typed controls that cannot display a stored value render blank
-  plus the exact stored JSON value as visible server-side context.
+  to `nothing`; every control that cannot faithfully round-trip a stored value
+  renders blank plus the exact stored JSON value as visible server-side
+  context. The fallback profile-v1 input is classified from the selected
+  operation field kind, including the one-line text boundary.
 - `surface-runtime.ts` normalises the string carrier once, before building the
-  immutable provider input. A malformed field refuses the whole submission
-  before the gateway can be called.
+  immutable provider input. An unavailable required update carries the same
+  `nothing` intent and omits its patch key; a non-empty replacement still wins
+  as `set`. A malformed field refuses the whole submission before the gateway
+  can be called.
 - `message-catalog.ts` registers the page diagnostic
   `OPERATION_INPUT_INVALID`.
 - `BrowserFixtureExecutor` now persists only the result returned by the real
@@ -109,6 +115,7 @@ read-back in the fixture executor.
 | String wire becomes a provider-acceptable native boolean | `the string wire is normalised before the real provider parser admits it` observes raw `"true"`, an accepted provider verdict, stored native `true`, and an omitted blank optional quantity. |
 | The user's create payoff works | `a create sets a boolean and omits a blank optional date` fills required values, chooses Yes, leaves the optional date blank, observes provider acceptance, rereads native `true`, and proves the date key is absent. |
 | The adopted profile-v1 seam works without typed surface metadata | `the adopted profile-v1 bare form converts a boolean and omits a blank date` observes text inputs for both fields, a working `empty:` companion, raw `"true"`, provider acceptance, stored native `true`, and no date key. |
+| A one-line control cannot sanitize stored text during an unrelated edit | The two profile-parametrized `multiline text survives an unrelated edit` cases observe profile-v1 and profile-v2 live controls. Each preserves line-bearing optional and required text plus a non-string historical text value through exactly one accepted parser verdict and persisted unrelated change. The same strings with the newline replaced by a space, and with the number represented as a string, are admitted neighbours that remain visible and round-trip. |
 | An unrelated edit cannot rewrite null or absence | `an unrelated edit preserves both stored null and absent optional values` rereads both states and the exact changed text value after the accepted update. |
 | A typed control cannot destroy a value it cannot display | `typed controls preserve and disclose every stored value they cannot display` seeds a retired short-enum option plus unavailable boolean, date, time and number values; observes five blank live controls, five exact stored-value disclosures, five `nothing` intents, provider acceptance, the unrelated text change and all five original stored values. |
 | Clear and real empty text remain distinct | `blank plus explicit clear sends null while blank text can remain a real value` rereads `null` and `""` from one accepted update. |
@@ -139,6 +146,10 @@ restored before the matrix and are not counted as committed evidence.
 | Restore `clear` as the default for a non-empty stored value | the unavailable-value control reds on the first companion's observed `clear` before submission |
 | Classify every typed stored value as displayable | the unavailable-value control reds because the exact stored-value disclosure and its accessible association are absent |
 | Pass raw `"true"` through the adopted v1 seam | the v1 control observes `MODULE_FIELD_VALUE_INVALID` instead of its exact accepted provider verdict |
+| Treat every profile-v1 input as lossless | the v1 multiline specimen observes the browser-stripped live value instead of the deliberate blank and disclosure |
+| Drop the runtime-type arm of the one-line predicate | the historical-number specimen observes live string `"17"` instead of the deliberate blank and disclosure |
+| Omit the required-field `nothing` marker | the required multiline specimen observes that its `empty:` carrier is absent |
+| Classify every one-line text value as unavailable | the space-for-newline and string `"17"` admission neighbours render blank instead of remaining live values |
 
 Each replay changed one relevant property and was required to fail for the
 intended reason. Because the writer chose them, the independent Critical arms
@@ -169,6 +180,38 @@ orchestrator upheld all three findings:
 The required-number fixture repair, the refusal-honouring double, the two test
 bridges, the internal unrepresentability ruling and removal of the old stand-in
 were all upheld and were not reopened.
+
+## Round-2 review adjudication
+
+The fresh-naive Codex xhigh arm reviewed
+`5c85b29e165fcde8f4382ef150d47173a819269a` and returned `REVISE`. The
+orchestrator upheld one Critical production finding in the same unavailable
+stored-value class:
+
+- Both profile-v1 bare inputs and profile-v2 `textFieldType` controls are
+  one-line native inputs. The provider admits text containing CR or LF, but the
+  browser strips those characters from the live input value. Because a
+  non-empty primary value takes precedence over `nothing`, an unrelated Save
+  rewrote valid stored multiline text. A historical non-string text value could
+  likewise be stringified and accepted as a different value. Round 3 moves the
+  preservation predicate to the selected operation-contract boundary, renders
+  those values blank with exact disclosure under both profiles, and proves the
+  original value plus the unrelated edit by persisted reread.
+
+The correction also makes the prior prose's required-field assumption true by
+construction. Required empty text is normally a real value, so disclosure alone
+would have rewritten an unavailable required value to `""`; an update now emits
+a hidden `nothing` marker for that precise state. The marker cannot express
+clear, cannot weaken required create input, and a non-empty replacement still
+wins as `set`.
+
+This round is licensed after round two because the finding is a production
+corruption path and the correction subsumes the prior kind list with a
+control-boundary fidelity predicate. It is not another enum or text special
+case. The reviewer found the v1 boolean/date seam, explicit clear, empty text,
+other unavailable typed values, malformed-input refusals and the executor's
+provider-refusal behavior sound; those controls remain committed and were not
+rewritten.
 
 ## Gates
 

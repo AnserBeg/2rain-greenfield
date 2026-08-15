@@ -1132,12 +1132,19 @@ function renderFormFields(
       const value = record ? record.values[fieldId] : undefined;
       const field = fieldsById.get(fieldId);
       const inputField = inputFieldsById.get(fieldId);
-      const control = renderFormControl(field, fieldId, index, value);
+      const control = renderFormControl(
+        field,
+        inputField,
+        fieldId,
+        index,
+        value,
+      );
       const emptyIntent = renderEmptyIntentControl(
         inputField,
         fieldId,
         value,
         record !== null,
+        control.storedValueUnavailable,
       );
       const unavailableValue = control.storedValueUnavailable
         ? renderUnavailableStoredValue(fieldId, index, inputField, value)
@@ -1165,8 +1172,14 @@ function renderEmptyIntentControl(
   fieldId: string,
   value: unknown,
   updating: boolean,
+  storedValueUnavailable: boolean,
 ): string {
-  if (!field || field.required) return '';
+  if (!field) return '';
+  if (field.required) {
+    return updating && storedValueUnavailable
+      ? `<input type="hidden" name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" value="nothing" data-preserve-unavailable-for="${escapeHtml(fieldId)}">`
+      : '';
+  }
   const selected =
     !updating || value === null || value === undefined
       ? 'nothing'
@@ -1193,28 +1206,34 @@ interface RenderedFormControl {
 
 function renderFormControl(
   field: CompiledSurfaceField | undefined,
+  inputField: CompiledSurfaceInputField | undefined,
   fieldId: string,
   index: number,
   value: unknown,
 ): RenderedFormControl {
   const name = `value:${escapeHtml(fieldId)}`;
-  if (!field) {
-    return {
-      html: `<input name="${name}" value="${renderInputValue(value)}" autocomplete="off">`,
-      // Profile v1 deliberately renders a lossless text carrier. Typed controls
-      // arrive only with profile v2 surface metadata.
-      storedValueUnavailable: false,
-    };
-  }
   const storedValueUnavailable =
     value !== null &&
     value !== undefined &&
-    !typedControlPreservesValue(field, value);
+    (field
+      ? !typedControlPreservesValue(field, value)
+      : inputField
+        ? !bareControlPreservesValue(inputField, value)
+        : false);
   // Make the unavailable state deterministic in the rendered HTML rather than
   // relying on each browser to sanitize the value after parsing the attribute.
   const renderedValue = storedValueUnavailable ? undefined : value;
+  const describedBy = storedValueUnavailable
+    ? ` aria-describedby="${unavailableStoredValueId(index)}"`
+    : '';
+  if (!field) {
+    return {
+      html: `<input${describedBy} name="${name}" value="${renderInputValue(renderedValue)}" autocomplete="off">`,
+      storedValueUnavailable,
+    };
+  }
   const current = renderInputValue(renderedValue);
-  const kind = ` data-field-kind="${field.kind}"${storedValueUnavailable ? ` aria-describedby="${unavailableStoredValueId(index)}"` : ''}`;
+  const kind = ` data-field-kind="${field.kind}"${describedBy}`;
   const html = (() => {
     switch (field.kind) {
       case 'enumFieldType':
@@ -1259,6 +1278,21 @@ function renderFormControl(
 }
 
 /**
+ * Profile v1 has no typed surface metadata, but the selected operation still
+ * declares the provider-facing field kind. The fallback is a one-line text
+ * input, so it is faithful only when that carrier and the input contract agree
+ * on the stored value's runtime type and the browser will not sanitize it.
+ */
+function bareControlPreservesValue(
+  field: CompiledSurfaceInputField,
+  value: unknown,
+): boolean {
+  return field.kind === 'booleanFieldType'
+    ? typeof value === 'boolean'
+    : oneLineInputPreservesValue(value);
+}
+
+/**
  * Whether the typed control's live IDL value can carry the stored value.
  *
  * This follows browser parsing, not provider admission. A value that the
@@ -1276,8 +1310,8 @@ function typedControlPreservesValue(
       return typeof value === 'boolean';
     case 'enumFieldType':
       return (
-        field.options.length > ENUM_SELECT_MAXIMUM_OPTIONS ||
-        (typeof value === 'string' &&
+        oneLineInputPreservesValue(value) &&
+        (field.options.length > ENUM_SELECT_MAXIMUM_OPTIONS ||
           field.options.some((option) => option.optionId === value))
       );
     case 'dateFieldType':
@@ -1289,10 +1323,14 @@ function typedControlPreservesValue(
     case 'moneyFieldType':
     case 'quantityFieldType':
       return typeof value === 'string' && nativeNumberValue(value);
-    case 'dateTimeFieldType':
     case 'textFieldType':
-      return true;
+    case 'dateTimeFieldType':
+      return oneLineInputPreservesValue(value);
   }
+}
+
+function oneLineInputPreservesValue(value: unknown): value is string {
+  return typeof value === 'string' && !/[\r\n]/u.test(value);
 }
 
 function nativeDateValue(value: string): boolean {
@@ -1338,7 +1376,7 @@ function renderUnavailableStoredValue(
   const consequence =
     inputField && !inputField.required
       ? 'It will be left unchanged unless you choose a replacement or explicitly clear it.'
-      : 'Choose a valid replacement; saving this blank control is refused.';
+      : 'It will be left unchanged unless you enter a valid replacement.';
   return `<small id="${unavailableStoredValueId(index)}" class="form-unavailable-value" data-unavailable-value-for="${escapeHtml(fieldId)}"><strong>Stored value unavailable in this control:</strong> <code>${encoded}</code>. ${consequence}</small>`;
 }
 

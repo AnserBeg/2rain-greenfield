@@ -50,10 +50,13 @@ profile version changes.
 The adopted profile-v1 release shape deliberately mixes two authorities:
 operation input fields are present because they are gated on whether an
 operation writes fields, while per-surface field metadata is absent until
-compiler-semantic profile v2. A profile-v1 form therefore renders lossless bare
-text inputs but still renders the companion intent and converts booleans from
-the selected operation contract. Profile v2 changes the control, not the wire
-authority.
+compiler-semantic profile v2. A profile-v1 form therefore renders bare one-line
+text inputs but still reads the selected operation contract to classify the
+stored value, render the companion intent and convert booleans. Profile v2
+changes the control, not the wire authority. Neither profile treats an HTML
+attribute string as proof that the browser's live control value is lossless:
+one-line text inputs remove CR and LF, and typed controls may sanitize or
+de-select other values.
 
 ### 2. A blank optional control carries an explicit intent
 
@@ -70,6 +73,11 @@ Every rendered optional field has a native companion `<select>` named
 update. A required text control may still submit `""`, because zero-length text
 is a real value. A required non-text blank is refused. A missing, unknown or
 inapplicable companion spelling is also refused as `OPERATION_INPUT_INVALID`.
+On update only, an unavailable stored value on a required field carries a
+server-rendered hidden `nothing` marker: leaving the blank replacement control
+untouched omits the patch key, while entering a non-empty valid replacement is
+still `set`. The marker adds no clear intent and cannot make a required create
+value optional.
 
 Before the provider input object is built, the runtime represents the result as
 the discriminated union `set | clear | nothing`. Those three intents are
@@ -85,15 +93,17 @@ other stored value defaults to `nothing`; and `clear` occurs only when the
 operator explicitly selects it. A non-empty primary value remains `set`
 regardless of the conditional choice beside it.
 
-This rule applies to the whole class of typed controls, not to one kind. If a
-profile-v2 boolean, short enum, date, time or number control cannot faithfully
-represent a stored value, the primary control is rendered blank, the exact
-stored JSON value is shown beside it, and its optional-field companion remains
-on `nothing`. Choosing a valid replacement is `set`; choosing `clear` remains
-available for an optional field. A required field that cannot be represented
-has no clear intent and is refused rather than rewritten. Thus editing an
-unrelated field neither invents a value nor clears one the control could not
-carry.
+This rule applies to every rendered control, not to an enumerated list of field
+kinds. If the selected operation contract and the live native control cannot
+faithfully round-trip a stored value, the primary control is rendered blank and
+the exact stored JSON value is shown beside it. This includes a profile-v1 bare
+input carrying contract-incompatible runtime types or line-bearing text, as well
+as profile-v2 boolean, short-enum, date, time, number and one-line text controls.
+An optional companion remains on `nothing`; a required update carries the hidden
+`nothing` marker above. Choosing a valid replacement is `set`, and choosing
+`clear` remains available only for an optional field. Thus editing an unrelated
+field neither invents a value, sanitizes one, nor clears one the control could
+not carry.
 
 ### 3. Refusal is before invocation and cannot partially apply
 
@@ -113,9 +123,10 @@ persist the parser's returned patch rather than the pre-validated request.
   non-text value, explicitly clear an optional value on update, and preserve
   empty text as text.
 - Profile-v1 bare inputs exercise the same operation-contract normalisation
-  today. The unavailable-typed-control case is unreachable at v1 and becomes
-  reachable when profile-v2 surface field metadata is adopted; it is therefore
-  controlled explicitly under v2 before adoption.
+  today. They are one-line controls rather than lossless carriers, so historical
+  line-bearing text and contract-incompatible runtime types use the same blank,
+  disclosed preservation path as unavailable profile-v2 values. Both profiles
+  are controlled explicitly.
 - The selected operation's pinned input contract now reaches the web binding as
   a narrow list of field id, field kind and requiredness. It is derived from the
   existing operation catalog and changes no compiled bytes.

@@ -306,6 +306,10 @@ function formUrl(recordId: string): string {
   return `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(recordId)}`;
 }
 
+function fieldKindFormUrl(base: string, recordId: string): string {
+  return `${base}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(recordId)}`;
+}
+
 function capturePost(page: Page): Promise<string> {
   return new Promise<string>((resolve) => {
     page.on('request', (request) => {
@@ -520,6 +524,178 @@ test('the adopted profile-v1 bare form converts a boolean and omits a blank date
   assert.equal(stored.values[EVERY_KIND_FIELD_IDS.active], true);
   assert.equal(Object.hasOwn(stored.values, EVERY_KIND_FIELD_IDS.due), false);
 });
+
+for (const profile of [
+  {
+    label: 'adopted profile v1',
+    runtime: () => ({
+      executor: adoptedFieldKindExecutor,
+      url: adoptedFieldKindUrl,
+    }),
+  },
+  {
+    label: 'explicit profile v2',
+    runtime: () => ({ executor: fieldKindExecutor, url: fieldKindUrl }),
+  },
+] as const) {
+  test(`multiline text survives an unrelated edit (${profile.label})`, async ({
+    page,
+  }) => {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const { executor: profileExecutor, url } = profile.runtime();
+    const notesId = FIXTURE_IDS.fieldIds.parentNotes;
+
+    const updateOptionalNotes = async (
+      storedNotes: ImmutableJsonValue,
+      changedName: string,
+      unavailable: boolean,
+    ): Promise<void> => {
+      const recordId = profileExecutor.seedTypedValues({
+        [FIXTURE_IDS.fieldIds.parentName]: 'Before text preservation',
+        [FIXTURE_IDS.fieldIds.parentNumber]: 'TEXT-PRESERVE-001',
+        [notesId]: storedNotes,
+      });
+      await page.goto(fieldKindFormUrl(url, recordId));
+
+      const control = page.locator(`[name="value:${notesId}"]`);
+      const disclosure = page.locator(
+        `[data-unavailable-value-for="${notesId}"]`,
+      );
+      if (unavailable) {
+        await expect(control).toHaveValue('');
+        await expect(disclosure).toContainText(JSON.stringify(storedNotes));
+        assert.equal(
+          await control.getAttribute('aria-describedby'),
+          await disclosure.getAttribute('id'),
+        );
+      } else {
+        await expect(control).toHaveValue(String(storedNotes));
+        await expect(disclosure).toHaveCount(0);
+      }
+      await expect(page.locator(`[name="empty:${notesId}"]`)).toHaveValue(
+        'nothing',
+      );
+
+      await page.getByLabel('Master Name').fill(changedName);
+      const posted = capturePost(page);
+      const before = profileExecutor.providerVerdicts.length;
+      await page.getByRole('button', { name: 'Save' }).click();
+      const params = new URLSearchParams(await posted);
+      expect(params.get(`value:${notesId}`)).toBe(
+        unavailable ? '' : String(storedNotes),
+      );
+      expect(params.get(`empty:${notesId}`)).toBe('nothing');
+      expect(profileExecutor.providerVerdicts.slice(before)).toEqual([
+        {
+          accepted: true,
+          code: null,
+          stage: 'operation-input',
+          subjectId: null,
+        },
+      ]);
+      await expect(page.getByRole('status')).toContainText('Update complete');
+
+      const stored = profileExecutor.readRecord(recordId);
+      assert.ok(stored);
+      assert.equal(stored.values[FIXTURE_IDS.fieldIds.parentName], changedName);
+      assert.equal(stored.values[notesId], storedNotes);
+    };
+
+    const multiline = 'Call buyer\nConfirm purchase order';
+    // One-property admission neighbour: only the newline becomes a space.
+    await updateOptionalNotes(multiline, 'After multiline preservation', true);
+    await updateOptionalNotes(
+      multiline.replace('\n', ' '),
+      'After one-line admission',
+      false,
+    );
+    // A historical non-string must not become the string produced by the
+    // renderer; its same-spelling string neighbour remains displayable.
+    await updateOptionalNotes(17, 'After non-string preservation', true);
+    await updateOptionalNotes('17', 'After string admission', false);
+
+    // Required empty text is ordinarily a real value, so an unavailable stored
+    // value needs an explicit `nothing` marker as well. Otherwise rendering it
+    // blank would silently replace it with "" on the unrelated update.
+    const requiredRecordId = profileExecutor.seedTypedValues({
+      [FIXTURE_IDS.fieldIds.parentName]: multiline,
+      [FIXTURE_IDS.fieldIds.parentNumber]: 'BEFORE-REQUIRED-TEXT',
+    });
+    await page.goto(fieldKindFormUrl(url, requiredRecordId));
+    const requiredName = page.locator(
+      `[name="value:${FIXTURE_IDS.fieldIds.parentName}"]`,
+    );
+    await expect(requiredName).toHaveValue('');
+    await expect(
+      page.locator(
+        `[data-unavailable-value-for="${FIXTURE_IDS.fieldIds.parentName}"]`,
+      ),
+    ).toContainText(JSON.stringify(multiline));
+    await expect(
+      page.locator(`[name="empty:${FIXTURE_IDS.fieldIds.parentName}"]`),
+    ).toHaveValue('nothing');
+    await page.getByLabel('Master Number').fill('AFTER-REQUIRED-TEXT');
+    const requiredPosted = capturePost(page);
+    const requiredBefore = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const requiredParams = new URLSearchParams(await requiredPosted);
+    expect(requiredParams.get(`value:${FIXTURE_IDS.fieldIds.parentName}`)).toBe(
+      '',
+    );
+    expect(requiredParams.get(`empty:${FIXTURE_IDS.fieldIds.parentName}`)).toBe(
+      'nothing',
+    );
+    expect(profileExecutor.providerVerdicts.slice(requiredBefore)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    const requiredStored = profileExecutor.readRecord(requiredRecordId);
+    assert.ok(requiredStored);
+    assert.equal(
+      requiredStored.values[FIXTURE_IDS.fieldIds.parentName],
+      multiline,
+    );
+    assert.equal(
+      requiredStored.values[FIXTURE_IDS.fieldIds.parentNumber],
+      'AFTER-REQUIRED-TEXT',
+    );
+
+    const replacementRecordId = profileExecutor.seedTypedValues({
+      [FIXTURE_IDS.fieldIds.parentName]: multiline,
+      [FIXTURE_IDS.fieldIds.parentNumber]: 'REPLACE-REQUIRED-TEXT',
+    });
+    await page.goto(fieldKindFormUrl(url, replacementRecordId));
+    await page.getByLabel('Master Name').fill('Valid replacement');
+    const replacementPosted = capturePost(page);
+    const replacementBefore = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const replacementParams = new URLSearchParams(await replacementPosted);
+    expect(
+      replacementParams.get(`value:${FIXTURE_IDS.fieldIds.parentName}`),
+    ).toBe('Valid replacement');
+    expect(
+      replacementParams.get(`empty:${FIXTURE_IDS.fieldIds.parentName}`),
+    ).toBe('nothing');
+    expect(profileExecutor.providerVerdicts.slice(replacementBefore)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    assert.equal(
+      profileExecutor.readRecord(replacementRecordId)?.values[
+        FIXTURE_IDS.fieldIds.parentName
+      ],
+      'Valid replacement',
+    );
+  });
+}
 
 test('an unrelated edit preserves both stored null and absent optional values', async ({
   page,
