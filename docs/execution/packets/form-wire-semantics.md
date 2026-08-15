@@ -6,10 +6,15 @@ Tier: Critical
 
 Status: evidence_ready
 
-Base: `d5159dd` (the round-2 branch merged current `origin/main` after the
-original `adb5f38` cut; the intervening commits are documentation/doctrine)
+Base: `bc28c2f92571a2036229816b7247fd52f8c230d0` (the round-3 branch merged
+current `origin/main`; the original cut was `adb5f38`)
 
-Round-2 matrix SHA: `587aefefba2d5a7f23fcd2067841fd80afb1262b`
+Round-3 tested executable SHA: `43a4b0b8eed84defb44812c156e91418e29a71e5`
+
+No round-3 full matrix has run. Current `git-workflow` requires review to
+converge first, then one matrix at the SHA that will integrate. The round-1 and
+round-2 matrices below are historical evidence for their respective candidates,
+not acceptance evidence for round 3.
 
 ## Goal
 
@@ -123,15 +128,15 @@ read-back in the fixture executor.
 | Malformed input refuses before provider invocation | `malformed boolean and empty intent are refused beside admitted twins` mutates one rendered property at a time: malformed boolean, unknown intent, missing companion and entire optional subject absent each return 422 before the provider verdict count changes; valid boolean and `nothing` twins are admitted. The fixture starts with no values, so this control does not claim preservation of a pre-existing name. |
 | The double cannot manufacture success | `a provider refusal cannot be manufactured into browser success` omits one required value from an otherwise rendered create, observes `MODULE_REQUIRED_FIELD_MISSING`, HTTP 422, no success status and no record; the neighbouring complete creates observe accepted provider verdicts and persisted records. |
 
-The round-2 focused browser file is 20/20 green. The round-1 matrix executed its
-18-test predecessor inside the 79/79 browser result; the round-2 matrix result
-is recorded below after the new frozen executable SHA.
+The round-3 focused browser file is 22/22 green, and the complete browser suite
+is 83/83 green at the tested executable SHA.
 
 ## Negative-control replay
 
-The committed controls above are the evidence. The writer also ran eleven
+The committed controls above are the evidence. The writer also ran fifteen
 author-chosen, ad-hoc mutation replays as supplementary causal checks; all were
-restored before the matrix and are not counted as committed evidence.
+restored before the round-3 freeze gates and are not counted as committed
+evidence.
 
 | One-property mutation | Causal red |
 |---|---|
@@ -215,15 +220,25 @@ rewritten.
 
 ## Gates
 
-Focused development gates:
+Round-3 review-freeze gates at
+`43a4b0b8eed84defb44812c156e91418e29a71e5`:
 
+- `pnpm format` — green.
+- `pnpm lint` — green.
 - `pnpm typecheck` — green.
+- `pnpm test:browser` — 83/83 green.
 - `pnpm test:integration` — 137/137 green.
 - `pnpm exec playwright test --config apps/web/playwright.config.ts
-  apps/web/test/browser/surface-data-binding.spec.ts --reporter=list` — 20/20
+  apps/web/test/browser/surface-data-binding.spec.ts --reporter=list` — 22/22
   green.
 - focused composed-application Party and light/dark focus-ring replay — 3/3
   green, including 120/120 painted ring measurements in each scheme.
+
+Per the current `git-workflow` sequence, the full matrix runs once only after
+the Critical review arms converge, at the SHA that will integrate. It has
+therefore deliberately not been run for round 3.
+
+### Historical round-1 and round-2 matrices
 
 The first frozen matrix at
 `947c766e9a2b8cbfb8a2367caf8ce2662f43ec8d` was honestly red:
@@ -295,10 +310,10 @@ changed doctrine was re-read before this record and the review prompt were
 finished.
 
 The checkpoint-only `bash scripts/check-parked-work.sh` governance check was
-run again after the round-2 current-main merge. It returns `parked-work: FAIL`
+run again after the round-3 current-main merge. It returns `parked-work: FAIL`
 on six pre-existing
 stale branches: `packet/proj-disc`, `packet/ps-0`, `packet/ps-1`, `packet/ps-2`,
-`packet/pur-1` and `packet/u5-design` (5–7 days old and 243–326 commits behind).
+`packet/pur-1` and `packet/u5-design` (6–8 days old and 244–327 commits behind).
 This packet is current at zero behind. The stale branches need an orchestrator
 decision to integrate, rescue or delete; this writer did not mutate another
 packet's refs to make the checkpoint report green.
@@ -322,24 +337,24 @@ surfaces then stop at the already-routed `record:activity`
 lists expose no usable Edit/New path. That limitation belongs to the existing
 G2-P5d-c remaining-anatomy row and was not widened into this packet.
 
-The best available under-ten-minute round-2 check is therefore the real browser
-form fixture, exercising both the adopted v1 seam and the future-v2 preservation
-case:
+The best available under-ten-minute round-3 check is therefore the real browser
+form fixture, exercising the unavailable one-line text preservation path under
+both the adopted v1 seam and explicit profile v2:
 
 ```bash
 cd /home/rvham/2rain-greenfield-formwire
 pnpm exec playwright test --config apps/web/playwright.config.ts \
   apps/web/test/browser/surface-data-binding.spec.ts \
-  --grep "adopted profile-v1 bare form|typed controls preserve" \
+  --grep "multiline text survives an unrelated edit" \
   --reporter=list
 ```
 
-Expected: `2 passed`. The v1 test submits raw `"true"` from a bare text input,
-leaves Due blank, observes real-parser acceptance, native stored `true`, and no
-Due key. The v2 test shows five exact unavailable stored values, edits a
-different field, observes provider acceptance, and rereads all five values
-unchanged. These prove the generic form path; they do **not** prove a seeded
-purchase-order or composed-product journey.
+Expected: `2 passed`. Each profile seeds optional and required multiline text
+plus a historical non-string text value, observes the browser-facing blank and
+exact disclosure, edits a different field, observes provider acceptance, and
+rereads the original values byte-for-byte. Each also exercises its one-line
+admission neighbours. These prove the generic form preservation path; they do
+**not** prove a seeded purchase-order or composed-product journey.
 
 For visual inspection of the current product shell:
 
@@ -362,9 +377,10 @@ server with Ctrl-C in its terminal or `fuser -k 4174/tcp`.
   sections. This packet did not take G2-P5d-c's anatomy scope.
 - The browser payoff persists through an in-memory executor that runs the real
   provider input parser; it is not a browser-to-PostgreSQL persistence journey.
-  The separately required `test:postgres` suite is green, but it does not turn
-  that browser test into such a journey.
-- The eleven mutation replays were selected and interpreted by this writer.
+  The historical round-2 `test:postgres` suite is green, but no round-3
+  PostgreSQL suite was part of this packet's prescribed blast radius, and
+  neither fact turns the browser test into such a journey.
+- The fifteen mutation replays were selected and interpreted by this writer.
 - No usability study assessed the companion-select wording or whether office
   workers understand the three choices. Automated browser coverage establishes
   native operability, labelling and focus treatment only.
@@ -397,10 +413,12 @@ triggers again after acceptance/integration.
 ## Review state
 
 Round 1's fresh-naive Codex xhigh arm returned `REVISE` on
-`292934ba813e39c907fef1c2e78ee4a726d8e80c`; its three upheld findings and their
-round-2 corrections are recorded above. No independent arm has reviewed the
-round-2 candidate yet. Critical cadence requires a new fresh-naive Codex xhigh
+`292934ba813e39c907fef1c2e78ee4a726d8e80c`. Round 2's fresh-naive Codex xhigh
+arm returned `REVISE` on `5c85b29e165fcde8f4382ef150d47173a819269a`.
+Their upheld findings and corrections are recorded above. No independent arm
+has reviewed round 3. Critical cadence requires a new fresh-naive Codex xhigh
 arm on the final frozen SHA, followed only after a Codex pass by an independent
-Fable max arm on the identical SHA. This lane writes that prompt and stops; it
-does not run its own review. Any executable change invalidates the matrix and
-prior review evidence.
+Fable max arm on the identical SHA. The full matrix follows convergence at the
+SHA that will integrate. This lane writes the round-3 prompt and stops; it does
+not run its own review or the pre-convergence matrix. Any executable change
+invalidates prior review evidence and requires a new SHA.
