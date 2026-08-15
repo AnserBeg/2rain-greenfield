@@ -648,3 +648,42 @@ tree — immediately red on a stale lookup: the registry's shape changed and one
 assertion was left keyed by `capabilityId`, reading `undefined`.
 
 Running total: **0 committed harness, 6 ad-hoc, all author-chosen.**
+
+### Round-3 gates — one is OWED, and it is not claimed
+
+| gate | result |
+|---|---|
+| `typecheck` / `lint` / `format` | exit 0 |
+| `check:app-release` / `check:demo-release` | exit 0 |
+| `test:browser` | **77 passed**, exit 0 |
+| `test/postgres/request-runtime-view.test.ts` | **14/14**, exit 0 |
+| `test:postgres` (full) | **NOT RUN TO COMPLETION — OWED** |
+
+**The full PostgreSQL suite is owed at this SHA and is not being claimed.** The
+run died mid-suite when the Docker daemon went away:
+
+```
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock.
+```
+
+It reported `46 pass / 61 fail` with the volume count dropping to **0**. That is
+an environment collapse, not a code result, and reporting it as a suite outcome
+would be false in both directions. The daemon did not recover: Docker Desktop's
+processes are up and the `docker-desktop` distro is Running, but the engine is
+wedged and unreachable, and terminating that distro did not bring it back. This
+needs a machine-level restart, which the lane did not force.
+
+**What IS established at this SHA, and its exact boundary:**
+
+- `test:browser` completed and passed 77 before the daemon died.
+- `test/postgres/request-runtime-view.test.ts` — the file carrying every control
+  this round touches — ran **14/14** at `da8b044`, and
+  `git diff --name-only da8b044 HEAD` excluding narrative paths is **empty**, so
+  that run covers HEAD's executable content exactly.
+- Both round-3 mutations were observed red against that same tree.
+
+**What is NOT established:** the other ~187 PostgreSQL assertions at this SHA.
+They passed at `f6ca221` (197/197) and at round 2 (201/201), and this round's
+executable delta is confined to the runtime capability seam and its test file —
+but that is an argument, not a measurement, and it is recorded as such. The full
+matrix is owed before integration regardless and will settle it.
