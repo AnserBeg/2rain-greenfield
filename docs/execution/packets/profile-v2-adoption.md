@@ -771,3 +771,20 @@ sixth request-serving family exists at this SHA, so there is no current defect,
 and the claim is not generalised beyond the five.
 
 Running total: **0 committed harness, 7 ad-hoc, all author-chosen.**
+
+### Round-4 gates
+
+| gate | result |
+|---|---|
+| `typecheck` / `lint` / `format` | exit 0 |
+| `check:app-release` / `check:demo-release` | exit 0 |
+| `test:browser` | **77 passed**, exit 0 |
+| `test:postgres` | **203/203**, exit 0 |
+
+203 is round 3's 202 plus the artifact-verification twin. `git rev-parse HEAD`
+pinned identical before and after; volumes 11 before and 11 after; daemon up at
+the end.
+
+**Still owed before integration:** the full matrix — `test:architecture`,
+`test:agent`, `test:contracts`, `test:locale`, `test:performance`,
+`check:reachability` and `check:language-coverage` remain unrun at this SHA.
