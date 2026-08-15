@@ -575,3 +575,76 @@ So the diagnosis was applied to each rather than to the group, which is what the
 ruling asked for. Treating all three as one cause would have been wrong in both
 directions: it would have charged the packet with two failures it did not cause,
 and it would have excused the one it did.
+
+## 13. Round 2 — REVISE again, two fixed and one routed
+
+Three findings, all verified against source before acceptance, all real.
+
+### High — the borrowed-capability bypass (FIXED)
+
+The registry keyed on `capabilityId` alone and the comparison never saw the
+family. A surface manifest declaring
+`northstar.runtime:capability.semantic-model` at floor 1 is self-consistent,
+survives admission — which only checks the reference and manifest agree with
+*each other* — finds a known id, and is served, **while the surface floor it
+actually owed is never compared**. A future surface needing floor 4 reaches a
+floor-3 reader that way.
+
+The compiler already binds the pair in `runtimeCapabilities`
+(`packages/compiler/src/projections.ts`). Nothing downstream did. The registry is
+now keyed by family and carries `{capabilityId, maximumSupportedVersion}`;
+`unsupportedRuntimeCapability` takes the family and refuses in three ordered
+ways — unknown family, wrong pairing, floor above support.
+
+**This was suspicion 1 in the lane's own round-2 prompt and the lane did not act
+on it.** Listing a suspicion is not closing it, and the arm was right to treat it
+as open. That is the process lesson from this round.
+
+### Medium — the refusal did not yet deserve its name (FIXED)
+
+The gate ran immediately after the manifest validated. Early enough to precede
+payload decoding, but **too early to justify its own diagnostic**: the code
+claims the release is "well-formed and internally consistent", and at that point
+nothing had established the chunk exists, is linked once, or matches its bytes,
+length, media type, scope or semantic digest. A release that was corrupt *and*
+unsupported reported an under-supported **reader** — sending an operator toward
+a runtime upgrade that fixes nothing.
+
+The gate now sits **after opaque integrity and before `decodeCanonicalJson`**.
+Everything above it is verified on bytes alone; that call is the first line that
+interprets meaning. It is the last point where the refusal is still honest about
+being a capability problem and the first where it can be.
+
+### Medium — the web boundary erases the code (ROUTED, not fixed)
+
+`app-server.ts` collapses every non-authentication error to
+`REQUEST_RUNTIME_VIEW_UNAVAILABLE`. Confirmed, and **measured to be general
+rather than specific to this work**: `RequestRuntimeViewLoadErrorCode` has 15
+members and a grep for each across `apps/web/src` returns **zero** hits.
+`UNSUPPORTED_RUNTIME_CAPABILITY` is the sixteenth and behaves like the rest.
+
+Not fixed here for three reasons, in order of weight: `app-server.ts` and
+`message-catalog.ts` are held by the live `form-wire-semantics` lane; the
+reviewer's own prescription is a **runtime-owned error contract** so `apps/web`
+need not depend on the provider, which is a design change rather than a refusal
+rename; and the granting ruling excluded widening the capability model. Filed as
+`provider-refusals-erased-at-the-web-boundary`.
+
+### Controls and their reds
+
+**14 pass / 0 fail.** Two new controls, two new mutations, both isolating.
+
+| mutation | result | which control died |
+|---|---|---|
+| delete the family/capability pairing check | 1 fail | **only** the borrowed-capability assertion — and the helper returned `null`, i.e. it *served* the borrowed capability |
+| move the gate back before opaque integrity | 1 fail | **only** *a corrupt projection reports malformed…*. Both *…refuses by its own name* and *…precedes payload interpretation* stayed `ok` |
+
+The second is the one worth keeping: neither pre-existing control can see
+integrity-before-attribution, which is exactly what the arm said was missing.
+
+**A control caught the lane's own error.** The new all-five-families assertion —
+added because the arm named "carry it only for `surface`" as a green-keeping
+tree — immediately red on a stale lookup: the registry's shape changed and one
+assertion was left keyed by `capabilityId`, reading `undefined`.
+
+Running total: **0 committed harness, 6 ad-hoc, all author-chosen.**
