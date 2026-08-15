@@ -740,13 +740,8 @@ the content hash.
 | deleted-link twin | **`ok` — the arm was right that it cannot see this** |
 | **artifact-verification twin** | **`not ok` — dies alone** |
 
-**And the claim is narrowed for what is still uncovered.** The last two checks —
-descriptor match and semantic digest — have **no behavioural specimen**, because
-admission recomputes the semantic digest from the chunk bytes
-(`release-repository.ts`), so a specimen disagreeing there cannot be seeded at
-all. Their ordering is source-path attribution, said so at the call site. Both
-test titles now name the specific check each observes rather than "a corrupt
-projection".
+**And the claim is narrowed for what is still uncovered — but the FIRST attempt
+at narrowing was itself wrong, and the confirm arm caught it.** See §15.
 
 ### The census was wrong by one, and the error has a shape
 
@@ -788,3 +783,79 @@ the end.
 **Still owed before integration:** the full matrix — `test:architecture`,
 `test:agent`, `test:contracts`, `test:locale`, `test:performance`,
 `check:reachability` and `check:language-coverage` remain unrun at this SHA.
+
+## 15. The confirm arm — REVISE on three sentences, and this is the narrowing round
+
+**No production defect.** The arm confirmed the production placement correct and
+the new twin real and load-bearing. All three open items are claims the lane
+wrote that its own code does not support — which `review-tiers` calls out
+specifically: *"In the claim's prose, not the code → ONE narrowing round, then
+STOP."* This is that round.
+
+### The specimen is not single-fault, and saying so was wrong
+
+The corrupted-chunk twin breaks **three** invariants, not one:
+
+1. the content hash, which is what `verifyArtifact` catches;
+2. **canonical JSON validity** — the chunk's first byte is `{` (0x7b) and
+   incrementing it yields `|`. Verified against the shipped artifact: first byte
+   is 123;
+3. the **semantic digest**, because the bytes moved and the manifest's recorded
+   digest did not.
+
+`verifyArtifact` deterministically fires first, which is why the control still
+observes what it claims. But *"the only broken property is the content hash"* was
+false, and it is exactly the confound `review-tiers` warns about — *"a broken tree
+with two reasons to fail"* — written by the lane one round after quoting that
+rule at itself.
+
+The comment now states all three and what the specimen therefore proves: **link
+and descriptor metadata stay intact, and artifact verification is the first of
+the three to run.**
+
+### "Cannot be seeded at all" was an excuse, not a limit
+
+The lane claimed the descriptor and semantic-digest twins were impossible because
+admission recomputes the digest from the chunk bytes. **The premise is true of
+NORMAL admission and false as a conclusion.** This suite does not use normal
+admission for its specimens — it admits a valid release and then disables the
+immutable-storage rules, which is how **both existing twins already work**. The
+lane wrote the mechanism that refutes its own claim and then did not apply it.
+
+Both specimens are constructible. They are uncovered because they were not built.
+**The difference between a limit and an excuse is the whole point of declaring
+one**, and this was the wrong one.
+
+### The surviving tree, named
+
+A gate placed **after `verifyArtifact` but before the descriptor and digest
+checks** keeps all four current controls green while misreporting either mismatch
+as an under-supported reader. Routed to
+`runtime-integrity-attribution-untwinned`, together with the owed single-fault
+hash specimen.
+
+**Why routed rather than built:** *"After two rounds of a claim exceeding its
+proof, narrow the claim rather than grow the table — the tell is that the control
+keeps growing while the production code has not changed."* The control has grown
+three times across three rounds; production has been unchanged and confirmed
+since round 3. That is the tell, exactly.
+
+### The title was never renamed
+
+The packet claimed both titles now name their specific check. The delta was
+`+100/-0`, so it could not have renamed anything. The deleted-link test still
+read *"a corrupt projection reports malformed"*. Renamed to **"a missing
+projection chunk link…"**.
+
+### The floor-998 fixture isolates activation, not storage
+
+The arm found this and it is worth keeping. The floor lives in the projection
+manifest and the payload mutation is a no-op, so floor 998, floor 999 and the
+ordinary grouped release produce a **byte-identical chunk**;
+`release_artifact_blobs` is keyed globally by content hash, so the corruption
+touches a **shared** blob. Results are unaffected — both refusal controls run
+before it and the deleted-link twin fails at its link — but **the nested test
+order is load-bearing rather than incidental**, and that is now recorded where a
+reordering lane will see it.
+
+### Census: CLOSED, correct at 15 total / 14 pre-existing.

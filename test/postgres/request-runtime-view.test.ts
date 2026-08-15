@@ -245,6 +245,20 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
   // distinct release. Each of these controls activates its own release, and the
   // pointer refuses re-activating the one already serving, so reusing 999 here
   // fails on the swap constraint rather than on anything under test.
+  //
+  // **It isolates ACTIVATION IDENTITY, not STORAGE — recorded on the confirm
+  // arm, which found this and it is worth knowing.** The floor lives in the
+  // projection MANIFEST, and `withSurfaceCapabilityFloor`'s payload mutation
+  // here is a no-op, so 998, 999 and the ordinary grouped release all produce a
+  // byte-identical surface CHUNK. `release_artifact_blobs` is keyed globally by
+  // content hash, so `corruptSurfaceChunkBytes` corrupts the blob those three
+  // releases SHARE.
+  //
+  // The current results are unaffected — both refusal controls run before the
+  // corruption, and the deleted-link twin fails at its link before ever reading
+  // the blob — but that makes the nested test ORDER load-bearing rather than
+  // incidental. Reordering these subtests can break them without any production
+  // change.
   const unsupportedCapabilityForCorruption = withSurfaceCapabilityFloor(
     grouped,
     998,
@@ -874,11 +888,21 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         // no placement earlier than artifact verification survives both.
         //
         // The remaining two checks (descriptor match, semantic digest) are NOT
-        // covered behaviourally and the claim is narrowed accordingly: admission
-        // recomputes the semantic digest from the chunk bytes
-        // (`release-repository.ts`), so a specimen disagreeing there cannot be
-        // seeded at all. Their ordering is source-path attribution, not an
-        // observation.
+        // covered behaviourally. **The earlier claim that they "cannot be seeded
+        // at all" was WRONG and is withdrawn** — corrected on the confirm arm.
+        // Normal admission does recompute the semantic digest from the chunk
+        // bytes (`release-repository.ts`), but this suite does not go through
+        // normal admission for its specimens: it admits a valid release and then
+        // disables the immutable-storage rules, exactly as the two helpers below
+        // already do. Both specimens are constructible that way.
+        //
+        // They are uncovered because they were not BUILT, not because they are
+        // impossible, and the difference matters: the first is a limit, the
+        // second was an excuse. **The surviving broken tree is therefore named
+        // rather than implied** — a gate placed after `verifyArtifact` but before
+        // the descriptor and digest checks keeps all four controls green while
+        // misreporting both as an under-supported reader. Routed to
+        // `runtime-integrity-attribution-untwinned`.
         await t.test(
           'a chunk failing artifact verification reports malformed, not unsupported capability',
           async () => {
@@ -904,7 +928,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         );
 
         await t.test(
-          'a corrupt projection reports malformed, not unsupported capability',
+          'a missing projection chunk link reports malformed, not unsupported capability',
           async () => {
             await activateRelease(
               runtimePool,
@@ -1399,11 +1423,29 @@ async function removeSurfaceChunkLink(
  * Substitutes one byte of the surface projection's stored CHUNK, keeping the
  * length identical so every table constraint still holds.
  *
- * The link resolves, the artifact is present, and the byte length and descriptor
- * still agree — so the loader gets all the way to `verifyArtifact` and refuses on
- * the content hash. That is strictly DEEPER in the integrity sequence than the
+ * The link resolves, the artifact is present, and the descriptor's byte length
+ * still agrees — so the loader reaches `verifyArtifact` and refuses on the
+ * content hash. That is strictly DEEPER in the integrity sequence than the
  * deleted-link twin, which is the point: it kills a gate placed anywhere before
  * artifact verification, not merely one placed before link validation.
+ *
+ * **THIS SPECIMEN IS NOT SINGLE-FAULT, corrected on the confirm arm.** An
+ * earlier version of this comment claimed the content hash was the only broken
+ * property. It is not. The chunk is canonical JSON, so its first byte is `{`
+ * (0x7b); incrementing it yields `|`, which is not valid JSON. And the manifest's
+ * semantic digest still describes the ORIGINAL bytes, so that comparison is
+ * broken too. Three invariants are violated, not one.
+ *
+ * What the specimen therefore proves is narrower than "only the hash is wrong",
+ * and it is still exactly the property this control exists for: **`verifyArtifact`
+ * is the FIRST of the three to run, deterministically**, so a capability gate
+ * placed before it reports an under-supported reader instead. Link and descriptor
+ * metadata remain intact, which is what keeps the specimen from failing earlier.
+ *
+ * A genuinely single-fault content-hash specimen is possible — re-key the blob to
+ * a deliberately wrong 64-hex hash and repoint the descriptor, link, closure and
+ * release root at it, leaving the valid bytes and digest alone. It is not built:
+ * see `runtime-integrity-attribution-untwinned`.
  */
 async function corruptSurfaceChunkBytes(
   pool: pg.Pool,
