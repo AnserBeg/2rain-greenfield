@@ -93,9 +93,11 @@ untrusted input, so its rejection remains **detectable**.
 
 The select is server-rendered and needs none of ADR-0036 §2's four authorised
 client behaviours. It never materialises a field default. Its selected option
-preserves only observed state: stored empty text selects `emptyText`; every
-other stored value defaults to `nothing`; and `clear` occurs only when the
-operator explicitly selects it. A non-empty primary value remains `set`
+preserves only observed state. For optional controls, stored empty text selects
+`emptyText`; all other stored values default to `nothing`. For required-text
+updates, unavailable, null or absent stored values select `nothing`; every
+faithfully representable string selects `emptyText`. `clear` occurs only when
+the operator explicitly selects it. A non-empty primary value remains `set`
 regardless of the conditional choice beside it.
 
 This rule applies to every rendered control, not to an enumerated list of field

@@ -794,6 +794,17 @@ function formFieldMutation(
   rawValue: string | undefined,
   rawEmptyIntent: string | undefined,
 ): FormFieldMutation {
+  // Every required-text update has a two-member wire subject. Validate its
+  // presence before any early return so deleting the primary and companion
+  // together cannot degrade into the ordinary update meaning “leave alone.”
+  if (
+    intent === 'update' &&
+    field?.required === true &&
+    field.kind === 'textFieldType' &&
+    (rawValue === undefined || rawEmptyIntent === undefined)
+  ) {
+    invalidFormSubmission();
+  }
   if (rawValue === undefined) {
     if (rawEmptyIntent !== undefined || (field && !field.required)) {
       invalidFormSubmission();
