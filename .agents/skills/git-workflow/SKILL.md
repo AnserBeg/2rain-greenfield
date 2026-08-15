@@ -130,6 +130,43 @@ Re-run the full matrix when, and only when:
 The failure this prevents is not a wrong acceptance — it is a lane spending an
 hour proving three times over what it will have to prove once more anyway.
 
+### The matrix runs AFTER review converges, not before it — ruled 2026-08-14
+
+**The 2026-08-03 rule above said "one matrix per packet, at the frozen SHA." It
+was right and it was placed one step too early.** A freeze is not the last SHA —
+**a REVISE makes a new one, and the matrix that preceded it proved nothing about
+what lands.** Measured over the review log: `ux-picker` 5 rounds, `matrix-unblock`
+5, `relation-contract-integrity` 3, `dev-environment` 6 by its own report.
+**Multi-round is the norm, so matrix-before-review means most matrices are spent
+on candidates that no longer exist.**
+
+**The sequence:**
+
+1. **Cheap gates** — `typecheck`, `lint`, `format`. Seconds to a couple of minutes.
+2. **The packet's blast-radius suites**, named in its own prompt. A web packet runs
+   `test:browser` and `test:integration`; a packet changing compiler or release
+   output runs `test:postgres` and `check:app-release`, per AGENTS.md §6's
+   cross-layer rule. **This is the step that keeps a reviewer from spending a round
+   on a broken build**, which is the whole risk of moving the matrix later.
+3. **Freeze and review** at that SHA. The fix loop runs here.
+4. **One full matrix, once, at the SHA that will integrate.**
+5. Integrate.
+
+**AGENTS.md §6 is satisfied exactly as written** — it requires the matrix green at
+the *integrated* SHA and has never required one before review.
+
+**Measured cost, 2026-08-14.** `test:postgres` alone was observed at
+`duration_ms 1697975` — **28 minutes for one suite**, against the 11-18 minutes the
+2026-08-03 note recorded for the *whole* matrix; `matrix-machine-decay` records the
+plateau at ~1.29x baseline. Two lanes that day each burned a matrix on a superseded
+candidate: `form-wire-semantics` went green at `1a06b97` and was then REVISEd, and
+`profile-v2-adoption` went red at `c843c0f` on three browser fixtures — a failure
+its own blast-radius suite would have surfaced in a fraction of the time.
+
+**What a freeze means under this rule:** gates and blast-radius suites green, and
+this is the SHA under review. It no longer implies matrix-green. **The ledger still
+records the full-matrix SHA, and it is still the integrated one.**
+
 **`learnings.md` was added to the list on 2026-08-08**, after `lock-obs`'s integration
 tripped on it: it sits at the repository root, outside all four original exclusions,
 while being pure doctrine. Verified before adding — `grep -rln 'learnings.md'` over
