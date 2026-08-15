@@ -57,14 +57,27 @@ function manifestSlotsAt(
 }
 
 /**
- * The property this packet actually depends on. `U5-design` measured that a
- * field gated on the ADOPTED version fails `check:app-release` outright, and
- * that the same field gated on a cut-but-unadopted version leaves the lineage
- * byte-identical. This asserts the constant that keeps us on the safe side of
- * that line, directly rather than through a compile -- a compile derives its
- * profile from the artifact and cannot see this constant move.
+ * CORRECTED BY `profile-v2-adoption`, and the correction is the point.
+ *
+ * `U5b` wrote this as an adoption RATCHET: it pinned `ADOPTED === v1` so no
+ * packet could adopt v2 without first being made to look at the consequences.
+ * It did its job. This packet adopted deliberately, measured the consequences,
+ * and corrected the assertions the move made red.
+ *
+ * The ratchet is INVERTED rather than deleted, because the property it guards
+ * has an edge on both sides. `U5-design` measured that a projection field gated
+ * on the ADOPTED version fails `check:app-release` outright, while the same
+ * field gated on a cut-but-unadopted version leaves the lineage byte-identical.
+ * Before adoption, readable-and-unadopted was the safe side. After adoption the
+ * safe side is that v2 is BOTH readable and adopted -- a supported list that has
+ * dropped its adopted member is exactly the fail-closed programming error
+ * `selectAdoptedProfileVersion` exists to raise.
+ *
+ * Asserted against the constants directly rather than through a compile: a
+ * compile derives its profile from the artifact and cannot see this constant
+ * move.
  */
-test('compiler-semantic v2 is readable and NOT adopted', () => {
+test('compiler-semantic v2 is readable and adopted', () => {
   assert.ok(
     SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.includes(
       COMPILER_SEMANTIC_PROFILE_V2_VERSION,
@@ -73,8 +86,13 @@ test('compiler-semantic v2 is readable and NOT adopted', () => {
   );
   assert.equal(
     ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    'profile-v2-adoption moved the adopted constant to v2, so the tier now reaches the compiled artifact',
+  );
+  assert.notEqual(
+    ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
     COMPILER_SEMANTIC_PROFILE_V1_VERSION,
-    'adopting v2 mints a lineage entry and moves 7 pinned expectations; U5b does not adopt',
+    'v1 is history now, and history is read from each entry attestation, never from this constant',
   );
 });
 

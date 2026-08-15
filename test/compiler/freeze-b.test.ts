@@ -228,6 +228,20 @@ test('revision two adds one optional field to storage and the existing form', ()
     surface.surfaces.find(
       (entry) => entry.surfaceId === 'northstar.bootstrap:surface.item_form',
     ),
+    // GREW BY `profile-v2-adoption`. This whole-object `deepEqual` is the
+    // clearest statement in the suite of what adoption did to a compiled
+    // surface: exactly two keys appear, and both are accumulated v2 emissions.
+    //
+    //   `fields`                  one entry per selected field, in fieldIds order
+    //   `slots[].disclosureTier`  resolved at projection time
+    //
+    // `disclosureTier: 'always'` here is the DEFAULT resolving, not an authored
+    // declaration -- this bootstrap fixture declares no tier anywhere. That is
+    // the documented behaviour of `?? DEFAULT_DISCLOSURE_TIER`, and it is also
+    // why an authored `always` is indistinguishable from an absent one in any
+    // compiled artifact. The authored declaration this packet lands on
+    // `party_detail`'s keyFacts slot is observable in the NORMALIZED definition
+    // and in the language conformance ledger, never here.
     {
       archetype: 'record',
       dataSourceQueryId: 'northstar.bootstrap:query.item_get',
@@ -235,11 +249,24 @@ test('revision two adds one optional field to storage and the existing form', ()
         'northstar.bootstrap:field.item_name',
         'northstar.bootstrap:field.item_description',
       ],
+      fields: [
+        {
+          fieldId: 'northstar.bootstrap:field.item_name',
+          kind: 'textFieldType',
+          required: false,
+        },
+        {
+          fieldId: 'northstar.bootstrap:field.item_description',
+          kind: 'textFieldType',
+          required: false,
+        },
+      ],
       label: 'Item form',
       lifecycle: 'active',
       slots: [
         {
           contentReferenceId: 'northstar.bootstrap:capability.auto_form',
+          disclosureTier: 'always',
           orderKey: 10,
           slot: 'keyFacts',
           slotId: 'northstar.bootstrap:slot.item_key_facts',

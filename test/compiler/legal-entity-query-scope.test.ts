@@ -21,6 +21,7 @@ import {
   type LegalEntityScopeSelectionReceipt,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
@@ -477,13 +478,29 @@ test('cutting v4 leaves v3 output byte-identical', () => {
   // output did not move: recompiling this fixture at an EXPLICIT
   // `northstar.compiler-semantic/v0-experimental` still produces 921ee278...,
   // the pre-adoption value. `compilerInput` spreads DEFAULT_COMPILER_PROFILE,
-  // so the digest here now reflects the adopted profile. Measured field by
-  // field, exactly three keys move and all three are profile-derived:
-  // `compilerSemanticProfileVersion`, `semanticProfileDigest` (the whole
-  // profile hashed) and `cacheInputDigest` (which folds in that digest).
-  // Every projection reference, artifact and payload field is unchanged.
-  const V3_RELEASE_MANIFEST_DIGEST =
+  // so the digest here now reflects the adopted profile.
+  //
+  // RE-DERIVED AGAIN by `profile-v2-adoption`, and the previous re-derivation's
+  // own justification is now GATED rather than asserted in prose. The pin below
+  // moved from aac9f52d... to e91ef814... The language axis did not move: the
+  // v1 arm asserted immediately after this reproduces the PREVIOUS pin exactly,
+  // so the only thing that changed is which profile `DEFAULT_COMPILER_PROFILE`
+  // names. A comment claiming that could not fail; an assertion can.
+  //
+  // ONE CORRECTION TO THE PARAGRAPH ABOVE, measured rather than inherited:
+  // proj-disc-impl recorded "exactly three keys move and all three are
+  // profile-derived". That does NOT carry over to this adoption. FIVE top-level
+  // release-manifest keys move v1 -> v2: `compilerSemanticProfileVersion`,
+  // `semanticProfileDigest`, `cacheInputDigest` -- the three profile-derived
+  // ones -- plus `projections` and `artifactClosure`. The two extra are correct
+  // and are the point of the packet: v1 adoption added no projection payload,
+  // whereas v2 has accumulated three real emissions (per-field kinds, the
+  // disclosure tier, and relation targets), so projection content genuinely
+  // changes. Do not copy the "three keys" claim forward again.
+  const V3_RELEASE_MANIFEST_DIGEST_AT_V1 =
     'aac9f52d2fe2fa592ec9df1a04f66d6d6ac4929f4b00ca047533bd7c9e5adce5';
+  const V3_RELEASE_MANIFEST_DIGEST =
+    'e91ef8145f144601cf30ab8a3d810f78e22f00b3b2164a911279f40798d10f4e';
   const before = canonicalizeAndHash(
     mustCompile(compilerInput(v3)).bundle.releaseManifest,
   ).contentHash;
@@ -492,6 +509,33 @@ test('cutting v4 leaves v3 output byte-identical', () => {
   ).contentHash;
   assert.equal(before, again);
   assert.equal(before, V3_RELEASE_MANIFEST_DIGEST);
+
+  // The language-axis arm, committed by `profile-v2-adoption` so that the claim
+  // "the v3 LANGUAGE output did not move across a profile adoption" is executed
+  // rather than believed. Recompiling the identical v3 bytes at an explicit
+  // compiler-semantic v1 must still produce the pre-adoption digest. If a future
+  // packet changes v3 language lowering, this reds -- which is the whole purpose
+  // of the pin and is exactly what re-deriving the constant above would
+  // otherwise have silently discarded.
+  const atV1 = canonicalizeAndHash(
+    mustCompile({
+      ...compilerInput(v3),
+      profile: {
+        ...compilerInput(v3).profile,
+        compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+      },
+    }).bundle.releaseManifest,
+  ).contentHash;
+  assert.equal(
+    atV1,
+    V3_RELEASE_MANIFEST_DIGEST_AT_V1,
+    'the v3 language output must be unchanged by the compiler-semantic adoption',
+  );
+  assert.notEqual(
+    atV1,
+    V3_RELEASE_MANIFEST_DIGEST,
+    'and the two profiles must actually differ, or the arm above is comparing a compile with itself',
+  );
 
   const manifest = mustCompile(compilerInput(v3)).bundle.releaseManifest;
   assert.equal(manifest.languageVersion, LANGUAGE_VERSIONS.v3);

@@ -40,6 +40,19 @@ export type ImmutableJsonValue =
   | readonly ImmutableJsonValue[]
   | { readonly [key: string]: ImmutableJsonValue };
 
+/**
+ * What a compiled projection DEMANDS of the reader that serves it.
+ *
+ * Declared structurally here rather than imported from the compiler: this
+ * package depends on `@north-star/canonical-model` alone, and a runtime that
+ * imported the compiler to learn what it must support would be deriving its own
+ * capability from the thing making the demand.
+ */
+export interface RuntimeCapabilityRequirement {
+  readonly capabilityId: string;
+  readonly minimumVersion: number;
+}
+
 export interface RuntimeProjection<
   TFamily extends RequestRuntimeProjectionFamily =
     RequestRuntimeProjectionFamily,
@@ -49,7 +62,169 @@ export interface RuntimeProjection<
   readonly instanceId: string;
   readonly payload: ImmutableJsonValue;
   readonly payloadSchemaVersion: string;
+  /**
+   * RETAINED, and it was previously DROPPED. Found by `profile-v2-adoption`'s
+   * round-1 review: the compiler emits a capability floor on every projection
+   * reference, and this interface omitted it, so the demand was erased from the
+   * runtime representation before any consumer could honour or refuse it --
+   * ADR-0041's accepted-and-ignored state, reached by omission rather than by
+   * coercion.
+   *
+   * **OPTIONAL, and the optionality is a declared limitation rather than a
+   * design preference.** The real serving path -- `PostgresRequestRuntimeViewService`
+   * -- always populates it, and the refusal that closes the defect runs there
+   * unconditionally, before the payload is decoded. Optionality therefore costs
+   * nothing on the path that serves a tenant.
+   *
+   * It is optional because making it REQUIRED fails to typecheck in **16 files**,
+   * two of which (`apps/web/test/browser/surface-data-binding.spec.ts` and
+   * `test/integration/surface-data-binding.test.ts`) are held by the live
+   * `form-wire-semantics` lane, and one of which
+   * (`packages/postgres-provider/src/release-verification-service.ts`) sits
+   * outside this packet's granted bridge. Those are hand-built fixtures and a
+   * verification path that never serves a request.
+   *
+   * **What this leaves open:** a future constructor can omit the field and no
+   * type error says so. Closing that is a mechanical sweep of the 16 sites and
+   * belongs in its own packet -- see `runtime-capability-floor-unenforced`.
+   * **What it does NOT leave open:** a projection reaching a tenant without its
+   * floor being compared, which is the defect the review found.
+   */
+  readonly requiredRuntimeCapability?: RuntimeCapabilityRequirement;
   readonly semanticDigest: string;
+}
+
+/**
+ * What THIS runtime can actually serve, per capability.
+ *
+ * **INDEPENDENT OF PAYLOAD-SCHEMA SUPPORT BY CONSTRUCTION, and that independence
+ * is the whole point of the table.** A registry derived from the supported
+ * payload-schema versions would restate what the parser already accepts: green
+ * forever, unable to refuse anything, which is precisely the failure the version
+ * floor exists to avoid. The two answer different questions -- the payload
+ * schema asks *can I parse these bytes*, the capability asks *may I serve what
+ * they mean*.
+ *
+ * **What would have to change for the two to disagree, written down so a later
+ * reader can check it rather than trust it.** They disagree whenever a
+ * projection changes meaning without changing payload shape, or changes shape in
+ * a way an older parser still accepts. Both have already happened on the surface
+ * family:
+ *
+ *   - floor 1 -> 2: `navigation` is ADDITIVE, so a v0 payload parser still
+ *     parsed the bytes -- and silently reconstructed unreachable overflow, a
+ *     WRONG render rather than a parse failure.
+ *   - floor 2 -> 3: `fields` is likewise additive and parses fine when ignored,
+ *     but a reader that drops it renders declared enums, dates and booleans as
+ *     bare text boxes.
+ *
+ * In both cases payload-schema support said yes while capability support had to
+ * say no. That is why this table is AUTHORED, not derived.
+ *
+ * `maximumSupportedVersion` is the HIGHEST floor this runtime can honour. A
+ * projection demanding more is refused; one demanding less is served, because a
+ * floor is a minimum and support is cumulative.
+ *
+ * **KEYED BY FAMILY, AND THE PAIR IS THE UNIT — corrected on round-2 review.**
+ * The first version of this table keyed on `capabilityId` alone, and the
+ * comparison never saw the family. That let a projection **borrow another
+ * family's capability**: a surface manifest declaring
+ * `northstar.runtime:capability.semantic-model` at floor 1 is self-consistent,
+ * survives admission (which only checks the reference and manifest agree with
+ * *each other*), finds a known id in this table, and is served -- while the
+ * surface floor it actually owed was never compared. A future surface shape
+ * needing floor 4 could reach a floor-3 reader that way.
+ *
+ * The compiler already binds the pair (`runtimeCapabilities` in
+ * `packages/compiler/src/projections.ts`). Nothing downstream did. **A
+ * capability id is meaningless without the family that must carry it**, so the
+ * two are declared together here and compared together below.
+ */
+export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
+  Record<
+    string,
+    { readonly capabilityId: string; readonly maximumSupportedVersion: number }
+  >
+> = Object.freeze({
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: {
+    capabilityId: 'northstar.runtime:capability.agent-discovery',
+    maximumSupportedVersion: 1,
+  },
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog]: {
+    capabilityId: 'northstar.runtime:capability.semantic-model',
+    maximumSupportedVersion: 1,
+  },
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
+    capabilityId: 'northstar.runtime:capability.operation-catalog',
+    maximumSupportedVersion: 1,
+  },
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
+    capabilityId: 'northstar.runtime:capability.query-catalog',
+    maximumSupportedVersion: 1,
+  },
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
+    capabilityId: 'northstar.runtime:capability.surface-manifest',
+    // 3 because this runtime understands `fields` (per-field kinds) and renders
+    // a control per declared kind. Raised from 2 by `profile-v2-adoption`, the
+    // packet that made the compiler start emitting them.
+    maximumSupportedVersion: 3,
+  },
+});
+
+/**
+ * `null` when this runtime may serve the projection; otherwise a reason naming
+ * the family, the capability and BOTH versions, so an operator learns what is
+ * missing rather than only that something is wrong.
+ *
+ * **Takes the FAMILY, not just the requirement — corrected on round-2 review.**
+ * Three refusals, in the order they can be established:
+ *
+ *   1. the family is unknown to this runtime;
+ *   2. the family is known but the projection declares a DIFFERENT family's
+ *      capability id -- the borrowed-capability bypass;
+ *   3. the family and capability match and the demanded floor is too high.
+ *
+ * (2) is the one the first version could not see. It fails closed in every
+ * direction: an unknown family, a mismatched pair, and a non-integer floor are
+ * all refusals, because treating any of them as permitted is how a projection
+ * serves itself into a reader that cannot honour it.
+ */
+export function unsupportedRuntimeCapability(
+  familyId: string,
+  requirement: RuntimeCapabilityRequirement,
+  // A SEAM, taking the registry as a parameter rather than closing over it, and
+  // the repository has already paid for this lesson: `adoption-selector-seam`
+  // records five rounds establishing that "only a seam that takes the choice as
+  // a parameter can observe the CHOICE." A comparison that could only ever be
+  // called against the live table would be untestable in the one direction that
+  // matters -- a supported version LOWER than the demanded floor -- because the
+  // live table is, by construction, high enough to serve what ships.
+  supported: Readonly<
+    Record<
+      string,
+      {
+        readonly capabilityId: string;
+        readonly maximumSupportedVersion: number;
+      }
+    >
+  > = SUPPORTED_RUNTIME_CAPABILITIES,
+): string | null {
+  const entry = Object.hasOwn(supported, familyId)
+    ? supported[familyId]
+    : undefined;
+  if (entry === undefined) {
+    return `projection family is unknown to this runtime: ${familyId}`;
+  }
+  if (requirement.capabilityId !== entry.capabilityId) {
+    return `projection family ${familyId} must declare ${entry.capabilityId} and declares ${requirement.capabilityId}`;
+  }
+  if (!Number.isSafeInteger(requirement.minimumVersion)) {
+    return `runtime capability floor is not a safe integer: ${requirement.capabilityId}`;
+  }
+  if (requirement.minimumVersion > entry.maximumSupportedVersion) {
+    return `runtime capability ${requirement.capabilityId} requires version ${String(requirement.minimumVersion)} and this runtime supports ${String(entry.maximumSupportedVersion)}`;
+  }
+  return null;
 }
 
 export interface LoadedRequestRuntimeDefinition {
@@ -660,6 +835,23 @@ function cloneProjection<TFamily extends RequestRuntimeProjectionFamily>(
     instanceId: projection.instanceId,
     payload: cloneImmutableJson(projection.payload, '$.projection.payload'),
     payloadSchemaVersion: projection.payloadSchemaVersion,
+    // Carried through the clone, not re-derived. This function is the copy that
+    // strips everything not named here, so omitting the requirement would
+    // re-introduce the exact drop the field was retained to close -- one layer
+    // further in, and invisible to the provider's own check.
+    //
+    // The spread is conditional so an absent requirement stays ABSENT rather
+    // than becoming a materialized `undefined` key: a hand-built fixture that
+    // never had a floor must not acquire one here, and a reader must be able to
+    // tell "no floor was carried" from "a floor of nothing".
+    ...(projection.requiredRuntimeCapability === undefined
+      ? {}
+      : {
+          requiredRuntimeCapability: Object.freeze({
+            capabilityId: projection.requiredRuntimeCapability.capabilityId,
+            minimumVersion: projection.requiredRuntimeCapability.minimumVersion,
+          }),
+        }),
     semanticDigest: projection.semanticDigest,
   });
 }

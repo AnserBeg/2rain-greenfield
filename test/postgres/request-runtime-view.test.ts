@@ -72,6 +72,8 @@ import {
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
   type CurrentPolicyVersionEvidence,
+  SUPPORTED_RUNTIME_CAPABILITIES,
+  unsupportedRuntimeCapability,
   type PinnedRuntimeContextEnvelope,
   type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
@@ -118,6 +120,96 @@ interface PointerFixture {
   releaseId: MintedUuid | null;
 }
 
+/**
+ * THE CONTROL THAT OBSERVES THE COMPARISON ITSELF, required by the orchestrator
+ * when the bridge was granted: *"floor 3 must refuse against a registry
+ * declaring only 2, or the control never observes the comparison it exists to
+ * prove."*
+ *
+ * The end-to-end pair below cannot do this. The live registry declares 3 and
+ * ships 3, so no real release can produce a supported-BELOW-demanded case
+ * against it -- the only reachable refusal is an absurd floor like 999, and a
+ * comparison implemented as `minimumVersion > 100` would satisfy that while
+ * passing everything real. The registry is therefore taken as a PARAMETER, and
+ * this exercises the boundary at 2/3/4 where the two rules actually differ.
+ *
+ * `adoption-selector-seam` is the repository's own five-round proof that only a
+ * seam taking the choice as a parameter can observe the choice. Same shape, one
+ * subsystem over.
+ */
+test('the capability comparison binds the family to its capability, then compares versions', () => {
+  const surface = PROJECTION_FAMILY_IDS.surfaceManifest;
+  const requirement = {
+    capabilityId: 'northstar.runtime:capability.surface-manifest',
+    minimumVersion: 3,
+  };
+  const registryAt = (maximumSupportedVersion: number) => ({
+    [surface]: {
+      capabilityId: 'northstar.runtime:capability.surface-manifest',
+      maximumSupportedVersion,
+    },
+  });
+
+  // The one the orchestrator named: the SAME floor that serves in production
+  // must refuse against a runtime declaring less.
+  assert.match(
+    unsupportedRuntimeCapability(surface, requirement, registryAt(2)) ?? '',
+    /requires version 3 and this runtime supports 2/,
+  );
+
+  // Admission twins at the boundary, so the refusal is discriminating rather
+  // than a wall: equal serves, and greater serves, because a floor is a MINIMUM
+  // and support is cumulative.
+  assert.equal(
+    unsupportedRuntimeCapability(surface, requirement, registryAt(3)),
+    null,
+  );
+  assert.equal(
+    unsupportedRuntimeCapability(surface, requirement, registryAt(4)),
+    null,
+  );
+
+  // THE BORROWED-CAPABILITY BYPASS, added on round-2 review. A surface manifest
+  // declaring ANOTHER family's known capability at a floor this runtime does
+  // support was previously served: the comparison saw a known id and a
+  // satisfiable version and never asked whether the family was entitled to that
+  // id. The floor the surface actually owed was never compared at all.
+  //
+  // Note the specimen is otherwise entirely valid -- known capability, floor 1,
+  // registry that supports it -- so the ONLY thing wrong is the pairing.
+  assert.match(
+    unsupportedRuntimeCapability(
+      surface,
+      {
+        capabilityId: 'northstar.runtime:capability.semantic-model',
+        minimumVersion: 1,
+      },
+      {
+        ...registryAt(3),
+        [PROJECTION_FAMILY_IDS.semanticModel]: {
+          capabilityId: 'northstar.runtime:capability.semantic-model',
+          maximumSupportedVersion: 1,
+        },
+      },
+    ) ?? '',
+    /must declare northstar\.runtime:capability\.surface-manifest and declares northstar\.runtime:capability\.semantic-model/,
+  );
+
+  // Fails closed on a family nobody declared. Treating unknown as permitted is
+  // how a new projection family would serve itself into an unaware reader.
+  assert.match(
+    unsupportedRuntimeCapability(surface, requirement, {}) ?? '',
+    /projection family is unknown to this runtime/,
+  );
+
+  // The live table binds the pair the compiler emits. Pinned so that renaming a
+  // capability on one side alone reds here rather than in production.
+  assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
+    capabilityId: 'northstar.runtime:capability.surface-manifest',
+    maximumSupportedVersion: 3,
+  });
+});
+
 test('G1-P5 pins one immutable release while policy and pointer authority remain current', async (t) => {
   const bootstrapBytes = fixtureBytes('bootstrap');
   const verticalBytes = definitionWithoutAssertions(bootstrapBytes, '1.0.1');
@@ -133,6 +225,44 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
     envelopeVersion: GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
     payloadVersion: FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   });
+  // A floor beyond anything this runtime declares, with a completely valid
+  // payload. The ONLY thing wrong with this release is the demand.
+  const unsupportedCapabilityFloor = withSurfaceCapabilityFloor(grouped, 999);
+  // The same unsupported floor, PLUS a payload this runtime would also refuse.
+  // It exists to observe ORDER: if the capability gate runs where it claims to,
+  // this reports the capability code; if it ran after the payload were decoded,
+  // it would report `projection payload version or kind is unsupported`
+  // instead. Two reasons to fail, deliberately, because the fact under test is
+  // WHICH ONE FIRES FIRST rather than whether it fails.
+  const unsupportedCapabilityAndBadPayload = withSurfaceCapabilityFloor(
+    grouped,
+    999,
+    (payload) => {
+      payload.kind = 'notASurfaceManifestPayload';
+    },
+  );
+  // A THIRD unsupported specimen, at 998 rather than 999 purely so it is a
+  // distinct release. Each of these controls activates its own release, and the
+  // pointer refuses re-activating the one already serving, so reusing 999 here
+  // fails on the swap constraint rather than on anything under test.
+  //
+  // **It isolates ACTIVATION IDENTITY, not STORAGE — recorded on the confirm
+  // arm, which found this and it is worth knowing.** The floor lives in the
+  // projection MANIFEST, and `withSurfaceCapabilityFloor`'s payload mutation
+  // here is a no-op, so 998, 999 and the ordinary grouped release all produce a
+  // byte-identical surface CHUNK. `release_artifact_blobs` is keyed globally by
+  // content hash, so `corruptSurfaceChunkBytes` corrupts the blob those three
+  // releases SHARE.
+  //
+  // The current results are unaffected — both refusal controls run before the
+  // corruption, and the deleted-link twin fails at its link before ever reading
+  // the blob — but that makes the nested test ORDER load-bearing rather than
+  // incidental. Reordering these subtests can break them without any production
+  // change.
+  const unsupportedCapabilityForCorruption = withSurfaceCapabilityFloor(
+    grouped,
+    998,
+  );
 
   await withEphemeralPostgres(
     'request-runtime-view',
@@ -246,6 +376,9 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             [groupedBytes, grouped],
             [groupedBytes, unknownSurfaceVersion],
             [groupedBytes, mismatchedSurfaceVersion],
+            [groupedBytes, unsupportedCapabilityFloor],
+            [groupedBytes, unsupportedCapabilityAndBadPayload],
+            [groupedBytes, unsupportedCapabilityForCorruption],
           ],
         );
         const policy = new VersionedPolicyAdapter();
@@ -615,6 +748,205 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'MALFORMED_REQUIRED_PROJECTION',
               /projection payload version or kind is unsupported/,
+            );
+          },
+        );
+
+        // THE ADMISSION TWIN. Without it every refusal below is satisfied by a
+        // runtime that refuses everything, and the capability gate would be a
+        // wall rather than a guard.
+        //
+        // It also proves the RETENTION half: the requirement survives the load
+        // and reaches the caller. Before `profile-v2-adoption`'s round-2 fix,
+        // `RuntimeProjection` had no such member and this assertion could not
+        // have been written at all.
+        await t.test(
+          'a surface projection at the supported floor serves, and carries its requirement',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[0]!,
+            );
+            const loaded = await new PostgresRequestRuntimeViewService(
+              runtimePool,
+            ).load(versionContext);
+            assert.deepEqual(
+              loaded.projections.surface.requiredRuntimeCapability,
+              {
+                capabilityId: 'northstar.runtime:capability.surface-manifest',
+                minimumVersion: 3,
+              },
+            );
+            // All FIVE loaded families carry their requirement, not just the
+            // surface. Added on round-2 review, which named "carry it only for
+            // `surface`" as a tree that keeps a surface-only assertion green.
+            for (const [family, projection] of Object.entries(
+              loaded.projections,
+            )) {
+              assert.ok(
+                projection.requiredRuntimeCapability,
+                `${family} must carry its capability requirement`,
+              );
+            }
+            // The floor the compiler emits under adopted profile v2, and the
+            // pair this runtime declares support for. Pinned literally so that
+            // raising the emitted floor without raising declared support reds
+            // here rather than in production.
+            //
+            // Keyed by FAMILY: the round-2 correction made the family/capability
+            // pair the unit, and this assertion was left keyed by capability id
+            // — it read `undefined` and its own control caught it.
+            assert.deepEqual(
+              SUPPORTED_RUNTIME_CAPABILITIES[
+                PROJECTION_FAMILY_IDS.surfaceManifest
+              ],
+              {
+                capabilityId: 'northstar.runtime:capability.surface-manifest',
+                maximumSupportedVersion: 3,
+              },
+            );
+          },
+        );
+
+        await t.test(
+          'a surface projection demanding an unsupported floor refuses by its own name',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[3]!,
+            );
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'UNSUPPORTED_RUNTIME_CAPABILITY',
+              /requires version 999 and this runtime supports 3/,
+            );
+          },
+        );
+
+        // ORDER, observed rather than asserted. This specimen is wrong TWICE --
+        // unsupported floor and an unparseable payload kind -- and the fact
+        // under test is which refusal wins. The capability code winning is the
+        // only outcome consistent with the gate running before the payload is
+        // decoded; the payload code winning would mean this runtime interpreted
+        // bytes whose meaning it had already declared it cannot honour.
+        await t.test(
+          'the capability refusal precedes payload interpretation',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[4]!,
+            );
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'UNSUPPORTED_RUNTIME_CAPABILITY',
+              /requires version 999 and this runtime supports 3/,
+            );
+          },
+        );
+
+        // THE OPAQUE-INTEGRITY TWIN, added on round-2 review. The capability
+        // refusal claims the release is "well-formed and internally
+        // consistent"; that premise has to be ESTABLISHED before the claim can
+        // be made, or a corrupt release reports an under-supported reader and
+        // sends an operator toward a runtime upgrade that fixes nothing.
+        //
+        // Same unsupported floor as the control above, plus a deleted chunk
+        // link. The projection is now corrupt in a way provable on OPAQUE BYTES
+        // — no payload interpretation required — so malformed must win.
+        // THE DEEPER INTEGRITY TWIN, added on round-3 review. The twin below
+        // deletes a chunk LINK, which is the FIRST check in the integrity
+        // sequence — so it only proves link-before-capability, and a gate moved
+        // to sit just after link validation but before artifact verification
+        // would keep it green while misreporting every later corruption as an
+        // under-supported reader.
+        //
+        // This one corrupts a byte of the stored chunk with the length held
+        // constant, so the link resolves, the artifact is present, and the
+        // descriptor still agrees — the loader reaches `verifyArtifact` and
+        // refuses on the content hash. Together the pair brackets the range:
+        // no placement earlier than artifact verification survives both.
+        //
+        // The remaining two checks (descriptor match, semantic digest) are NOT
+        // covered behaviourally. **The earlier claim that they "cannot be seeded
+        // at all" was WRONG and is withdrawn** — corrected on the confirm arm.
+        // Normal admission does recompute the semantic digest from the chunk
+        // bytes (`release-repository.ts`), but this suite does not go through
+        // normal admission for its specimens: it admits a valid release and then
+        // disables the immutable-storage rules, exactly as the two helpers below
+        // already do. Both specimens are constructible that way.
+        //
+        // They are uncovered because they were not BUILT, not because they are
+        // impossible, and the difference matters: the first is a limit, the
+        // second was an excuse. **The surviving broken tree is therefore named
+        // rather than implied** — a gate placed after `verifyArtifact` but before
+        // the descriptor and digest checks keeps all four controls green while
+        // misreporting both as an under-supported reader. Routed to
+        // `runtime-integrity-attribution-untwinned`.
+        await t.test(
+          'a chunk failing artifact verification reports malformed, not unsupported capability',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[5]!,
+            );
+            await corruptSurfaceChunkBytes(pool, versionReleases[5]!.releaseId);
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'MALFORMED_REQUIRED_PROJECTION',
+              /artifact bytes, domain, or digest are invalid/,
+            );
+          },
+        );
+
+        await t.test(
+          'a missing projection chunk link reports malformed, not unsupported capability',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[3]!,
+            );
+            await removeSurfaceChunkLink(pool, versionReleases[3]!.releaseId);
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'MALFORMED_REQUIRED_PROJECTION',
+              /projection chunk link is missing or duplicated/,
             );
           },
         );
@@ -1050,6 +1382,109 @@ async function removeRequiredProjection(
   }
 }
 
+/**
+ * Deletes the surface projection's CHUNK link, leaving the projection link and
+ * the manifest intact. The loader then finds the manifest, validates it, and
+ * fails opaque integrity when it cannot resolve exactly one chunk link.
+ *
+ * Used to prove the capability refusal does not mask corrupt storage.
+ */
+async function removeSurfaceChunkLink(
+  pool: pg.Pool,
+  releaseId: MintedUuid,
+): Promise<void> {
+  await pool.query(
+    'ALTER TABLE platform.tenant_release_chunk_links DISABLE RULE tenant_release_chunk_links_reject_delete',
+  );
+  try {
+    const instance = await pool.query<{ projection_instance_id: string }>(
+      `SELECT projection_instance_id
+         FROM platform.tenant_release_projection_links
+        WHERE release_id = $1
+          AND projection_family_id =
+            'northstar.compiler:projection-family.surface-manifest'`,
+      [releaseId],
+    );
+    const instanceId = instance.rows[0]?.projection_instance_id;
+    assert.ok(instanceId);
+    await pool.query(
+      `DELETE FROM platform.tenant_release_chunk_links
+        WHERE release_id = $1 AND projection_instance_id = $2`,
+      [releaseId, instanceId],
+    );
+  } finally {
+    await pool.query(
+      'ALTER TABLE platform.tenant_release_chunk_links ENABLE RULE tenant_release_chunk_links_reject_delete',
+    );
+  }
+}
+
+/**
+ * Substitutes one byte of the surface projection's stored CHUNK, keeping the
+ * length identical so every table constraint still holds.
+ *
+ * The link resolves, the artifact is present, and the descriptor's byte length
+ * still agrees — so the loader reaches `verifyArtifact` and refuses on the
+ * content hash. That is strictly DEEPER in the integrity sequence than the
+ * deleted-link twin, which is the point: it kills a gate placed anywhere before
+ * artifact verification, not merely one placed before link validation.
+ *
+ * **THIS SPECIMEN IS NOT SINGLE-FAULT, corrected on the confirm arm.** An
+ * earlier version of this comment claimed the content hash was the only broken
+ * property. It is not. The chunk is canonical JSON, so its first byte is `{`
+ * (0x7b); incrementing it yields `|`, which is not valid JSON. And the manifest's
+ * semantic digest still describes the ORIGINAL bytes, so that comparison is
+ * broken too. Three invariants are violated, not one.
+ *
+ * What the specimen therefore proves is narrower than "only the hash is wrong",
+ * and it is still exactly the property this control exists for: **`verifyArtifact`
+ * is the FIRST of the three to run, deterministically**, so a capability gate
+ * placed before it reports an under-supported reader instead. Link and descriptor
+ * metadata remain intact, which is what keeps the specimen from failing earlier.
+ *
+ * A genuinely single-fault content-hash specimen is possible — re-key the blob to
+ * a deliberately wrong 64-hex hash and repoint the descriptor, link, closure and
+ * release root at it, leaving the valid bytes and digest alone. It is not built:
+ * see `runtime-integrity-attribution-untwinned`.
+ */
+async function corruptSurfaceChunkBytes(
+  pool: pg.Pool,
+  releaseId: MintedUuid,
+): Promise<void> {
+  const chunk = await pool.query<{ chunk_hash: string }>(
+    `SELECT link.chunk_hash
+       FROM platform.tenant_release_chunk_links AS link
+       JOIN platform.tenant_release_projection_links AS projection
+         ON projection.release_id = link.release_id
+        AND projection.projection_instance_id = link.projection_instance_id
+      WHERE link.release_id = $1
+        AND projection.projection_family_id =
+          'northstar.compiler:projection-family.surface-manifest'`,
+    [releaseId],
+  );
+  const chunkHash = chunk.rows[0]?.chunk_hash;
+  assert.ok(chunkHash);
+  await pool.query(
+    'ALTER TABLE platform.release_artifact_blobs DISABLE RULE release_artifact_blobs_reject_update',
+  );
+  try {
+    // `set_byte` on the first byte, same length, so `byte_length =
+    // octet_length(canonical_bytes)` still holds and the ONLY broken property is
+    // the content hash.
+    await pool.query(
+      `UPDATE platform.release_artifact_blobs
+          SET canonical_bytes =
+                set_byte(canonical_bytes, 0, (get_byte(canonical_bytes, 0) + 1) % 256)
+        WHERE content_hash = $1`,
+      [chunkHash],
+    );
+  } finally {
+    await pool.query(
+      'ALTER TABLE platform.release_artifact_blobs ENABLE RULE release_artifact_blobs_reject_update',
+    );
+  }
+}
+
 async function assertSeparateProcessPin(
   pin: PinnedRuntimeContextEnvelope,
 ): Promise<void> {
@@ -1237,11 +1672,38 @@ function withoutVerificationScenarios(
   );
 }
 
+/**
+ * Forges an otherwise-VALID release whose surface projection demands a runtime
+ * capability floor this runtime cannot honour.
+ *
+ * ONE property varies. Payload schema, payload kind, chunk bytes, digests,
+ * artifact closure and node fingerprints are all regenerated consistently, and
+ * the floor is written to BOTH the manifest and its reference so the provider's
+ * canonical-agreement check still passes. Anything less and the specimen would
+ * be refused for being MALFORMED, and the control would prove nothing about the
+ * capability comparison -- the confound `review-tiers` calls "a broken tree with
+ * two reasons to fail".
+ */
+function withSurfaceCapabilityFloor(
+  compiled: CompileSuccess,
+  minimumVersion: number,
+  mutatePayload: (payload: Record<string, unknown>) => void = () => {},
+): CompileSuccess {
+  return rewriteProjectionPayload(
+    compiled,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+    mutatePayload,
+    undefined,
+    minimumVersion,
+  );
+}
+
 function rewriteProjectionPayload(
   compiled: CompileSuccess,
   familyId: string,
   mutatePayload: (payload: Record<string, unknown>) => void,
   envelopeVersion?: string,
+  capabilityFloor?: number,
 ): CompileSuccess {
   const clone = structuredClone(compiled);
   const reference = clone.bundle.releaseManifest.projections.find(
@@ -1279,6 +1741,19 @@ function rewriteProjectionPayload(
   if (envelopeVersion !== undefined) {
     manifest.payloadSchemaVersion = envelopeVersion;
     reference.payloadSchemaVersion = envelopeVersion;
+  }
+  if (capabilityFloor !== undefined) {
+    // Written to BOTH sides on purpose: the provider canonicalizes the manifest
+    // against its reference and refuses any disagreement, so a floor set on one
+    // side alone would be refused as malformed and never reach the comparison.
+    manifest.requiredRuntimeCapability = {
+      ...manifest.requiredRuntimeCapability,
+      minimumVersion: capabilityFloor,
+    };
+    reference.requiredRuntimeCapability = {
+      ...reference.requiredRuntimeCapability,
+      minimumVersion: capabilityFloor,
+    };
   }
   manifest.semanticDigest = hashArtifactBytes(
     `${HASH_DOMAINS.projectionSemantic}/${familyId}`,

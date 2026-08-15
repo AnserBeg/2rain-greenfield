@@ -419,3 +419,64 @@ entity. What is owed:
 Until that lands, **a language adoption partially orphans durable verification
 evidence, and nothing observes it.** That sentence is the row's content, not a
 prediction.
+
+## §9 — v2 adoption, measured. Three claims above are corrected by it
+
+Added 2026-08-14 by `profile-v2-adoption`, the packet §4a addressed its closing
+instruction to. The decision is unchanged; three recorded measurements are not.
+
+### The accumulation window closed carrying THREE shapes, not two
+
+`disclosureTier` (`U5b`), `targetEntityId` (`relation-contract-integrity`) and
+**`fields`** — per-field kinds, landed by `e29935d`. Every document describing
+the adoption named the first two. The third is the largest by artifact delta and
+the only one that moves a compatibility floor, so the blast radius was
+under-priced everywhere it was written down. **When an accumulation window is
+scheduled to close, enumerate its members from the gate rather than from the
+queue** — `grep` the version constant in `projections.ts`, do not trust the row.
+
+### §4a's instruction is discharged, and it was load-bearing for a reason §6 did not state
+
+The obligation was to land the declaration in the adopting packet "where it
+carries a real difference". It does, and the difference is bigger than §4a
+claimed: it decides **what kind of lineage edge adoption is**.
+
+Measured in both arms:
+
+| | normalized bytes vs predecessor | edge |
+|---|---|---|
+| adoption alone | **identical** | profile-only — §6 applies, rollback refuses |
+| adoption + §4a's declaration | **differs** | ordinary source edge — rollback behaves normally |
+
+So the §4a obligation is *what keeps this edge ordinary*. Had adoption shipped
+alone it would have produced exactly the profile-only sibling §6 describes, and
+`rollback-release-edge`'s open defect would have been reachable on the serving
+head. **A future profile adoption carrying no authored change will land on it.**
+§6 should be read as still live, not as discharged by this packet having missed it.
+
+### `proj-disc-impl`'s "exactly three keys move" does not generalise
+
+That measurement — that a profile adoption moves only
+`compilerSemanticProfileVersion`, `semanticProfileDigest` and `cacheInputDigest`
+— was true of v1 adoption and is **false of v2**. Five top-level release-manifest
+keys move, adding `projections` and `artifactClosure`, because v1 adoption
+carried no projection payload while v2 carries three real emissions. The
+Consequences section's other predictions held exactly: `storage-target.manifest.*`
+and `storage-target.chunk.*` goldens are byte-identical, no projection family was
+added, and `check:demo-release` needed regeneration rather than mechanism.
+
+The adoption price, measured: **12 `test:compiler` failures across 6 files**, one
+`test:integration`, three `test:architecture` sites, and four goldens re-derived
+against four held. The estimate above says seven across five.
+
+### What adoption COST, which nothing anticipated
+
+The compiler-semantic axis was the last place in the tree where *take the adopted
+version* and *take the newest readable one* could disagree — readable
+`[v0, v1, v2]` with adoption on v1. Adoption made adopted == last-readable on
+**both** axes, so `adoption-selector-seam`'s owed `.at(-1)!` red can no longer be
+made to fire against production at all. §2's "readable before it is adopted"
+discipline is what created that discriminator, and consuming a version consumes
+it. **Cutting the next version restores it; until then the selector rule has no
+live negative control.** Recorded so the next adopting packet knows the cost is
+recurring rather than one-off.

@@ -43,7 +43,25 @@ test('real Location surface creates a location and archives/restores through the
     await page.goto(surfaceUrl(fixture.baseUrl, 'location_form'));
     await page.getByLabel('Location Code').fill('LOC-WEB-004');
     await page.getByLabel('Location Name').fill('Browser-created Location');
-    await page.getByLabel('Location Type').fill(`${namespace}:option.store`);
+    // `fill` -> `selectOption`, corrected by `profile-v2-adoption`, and this one
+    // line is the sharpest evidence in the repository that the adoption reaches
+    // a real user.
+    //
+    // `location_type` is an `enumFieldType`. Under compiler-semantic v1 the
+    // surface manifest carried no `fields` array, so `renderFormControl` took
+    // its `if (!field)` branch and emitted a bare `<input>` -- into which a user
+    // had to type `northstar.location:option.store` by hand, exactly as this
+    // line did. Adopting v2 emits the field kinds, so the same control is now a
+    // `<select>` and Playwright refuses `fill` on it by name: *"Element is not
+    // an <input>, <textarea> or [contenteditable]"*.
+    //
+    // The assertion's MEANING is unchanged -- choose the store option and save.
+    // Only its shape moved, because the control moved. Every other `fill` in
+    // every browser spec targets a `textFieldType` and is untouched; this is the
+    // only enum any of them writes, which is why it is the only correction.
+    await page
+      .getByLabel('Location Type')
+      .selectOption(`${namespace}:option.store`);
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
     await expect(page.getByRole('status')).toContainText(

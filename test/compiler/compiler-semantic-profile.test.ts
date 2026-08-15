@@ -58,11 +58,42 @@ test('cutting compiler-semantic profile v1 leaves v0 output byte-identical', () 
   // A control that derives the profile from the artifact cannot see the
   // defect it exists to catch, so this half must not go through a compile.
   //
-  // On its own this assertion is DEGENERATE today: adopted and latest-readable
-  // are both v1, so a "take the last readable member" implementation satisfies
-  // it. The rule is therefore proven separately on a constructed readable set
-  // in the selector test below, and production is proven to route through that
-  // same selector rather than an inlined copy.
+  // On its own this assertion is DEGENERATE, and `profile-v2-adoption` MADE IT
+  // WORSE rather than resolving it. The degeneracy does not move position; it
+  // deepens, and the packet that deepened it says so here rather than leaving
+  // the next reader to find out.
+  //
+  // Adopted and latest-readable are both v2 now, so a "take the last readable
+  // member" implementation still satisfies this. That much is the same as
+  // before. What CHANGED is that the compiler-semantic axis used to be the one
+  // place in the tree where the two rules could actually disagree: readable was
+  // [v0, v1, v2] while adoption sat on v1, so substituting
+  // `SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.at(-1)` for the adopted
+  // constant moved the default profile from v1 to v2 and would have moved every
+  // recorded release root -- a loud, unmissable red.
+  //
+  // Adoption consumed that. Measured at this commit: compiler-semantic readable
+  // is [v0, v1, v2] with v2 adopted, and language readable is
+  // [v0-experimental, v1..v5] with v5 adopted. BOTH axes now have adopted ==
+  // last-readable, so `.at(-1)` is behaviourally indistinguishable from the
+  // adopted constant EVERYWHERE, and the `adoption-selector-seam` row's owed
+  // red -- the `.at(-1)!` mutation -- currently cannot be made to fire against
+  // production at all.
+  //
+  // The separate selector proof below still carries EXACTLY the weight its own
+  // comment claims, no more: `selectAdoptedProfileVersion` is genuinely proven
+  // on a constructed readable set whose adopted member is not its last, and
+  // that proof is unaffected by adoption. What it does not establish, and never
+  // did, is that production is BUILT by that function rather than by an inlined
+  // rule that happens to agree -- "the default profile is the selector applied
+  // to the live axes" is an equality between two expressions that cannot
+  // disagree while adoption is last. It arms the moment either axis cuts
+  // without adopting, and until then it is structural.
+  //
+  // This is `adoption-selector-seam`'s subject, not this packet's, and this
+  // packet did not repair it. It is recorded here because a row saying "gates
+  // the NEXT version cut" now understates the position: the next cut is the
+  // first moment ANY gate in the tree can observe the choice.
   assert.equal(
     DEFAULT_COMPILER_PROFILE.compilerSemanticProfileVersion,
     ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
@@ -323,7 +354,13 @@ test('historical reproduction reads the profile from the entry, not the constant
 // real v0 history survives only under historical leniency, so truncation
 // legitimately refuses it with "no valid application prefix to retain" -- a
 // different outcome that would hide this defect.
-test('--truncate-invalid-lineage retains a v0 prefix while the adopted profile is v1', () => {
+// TITLE CORRECTED by `profile-v2-adoption` on review: it said "while the adopted
+// profile is v1" and the body never asserted v1 -- it asserts only that adoption
+// has moved OFF v0, which is what the control actually needs. The title was a
+// version-pinned restatement of a version-agnostic assertion, so moving the
+// constant to v2 made it read as a false claim about the tree. Named for the
+// assertion instead, so the next adoption does not have to touch it.
+test('--truncate-invalid-lineage retains a v0 prefix once adoption has moved off v0', () => {
   assert.notEqual(
     ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
     COMPILER_SEMANTIC_PROFILE_VERSION,
@@ -538,6 +575,12 @@ function emptyApplicationDefinition(
 }
 
 interface RecordedRelease {
+  readonly artifacts: readonly {
+    readonly artifactKind: string;
+    readonly canonicalBytesBase64: string;
+    readonly contentHash: string;
+    readonly domainTag: string;
+  }[];
   readonly attestation: {
     readonly compilerSemanticProfileVersion: CompilerSemanticProfileVersion;
   };
@@ -547,6 +590,139 @@ interface RecordedRelease {
   };
   readonly releaseRoot: string;
 }
+
+/** Every relation input in an entry's decoded artifact bytes. */
+function relationInputsIn(
+  entry: RecordedRelease,
+): { readonly targetEntityId?: string }[] {
+  const found: { readonly targetEntityId?: string }[] = [];
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    if (Array.isArray(record.relationInputs)) {
+      found.push(
+        ...(record.relationInputs as { readonly targetEntityId?: string }[]),
+      );
+    }
+    Object.values(record).forEach(walk);
+  };
+  for (const artifact of entry.artifacts) {
+    try {
+      walk(
+        JSON.parse(
+          Buffer.from(artifact.canonicalBytesBase64, 'base64').toString('utf8'),
+        ),
+      );
+    } catch {
+      // Not every artifact is JSON; a non-JSON artifact carries no relation
+      // input and is correctly skipped rather than failing the scan.
+    }
+  }
+  return found;
+}
+
+/** Artifacts whose decoded bytes contain the given key, by artifactKind. */
+function artifactsCarrying(entry: RecordedRelease, key: string): string[] {
+  return entry.artifacts
+    .filter((artifact) =>
+      Buffer.from(artifact.canonicalBytesBase64, 'base64')
+        .toString('utf8')
+        .includes(`"${key}"`),
+    )
+    .map((artifact) => artifact.artifactKind);
+}
+
+/**
+ * THE CONTROL THIS PACKET EXISTS TO SHIP, and it is written against a named
+ * prior failure rather than invented.
+ *
+ * `U5b` declared `disclosureTier` on a real slot, minted a lineage entry, and
+ * reported eight artifacts differing between the two entries. **The tier
+ * appeared in ZERO artifacts of either one.** All eight differences were digest
+ * churn -- release roots and cache inputs folding in a changed profile hash --
+ * and every count-based or digest-based assertion available at the time was
+ * satisfied by that. ADR-0047 §4a is the rule written from it: a feature that
+ * reaches no artifact must not mint an entry.
+ *
+ * So a digest is not evidence that a field shipped. This reads the entry's
+ * artifact BYTES, decodes them, and counts the field itself.
+ *
+ * The pair is the discrimination. Entry -2 is the last v1 entry and entry -1 is
+ * the v2 entry this packet minted; asserting only the presence half would be
+ * satisfied by a projection that emitted the key under every profile, which is
+ * precisely what would have moved the recorded roots and broken history.
+ */
+test('the adopted entry carries the gated fields in ARTIFACTS, not only in digests', () => {
+  const lineage = readLineage();
+  const adopted = lineage.applications.at(-1)!;
+  const previous = lineage.applications.at(-2)!;
+
+  assert.equal(
+    adopted.attestation.compilerSemanticProfileVersion,
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  );
+  assert.equal(
+    previous.attestation.compilerSemanticProfileVersion,
+    COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+    'the pair must straddle the adoption or neither half discriminates',
+  );
+
+  // targetEntityId -- the field `relation-scoped-enumeration` is blocked on.
+  // Counted per relation input rather than per artifact, because "some artifact
+  // mentions the key" would be satisfied by one relation out of six.
+  const previousRelations = relationInputsIn(previous);
+  const adoptedRelations = relationInputsIn(adopted);
+  assert.ok(
+    previousRelations.length > 0,
+    'the recorded release must declare relation inputs, or this reads nothing',
+  );
+  assert.equal(
+    adoptedRelations.length,
+    previousRelations.length,
+    'adoption must not change how many relations exist, only what they carry',
+  );
+  assert.equal(
+    previousRelations.filter(
+      (relation) => relation.targetEntityId !== undefined,
+    ).length,
+    0,
+    'no v1 relation input may carry a target, or the recorded roots would have moved',
+  );
+  assert.equal(
+    adoptedRelations.filter((relation) => relation.targetEntityId !== undefined)
+      .length,
+    adoptedRelations.length,
+    'every v2 relation input carries its target; a picker resolves its list from exactly this',
+  );
+
+  // disclosureTier -- the field `U5b` measured in zero artifacts.
+  assert.deepEqual(
+    artifactsCarrying(previous, 'disclosureTier'),
+    [],
+    'the v1 entry must carry the tier in no artifact -- this is the state U5b measured',
+  );
+  assert.ok(
+    artifactsCarrying(adopted, 'disclosureTier').length > 0,
+    'the v2 entry must carry the tier in a real artifact, which is what U5b could not claim',
+  );
+
+  // The digest-churn twin, stated as an assertion so the distinction this test
+  // rests on is itself observed: artifacts DO differ by hash across the pair,
+  // and that difference is exactly what proved nothing last time.
+  const previousHashes = new Set(
+    previous.artifacts.map((artifact) => artifact.contentHash),
+  );
+  assert.ok(
+    adopted.artifacts.some(
+      (artifact) => !previousHashes.has(artifact.contentHash),
+    ),
+    'artifacts differ by digest across the pair, which is necessary and never sufficient',
+  );
+});
 
 function readLineage(): {
   readonly applications: readonly RecordedRelease[];

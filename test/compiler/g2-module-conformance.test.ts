@@ -381,14 +381,26 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
         writable: true,
       },
     ],
+    // GREW BY `profile-v2-adoption`. This expectation compiles at the DEFAULT
+    // profile, which is now v2, so the required relation carries its target and
+    // the contract version names the shape it carries. `targetEntityId` is the
+    // field `relation-scoped-enumeration` needs in order to resolve a picker
+    // list at all: under v1 this relation input had exactly three keys and no
+    // target, which is why no record picker could render against the shipped
+    // application no matter how well it was built.
+    //
+    // The v1 shape is not lost. `relation-target-projection.test.ts` pins it
+    // literally at an explicit v1 profile, because recorded lineage entries 0-8
+    // must keep reproducing it.
     relationInputs: [
       {
         archiveBehavior: 'restrict',
         relationId: `${FIXTURE_IDS.namespace}:relation.master_role_parent`,
         required: true,
+        targetEntityId: FIXTURE_IDS.entityIds.parent,
       },
     ],
-    schemaVersion: 'northstar.module-input-contract/v1',
+    schemaVersion: 'northstar.module-input-contract/v3',
     writableFieldIds: [FIXTURE_IDS.fieldIds.childRole],
   });
   const parentCreate = operations.find((operation) =>
