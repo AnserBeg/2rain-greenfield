@@ -4,17 +4,17 @@ Date: 2026-08-14
 
 Tier: Critical
 
-Status: evidence_ready
+Status: accepted
 
 Base: `bc28c2f92571a2036229816b7247fd52f8c230d0` (the round-3 branch merged
 current `origin/main`; the original cut was `adb5f38`)
 
-Round-7 tested executable SHA: `dd473137ead4983cec365e6caa6013e6d3afb302`
+Round-7 reviewed and matrix-tested SHA:
+`88f66b072f4c44e45ab3fe7e5dc4184fa286a54f`
 
-No round-7 full matrix has run. Current `git-workflow` requires review to
-converge first, then one matrix at the SHA that will integrate. The round-1 and
-round-2 matrices below are historical evidence for their respective candidates,
-not acceptance evidence for round 7.
+Round-7 executable correction SHA:
+`dd473137ead4983cec365e6caa6013e6d3afb302`. The reviewed tip adds execution
+records only, so both SHAs have identical executable content.
 
 ## Goal
 
@@ -352,8 +352,8 @@ round-5 source.
 This is `review-tiers`' one permitted prose/control narrowing round. It narrows
 the structural claim to what the source and controls establish and does not
 grow the table or claim branch-level instrumentation that the tests do not
-carry. Executable content changed, so a fresh review of round 7 remains
-mandatory.
+carry. The fresh round-7 Codex xhigh arm returned `PASS` on the frozen
+candidate.
 
 ## Gates
 
@@ -388,9 +388,28 @@ was inspected: zero active containers, eight local volumes totalling 904.5 MB,
 quiet state passed 89/89. This recurrence is appended to
 `container-pressure-forges-outcomes`; it is not hidden as a first-pass green.
 
-Per the current `git-workflow` sequence, the full matrix runs once only after
-the Critical review arms converge, at the SHA that will integrate. It has
-therefore deliberately not been run for round 7.
+### Round-7 acceptance matrix
+
+The full matrix ran from the clean frozen worktree at
+`88f66b072f4c44e45ab3fe7e5dc4184fa286a54f`. Its log is
+`/tmp/matrix-form-wire-semantics-88f66b07.log` and ends:
+
+```text
+PERFORMANCE_GATE_PASS_SHA=88f66b072f4c44e45ab3fe7e5dc4184fa286a54f
+compile-budget: best-of-5 wall_ms=1304.6, budget_ms=5000, cpu_idle_pct=97.1
+test:integration: 137/137 pass
+test:postgres: 197/197 pass
+test:browser: 89/89 pass
+reachability: PASS (104/104 test files; 10 producer artifacts)
+security scans: PASS
+FULL_MATRIX_PASS_SHA=88f66b072f4c44e45ab3fe7e5dc4184fa286a54f
+```
+
+The runner refused dirty input before starting, acquired and released the
+`form-wire-semantics` slot normally, and its terminal pass marker proves the
+load-tolerant tail also completed. The runner still emits no `MATRIX_EXIT`
+token; that pre-existing instrumentation mismatch remains filed under
+`matrix-evidence-truncated` rather than inferred away.
 
 ### Historical round-1 and round-2 matrices
 
@@ -535,9 +554,8 @@ server with Ctrl-C in its terminal or `fuser -k 4174/tcp`.
   sections. This packet did not take G2-P5d-c's anatomy scope.
 - The browser payoff persists through an in-memory executor that runs the real
   provider input parser; it is not a browser-to-PostgreSQL persistence journey.
-  The historical round-2 `test:postgres` suite is green, but no round-7
-  PostgreSQL suite was part of this packet's prescribed blast radius, and
-  neither fact turns the browser test into such a journey.
+  The round-7 acceptance matrix includes a green `test:postgres` suite, but
+  that separate suite does not turn the browser test into such a journey.
 - The twenty mutation replays were selected and interpreted by this writer;
   round 7 added no new ad-hoc replay. The committed four-case presence table
   observes outcomes, not branch counters. Source-path reasoning establishes
@@ -567,9 +585,7 @@ architecture-boundary, relation, compiler or profile-adoption bridges.
 No program review is due at this checkpoint. This is a local correction to an
 existing web-to-provider seam, not a first vertical slice before fan-out, a new
 stabilised correctness domain, a stage boundary or the first zero-dev-code
-module. The branch is also evidence-ready rather than accepted and integrated,
-which is an explicit anti-trigger. The next checkpoint must evaluate the
-triggers again after acceptance/integration.
+module. The next checkpoint must evaluate the triggers again after integration.
 
 ## Review state
 
@@ -584,10 +600,11 @@ Round 5's fresh-naive Codex xhigh arm returned `REVISE` on
 corrections are recorded above. Round 6's fresh-naive Codex xhigh arm returned
 `REVISE` on `d2499fbe45ad6f043dd0905672cf0dbdd3be2d2e`; its upheld
 control-attribution finding and the one permitted narrowing correction are
-recorded above. No independent arm has reviewed round 7.
-Critical cadence requires a new fresh-naive Codex xhigh
-arm on the final frozen SHA, followed only after a Codex pass by an independent
-Fable max arm on the identical SHA. The full matrix follows convergence at the
-SHA that will integrate. This lane writes the round-7 prompt and stops; it does
-not run its own review or the pre-convergence matrix. Any executable change
-invalidates prior review evidence and requires a new SHA.
+recorded above. Round 7's fresh-naive Codex xhigh arm reviewed frozen candidate
+`88f66b072f4c44e45ab3fe7e5dc4184fa286a54f` and returned `PASS`, finding no
+material production, control or record defect. An independent Fable arm had
+already returned `PASS` on that identical SHA, but it ran before the Codex arm.
+The user explicitly overrode the normal Critical ordering and waived a repeated
+post-Codex Fable arm. This record preserves that deviation rather than
+misreporting the earlier arm as sequence-conformant. No executable content
+changed after the reviewed and matrix-tested SHA.
