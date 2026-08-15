@@ -859,3 +859,39 @@ order is load-bearing rather than incidental**, and that is now recorded where a
 reordering lane will see it.
 
 ### Census: CLOSED, correct at 15 total / 14 pre-existing.
+
+## 16. Full matrix — GREEN at the integrated SHA
+
+```
+FULL_MATRIX_PASS_SHA=949a9dc9a68f26afe4e24de95a477163448a35a2
+PERFORMANCE_GATE_PASS_SHA=949a9dc9a68f26afe4e24de95a477163448a35a2
+```
+
+Read from inside `/tmp/matrix-profile-v2-adoption-949a9dc9.log`, not from a
+pipeline exit status. **Zero** `not ok` lines. `git rev-parse HEAD` identical
+before and after the run. Tree clean.
+
+**All twenty gates executed**, including the nine that had never run against the
+capability work at any SHA: `test:unit`, `test:integration`, `test:agent`,
+`test:architecture`, `test:contracts`, `test:locale`, `test:performance`,
+`check:reachability`, `check:language-coverage`.
+
+**This ran at the INTEGRATED tree, which is the point.** `form-wire-semantics`
+was accepted while this packet was in review, so `main` advanced from `23e7ba3`
+to `384a68f` carrying its rewrites of `component-registry.ts`,
+`surface-contract.ts`, `surface-runtime.ts`, `message-catalog.ts` and five
+browser specs. This packet's base predates all of it.
+
+**That is the cross-lane interaction this lane predicted in `lanes.md` when it
+took its lease**, and the matrix is where it was finally observable: path
+disjointness was real and effect disjointness was not. Adoption makes `fields`
+present on every surface manifest, activating a `renderFormControl` branch that
+was dead against the shipped application — and that lane rewrote exactly that
+renderer. `test:browser` green on the merged tree is the observation that closes
+it.
+
+**Minor correction to the packet charter:** it instructs the lane to read
+`MATRIX_EXIT` from inside the log. `run-matrix.sh` emits no such token — success
+is `FULL_MATRIX_PASS_SHA=<sha>` and failure is `FULL_MATRIX_FAILED rc=<n>
+sha=<sha>`. Both forms were seen this session; the verdict above is read from the
+real ones.
