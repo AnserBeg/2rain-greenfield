@@ -536,7 +536,7 @@ purchase-order or composed-product journey.
 For visual inspection of the current product shell:
 
 ```bash
-cd /home/rvham/2rain-greenfield-formwire
+cd /home/rvham/2rain-greenfield
 pnpm dev
 ```
 
@@ -585,7 +585,8 @@ architecture-boundary, relation, compiler or profile-adoption bridges.
 No program review is due at this checkpoint. This is a local correction to an
 existing web-to-provider seam, not a first vertical slice before fan-out, a new
 stabilised correctness domain, a stage boundary or the first zero-dev-code
-module. The next checkpoint must evaluate the triggers again after integration.
+module. Re-evaluation after integration found the same result: no milestone or
+judgment trigger fired, so no whole-program review is proposed.
 
 ## Review state
 
