@@ -794,14 +794,16 @@ function formFieldMutation(
   rawValue: string | undefined,
   rawEmptyIntent: string | undefined,
 ): FormFieldMutation {
-  // Every required-text update has a two-member wire subject. Validate its
-  // presence before any early return so deleting the primary and companion
-  // together cannot degrade into the ordinary update meaning “leave alone.”
+  // Every required-text update has a two-member wire subject. Refuse complete
+  // subject erasure before the generic absent-primary return can interpret it
+  // as “leave alone.” The absent-primary branch below owns primary-only
+  // erasure; readEmptyIntent owns companion-only erasure and invalid values.
   if (
     intent === 'update' &&
     field?.required === true &&
     field.kind === 'textFieldType' &&
-    (rawValue === undefined || rawEmptyIntent === undefined)
+    rawValue === undefined &&
+    rawEmptyIntent === undefined
   ) {
     invalidFormSubmission();
   }
