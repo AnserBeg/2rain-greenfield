@@ -9,7 +9,7 @@ Status: evidence_ready
 Base: `bc28c2f92571a2036229816b7247fd52f8c230d0` (the round-3 branch merged
 current `origin/main`; the original cut was `adb5f38`)
 
-Round-6 tested executable SHA: `00211ef43c7d496ef7d32c39f08f1bb7b8deb06a`
+Round-6 tested executable SHA: `255747e3fe69aa86d9a0671241a81e4d06b21907`
 
 No round-6 full matrix has run. Current `git-workflow` requires review to
 converge first, then one matrix at the SHA that will integrate. The round-1 and
@@ -124,7 +124,7 @@ read-back in the fixture executor.
 | The user's create payoff works | `a create sets a boolean and omits a blank optional date` fills required values, chooses Yes, leaves the optional date blank, observes provider acceptance, rereads native `true`, and proves the date key is absent. |
 | The adopted profile-v1 seam works without typed surface metadata | `the adopted profile-v1 bare form converts a boolean and omits a blank date` observes text inputs for both fields, a working `empty:` companion, raw `"true"`, provider acceptance, stored native `true`, and no date key. |
 | A one-line control cannot sanitize stored text during an unrelated edit | The two profile-parametrized `multiline text survives an unrelated edit` cases observe profile-v1 and profile-v2 live controls. Each preserves line-bearing optional and required text plus a non-string historical text value through exactly one accepted parser verdict and persisted unrelated change. The same strings with the newline replaced by a space, and with the number represented as a string, are admitted neighbours that remain visible and round-trip. |
-| An unavailable required text value has a complete intent carrier | The two profile-parametrized `required unavailable text can be replaced with empty text` cases observe the exact ordered `{ value, text }` pairs and safe `nothing` default. Direct posts delete only the companion, forge `clear`, or erase the entire primary-and-companion subject; each returns 422 before a provider verdict and leaves revision plus both values unchanged. The native admission path selects by visible “Save an empty text value,” observes raw `""` plus `emptyText`, one accepted real-parser verdict, the unrelated edit and persisted `""`. |
+| An unavailable required text value has a complete intent carrier | The two profile-parametrized `required unavailable text can be replaced with empty text` cases observe the exact ordered `{ value, text }` pairs and safe `nothing` default. Direct posts delete only the companion, forge `clear`, delete only the primary, or erase the entire primary-and-companion subject; each returns 422 before a provider verdict and leaves revision plus both values unchanged. The native admission path selects by visible “Save an empty text value,” observes raw `""` plus `emptyText`, one accepted real-parser verdict, the unrelated edit and persisted `""`. |
 | Ordinary required update text remains intentionally blankable | The two profile-parametrized `representable required text remains intentionally blankable` cases observe the same exact companion with `emptyText` selected, deliberately blank the primary value, and reread `""` plus the unrelated edit after one accepted real-parser verdict. |
 | Required create has not acquired a preservation omission | The two profile-parametrized `required text remains real empty text on create` cases observe no `empty:` companion. A direct post forging create-time `emptyText` returns 422 before a provider verdict and creates no record; the neighbouring native post observes raw `""`, one accepted verdict and persisted `""` beside the required number. |
 | An unrelated edit cannot rewrite null or absence | `an unrelated edit preserves both stored null and absent optional values` rereads both states and the exact changed text value after the accepted update. |
@@ -315,10 +315,17 @@ recorded process failure; the rule is already binding in `review-tiers`, so this
 packet does not create a duplicate doctrine entry. A fresh arm remains required
 because executable content changed.
 
+Before the final round-6 freeze, the lane completed the finite presence matrix
+with the neighbouring primary-absent/companion-present specimen. Without it,
+removing the `rawValue === undefined` half of the new guard would have kept all
+committed controls green. That test-only addition produced executable SHA
+`255747e3fe69aa86d9a0671241a81e4d06b21907`; format, lint, typecheck, browser
+and integration were rerun on that exact tree.
+
 ## Gates
 
 Round-6 review-freeze gates at the tested executable SHA
-`00211ef43c7d496ef7d32c39f08f1bb7b8deb06a`:
+`255747e3fe69aa86d9a0671241a81e4d06b21907`:
 
 - `pnpm format` — green.
 - `pnpm lint` — green.
@@ -460,8 +467,9 @@ pnpm exec playwright test --config apps/web/playwright.config.ts \
 Expected: `2 passed`. Each profile seeds required multiline text and observes
 the exact native “Leave unchanged”/`nothing` and “Save an empty text
 value”/`emptyText` pairing. It deletes only the companion and then forges
-`clear`, then erases the complete primary-and-companion subject, proving all
-three are atomic refusals with no provider verdict, revision or value change.
+`clear`, deletes only the primary, then erases the complete
+primary-and-companion subject, proving all four are atomic refusals with no
+provider verdict, revision or value change.
 The native admission path selects by the visible empty-text label, edits another
 field, observes the raw post and provider acceptance, and rereads both persisted
 values. These prove the reviewed correction; they do **not** prove a seeded
