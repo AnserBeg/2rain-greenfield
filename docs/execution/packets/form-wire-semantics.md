@@ -9,12 +9,12 @@ Status: evidence_ready
 Base: `bc28c2f92571a2036229816b7247fd52f8c230d0` (the round-3 branch merged
 current `origin/main`; the original cut was `adb5f38`)
 
-Round-4 tested executable SHA: `acbfb83bf26a8639edc6966dfadbcf318cc7bf02`
+Round-5 tested executable SHA: `bd3eaf3731a142396b73bc9f901c834514c49758`
 
-No round-4 full matrix has run. Current `git-workflow` requires review to
+No round-5 full matrix has run. Current `git-workflow` requires review to
 converge first, then one matrix at the SHA that will integrate. The round-1 and
 round-2 matrices below are historical evidence for their respective candidates,
-not acceptance evidence for round 4.
+not acceptance evidence for round 5.
 
 ## Goal
 
@@ -71,11 +71,11 @@ runtime types use the same preservation path as profile-v2 typed controls.
   context. The fallback profile-v1 input is classified from the selected
   operation field kind, including the one-line text boundary.
 - `surface-runtime.ts` normalises the string carrier once, before building the
-  immutable provider input. An unavailable required update carries the same
-  `nothing` intent and omits its patch key; an unavailable required text update
-  may instead state `emptyText` and store the real value `""`. A non-empty
-  replacement still wins as `set`. A malformed field refuses the whole
-  submission before the gateway can be called.
+  immutable provider input. Every required text update must carry the
+  contract-derived `nothing | emptyText` companion: `nothing` omits its patch
+  key, while `emptyText` stores the real value `""`. A missing or inapplicable
+  companion is refused before the gateway is called, and a non-empty replacement
+  still wins as `set`.
 - `message-catalog.ts` registers the page diagnostic
   `OPERATION_INPUT_INVALID`.
 - `BrowserFixtureExecutor` now persists only the result returned by the real
@@ -104,7 +104,8 @@ same. This packet used that bridge for:
   selection and removal of `.form-fields select:focus-visible` from the pinned
   known-absence set once this packet made a real subject reachable;
 - `test/integration/surface-data-binding.test.ts`: propagate the additive
-  selected-operation binding shape.
+  selected-operation binding shape, and carry the required text companion in
+  its two synthetic update submissions.
 
 No bridge into `packages/runtime`, `packages/compiler`, architecture boundaries,
 or provider production source was used. `app-server.ts` and
@@ -122,8 +123,9 @@ read-back in the fixture executor.
 | The user's create payoff works | `a create sets a boolean and omits a blank optional date` fills required values, chooses Yes, leaves the optional date blank, observes provider acceptance, rereads native `true`, and proves the date key is absent. |
 | The adopted profile-v1 seam works without typed surface metadata | `the adopted profile-v1 bare form converts a boolean and omits a blank date` observes text inputs for both fields, a working `empty:` companion, raw `"true"`, provider acceptance, stored native `true`, and no date key. |
 | A one-line control cannot sanitize stored text during an unrelated edit | The two profile-parametrized `multiline text survives an unrelated edit` cases observe profile-v1 and profile-v2 live controls. Each preserves line-bearing optional and required text plus a non-string historical text value through exactly one accepted parser verdict and persisted unrelated change. The same strings with the newline replaced by a space, and with the number represented as a string, are admitted neighbours that remain visible and round-trip. |
-| An unavailable required text value can be replaced by real empty text | The two profile-parametrized `required unavailable text can be replaced with empty text` cases observe the native companion's exact `nothing | emptyText` vocabulary and safe default, select `emptyText`, observe raw `""` plus the explicit intent, one accepted real-parser verdict, the unrelated edit, and persisted `""`. |
-| Required create has not acquired a preservation omission | The two profile-parametrized `required text remains real empty text on create` cases observe no `empty:` companion, raw `""`, one accepted real-parser verdict and persisted `""` beside the required number. |
+| An unavailable required text value has a complete intent carrier | The two profile-parametrized `required unavailable text can be replaced with empty text` cases observe the exact ordered `{ value, text }` pairs and safe `nothing` default. Direct posts delete only the companion or forge `clear`; each returns 422 before a provider verdict and leaves revision plus both values unchanged. The native admission path selects by visible “Save an empty text value,” observes raw `""` plus `emptyText`, one accepted real-parser verdict, the unrelated edit and persisted `""`. |
+| Ordinary required update text remains intentionally blankable | The two profile-parametrized `representable required text remains intentionally blankable` cases observe the same exact companion with `emptyText` selected, deliberately blank the primary value, and reread `""` plus the unrelated edit after one accepted real-parser verdict. |
+| Required create has not acquired a preservation omission | The two profile-parametrized `required text remains real empty text on create` cases observe no `empty:` companion. A direct post forging create-time `emptyText` returns 422 before a provider verdict and creates no record; the neighbouring native post observes raw `""`, one accepted verdict and persisted `""` beside the required number. |
 | An unrelated edit cannot rewrite null or absence | `an unrelated edit preserves both stored null and absent optional values` rereads both states and the exact changed text value after the accepted update. |
 | A typed control cannot destroy a value it cannot display | `typed controls preserve and disclose every stored value they cannot display` seeds a retired short-enum option plus unavailable boolean, date, time and number values; observes five blank live controls, five exact stored-value disclosures, five `nothing` intents, provider acceptance, the unrelated text change and all five original stored values. |
 | Clear and real empty text remain distinct | `blank plus explicit clear sends null while blank text can remain a real value` rereads `null` and `""` from one accepted update. |
@@ -131,14 +133,14 @@ read-back in the fixture executor.
 | Malformed input refuses before provider invocation | `malformed boolean and empty intent are refused beside admitted twins` mutates one rendered property at a time: malformed boolean, unknown intent, missing companion and entire optional subject absent each return 422 before the provider verdict count changes; valid boolean and `nothing` twins are admitted. The fixture starts with no values, so this control does not claim preservation of a pre-existing name. |
 | The double cannot manufacture success | `a provider refusal cannot be manufactured into browser success` omits one required value from an otherwise rendered create, observes `MODULE_REQUIRED_FIELD_MISSING`, HTTP 422, no success status and no record; the neighbouring complete creates observe accepted provider verdicts and persisted records. |
 
-The round-4 focused browser file is 26/26 green, and the complete browser suite
-is 87/87 green at the tested executable SHA.
+The round-5 focused browser file is 28/28 green, and the complete browser suite
+is 89/89 green at the tested executable SHA.
 
 ## Negative-control replay
 
-The committed controls above are the evidence. The writer also ran sixteen
+The committed controls above are the evidence. The writer also ran twenty
 author-chosen, ad-hoc mutation replays as supplementary causal checks; all were
-restored before the round-4 freeze gates and are not counted as committed
+restored before the round-5 freeze gates and are not counted as committed
 evidence.
 
 | One-property mutation | Causal red |
@@ -159,6 +161,10 @@ evidence.
 | Omit the required-field `nothing` marker | the required multiline specimen observes that its `empty:` carrier is absent |
 | Classify every one-line text value as unavailable | the space-for-newline and string `"17"` admission neighbours render blank instead of remaining live values |
 | Delete the required-update `emptyText` admission | both profile controls preserve the raw `emptyText` post but observe no accepted provider verdict because the request is refused |
+| Treat a missing required-text update companion as ordinary required text | both direct-post controls observe HTTP 200 instead of 422 |
+| Admit forged `clear` for a required text update | the second direct-post refusal observes HTTP 200 instead of 422 under both profiles |
+| Admit forged `emptyText` on required create | both create controls observe HTTP 200 instead of 422 |
+| Swap the visible labels for `nothing` and `emptyText` | both exact ordered label/value observations red before submission |
 
 Each replay changed one relevant property and was required to fail for the
 intended reason. Because the writer chose them, the independent Critical arms
@@ -247,23 +253,63 @@ posts remained correct. This fourth round is licensed by `review-tiers`'
 regression override: the finding is a production regression introduced by the
 prior correction and it receives both the correction and a committed control.
 
+## Round-4 review adjudication
+
+The fresh-naive Codex xhigh arm reviewed
+`90133a8e794f5a8435064f0763888b240166698f` and returned `REVISE`. The
+orchestrator upheld both findings:
+
+1. **Production:** round 4 rendered the required-text companion only when the
+   renderer knew the stored value was unavailable. The parser had no trusted
+   record-state carrier, so deleting that companion from an otherwise native
+   submission made blank required text fall through to `set ""`. The provider
+   admitted the unintended mutation alongside an unrelated edit. Round 5 makes
+   companion applicability contract-derived instead: every required-text
+   update carries `nothing | emptyText`; unavailable values default to
+   `nothing`, representable values default to `emptyText`, and a missing or
+   inapplicable companion refuses before invocation. Required create still has
+   no companion.
+2. **Control:** the round-4 specimen observed only wire values and selected by
+   wire spelling, so swapping the visible labels stayed green while reversing
+   the operator-visible meaning. Round 5 observes the exact ordered
+   `{ value, text }` pairs and selects the mutation by its visible label.
+
+The two profile-parametrized direct-post controls start from the live native
+`FormData`. Deleting only the required-update companion or forging `clear`
+returns 422, adds no provider verdict and changes neither revision nor stored
+value. Forging `emptyText` on required create is refused beside the native
+no-companion create that persists real empty text. These controls were written
+before the production correction: the missing-companion arms returned 200 on
+the round-4 source, and representable required text rendered no companion.
+
+This fifth round is licensed because the finding is a reachable silent
+business-value mutation and the correction removes the record-state ambiguity
+with one operation-contract rule. It is not another stored-value special case.
+
 ## Gates
 
-Round-4 review-freeze gates at
-`acbfb83bf26a8639edc6966dfadbcf318cc7bf02`:
+Round-5 review-freeze gates at the tested executable SHA
+`bd3eaf3731a142396b73bc9f901c834514c49758`:
 
 - `pnpm format` — green.
 - `pnpm lint` — green.
 - `pnpm typecheck` — green.
-- `pnpm test:browser` — 87/87 green.
+- `pnpm test:browser` — 89/89 green.
 - `pnpm test:integration` — 137/137 green.
 - `pnpm exec playwright test --config apps/web/playwright.config.ts
-  apps/web/test/browser/surface-data-binding.spec.ts --reporter=list` — 26/26
+  apps/web/test/browser/surface-data-binding.spec.ts --reporter=list` — 28/28
   green.
+
+The first round-5 integration run was honestly red at 135/137. Two synthetic
+required-text update submissions in the integration fixture omitted the newly
+contract-required companion. The pre-authorised test bridge added
+`empty:<fieldId>=emptyText` without changing either assertion's meaning; a
+fresh integration run then reached 137/137. Format, lint, typecheck and the
+complete browser suite were rerun on the resulting executable tree.
 
 Per the current `git-workflow` sequence, the full matrix runs once only after
 the Critical review arms converge, at the SHA that will integrate. It has
-therefore deliberately not been run for round 4.
+therefore deliberately not been run for round 5.
 
 ### Historical round-1 and round-2 matrices
 
@@ -337,7 +383,7 @@ changed doctrine was re-read before this record and the review prompt were
 finished.
 
 The checkpoint-only `bash scripts/check-parked-work.sh` governance check was
-run again at the round-4 freeze. It returns `parked-work: FAIL` on six
+run again at the round-5 freeze. It returns `parked-work: FAIL` on six
 pre-existing
 stale branches: `packet/proj-disc`, `packet/ps-0`, `packet/ps-1`, `packet/ps-2`,
 `packet/pur-1` and `packet/u5-design` (6–8 days old and 244–327 commits behind).
@@ -364,7 +410,7 @@ surfaces then stop at the already-routed `record:activity`
 lists expose no usable Edit/New path. That limitation belongs to the existing
 G2-P5d-c remaining-anatomy row and was not widened into this packet.
 
-The best available under-ten-minute round-4 check is therefore the real browser
+The best available under-ten-minute round-5 check is therefore the real browser
 form fixture, exercising explicit empty text from an unavailable required
 one-line value under both the adopted v1 seam and explicit profile v2:
 
@@ -376,11 +422,14 @@ pnpm exec playwright test --config apps/web/playwright.config.ts \
   --reporter=list
 ```
 
-Expected: `2 passed`. Each profile seeds required multiline text, observes the
-exact native `nothing | emptyText` companion, explicitly chooses empty text,
-edits another field, observes the raw post and provider acceptance, and rereads
-both persisted values. These prove the reviewed correction; they do **not**
-prove a seeded purchase-order or composed-product journey.
+Expected: `2 passed`. Each profile seeds required multiline text and observes
+the exact native “Leave unchanged”/`nothing` and “Save an empty text
+value”/`emptyText` pairing. It deletes only the companion and then forges
+`clear`, proving both are atomic refusals with no provider verdict, revision or
+value change. The native admission path selects by the visible empty-text
+label, edits another field, observes the raw post and provider acceptance, and
+rereads both persisted values. These prove the reviewed correction; they do
+**not** prove a seeded purchase-order or composed-product journey.
 
 For visual inspection of the current product shell:
 
@@ -403,10 +452,10 @@ server with Ctrl-C in its terminal or `fuser -k 4174/tcp`.
   sections. This packet did not take G2-P5d-c's anatomy scope.
 - The browser payoff persists through an in-memory executor that runs the real
   provider input parser; it is not a browser-to-PostgreSQL persistence journey.
-  The historical round-2 `test:postgres` suite is green, but no round-4
+  The historical round-2 `test:postgres` suite is green, but no round-5
   PostgreSQL suite was part of this packet's prescribed blast radius, and
   neither fact turns the browser test into such a journey.
-- The sixteen mutation replays were selected and interpreted by this writer.
+- The twenty mutation replays were selected and interpreted by this writer.
 - No usability study assessed the companion-select wording or whether office
   workers understand the three choices. Automated browser coverage establishes
   native operability, labelling and focus treatment only.
@@ -442,11 +491,13 @@ Round 1's fresh-naive Codex xhigh arm returned `REVISE` on
 `292934ba813e39c907fef1c2e78ee4a726d8e80c`. Round 2's fresh-naive Codex xhigh
 arm returned `REVISE` on `5c85b29e165fcde8f4382ef150d47173a819269a`.
 Round 3's fresh-naive Codex xhigh arm returned `REVISE` on
-`c5975646a18478ada9d2e8ca71a16bf5f2f06a28`. Their upheld findings and
-corrections are recorded above. No independent arm has reviewed round 4.
+`c5975646a18478ada9d2e8ca71a16bf5f2f06a28`. Round 4's fresh-naive Codex xhigh
+arm returned `REVISE` on `90133a8e794f5a8435064f0763888b240166698f`.
+Their upheld findings and corrections are recorded above. No independent arm
+has reviewed round 5.
 Critical cadence requires a new fresh-naive Codex xhigh
 arm on the final frozen SHA, followed only after a Codex pass by an independent
 Fable max arm on the identical SHA. The full matrix follows convergence at the
-SHA that will integrate. This lane writes the round-4 prompt and stops; it does
+SHA that will integrate. This lane writes the round-5 prompt and stops; it does
 not run its own review or the pre-convergence matrix. Any executable change
 invalidates prior review evidence and requires a new SHA.
