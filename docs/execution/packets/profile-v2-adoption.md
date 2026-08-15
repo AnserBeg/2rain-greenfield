@@ -250,10 +250,28 @@ restored, it red for the stated reason.
 
 - `runtime-capability-floor-unenforced` (**new**) — the floor moved 1 → 3 and
   **nothing enforces it**. The only `minimumVersion` comparison in the tree is the
-  compiler's dependency-validity check; the provider persists it and the web
-  reader passes it through. `component-registry.ts`'s own comment says a reader
-  without field support "must refuse it rather than fall back". No such refusal
-  exists.
+  compiler's dependency-validity check. `component-registry.ts`'s own comment says
+  a reader without field support "must refuse it rather than fall back". No such
+  refusal exists.
+
+  **CORRECTED ON REVIEW, 2026-08-14, and the correction upgrades this from a
+  filed row to the verdict-driving finding.** I wrote that the provider "passes
+  it through". **It does not pass it through — it DROPS it.**
+  `RuntimeProjection` (`packages/runtime/src/request-runtime-view.ts`) declares
+  exactly six members — `artifactRoot`, `familyId`, `instanceId`, `payload`,
+  `payloadSchemaVersion`, `semanticDigest` — and `requiredRuntimeCapability` is
+  not among them. The provider's single use of the field sits inside a
+  `canonicalize` comparison proving the MANIFEST and its REFERENCE agree with
+  each other: self-consistency, not support. Verified independently —
+  `minimumVersion` appears nowhere in `packages/postgres-provider/src`,
+  `packages/runtime/src` or `apps/web/src` except one comment.
+
+  So the floor is erased from the runtime representation **before any consumer
+  receives it**, and `readCompiledSurfaceManifest` never gets the chance. My
+  wording implied the gap was at the final reader; it is one layer earlier and
+  structural. **This is why the arm returned REVISE rather than accepting the
+  row as filed, and it is a fair catch: I filed the symptom and missed the
+  mechanism.**
 - `demo-shell-profile-untracked` (**new**) — "the demo shell stays on
   `v0-experimental`" is true of the **language** axis only.
   `compile-demo-release.ts` spreads `DEFAULT_COMPILER_PROFILE` and overrides
@@ -397,3 +415,57 @@ pressure, 16/16 isolated.
 is what that row most needs: the first was measured by `ux-picker`, this one by a
 packet touching neither the release kernel nor the provider. **Do not read the
 first red as evidence about this packet's code.**
+
+## 11. Review round 1 — REVISE, and what the lane got wrong
+
+Arm returned **REVISE** on the frozen candidate
+`f2547991fb09e0b98468005f2db115547a975cad`. Every finding was verified against
+source by the lane before being accepted; all three stand.
+
+**The verdict-driving finding is a correction to this packet's own filing**, not
+a new discovery — and that distinction is the useful part. The lane found the
+floor was unenforced and filed it as a row. The arm found the mechanism is worse
+than filed: the floor is **dropped from `RuntimeProjection`** before any consumer
+can see it, so the gap is structural and one layer earlier than "the reader does
+not check". **Filing the symptom and missing the mechanism is the defect in the
+lane's process here**, and it is the same shape as writing a claim from an
+expectation rather than from a measurement — the lane read enough to see no
+comparison existed and stopped before reading the type.
+
+Two record corrections, both confirmed and both the lane's error:
+
+- **The frozen range is 10 commits across 25 paths, not nine.** The lane counted
+  `origin/main..HEAD` at `f6ca221`, then committed once more before freezing and
+  did not recount. The delta range quoted in the review prompt was correct; the
+  count beside it was stale. **A number copied forward across a commit is the
+  same failure as a line number copied forward across an edit.**
+- **A stale test title**: `--truncate-invalid-lineage retains a v0 prefix while
+  the adopted profile is v1` asserted only that adoption has moved *off v0*. The
+  title pinned a version the body never checks, so moving the constant made it
+  read as a false claim. Corrected to name the assertion instead, so the next
+  adoption need not touch it.
+
+**Three claims the arm closed with sharpened reasoning worth keeping:**
+
+- Claim 1 (ordinary source edge) is closed, but the lane's causal wording was
+  too strong. ADR-0047 §4a does not *declare* the edge ordinary; it requires the
+  declaration to land with adoption, and the edge is ordinary as an
+  *implementation consequence* of that declaration being normalized and
+  revision-bearing. **And edge classification is not rollback success** — an
+  ordinary edge can still refuse on forward-evidence or another transition
+  condition, and no rollback was executed.
+- Claim 3 is closed but its control is **weaker than the property it supports**:
+  it counts 6-of-6 presence, not relation-to-target correspondence. Copying one
+  valid target onto all six relations keeps it green. The projection is correct
+  at this SHA, so this is an evidence weakness, not a live defect.
+- Claim 4 is closed for *this* adoption and leaves a successor gap the lane did
+  not see: production predicates are `profile === V2` equality checks, so a v3
+  that is merely cut and made readable would silently lose every v2 shape while
+  the v1/v2 ratchets stayed green. That is next-profile design debt.
+
+**On the scope clause.** The arm declined to treat *"nothing in this prompt
+bounds your scope"* as governing authority, on the ground that `review-tiers`
+requires a bounded orchestrator-owned charter. That is a fair reading and the
+clause is doctrine-mandated for lanes, so the tension belongs to the
+orchestrator rather than to this packet. Recording it because a lane-written
+prompt carrying a clause the reviewer then overrides is worth someone noticing.

@@ -354,7 +354,13 @@ test('historical reproduction reads the profile from the entry, not the constant
 // real v0 history survives only under historical leniency, so truncation
 // legitimately refuses it with "no valid application prefix to retain" -- a
 // different outcome that would hide this defect.
-test('--truncate-invalid-lineage retains a v0 prefix while the adopted profile is v1', () => {
+// TITLE CORRECTED by `profile-v2-adoption` on review: it said "while the adopted
+// profile is v1" and the body never asserted v1 -- it asserts only that adoption
+// has moved OFF v0, which is what the control actually needs. The title was a
+// version-pinned restatement of a version-agnostic assertion, so moving the
+// constant to v2 made it read as a false claim about the tree. Named for the
+// assertion instead, so the next adoption does not have to touch it.
+test('--truncate-invalid-lineage retains a v0 prefix once adoption has moved off v0', () => {
   assert.notEqual(
     ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
     COMPILER_SEMANTIC_PROFILE_VERSION,
