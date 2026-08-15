@@ -328,3 +328,72 @@ browser specs failed; the three did not share a cause:
 Reading all three as one cause would have been wrong in both directions: it would
 have blamed the packet for two failures it did not cause, and excused the one it
 did.
+
+## 10. Gates under the changed doctrine, and a second reproduction of the forged outcome
+
+**Doctrine moved mid-packet.** `git-workflow` `bc28c2f` (2026-08-14) ruled *"the
+matrix runs AFTER review converges, not before it"* and cites this packet's own
+red at `c843c0f` as part of its evidence. A freeze now means **cheap gates plus
+the packet's blast-radius suites green**, and the full matrix runs once at the
+SHA that will integrate. `mission-cadence` `d5159dd` separately binds a lane to
+**write** its review prompt and never **run** it.
+
+This packet's blast-radius set, per the new rule's own naming (a packet changing
+compiler or release output runs `test:postgres` and `check:app-release`), plus
+`test:browser` because §9 established the adoption reaches rendered controls.
+
+| gate | result |
+|---|---|
+| `typecheck` | exit 0 |
+| `lint` | exit 0 |
+| `format` | exit 0 |
+| `check:app-release` | exit 0 |
+| `test:browser` | **77 passed**, exit 0 |
+| `test:postgres` | **197/197**, exit 0 (after the volume reclaim below) |
+
+`test:browser` at 77 passed is itself the evidence that §9's correction was right:
+the earlier quiet re-run was 62 passed / 1 failed / 14 did not run, and all 77 now
+execute and pass.
+
+### `test:postgres` reproduced `container-pressure-forges-outcomes` exactly
+
+The first run of the pair failed 189/1:
+
+```
+not ok 8 - composed product activates through the kernel and persists tenant-scoped gateway data
+  error: 'composed release activation did not verify: NO_SWAP_TERMINAL'
+```
+
+**That is the queue row's signature verbatim** — same test name, same outcome
+code, same string. The row records it measured *"on `main` alone at `b289911` in
+a worktree carrying none of the packet — so it was pre-existing and not the
+merge"*, and passing *"16/16 on the same merged tree after reclaiming 27 leaked
+anonymous volumes."*
+
+**The discriminator, and it is decisive rather than suggestive.** The only
+executable change between the SHA where this suite ran **197/197 green**
+(`c843c0f`) and the SHA where it failed (`f6ca221`) is
+`apps/web/test/browser/location-runtime.spec.ts` — a Playwright spec the
+PostgreSQL suite neither loads nor executes:
+
+```
+git diff --name-only c843c0f f6ca221 -- . ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
+  apps/web/test/browser/location-runtime.spec.ts
+```
+
+So the packet delta **cannot** be causal. Re-running the same file in isolation
+gave **16/16**, matching the row's own recorded number.
+
+**Container state, recorded rather than re-run blind, as the charter instructs:**
+volumes stood at 35 at session start, 38 after the first matrix, and **44** when
+this failure occurred; load average 2.20. Remediation was the row's own — 36
+dangling anonymous volumes reclaimed (44 → 8 total), every named volume left
+intact, no orphaned `release-activation` container present. The suite was then re-run in full and returned **197/197, exit 0**, with the
+volume count stable at 8 -- the same 197 it returned at `c843c0f` before the
+pressure built. Three observations now agree: 197/197 clean, 189/1 under
+pressure, 16/16 isolated.
+
+**This is a second independent reproduction with a clean discriminator**, which
+is what that row most needs: the first was measured by `ux-picker`, this one by a
+packet touching neither the release kernel nor the provider. **Do not read the
+first red as evidence about this packet's code.**
