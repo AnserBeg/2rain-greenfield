@@ -55,11 +55,17 @@ export type RequestRuntimeViewLoadErrorCode =
   | 'REQUEST_CONTEXT_MISMATCH'
   | 'REQUIRED_PROJECTION_DUPLICATE'
   | 'REQUIRED_PROJECTION_MISSING'
-  // The projection declares a capability floor this runtime cannot honour.
-  // Deliberately NOT a `MALFORMED_*` code: the release is well-formed and
-  // internally consistent, and calling it malformed would send an operator
-  // hunting a corrupt artifact rather than an under-supported reader. ADR-0046's
-  // rule that a defect refuses by its own name.
+  // The projection is intact and this runtime cannot honour what it declares --
+  // either the family/capability pairing is wrong or the floor exceeds what is
+  // supported. Deliberately NOT a `MALFORMED_*` code: calling it malformed would
+  // send an operator hunting a corrupt artifact rather than an under-supported
+  // reader. ADR-0046's rule that a defect refuses by its own name.
+  //
+  // The word "intact" is load-bearing and is now EARNED rather than asserted:
+  // the gate that raises this runs after chunk links, artifact hashes, byte
+  // length, media type, scope and the semantic digest have all been verified on
+  // opaque bytes. Round 2 of `profile-v2-adoption` found it raised before any of
+  // that, so a corrupt release reported an under-supported reader.
   | 'UNSUPPORTED_RUNTIME_CAPABILITY';
 
 export class RequestRuntimeViewLoadError extends Error {
@@ -683,24 +689,9 @@ function definitionFromSnapshotRows(
       reference,
       manifest,
     );
-    // THE CAPABILITY GATE, and its POSITION is load-bearing.
-    //
-    // It sits here -- immediately after the manifest is validated and roughly
-    // sixty lines BEFORE `decodeCanonicalJson` produces the payload -- because
-    // the contract is "a reader that cannot honour this must not SERVE it", not
-    // "must not return it". Refusing after parsing would still have interpreted
-    // bytes whose meaning this runtime does not implement.
-    //
-    // `validateProjectionManifest` has already proved the manifest and its
-    // reference agree canonically, including on this field, so reading it from
-    // the manifest here is not a second source of truth.
     const requiredRuntimeCapability = runtimeCapabilityRequirement(
       manifest.requiredRuntimeCapability,
     );
-    const unsupported = unsupportedRuntimeCapability(requiredRuntimeCapability);
-    if (unsupported !== null) {
-      throw loadError('UNSUPPORTED_RUNTIME_CAPABILITY', unsupported);
-    }
     const descriptors = requireArray(manifest.chunks, 'chunks');
     if (descriptors.length !== 1) {
       throw malformedProjection(
@@ -758,6 +749,32 @@ function definitionFromSnapshotRows(
       )
     ) {
       throw malformedProjection('projection semantic digest does not match');
+    }
+    // THE CAPABILITY GATE, and its POSITION is load-bearing in BOTH directions.
+    //
+    // AFTER opaque integrity, BEFORE semantic decoding -- moved here on round-2
+    // review. It previously sat immediately after the manifest validated, which
+    // was early enough to satisfy "refuse before interpreting the payload" but
+    // TOO early to justify its own diagnostic: the code says the release is
+    // "well-formed and internally consistent", and at that point nothing had yet
+    // established the chunk exists, is linked once, matches its declared bytes,
+    // length, media type, scope or semantic digest. A projection that was BOTH
+    // corrupt and unsupported reported an unsupported READER, sending an
+    // operator toward a runtime upgrade when the real defect was corrupt
+    // storage. That is the same misattribution ADR-0046 forbids, and the same
+    // one this code's own comment was written to avoid.
+    //
+    // Everything above this line is verified on OPAQUE BYTES -- hashes, lengths,
+    // links, digests -- and needs no understanding of what the payload means.
+    // `decodeCanonicalJson` below is the first line that interprets it. So this
+    // is the last point at which the refusal is still honest about being a
+    // capability problem, and the first at which it can be.
+    const unsupported = unsupportedRuntimeCapability(
+      familyId,
+      requiredRuntimeCapability,
+    );
+    if (unsupported !== null) {
+      throw loadError('UNSUPPORTED_RUNTIME_CAPABILITY', unsupported);
     }
     const payload = decodeCanonicalJson(
       chunkArtifact.bytes,

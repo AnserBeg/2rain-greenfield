@@ -137,18 +137,23 @@ interface PointerFixture {
  * seam taking the choice as a parameter can observe the choice. Same shape, one
  * subsystem over.
  */
-test('the capability comparison refuses a floor above the registry, and admits at or below', () => {
+test('the capability comparison binds the family to its capability, then compares versions', () => {
+  const surface = PROJECTION_FAMILY_IDS.surfaceManifest;
   const requirement = {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
     minimumVersion: 3,
   };
+  const registryAt = (maximumSupportedVersion: number) => ({
+    [surface]: {
+      capabilityId: 'northstar.runtime:capability.surface-manifest',
+      maximumSupportedVersion,
+    },
+  });
 
   // The one the orchestrator named: the SAME floor that serves in production
   // must refuse against a runtime declaring less.
   assert.match(
-    unsupportedRuntimeCapability(requirement, {
-      'northstar.runtime:capability.surface-manifest': 2,
-    }) ?? '',
+    unsupportedRuntimeCapability(surface, requirement, registryAt(2)) ?? '',
     /requires version 3 and this runtime supports 2/,
   );
 
@@ -156,24 +161,53 @@ test('the capability comparison refuses a floor above the registry, and admits a
   // than a wall: equal serves, and greater serves, because a floor is a MINIMUM
   // and support is cumulative.
   assert.equal(
-    unsupportedRuntimeCapability(requirement, {
-      'northstar.runtime:capability.surface-manifest': 3,
-    }),
+    unsupportedRuntimeCapability(surface, requirement, registryAt(3)),
     null,
   );
   assert.equal(
-    unsupportedRuntimeCapability(requirement, {
-      'northstar.runtime:capability.surface-manifest': 4,
-    }),
+    unsupportedRuntimeCapability(surface, requirement, registryAt(4)),
     null,
   );
 
-  // Fails closed on a capability nobody declared. Treating unknown as permitted
-  // is how a new projection family would serve itself into an unaware reader.
+  // THE BORROWED-CAPABILITY BYPASS, added on round-2 review. A surface manifest
+  // declaring ANOTHER family's known capability at a floor this runtime does
+  // support was previously served: the comparison saw a known id and a
+  // satisfiable version and never asked whether the family was entitled to that
+  // id. The floor the surface actually owed was never compared at all.
+  //
+  // Note the specimen is otherwise entirely valid -- known capability, floor 1,
+  // registry that supports it -- so the ONLY thing wrong is the pairing.
   assert.match(
-    unsupportedRuntimeCapability(requirement, {}) ?? '',
-    /unknown to this runtime/,
+    unsupportedRuntimeCapability(
+      surface,
+      {
+        capabilityId: 'northstar.runtime:capability.semantic-model',
+        minimumVersion: 1,
+      },
+      {
+        ...registryAt(3),
+        [PROJECTION_FAMILY_IDS.semanticModel]: {
+          capabilityId: 'northstar.runtime:capability.semantic-model',
+          maximumSupportedVersion: 1,
+        },
+      },
+    ) ?? '',
+    /must declare northstar\.runtime:capability\.surface-manifest and declares northstar\.runtime:capability\.semantic-model/,
   );
+
+  // Fails closed on a family nobody declared. Treating unknown as permitted is
+  // how a new projection family would serve itself into an unaware reader.
+  assert.match(
+    unsupportedRuntimeCapability(surface, requirement, {}) ?? '',
+    /projection family is unknown to this runtime/,
+  );
+
+  // The live table binds the pair the compiler emits. Pinned so that renaming a
+  // capability on one side alone reds here rather than in production.
+  assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
+    capabilityId: 'northstar.runtime:capability.surface-manifest',
+    maximumSupportedVersion: 3,
+  });
 });
 
 test('G1-P5 pins one immutable release while policy and pointer authority remain current', async (t) => {
@@ -725,15 +759,33 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 minimumVersion: 3,
               },
             );
+            // All FIVE loaded families carry their requirement, not just the
+            // surface. Added on round-2 review, which named "carry it only for
+            // `surface`" as a tree that keeps a surface-only assertion green.
+            for (const [family, projection] of Object.entries(
+              loaded.projections,
+            )) {
+              assert.ok(
+                projection.requiredRuntimeCapability,
+                `${family} must carry its capability requirement`,
+              );
+            }
             // The floor the compiler emits under adopted profile v2, and the
-            // value this runtime declares support for. Pinned literally so that
+            // pair this runtime declares support for. Pinned literally so that
             // raising the emitted floor without raising declared support reds
             // here rather than in production.
-            assert.equal(
+            //
+            // Keyed by FAMILY: the round-2 correction made the family/capability
+            // pair the unit, and this assertion was left keyed by capability id
+            // — it read `undefined` and its own control caught it.
+            assert.deepEqual(
               SUPPORTED_RUNTIME_CAPABILITIES[
-                'northstar.runtime:capability.surface-manifest'
+                PROJECTION_FAMILY_IDS.surfaceManifest
               ],
-              3,
+              {
+                capabilityId: 'northstar.runtime:capability.surface-manifest',
+                maximumSupportedVersion: 3,
+              },
             );
           },
         );
@@ -786,6 +838,39 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
               /requires version 999 and this runtime supports 3/,
+            );
+          },
+        );
+
+        // THE OPAQUE-INTEGRITY TWIN, added on round-2 review. The capability
+        // refusal claims the release is "well-formed and internally
+        // consistent"; that premise has to be ESTABLISHED before the claim can
+        // be made, or a corrupt release reports an under-supported reader and
+        // sends an operator toward a runtime upgrade that fixes nothing.
+        //
+        // Same unsupported floor as the control above, plus a deleted chunk
+        // link. The projection is now corrupt in a way provable on OPAQUE BYTES
+        // — no payload interpretation required — so malformed must win.
+        await t.test(
+          'a corrupt projection reports malformed, not unsupported capability',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[3]!,
+            );
+            await removeSurfaceChunkLink(pool, versionReleases[3]!.releaseId);
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'MALFORMED_REQUIRED_PROJECTION',
+              /projection chunk link is missing or duplicated/,
             );
           },
         );
@@ -1215,6 +1300,43 @@ async function removeRequiredProjection(
     await pool.query(
       'ALTER TABLE platform.tenant_release_projection_links ENABLE RULE tenant_release_projection_links_reject_delete',
     );
+    await pool.query(
+      'ALTER TABLE platform.tenant_release_chunk_links ENABLE RULE tenant_release_chunk_links_reject_delete',
+    );
+  }
+}
+
+/**
+ * Deletes the surface projection's CHUNK link, leaving the projection link and
+ * the manifest intact. The loader then finds the manifest, validates it, and
+ * fails opaque integrity when it cannot resolve exactly one chunk link.
+ *
+ * Used to prove the capability refusal does not mask corrupt storage.
+ */
+async function removeSurfaceChunkLink(
+  pool: pg.Pool,
+  releaseId: MintedUuid,
+): Promise<void> {
+  await pool.query(
+    'ALTER TABLE platform.tenant_release_chunk_links DISABLE RULE tenant_release_chunk_links_reject_delete',
+  );
+  try {
+    const instance = await pool.query<{ projection_instance_id: string }>(
+      `SELECT projection_instance_id
+         FROM platform.tenant_release_projection_links
+        WHERE release_id = $1
+          AND projection_family_id =
+            'northstar.compiler:projection-family.surface-manifest'`,
+      [releaseId],
+    );
+    const instanceId = instance.rows[0]?.projection_instance_id;
+    assert.ok(instanceId);
+    await pool.query(
+      `DELETE FROM platform.tenant_release_chunk_links
+        WHERE release_id = $1 AND projection_instance_id = $2`,
+      [releaseId, instanceId],
+    );
+  } finally {
     await pool.query(
       'ALTER TABLE platform.tenant_release_chunk_links ENABLE RULE tenant_release_chunk_links_reject_delete',
     );

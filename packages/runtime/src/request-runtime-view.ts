@@ -121,32 +121,76 @@ export interface RuntimeProjection<
  * In both cases payload-schema support said yes while capability support had to
  * say no. That is why this table is AUTHORED, not derived.
  *
- * Each value is the HIGHEST floor this runtime can honour. A projection
- * demanding more is refused; one demanding less is served, because a floor is a
- * minimum and support is cumulative.
+ * `maximumSupportedVersion` is the HIGHEST floor this runtime can honour. A
+ * projection demanding more is refused; one demanding less is served, because a
+ * floor is a minimum and support is cumulative.
+ *
+ * **KEYED BY FAMILY, AND THE PAIR IS THE UNIT — corrected on round-2 review.**
+ * The first version of this table keyed on `capabilityId` alone, and the
+ * comparison never saw the family. That let a projection **borrow another
+ * family's capability**: a surface manifest declaring
+ * `northstar.runtime:capability.semantic-model` at floor 1 is self-consistent,
+ * survives admission (which only checks the reference and manifest agree with
+ * *each other*), finds a known id in this table, and is served -- while the
+ * surface floor it actually owed was never compared. A future surface shape
+ * needing floor 4 could reach a floor-3 reader that way.
+ *
+ * The compiler already binds the pair (`runtimeCapabilities` in
+ * `packages/compiler/src/projections.ts`). Nothing downstream did. **A
+ * capability id is meaningless without the family that must carry it**, so the
+ * two are declared together here and compared together below.
  */
-export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<Record<string, number>> =
-  Object.freeze({
-    'northstar.runtime:capability.agent-discovery': 1,
-    'northstar.runtime:capability.operation-catalog': 1,
-    'northstar.runtime:capability.query-catalog': 1,
-    'northstar.runtime:capability.semantic-model': 1,
+export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
+  Record<
+    string,
+    { readonly capabilityId: string; readonly maximumSupportedVersion: number }
+  >
+> = Object.freeze({
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: {
+    capabilityId: 'northstar.runtime:capability.agent-discovery',
+    maximumSupportedVersion: 1,
+  },
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog]: {
+    capabilityId: 'northstar.runtime:capability.semantic-model',
+    maximumSupportedVersion: 1,
+  },
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
+    capabilityId: 'northstar.runtime:capability.operation-catalog',
+    maximumSupportedVersion: 1,
+  },
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
+    capabilityId: 'northstar.runtime:capability.query-catalog',
+    maximumSupportedVersion: 1,
+  },
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
+    capabilityId: 'northstar.runtime:capability.surface-manifest',
     // 3 because this runtime understands `fields` (per-field kinds) and renders
     // a control per declared kind. Raised from 2 by `profile-v2-adoption`, the
     // packet that made the compiler start emitting them.
-    'northstar.runtime:capability.surface-manifest': 3,
-  });
+    maximumSupportedVersion: 3,
+  },
+});
 
 /**
  * `null` when this runtime may serve the projection; otherwise a reason naming
- * the capability and BOTH versions, so an operator learns what is missing rather
- * than only that something is wrong.
+ * the family, the capability and BOTH versions, so an operator learns what is
+ * missing rather than only that something is wrong.
  *
- * Fails closed on an UNKNOWN capability id. A capability this runtime has never
- * heard of is not one it supports, and treating unknown as permitted is exactly
- * how a new projection family would serve itself into an unaware reader.
+ * **Takes the FAMILY, not just the requirement — corrected on round-2 review.**
+ * Three refusals, in the order they can be established:
+ *
+ *   1. the family is unknown to this runtime;
+ *   2. the family is known but the projection declares a DIFFERENT family's
+ *      capability id -- the borrowed-capability bypass;
+ *   3. the family and capability match and the demanded floor is too high.
+ *
+ * (2) is the one the first version could not see. It fails closed in every
+ * direction: an unknown family, a mismatched pair, and a non-integer floor are
+ * all refusals, because treating any of them as permitted is how a projection
+ * serves itself into a reader that cannot honour it.
  */
 export function unsupportedRuntimeCapability(
+  familyId: string,
   requirement: RuntimeCapabilityRequirement,
   // A SEAM, taking the registry as a parameter rather than closing over it, and
   // the repository has already paid for this lesson: `adoption-selector-seam`
@@ -155,19 +199,30 @@ export function unsupportedRuntimeCapability(
   // called against the live table would be untestable in the one direction that
   // matters -- a supported version LOWER than the demanded floor -- because the
   // live table is, by construction, high enough to serve what ships.
-  supported: Readonly<Record<string, number>> = SUPPORTED_RUNTIME_CAPABILITIES,
+  supported: Readonly<
+    Record<
+      string,
+      {
+        readonly capabilityId: string;
+        readonly maximumSupportedVersion: number;
+      }
+    >
+  > = SUPPORTED_RUNTIME_CAPABILITIES,
 ): string | null {
-  const supportedVersion = Object.hasOwn(supported, requirement.capabilityId)
-    ? supported[requirement.capabilityId]
+  const entry = Object.hasOwn(supported, familyId)
+    ? supported[familyId]
     : undefined;
-  if (supportedVersion === undefined) {
-    return `runtime capability is unknown to this runtime: ${requirement.capabilityId}`;
+  if (entry === undefined) {
+    return `projection family is unknown to this runtime: ${familyId}`;
+  }
+  if (requirement.capabilityId !== entry.capabilityId) {
+    return `projection family ${familyId} must declare ${entry.capabilityId} and declares ${requirement.capabilityId}`;
   }
   if (!Number.isSafeInteger(requirement.minimumVersion)) {
     return `runtime capability floor is not a safe integer: ${requirement.capabilityId}`;
   }
-  if (requirement.minimumVersion > supportedVersion) {
-    return `runtime capability ${requirement.capabilityId} requires version ${String(requirement.minimumVersion)} and this runtime supports ${String(supportedVersion)}`;
+  if (requirement.minimumVersion > entry.maximumSupportedVersion) {
+    return `runtime capability ${requirement.capabilityId} requires version ${String(requirement.minimumVersion)} and this runtime supports ${String(entry.maximumSupportedVersion)}`;
   }
   return null;
 }
