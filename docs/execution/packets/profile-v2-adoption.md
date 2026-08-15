@@ -649,7 +649,7 @@ assertion was left keyed by `capabilityId`, reading `undefined`.
 
 Running total: **0 committed harness, 6 ad-hoc, all author-chosen.**
 
-### Round-3 gates — one is OWED, and it is not claimed
+### Round-3 gates — the owed suite has since run
 
 | gate | result |
 |---|---|
@@ -657,10 +657,17 @@ Running total: **0 committed harness, 6 ad-hoc, all author-chosen.**
 | `check:app-release` / `check:demo-release` | exit 0 |
 | `test:browser` | **77 passed**, exit 0 |
 | `test/postgres/request-runtime-view.test.ts` | **14/14**, exit 0 |
-| `test:postgres` (full) | **NOT RUN TO COMPLETION — OWED** |
+| `test:postgres` (full) | **202/202**, exit 0 — after the restored daemon; see below |
 
-**The full PostgreSQL suite is owed at this SHA and is not being claimed.** The
-run died mid-suite when the Docker daemon went away:
+**RESOLVED.** The suite ran to completion at this exact SHA and returned
+**202/202, exit 0**, with `git rev-parse HEAD` pinned identical before and
+after, volumes 8 before and 8 after, and the daemon still up at the end. 202 is
+round 2's 201 plus this round's corrupt-projection twin, which is the arithmetic
+the count should show.
+
+**The account of the failed attempt is kept rather than deleted**, because its
+numbers are on the record and a reader needs to know why they are not evidence.
+That first run died mid-suite when the Docker daemon went away:
 
 ```
 Cannot connect to the Docker daemon at unix:///var/run/docker.sock.
@@ -682,8 +689,12 @@ needs a machine-level restart, which the lane did not force.
   that run covers HEAD's executable content exactly.
 - Both round-3 mutations were observed red against that same tree.
 
-**What is NOT established:** the other ~187 PostgreSQL assertions at this SHA.
+**What was NOT established when this was written, and now is:** the other ~187
+PostgreSQL assertions at this SHA.
 They passed at `f6ca221` (197/197) and at round 2 (201/201), and this round's
 executable delta is confined to the runtime capability seam and its test file —
-but that is an argument, not a measurement, and it is recorded as such. The full
-matrix is owed before integration regardless and will settle it.
+but that was an argument rather than a measurement when it was written. It has
+since been measured directly: **202/202 at this SHA**. **The full matrix is
+still owed before integration** — `test:architecture`, `test:agent`,
+`test:contracts`, `test:locale`, `test:performance`, `check:reachability` and
+`check:language-coverage` remain unrun here.
