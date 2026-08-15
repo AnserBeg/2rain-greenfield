@@ -535,3 +535,43 @@ the optional field leaves open — a constructor silently omitting the requireme
 
 Reported honestly as **0 committed harness, 4 ad-hoc, all author-chosen**. Per
 `review-tiers` that is worth strictly less than an independent replay.
+
+### Round-2 gates
+
+| gate | result |
+|---|---|
+| `typecheck` / `lint` / `format` | exit 0 |
+| `check:app-release` | exit 0 |
+| `check:demo-release` | exit 0 |
+| `test:browser` | **77 passed**, exit 0 |
+| `test:postgres` | **201/201**, exit 0 |
+
+201 is 197 plus this round's four controls, which is the arithmetic the count
+should show. Docker volumes were 8 before and 8 after — no leak this run, which
+is itself corroboration for §10's diagnosis: the suite leaks under pressure and
+does not leak when there is room.
+
+### The three browser fixtures, settled
+
+The bridge ruling expected all three of `catalog-runtime`, `location-runtime` and
+`party-runtime` to be true positives — surfaces that begin rendering typed
+controls under v2, failing because a fixture types into what is now a `<select>`.
+
+**That mechanism was exactly right, and it accounts for one of the three.**
+`location-runtime` failed on precisely that, with Playwright naming the element:
+*"Element is not an `<input>` … locator resolved to `<select
+data-field-kind="enumFieldType">`"*. Corrected to `selectOption`.
+
+**The other two were not.** Measured rather than assumed:
+
+- both pass on a quiet machine with no code change;
+- both harnesses print their READY line immediately when started standalone;
+- `getByLabel(...).fill(` appears 14 times across five browser specs and
+  `location-runtime:46` is the **only** one targeting an enum — every other
+  target is a `textFieldType` and still fills an `<input>`;
+- `test:browser` has now returned **77 passed** twice.
+
+So the diagnosis was applied to each rather than to the group, which is what the
+ruling asked for. Treating all three as one cause would have been wrong in both
+directions: it would have charged the packet with two failures it did not cause,
+and it would have excused the one it did.
