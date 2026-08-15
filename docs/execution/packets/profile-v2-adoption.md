@@ -619,9 +619,18 @@ being a capability problem and the first where it can be.
 
 `app-server.ts` collapses every non-authentication error to
 `REQUEST_RUNTIME_VIEW_UNAVAILABLE`. Confirmed, and **measured to be general
-rather than specific to this work**: `RequestRuntimeViewLoadErrorCode` has 15
-members and a grep for each across `apps/web/src` returns **zero** hits.
-`UNSUPPORTED_RUNTIME_CAPABILITY` is the sixteenth and behaves like the rest.
+rather than specific to this work**: `RequestRuntimeViewLoadErrorCode` has **15 members
+total — 14 pre-existing plus this packet's** — and a grep for each across
+`apps/web/src` returns **zero** hits. `UNSUPPORTED_RUNTIME_CAPABILITY` behaves
+like the other fourteen.
+
+**Census corrected on round-3 review.** The lane counted the union *after*
+adding its own code, reported 15 as the pre-existing figure, and then called its
+own addition the sixteenth — double-counting it. Measuring after a change and
+describing the result as the state before it is the error, and it is the same
+shape as the round-2 commit-count slip. The routing conclusion is unaffected:
+fourteen pre-existing codes plus a fifteenth are still a general family erased
+at one boundary.
 
 Not fixed here for three reasons, in order of weight: `app-server.ts` and
 `message-catalog.ts` are held by the live `form-wire-semantics` lane; the
@@ -698,3 +707,67 @@ since been measured directly: **202/202 at this SHA**. **The full matrix is
 still owed before integration** — `test:architecture`, `test:agent`,
 `test:contracts`, `test:locale`, `test:performance`, `check:reachability` and
 `check:language-coverage` remain unrun here.
+
+## 14. Round 3 — REVISE, one control insufficient and one census wrong
+
+Both findings verified and accepted. **No production defect was found this
+round** — the arm confirmed the round-3 implementation correct at the frozen SHA
+and found no remaining borrowed-capability bypass.
+
+### The twin pinned the first check, not the boundary
+
+The deleted-link twin corrupts the **first** item in the integrity sequence, so
+execution refuses at `matchingChunkLinks.length !== 1` before reaching anything
+later. It therefore proves only *link-before-capability*.
+
+The arm named the exact surviving tree: move the gate to sit **after** the link
+check but **before** the artifact lookup and `verifyArtifact`. Every committed
+control stays green, while a missing artifact, bad hash, wrong byte length or
+bad semantic digest is again misreported as an under-supported reader. That is
+AGENTS.md §6's "one red per vacuity vector, not one red overall".
+
+**Fixed by bracketing.** A second twin substitutes one byte of the stored chunk
+with the length held constant, so the link resolves, the artifact is present and
+the descriptor still agrees — the loader reaches `verifyArtifact` and refuses on
+the content hash.
+
+**Measured against the arm's own mutation:**
+
+| control | gate moved to the partial position |
+|---|---|
+| …refuses by its own name | `ok` |
+| …precedes payload interpretation | `ok` |
+| deleted-link twin | **`ok` — the arm was right that it cannot see this** |
+| **artifact-verification twin** | **`not ok` — dies alone** |
+
+**And the claim is narrowed for what is still uncovered.** The last two checks —
+descriptor match and semantic digest — have **no behavioural specimen**, because
+admission recomputes the semantic digest from the chunk bytes
+(`release-repository.ts`), so a specimen disagreeing there cannot be seeded at
+all. Their ordering is source-path attribution, said so at the call site. Both
+test titles now name the specific check each observes rather than "a corrupt
+projection".
+
+### The census was wrong by one, and the error has a shape
+
+`RequestRuntimeViewLoadErrorCode` holds **15 total — 14 pre-existing plus this
+packet's**. The record said 15 pre-existing and called the new one the
+sixteenth.
+
+**The lane counted the union *after* adding its own code and reported the result
+as the state before it.** That is the same error as round 2's commit count,
+which was taken before a later commit and never re-taken. Both are measurements
+attached to the wrong moment. The routing conclusion is unaffected: fourteen
+pre-existing codes plus a fifteenth are still a general family erased at one
+boundary.
+
+### Scope caveat accepted, and not generalised
+
+The arm noted the unknown-family arm proves *"a required loaded family absent
+from this registry refuses"*, not that any newly added release family is routed
+through this helper — the provider calls `projectionFor` only for its five
+declared families, and the compiler has others it deliberately does not load. No
+sixth request-serving family exists at this SHA, so there is no current defect,
+and the claim is not generalised beyond the five.
+
+Running total: **0 committed harness, 7 ad-hoc, all author-chosen.**
