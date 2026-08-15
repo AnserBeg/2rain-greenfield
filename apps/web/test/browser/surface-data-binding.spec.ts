@@ -669,7 +669,9 @@ for (const profile of [
       [FIXTURE_IDS.fieldIds.parentNumber]: 'REPLACE-REQUIRED-TEXT',
     });
     await page.goto(fieldKindFormUrl(url, replacementRecordId));
-    await page.getByLabel('Master Name').fill('Valid replacement');
+    await page
+      .locator(`[name="value:${FIXTURE_IDS.fieldIds.parentName}"]`)
+      .fill('Valid replacement');
     const replacementPosted = capturePost(page);
     const replacementBefore = profileExecutor.providerVerdicts.length;
     await page.getByRole('button', { name: 'Save' }).click();
@@ -694,6 +696,90 @@ for (const profile of [
       ],
       'Valid replacement',
     );
+  });
+
+  test(`required unavailable text can be replaced with empty text (${profile.label})`, async ({
+    page,
+  }) => {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const { executor: profileExecutor, url } = profile.runtime();
+    const nameId = FIXTURE_IDS.fieldIds.parentName;
+    const numberId = FIXTURE_IDS.fieldIds.parentNumber;
+    const recordId = profileExecutor.seedTypedValues({
+      [nameId]: 'Call buyer\nConfirm purchase order',
+      [numberId]: 'BEFORE-EMPTY-TEXT',
+    });
+    await page.goto(fieldKindFormUrl(url, recordId));
+
+    const emptyIntent = page.locator(`[name="empty:${nameId}"]`);
+    await expect(emptyIntent).toHaveValue('nothing');
+    expect(
+      await emptyIntent
+        .locator('option')
+        .evaluateAll((options) =>
+          options.map((option) => (option as HTMLOptionElement).value),
+        ),
+    ).toEqual(['nothing', 'emptyText']);
+    await emptyIntent.selectOption('emptyText');
+    await page.locator(`[name="value:${numberId}"]`).fill('AFTER-EMPTY-TEXT');
+
+    const posted = capturePost(page);
+    const before = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const params = new URLSearchParams(await posted);
+    expect(params.get(`value:${nameId}`)).toBe('');
+    expect(params.get(`empty:${nameId}`)).toBe('emptyText');
+    expect(profileExecutor.providerVerdicts.slice(before)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    await expect(page.getByRole('status')).toContainText('Update complete');
+
+    const stored = profileExecutor.readRecord(recordId);
+    assert.ok(stored);
+    assert.equal(stored.values[nameId], '');
+    assert.equal(stored.values[numberId], 'AFTER-EMPTY-TEXT');
+  });
+
+  test(`required text remains real empty text on create (${profile.label})`, async ({
+    page,
+  }) => {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const { executor: profileExecutor, url } = profile.runtime();
+    const nameId = FIXTURE_IDS.fieldIds.parentName;
+    const numberId = FIXTURE_IDS.fieldIds.parentNumber;
+    await page.goto(
+      `${url}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+    );
+
+    await expect(page.locator(`[name="value:${nameId}"]`)).toHaveValue('');
+    await expect(page.locator(`[name="empty:${nameId}"]`)).toHaveCount(0);
+    await page.locator(`[name="value:${numberId}"]`).fill('CREATE-EMPTY-TEXT');
+
+    const posted = capturePost(page);
+    const before = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const params = new URLSearchParams(await posted);
+    expect(params.get(`value:${nameId}`)).toBe('');
+    expect(params.getAll(`empty:${nameId}`)).toEqual([]);
+    expect(profileExecutor.providerVerdicts.slice(before)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    await expect(page.getByRole('status')).toContainText('Create complete');
+
+    const stored = profileExecutor.readRecord(String(params.get('recordId')));
+    assert.ok(stored);
+    assert.equal(stored.values[nameId], '');
+    assert.equal(stored.values[numberId], 'CREATE-EMPTY-TEXT');
   });
 }
 

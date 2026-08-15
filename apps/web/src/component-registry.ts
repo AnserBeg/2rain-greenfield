@@ -1165,7 +1165,10 @@ function renderFormFields(
  * default for every non-empty stored value: a non-empty primary control still
  * wins as `set`, while a blank control cannot clear anything unless the
  * operator explicitly chooses `clear`. Stored empty text selects `emptyText`.
- * No field value is invented or destroyed by a control default.
+ * An unavailable required text value gets the explicit `nothing | emptyText`
+ * choice because both preserving it and replacing it with `""` are valid. An
+ * unavailable required non-text value needs only the hidden preservation
+ * marker. No field value is invented or destroyed by a control default.
  */
 function renderEmptyIntentControl(
   field: CompiledSurfaceInputField | undefined,
@@ -1175,10 +1178,23 @@ function renderEmptyIntentControl(
   storedValueUnavailable: boolean,
 ): string {
   if (!field) return '';
+  const option = (
+    intent: 'clear' | 'emptyText' | 'nothing',
+    label: string,
+    selectedIntent: 'clear' | 'emptyText' | 'nothing',
+  ): string =>
+    `<option value="${intent}"${selectedIntent === intent ? ' selected' : ''}>${label}</option>`;
+  const select = (options: readonly string[]): string =>
+    `<label class="form-empty-intent"><span>When ${escapeHtml(fieldLabel(fieldId))} is blank</span><select name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" data-empty-intent-for="${escapeHtml(fieldId)}" autocomplete="off">${options.join('')}</select></label>`;
   if (field.required) {
-    return updating && storedValueUnavailable
-      ? `<input type="hidden" name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" value="nothing" data-preserve-unavailable-for="${escapeHtml(fieldId)}">`
-      : '';
+    if (!updating || !storedValueUnavailable) return '';
+    if (field.kind === 'textFieldType') {
+      return select([
+        option('nothing', 'Leave unchanged', 'nothing'),
+        option('emptyText', 'Save an empty text value', 'nothing'),
+      ]);
+    }
+    return `<input type="hidden" name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" value="nothing" data-preserve-unavailable-for="${escapeHtml(fieldId)}">`;
   }
   const selected =
     !updating || value === null || value === undefined
@@ -1186,16 +1202,14 @@ function renderEmptyIntentControl(
       : field.kind === 'textFieldType' && value === ''
         ? 'emptyText'
         : 'nothing';
-  const option = (intent: string, label: string): string =>
-    `<option value="${intent}"${selected === intent ? ' selected' : ''}>${label}</option>`;
   const options = [
-    option('nothing', updating ? 'Leave unchanged' : 'No value'),
-    ...(updating ? [option('clear', 'Clear stored value')] : []),
+    option('nothing', updating ? 'Leave unchanged' : 'No value', selected),
+    ...(updating ? [option('clear', 'Clear stored value', selected)] : []),
     ...(field.kind === 'textFieldType'
-      ? [option('emptyText', 'Save an empty text value')]
+      ? [option('emptyText', 'Save an empty text value', selected)]
       : []),
   ];
-  return `<label class="form-empty-intent"><span>When ${escapeHtml(fieldLabel(fieldId))} is blank</span><select name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" data-empty-intent-for="${escapeHtml(fieldId)}" autocomplete="off">${options.join('')}</select></label>`;
+  return select(options);
 }
 
 interface RenderedFormControl {
