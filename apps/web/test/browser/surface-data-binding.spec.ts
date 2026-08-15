@@ -767,13 +767,14 @@ for (const profile of [
       assert.deepEqual(stored.values, original.values);
     };
 
-    // The native form is otherwise unchanged. The first two vary one posted
-    // property; the third removes the whole required-text subject, which is
+    // The native form is otherwise unchanged. The first three vary one posted
+    // property; the fourth removes the whole required-text subject, which is
     // the subject-absence vacuity vector rather than two independent faults.
     await refuse((form) => delete form[`empty:${nameId}`]);
     await refuse((form) => {
       form[`empty:${nameId}`] = 'clear';
     });
+    await refuse((form) => delete form[`value:${nameId}`]);
     await refuse((form) => {
       delete form[`value:${nameId}`];
       delete form[`empty:${nameId}`];
