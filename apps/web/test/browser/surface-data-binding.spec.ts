@@ -318,6 +318,19 @@ function capturePost(page: Page): Promise<string> {
   });
 }
 
+async function readRenderedForm(page: Page): Promise<Record<string, string>> {
+  return (await page
+    .locator('#surface-record-form')
+    .evaluate((form: HTMLFormElement) =>
+      Object.fromEntries(
+        [...new FormData(form).entries()].map(([key, value]) => [
+          key,
+          String(value),
+        ]),
+      ),
+    )) as Record<string, string>;
+}
+
 async function idleValue(page: Page, fieldId: string): Promise<string> {
   return page
     .locator(`[name="value:${fieldId}"]`)
@@ -576,7 +589,7 @@ for (const profile of [
         'nothing',
       );
 
-      await page.getByLabel('Master Name').fill(changedName);
+      await page.getByLabel('Master Name', { exact: true }).fill(changedName);
       const posted = capturePost(page);
       const before = profileExecutor.providerVerdicts.length;
       await page.getByRole('button', { name: 'Save' }).click();
@@ -634,7 +647,9 @@ for (const profile of [
     await expect(
       page.locator(`[name="empty:${FIXTURE_IDS.fieldIds.parentName}"]`),
     ).toHaveValue('nothing');
-    await page.getByLabel('Master Number').fill('AFTER-REQUIRED-TEXT');
+    await page
+      .getByLabel('Master Number', { exact: true })
+      .fill('AFTER-REQUIRED-TEXT');
     const requiredPosted = capturePost(page);
     const requiredBefore = profileExecutor.providerVerdicts.length;
     await page.getByRole('button', { name: 'Save' }).click();
@@ -709,18 +724,56 @@ for (const profile of [
       [nameId]: 'Call buyer\nConfirm purchase order',
       [numberId]: 'BEFORE-EMPTY-TEXT',
     });
-    await page.goto(fieldKindFormUrl(url, recordId));
+    const surfaceUrl = fieldKindFormUrl(url, recordId);
+    await page.goto(surfaceUrl);
 
     const emptyIntent = page.locator(`[name="empty:${nameId}"]`);
     await expect(emptyIntent).toHaveValue('nothing');
     expect(
-      await emptyIntent
-        .locator('option')
-        .evaluateAll((options) =>
-          options.map((option) => (option as HTMLOptionElement).value),
-        ),
-    ).toEqual(['nothing', 'emptyText']);
-    await emptyIntent.selectOption('emptyText');
+      await emptyIntent.locator('option').evaluateAll((options) =>
+        options.map((option) => ({
+          text: option.textContent?.trim() ?? '',
+          value: (option as HTMLOptionElement).value,
+        })),
+      ),
+    ).toEqual([
+      { text: 'Leave unchanged', value: 'nothing' },
+      { text: 'Save an empty text value', value: 'emptyText' },
+    ]);
+
+    const renderedForm = await readRenderedForm(page);
+    const original = profileExecutor.readRecord(recordId);
+    assert.ok(original);
+    const refuse = async (
+      mutate: (form: Record<string, string>) => void,
+    ): Promise<void> => {
+      const form = {
+        ...renderedForm,
+        idempotencyKey: randomUUID(),
+        [`value:${numberId}`]: 'AFTER-REFUSED-SUBMISSION',
+      };
+      mutate(form);
+      const beforeRefusal = profileExecutor.providerVerdicts.length;
+      const response = await page.request.post(surfaceUrl, {
+        form,
+        headers: { authorization: 'fixture-user' },
+      });
+      assert.equal(response.status(), 422);
+      assert.match(await response.text(), /OPERATION_INPUT_INVALID/);
+      assert.equal(profileExecutor.providerVerdicts.length, beforeRefusal);
+      const stored = profileExecutor.readRecord(recordId);
+      assert.ok(stored);
+      assert.equal(stored.revision, original.revision);
+      assert.deepEqual(stored.values, original.values);
+    };
+
+    // One property at a time: the native form is otherwise unchanged.
+    await refuse((form) => delete form[`empty:${nameId}`]);
+    await refuse((form) => {
+      form[`empty:${nameId}`] = 'clear';
+    });
+
+    await emptyIntent.selectOption({ label: 'Save an empty text value' });
     await page.locator(`[name="value:${numberId}"]`).fill('AFTER-EMPTY-TEXT');
 
     const posted = capturePost(page);
@@ -745,6 +798,55 @@ for (const profile of [
     assert.equal(stored.values[numberId], 'AFTER-EMPTY-TEXT');
   });
 
+  test(`representable required text remains intentionally blankable (${profile.label})`, async ({
+    page,
+  }) => {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const { executor: profileExecutor, url } = profile.runtime();
+    const nameId = FIXTURE_IDS.fieldIds.parentName;
+    const numberId = FIXTURE_IDS.fieldIds.parentNumber;
+    const recordId = profileExecutor.seedTypedValues({
+      [nameId]: 'Representable required text',
+      [numberId]: 'BEFORE-REPRESENTABLE-EMPTY',
+    });
+    await page.goto(fieldKindFormUrl(url, recordId));
+
+    const emptyIntent = page.locator(`[name="empty:${nameId}"]`);
+    await expect(emptyIntent).toHaveValue('emptyText');
+    expect(
+      await emptyIntent.locator('option').evaluateAll((options) =>
+        options.map((option) => ({
+          text: option.textContent?.trim() ?? '',
+          value: (option as HTMLOptionElement).value,
+        })),
+      ),
+    ).toEqual([
+      { text: 'Leave unchanged', value: 'nothing' },
+      { text: 'Save an empty text value', value: 'emptyText' },
+    ]);
+    await page.locator(`[name="value:${nameId}"]`).fill('');
+    await page.locator(`[name="value:${numberId}"]`).fill('AFTER-EMPTY');
+
+    const posted = capturePost(page);
+    const before = profileExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    const params = new URLSearchParams(await posted);
+    expect(params.get(`value:${nameId}`)).toBe('');
+    expect(params.get(`empty:${nameId}`)).toBe('emptyText');
+    expect(profileExecutor.providerVerdicts.slice(before)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    const stored = profileExecutor.readRecord(recordId);
+    assert.ok(stored);
+    assert.equal(stored.values[nameId], '');
+    assert.equal(stored.values[numberId], 'AFTER-EMPTY');
+  });
+
   test(`required text remains real empty text on create (${profile.label})`, async ({
     page,
   }) => {
@@ -759,6 +861,25 @@ for (const profile of [
     await expect(page.locator(`[name="value:${nameId}"]`)).toHaveValue('');
     await expect(page.locator(`[name="empty:${nameId}"]`)).toHaveCount(0);
     await page.locator(`[name="value:${numberId}"]`).fill('CREATE-EMPTY-TEXT');
+
+    const renderedForm = await readRenderedForm(page);
+    const refusedRecordId = String(renderedForm.recordId);
+    const beforeRefusal = profileExecutor.providerVerdicts.length;
+    const refused = await page.request.post(
+      `${url}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+      {
+        form: {
+          ...renderedForm,
+          [`empty:${nameId}`]: 'emptyText',
+          idempotencyKey: randomUUID(),
+        },
+        headers: { authorization: 'fixture-user' },
+      },
+    );
+    assert.equal(refused.status(), 422);
+    assert.match(await refused.text(), /OPERATION_INPUT_INVALID/);
+    assert.equal(profileExecutor.providerVerdicts.length, beforeRefusal);
+    assert.equal(profileExecutor.readRecord(refusedRecordId), null);
 
     const posted = capturePost(page);
     const before = profileExecutor.providerVerdicts.length;
@@ -792,7 +913,9 @@ test('an unrelated edit preserves both stored null and absent optional values', 
     [FIXTURE_IDS.fieldIds.parentName]: 'Before unrelated edit',
   });
   await page.goto(formUrl(recordId));
-  await page.getByLabel('Master Name').fill('After unrelated edit');
+  await page
+    .getByLabel('Master Name', { exact: true })
+    .fill('After unrelated edit');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Update complete');
 
@@ -848,7 +971,9 @@ test('typed controls preserve and disclose every stored value they cannot displa
     );
   }
 
-  await page.getByLabel('Master Name').fill('After unavailable preservation');
+  await page
+    .getByLabel('Master Name', { exact: true })
+    .fill('After unavailable preservation');
   const posted = capturePost(page);
   const before = fieldKindExecutor.providerVerdicts.length;
   await page.getByRole('button', { name: 'Save' }).click();
@@ -1203,7 +1328,7 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
   await expect(page.getByRole('status')).toContainText(
     'trust evidence is linked',
   );
-  await expect(page.getByLabel('Master Name')).toHaveValue(
+  await expect(page.getByLabel('Master Name', { exact: true })).toHaveValue(
     'Browser-created master',
   );
 

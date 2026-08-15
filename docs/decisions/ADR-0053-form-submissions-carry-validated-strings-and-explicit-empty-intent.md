@@ -73,13 +73,16 @@ Every rendered optional field has a native companion `<select>` named
 update. A required text control may still submit `""`, because zero-length text
 is a real value. A required non-text blank is refused. A missing, unknown or
 inapplicable companion spelling is also refused as `OPERATION_INPUT_INVALID`.
-On update only, an unavailable stored value on a required text field carries a
-server-rendered `nothing | emptyText` choice. `nothing` is selected by default;
-`emptyText` makes the valid replacement `""` explicit. An unavailable required
-non-text field carries a hidden `nothing` marker because blank is not a value in
-its domain. In both cases, entering a non-empty valid replacement is still
-`set`. Neither form adds a clear intent or appears on create, so neither can
-make a required create value optional.
+On update only, every required text field carries a server-rendered
+`nothing | emptyText` choice. When the stored value is unavailable to the
+one-line control, `nothing` is selected by default; otherwise `emptyText` is
+selected so deliberately blanking ordinary required text retains its existing
+meaning. The selected operation contract therefore makes the companion
+mandatory without asking the submission parser to reconstruct render-time
+record state. An unavailable required non-text field carries a hidden `nothing`
+marker because blank is not a value in its domain. In both cases, entering a
+non-empty valid replacement is still `set`. Neither form adds a clear intent or
+appears on create, so neither can make a required create value optional.
 
 Before the provider input object is built, the runtime represents the result as
 the discriminated union `set | clear | nothing`. Those three intents are
@@ -101,12 +104,13 @@ faithfully round-trip a stored value, the primary control is rendered blank and
 the exact stored JSON value is shown beside it. This includes a profile-v1 bare
 input carrying contract-incompatible runtime types or line-bearing text, as well
 as profile-v2 boolean, short-enum, date, time, number and one-line text controls.
-An optional companion remains on `nothing`; an unavailable required text update
-offers the explicit `nothing | emptyText` choice above; and an unavailable
-required non-text update carries the hidden `nothing` marker. Choosing any valid
-replacement is `set`, including explicit empty text, and choosing `clear` remains
-available only for an optional field. Thus editing an unrelated field neither
-invents a value, sanitizes one, nor clears one the control could not carry.
+An optional companion remains on `nothing`; every required text update offers
+the explicit `nothing | emptyText` choice above, with `nothing` selected for an
+unavailable value; and an unavailable required non-text update carries the
+hidden `nothing` marker. Choosing any valid replacement is `set`, including
+explicit empty text, and choosing `clear` remains available only for an optional
+field. Thus editing an unrelated field neither invents a value, sanitizes one,
+nor clears one the control could not carry.
 
 ### 3. Refusal is before invocation and cannot partially apply
 

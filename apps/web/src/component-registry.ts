@@ -1165,10 +1165,13 @@ function renderFormFields(
  * default for every non-empty stored value: a non-empty primary control still
  * wins as `set`, while a blank control cannot clear anything unless the
  * operator explicitly chooses `clear`. Stored empty text selects `emptyText`.
- * An unavailable required text value gets the explicit `nothing | emptyText`
- * choice because both preserving it and replacing it with `""` are valid. An
- * unavailable required non-text value needs only the hidden preservation
- * marker. No field value is invented or destroyed by a control default.
+ * Every required text update gets the explicit `nothing | emptyText` choice,
+ * so the submission reader can require the companion from the pinned
+ * operation contract without knowing the record state that caused the render.
+ * `nothing` safely preserves an unavailable value; `emptyText` keeps ordinary
+ * required text intentionally blankable. An unavailable required non-text
+ * value needs only the hidden preservation marker. No field value is invented
+ * or destroyed by a control default.
  */
 function renderEmptyIntentControl(
   field: CompiledSurfaceInputField | undefined,
@@ -1187,13 +1190,18 @@ function renderEmptyIntentControl(
   const select = (options: readonly string[]): string =>
     `<label class="form-empty-intent"><span>When ${escapeHtml(fieldLabel(fieldId))} is blank</span><select name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" data-empty-intent-for="${escapeHtml(fieldId)}" autocomplete="off">${options.join('')}</select></label>`;
   if (field.required) {
-    if (!updating || !storedValueUnavailable) return '';
+    if (!updating) return '';
     if (field.kind === 'textFieldType') {
+      const selected =
+        storedValueUnavailable || value === null || value === undefined
+          ? 'nothing'
+          : 'emptyText';
       return select([
-        option('nothing', 'Leave unchanged', 'nothing'),
-        option('emptyText', 'Save an empty text value', 'nothing'),
+        option('nothing', 'Leave unchanged', selected),
+        option('emptyText', 'Save an empty text value', selected),
       ]);
     }
+    if (!storedValueUnavailable) return '';
     return `<input type="hidden" name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" value="nothing" data-preserve-unavailable-for="${escapeHtml(fieldId)}">`;
   }
   const selected =
