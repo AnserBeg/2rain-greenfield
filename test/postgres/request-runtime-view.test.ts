@@ -72,6 +72,8 @@ import {
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
   type CurrentPolicyVersionEvidence,
+  SUPPORTED_RUNTIME_CAPABILITIES,
+  unsupportedRuntimeCapability,
   type PinnedRuntimeContextEnvelope,
   type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
@@ -118,6 +120,62 @@ interface PointerFixture {
   releaseId: MintedUuid | null;
 }
 
+/**
+ * THE CONTROL THAT OBSERVES THE COMPARISON ITSELF, required by the orchestrator
+ * when the bridge was granted: *"floor 3 must refuse against a registry
+ * declaring only 2, or the control never observes the comparison it exists to
+ * prove."*
+ *
+ * The end-to-end pair below cannot do this. The live registry declares 3 and
+ * ships 3, so no real release can produce a supported-BELOW-demanded case
+ * against it -- the only reachable refusal is an absurd floor like 999, and a
+ * comparison implemented as `minimumVersion > 100` would satisfy that while
+ * passing everything real. The registry is therefore taken as a PARAMETER, and
+ * this exercises the boundary at 2/3/4 where the two rules actually differ.
+ *
+ * `adoption-selector-seam` is the repository's own five-round proof that only a
+ * seam taking the choice as a parameter can observe the choice. Same shape, one
+ * subsystem over.
+ */
+test('the capability comparison refuses a floor above the registry, and admits at or below', () => {
+  const requirement = {
+    capabilityId: 'northstar.runtime:capability.surface-manifest',
+    minimumVersion: 3,
+  };
+
+  // The one the orchestrator named: the SAME floor that serves in production
+  // must refuse against a runtime declaring less.
+  assert.match(
+    unsupportedRuntimeCapability(requirement, {
+      'northstar.runtime:capability.surface-manifest': 2,
+    }) ?? '',
+    /requires version 3 and this runtime supports 2/,
+  );
+
+  // Admission twins at the boundary, so the refusal is discriminating rather
+  // than a wall: equal serves, and greater serves, because a floor is a MINIMUM
+  // and support is cumulative.
+  assert.equal(
+    unsupportedRuntimeCapability(requirement, {
+      'northstar.runtime:capability.surface-manifest': 3,
+    }),
+    null,
+  );
+  assert.equal(
+    unsupportedRuntimeCapability(requirement, {
+      'northstar.runtime:capability.surface-manifest': 4,
+    }),
+    null,
+  );
+
+  // Fails closed on a capability nobody declared. Treating unknown as permitted
+  // is how a new projection family would serve itself into an unaware reader.
+  assert.match(
+    unsupportedRuntimeCapability(requirement, {}) ?? '',
+    /unknown to this runtime/,
+  );
+});
+
 test('G1-P5 pins one immutable release while policy and pointer authority remain current', async (t) => {
   const bootstrapBytes = fixtureBytes('bootstrap');
   const verticalBytes = definitionWithoutAssertions(bootstrapBytes, '1.0.1');
@@ -133,6 +191,22 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
     envelopeVersion: GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
     payloadVersion: FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   });
+  // A floor beyond anything this runtime declares, with a completely valid
+  // payload. The ONLY thing wrong with this release is the demand.
+  const unsupportedCapabilityFloor = withSurfaceCapabilityFloor(grouped, 999);
+  // The same unsupported floor, PLUS a payload this runtime would also refuse.
+  // It exists to observe ORDER: if the capability gate runs where it claims to,
+  // this reports the capability code; if it ran after the payload were decoded,
+  // it would report `projection payload version or kind is unsupported`
+  // instead. Two reasons to fail, deliberately, because the fact under test is
+  // WHICH ONE FIRES FIRST rather than whether it fails.
+  const unsupportedCapabilityAndBadPayload = withSurfaceCapabilityFloor(
+    grouped,
+    999,
+    (payload) => {
+      payload.kind = 'notASurfaceManifestPayload';
+    },
+  );
 
   await withEphemeralPostgres(
     'request-runtime-view',
@@ -246,6 +320,8 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             [groupedBytes, grouped],
             [groupedBytes, unknownSurfaceVersion],
             [groupedBytes, mismatchedSurfaceVersion],
+            [groupedBytes, unsupportedCapabilityFloor],
+            [groupedBytes, unsupportedCapabilityAndBadPayload],
           ],
         );
         const policy = new VersionedPolicyAdapter();
@@ -615,6 +691,101 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'MALFORMED_REQUIRED_PROJECTION',
               /projection payload version or kind is unsupported/,
+            );
+          },
+        );
+
+        // THE ADMISSION TWIN. Without it every refusal below is satisfied by a
+        // runtime that refuses everything, and the capability gate would be a
+        // wall rather than a guard.
+        //
+        // It also proves the RETENTION half: the requirement survives the load
+        // and reaches the caller. Before `profile-v2-adoption`'s round-2 fix,
+        // `RuntimeProjection` had no such member and this assertion could not
+        // have been written at all.
+        await t.test(
+          'a surface projection at the supported floor serves, and carries its requirement',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[0]!,
+            );
+            const loaded = await new PostgresRequestRuntimeViewService(
+              runtimePool,
+            ).load(versionContext);
+            assert.deepEqual(
+              loaded.projections.surface.requiredRuntimeCapability,
+              {
+                capabilityId: 'northstar.runtime:capability.surface-manifest',
+                minimumVersion: 3,
+              },
+            );
+            // The floor the compiler emits under adopted profile v2, and the
+            // value this runtime declares support for. Pinned literally so that
+            // raising the emitted floor without raising declared support reds
+            // here rather than in production.
+            assert.equal(
+              SUPPORTED_RUNTIME_CAPABILITIES[
+                'northstar.runtime:capability.surface-manifest'
+              ],
+              3,
+            );
+          },
+        );
+
+        await t.test(
+          'a surface projection demanding an unsupported floor refuses by its own name',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[3]!,
+            );
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'UNSUPPORTED_RUNTIME_CAPABILITY',
+              /requires version 999 and this runtime supports 3/,
+            );
+          },
+        );
+
+        // ORDER, observed rather than asserted. This specimen is wrong TWICE --
+        // unsupported floor and an unparseable payload kind -- and the fact
+        // under test is which refusal wins. The capability code winning is the
+        // only outcome consistent with the gate running before the payload is
+        // decoded; the payload code winning would mean this runtime interpreted
+        // bytes whose meaning it had already declared it cannot honour.
+        await t.test(
+          'the capability refusal precedes payload interpretation',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[4]!,
+            );
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'UNSUPPORTED_RUNTIME_CAPABILITY',
+              /requires version 999 and this runtime supports 3/,
             );
           },
         );
@@ -1237,11 +1408,38 @@ function withoutVerificationScenarios(
   );
 }
 
+/**
+ * Forges an otherwise-VALID release whose surface projection demands a runtime
+ * capability floor this runtime cannot honour.
+ *
+ * ONE property varies. Payload schema, payload kind, chunk bytes, digests,
+ * artifact closure and node fingerprints are all regenerated consistently, and
+ * the floor is written to BOTH the manifest and its reference so the provider's
+ * canonical-agreement check still passes. Anything less and the specimen would
+ * be refused for being MALFORMED, and the control would prove nothing about the
+ * capability comparison -- the confound `review-tiers` calls "a broken tree with
+ * two reasons to fail".
+ */
+function withSurfaceCapabilityFloor(
+  compiled: CompileSuccess,
+  minimumVersion: number,
+  mutatePayload: (payload: Record<string, unknown>) => void = () => {},
+): CompileSuccess {
+  return rewriteProjectionPayload(
+    compiled,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+    mutatePayload,
+    undefined,
+    minimumVersion,
+  );
+}
+
 function rewriteProjectionPayload(
   compiled: CompileSuccess,
   familyId: string,
   mutatePayload: (payload: Record<string, unknown>) => void,
   envelopeVersion?: string,
+  capabilityFloor?: number,
 ): CompileSuccess {
   const clone = structuredClone(compiled);
   const reference = clone.bundle.releaseManifest.projections.find(
@@ -1279,6 +1477,19 @@ function rewriteProjectionPayload(
   if (envelopeVersion !== undefined) {
     manifest.payloadSchemaVersion = envelopeVersion;
     reference.payloadSchemaVersion = envelopeVersion;
+  }
+  if (capabilityFloor !== undefined) {
+    // Written to BOTH sides on purpose: the provider canonicalizes the manifest
+    // against its reference and refuses any disagreement, so a floor set on one
+    // side alone would be refused as malformed and never reach the comparison.
+    manifest.requiredRuntimeCapability = {
+      ...manifest.requiredRuntimeCapability,
+      minimumVersion: capabilityFloor,
+    };
+    reference.requiredRuntimeCapability = {
+      ...reference.requiredRuntimeCapability,
+      minimumVersion: capabilityFloor,
+    };
   }
   manifest.semanticDigest = hashArtifactBytes(
     `${HASH_DOMAINS.projectionSemantic}/${familyId}`,

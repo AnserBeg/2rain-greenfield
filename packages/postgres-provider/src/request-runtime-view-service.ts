@@ -26,12 +26,14 @@ import {
   PINNED_RUNTIME_CONTEXT_VERSION,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   parsePinnedRuntimeContextEnvelope,
+  unsupportedRuntimeCapability,
   type ImmutableJsonValue,
   type LoadedRequestRuntimeDefinition,
   type PinnedRuntimeContextEnvelope,
   type PinValidationResult,
   type RequestRuntimeDefinitionLoader,
   type RequestRuntimeProjectionFamily,
+  type RuntimeCapabilityRequirement,
   type RuntimeProjection,
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
@@ -52,7 +54,13 @@ export type RequestRuntimeViewLoadErrorCode =
   | 'POINTER_IDENTITY_CHANGED'
   | 'REQUEST_CONTEXT_MISMATCH'
   | 'REQUIRED_PROJECTION_DUPLICATE'
-  | 'REQUIRED_PROJECTION_MISSING';
+  | 'REQUIRED_PROJECTION_MISSING'
+  // The projection declares a capability floor this runtime cannot honour.
+  // Deliberately NOT a `MALFORMED_*` code: the release is well-formed and
+  // internally consistent, and calling it malformed would send an operator
+  // hunting a corrupt artifact rather than an under-supported reader. ADR-0046's
+  // rule that a defect refuses by its own name.
+  | 'UNSUPPORTED_RUNTIME_CAPABILITY';
 
 export class RequestRuntimeViewLoadError extends Error {
   override readonly name = 'RequestRuntimeViewLoadError';
@@ -675,6 +683,24 @@ function definitionFromSnapshotRows(
       reference,
       manifest,
     );
+    // THE CAPABILITY GATE, and its POSITION is load-bearing.
+    //
+    // It sits here -- immediately after the manifest is validated and roughly
+    // sixty lines BEFORE `decodeCanonicalJson` produces the payload -- because
+    // the contract is "a reader that cannot honour this must not SERVE it", not
+    // "must not return it". Refusing after parsing would still have interpreted
+    // bytes whose meaning this runtime does not implement.
+    //
+    // `validateProjectionManifest` has already proved the manifest and its
+    // reference agree canonically, including on this field, so reading it from
+    // the manifest here is not a second source of truth.
+    const requiredRuntimeCapability = runtimeCapabilityRequirement(
+      manifest.requiredRuntimeCapability,
+    );
+    const unsupported = unsupportedRuntimeCapability(requiredRuntimeCapability);
+    if (unsupported !== null) {
+      throw loadError('UNSUPPORTED_RUNTIME_CAPABILITY', unsupported);
+    }
     const descriptors = requireArray(manifest.chunks, 'chunks');
     if (descriptors.length !== 1) {
       throw malformedProjection(
@@ -753,6 +779,7 @@ function definitionFromSnapshotRows(
       instanceId,
       payload: freezeJson(payload),
       payloadSchemaVersion,
+      requiredRuntimeCapability,
       semanticDigest,
     });
   };
@@ -1062,6 +1089,26 @@ function safeFence(value: string): number {
     throw malformedRelease('pointer fence is not a nonnegative safe integer');
   }
   return fence;
+}
+
+/**
+ * Decodes the capability requirement off an untrusted manifest.
+ *
+ * A MALFORMED requirement is malformed-projection, not unsupported-capability:
+ * the two refusals answer different questions, and collapsing them would let a
+ * corrupt artifact report itself as a version gap. `unsupportedRuntimeCapability`
+ * is then asked only about a well-formed requirement.
+ */
+function runtimeCapabilityRequirement(
+  value: unknown,
+): RuntimeCapabilityRequirement {
+  if (!isRecord(value)) {
+    throw malformedProjection('requiredRuntimeCapability must be an object');
+  }
+  return Object.freeze({
+    capabilityId: requireString(value.capabilityId, 'capabilityId'),
+    minimumVersion: requireSafeInteger(value.minimumVersion, 'minimumVersion'),
+  });
 }
 
 function requireSafeInteger(value: unknown, name: string): number {
