@@ -61,6 +61,44 @@ text box* — but it cannot be one packet, because two of its three answers sit 
 a profile-adoption event and one does not. Chartering them together would have parked
 the unblocked half behind the blocked half.
 
+#### TIER 1 GAINS A ROW — `inventory-form-anatomy`, filed 2026-08-15
+
+**`relation-scoped-enumeration` stopped on it, correctly, and it is now `PUR-1`'s
+blocker.** Decoded from the shipped release: `component-registry.ts` registers
+exactly ONE form content component, `record:sections`. `packages/domain/src/inventory/definition.ts`
+authors inventory form anatomy as `['breadcrumb','titleStatus','activity']` while
+`packages/domain/src/party/definition.ts` authors the working shape as
+`['breadcrumb','titleStatus','commandBar','keyFacts','sections']`. **So every
+inventory form renders `UNSUPPORTED_COMPONENT`, has no command bar and no save
+control, and refuses at HTTP 422 before any relation logic runs.**
+
+**Measured impact on the inventory path:** of the four form surfaces carrying a
+required relation, **three cannot render** — `inventory_transaction_line_form`,
+`stock_count_form`, `stock_count_line_form`, all three of which are the
+legal-entity-SCOPED specimens. The only one that renders is `party_role_form`,
+the single unscoped case. **A picker built today could only ever demonstrate the
+easy specimen, which is exactly how both predecessors failed.**
+
+**This is the G2-composition program review's A2 finding, recorded 2026-07-27 and
+routed nowhere since.** That review's own standing lesson reads: *"a recorded
+finding with no owning row is a disposition with no executing gate — the
+composition gap was recorded four times and routed nowhere."* **It has now been
+recorded a fifth time, by a lane that could not proceed past it.** This row is
+the executing gate.
+
+**Owed:** rule what anatomy an inventory form gets, and whether `activity` stays
+declared-but-unregistered or is removed. **Do not assume the answer is "copy
+party's five slots"** — the language cannot currently express *declared,
+intentionally unregistered*, which the same program review flagged as an
+expressiveness gap. Changing authored definitions regenerates release output and
+mints a lineage entry, so `check:app-release` and `test:postgres` are required
+gates.
+
+**Orchestrator error recorded with it:** the `relation-scoped-enumeration` prompt
+named all four required-relation forms as its specimen set. That table was built
+by measuring relations, targets and scope exhaustively and never checking whether
+the surfaces could render — one half measured, the whole asserted.
+
 ### TIER 2 — an operator can work, but badly. Immediately after `PUR-1`.
 
 `ux-list-usability` (100 items, no search box, forward-only pagination) ·
