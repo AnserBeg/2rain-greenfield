@@ -61,6 +61,22 @@ text box* — but it cannot be one packet, because two of its three answers sit 
 a profile-adoption event and one does not. Chartering them together would have parked
 the unblocked half behind the blocked half.
 
+#### RELATION PACKET STOP 1 — 2026-08-16: the shipped forms refuse before enumeration
+
+`relation-scoped-enumeration` measured the four required-relation form surfaces
+from the adopted-v2 artifact before implementing a picker. All four — including
+the two-relation `stock_count_line_form` — declare `breadcrumb`, `titleStatus`
+and unsupported `activity`, but no `record:sections`, which is the component
+registry's only form mutation renderer. The existing composed browser journey
+observes the consequence on an explicitly scoped Inventory form:
+`UNSUPPORTED_COMPONENT`, zero inputs, zero buttons, and a forged write refused
+`OPERATION_UNSUPPORTED`. Therefore relation enumeration is **not** the last
+executable blocker: G2-P5d-c / G3-P6b's already-routed remaining-anatomy work is
+a prerequisite to a shipped scoped-form payoff. The packet stopped under its
+explicit no-compiler/no-release-output boundary rather than substituting a
+fixture-only success. See
+[`packets/relation-scoped-enumeration.md`](packets/relation-scoped-enumeration.md).
+
 ### TIER 2 — an operator can work, but badly. Immediately after `PUR-1`.
 
 `ux-list-usability` (100 items, no search box, forward-only pagination) ·
