@@ -224,15 +224,8 @@ applies; it creates no stage boundary, stabilized correctness domain, or
 fan-out. The ADR's separate external Critical arm remains required.
 
 Test it yourself by reading ADR-0054 section **“Preserved probe and evidence”**
-and running:
-
-```sh
-node --import tsx --test \
-  test/integration/module-runtime.test.ts \
-  test/integration/surface-data-binding.test.ts
-```
-
-The output to check is `pass 37`, `fail 0`, with these two named subtests:
+and checking the targeted probe output recorded above: `pass 37`, `fail 0`,
+with these two named subtests:
 
 - `probe: scoped create converts a request selection into INTERNAL input and refuses vacuity`
 - `probe: a scoped form create carries URL scope as gateway INTERNAL input`
