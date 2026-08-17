@@ -6,8 +6,10 @@ import {
 } from 'node:crypto';
 
 import {
+  LEGAL_ENTITY_SCOPE_PROFILE_VERSION,
   SUPPORTED_LANGUAGE_VERSIONS,
   admitPredicateForExecution,
+  evaluateLegalEntityScopeSelection,
   inspectPredicateForExecution,
   type PredicateKernelReceipt,
 } from '@north-star/canonical-model';
@@ -57,6 +59,16 @@ export interface SemanticOperationRequestEnvelope {
   readonly input: ImmutableJsonValue;
   readonly operationId: string;
   readonly schemaVersion: typeof SEMANTIC_OPERATION_REQUEST_VERSION;
+}
+
+/**
+ * Request-adapter context that is deliberately outside the authored operation
+ * input. The selection is still untrusted: the gateway rules it against the
+ * compiled INTERNAL system-input declaration before it can reach policy,
+ * mediation, hashing, or execution.
+ */
+export interface SemanticOperationExecutionContext {
+  readonly legalEntitySelection?: ImmutableJsonValue;
 }
 
 interface RegisteredOperationDefinitionBase {
@@ -617,6 +629,7 @@ export class SemanticOperationGateway {
     view: IssuedRequestRuntimeView,
     requestInput: unknown,
     invocation: TrustedSemanticOperationInvocation,
+    executionContext: SemanticOperationExecutionContext = Object.freeze({}),
   ): Promise<SemanticOperationResultEnvelope> {
     assertRequestRuntimeView(view);
     this.mediation.assertInvocation(view, invocation);
@@ -652,6 +665,11 @@ export class SemanticOperationGateway {
       if (!definition) {
         throw new NoSuchRegisteredOperationError(request.operationId, view);
       }
+      const effectiveInput = operationInputWithLegalEntityScope(
+        definition,
+        request.input,
+        executionContext,
+      );
       // The gateway owns the closed-argument fence for every operation whose
       // declared contract admits no caller-supplied values -- a capability
       // command and a record transition alike. Both were already refused, but
@@ -664,14 +682,14 @@ export class SemanticOperationGateway {
         isRegisteredCapabilityOperation(definition) ||
         isRegisteredTransitionOperation(definition)
       ) {
-        assertClosedOperationArguments(definition, request.input);
+        assertClosedOperationArguments(definition, effectiveInput);
       }
       const operationDecision = await authorizeCurrentPolicy(
         this.currentPolicy,
         view,
         definition.permissionId,
         Object.freeze({
-          input: request.input,
+          input: effectiveInput,
           kind: 'registeredSemanticOperationPolicyInput',
           operationId: request.operationId,
           requestId: view.requestId,
@@ -686,7 +704,7 @@ export class SemanticOperationGateway {
       this.mediation.assertConfirmationGrant(
         view,
         definition,
-        request.input,
+        effectiveInput,
         request.confirmationGrant,
       );
       if (definition.lifecycle !== 'active') {
@@ -789,8 +807,8 @@ export class SemanticOperationGateway {
         context: trustedContextForRequestRuntimeView(view),
         definition,
         idempotencyKey: request.idempotencyKey,
-        input: request.input,
-        inputDigest: digestOperationInput(request.input),
+        input: effectiveInput,
+        inputDigest: digestOperationInput(effectiveInput),
         policyVersion: operationDecision.policyVersion,
         readBackDefinition,
         view,
@@ -865,6 +883,54 @@ export class SemanticOperationGateway {
       }),
     );
   }
+}
+
+/**
+ * scoped-create-operand PROBE ONLY -- NOT FOR MERGE.
+ *
+ * Turns a request-selected legal entity into the operation's compiled INTERNAL
+ * input. It is not a caller argument and it is not a default: absence,
+ * multiplicity, malformed identity, direct injection, and selection on an
+ * unscoped operation all refuse before an executor can run.
+ */
+function operationInputWithLegalEntityScope(
+  definition: RegisteredOperationDefinition,
+  input: ImmutableJsonValue,
+  executionContext: SemanticOperationExecutionContext,
+): ImmutableJsonValue {
+  const systemInput = definition.inputContract?.systemInput;
+  if (!systemInput) {
+    if (executionContext.legalEntitySelection !== undefined) {
+      throw new MalformedSemanticOperationRequestError(
+        'operation does not declare a legal-entity system input',
+      );
+    }
+    return input;
+  }
+  if (!isRecord(input)) {
+    throw new MalformedSemanticOperationRequestError(
+      'semantic operation input must be an object',
+    );
+  }
+  if (Object.hasOwn(input, systemInput.argumentKey)) {
+    throw new MalformedSemanticOperationRequestError(
+      'legal-entity system input cannot be supplied as an operation argument',
+    );
+  }
+  const receipt = evaluateLegalEntityScopeSelection({
+    cardinality: 'exactlyOne',
+    profileVersion: LEGAL_ENTITY_SCOPE_PROFILE_VERSION,
+    selection: executionContext.legalEntitySelection,
+  });
+  if (receipt.outcome !== 'accepted') {
+    throw new MalformedSemanticOperationRequestError(
+      `operation legal-entity scope is ${receipt.reason}`,
+    );
+  }
+  return Object.freeze({
+    ...input,
+    [systemInput.argumentKey]: receipt.members[0]!,
+  });
 }
 
 function parseSemanticOperationRequest(

@@ -2,6 +2,7 @@ import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-vi
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type {
+  SemanticOperationExecutionContext,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -301,6 +302,11 @@ export async function submitSurfaceRuntimeIntent(
 
   let result;
   try {
+    const executionContext = operationExecutionContext(
+      binding,
+      intent,
+      new URL(requestUrl, 'http://surface-runtime.local'),
+    );
     result = await gateways.operationGateway.invoke(
       view,
       semanticOperationRequestFor(
@@ -310,6 +316,7 @@ export async function submitSurfaceRuntimeIntent(
         submission.idempotencyKey ?? '',
       ),
       gateways.operationMediation.issueInvocation(view, 'UI'),
+      executionContext,
     );
   } catch (error) {
     const code = operationMessageCode(error);
@@ -340,6 +347,22 @@ export async function submitSurfaceRuntimeIntent(
     ),
     null,
   );
+}
+
+function operationExecutionContext(
+  binding: CompiledSurfaceDataBinding,
+  intent: SurfaceOperationIntent,
+  url: URL,
+): SemanticOperationExecutionContext {
+  // scoped-create-operand PROBE ONLY -- NOT FOR MERGE.
+  if (intent !== 'create' || !binding.query.legalEntityScope) {
+    return Object.freeze({});
+  }
+  const selection = legalEntitySelectionForSurface(binding, url);
+  return Object.freeze({
+    legalEntitySelection:
+      selection.length === 1 ? selection[0]! : Object.freeze([...selection]),
+  });
 }
 
 function renderSelectedSurface(

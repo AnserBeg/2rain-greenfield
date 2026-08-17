@@ -130,6 +130,109 @@ test('compiled registration data drives both generic gateway ports from one pinn
   );
 });
 
+test('probe: scoped create converts a request selection into INTERNAL input and refuses vacuity', async () => {
+  const compiled = compileFixture();
+  const policy = new AllowPolicy();
+  const executor = new RecordingExecutor();
+  const view = await issuedView(compiled, policy, (projections) => ({
+    ...projections,
+    operation: mutateCatalog(projections.operation, 'operations', (entry) =>
+      entry.operationId === `${FIXTURE_IDS.namespace}:operation.master_create`
+        ? operationWithLegalEntitySystemInput(entry)
+        : entry,
+    ),
+  }));
+  const mediation = new SemanticOperationMediationAuthority();
+  const gateway = new SemanticOperationGateway(policy, executor, mediation);
+  const legalEntityId = 'dc000000-0000-4000-8000-00000000000c';
+
+  await gateway.invoke(
+    view,
+    createRequest(),
+    mediation.issueInvocation(view, 'UI'),
+    { legalEntitySelection: legalEntityId },
+  );
+
+  assert.equal(executor.operationCalls.length, 1);
+  assert.deepEqual(executor.operationCalls[0]?.input, {
+    ...createRequest().input,
+    legalEntityId,
+  });
+  const operationPolicyInput = policy.calls.find(
+    (call) =>
+      isRecord(call.decisionInput) &&
+      call.decisionInput.kind === 'registeredSemanticOperationPolicyInput',
+  )?.decisionInput;
+  assert.ok(isRecord(operationPolicyInput));
+  assert.deepEqual(
+    operationPolicyInput.input,
+    executor.operationCalls[0]?.input,
+  );
+
+  const alternateLegalEntityId = 'dd000000-0000-4000-8000-00000000000d';
+  await gateway.invoke(
+    view,
+    createRequest(),
+    mediation.issueInvocation(view, 'UI'),
+    { legalEntitySelection: alternateLegalEntityId },
+  );
+  assert.equal(executor.operationCalls.length, 2);
+  assert.notEqual(
+    executor.operationCalls[0]?.inputDigest,
+    executor.operationCalls[1]?.inputDigest,
+  );
+
+  await assert.rejects(
+    gateway.invoke(
+      view,
+      createRequest(),
+      mediation.issueInvocation(view, 'UI'),
+    ),
+    (error: unknown) =>
+      error instanceof MalformedSemanticOperationRequestError &&
+      error.message.includes('selection-omitted'),
+  );
+  await assert.rejects(
+    gateway.invoke(
+      view,
+      createRequest(),
+      mediation.issueInvocation(view, 'UI'),
+      { legalEntitySelection: [legalEntityId] },
+    ),
+    (error: unknown) =>
+      error instanceof MalformedSemanticOperationRequestError &&
+      error.message.includes('set-selection-for-exactly-one'),
+  );
+  await assert.rejects(
+    gateway.invoke(
+      view,
+      {
+        ...createRequest(),
+        input: { ...createRequest().input, legalEntityId },
+      },
+      mediation.issueInvocation(view, 'UI'),
+      { legalEntitySelection: legalEntityId },
+    ),
+    (error: unknown) =>
+      error instanceof MalformedSemanticOperationRequestError &&
+      error.message.includes('cannot be supplied'),
+  );
+
+  const unscopedView = await issuedView(compiled, policy);
+  await assert.rejects(
+    gateway.invoke(
+      unscopedView,
+      createRequest(),
+      mediation.issueInvocation(unscopedView, 'UI'),
+      { legalEntitySelection: legalEntityId },
+    ),
+    (error: unknown) =>
+      error instanceof MalformedSemanticOperationRequestError &&
+      error.message.includes('does not declare'),
+  );
+  assert.equal(executor.operationCalls.length, 2);
+});
+
 test('gateway admits parseable operation predicates without deciding their truth', async () => {
   const compiled = compileFixture();
   const schemaVersion = compiled.bundle.releaseManifest.languageVersion;
@@ -649,6 +752,40 @@ function createRequest() {
     operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
     schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
   } as const;
+}
+
+function operationWithLegalEntitySystemInput(
+  entry: Record<string, ImmutableJsonValue>,
+): ImmutableJsonValue {
+  assert.ok(isRecord(entry.inputContract));
+  const inputContract = entry.inputContract;
+  assert.ok(Array.isArray(inputContract.closedArgumentKeys));
+  assert.ok(
+    inputContract.schemaVersion === 'northstar.module-input-contract/v1' ||
+      inputContract.schemaVersion === 'northstar.module-input-contract/v3',
+  );
+  return {
+    ...entry,
+    inputContract: {
+      ...inputContract,
+      closedArgumentKeys: [
+        ...inputContract.closedArgumentKeys,
+        'legalEntityId',
+      ],
+      schemaVersion:
+        inputContract.schemaVersion === 'northstar.module-input-contract/v1'
+          ? 'northstar.module-input-contract/v2'
+          : 'northstar.module-input-contract/v4',
+      systemInput: {
+        argumentKey: 'legalEntityId',
+        classification: 'INTERNAL',
+        immutableAfterCreate: true,
+        physicalColumn: 'legal_entity_id',
+        required: true,
+        valueKind: 'uuid',
+      },
+    },
+  };
 }
 
 class RecordingExecutor

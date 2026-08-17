@@ -708,6 +708,121 @@ const CHILD_FORM_SURFACE = `${FIXTURE_IDS.namespace}:surface.master_role_form`;
 const CHILD_CREATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_create`;
 const REQUIRED_RELATION_ID = `${FIXTURE_IDS.namespace}:relation.master_role_parent`;
 
+test('probe: a scoped form create carries URL scope as gateway INTERNAL input', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const scopeParameterId = `${FIXTURE_IDS.namespace}:parameter.master_get_legal_entity_scope`;
+  const view = await issuedView(
+    runtimeEntry(
+      compiled,
+      policy,
+      { a: identity(tenantA, environmentA, principalA) },
+      (projections) => {
+        const operationPayload = structuredClone(
+          projections.operation.payload,
+        ) as { operations: Record<string, unknown>[] };
+        const create = operationPayload.operations.find(
+          (operation) =>
+            operation.operationId ===
+            `${FIXTURE_IDS.namespace}:operation.master_create`,
+        );
+        assert.ok(create);
+        const contract = asRecord(create.inputContract);
+        assert.ok(Array.isArray(contract.closedArgumentKeys));
+        contract.closedArgumentKeys = [
+          ...contract.closedArgumentKeys,
+          'legalEntityId',
+        ];
+        contract.schemaVersion = 'northstar.module-input-contract/v2';
+        contract.systemInput = {
+          argumentKey: 'legalEntityId',
+          classification: 'INTERNAL',
+          immutableAfterCreate: true,
+          physicalColumn: 'legal_entity_id',
+          required: true,
+          valueKind: 'uuid',
+        };
+
+        const queryPayload = structuredClone(projections.query.payload) as {
+          queries: Record<string, unknown>[];
+        };
+        const get = queryPayload.queries.find(
+          (query) =>
+            query.queryId === `${FIXTURE_IDS.namespace}:query.master_get`,
+        );
+        assert.ok(get);
+        get.legalEntityScope = {
+          cardinality: 'exactlyOne',
+          kind: 'queryLegalEntityScope',
+          operand: {
+            kind: 'queryParameterReference',
+            parameterId: scopeParameterId,
+            schemaVersion: 'v5',
+          },
+          schemaVersion: 'v5',
+        };
+        get.parameters = [
+          {
+            orderKey: 10,
+            parameterId: scopeParameterId,
+            parameterType: {
+              kind: 'legalEntityReferenceParameterType',
+              schemaVersion: 'v5',
+            },
+          },
+        ];
+        return {
+          ...projections,
+          operation: {
+            ...projections.operation,
+            payload: operationPayload as unknown as ImmutableJsonValue,
+          },
+          query: {
+            ...projections.query,
+            payload: queryPayload as unknown as ImmutableJsonValue,
+          },
+        };
+      },
+    ),
+    'a',
+  );
+  const legalEntityId = 'ac000000-0000-4000-8000-00000000000c';
+  const formUrl = `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&${encodeURIComponent(scopeParameterId)}=${legalEntityId}`;
+
+  const result = await submitSurfaceRuntimeIntent(
+    view,
+    formUrl,
+    {
+      idempotencyKey: randomUUID(),
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+      recordId: randomUUID(),
+    },
+    semanticGateways(policy, executor),
+  );
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(executor.operationCalls.length, 1);
+  assert.equal(
+    asRecord(executor.operationCalls[0]!.input).legalEntityId,
+    legalEntityId,
+  );
+
+  const omittedExecutor = new InMemoryGenericExecutor();
+  const omitted = await submitSurfaceRuntimeIntent(
+    view,
+    `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+    {
+      idempotencyKey: randomUUID(),
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+      recordId: randomUUID(),
+    },
+    semanticGateways(policy, omittedExecutor),
+  );
+  assert.equal(omitted.statusCode, 422);
+  assert.equal(omittedExecutor.operationCalls.length, 0);
+});
+
 /**
  * The write wire this whole re-charter exists to reach: `operationInput` builds
  * a `relations` key, so a create through a REQUIRED relation is satisfiable.
@@ -1550,6 +1665,10 @@ function runtimeEntry(
   compiled: CompileSuccess,
   policy: CurrentPolicyGateway,
   identities: Readonly<Record<string, AuthenticatedIdentity>>,
+  transform: (
+    projections: LoadedRequestRuntimeDefinition['projections'],
+  ) => LoadedRequestRuntimeDefinition['projections'] = (projections) =>
+    projections,
 ): AuthenticatedRequestRuntimeEntryAdapter {
   return new AuthenticatedRequestRuntimeEntryAdapter(
     new AuthenticatedRequestEntryAdapter(async (request) => {
@@ -1561,7 +1680,7 @@ function runtimeEntry(
         return {
           environmentId: context.environmentId,
           pointer: { fence: 1, pointerId },
-          projections: runtimeProjections(compiled),
+          projections: transform(runtimeProjections(compiled)),
           release: { contentHash: compiled.releaseRoot, releaseId },
           tenantId: context.tenantId,
         };
