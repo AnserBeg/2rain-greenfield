@@ -109,6 +109,22 @@ the actual Inventory form on this base returned its pre-existing
 have invaded the live `inventory-form-anatomy` lane, so that variant was
 discarded and is not presented as probe evidence.
 
+Four isolated mutations were applied one at a time in a disposable detached
+worktree at the frozen SHA, then removed. Each produced the expected red for its
+own victim:
+
+| Victim removed | Observed red |
+| --- | --- |
+| web URL-selection handoff | scoped-form probe received 422 instead of 200 |
+| direct-internal-input refusal | `Missing expected rejection` at the direct `legalEntityId` case |
+| unscoped-operation refusal | `Missing expected rejection` at the admission twin |
+| effective-input digest | the two different legal entities produced the same digest |
+
+Omission and exactly-one array refusal use Q1-P5's accepted canonical kernel;
+that packet already records the per-cardinality mutation reds. This probe reads
+the exact refusal reasons and independently holds the executor count at its
+pre-refusal value.
+
 ## Gate evidence
 
 - `corepack pnpm typecheck`: PASS.
