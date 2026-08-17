@@ -15,10 +15,10 @@ Probe commit: `7fbe0f0`
 ## Ruling
 
 [ADR-0054](../../decisions/ADR-0054-legal-entity-create-scope-is-gateway-issued.md)
-rules that legal-entity identity for a generic create is selected by the
-request, validated and authorized by the semantic operation gateway, and added
-only to the effective execution input. It is not an authored field, caller
-argument, default, or module branch.
+proposes the ruling that legal-entity identity for a generic create is selected
+by the request, validated and authorized by the semantic operation gateway, and
+added only to the effective execution input. It is not an authored field,
+caller argument, default, or module branch.
 
 The existing compiler-derived `systemInput` is enough to declare the storage
 binding, so no canonical-language change is required. Literal reuse of Q1-P5's

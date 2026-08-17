@@ -1,9 +1,8 @@
 # ADR-0054: Legal-entity create scope is gateway-issued, not an authored input
 
 Date: 2026-08-17
-Status: accepted — ruled by the `scoped-create-operand` writer under the
-authority granted in that packet's charter; the required external review arm
-is still pending
+Status: proposed by packet `scoped-create-operand`; ratification requires the
+pending external review arm
 Tier: Critical (the ruling determines write attribution and authorization)
 
 ## Context
