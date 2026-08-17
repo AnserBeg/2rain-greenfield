@@ -10185,8 +10185,32 @@
           "kind": "surfaceSlot",
           "orderKey": 30,
           "schemaVersion": "v5",
-          "slot": "activity",
-          "slotId": "northstar.app:slot.legal_entity_form_activity"
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.legal_entity_form_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v5",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.legal_entity_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v5",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.legal_entity_form_sections"
         }
       ],
       "statusRoles": [],
@@ -10356,8 +10380,32 @@
           "kind": "surfaceSlot",
           "orderKey": 30,
           "schemaVersion": "v5",
-          "slot": "activity",
-          "slotId": "northstar.app:slot.inventory_transaction_form_activity"
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.inventory_transaction_form_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v5",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.inventory_transaction_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v5",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.inventory_transaction_form_sections"
         }
       ],
       "statusRoles": [],
@@ -10515,8 +10563,32 @@
           "kind": "surfaceSlot",
           "orderKey": 30,
           "schemaVersion": "v5",
-          "slot": "activity",
-          "slotId": "northstar.app:slot.inventory_transaction_line_form_activity"
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.inventory_transaction_line_form_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v5",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.inventory_transaction_line_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v5",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.inventory_transaction_line_form_sections"
         }
       ],
       "statusRoles": [],
@@ -10776,8 +10848,32 @@
           "kind": "surfaceSlot",
           "orderKey": 30,
           "schemaVersion": "v5",
-          "slot": "activity",
-          "slotId": "northstar.app:slot.stock_count_form_activity"
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.stock_count_form_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v5",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.stock_count_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v5",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.stock_count_form_sections"
         }
       ],
       "statusRoles": [],
@@ -10935,8 +11031,32 @@
           "kind": "surfaceSlot",
           "orderKey": 30,
           "schemaVersion": "v5",
-          "slot": "activity",
-          "slotId": "northstar.app:slot.stock_count_line_form_activity"
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.stock_count_line_form_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v5",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.stock_count_line_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v5",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.stock_count_line_form_sections"
         }
       ],
       "statusRoles": [],

@@ -1411,7 +1411,23 @@ function surfaces(
     ...(readOnly
       ? []
       : ([
-          ['form', 'record', ['breadcrumb', 'titleStatus', 'activity'], 'form'],
+          // ADR-0054. `sections` is the form: it is the only registration
+          // carrying `mutationIntents.form`, and the only renderer that emits
+          // the field controls and `<form id="surface-record-form">`. Without
+          // it `surfaceSupportsRuntimeIntent` is false and the surface is inert
+          // by construction. `commandBar` puts Save in the grammar's slot for a
+          // primary action instead of the `sections` fallback, and it is what
+          // re-admits archive/restore on the paired `detail` surface. `activity`
+          // is NOT declared: no `record:activity` renderer is registered, so
+          // declaring it is the accepted-and-ignored state ADR-0041 forbids.
+          // Its absence is reported by name as `SG003_REQUIRED_SLOT` against
+          // the conformance baseline, which is where this debt is expressible.
+          [
+            'form',
+            'record',
+            ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts', 'sections'],
+            'form',
+          ],
         ] as const)),
   ];
   return descriptors.map(([suffix, archetype, slots, surfaceRole]) => ({
