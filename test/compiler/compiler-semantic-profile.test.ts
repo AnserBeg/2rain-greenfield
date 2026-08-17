@@ -658,8 +658,30 @@ function artifactsCarrying(entry: RecordedRelease, key: string): string[] {
  */
 test('the adopted entry carries the gated fields in ARTIFACTS, not only in digests', () => {
   const lineage = readLineage();
-  const adopted = lineage.applications.at(-1)!;
-  const previous = lineage.applications.at(-2)!;
+  // THE PAIR IS LOCATED BY THE ADOPTION EDGE, NOT BY POSITION -- corrected by
+  // `inventory-form-anatomy` (ADR-0054), the first packet to append an entry
+  // after adoption. This read `.at(-1)`/`.at(-2)`, which named the edge only
+  // while the v2 entry happened to be last; one ordinary authored-source entry
+  // put a v2 entry at BOTH indices and the straddle assertion below failed
+  // while nothing it protects had moved. That is exactly the defect the sibling
+  // `consecutive lineage entries...` test above was rewritten to fix -- "a
+  // control whose subject moves when the tree grows is not observing the fact
+  // it names" -- and the class survived one test over. The edge is a property
+  // of the lineage, so it is found as one: the FIRST v2 entry and the entry
+  // immediately before it. That pair is now stable for every future entry.
+  const adoptedIndex = lineage.applications.findIndex(
+    (entry) =>
+      entry.attestation.compilerSemanticProfileVersion ===
+      COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  );
+  // Non-vacuity: no v2 entry at all, or one at index 0, leaves `previous`
+  // undefined and every assertion below reading nothing.
+  assert.ok(
+    adoptedIndex > 0,
+    'the lineage must record a v2 entry with at least one entry before it, or there is no edge to straddle',
+  );
+  const adopted = lineage.applications[adoptedIndex]!;
+  const previous = lineage.applications[adoptedIndex - 1]!;
 
   assert.equal(
     adopted.attestation.compilerSemanticProfileVersion,
