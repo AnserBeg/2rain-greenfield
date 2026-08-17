@@ -99,6 +99,52 @@ named all four required-relation forms as its specimen set. That table was built
 by measuring relations, targets and scope exhaustively and never checking whether
 the surfaces could render — one half measured, the whole asserted.
 
+#### TWO MORE ROWS, filed 2026-08-17 by the orchestrator from the inventory pilot-readiness audit
+
+**`dev-seed-has-no-inventory` — TIER 1.** Verified by reading, not relayed:
+`apps/api/src/main.ts:66` passes `seedProfile: 'distributor'`;
+`packages/domain/src/app/seed.ts` emits creates for exactly three entities —
+`APPLICATION_IDS.{catalog,location,party}.createOperationId` — and
+`grep -c inventory` over that file returns **0**. The only thing in the repository
+that produces an inventory draft is `seedInventoryDraft`
+(`apps/web/test/browser/composed-application.spec.ts:1813`), which inserts via raw
+SQL from the browser suite. **So on `pnpm dev` every inventory list is empty and
+the posting route is unreachable; the shipped posting capability cannot be
+observed by a human at all.**
+
+**Triage argument, with the case against.** *Against Tier 1:* a dev seed is not
+production, and if forms rendered and relations were fillable an operator would
+create transactions themselves — making this an observability gap, not a
+capability gap. **That argument fails on a measured fact.** `5g3-mount` records
+that inventory entities are **structurally non-constructible through the generic
+press**: `legal_entity_id` is compiler-derived storage metadata living outside the
+entity's canonical `columns`, so a generic create has **no authored field through
+which to supply it**, and the database refuses with `23502 null value in column
+"legal_entity_id"`. **The operator route does not exist, so the seed is currently
+the only way inventory data can exist at all.** Tier 1 while that holds; it drops
+to Tier 3 the moment non-constructibility is fixed.
+
+**Collision risk, stated:** `5g3-mount` forbids specific workarounds. A seed row
+must say how it avoids them — supplying `legal_entity_id` out of band is the same
+defect wearing a different hat. **This row does not yet know how, and says so
+rather than inventing a route.**
+
+**`activity-rail-unowned` — DORMANT, promoted out of a parenthetical.** It existed
+only inside row 1 ("the activity rail to a trust read model") and as the
+2026-07-24 review's NC3. Measured: no surface in `apps/web` reads audit events,
+business change documents, or semantic operation receipts; `renderKeyFacts`
+(`apps/web/src/component-registry.ts`) emits record id, state and revision only;
+no entity carries a created-by or created-at field. **Named firing trigger — it
+fires when the first entity carries an authored created-by/created-at pair, NOT
+"when the trust read model exists."** `ui-ux-remaining.md` §3d records that second
+shape (`U6c`, ladder-trigger) as a deferral waiting on something it had itself
+made impossible, which is why this row refuses to use it.
+
+**ROUTING CORRECTION.** The audit routed *"UNSUPPORTED_COMPONENT on inventory and
+legal_entity forms"* to `5g3-term`. **That is wrong and would have duplicated a
+row filed the same week.** `5g3-term` gates the inventory **mount**;
+`inventory-form-anatomy` owns the **slot anatomy** and is the live packet.
+
 ### TIER 2 — an operator can work, but badly. Immediately after `PUR-1`.
 
 `ux-list-usability` (100 items, no search box, forward-only pagination) ·
