@@ -45,7 +45,7 @@ const mutations = [
     test: focusedSurfaceTest,
   },
   {
-    expected: /2 !== 3|422 !== 200/u,
+    expected: /200 !== 422|3 !== 2/u,
     file: 'apps/web/src/surface-runtime.ts',
     name: 'scoped-cardinality-refusal-removed',
     original: `  if (legalEntitySelection.length !== 1) {
