@@ -3529,9 +3529,10 @@ function assertOperationSystemInputStorageContract(
 
 /**
  * ADR-0015:100. A compiler-declared legal-entity create operand names new
- * work, so the selected master must still be active when the row is inserted.
- * The master row is locked in the same accepted-mutation transaction as the
- * create; a concurrent status update cannot pass between this check and the
+ * work, so the selected master must still have active business status and
+ * must not be generically archived when the row is inserted. The master row
+ * is locked in the same accepted-mutation transaction as the create; a
+ * concurrent status or archive update cannot pass between this check and the
  * insert.
  */
 async function requireActiveCreateLegalEntity(
@@ -3569,12 +3570,17 @@ async function requireActiveCreateLegalEntity(
   for (const identifier of [
     master.physicalTableName,
     master.recordIdentity.column,
+    master.archive.archivedAtColumn,
     descriptor.fieldColumns.status,
   ]) {
     safeIdentifier(identifier);
   }
-  const selected = await client.query<{ status: string }>(
-    `SELECT ${quoted(descriptor.fieldColumns.status)}::text AS status
+  const selected = await client.query<{
+    archivedAt: Date | string | null;
+    status: string;
+  }>(
+    `SELECT ${quoted(descriptor.fieldColumns.status)}::text AS status,
+            ${quoted(master.archive.archivedAtColumn)} AS "archivedAt"
        FROM north_star_module.${quoted(master.physicalTableName)}
       WHERE tenant_id = north_star_internal.trusted_tenant_id()
         AND environment_id = north_star_internal.trusted_environment_id()
@@ -3582,7 +3588,10 @@ async function requireActiveCreateLegalEntity(
       FOR NO KEY UPDATE`,
     [input.systemInput.value],
   );
-  if (selected.rows[0]?.status !== descriptor.activeStatusValue) {
+  if (
+    selected.rows[0]?.status !== descriptor.activeStatusValue ||
+    selected.rows[0]?.archivedAt !== null
+  ) {
     throw failure(
       'MODULE_LEGAL_ENTITY_CREATE_INACTIVE',
       'legal entity is not active for new work',

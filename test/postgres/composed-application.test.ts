@@ -3444,6 +3444,7 @@ async function assertEntityOwnedCreateInput(
   const invokeUnscopedCreate = (
     unscopedRecordId: string,
     extra: Readonly<Record<string, unknown>>,
+    createValues: Readonly<Record<string, unknown>> = unscopedValues,
   ) =>
     runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
       runtime.operationGateway.invoke(
@@ -3454,7 +3455,7 @@ async function assertEntityOwnedCreateInput(
           input: {
             recordId: unscopedRecordId,
             relations: {},
-            values: unscopedValues,
+            values: createValues,
             ...extra,
           },
           operationId: 'northstar.app:operation.legal_entity_create',
@@ -3555,7 +3556,285 @@ async function assertEntityOwnedCreateInput(
       )
     ).outcome,
     'succeeded',
-    'the identical request is admitted after the sole enforcing fact changes from inactive to active',
+    'the identical request is admitted after the business-status fact changes from inactive to active',
+  );
+
+  const invokeArchive = (archivedLegalEntityId: string) => {
+    const input = Object.freeze({
+      expectedRevision: 1,
+      recordId: archivedLegalEntityId,
+    });
+    const operationId = 'northstar.app:operation.legal_entity_archive';
+    return runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+      runtime.operationGateway.invoke(
+        view,
+        {
+          confirmationGrant: runtime.operationMediation.issueConfirmationGrant(
+            view,
+            operationId,
+            input,
+          ),
+          idempotencyKey: randomUUID(),
+          input,
+          operationId,
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+        },
+        runtime.operationMediation.issueInvocation(view, 'UI'),
+      ),
+    );
+  };
+  const createLegalEntity = (
+    legalEntityRecordId: string,
+    code: string,
+    name: string,
+  ) =>
+    invokeUnscopedCreate(
+      legalEntityRecordId,
+      {},
+      {
+        ...unscopedValues,
+        'northstar.app:field.legal_entity_code': code,
+        'northstar.app:field.legal_entity_name': name,
+      },
+    );
+  const lockLegalEntity = async (lockedLegalEntityId: string) => {
+    const blocker = await pool.connect();
+    await blocker.query('BEGIN');
+    await blocker.query(
+      `SELECT 1
+         FROM north_star_module.${master.physicalTableName}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND "${master.recordIdentity.column}" = $3
+        FOR UPDATE`,
+      [
+        runtime.identity.tenantId,
+        runtime.identity.environmentId,
+        lockedLegalEntityId,
+      ],
+    );
+    return blocker;
+  };
+
+  const archiveFirstLegalEntityId = randomUUID();
+  await createLegalEntity(
+    archiveFirstLegalEntityId,
+    'LE-ARCHIVE-FIRST',
+    'Archive-first legal entity',
+  );
+  const archiveFirstRecordId = randomUUID();
+  const archiveFirstIdempotencyKey = randomUUID();
+  const archiveFirstBlocker = await lockLegalEntity(archiveFirstLegalEntityId);
+  let archiveFirstBlockerOpen = true;
+  let archiveFirstAttempt: Promise<unknown> | undefined;
+  let archiveFirstCreate: Promise<unknown> | undefined;
+  try {
+    archiveFirstAttempt = invokeArchive(archiveFirstLegalEntityId);
+    void archiveFirstAttempt.catch(() => undefined);
+    await waitForLegalEntityMasterLockWaiters(
+      pool,
+      master.physicalTableName,
+      1,
+    );
+    archiveFirstCreate = invokeCreate(
+      archiveFirstRecordId,
+      { legalEntityId: archiveFirstLegalEntityId },
+      archiveFirstIdempotencyKey,
+      {
+        ...values,
+        'northstar.app:field.inventory_transaction_number':
+          'DRAFT-SCOPE-ARCHIVE-FIRST',
+      },
+    );
+    void archiveFirstCreate.catch(() => undefined);
+    await waitForLegalEntityMasterLockWaiters(
+      pool,
+      master.physicalTableName,
+      2,
+    );
+    await archiveFirstBlocker.query('COMMIT');
+    archiveFirstBlockerOpen = false;
+    assert.equal(
+      ((await archiveFirstAttempt) as { outcome?: string }).outcome,
+      'succeeded',
+    );
+    await assert.rejects(archiveFirstCreate, (error: unknown) => {
+      assert.ok(error instanceof ModuleRuntimeInterpreterError);
+      assert.equal(error.code, 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE');
+      assert.equal(error.subjectId, archiveFirstLegalEntityId);
+      return true;
+    });
+  } finally {
+    if (archiveFirstBlockerOpen) {
+      await archiveFirstBlocker.query('ROLLBACK');
+    }
+    archiveFirstBlocker.release();
+    await Promise.allSettled(
+      [archiveFirstAttempt, archiveFirstCreate].filter(
+        (attempt): attempt is Promise<unknown> => attempt !== undefined,
+      ),
+    );
+  }
+  const archiveFirstState = await pool.query<{
+    archived: boolean;
+    business_rows: string;
+    receipts: string;
+    status: string;
+  }>(
+    `SELECT "${master.legalEntityMaster.fieldColumns.status}"::text AS status,
+            "${master.archive.archivedAtColumn}" IS NOT NULL AS archived,
+            (SELECT count(*)::text
+               FROM north_star_module.${transaction.physicalTableName}
+              WHERE tenant_id = $1 AND environment_id = $2
+                AND "${transaction.recordIdentity.column}" = $4) AS business_rows,
+            (SELECT count(*)::text
+               FROM platform.semantic_operation_receipts
+              WHERE tenant_id = $1 AND environment_id = $2
+                AND action_id = 'northstar.app:operation.inventory_transaction_create'
+                AND idempotency_key = $5) AS receipts
+       FROM north_star_module.${master.physicalTableName}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND "${master.recordIdentity.column}" = $3`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      archiveFirstLegalEntityId,
+      archiveFirstRecordId,
+      archiveFirstIdempotencyKey,
+    ],
+  );
+  assert.deepEqual(archiveFirstState.rows, [
+    {
+      archived: true,
+      business_rows: '0',
+      receipts: '0',
+      status: master.legalEntityMaster.activeStatusValue,
+    },
+  ]);
+
+  const createFirstLegalEntityId = randomUUID();
+  await createLegalEntity(
+    createFirstLegalEntityId,
+    'LE-CREATE-FIRST',
+    'Create-first legal entity',
+  );
+  const createFirstBlocker = await lockLegalEntity(createFirstLegalEntityId);
+  let createFirstBlockerOpen = true;
+  let createFirstAttempt: Promise<unknown> | undefined;
+  let createFirstArchive: Promise<unknown> | undefined;
+  try {
+    createFirstAttempt = invokeCreate(
+      randomUUID(),
+      { legalEntityId: createFirstLegalEntityId },
+      randomUUID(),
+      {
+        ...values,
+        'northstar.app:field.inventory_transaction_number':
+          'DRAFT-SCOPE-CREATE-FIRST',
+      },
+    );
+    void createFirstAttempt.catch(() => undefined);
+    await waitForLegalEntityMasterLockWaiters(
+      pool,
+      master.physicalTableName,
+      1,
+    );
+    createFirstArchive = invokeArchive(createFirstLegalEntityId);
+    void createFirstArchive.catch(() => undefined);
+    await waitForLegalEntityMasterLockWaiters(
+      pool,
+      master.physicalTableName,
+      2,
+    );
+    await createFirstBlocker.query('COMMIT');
+    createFirstBlockerOpen = false;
+    assert.equal(
+      ((await createFirstAttempt) as { outcome?: string }).outcome,
+      'succeeded',
+    );
+    assert.equal(
+      ((await createFirstArchive) as { outcome?: string }).outcome,
+      'succeeded',
+    );
+  } finally {
+    if (createFirstBlockerOpen) {
+      await createFirstBlocker.query('ROLLBACK');
+    }
+    createFirstBlocker.release();
+    await Promise.allSettled(
+      [createFirstAttempt, createFirstArchive].filter(
+        (attempt): attempt is Promise<unknown> => attempt !== undefined,
+      ),
+    );
+  }
+  const postArchiveRecordId = randomUUID();
+  const postArchiveIdempotencyKey = randomUUID();
+  await assert.rejects(
+    invokeCreate(
+      postArchiveRecordId,
+      { legalEntityId: createFirstLegalEntityId },
+      postArchiveIdempotencyKey,
+      {
+        ...values,
+        'northstar.app:field.inventory_transaction_number':
+          'DRAFT-SCOPE-POST-ARCHIVE',
+      },
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ModuleRuntimeInterpreterError);
+      assert.equal(error.code, 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE');
+      assert.equal(error.subjectId, createFirstLegalEntityId);
+      return true;
+    },
+  );
+  const postArchivePersistence = await pool.query<{
+    business_rows: string;
+    receipts: string;
+  }>(
+    `SELECT
+       (SELECT count(*)::text
+          FROM north_star_module.${transaction.physicalTableName}
+         WHERE tenant_id = $1 AND environment_id = $2
+           AND "${transaction.recordIdentity.column}" = $3) AS business_rows,
+       (SELECT count(*)::text
+          FROM platform.semantic_operation_receipts
+         WHERE tenant_id = $1 AND environment_id = $2
+           AND action_id = 'northstar.app:operation.inventory_transaction_create'
+           AND idempotency_key = $4) AS receipts`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      postArchiveRecordId,
+      postArchiveIdempotencyKey,
+    ],
+  );
+  assert.deepEqual(postArchivePersistence.rows, [
+    { business_rows: '0', receipts: '0' },
+  ]);
+}
+
+async function waitForLegalEntityMasterLockWaiters(
+  pool: pg.Pool,
+  physicalTableName: string,
+  expected: number,
+): Promise<void> {
+  const deadline = process.hrtime.bigint() + 10_000_000_000n;
+  while (process.hrtime.bigint() < deadline) {
+    const waiting = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM pg_catalog.pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query LIKE $1
+          AND query LIKE '%FOR NO KEY UPDATE%'`,
+      [`%${physicalTableName}%`],
+    );
+    if (Number(waiting.rows[0]?.count ?? 0) >= expected) return;
+    await new Promise<void>((resolveImmediate) =>
+      setImmediate(resolveImmediate),
+    );
+  }
+  throw new Error(
+    `expected ${expected} provider transaction(s) waiting on legal-entity master ${physicalTableName}`,
   );
 }
 
