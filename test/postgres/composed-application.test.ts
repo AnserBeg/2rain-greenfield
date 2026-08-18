@@ -3354,6 +3354,7 @@ async function assertEntityOwnedCreateInput(
     recordId: string,
     input: Readonly<Record<string, unknown>>,
     idempotencyKey: string = randomUUID(),
+    createValues: Readonly<Record<string, unknown>> = values,
   ) =>
     runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
       runtime.operationGateway.invoke(
@@ -3361,7 +3362,12 @@ async function assertEntityOwnedCreateInput(
         {
           confirmationGrant: null,
           idempotencyKey,
-          input: { recordId, relations: {}, values, ...input },
+          input: {
+            recordId,
+            relations: {},
+            values: createValues,
+            ...input,
+          },
           operationId: 'northstar.app:operation.inventory_transaction_create',
           schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
         },
@@ -3481,6 +3487,11 @@ async function assertEntityOwnedCreateInput(
   );
   assert.ok(inactiveStatus);
   const inactiveRecordId = randomUUID();
+  const inactiveIdempotencyKey = randomUUID();
+  const inactiveValues = {
+    ...values,
+    'northstar.app:field.inventory_transaction_number': 'DRAFT-SCOPE-INACTIVE',
+  } as const;
   await pool.query(
     `UPDATE north_star_module.${master.physicalTableName}
         SET "${master.legalEntityMaster.fieldColumns.status}" = $1
@@ -3495,7 +3506,12 @@ async function assertEntityOwnedCreateInput(
   );
   try {
     await assert.rejects(
-      invokeCreate(inactiveRecordId, { legalEntityId }),
+      invokeCreate(
+        inactiveRecordId,
+        { legalEntityId },
+        inactiveIdempotencyKey,
+        inactiveValues,
+      ),
       (error: unknown) => {
         assert.ok(error instanceof ModuleRuntimeInterpreterError);
         assert.equal(error.code, 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE');
@@ -3529,6 +3545,18 @@ async function assertEntityOwnedCreateInput(
       ],
     );
   }
+  assert.equal(
+    (
+      await invokeCreate(
+        inactiveRecordId,
+        { legalEntityId },
+        inactiveIdempotencyKey,
+        inactiveValues,
+      )
+    ).outcome,
+    'succeeded',
+    'the identical request is admitted after the sole enforcing fact changes from inactive to active',
+  );
 }
 
 async function assertInventoryPostingCapabilityRoute(

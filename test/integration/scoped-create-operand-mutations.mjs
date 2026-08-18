@@ -118,7 +118,17 @@ const mutations = [
 ];
 
 assertCleanTrackedTree();
-for (const mutation of mutations) {
+const requestedNames = new Set(process.argv.slice(2));
+for (const requestedName of requestedNames) {
+  assert.ok(
+    mutations.some((mutation) => mutation.name === requestedName),
+    `unknown mutation: ${requestedName}`,
+  );
+}
+for (const mutation of mutations.filter(
+  (candidate) =>
+    requestedNames.size === 0 || requestedNames.has(candidate.name),
+)) {
   runMutation(mutation);
 }
 assertCleanTrackedTree();
