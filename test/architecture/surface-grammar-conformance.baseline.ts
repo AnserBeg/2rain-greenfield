@@ -25,8 +25,20 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // complete on-hand Task closes the one missing-archetype violation.
     // 5g3-postroute then supplies inventory_transaction_detail's commandBar,
     // closing that surface's SG003_REQUIRED_SLOT and SG009_COMPACT_SLOT:
-    // 126 - 2 = 124. The remaining anatomy debt is unchanged.
-    violationCount: 124,
+    // 126 - 2 = 124.
+    //
+    // inventory-form-anatomy (ADR-0054) then repairs the Form anatomy the
+    // comment above describes as debt. All five Form surfaces trade the single
+    // unregistered `activity` slot for the five registered ones, so each drops
+    // from four missing required slots to two -- `childTables` and `activity`,
+    // the two the web registry renders nowhere for any module. Two fewer
+    // missing slots on each of SG003 and SG009, five surfaces: 124 - 20 = 104.
+    // MEASURED by compiling the module, not derived from this arithmetic; the
+    // arithmetic is recorded so a future reader can tell WHICH surfaces moved.
+    // The residual is the platform-wide `childTables`/`activity` gap that
+    // catalog, location and party carry identically, and it is not this
+    // packet's to close.
+    violationCount: 104,
   }),
   Object.freeze({
     moduleId: 'northstar.location:module.location',

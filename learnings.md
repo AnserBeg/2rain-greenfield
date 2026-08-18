@@ -566,3 +566,11 @@ How to apply: assert on the **remote**, not on HEAD:
 working directory you did not verify the branch of — `lanes.md` already says leases
 separate paths, not directories. Same class as the wrapper exit status that masked
 an aborted matrix: a report derived from the wrong thing.
+
+## Audit every operation a surface repair makes reachable
+Date: 2026-08-18
+Why: restoring an inert form also restored generic Edit on posted transactions
+and opened posted → draft → Post twice. How to apply: enumerate every newly
+reachable New, Edit, command and lifecycle path; execute state-boundary twins
+through the provider, and make affordances follow the same compiled predicates.
+See ADR-0054 and `docs/execution/packets/inventory-form-anatomy.md`.

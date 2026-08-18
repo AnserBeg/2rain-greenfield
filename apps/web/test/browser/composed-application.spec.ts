@@ -31,6 +31,7 @@ const journeyTimeoutMilliseconds = Object.freeze({
   onHandLookup: 20_000,
   partyLifecycle: 20_000,
   postingRoute: 20_000,
+  repairedFormAnatomy: 40_000,
   scopedInventory: 20_000,
 });
 const sharedSetupTimeoutMilliseconds = 180_000;
@@ -133,6 +134,17 @@ composedTest.describe('composed application journeys', () => {
   );
 
   composedTest(
+    'renders every repaired Inventory record form',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.repairedFormAnatomy);
+      await repairedFormAnatomyJourney(
+        page,
+        composedApplication.currentBaseUrl(),
+      );
+    },
+  );
+
+  composedTest(
     'persists the Party lifecycle across restart',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.partyLifecycle);
@@ -150,7 +162,7 @@ composedTest.describe('composed application journeys', () => {
   );
 
   composedTest(
-    'posts a staged adjustment through a deliberately confirmed command',
+    'posts one staged adjustment and keeps its business effect immutable',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.postingRoute);
       await postingRouteJourney(page, composedApplication.currentBaseUrl());
@@ -1210,9 +1222,22 @@ async function scopedInventoryJourney(
   ).toBe(browserLegalEntityId);
   const transactionRow = page.locator('tr', { hasText: 'ADJ-BROWSER-001' });
   await expect(transactionRow).toBeVisible();
-  await expect(
-    page.getByRole('link', { name: 'New', exact: true }),
-  ).toHaveCount(0);
+  // ALSO INVERTED BY ADR-0054, and this one was not obvious from the diff.
+  //
+  // This asserted the Inventory transaction list offers no `New` link. That was
+  // never a statement that transactions are read-only -- the module authors a
+  // form for them, so they are declared writable. `renderListTitle` renders
+  // `New` only through `relatedSurface(context, 'form')`, which returns the form
+  // ONLY if it supports create or update; the broken anatomy made that false, so
+  // the affordance vanished and the suite recorded its absence as intended.
+  //
+  // The declared intent is now honoured: the link exists and points at the form.
+  const newTransaction = page.getByRole('link', { name: 'New', exact: true });
+  await expect(newTransaction).toHaveCount(1);
+  await expect(newTransaction).toHaveAttribute(
+    'href',
+    new RegExp(encodeURIComponent('surface.inventory_transaction_form')),
+  );
   await transactionRow.getByRole('link').click();
   expect(new URL(page.url()).searchParams.get('record')).toBe(
     browserTransactionId,
@@ -1223,9 +1248,25 @@ async function scopedInventoryJourney(
     }),
   ).toBeVisible();
   await expect(page.locator('form.capability-command')).toHaveCount(0);
-  await expect(
-    page.getByRole('button', { name: /Archive|Restore/ }),
-  ).toHaveCount(0);
+  // THE THIRD INVERSION, and it is the one ADR-0054 predicted rather than found.
+  //
+  // Archive and Restore were absent here for the same single reason as the `New`
+  // link: `surfaceSupportsRuntimeIntent`'s `record` branch grants a lifecycle
+  // intent only when a RELATED FORM supports create or update, so a visibly
+  // inert entity cannot be mutated by posting around its release-defined UI.
+  // Repairing the form is therefore what re-admits lifecycle control on the
+  // paired detail surface -- one line in the module, three affordances restored.
+  //
+  // The grammar's placement is asserted with them: destructive actions live
+  // behind the overflow and are never a lone exposed control.
+  const lifecycleOverflow = page.locator(
+    '[data-platform-slot="record:commandBar"] details.action-overflow',
+  );
+  const transactionArchive = page.getByRole('button', { name: 'Archive' });
+  await expect(lifecycleOverflow).toBeVisible();
+  await expect(transactionArchive).toBeHidden();
+  await lifecycleOverflow.locator('summary').click();
+  await expect(transactionArchive).toBeVisible();
   const inventoryTransactionDetailUrl = `${scopedSurfaceUrl(
     baseUrl,
     'inventory_transaction_detail',
@@ -1264,22 +1305,236 @@ async function scopedInventoryJourney(
     inventoryScopeParameters.transactionForm,
     browserLegalEntityId,
   );
+  // ADR-0054 INVERTS THIS BLOCK, and the inversion is the point.
+  //
+  // Until 2026-08-17 this asserted the scoped Inventory create form was inert:
+  // an UNSUPPORTED_COMPONENT alert, zero textboxes, zero buttons, and a forged
+  // write refused 422 OPERATION_UNSUPPORTED. Every one of those was TRUE and
+  // every one of them was a contract on a defect -- the form declared a
+  // `record:activity` slot the registry renders nowhere, so the whole surface
+  // refused before a field could exist.
+  //
+  // Each assertion's MEANING is preserved by being turned over, not deleted:
+  // the surface that could not render now renders, the slot that produced the
+  // diagnostic is gone, the absent controls are present, and the write that was
+  // refused at COMPOSITION is now admitted that far and judged on its content.
   await page.goto(inventoryTransactionFormUrl);
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'New Inventory transaction' }),
   ).toBeVisible();
-  await expect(page.getByRole('textbox')).toHaveCount(0);
-  await expect(page.getByRole('button')).toHaveCount(0);
-  const refusedWrite = await page.request.post(inventoryTransactionFormUrl, {
+  await expect(page.getByRole('textbox').first()).toBeVisible();
+  await expect(
+    page
+      .locator('[data-platform-slot="record:commandBar"]')
+      .getByRole('button', {
+        name: 'Save',
+      }),
+  ).toBeVisible();
+  // The forged write is kept verbatim and still refuses 422
+  // OPERATION_UNSUPPORTED.
+  //
+  // MEASURED 2026-08-17, and recorded because it corrects what this line was
+  // believed to prove: this assertion never discriminated the anatomy defect.
+  // The payload carries `intent` and no `operationId`, and ADR-0051 made the
+  // write path OPERATION-addressed, so it is refused for being unaddressed no
+  // matter what the surface declares. It was green before the repair and is
+  // green after it, for a reason that has nothing to do with slots.
+  //
+  // It is kept because refusing an unaddressed write is worth asserting on its
+  // own terms. It is NOT evidence about anatomy, and the discriminating write
+  // below is what carries that claim.
+  const forgedWrite = await page.request.post(inventoryTransactionFormUrl, {
     form: {
       idempotencyKey: '74000000-0000-4000-8000-000000000005',
       intent: 'create',
       recordId: '74000000-0000-4000-8000-000000000006',
     },
   });
-  expect(refusedWrite.status()).toBe(422);
-  expect(await refusedWrite.text()).toContain('OPERATION_UNSUPPORTED');
+  expect(forgedWrite.status()).toBe(422);
+  expect(await forgedWrite.text()).toContain('OPERATION_UNSUPPORTED');
 }
+
+/**
+ * ADR-0054's control: the five repaired Inventory form surfaces render.
+ *
+ * This is the observation the packet exists to produce, and it is deliberately
+ * NOT "no longer UNSUPPORTED_COMPONENT". A surface can lose that diagnostic and
+ * still be useless, so each surface must show the five grammar slots, at least
+ * one real input control, and a save control that targets the form.
+ *
+ * `party_form` is the untouched twin: it was already conformant before this
+ * packet and is asserted through the identical helper, so a regression in the
+ * helper itself cannot read as an Inventory repair.
+ */
+const repairedInventoryForms = [
+  'inventory_transaction_form',
+  'inventory_transaction_line_form',
+  'stock_count_form',
+  'stock_count_line_form',
+] as const;
+
+async function expectRenderedRecordForm(
+  page: Page,
+  heading: string,
+): Promise<void> {
+  await expect(
+    page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
+  ).toHaveCount(0);
+  for (const slot of [
+    'record:breadcrumb',
+    'record:titleStatus',
+    'record:commandBar',
+    'record:keyFacts',
+    'record:sections',
+  ]) {
+    await expect(page.locator(`[data-platform-slot="${slot}"]`)).toHaveCount(1);
+  }
+  await expect(
+    page.getByRole('heading', { level: 1, name: heading }),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-platform-slot="record:keyFacts"]'),
+  ).toContainText('New record');
+  // A real create form, not an empty panel: the posting form exists, carries
+  // field controls, and has a save control bound to it by id.
+  const form = page.locator('form#surface-record-form');
+  await expect(form).toHaveCount(1);
+  expect(await form.locator('.form-field').count()).toBeGreaterThan(0);
+  expect(await form.locator('input, select').count()).toBeGreaterThan(0);
+  await expect(
+    page
+      .locator('[data-platform-slot="record:commandBar"]')
+      .getByRole('button', { name: 'Save' }),
+  ).toHaveAttribute('form', 'surface-record-form');
+}
+
+async function repairedFormAnatomyJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
+  for (const localSurface of repairedInventoryForms) {
+    const url = scopedSurfaceUrl(
+      baseUrl,
+      localSurface,
+      await loadSurfaceScopeParameterId(localSurface),
+      browserLegalEntityId,
+    );
+    await page.goto(url);
+    await expectRenderedRecordForm(
+      page,
+      `New ${inventoryFormHeadings[localSurface]}`,
+    );
+  }
+
+  // `legal_entity_form` is unscoped and was in the broken set too -- the
+  // platform's own legal-entity form could not render, which is its own quiet
+  // problem and is closed by the same one-line change.
+  await page.goto(surfaceUrl(baseUrl, 'legal_entity_form'));
+  await expectRenderedRecordForm(page, 'New Legal entity');
+  await page.getByLabel('Legal Entity Code', { exact: true }).fill('LE-ANAT-1');
+  await page
+    .getByLabel('Legal Entity Name', { exact: true })
+    .fill('Anatomy Legal Entity');
+  await page
+    .getByRole('combobox', { exact: true, name: 'Legal Entity Status' })
+    .selectOption({ label: 'active' });
+  await page
+    .getByRole('combobox', { exact: true, name: 'Legal Entity Is Default' })
+    .selectOption({ label: 'No' });
+  await page
+    .locator('[data-platform-slot="record:commandBar"]')
+    .getByRole('button', { name: 'Save' })
+    .click();
+  // THE PACKET'S CLAIM, END TO END. A surface that could not render at all now
+  // takes an operator's input and persists a record through the real provider.
+  // `legal_entity_form` is the specimen because it is the one repaired surface
+  // with NO required relation and NO legal-entity system input, so the anatomy
+  // is the only thing that ever stood between the operator and the record.
+  await expect(page.getByRole('status')).toContainText('Create complete');
+  await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
+
+  // The untouched twin, through the same helper.
+  await page.goto(surfaceUrl(baseUrl, 'party_form'));
+  await expectRenderedRecordForm(page, 'New Party');
+
+  // A rendered form is not a working one. Drive the real create through the
+  // real controls on the one scoped Inventory surface that declares NO relation
+  // input, so nothing but the anatomy stands between the operator and a record.
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_transaction_form',
+      await loadSurfaceScopeParameterId('inventory_transaction_form'),
+      browserLegalEntityId,
+    ),
+  );
+  await page
+    .getByLabel('Inventory Transaction Number', { exact: true })
+    .fill('TXN-ANATOMY-001');
+  // Enum controls are addressed by ROLE, not by label text. A wrapping
+  // `<label>` around a `<select>` has the option labels inside its text
+  // content, so an exact getByLabel never matches one -- it works for the
+  // `<input>` fields above only because an input contributes no text.
+  await page
+    .getByRole('combobox', { exact: true, name: 'Inventory Transaction Type' })
+    .selectOption({ label: 'adjustment' });
+  await page
+    .getByRole('combobox', { exact: true, name: 'Inventory Transaction State' })
+    .selectOption({ label: 'draft' });
+  await page
+    .getByLabel('Inventory Transaction Source Type', { exact: true })
+    .fill('browser');
+  await page
+    .getByLabel('Inventory Transaction Source Id', { exact: true })
+    .fill('anatomy-control');
+  await page
+    .getByLabel('Inventory Transaction Effective At', { exact: true })
+    .fill('2026-07-30T12:00:00.000Z');
+  await page
+    .getByLabel('Inventory Transaction Recorded At', { exact: true })
+    .fill('2026-07-30T12:00:00.000Z');
+  await page
+    .getByLabel('Inventory Transaction Actor Id', { exact: true })
+    .fill('anatomy-actor');
+  await page
+    .locator('[data-platform-slot="record:commandBar"]')
+    .getByRole('button', { name: 'Save' })
+    .click();
+  // THE BOUNDARY THIS PACKET DOES NOT CROSS, asserted rather than described, so
+  // the next packet inherits a measurement instead of a paragraph.
+  //
+  // The scoped create reaches the provider and is refused there. MEASURED:
+  // `legal_entity_form` above is identical in every respect that matters except
+  // that it is UNSCOPED, and it creates a record. The single differing property
+  // is the legal-entity system input.
+  //
+  // `inventory_transaction_create` declares `legalEntityId` in its
+  // `closedArgumentKeys`, and `requiredSystemInput` raises
+  // MODULE_REQUIRED_SYSTEM_INPUT_MISSING when the input omits it.
+  // `operationInput` in `surface-runtime.ts` returns `{recordId, relations,
+  // values}` for a create and never carries the selected legal entity, so EVERY
+  // scoped create refuses. That is the exact shape of
+  // `required-relation-uncreatable`, one argument key over, and it is a
+  // SEPARATE defect from the anatomy this packet fixes.
+  //
+  // Note what the operator is shown: an unattributed "Save unavailable". The
+  // provider names its subject and the web boundary drops it, which is
+  // `relation-refusal-unnamed`'s class.
+  await expect(page.getByRole('alert')).toContainText('Save unavailable');
+  await expect(
+    page.locator('[data-diagnostic-code="OPERATION_UNAVAILABLE"]'),
+  ).toHaveCount(1);
+}
+
+const inventoryFormHeadings = Object.freeze({
+  inventory_transaction_form: 'Inventory transaction',
+  inventory_transaction_line_form: 'Inventory transaction line',
+  stock_count_form: 'Stock count',
+  stock_count_line_form: 'Stock count line',
+});
 
 async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
   const scopeParameterId = await loadSurfaceScopeParameterId(
@@ -1291,8 +1546,50 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     scopeParameterId,
     browserLegalEntityId,
   )}&record=${encodeURIComponent(browserRouteTransactionId)}`;
+  await expectRoutePostingEffect(page, baseUrl, 0, '5');
   await page.goto(detailUrl);
   await expect(page.getByText(/Active · revision 1/)).toBeVisible();
+  const edit = page.getByRole('link', { name: 'Edit', exact: true });
+  await expect(edit).toHaveCount(1);
+  const editHref = await edit.getAttribute('href');
+  expect(editHref).not.toBeNull();
+  const editUrl = new URL(editHref ?? '', baseUrl).href;
+  const editPage = await page.context().newPage();
+  let updateSubmission: Record<string, string>;
+  try {
+    await editPage.goto(editUrl);
+    await expect(
+      editPage.getByRole('heading', {
+        level: 1,
+        name: 'Edit Inventory transaction',
+      }),
+    ).toBeVisible();
+    await expect(editPage.locator('form#surface-record-form')).toHaveCount(1);
+    await expect(
+      editPage
+        .locator('[data-platform-slot="record:commandBar"]')
+        .getByRole('button', { name: 'Save' }),
+    ).toBeVisible();
+    updateSubmission = await editPage
+      .locator('form#surface-record-form')
+      .evaluate((form) =>
+        Object.fromEntries(
+          [...new FormData(form as HTMLFormElement).entries()].map(
+            ([name, value]) => [name, String(value)],
+          ),
+        ),
+      );
+  } finally {
+    await editPage.close();
+  }
+  expect(updateSubmission.operationId).toBe(
+    `${applicationNamespace}:operation.inventory_transaction_update`,
+  );
+  expect(
+    updateSubmission[
+      `value:${applicationNamespace}:field.inventory_transaction_state`
+    ],
+  ).toBe(`${applicationNamespace}:option.inventory_transaction_state_draft`);
   const command = page.locator('form.capability-command');
   await expect(command).toHaveAttribute(
     'data-capability-id',
@@ -1340,6 +1637,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(page.getByRole('status')).toContainText('Post complete');
   await expect(page.getByText(/Active · revision 2/)).toBeVisible();
   await expect(page.locator('form.capability-command')).toHaveCount(0);
+  await expect(edit).toHaveCount(0);
 
   const replay = await page.request.post(
     `${baseUrl}/?surface=${encodeURIComponent(`${applicationNamespace}:surface.inventory_transaction_detail`)}`,
@@ -1349,6 +1647,78 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
   const replayHtml = await replay.text();
   expect(replayHtml).toContain('Post complete');
   expect(replayHtml).toContain('Active · revision 2');
+
+  // The direct URL is a second UI boundary. Hiding Edit alone leaves a pasted
+  // form URL, its Save button and implicit Enter submission live.
+  await page.goto(editUrl);
+  await expect(
+    page.getByRole('heading', {
+      level: 1,
+      name: 'Edit Inventory transaction',
+    }),
+  ).toBeVisible();
+  await expect(page.locator('form#surface-record-form')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save' })).toHaveCount(0);
+
+  // The provider is the authority even when a caller posts around both UI
+  // affordances. This is the actual operation-addressed update form captured
+  // while the transaction was a draft, not a structurally invalid forgery.
+  // Only revision, idempotency and state change after posting.
+  const refusedRewind = await page.request.post(editUrl, {
+    form: {
+      ...updateSubmission,
+      expectedRevision: '2',
+      idempotencyKey: '74200000-0000-4000-8000-000000000003',
+      [`value:${applicationNamespace}:field.inventory_transaction_state`]: `${applicationNamespace}:option.inventory_transaction_state_draft`,
+    },
+  });
+  expect(refusedRewind.status()).toBe(422);
+  expect(await refusedRewind.text()).toContain('OPERATION_UNAVAILABLE');
+
+  // One source effect remains one movement and one +3 on-hand delta. A rewind
+  // followed by a second post would make these 2 and 11 respectively because
+  // movement replay identity includes the source revision.
+  await expectRoutePostingEffect(page, baseUrl, 1, '8');
+  await page.goto(detailUrl);
+  await expect(page.getByText(/Active · revision 2/)).toBeVisible();
+  await expect(page.locator('form.capability-command')).toHaveCount(0);
+  await expect(
+    page.getByRole('link', { name: 'Edit', exact: true }),
+  ).toHaveCount(0);
+}
+
+async function expectRoutePostingEffect(
+  page: Page,
+  baseUrl: string,
+  expectedMovementRows: number,
+  expectedOnHand: string,
+): Promise<void> {
+  const movementUrl = scopedSurfaceUrl(
+    baseUrl,
+    'inventory_movement_list',
+    await loadSurfaceScopeParameterId('inventory_movement_list'),
+    browserLegalEntityId,
+  );
+  await page.goto(movementUrl);
+  await expect(
+    page.locator('tbody tr', { hasText: 'browser-posting-route' }),
+  ).toHaveCount(expectedMovementRows);
+
+  const onHand = await loadOnHandLookupProjection();
+  const onHandUrl = new URL(surfaceUrl(baseUrl, 'inventory_on_hand_lookup'));
+  const horizon = '2099-01-01T00:00:00.000Z';
+  const values = [demoItemId, demoLocationId, horizon, horizon];
+  onHandUrl.searchParams.set(
+    onHand.legalEntityParameterId,
+    browserLegalEntityId,
+  );
+  for (const [index, parameter] of onHand.inputParameters.entries()) {
+    onHandUrl.searchParams.set(parameter.parameterId, values[index]!);
+  }
+  await page.goto(onHandUrl.href);
+  await expect(
+    page.getByRole('status', { name: 'Lookup result' }),
+  ).toHaveAttribute('data-aggregate-value', expectedOnHand);
 }
 
 async function partyLifecycleJourney(
