@@ -5,7 +5,7 @@ Base: `39fef80c21db604e54c0ffe3c7c55b8f2c32993b` (current `origin/main`; fetched
 and confirmed unmoved before cutting)
 Branch: `packet/inventory-form-anatomy`
 Tier: Behavioral
-Status: **FROZEN for review at `%%SHA%%`.** Stop 1 (Docker unavailable) was
+Status: **FROZEN for review at `e9f81fc`.** Stop 1 (Docker unavailable) was
 cleared by the user on 2026-08-17; the browser evidence, the negative control
 and every blast-radius gate have since run green.
 
