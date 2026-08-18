@@ -96,17 +96,30 @@ place surface anatomy is stated.
 
 ## Consequences
 
-- **Five Inventory form surfaces render and carry a save control.** Two of them
-  — `inventory_transaction_form` and `legal_entity_form` — declare **no relation
-  inputs at all** and are therefore creatable end to end today.
-- **Three still refuse, and refuse later than they did.**
-  `inventory_transaction_line_form`, `stock_count_form` and
-  `stock_count_line_form` carry required create relations with no rendered
-  control, so they now render, submit, and are refused **by the provider** with
-  `MODULE_REQUIRED_RELATION_MISSING` instead of refusing at composition with
-  `UNSUPPORTED_COMPONENT`. **This is the expected boundary, not a regression** —
-  it is exactly the defect `relation-scoped-enumeration` is chartered to close,
-  and that packet's blocker is now clear.
+- **Five Inventory form surfaces render and carry a save control**, and
+  `legal_entity_form` **creates a record end to end from the browser**. It is
+  the specimen because it is the only repaired surface with neither a required
+  relation nor a legal-entity system input, so the anatomy was the only thing
+  between the operator and the record.
+- **The other four still refuse, and they refuse LATER than they did** — at the
+  provider, on the content of the write, rather than at composition with
+  `UNSUPPORTED_COMPONENT`. Two distinct causes, and the second was **measured
+  during this packet rather than predicted**:
+  - `inventory_transaction_line_form`, `stock_count_form` and
+    `stock_count_line_form` carry required create relations with no rendered
+    control — `MODULE_REQUIRED_RELATION_MISSING`, which is exactly what
+    `relation-scoped-enumeration` is chartered to close.
+  - **All four are legal-entity-scoped, and a scoped create additionally
+    refuses `MODULE_REQUIRED_SYSTEM_INPUT_MISSING` on `legalEntityId`.**
+    `operationInput` returns `{recordId, relations, values}` for a create and
+    never carries the selected legal entity, while every scoped create contract
+    declares it in `closedArgumentKeys`. **This is a separate defect from the
+    anatomy, and it is not fixed here.** It is the same shape as
+    `required-relation-uncreatable`, one argument key over.
+
+  **An earlier draft of this ADR claimed `inventory_transaction_form` was
+  creatable end to end. That was wrong and the browser control refuted it**;
+  the claim now rests on the surface that actually creates a record.
 - **The Inventory conformance debt falls** and the baseline moves with it in the
   same commit, per the ratchet's own rule.
 - **`record:activity` and `record:childTables` remain unregistered
@@ -121,11 +134,23 @@ place surface anatomy is stated.
   carry relation inputs — `inventory_transaction_line_create`,
   `party_role_create`, `stock_count_create`, `stock_count_line_create`.
   `inventory_transaction_create` and `legal_entity_create` carry none.
-- A browser control per repaired surface observes the rendered form, its inputs,
-  its save control, and a successful submit — not merely the absence of
-  `UNSUPPORTED_COMPONENT`.
-- A negative control reverts the anatomy on one surface and records its control
-  red.
+- A browser control observes each repaired surface's five slots, its posting
+  form, its field controls and a Save bound to that form by id — not merely the
+  absence of `UNSUPPORTED_COMPONENT`, which a useless surface would also
+  satisfy. `party_form` runs through the identical helper as the untouched twin.
+  `test:browser` 90/90; `test:postgres` 203/203; `test:architecture` 141/141.
+- **Negative control, with its red attributed.** Reverting the authored anatomy
+  to `origin/main`'s and re-running turns both controls red **on their own
+  subjects**: `UNSUPPORTED_COMPONENT` returns to 1 where 0 is required, and the
+  `New` link returns to 0 where 1 is required. 75 sibling tests stay green.
+
+  **A first attempt at this control was discarded because its red was not the
+  control firing.** Reverting the source and regenerating *appended* a lineage
+  entry carrying the older definition, which the runtime refused as a rollback
+  without a verified forward activation (`ReleaseReverseTransitionRefusal`), so
+  the application never started and both tests failed in 2 ms for a reason
+  unrelated to anatomy. The valid form of the control restores the release to a
+  legitimate forward head rather than appending a backwards one.
 - **A prior measurement is corrected.** `relation-scoped-enumeration`'s stop
   record tabulates `party_role_form` as `breadcrumb, titleStatus, activity`. It
   is not, and was not at that branch's base: `party_role_form` carries the full

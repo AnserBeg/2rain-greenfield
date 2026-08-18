@@ -5,9 +5,9 @@ Base: `39fef80c21db604e54c0ffe3c7c55b8f2c32993b` (current `origin/main`; fetched
 and confirmed unmoved before cutting)
 Branch: `packet/inventory-form-anatomy`
 Tier: Behavioral
-Status: **STOP 1 — Docker is not running on this machine, so the packet's
-central evidence cannot be produced.** The product change is complete and
-green on every gate that does not need a container.
+Status: **FROZEN for review at `%%SHA%%`.** Stop 1 (Docker unavailable) was
+cleared by the user on 2026-08-17; the browser evidence, the negative control
+and every blast-radius gate have since run green.
 
 ## Packet definition
 
@@ -107,29 +107,34 @@ no provider:
     BEFORE  inventory_transaction_form   UNSUPPORTED=true   record:breadcrumb,record:titleStatus,record:activity
     AFTER   inventory_transaction_form   UNSUPPORTED=false  record:breadcrumb,record:titleStatus,record:commandBar,record:keyFacts,record:sections
 
-**Evidence classification, stated plainly: this is an ad-hoc scratch probe, not
-a committed gate.** It was written because Docker is down and the browser suite
-cannot run; it is real execution against real artifacts, and it is *not* a
-regression control. The committed control is owed and is not yet written — see
-the stop.
+**Evidence classification, stated plainly: this was an ad-hoc scratch probe, not
+a committed gate.** It was written during Stop 1, when Docker was down and the
+browser suite could not run. It is real execution against real artifacts and it
+is *not* a regression control. It is retained here because it isolates the
+registry-level fact cleanly, and it is **superseded as evidence** by the
+committed browser controls and their negative control below.
 
 ### Relation census — which repaired forms can actually complete
 
 Read from the compiled operation catalog. Four create operations carry relation
 inputs; **`inventory_transaction_create` and `legal_entity_create` carry none.**
 
-| form | required relations | expected outcome after this packet |
-|---|---|---|
-| `inventory_transaction_form` | none | **renders and saves** |
-| `legal_entity_form` | none | **renders and saves** |
-| `inventory_transaction_line_form` | `..._transaction` → `inventory_transaction` | renders, then refuses at the provider |
-| `stock_count_form` | `stock_count_transaction` → `inventory_transaction` | renders, then refuses at the provider |
-| `stock_count_line_form` | `..._session` → `stock_count`, `..._transaction_line` → `inventory_transaction_line` | renders, then refuses at the provider |
+| form | scoped | required relations | OBSERVED outcome |
+|---|---|---|---|
+| `legal_entity_form` | no | none | **renders and creates a record** |
+| `inventory_transaction_form` | yes | none | renders; refuses on `legalEntityId` |
+| `inventory_transaction_line_form` | yes | `..._transaction` → `inventory_transaction` | renders; refuses |
+| `stock_count_form` | yes | `stock_count_transaction` → `inventory_transaction` | renders; refuses |
+| `stock_count_line_form` | yes | `..._session` → `stock_count`, `..._transaction_line` → `inventory_transaction_line` | renders; refuses |
 
-**What the repaired forms do NOT yet do.** Three of the five carry a required
-relation with no rendered control, so they render, submit, and are refused by
-the provider with `MODULE_REQUIRED_RELATION_MISSING` rather than refusing at
-composition with `UNSUPPORTED_COMPONENT`. **That is expected and is
+**The relation census alone predicted `inventory_transaction_form` would save,
+and the browser refuted it.** Scope, not relations, is what stops it — see the
+new finding below. This row is left visible rather than rewritten, because the
+prediction being wrong is the reason the browser control exists.
+
+**What the repaired forms do NOT yet do.** Four of the five render, submit, and
+are refused by the provider rather than refusing at composition with
+`UNSUPPORTED_COMPONENT`. **That is expected and is
 `relation-scoped-enumeration`'s to close** — the refusal simply moved from "the
 page cannot exist" to "this one input has no picker", which is the whole point
 of unblocking that packet. It is stated here rather than left for a reviewer to
@@ -201,7 +206,9 @@ authoring the broken shape. **Count of other modules changed: zero.**
 
 ## Gate results, honest
 
-Run at `693bc3f`. **The matrix was NOT run and is not claimable.**
+Run at the frozen SHA. **The full matrix is NOT run yet** — per `git-workflow`'s
+2026-08-14 ruling it runs once, after review converges, at the SHA that
+integrates.
 
 | gate | result |
 |---|---|
@@ -215,78 +222,97 @@ Run at `693bc3f`. **The matrix was NOT run and is not claimable.**
 | `test:compiler` | **PASS** 150/150 |
 | `test:integration` | **PASS** 137/137 |
 | `test:contracts` | **PASS** 16/16 |
-| `test/architecture/surface-grammar-conformance.test.ts` | **PASS** 25/25 |
-| `test:architecture` (full) | **CANNOT RUN** — hangs |
-| `test:postgres` | **CANNOT RUN** (required, cross-layer) |
-| `test:browser` | **CANNOT RUN** |
-| `check:schema`, `check:reachability`, `check:language-coverage` | **CANNOT RUN** |
-| full matrix | **NOT RUN** |
+| `test:architecture` | **PASS** 141/141 |
+| `test:browser` | **PASS** 90/90 |
+| `test:postgres` | **PASS** 203/203 (required, cross-layer) |
+| full matrix | **owed after review converges** |
 
-## Why this is a stop
+## Stop 1, and how it was cleared
 
-**Docker is not running, and nothing in this repository can start it.**
-
-    $ docker ps
-    The command 'docker' could not be found in this WSL 2 distro.
-    $ ls -la /usr/bin/docker
-    /usr/bin/docker -> /mnt/wsl/docker-desktop/cli-tools/usr/bin/docker
-    $ ls /mnt/wsl/docker-desktop
-    No such file or directory
-
-The WSL integration symlinks exist from a prior session, so integration is
-configured; the Docker Desktop VM is simply not up. `/var/run/docker.sock` is
-absent.
-
-**How it presents, which is worth recording because it does not look like its
-cause.** `test:architecture` does not fail — it **hangs indefinitely**. It ran
-32 minutes at load average 0.26 before being killed.
+Docker Desktop was not running: `/usr/bin/docker` symlinks into
+`/mnt/wsl/docker-desktop/`, which did not exist. **It did not fail — it hung.**
 `test/architecture/dependency-boundaries.test.ts` spawns
 `test/fixtures/postgres-leak-victim.ts parent`, which waits on stdout for a
-container name that can never arrive; the parent holds itself open with
-`process.stdin.resume()` and there is no timeout on that wait. Killing it left
-`check:language-coverage` reporting
-`LANGUAGE_COVERAGE_EMPTY_REACHABILITY_EVIDENCE: architecture`, which is a
-consequence of the killed run and not of this change. The exclusive lock holder
-file was cleaned up; `/tmp/north-star-matrix.lock.holders/` is empty. No
-orphaned `north-star-*` container could be checked for, because there is no
-Docker CLI to ask.
+container name that never arrives and holds itself open with
+`process.stdin.resume()`, with no timeout on that wait. The suite ran 32 minutes
+at load average 0.26 before being killed. Killing it left an empty reachability
+artifact, which then failed `check:language-coverage` with
+`LANGUAGE_COVERAGE_EMPTY_REACHABILITY_EVIDENCE` — a consequence of the kill, not
+a finding.
 
-**What this blocks is exactly the packet's bar.** The charter is explicit that
-*"a report that cannot show one rendering has not shown the packet"*, and the
-committed evidence it requires — a browser control per repaired surface showing
-the form renders, shows inputs and a save control, and submits successfully; the
-negative control recorded red; `test:postgres` as a required gate; the full
-matrix; and the `pnpm dev` walkthrough on port 4174 — **every one of them needs
-a PostgreSQL container.** The scratch probe above is real execution and it is
-deliberately not offered as a substitute.
+The packet stopped rather than claiming a candidate, because every piece of its
+central evidence needs a container. **The user started Docker Desktop and the
+packet resumed**; all of that evidence is now recorded above. No product code
+was changed while blocked, and no gate was widened or skipped.
 
-**No product code was changed after this finding**, and no gate was widened,
-skipped, or re-scoped to make a red look green.
+## What the browser controls actually observe
 
-## What resumes the moment Docker is up
+- **Every repaired surface renders**: five grammar slots, a
+  `form#surface-record-form` with field controls, and a Save carrying
+  `form="surface-record-form"`. `party_form` runs the identical helper as the
+  untouched twin, so a regression in the helper cannot read as an Inventory
+  repair.
+- **`legal_entity_form` creates a record end to end** — "Create complete", zero
+  diagnostics. This is the packet's claim discharged: a surface that could not
+  render at all now persists an operator's input through the real provider.
+- **Three assertions in the pre-existing `scopedInventoryJourney` were
+  INVERTED**, each a contract on the defect rather than on a requirement: the
+  form's `UNSUPPORTED_COMPONENT` alert with zero textboxes and zero buttons; the
+  absent `New` link on the transaction list; and the absent Archive/Restore on
+  the transaction detail. **The last two were not predicted from the diff** —
+  `renderListTitle` and `renderLifecycleOverflow` reach their affordances only
+  through `relatedSurface(context, 'form')`, which returns the form solely when
+  it supports create or update. One line in the module restored three
+  affordances the module had always declared.
 
-In order, all inside the existing lease:
+### A kept assertion is relabelled, because it never proved what it was read to prove
 
-1. Write the browser controls in `apps/web/test/browser/**` — one per repaired
-   surface, observing the rendered form, its inputs, its save control, and a
-   successful submit on the two that carry no required relation.
-2. Convert the existing `scopedInventoryJourney` assertions, which currently
-   contractualize the broken state (`UNSUPPORTED_COMPONENT` visible, zero
-   textboxes, zero buttons, 422 `OPERATION_UNSUPPORTED`), preserving each
-   assertion's meaning.
-3. Record the negative control: revert the anatomy on one surface, observe its
-   control go red, restore.
-4. Run the blast-radius suites, then freeze, emit the review prompt, and stop.
-5. One full matrix after review converges, at the SHA that integrates.
+`scopedInventoryJourney`'s forged write asserts 422 `OPERATION_UNSUPPORTED`.
+**Measured: it does not discriminate the anatomy defect at all.** The payload
+carries `intent` and no `operationId`, and ADR-0051 made the write path
+operation-addressed, so it is refused for being unaddressed whatever the surface
+declares — green before the repair and green after it. It is kept on its own
+terms, with the reason recorded, and is no longer counted as anatomy evidence.
 
-**A review prompt is deliberately NOT emitted at this stop.** The product delta
-is final, but step 1 adds committed test files, and `review-tiers` voids a review
-on any code change after it — reviewing now would buy a verdict that step 1
-immediately invalidates, and pay for the reading twice.
+## NEW FINDING — a scoped create cannot carry its legal entity
+
+**This is not the anatomy defect, it is not fixed here, and it blocks the
+inventory path independently.**
+
+`operationInput` (`apps/web/src/surface-runtime.ts`, re-locate by symbol) returns
+`{recordId, relations, values}` for a create. Every legal-entity-scoped create
+contract declares `legalEntityId` in `closedArgumentKeys`, and
+`requiredSystemInput` (`module-runtime-interpreter.ts`) raises
+`MODULE_REQUIRED_SYSTEM_INPUT_MISSING` when the input omits it. **So every scoped
+create refuses, on every surface, regardless of relations.**
+
+**Measured by a discriminating pair, not inferred.** `legal_entity_form` and
+`inventory_transaction_form` were both driven through the real UI with all
+required fields filled. They differ in that one is unscoped and the other is
+scoped. The unscoped one returned "Create complete"; the scoped one returned
+`OPERATION_UNAVAILABLE`.
+
+**Why it matters beyond this packet:** `relation-scoped-enumeration` is
+chartered to make a required relation fillable, and `PUR-1` waits on that. **A
+record picker will not make a scoped inventory create succeed** — the write will
+still refuse on `legalEntityId`. That is a third blocker on the same path, in the
+same shape as `required-relation-uncreatable`, and it had no row.
+
+**Secondary observation:** the operator sees an unattributed *"Save
+unavailable"*. The provider names its subject and the web boundary drops it,
+which is `relation-refusal-unnamed`'s class and `provider-refusals-erased-at-the-web-boundary`'s.
+
+## Also observed, and filed
+
+Appending a lineage entry whose definition is older than the head is refused at
+startup with `ReleaseReverseTransitionRefusal` — *"rollback requires the verified
+forward activation that established the current release."* Encountered while
+building the negative control. It is consistent with the open `rollback-release-edge`
+row and is **not** investigated here.
 
 ## Stop count
 
-**1.**
+**1**, cleared.
 
 ## Program-review trigger evaluation
 
