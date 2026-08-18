@@ -25,6 +25,13 @@ const composedProviderTest = [
   '--test',
   'test/postgres/composed-application.test.ts',
 ];
+const composedActivationTest = [
+  '--import',
+  'tsx',
+  '--test',
+  '--test-name-pattern=composed product activates through the kernel',
+  'test/postgres/composed-application.test.ts',
+];
 
 const mutations = [
   {
@@ -115,6 +122,16 @@ const mutations = [
 `,
     replacement: '',
     test: composedProviderTest,
+  },
+  {
+    expected: /Missing expected rejection/u,
+    file: 'packages/postgres-provider/src/module-runtime-interpreter.ts',
+    name: 'archived-legal-entity-predicate-removed',
+    original: `    selected.rows[0]?.status !== descriptor.activeStatusValue ||
+    selected.rows[0]?.archivedAt !== null`,
+    replacement:
+      '    selected.rows[0]?.status !== descriptor.activeStatusValue',
+    test: composedActivationTest,
   },
 ];
 
