@@ -26,7 +26,8 @@ entities cannot be selected for new work. Presence, UUID validation and a
 foreign key do not enforce that rule: an archived legal-entity master remains a
 valid foreign-key target. The generic interpreter already receives the compiled
 legal-entity-master descriptor, including the status column and active value,
-but did not use them for create admission.
+and every storage entity's generic archive column, but did not use them for
+create admission.
 
 The preserved `scoped-create-operand` design probe proposed describing the web
 gateway as the issuer of write scope, by analogy to ADR-0031 and Q1-P5's read
@@ -81,18 +82,23 @@ web boundary.
 For every create of an entity whose storage descriptor declares legal-entity
 ownership, the PostgreSQL interpreter reads the one compiled legal-entity-master
 descriptor. Under the trusted tenant and environment context, it locks the
-selected master row and compares the descriptor's status column with its
-`activeStatusValue`.
+selected master row and reads both lifecycle facts that can make it unavailable
+for new work:
+
+- the legal-entity-master status column must equal `activeStatusValue`; and
+- the generic entity `archive.archivedAtColumn` must be null.
 
 That check runs inside the same accepted-mutation transaction and module-runtime
-role as the insert. `FOR NO KEY UPDATE` prevents a concurrent status update from
-changing the enforcing fact between admission and insertion. A non-active
-selection refuses as `MODULE_LEGAL_ENTITY_CREATE_INACTIVE` and names the selected
-legal-entity id as its subject. The web boundary preserves that subject in a
-dedicated operator diagnostic.
+role as the insert. `FOR NO KEY UPDATE` prevents either a concurrent business-
+status update or the registered archive lifecycle operation from changing those
+facts between admission and insertion. A non-active or generically archived
+selection refuses as `MODULE_LEGAL_ENTITY_CREATE_INACTIVE` and names the
+selected legal-entity id as its subject. The web boundary preserves that subject
+in a dedicated operator diagnostic.
 
-This is the generic enforcing layer because it holds both facts required by
-ADR-0015: the compiled storage meaning and the transactional master row. An
+This is the generic enforcing layer because it holds every enforcing fact
+required by ADR-0015: the compiled storage meanings and the transactional
+master row. An
 allow-all local policy is not a substitute for this invariant.
 
 ### 4. No sealed write-scope receipt is introduced
@@ -116,9 +122,12 @@ field "gateway-issued."
   idempotency through the one existing operation input.
 - Changing only `legalEntityId` under the same idempotency key conflicts; an
   identical replay is stable.
-- An archived master cannot own a new entity-scoped record even when its UUID
-  and foreign key remain valid. The identical request is admitted after the
-  sole enforcing fact changes back to the descriptor's active value.
+- A master cannot own a new entity-scoped record when either its business status
+  is non-active or its independent generic archive marker is present, even when
+  its UUID and foreign key remain valid. The status-only twin is admitted after
+  its status returns to the descriptor's active value; the registered archive
+  concurrency control proves that an active-status master still refuses after
+  its generic archive operation commits.
 - Existing internal adapters that construct execution requests remain able to
   supply the untrusted operand directly. They do not gain a scope capability.
 - The compiler-derived descriptor was sufficient. No language version, compiler

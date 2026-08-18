@@ -50,7 +50,8 @@ claim.
   therefore all see the same operand.
 - `PostgresModuleRuntimeInterpreter` checks active ownership inside the same
   accepted-mutation transaction as insertion, using the compiled master status
-  column/value and a row lock. It emits
+  column/value, the independent compiler-derived generic archive column and one
+  row lock. It emits
   `MODULE_LEGAL_ENTITY_CREATE_INACTIVE` with the legal-entity id as subject.
 - The web message boundary preserves that subject as
   `OPERATION_LEGAL_ENTITY_INACTIVE`; it does not add another instance of the
@@ -67,7 +68,7 @@ generic provider.
 `test:scoped-create-operand-mutations`. It requires a clean tracked tree,
 replaces one unique production victim, runs the named control in a fresh
 process, verifies the expected red text, and restores the exact source in
-`finally`. All eight mutations were executed one at a time:
+`finally`. All nine mutations were executed one at a time:
 
 | Production victim | Admission/refusal discriminator | Observed red |
 |---|---|---|
@@ -79,6 +80,7 @@ process, verifies the expected red text, and restores the exact source in
 | effective-input digest collapsed | same key and changed legal entity must conflict; exact replay is stable | `MUTATION_RED effective-input-digest-collapsed` |
 | unscoped create closed-key fence removed | supplied operand refuses beside no-operand admission twin | `MUTATION_RED unscoped-create-closed-key-fence-removed` |
 | transactional active-owner check removed | identical request refuses while inactive, then succeeds after only master status returns active | `MUTATION_RED active-legal-entity-enforcement-removed` |
+| generic archive comparison removed while status check remains | registered archive-first create and post-archive create refuse beside a create-first admission | `MUTATION_RED archived-legal-entity-predicate-removed` |
 
 The first permission control was initially vacuous: a blanket-deny policy let
 the earlier semantic-boundary permission hide deletion of the registered
@@ -90,6 +92,14 @@ otherwise unused request across the status change; the corrected mutation reds
 only because the inactive refusal is absent. Both failures are retained here
 because they are evidence that the harness discriminates its subject rather
 than accepting any nonzero exit.
+
+External review round 1 at `08adef83a2be501918bf08704c5c479aae4b498c`
+returned REVISE. It found the cheapest surviving broken tree the author-selected
+mutations missed: keep the whole owner check and its business-status comparison,
+but ignore the independent generic archive marker changed by
+`legal_entity_archive`. The correction subsumes that finding by reading both
+compiler-derived lifecycle facts from the same locked row. The new mutation
+removes only the archive comparison; the status check remains intact.
 
 ## Direct generic execution — observed and accepted
 
@@ -119,7 +129,11 @@ Observed by this packet:
   rows, including direct-executor creates;
 - changing only the legal-entity operand under one idempotency key conflicts;
 - the exact inactive request leaves no row and succeeds after the same master
-  status becomes active; and
+  status becomes active;
+- the human-confirmed registered legal-entity archive and a scoped create were
+  queued behind the same row lock in both orders: archive-first refuses the
+  waiting create with no business row or receipt, while create-first succeeds,
+  the archive follows, and every later create refuses; and
 - the provider refusal subject survives the web message boundary.
 
 Inherited premises, not newly proven in isolation:
