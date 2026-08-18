@@ -87,10 +87,14 @@ const itemId = 'aa500000-0000-4000-8000-000000000005';
 const locationId = 'aa600000-0000-4000-8000-000000000006';
 const transactionId = 'aa700000-0000-4000-8000-000000000007';
 const transactionLineId = 'aa800000-0000-4000-8000-000000000008';
+const postedTransactionId = 'aa900000-0000-4000-8000-000000000009';
+const reversedTransactionId = 'aaa00000-0000-4000-8000-00000000000a';
+const postedTransactionLineId = 'aab00000-0000-4000-8000-00000000000b';
+const postedParentTransactionId = 'aac00000-0000-4000-8000-00000000000c';
 
 type StorageEntity = StorageTargetPayloadV1['entities'][number];
 
-test('C1-C7 terminal stock-count evidence is enforced by the real gateway and PostgreSQL interpreter', async () => {
+test('draft transaction and terminal stock-count evidence is enforced by the real gateway and PostgreSQL interpreter', async () => {
   const definition = inventoryApplicationDefinition();
   const emptyDefinition = emptyApplicationDefinition(definition);
   const empty = mustCompile(moduleInput(emptyDefinition));
@@ -189,6 +193,62 @@ test('C1-C7 terminal stock-count evidence is enforced by the real gateway and Po
               transactionId,
           },
         );
+        await insertRecord(
+          pool,
+          storage,
+          transaction,
+          postedTransactionId,
+          legalEntityId,
+          {
+            [fieldId('inventory_transaction_number')]: 'POSTED-TRANSACTION',
+            [fieldId('inventory_transaction_state')]: optionId(
+              'inventory_transaction_state_posted',
+            ),
+          },
+          {},
+        );
+        await insertRecord(
+          pool,
+          storage,
+          transaction,
+          postedParentTransactionId,
+          legalEntityId,
+          {
+            [fieldId('inventory_transaction_number')]: 'POSTED-PARENT',
+            [fieldId('inventory_transaction_state')]: optionId(
+              'inventory_transaction_state_posted',
+            ),
+          },
+          {},
+        );
+        await insertRecord(
+          pool,
+          storage,
+          transactionLine,
+          postedTransactionLineId,
+          legalEntityId,
+          {
+            [fieldId('inventory_transaction_line_item_id')]: itemId,
+          },
+          {
+            [relationId('inventory_transaction_line_transaction')]:
+              postedParentTransactionId,
+          },
+        );
+        await insertRecord(
+          pool,
+          storage,
+          transaction,
+          reversedTransactionId,
+          legalEntityId,
+          {
+            [fieldId('inventory_transaction_number')]: 'REVERSED-TRANSACTION',
+            [fieldId('inventory_transaction_state')]: optionId(
+              'inventory_transaction_state_reversed',
+            ),
+          },
+          {},
+        );
 
         await seedStockCount(
           pool,
@@ -267,6 +327,233 @@ test('C1-C7 terminal stock-count evidence is enforced by the real gateway and Po
           releases[1]!,
           pointer,
           policy,
+        );
+
+        // T1: a draft candidate is admitted. Both non-draft options are then
+        // refused so this control distinguishes `equals draft` from the weaker
+        // `not equals posted`, which would silently admit a reversed source.
+        const admittedTransactionId = randomUUID();
+        const draftCreate = await invokeOperation(
+          gateway,
+          mediation,
+          view,
+          'inventory_transaction_create',
+          {
+            legalEntityId,
+            recordId: admittedTransactionId,
+            relations: {},
+            values: requiredOperationValues(transaction, {
+              [fieldId('inventory_transaction_number')]: 'DRAFT-CANDIDATE',
+              [fieldId('inventory_transaction_state')]: optionId(
+                'inventory_transaction_state_draft',
+              ),
+            }),
+          },
+        );
+        assert.equal(draftCreate.outcome, 'succeeded');
+        assert.equal(draftCreate.readBack?.revision, 1);
+        assert.equal(
+          draftCreate.readBack?.values[fieldId('inventory_transaction_state')],
+          optionId('inventory_transaction_state_draft'),
+        );
+        for (const terminalState of ['posted', 'reversed'] as const) {
+          await assertOperationRefused(
+            invokeOperation(
+              gateway,
+              mediation,
+              view,
+              'inventory_transaction_create',
+              {
+                legalEntityId,
+                recordId: randomUUID(),
+                relations: {},
+                values: requiredOperationValues(transaction, {
+                  [fieldId('inventory_transaction_number')]:
+                    `FORGED-${terminalState.toUpperCase()}`,
+                  [fieldId('inventory_transaction_state')]: optionId(
+                    `inventory_transaction_state_${terminalState}`,
+                  ),
+                }),
+              },
+            ),
+          );
+        }
+
+        // T2: an ordinary draft-to-draft update succeeds, while both terminal
+        // projected images refuse. The second refusal is the non-vacuity twin
+        // that rules out a merely `not posted` predicate.
+        const draftUpdate = await invokeOperation(
+          gateway,
+          mediation,
+          view,
+          'inventory_transaction_update',
+          {
+            expectedRevision: 1,
+            patch: {
+              [fieldId('inventory_transaction_number')]: 'DRAFT-REWRITE',
+            },
+            recordId: transactionId,
+          },
+        );
+        assert.equal(draftUpdate.outcome, 'succeeded');
+        assert.equal(draftUpdate.readBack?.revision, 2);
+        for (const terminalState of ['posted', 'reversed'] as const) {
+          await assertOperationRefused(
+            invokeOperation(
+              gateway,
+              mediation,
+              view,
+              'inventory_transaction_update',
+              {
+                expectedRevision: 2,
+                patch: {
+                  [fieldId('inventory_transaction_state')]: optionId(
+                    `inventory_transaction_state_${terminalState}`,
+                  ),
+                },
+                recordId: transactionId,
+              },
+            ),
+          );
+        }
+
+        // T3: archive and restore are visibility lifecycle operations, not
+        // draft mutation. They remain admitted for a posted source and preserve
+        // its state. Applying the transaction predicate to all four generic
+        // operations would make this admission twin red.
+        const postedArchive = await invokeOperation(
+          gateway,
+          mediation,
+          view,
+          'inventory_transaction_archive',
+          { expectedRevision: 1, recordId: postedTransactionId },
+        );
+        assert.equal(postedArchive.outcome, 'succeeded');
+        assert.equal(postedArchive.readBack?.archived, true);
+        assert.equal(postedArchive.readBack?.revision, 2);
+        assert.equal(
+          postedArchive.readBack?.values[
+            fieldId('inventory_transaction_state')
+          ],
+          optionId('inventory_transaction_state_posted'),
+        );
+        const postedRestore = await invokeOperation(
+          gateway,
+          mediation,
+          view,
+          'inventory_transaction_restore',
+          { expectedRevision: 2, recordId: postedTransactionId },
+        );
+        assert.equal(postedRestore.outcome, 'succeeded');
+        assert.equal(postedRestore.readBack?.archived, false);
+        assert.equal(postedRestore.readBack?.revision, 3);
+        assert.equal(
+          postedRestore.readBack?.values[
+            fieldId('inventory_transaction_state')
+          ],
+          optionId('inventory_transaction_state_posted'),
+        );
+
+        // T4: prior-image evaluation refuses attempts to turn either terminal
+        // state back into a draft. The projected image is deliberately valid,
+        // so removing the prior-image check makes these controls go green for
+        // the wrong tree and then fail here.
+        for (const [recordId, expectedRevision] of [
+          [postedTransactionId, 3],
+          [reversedTransactionId, 1],
+        ] as const) {
+          await assertOperationRefused(
+            invokeOperation(
+              gateway,
+              mediation,
+              view,
+              'inventory_transaction_update',
+              {
+                expectedRevision,
+                patch: {
+                  [fieldId('inventory_transaction_state')]: optionId(
+                    'inventory_transaction_state_draft',
+                  ),
+                },
+                recordId,
+              },
+            ),
+          );
+        }
+
+        // T5: transaction lines are parentScopedChild. ADR-0034 resolves the
+        // target transaction's UPDATE predicate for every child mutation, so a
+        // draft parent's line remains writable and a posted parent's line does
+        // not. This is an inherited effect of the transaction guard, not a
+        // second predicate authored on the line operations.
+        const draftLineUpdate = await invokeOperation(
+          gateway,
+          mediation,
+          view,
+          'inventory_transaction_line_update',
+          {
+            expectedRevision: 1,
+            patch: {
+              [fieldId('inventory_transaction_line_quantity')]: '2',
+            },
+            recordId: transactionLineId,
+          },
+        );
+        assert.equal(draftLineUpdate.outcome, 'succeeded');
+        assert.equal(draftLineUpdate.readBack?.revision, 2);
+        await assertOperationRefused(
+          invokeOperation(
+            gateway,
+            mediation,
+            view,
+            'inventory_transaction_line_update',
+            {
+              expectedRevision: 1,
+              patch: {
+                [fieldId('inventory_transaction_line_quantity')]: '2',
+              },
+              recordId: postedTransactionLineId,
+            },
+          ),
+        );
+        const draftLineCreate = await invokeOperation(
+          gateway,
+          mediation,
+          view,
+          'inventory_transaction_line_create',
+          {
+            legalEntityId,
+            recordId: randomUUID(),
+            relations: {
+              [relationId('inventory_transaction_line_transaction')]:
+                transactionId,
+            },
+            values: requiredOperationValues(transactionLine, {
+              [fieldId('inventory_transaction_line_item_id')]: itemId,
+              [fieldId('inventory_transaction_line_line_number')]: '2',
+            }),
+          },
+        );
+        assert.equal(draftLineCreate.outcome, 'succeeded');
+        await assertOperationRefused(
+          invokeOperation(
+            gateway,
+            mediation,
+            view,
+            'inventory_transaction_line_create',
+            {
+              legalEntityId,
+              recordId: randomUUID(),
+              relations: {
+                [relationId('inventory_transaction_line_transaction')]:
+                  postedParentTransactionId,
+              },
+              values: requiredOperationValues(transactionLine, {
+                [fieldId('inventory_transaction_line_item_id')]: itemId,
+                [fieldId('inventory_transaction_line_line_number')]: '2',
+              }),
+            },
+          ),
         );
 
         // C1: prior-image evaluation refuses a generic update of posted
