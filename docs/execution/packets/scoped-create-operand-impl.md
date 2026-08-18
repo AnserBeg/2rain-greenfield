@@ -1,11 +1,11 @@
 # scoped-create-operand-impl — permission-authorized legal-entity create operand
 
 Date: 2026-08-18
-Base: `22154a7db5f0c25d13fe33d133207bce6af63b12` (`origin/main`, verified before cut)
+Base: `22154a7db5cdae739cacaae2ea46771d805b20cf` (`origin/main`, verified before cut)
 Branch: `packet/scoped-create-operand-impl`
 Tier: Critical
-Status: evidence-ready; implementation, mutation evidence, prescribed gates and
-manual checkpoint complete; external review, full matrix and integration pending
+Status: active revision round 2; external round 1 returned REVISE on incomplete
+generic archive enforcement and a malformed recorded base SHA
 
 ## Packet definition
 
