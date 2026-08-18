@@ -5,10 +5,12 @@ Base: `39fef80c21db604e54c0ffe3c7c55b8f2c32993b` (current `origin/main`; fetched
 and confirmed unmoved before cutting)
 Branch: `packet/inventory-form-anatomy`
 Tier: Critical (raised by the round-1 reachability finding)
-Status: **EVIDENCE READY for fresh review.** The executable correction is
-`3e89d9c`; the branch head adds only this checkpoint stamp. The five-slot
-anatomy remains accepted, and the newly reachable transaction lifecycle is now
-state-aware.
+Status: **ACCEPTED.** Reviewed candidate
+`9d478e4a3e18f5f48a5e92baa866fd6e0f39ab01`; full-matrix tree
+`56eb2c7d4cfc82a308b1f135fff65a9b0a663142`; integrated by the required
+packet-to-main `--no-ff` merge at
+`d048dc0625d5215bb3f6edd1000cd2aba3b4b820`. The integrated executable tree is
+byte-identical to the matrix-green tree.
 
 ## Packet definition
 
@@ -397,8 +399,51 @@ row and is **not** investigated here.
 
 ## Program-review trigger evaluation
 
-No program review is proposed. This checkpoint is review-ready but not
-integrated, and it still does not complete the first office-worker write:
+No program review is proposed. This accepted packet still does not complete the
+first office-worker write:
 `relation-scoped-enumeration` and `scoped-create-missing-legal-entity-input`
 remain explicit blockers. The first-end-to-end-slice trigger becomes live when
 those compose into a real write, before any module fan-out.
+
+## Review round 2 and acceptance
+
+The fresh Critical confirm reviewed frozen candidate
+`9d478e4a3e18f5f48a5e92baa866fd6e0f39ab01` and returned **PASS**: all eleven
+numbered claims closed and no new executable defect. Two precision notes are
+accepted in this record:
+
+- removing `activity` removes its rendered unsupported-slot failure card; the
+  old whole-surface refusal was an operability/mutation refusal, not a page
+  rendering short-circuit;
+- the literal `124 -> 104` movement is 30 violations removed and 10 added,
+  net 20. The checked-in wording "two fewer missing slots" remains accurate.
+
+After review converged, the exact reviewed packet was merged into a staged
+integration tree at `56eb2c7d4cfc82a308b1f135fff65a9b0a663142` and the full
+matrix was run there. The first attempt reached PostgreSQL and recorded one
+environmental startup failure: the container reported ready internally while
+its Docker-published localhost endpoint remained unavailable until the helper's
+deadline; the test assertion never ran. Every later PostgreSQL case passed. No
+file changed. A complete rerun from the same SHA passed:
+
+- unit 120/120; compiler 150/150; integration 137/137; agent 3/3;
+  architecture 141/141; contracts 16/16;
+- PostgreSQL 203/203; locale 1/1; browser 90/90; observability 11/11;
+- language coverage PASS (2,050 obligations, 429 first-party observations);
+- reachability PASS (104/104 test files, 10 producer artifacts).
+
+Main then received the packet through `git merge --no-ff
+packet/inventory-form-anatomy`, producing
+`d048dc0625d5215bb3f6edd1000cd2aba3b4b820` with first parent
+`2fd28a42e6578e7cbb984858f667862b213792cc` and second parent the exact reviewed
+candidate `9d478e4a3e18f5f48a5e92baa866fd6e0f39ab01`. The executable diff from the
+matrix-green staged merge to the real integration merge is empty. The review
+record gate passes on that topology, so AGENTS.md §6's identical-tree rule
+carries the matrix to the integrated merge without rerunning the same bytes.
+
+The checkpoint-only `scripts/check-parked-work.sh` audit is red on six
+pre-existing, unrelated branches aged 9–11 days: `packet/proj-disc`,
+`packet/ps-0`, `packet/ps-1`, `packet/ps-2`, `packet/pur-1`, and
+`packet/u5-design`. This packet neither deleted preserved evidence branches nor
+rebased another lane's work. The failed audit is surfaced for an explicit user
+disposition; it does not change the green executable matrix above.
