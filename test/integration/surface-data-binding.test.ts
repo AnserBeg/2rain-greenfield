@@ -846,7 +846,11 @@ test('scoped create carries each URL operand under its declared system-input key
     'omission and multiplicity refuse before execution',
   );
 
-  const deniedPolicy = new RecordingPolicy('DENY');
+  const deniedPolicy = new RecordingPolicy((request) =>
+    request.permissionId === `${FIXTURE_IDS.namespace}:permission.master_create`
+      ? 'DENY'
+      : 'ALLOW',
+  );
   const deniedExecutor = new InMemoryGenericExecutor();
   const deniedView = await issuedView(
     runtimeEntry(
@@ -1504,12 +1508,20 @@ test('a create with no contract is unavailable, not known-empty', async () => {
 class RecordingPolicy implements CurrentPolicyGateway {
   readonly calls: CurrentPolicyDecisionRequest[] = [];
 
-  constructor(private readonly decision: 'ALLOW' | 'DENY') {}
+  constructor(
+    private readonly decision:
+      | 'ALLOW'
+      | 'DENY'
+      | ((request: CurrentPolicyDecisionRequest) => 'ALLOW' | 'DENY'),
+  ) {}
 
   async authorize(request: CurrentPolicyDecisionRequest) {
     this.calls.push(request);
     return {
-      decision: this.decision,
+      decision:
+        typeof this.decision === 'function'
+          ? this.decision(request)
+          : this.decision,
       decisionVersion: CURRENT_POLICY_DECISION_VERSION,
       policyVersion: 'surface-binding-policy/v1',
     };
