@@ -19,6 +19,7 @@ writer is holding those paths right now.
 | **CANON** *(Opus)* | `Q1-P5` — the legal-entity query operand, canonical v4 | **active, added 2026-07-30.** First non-Codex writer lane. Same review chain: Codex for everything, Fable on Critical. Holding its frozen candidate while `Q1-P4` takes the slot; authoring the deferred gateway binding meanwhile. |
 | **KERNEL** | — | idle since `G3-P2b-4` (2026-07-29). |
 | **DEPLOY** | — | idle since `1g2` (2026-07-29). |
+| **WRITER** | `scoped-create-operand-impl` — permission-authorized legal-entity create operand | **active 2026-08-18** in `/home/rvham/2rain-greenfield-scopedimpl` on `packet/scoped-create-operand-impl`. Holds the packet prompt's explicit web runtime, semantic operation gateway, generic PostgreSQL interpreter, browser/integration/PostgreSQL controls, and packet-owned ADR/execution-record paths. No compiler path is leased. |
 
 **Lane identity is per packet, not per theme.** The earlier model assigned
 standing themes (KERNEL owns canonical, FIX owns correctness). That broke on
