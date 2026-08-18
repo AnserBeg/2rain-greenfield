@@ -5,9 +5,10 @@ Base: `39fef80c21db604e54c0ffe3c7c55b8f2c32993b` (current `origin/main`; fetched
 and confirmed unmoved before cutting)
 Branch: `packet/inventory-form-anatomy`
 Tier: Critical (raised by the round-1 reachability finding)
-Status: **REVISION IN PROGRESS after REVISE at `860c9ca`.** The five-slot
-anatomy remains accepted; the correction makes the newly reachable transaction
-lifecycle state-aware.
+Status: **EVIDENCE READY for fresh review.** The executable correction is
+`3e89d9c`; the branch head adds only this checkpoint stamp. The five-slot
+anatomy remains accepted, and the newly reachable transaction lifecycle is now
+state-aware.
 
 ## Packet definition
 
@@ -272,6 +273,36 @@ recorded separately below once frozen.
 | `test:postgres` | **PASS** 203/203 (required, cross-layer) |
 | full matrix | **owed after review converges** |
 
+### Revised candidate at executable commit `3e89d9c`
+
+No executable byte changed after these runs. The final branch-head commit is a
+narrative-only checkpoint stamp.
+
+| gate | result |
+|---|---|
+| `typecheck` | **PASS** |
+| `lint` | **PASS** |
+| `format` | **PASS** |
+| `check:app-release` | **PASS**; entries 1–11 reproduce, entry 12 is current |
+| `check:demo-release` | **PASS** |
+| `check:boundaries` | **PASS** (160 files) |
+| `test:unit` | **PASS** 120/120 |
+| `test:compiler` | **PASS** 150/150 |
+| `test:integration` | **PASS** 137/137 |
+| `test:contracts` | **PASS** 16/16 |
+| `test:architecture` | **PASS** 141/141; Inventory ratchet 104/104 |
+| `test:browser` | **PASS** 90/90, unfiltered |
+| `test:postgres` | **PASS** 203/203, unfiltered, required cross-layer consumer |
+| full matrix | **NOT RUN; owed after fresh review converges** |
+
+The first unfiltered PostgreSQL attempt finished 201/202: the packet's new
+terminal-state test passed, but an earlier composed fresh-tenant activation
+returned `NO_SWAP_TERMINAL`. Its nested semantic, create, posting-replay and
+latency checks had passed. The exact composed test then passed 8/8 in isolation,
+and a second complete unfiltered suite passed 203/203, including that activation
+and the new terminal-state test. No code or deadline changed between attempts;
+the packet did not claim the provider gate until the complete green run.
+
 ## Stop 1, and how it was cleared
 
 Docker Desktop was not running: `/usr/bin/docker` symlinks into
@@ -309,6 +340,11 @@ was changed while blocked, and no gate was widened or skipped.
   through `relatedSurface(context, 'form')`, which returns the form solely when
   it supports create or update. One line in the module restored three
   affordances the module had always declared.
+- **The posting journey now crosses the newly reachable boundary.** It captures
+  the real draft update form, posts once, proves terminal Edit and direct-URL
+  Save are absent, sends the captured operation-addressed update around the UI,
+  and observes a 422 refusal. The transaction remains revision 2 with Post
+  absent, exactly one matching movement, and on-hand exactly 8.
 
 ### A kept assertion is relabelled, because it never proved what it was read to prove
 
@@ -361,8 +397,8 @@ row and is **not** investigated here.
 
 ## Program-review trigger evaluation
 
-No program review is proposed. The packet is mid-flight with no integrated
-candidate, which is an explicit anti-trigger. The first-end-to-end-slice trigger
-becomes live once this and `relation-scoped-enumeration` compose into a real
-office-worker write, and that is the point to propose one — before any module
-fan-out.
+No program review is proposed. This checkpoint is review-ready but not
+integrated, and it still does not complete the first office-worker write:
+`relation-scoped-enumeration` and `scoped-create-missing-legal-entity-input`
+remain explicit blockers. The first-end-to-end-slice trigger becomes live when
+those compose into a real write, before any module fan-out.
