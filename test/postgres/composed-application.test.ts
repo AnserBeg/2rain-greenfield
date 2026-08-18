@@ -70,6 +70,7 @@ import {
   type DurableReleaseVerificationEvidence,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
+import { TrustEvidenceError } from '../../packages/postgres-provider/src/trust/postgres-trust-service.js';
 import {
   AuthenticatedRequestEntryAdapter,
   type TrustedRequestContext,
@@ -3352,13 +3353,14 @@ async function assertEntityOwnedCreateInput(
   const invokeCreate = (
     recordId: string,
     input: Readonly<Record<string, unknown>>,
+    idempotencyKey: string = randomUUID(),
   ) =>
     runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
       runtime.operationGateway.invoke(
         view,
         {
           confirmationGrant: null,
-          idempotencyKey: randomUUID(),
+          idempotencyKey,
           input: { recordId, relations: {}, values, ...input },
           operationId: 'northstar.app:operation.inventory_transaction_create',
           schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
@@ -3392,8 +3394,31 @@ async function assertEntityOwnedCreateInput(
   );
 
   const recordId = randomUUID();
-  const created = await invokeCreate(recordId, { legalEntityId });
+  const idempotencyKey = randomUUID();
+  const created = await invokeCreate(
+    recordId,
+    { legalEntityId },
+    idempotencyKey,
+  );
   assert.equal(created.outcome, 'succeeded');
+  const replayed = await invokeCreate(
+    recordId,
+    { legalEntityId },
+    idempotencyKey,
+  );
+  assert.deepEqual(
+    replayed.trust,
+    created.trust,
+    'the same effective input retains one stable idempotency identity',
+  );
+  await assert.rejects(
+    invokeCreate(recordId, { legalEntityId: randomUUID() }, idempotencyKey),
+    (error: unknown) => {
+      assert.ok(error instanceof TrustEvidenceError);
+      assert.equal(error.code, 'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT');
+      return true;
+    },
+  );
   const stored = await pool.query<{ legal_entity_id: string }>(
     `SELECT "${transaction.legalEntity.column}"::text AS legal_entity_id
        FROM north_star_module.${transaction.physicalTableName}
@@ -3402,6 +3427,108 @@ async function assertEntityOwnedCreateInput(
     [runtime.identity.tenantId, runtime.identity.environmentId, recordId],
   );
   assert.deepEqual(stored.rows, [{ legal_entity_id: legalEntityId }]);
+
+  const unscopedValues = {
+    'northstar.app:field.legal_entity_code': 'LE-UNSCOPED-TWIN',
+    'northstar.app:field.legal_entity_is_default': false,
+    'northstar.app:field.legal_entity_name': 'Unscoped admission twin',
+    'northstar.app:field.legal_entity_status':
+      master.legalEntityMaster.activeStatusValue,
+  } as const;
+  const invokeUnscopedCreate = (
+    unscopedRecordId: string,
+    extra: Readonly<Record<string, unknown>>,
+  ) =>
+    runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+      runtime.operationGateway.invoke(
+        view,
+        {
+          confirmationGrant: null,
+          idempotencyKey: randomUUID(),
+          input: {
+            recordId: unscopedRecordId,
+            relations: {},
+            values: unscopedValues,
+            ...extra,
+          },
+          operationId: 'northstar.app:operation.legal_entity_create',
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+        },
+        runtime.operationMediation.issueInvocation(view, 'UI'),
+      ),
+    );
+  await assert.rejects(
+    invokeUnscopedCreate(randomUUID(), { legalEntityId }),
+    (error: unknown) => {
+      assert.ok(error instanceof ModuleRuntimeInterpreterError);
+      assert.equal(error.code, 'MODULE_INPUT_MALFORMED');
+      return true;
+    },
+  );
+  assert.equal(
+    (await invokeUnscopedCreate(randomUUID(), {})).outcome,
+    'succeeded',
+    'the unscoped refusal is discriminating rather than a create wall',
+  );
+
+  const statusColumn = master.columns.find(
+    (column) =>
+      column.physicalName === master.legalEntityMaster?.fieldColumns.status,
+  );
+  assert.ok(statusColumn);
+  const inactiveStatus = statusColumn.fieldContract.enumOptionIds.find(
+    (optionId) => optionId !== master.legalEntityMaster?.activeStatusValue,
+  );
+  assert.ok(inactiveStatus);
+  const inactiveRecordId = randomUUID();
+  await pool.query(
+    `UPDATE north_star_module.${master.physicalTableName}
+        SET "${master.legalEntityMaster.fieldColumns.status}" = $1
+      WHERE tenant_id = $2 AND environment_id = $3
+        AND "${master.recordIdentity.column}" = $4`,
+    [
+      inactiveStatus,
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      legalEntityId,
+    ],
+  );
+  try {
+    await assert.rejects(
+      invokeCreate(inactiveRecordId, { legalEntityId }),
+      (error: unknown) => {
+        assert.ok(error instanceof ModuleRuntimeInterpreterError);
+        assert.equal(error.code, 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE');
+        assert.equal(error.subjectId, legalEntityId);
+        return true;
+      },
+    );
+    const refused = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM north_star_module.${transaction.physicalTableName}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND "${transaction.recordIdentity.column}" = $3`,
+      [
+        runtime.identity.tenantId,
+        runtime.identity.environmentId,
+        inactiveRecordId,
+      ],
+    );
+    assert.equal(refused.rows[0]?.count, '0');
+  } finally {
+    await pool.query(
+      `UPDATE north_star_module.${master.physicalTableName}
+          SET "${master.legalEntityMaster.fieldColumns.status}" = $1
+        WHERE tenant_id = $2 AND environment_id = $3
+          AND "${master.recordIdentity.column}" = $4`,
+      [
+        master.legalEntityMaster.activeStatusValue,
+        runtime.identity.tenantId,
+        runtime.identity.environmentId,
+        legalEntityId,
+      ],
+    );
+  }
 }
 
 async function assertInventoryPostingCapabilityRoute(

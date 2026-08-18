@@ -756,6 +756,218 @@ test('a create submission carries its relations into the operation input', async
   );
 });
 
+test('scoped create carries each URL operand under its declared system-input key', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const scopeParameterId = `${FIXTURE_IDS.namespace}:parameter.master_get_legal_entity_scope`;
+  const view = await issuedView(
+    runtimeEntry(
+      compiled,
+      policy,
+      { a: identity(tenantA, environmentA, principalA) },
+      (projections) =>
+        scopedCreateProjections(projections, scopeParameterId, true),
+    ),
+    'a',
+  );
+  const gateways = semanticGateways(policy, executor);
+  const firstLegalEntityId = 'ac000000-0000-4000-8000-00000000000c';
+  const secondLegalEntityId = 'ad000000-0000-4000-8000-00000000000d';
+  const formSurface = `${FIXTURE_IDS.namespace}:surface.master_form`;
+
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(formSurface)}&${encodeURIComponent(scopeParameterId)}=${firstLegalEntityId}`,
+    gateways,
+  );
+  assert.equal(rendered.statusCode, 200);
+  assert.match(
+    rendered.html,
+    new RegExp(
+      `form id="surface-record-form"[^>]+action="[^"]*${encodeURIComponent(scopeParameterId)}=${firstLegalEntityId}`,
+    ),
+    'the rendered POST action must retain the selected operand across the browser handoff',
+  );
+
+  const submit = (selection: readonly string[]) => {
+    const url = new URL('http://surface-runtime.local');
+    url.searchParams.set('surface', formSurface);
+    for (const legalEntityId of selection) {
+      url.searchParams.append(scopeParameterId, legalEntityId);
+    }
+    return submitSurfaceRuntimeIntent(
+      view,
+      `${url.pathname}${url.search}`,
+      {
+        idempotencyKey: randomUUID(),
+        operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+        recordId: randomUUID(),
+        [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Scoped create',
+      },
+      gateways,
+    );
+  };
+
+  for (const legalEntityId of [firstLegalEntityId, secondLegalEntityId]) {
+    const response = await submit([legalEntityId]);
+    assert.equal(response.statusCode, 200);
+  }
+  assert.deepEqual(
+    executor.operationCalls.map((call) => asRecord(call.input).legalEntityId),
+    [firstLegalEntityId, secondLegalEntityId],
+    'a second URL value must move the effective operand; one hardcoded fixture value cannot satisfy both arms',
+  );
+  const operationPolicyInputs = policy.calls
+    .map((call) => call.decisionInput)
+    .filter(
+      (input) =>
+        isRecord(input) &&
+        input.kind === 'registeredSemanticOperationPolicyInput',
+    );
+  assert.deepEqual(
+    operationPolicyInputs
+      .slice(-2)
+      .map((input) => asRecord(asRecord(input).input).legalEntityId),
+    [firstLegalEntityId, secondLegalEntityId],
+    'the registered operation permission authorizes the exact untrusted operand',
+  );
+
+  for (const invalidSelection of [
+    [] as const,
+    [firstLegalEntityId, secondLegalEntityId] as const,
+  ]) {
+    const response = await submit(invalidSelection);
+    assert.equal(response.statusCode, 422);
+  }
+  assert.equal(
+    executor.operationCalls.length,
+    2,
+    'omission and multiplicity refuse before execution',
+  );
+
+  const deniedPolicy = new RecordingPolicy('DENY');
+  const deniedExecutor = new InMemoryGenericExecutor();
+  const deniedView = await issuedView(
+    runtimeEntry(
+      compiled,
+      deniedPolicy,
+      { a: identity(tenantA, environmentA, principalA) },
+      (projections) =>
+        scopedCreateProjections(projections, scopeParameterId, true),
+    ),
+    'a',
+  );
+  const deniedUrl = `/?surface=${encodeURIComponent(formSurface)}&${encodeURIComponent(scopeParameterId)}=${firstLegalEntityId}`;
+  const denied = await submitSurfaceRuntimeIntent(
+    deniedView,
+    deniedUrl,
+    {
+      idempotencyKey: randomUUID(),
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+      recordId: randomUUID(),
+      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Denied scoped create',
+    },
+    semanticGateways(deniedPolicy, deniedExecutor),
+  );
+  assert.equal(denied.statusCode, 403);
+  assert.equal(deniedExecutor.operationCalls.length, 0);
+});
+
+test('an inactive legal-entity refusal keeps its provider subject at the web boundary', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const legalEntityId = 'ae000000-0000-4000-8000-00000000000e';
+  const failure = Object.assign(
+    new Error('legal entity is not active for new work'),
+    {
+      code: 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE',
+      subjectId: legalEntityId,
+    },
+  );
+  const executor = new InMemoryGenericExecutor(failure);
+  const scopeParameterId = `${FIXTURE_IDS.namespace}:parameter.master_get_legal_entity_scope`;
+  const view = await issuedView(
+    runtimeEntry(
+      compiled,
+      policy,
+      { a: identity(tenantA, environmentA, principalA) },
+      (projections) =>
+        scopedCreateProjections(projections, scopeParameterId, true),
+    ),
+    'a',
+  );
+  const response = await submitSurfaceRuntimeIntent(
+    view,
+    `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&${encodeURIComponent(scopeParameterId)}=${legalEntityId}`,
+    {
+      idempotencyKey: randomUUID(),
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+      recordId: randomUUID(),
+      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Inactive refusal',
+    },
+    semanticGateways(policy, executor),
+  );
+
+  assert.equal(response.statusCode, 422);
+  assert.match(
+    response.html,
+    /data-diagnostic-code="OPERATION_LEGAL_ENTITY_INACTIVE"/u,
+  );
+  assert.match(
+    response.html,
+    new RegExp(`<code data-message-subject>${legalEntityId}</code>`),
+  );
+  assert.equal(executor.operationCalls.length, 0);
+});
+
+test('an unscoped create refuses a supplied URL operand beside its admitted twin', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const scopeParameterId = `${FIXTURE_IDS.namespace}:parameter.master_get_legal_entity_scope`;
+  const view = await issuedView(
+    runtimeEntry(
+      compiled,
+      policy,
+      { a: identity(tenantA, environmentA, principalA) },
+      (projections) =>
+        scopedCreateProjections(projections, scopeParameterId, false),
+    ),
+    'a',
+  );
+  const formSurface = `${FIXTURE_IDS.namespace}:surface.master_form`;
+  const submission = {
+    idempotencyKey: randomUUID(),
+    operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+    recordId: randomUUID(),
+    [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Unscoped create',
+  };
+  const gateways = semanticGateways(policy, executor);
+
+  const refused = await submitSurfaceRuntimeIntent(
+    view,
+    `/?surface=${encodeURIComponent(formSurface)}&${encodeURIComponent(scopeParameterId)}=ac000000-0000-4000-8000-00000000000c`,
+    submission,
+    gateways,
+  );
+  assert.equal(refused.statusCode, 422);
+  assert.equal(executor.operationCalls.length, 0);
+
+  const admitted = await submitSurfaceRuntimeIntent(
+    view,
+    `/?surface=${encodeURIComponent(formSurface)}`,
+    { ...submission, idempotencyKey: randomUUID(), recordId: randomUUID() },
+    gateways,
+  );
+  assert.equal(admitted.statusCode, 200);
+  assert.equal(executor.operationCalls.length, 1);
+  assert.equal(
+    Object.hasOwn(asRecord(executor.operationCalls[0]!.input), 'legalEntityId'),
+    false,
+  );
+});
+
 /**
  * An unselected relation is OMITTED, not sent as "". Posting "" would reach the
  * provider's `uuidRecord` and fail as a malformed uuid, which is a different
@@ -1324,6 +1536,8 @@ class InMemoryGenericExecutor
     Map<string, SemanticRecordDto>
   >();
 
+  constructor(private readonly operationFailure: Error | null = null) {}
+
   seed(tenantId: string, name: string): string {
     const recordId = randomUUID();
     this.tenantRecords(tenantId).set(
@@ -1372,6 +1586,9 @@ class InMemoryGenericExecutor
   async execute(
     request: SemanticQueryExecutionRequest | SemanticOperationExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope | SemanticOperationResultEnvelope> {
+    if (!('arguments' in request) && this.operationFailure) {
+      throw this.operationFailure;
+    }
     return 'arguments' in request
       ? this.query(request)
       : this.operation(request);
@@ -1550,6 +1767,10 @@ function runtimeEntry(
   compiled: CompileSuccess,
   policy: CurrentPolicyGateway,
   identities: Readonly<Record<string, AuthenticatedIdentity>>,
+  transform: (
+    projections: LoadedRequestRuntimeDefinition['projections'],
+  ) => LoadedRequestRuntimeDefinition['projections'] = (projections) =>
+    projections,
 ): AuthenticatedRequestRuntimeEntryAdapter {
   return new AuthenticatedRequestRuntimeEntryAdapter(
     new AuthenticatedRequestEntryAdapter(async (request) => {
@@ -1561,7 +1782,7 @@ function runtimeEntry(
         return {
           environmentId: context.environmentId,
           pointer: { fence: 1, pointerId },
-          projections: runtimeProjections(compiled),
+          projections: transform(runtimeProjections(compiled)),
           release: { contentHash: compiled.releaseRoot, releaseId },
           tenantId: context.tenantId,
         };
@@ -1569,6 +1790,85 @@ function runtimeEntry(
     },
     policy,
   );
+}
+
+function scopedCreateProjections(
+  projections: LoadedRequestRuntimeDefinition['projections'],
+  scopeParameterId: string,
+  systemInput: boolean,
+): LoadedRequestRuntimeDefinition['projections'] {
+  const operationPayload = structuredClone(projections.operation.payload) as {
+    operations: Record<string, unknown>[];
+  };
+  const create = operationPayload.operations.find(
+    (operation) =>
+      operation.operationId ===
+      `${FIXTURE_IDS.namespace}:operation.master_create`,
+  );
+  assert.ok(create);
+  const contract = asRecord(create.inputContract);
+  assert.ok(Array.isArray(contract.closedArgumentKeys));
+  if (systemInput) {
+    contract.closedArgumentKeys = [
+      ...contract.closedArgumentKeys,
+      'legalEntityId',
+    ];
+    assert.ok(
+      contract.schemaVersion === 'northstar.module-input-contract/v1' ||
+        contract.schemaVersion === 'northstar.module-input-contract/v3',
+    );
+    contract.schemaVersion =
+      contract.schemaVersion === 'northstar.module-input-contract/v1'
+        ? 'northstar.module-input-contract/v2'
+        : 'northstar.module-input-contract/v4';
+    contract.systemInput = {
+      argumentKey: 'legalEntityId',
+      classification: 'INTERNAL',
+      immutableAfterCreate: true,
+      physicalColumn: 'legal_entity_id',
+      required: true,
+      valueKind: 'uuid',
+    };
+  }
+
+  const queryPayload = structuredClone(projections.query.payload) as {
+    queries: Record<string, unknown>[];
+  };
+  const get = queryPayload.queries.find(
+    (query) => query.queryId === `${FIXTURE_IDS.namespace}:query.master_get`,
+  );
+  assert.ok(get);
+  get.legalEntityScope = {
+    cardinality: 'exactlyOne',
+    kind: 'queryLegalEntityScope',
+    operand: {
+      kind: 'queryParameterReference',
+      parameterId: scopeParameterId,
+      schemaVersion: 'v5',
+    },
+    schemaVersion: 'v5',
+  };
+  get.parameters = [
+    {
+      orderKey: 10,
+      parameterId: scopeParameterId,
+      parameterType: {
+        kind: 'legalEntityReferenceParameterType',
+        schemaVersion: 'v5',
+      },
+    },
+  ];
+  return {
+    ...projections,
+    operation: {
+      ...projections.operation,
+      payload: operationPayload as unknown as ImmutableJsonValue,
+    },
+    query: {
+      ...projections.query,
+      payload: queryPayload as unknown as ImmutableJsonValue,
+    },
+  };
 }
 
 async function issuedView(
@@ -2116,6 +2416,7 @@ test('the gateway request carries the resolved operation id and nothing from the
     label: 'Release',
     operationId: `${FIXTURE_IDS.namespace}:operation.master_release`,
     precondition: Object.freeze({}),
+    systemInputArgumentKey: null,
   });
   const input = { expectedRevision: 1, recordId: 'r-1' };
 

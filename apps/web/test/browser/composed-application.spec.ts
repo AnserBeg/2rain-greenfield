@@ -1460,20 +1460,98 @@ async function repairedFormAnatomyJourney(
   await page.goto(surfaceUrl(baseUrl, 'party_form'));
   await expectRenderedRecordForm(page, 'New Party');
 
-  // A rendered form is not a working one. Drive the real create through the
-  // real controls on the one scoped Inventory surface that declares NO relation
-  // input, so nothing but the anatomy stands between the operator and a record.
-  await page.goto(
+  const scopeParameterId = await loadSurfaceScopeParameterId(
+    'inventory_transaction_form',
+  );
+  const listScopeParameterId = await loadSurfaceScopeParameterId(
+    'inventory_transaction_list',
+  );
+  await createScopedInventoryTransaction(
+    page,
+    baseUrl,
+    scopeParameterId,
+    browserLegalEntityId,
+    'TXN-SCOPE-A',
+  );
+  await createScopedInventoryTransaction(
+    page,
+    baseUrl,
+    scopeParameterId,
+    browserAlternateLegalEntityId,
+    'TXN-SCOPE-B',
+  );
+
+  // The read side independently observes the persisted attribution. A
+  // hardcoded first UUID can make one create green; it cannot put the second
+  // record into the second entity's sealed read scope while keeping the two
+  // lists disjoint.
+  await expectScopedInventoryTransactions(
+    page,
+    baseUrl,
+    listScopeParameterId,
+    browserLegalEntityId,
+    'TXN-SCOPE-A',
+    'TXN-SCOPE-B',
+  );
+  await expectScopedInventoryTransactions(
+    page,
+    baseUrl,
+    listScopeParameterId,
+    browserAlternateLegalEntityId,
+    'TXN-SCOPE-B',
+    'TXN-SCOPE-A',
+  );
+
+  const multipleScopeUrl = new URL(
     scopedSurfaceUrl(
       baseUrl,
       'inventory_transaction_form',
-      await loadSurfaceScopeParameterId('inventory_transaction_form'),
+      scopeParameterId,
       browserLegalEntityId,
     ),
   );
+  multipleScopeUrl.searchParams.append(
+    scopeParameterId,
+    browserAlternateLegalEntityId,
+  );
+  await expectScopedInventoryCreateRefusal(
+    page,
+    baseUrl,
+    scopeParameterId,
+    multipleScopeUrl.href,
+    'TXN-SCOPE-MULTIPLE',
+    'OPERATION_INPUT_INVALID',
+  );
+  await expectScopedInventoryCreateRefusal(
+    page,
+    baseUrl,
+    scopeParameterId,
+    surfaceUrl(baseUrl, 'inventory_transaction_form'),
+    'TXN-SCOPE-OMITTED',
+    'OPERATION_INPUT_INVALID',
+  );
+  await expectScopedInventoryCreateRefusal(
+    page,
+    baseUrl,
+    scopeParameterId,
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_transaction_form',
+      scopeParameterId,
+      'not-a-uuid',
+    ),
+    'TXN-SCOPE-MALFORMED',
+    'OPERATION_UNAVAILABLE',
+  );
+}
+
+async function fillInventoryTransactionForm(
+  page: Page,
+  transactionNumber: string,
+): Promise<void> {
   await page
     .getByLabel('Inventory Transaction Number', { exact: true })
-    .fill('TXN-ANATOMY-001');
+    .fill(transactionNumber);
   // Enum controls are addressed by ROLE, not by label text. A wrapping
   // `<label>` around a `<select>` has the option labels inside its text
   // content, so an exact getByLabel never matches one -- it works for the
@@ -1489,7 +1567,7 @@ async function repairedFormAnatomyJourney(
     .fill('browser');
   await page
     .getByLabel('Inventory Transaction Source Id', { exact: true })
-    .fill('anatomy-control');
+    .fill(transactionNumber.toLowerCase());
   await page
     .getByLabel('Inventory Transaction Effective At', { exact: true })
     .fill('2026-07-30T12:00:00.000Z');
@@ -1499,33 +1577,87 @@ async function repairedFormAnatomyJourney(
   await page
     .getByLabel('Inventory Transaction Actor Id', { exact: true })
     .fill('anatomy-actor');
+}
+
+async function createScopedInventoryTransaction(
+  page: Page,
+  baseUrl: string,
+  scopeParameterId: string,
+  legalEntityId: string,
+  transactionNumber: string,
+): Promise<void> {
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_transaction_form',
+      scopeParameterId,
+      legalEntityId,
+    ),
+  );
+  await fillInventoryTransactionForm(page, transactionNumber);
+  await expect(page.locator('form#surface-record-form')).toHaveAttribute(
+    'action',
+    new RegExp(
+      `${encodeURIComponent(scopeParameterId)}=${encodeURIComponent(legalEntityId)}`,
+    ),
+  );
   await page
     .locator('[data-platform-slot="record:commandBar"]')
     .getByRole('button', { name: 'Save' })
     .click();
-  // THE BOUNDARY THIS PACKET DOES NOT CROSS, asserted rather than described, so
-  // the next packet inherits a measurement instead of a paragraph.
-  //
-  // The scoped create reaches the provider and is refused there. MEASURED:
-  // `legal_entity_form` above is identical in every respect that matters except
-  // that it is UNSCOPED, and it creates a record. The single differing property
-  // is the legal-entity system input.
-  //
-  // `inventory_transaction_create` declares `legalEntityId` in its
-  // `closedArgumentKeys`, and `requiredSystemInput` raises
-  // MODULE_REQUIRED_SYSTEM_INPUT_MISSING when the input omits it.
-  // `operationInput` in `surface-runtime.ts` returns `{recordId, relations,
-  // values}` for a create and never carries the selected legal entity, so EVERY
-  // scoped create refuses. That is the exact shape of
-  // `required-relation-uncreatable`, one argument key over, and it is a
-  // SEPARATE defect from the anatomy this packet fixes.
-  //
-  // Note what the operator is shown: an unattributed "Save unavailable". The
-  // provider names its subject and the web boundary drops it, which is
-  // `relation-refusal-unnamed`'s class.
-  await expect(page.getByRole('alert')).toContainText('Save unavailable');
+  await expect(page.getByRole('status')).toContainText('Create complete');
+  await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
+}
+
+async function expectScopedInventoryTransactions(
+  page: Page,
+  baseUrl: string,
+  scopeParameterId: string,
+  legalEntityId: string,
+  visibleNumber: string,
+  hiddenNumber: string,
+): Promise<void> {
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_transaction_list',
+      scopeParameterId,
+      legalEntityId,
+    ),
+  );
+  await expect(page.getByText(visibleNumber, { exact: true })).toBeVisible();
+  await expect(page.getByText(hiddenNumber, { exact: true })).toHaveCount(0);
+}
+
+async function expectScopedInventoryCreateRefusal(
+  page: Page,
+  baseUrl: string,
+  scopeParameterId: string,
+  action: string,
+  transactionNumber: string,
+  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'OPERATION_UNAVAILABLE',
+): Promise<void> {
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_transaction_form',
+      scopeParameterId,
+      browserLegalEntityId,
+    ),
+  );
+  await fillInventoryTransactionForm(page, transactionNumber);
+  await page
+    .locator('form#surface-record-form')
+    .evaluate(
+      (form, nextAction) => form.setAttribute('action', nextAction),
+      action,
+    );
+  await page
+    .locator('[data-platform-slot="record:commandBar"]')
+    .getByRole('button', { name: 'Save' })
+    .click();
   await expect(
-    page.locator('[data-diagnostic-code="OPERATION_UNAVAILABLE"]'),
+    page.locator(`[data-diagnostic-code="${diagnosticCode}"]`),
   ).toHaveCount(1);
 }
 
