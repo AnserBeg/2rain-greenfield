@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import process from 'node:process';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 const focusedSurfaceTest = [
@@ -158,7 +159,7 @@ function runMutation(mutation) {
       `${mutation.name}: mutation stayed green`,
     );
     assert.match(output, mutation.expected, `${mutation.name}: wrong red`);
-    console.log(`MUTATION_RED ${mutation.name}`);
+    process.stdout.write(`MUTATION_RED ${mutation.name}\n`);
   } finally {
     writeFileSync(path, originalSource);
   }
