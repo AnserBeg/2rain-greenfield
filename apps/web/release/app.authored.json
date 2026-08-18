@@ -2949,6 +2949,21 @@
         "schemaVersion": "v5",
         "targetId": "northstar.app:permission.inventory_transaction_create"
       },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v5",
+          "targetId": "northstar.app:field.inventory_transaction_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v5",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v5",
+          "value": "northstar.app:option.inventory_transaction_state_draft"
+        }
+      },
       "readBack": {
         "kind": "queryReference",
         "schemaVersion": "v5",
@@ -2979,6 +2994,21 @@
         "kind": "permissionReference",
         "schemaVersion": "v5",
         "targetId": "northstar.app:permission.inventory_transaction_update"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v5",
+          "targetId": "northstar.app:field.inventory_transaction_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v5",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v5",
+          "value": "northstar.app:option.inventory_transaction_state_draft"
+        }
       },
       "readBack": {
         "kind": "queryReference",

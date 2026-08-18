@@ -651,8 +651,8 @@ function artifactsCarrying(entry: RecordedRelease, key: string): string[] {
  * So a digest is not evidence that a field shipped. This reads the entry's
  * artifact BYTES, decodes them, and counts the field itself.
  *
- * The pair is the discrimination. Entry -2 is the last v1 entry and entry -1 is
- * the v2 entry this packet minted; asserting only the presence half would be
+ * The pair is the discrimination: the last v1 entry before adoption and the
+ * first v2 entry. Asserting only the presence half would be
  * satisfied by a projection that emitted the key under every profile, which is
  * precisely what would have moved the recorded roots and broken history.
  */

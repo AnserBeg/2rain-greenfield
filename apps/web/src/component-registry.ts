@@ -576,14 +576,17 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   const record = recordFrom(context.data);
   if (context.surface.surfaceRole === 'form') {
     const intent = record ? 'update' : 'create';
+    const operation = operationForIntent(context, intent);
     return slotPanel(
       context,
-      surfaceSupportsRuntimeIntent(
-        context.view,
-        context.surface,
-        context.surfaces ?? [],
-        intent,
-      )
+      operation &&
+        operationAvailableForRecord(operation, record) &&
+        surfaceSupportsRuntimeIntent(
+          context.view,
+          context.surface,
+          context.surfaces ?? [],
+          intent,
+        )
         ? `<div class="command-bar" aria-label="Record commands"><button type="submit" form="surface-record-form">Save</button></div>`
         : '',
       'command-bar-slot',
@@ -591,6 +594,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   }
 
   const form = relatedSurface(context, 'form');
+  const update = operationForIntent(context, 'update');
   // EVERY granted command, not the first one. The binding may now carry more
   // than one (`INTENT_RENDERED_ARITY` in surface-contract.ts), and a `find`
   // here would render one operable control while the rest bound invisibly --
@@ -606,7 +610,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
       )
     : [];
   const actions = [
-    record && form
+    record && form && update && operationAvailableForRecord(update, record)
       ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, record.recordId, false, context))}">Edit</a>`
       : '',
     form
@@ -717,15 +721,16 @@ function renderSections(context: SurfaceComponentContext): string {
   ) {
     return slotPanel(context, '', 'sections-slot');
   }
-  const operation = (context.operations ?? []).find(
-    (binding) => binding.intent === intent,
-  );
+  const operation = operationForIntent(context, intent);
   if (!operation) {
     return slotPanel(
       context,
       dataDiagnostic('QUERY_UNSUPPORTED'),
       'sections-slot',
     );
+  }
+  if (!operationAvailableForRecord(operation, record)) {
+    return slotPanel(context, '', 'sections-slot');
   }
   const recordId = record?.recordId ?? randomUUID();
   const compatibilityFeedback = hasSurfaceSlot(context, 'titleStatus')
@@ -960,6 +965,35 @@ function relatedSurface(
     )
     ? related
     : undefined;
+}
+
+/**
+ * A current-record affordance is a view of the compiled operation predicate,
+ * never a second state rule. The interpreter remains authoritative over create
+ * candidates and both update images; this only prevents offering a control the
+ * current image already proves cannot execute. Unsupported predicates fail
+ * closed for the same reason command rendering does.
+ */
+function operationForIntent(
+  context: SurfaceComponentContext,
+  intent: SurfaceOperationIntent,
+): CompiledSurfaceOperationBinding | undefined {
+  return (context.operations ?? []).find(
+    (binding) => binding.intent === intent,
+  );
+}
+
+function operationAvailableForRecord(
+  operation: CompiledSurfaceOperationBinding,
+  record: SemanticRecordDto | null,
+): boolean {
+  return (
+    record === null ||
+    evaluateRegisteredOperationPrecondition(
+      operation.precondition,
+      record.values,
+    ).outcome === 'holds'
+  );
 }
 
 function findRelatedSurface(

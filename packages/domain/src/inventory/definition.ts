@@ -743,26 +743,7 @@ export function inventoryModuleDefinition(
               definitionIds,
               local,
               entityId,
-              local === 'stock_count'
-                ? {
-                    kind: 'notPredicate',
-                    schemaVersion: version,
-                    term: {
-                      field: reference(
-                        'fieldReference',
-                        fieldIds.stockCount.state,
-                      ),
-                      kind: 'fieldComparisonPredicate',
-                      operator: 'equals',
-                      schemaVersion: version,
-                      value: {
-                        kind: 'textValue',
-                        schemaVersion: version,
-                        value: `${namespace}:option.stock_count_state_posted`,
-                      },
-                    },
-                  }
-                : undefined,
+              standardOperationPreconditions(definitionIds, local),
             ),
       ),
       postingOperation(definitionIds),
@@ -893,6 +874,54 @@ export function inventoryModuleDefinition(
       onHandSurface(definitionIds),
     ],
   };
+}
+
+type StandardOperationAction = 'archive' | 'create' | 'restore' | 'update';
+
+type StandardOperationPreconditions = Partial<
+  Readonly<Record<StandardOperationAction, Record<string, unknown>>>
+>;
+
+function standardOperationPreconditions(
+  ids: InventoryIds,
+  local: string,
+): StandardOperationPreconditions | undefined {
+  const stockCountMutable = (): Record<string, unknown> => ({
+    kind: 'notPredicate',
+    schemaVersion: version,
+    term: {
+      field: reference('fieldReference', ids.fieldIds.stockCount.state),
+      kind: 'fieldComparisonPredicate',
+      operator: 'equals',
+      schemaVersion: version,
+      value: {
+        kind: 'textValue',
+        schemaVersion: version,
+        value: `${ids.namespace}:option.stock_count_state_posted`,
+      },
+    },
+  });
+  if (local === 'stock_count') {
+    return {
+      archive: stockCountMutable(),
+      create: stockCountMutable(),
+      restore: stockCountMutable(),
+      update: stockCountMutable(),
+    };
+  }
+  if (local !== 'inventory_transaction') return undefined;
+
+  // ADR-0054. O0 owns the draft lifecycle: create admits a draft candidate,
+  // and update requires both the prior and projected images to remain draft.
+  // Archive/restore are deliberately absent here. They change visibility while
+  // preserving state, so a posted source stays posted and cannot regain Post.
+  const remainsDraft = (): Record<string, unknown> =>
+    fieldComparison(ids.fieldIds.transaction.state, 'equals', {
+      kind: 'textValue',
+      schemaVersion: version,
+      value: `${ids.namespace}:option.inventory_transaction_state_draft`,
+    });
+  return { create: remainsDraft(), update: remainsDraft() };
 }
 
 function fieldComparison(
@@ -1227,7 +1256,7 @@ function operations(
   ids: InventoryIds,
   local: string,
   entityId: string,
-  precondition?: Record<string, unknown>,
+  preconditions?: StandardOperationPreconditions,
 ): Array<Record<string, unknown>> {
   return (
     [
@@ -1236,28 +1265,31 @@ function operations(
       ['archive', 'archiveRecordEffect'],
       ['restore', 'restoreRecordEffect'],
     ] as const
-  ).map(([action, kind]) => ({
-    confirmation: action === 'archive' ? 'humanRequired' : 'none',
-    effect: {
-      entity: reference('entityReference', entityId),
-      kind,
+  ).map(([action, kind]) => {
+    const precondition = preconditions?.[action];
+    return {
+      confirmation: action === 'archive' ? 'humanRequired' : 'none',
+      effect: {
+        entity: reference('entityReference', entityId),
+        kind,
+        schemaVersion: version,
+      },
+      kind: 'operationDefinition',
+      module: reference('moduleReference', ids.moduleId),
+      operationId: `${ids.namespace}:operation.${local}_${action}`,
+      permission: reference(
+        'permissionReference',
+        `${ids.namespace}:permission.${local}_${action}`,
+      ),
+      ...(precondition ? { precondition } : {}),
+      readBack: reference(
+        'queryReference',
+        `${ids.namespace}:query.${local}_get`,
+      ),
       schemaVersion: version,
-    },
-    kind: 'operationDefinition',
-    module: reference('moduleReference', ids.moduleId),
-    operationId: `${ids.namespace}:operation.${local}_${action}`,
-    permission: reference(
-      'permissionReference',
-      `${ids.namespace}:permission.${local}_${action}`,
-    ),
-    ...(precondition ? { precondition } : {}),
-    readBack: reference(
-      'queryReference',
-      `${ids.namespace}:query.${local}_get`,
-    ),
-    schemaVersion: version,
-    tier: 'o0',
-  }));
+      tier: 'o0',
+    };
+  });
 }
 
 function postingOperation(ids: InventoryIds): Record<string, unknown> {
@@ -1416,10 +1448,11 @@ function surfaces(
           // the field controls and `<form id="surface-record-form">`. Without
           // it `surfaceSupportsRuntimeIntent` is false and the surface is inert
           // by construction. `commandBar` puts Save in the grammar's slot for a
-          // primary action instead of the `sections` fallback, and it is what
-          // re-admits archive/restore on the paired `detail` surface. `activity`
-          // is NOT declared: no `record:activity` renderer is registered, so
-          // declaring it is the accepted-and-ignored state ADR-0041 forbids.
+          // primary action instead of the `sections` fallback. `sections` is
+          // what makes the related form operable and thereby re-admits New,
+          // Edit, archive and restore on the paired surfaces. `activity` is NOT
+          // declared: authoring and compilation accept it, but the web registry
+          // then refuses the whole surface because no renderer is registered.
           // Its absence is reported by name as `SG003_REQUIRED_SLOT` against
           // the conformance baseline, which is where this debt is expressible.
           [

@@ -162,7 +162,7 @@ composedTest.describe('composed application journeys', () => {
   );
 
   composedTest(
-    'posts a staged adjustment through a deliberately confirmed command',
+    'posts one staged adjustment and keeps its business effect immutable',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.postingRoute);
       await postingRouteJourney(page, composedApplication.currentBaseUrl());
@@ -1546,8 +1546,50 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     scopeParameterId,
     browserLegalEntityId,
   )}&record=${encodeURIComponent(browserRouteTransactionId)}`;
+  await expectRoutePostingEffect(page, baseUrl, 0, '5');
   await page.goto(detailUrl);
   await expect(page.getByText(/Active · revision 1/)).toBeVisible();
+  const edit = page.getByRole('link', { name: 'Edit', exact: true });
+  await expect(edit).toHaveCount(1);
+  const editHref = await edit.getAttribute('href');
+  expect(editHref).not.toBeNull();
+  const editUrl = new URL(editHref ?? '', baseUrl).href;
+  const editPage = await page.context().newPage();
+  let updateSubmission: Record<string, string>;
+  try {
+    await editPage.goto(editUrl);
+    await expect(
+      editPage.getByRole('heading', {
+        level: 1,
+        name: 'Edit Inventory transaction',
+      }),
+    ).toBeVisible();
+    await expect(editPage.locator('form#surface-record-form')).toHaveCount(1);
+    await expect(
+      editPage
+        .locator('[data-platform-slot="record:commandBar"]')
+        .getByRole('button', { name: 'Save' }),
+    ).toBeVisible();
+    updateSubmission = await editPage
+      .locator('form#surface-record-form')
+      .evaluate((form) =>
+        Object.fromEntries(
+          [...new FormData(form as HTMLFormElement).entries()].map(
+            ([name, value]) => [name, String(value)],
+          ),
+        ),
+      );
+  } finally {
+    await editPage.close();
+  }
+  expect(updateSubmission.operationId).toBe(
+    `${applicationNamespace}:operation.inventory_transaction_update`,
+  );
+  expect(
+    updateSubmission[
+      `value:${applicationNamespace}:field.inventory_transaction_state`
+    ],
+  ).toBe(`${applicationNamespace}:option.inventory_transaction_state_draft`);
   const command = page.locator('form.capability-command');
   await expect(command).toHaveAttribute(
     'data-capability-id',
@@ -1595,6 +1637,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(page.getByRole('status')).toContainText('Post complete');
   await expect(page.getByText(/Active · revision 2/)).toBeVisible();
   await expect(page.locator('form.capability-command')).toHaveCount(0);
+  await expect(edit).toHaveCount(0);
 
   const replay = await page.request.post(
     `${baseUrl}/?surface=${encodeURIComponent(`${applicationNamespace}:surface.inventory_transaction_detail`)}`,
@@ -1604,6 +1647,78 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
   const replayHtml = await replay.text();
   expect(replayHtml).toContain('Post complete');
   expect(replayHtml).toContain('Active · revision 2');
+
+  // The direct URL is a second UI boundary. Hiding Edit alone leaves a pasted
+  // form URL, its Save button and implicit Enter submission live.
+  await page.goto(editUrl);
+  await expect(
+    page.getByRole('heading', {
+      level: 1,
+      name: 'Edit Inventory transaction',
+    }),
+  ).toBeVisible();
+  await expect(page.locator('form#surface-record-form')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save' })).toHaveCount(0);
+
+  // The provider is the authority even when a caller posts around both UI
+  // affordances. This is the actual operation-addressed update form captured
+  // while the transaction was a draft, not a structurally invalid forgery.
+  // Only revision, idempotency and state change after posting.
+  const refusedRewind = await page.request.post(editUrl, {
+    form: {
+      ...updateSubmission,
+      expectedRevision: '2',
+      idempotencyKey: '74200000-0000-4000-8000-000000000003',
+      [`value:${applicationNamespace}:field.inventory_transaction_state`]: `${applicationNamespace}:option.inventory_transaction_state_draft`,
+    },
+  });
+  expect(refusedRewind.status()).toBe(422);
+  expect(await refusedRewind.text()).toContain('OPERATION_UNAVAILABLE');
+
+  // One source effect remains one movement and one +3 on-hand delta. A rewind
+  // followed by a second post would make these 2 and 11 respectively because
+  // movement replay identity includes the source revision.
+  await expectRoutePostingEffect(page, baseUrl, 1, '8');
+  await page.goto(detailUrl);
+  await expect(page.getByText(/Active · revision 2/)).toBeVisible();
+  await expect(page.locator('form.capability-command')).toHaveCount(0);
+  await expect(
+    page.getByRole('link', { name: 'Edit', exact: true }),
+  ).toHaveCount(0);
+}
+
+async function expectRoutePostingEffect(
+  page: Page,
+  baseUrl: string,
+  expectedMovementRows: number,
+  expectedOnHand: string,
+): Promise<void> {
+  const movementUrl = scopedSurfaceUrl(
+    baseUrl,
+    'inventory_movement_list',
+    await loadSurfaceScopeParameterId('inventory_movement_list'),
+    browserLegalEntityId,
+  );
+  await page.goto(movementUrl);
+  await expect(
+    page.locator('tbody tr', { hasText: 'browser-posting-route' }),
+  ).toHaveCount(expectedMovementRows);
+
+  const onHand = await loadOnHandLookupProjection();
+  const onHandUrl = new URL(surfaceUrl(baseUrl, 'inventory_on_hand_lookup'));
+  const horizon = '2099-01-01T00:00:00.000Z';
+  const values = [demoItemId, demoLocationId, horizon, horizon];
+  onHandUrl.searchParams.set(
+    onHand.legalEntityParameterId,
+    browserLegalEntityId,
+  );
+  for (const [index, parameter] of onHand.inputParameters.entries()) {
+    onHandUrl.searchParams.set(parameter.parameterId, values[index]!);
+  }
+  await page.goto(onHandUrl.href);
+  await expect(
+    page.getByRole('status', { name: 'Lookup result' }),
+  ).toHaveAttribute('data-aggregate-value', expectedOnHand);
 }
 
 async function partyLifecycleJourney(

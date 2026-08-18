@@ -2,7 +2,7 @@
 
 Date: 2026-08-17
 Status: accepted
-Tier: Behavioral (review per `review-tiers`)
+Tier: Critical (review per `review-tiers`)
 
 ## Context
 
@@ -55,6 +55,14 @@ render — `inventory_transaction_line_form`, `stock_count_form`,
 specimens. The only one that rendered was `party_role_form`, the single
 unscoped case. `relation-scoped-enumeration` stopped here and was right to.
 
+Repairing that composition failure also made the generic lifecycle reachable.
+On `inventory_transaction`, the emitted update operation accepted every state
+and the form rendered the state enumeration as an ordinary writable field. A
+posted transaction could therefore be edited back to draft and posted again;
+the second post used the later source revision and escaped movement replay
+identity. The form repair is correct, but it cannot activate a route that
+violates ADR-0007's one-source-effect invariant.
+
 ## Decision
 
 **1. Every first-party surface with `surfaceRole: 'form'` declares exactly the
@@ -64,14 +72,16 @@ five registered record slots, in focus order:**
 
 This is now uniform across all nine form surfaces in the composed application.
 `commandBar` is included rather than left to `renderSections`' fallback Save
-button, for two reasons: the UX grammar makes the command bar the home of the
-primary action, and `surfaceSupportsRuntimeIntent`'s `record` branch requires a
-**related form that supports create or update**, so a working form is also what
-re-admits archive and restore on the paired `detail` surface.
+button because the UX grammar makes the command bar the home of the primary
+action. It is `sections` — the slot carrying create/update intents — that makes
+the related form operable and thereby re-admits New, Edit, archive and restore
+on the paired surfaces.
 
 **2. `activity` is not declared by any first-party module.** A slot declared
-with no registered renderer is forbidden — it is ADR-0041's accepted-and-ignored
-state, *indistinguishable from success at every point where anyone would look*.
+with no registered renderer is forbidden. This is **not** ADR-0041's
+accepted-and-ignored state: authoring and compilation accept the declaration,
+then `surfaceHasUnsupportedComponent` explicitly refuses the whole surface at
+runtime. It is a late, whole-surface refusal.
 
 The G2-composition review recorded that **the language cannot express "declared,
 intentionally unregistered."** That is still true, and it is decisive here: a
@@ -93,6 +103,26 @@ observable, and it is why removal is honest where declaration is not.
 **4. This ADR does not create a default.** No slot is materialized for a surface
 that declares none; the change is to the authored definition, which is the only
 place surface anatomy is stated.
+
+**5. Making the transaction form operable does not widen the transaction state
+machine.** The existing ADR-0034 operation-precondition carrier expresses the
+rule without new language:
+
+- `inventory_transaction_create` admits only a candidate whose state is
+  `draft`;
+- `inventory_transaction_update` requires both the prior and projected images
+  to remain `draft`;
+- transaction `archive` and `restore` deliberately carry no draft predicate.
+  They change visibility while preserving transaction state, so a posted source
+  stays posted and cannot regain Post. Existing independent constraints, such
+  as archive restriction by active dependents, still apply;
+- Edit and update Save are offered only when the same compiled update predicate
+  holds on the current record. This is an affordance check; the interpreter
+  remains authoritative over stored prior and projected images; and
+- `inventory_transaction_line` is `parentScopedChild`, so ADR-0034 resolves the
+  parent transaction's update predicate for child mutation. Lines under a
+  posted transaction are consequently immutable without a second line-level
+  predicate.
 
 ## Consequences
 
@@ -120,6 +150,14 @@ place surface anatomy is stated.
   **An earlier draft of this ADR claimed `inventory_transaction_form` was
   creatable end to end. That was wrong and the browser control refuted it**;
   the claim now rests on the surface that actually creates a record.
+- **A draft transaction remains generically editable; a posted or reversed
+  transaction does not.** Posted and reversed sources cannot be rewound by a
+  direct operation-addressed update. Archive/restore remain unguarded by
+  transaction state because they are visibility lifecycle operations; existing
+  relation constraints can still refuse them.
+- **The posted document boundary covers its lines.** Child create and update
+  under a draft transaction succeed; the same operations under a posted parent
+  refuse through the inherited parent predicate.
 - **The Inventory conformance debt falls** and the baseline moves with it in the
   same commit, per the ratchet's own rule.
 - **`record:activity` and `record:childTables` remain unregistered
@@ -151,6 +189,14 @@ place surface anatomy is stated.
   the application never started and both tests failed in 2 ms for a reason
   unrelated to anatomy. The valid form of the control restores the release to a
   legitimate forward head rather than appending a backwards one.
+- **The round-1 Critical finding has its own executed reds.** At reviewed SHA
+  `860c9ca`, a non-draft create succeeded where the PostgreSQL control required
+  `MODULE_OPERATION_PRECONDITION_REFUSED`, and the composed browser journey
+  rendered Edit after the first post. The corrected controls admit draft create
+  and draft-to-draft update, refuse both posted and reversed candidate/projected
+  states, isolate prior-image refusal with terminal-to-draft patches, admit
+  posted archive/restore, and observe one movement plus an on-hand value of 8
+  after the refused rewind.
 - **A prior measurement is corrected.** `relation-scoped-enumeration`'s stop
   record tabulates `party_role_form` as `breadcrumb, titleStatus, activity`. It
   is not, and was not at that branch's base: `party_role_form` carries the full
@@ -171,12 +217,19 @@ place surface anatomy is stated.
 - **Refused at render:** `surfaceHasUnsupportedComponent` still refuses any
   surface declaring an unregistered slot, by name, with the component id as a
   declared subject.
+- **Refused at execution:** the operation catalog carries the draft predicate;
+  the PostgreSQL interpreter evaluates create candidate plus update prior and
+  projected images, including the inherited parent check for line mutations.
+- **Affordances follow the same contract:** the renderer uses
+  `evaluateRegisteredOperationPrecondition` for Edit and update Save and emits
+  no update form at the direct URL when the current image refuses.
 
 **The honest limit.** There is **no static gate binding "every declared slot has
 a registered renderer."** The conformance checker reads compiled definitions and
 has no view of the web registry; the registry's slot keys are not exported. Such
-a gate would need `apps/web/src/component-registry.ts`, which is outside this
-packet's lease and is deliberately read here as authority rather than edited.
-**This is the residual, and it is the shape of the original defect:** what this
-ADR fixes is observed per surface, and what would prevent the next instance is
-not yet mechanized. It is filed as future work rather than left implicit.
+a gate would need `apps/web/src/component-registry.ts`. The round-1 bridge edits
+that registry only to make transaction update affordances predicate-aware; it
+does not build the cross-registry static gate. **This is the residual, and it is
+the shape of the original defect:** what this ADR fixes is observed per surface,
+and what would prevent the next instance is not yet mechanized. It is filed as
+future work rather than left implicit.

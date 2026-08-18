@@ -4,10 +4,10 @@ Date: 2026-08-17
 Base: `39fef80c21db604e54c0ffe3c7c55b8f2c32993b` (current `origin/main`; fetched
 and confirmed unmoved before cutting)
 Branch: `packet/inventory-form-anatomy`
-Tier: Behavioral
-Status: **FROZEN for review at `e9f81fc`.** Stop 1 (Docker unavailable) was
-cleared by the user on 2026-08-17; the browser evidence, the negative control
-and every blast-radius gate have since run green.
+Tier: Critical (raised by the round-1 reachability finding)
+Status: **REVISION IN PROGRESS after REVISE at `860c9ca`.** The five-slot
+anatomy remains accepted; the correction makes the newly reachable transaction
+lifecycle state-aware.
 
 ## Packet definition
 
@@ -54,10 +54,9 @@ found that the obvious answer is *not* the conformant one:
   without it is inert before any renderer runs.
 - `commandBar` was included deliberately. `renderSections` emits a fallback Save
   when no `commandBar` slot is present, so a save control exists either way;
-  declaring `commandBar` puts it in the grammar's slot for a primary action, and
-  `surfaceSupportsRuntimeIntent`'s `record` branch requires a form supporting
-  create or update, so a working form is also what re-admits archive/restore on
-  the paired `detail` surface.
+  declaring `commandBar` puts it in the grammar's slot for a primary action.
+  `sections` is what makes the related form operable and thereby re-admits New,
+  Edit, archive and restore on the paired surfaces.
 - **Is a slot wrong for these surfaces?** Checked against `ux-grammar`, and no.
   An inventory transaction is a posted document, and the grammar's rules for
   posted documents govern *inline grid editing* and *confirm weight on posting* —
@@ -69,11 +68,12 @@ found that the obvious answer is *not* the conformant one:
   that. It is **not** declared, because no `record:childTables` renderer is
   registered and declaring it would reproduce this defect. Filed, not taken.
 
-**Question 2 — what happens to `activity`? It is removed.** The trap was the
-third option and it was refused on the record that names it: the G2-composition
-program review found that **the language cannot express "declared, intentionally
-unregistered"**, so a declared-unregistered slot is indistinguishable from this
-defect and shipping one re-arms it. Registering a renderer is a different packet —
+**Question 2 — what happens to `activity`? It is removed.** The declaration is
+accepted through authoring and compilation, then explicitly causes a late
+whole-surface runtime refusal; it is not ADR-0041's accepted-and-ignored state.
+The G2-composition program review nevertheless found that **the language cannot
+express "declared, intentionally unregistered"**, so retaining the declaration
+re-arms the defect. Registering a renderer is a different packet —
 the activity rail renders trust-substrate change documents, which is a second
 data binding on the surface, and `ux-grammar` makes a second binding the explicit
 trigger to re-rule which unit resolves. Removal is expressible **because the
@@ -153,10 +153,17 @@ normalized definition changed, and both sides sit at v2.
 **`check:app-release` exits 0**, which is the observation that every prior entry
 still reproduces under its own recorded profile (ADR-0047 §5).
 
+**Round-1 correction: 11 → 12 entries.** Entries 1–11 remain byte-unchanged;
+entry 11 retains root `309a03427bc1a5e9…` and input-definition digest
+`2c3f177d0baf9303…`. Entry 12 records the new transaction operation predicates:
+profile `northstar.compiler-semantic/v2`, root `ee788f8c75c9857…`,
+input-definition digest `15a000615b8f2ed1…`.
+
 ## Bridges taken
 
-Both were pre-authorized ("any test, fixture or golden your regeneration makes
-red, bounded to preserving each assertion's meaning"). **Count: two.**
+The first two were pre-authorized ("any test, fixture or golden your
+regeneration makes red, bounded to preserving each assertion's meaning"). The
+third is the bounded round-1 review bridge. **Count: three.**
 
 1. **`test/architecture/surface-grammar-conformance.baseline.ts`** — Inventory
    `124 → 104`, **measured by compiling the module**, not derived. The recorded
@@ -176,11 +183,47 @@ red, bounded to preserving each assertion's meaning"). **Count: two.**
    its predecessor), with a non-vacuity guard that the index exceeds zero. Every
    assertion's meaning is preserved; the pair is now stable for all future
    entries.
+3. **`apps/web/src/component-registry.ts` and
+   `test/postgres/inventory-terminal-state.test.ts`** — granted after the
+   Critical review finding, bounded to compiled-precondition-aware Edit/Save
+   affordances and executed transaction lifecycle admission twins. No new
+   predicate language, surface-runtime input, picker or detail-anatomy work was
+   taken. The empirical branch sweep found both paths free.
 
 **No other domain module needed the identical fix.** The enumeration was run:
 `grep -rn "'breadcrumb'" packages/domain/src/` returns catalog, location and
 party all already authoring the five working slots, and `inventory` alone
 authoring the broken shape. **Count of other modules changed: zero.**
+
+## Review round 1 — REVISE, anatomy upheld and lifecycle activation corrected
+
+The fresh review of frozen candidate `860c9ca` returned **REVISE** with one
+Critical defect. The five registered slots were judged correct and must not be
+reverted. The defect was the operation set the repaired `sections` slot made
+reachable: a posted `inventory_transaction` still exposed generic Edit, its
+state field could be patched back to draft, and Post then emitted another
+movement set because replay identity includes the later source revision.
+
+The correction uses ADR-0034's existing carrier rather than inventing a state
+machine:
+
+- create requires a draft candidate;
+- update requires both prior and projected images to remain draft;
+- archive/restore carry no transaction-state predicate because they preserve
+  state and cannot make Post reappear; independent relation restrictions still
+  apply;
+- parent-scoped transaction lines inherit the transaction update predicate;
+- Edit and update Save use the compiled predicate evaluator already used for
+  commands, and a direct posted-record form URL emits no update form; and
+- the browser journey captures a valid draft update form before posting, posts
+  once, attempts that operation-addressed rewind, then observes revision 2,
+  Post/Edit absent, one movement and on-hand 8 unchanged.
+
+The review also corrected two explanations. A declared `activity` slot is
+accepted through compilation and then explicitly refuses the whole surface at
+runtime; it is not ADR-0041's accepted-and-ignored state. And `sections`, not
+`commandBar`, is what makes the related form operable and re-admits lifecycle
+affordances.
 
 ## Filed and left
 
@@ -199,16 +242,18 @@ authoring the broken shape. **Count of other modules changed: zero.**
   of the residual conformance debt on every module's Record surfaces.
 - **There is no static gate binding "every declared slot has a registered
   renderer."** The conformance checker reads compiled definitions and has no
-  view of the web registry, whose slot keys are not exported. Building one needs
-  `apps/web/src/component-registry.ts`, deliberately read as authority here and
-  not edited. **This is the residual and it has the shape of the original
-  defect** — the fix is observed per surface, the prevention is not mechanized.
+  view of the web registry, whose slot keys are not exported. The review bridge
+  edits `component-registry.ts` only for predicate-aware mutation affordances;
+  it does not build that cross-registry gate. **This is the residual and it has
+  the shape of the original defect** — the fix is observed per surface, the
+  prevention is not mechanized.
 
 ## Gate results, honest
 
-Run at the frozen SHA. **The full matrix is NOT run yet** — per `git-workflow`'s
-2026-08-14 ruling it runs once, after review converges, at the SHA that
-integrates.
+Initial run at reviewed SHA `860c9ca`. **The full matrix is NOT run yet** — per
+`git-workflow`'s 2026-08-14 ruling it runs once, after review converges, at the
+SHA that integrates. The revised-candidate focused and blast-radius table is
+recorded separately below once frozen.
 
 | gate | result |
 |---|---|
