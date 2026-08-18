@@ -4,8 +4,8 @@ Date: 2026-08-18
 Base: `22154a7db5f0c25d13fe33d133207bce6af63b12` (`origin/main`, verified before cut)
 Branch: `packet/scoped-create-operand-impl`
 Tier: Critical
-Status: active; implementation and mutation evidence complete, prescribed gates
-and manual checkpoint pending
+Status: evidence-ready; implementation, mutation evidence, prescribed gates and
+manual checkpoint complete; external review, full matrix and integration pending
 
 ## Packet definition
 
@@ -134,8 +134,11 @@ Inherited premises, not newly proven in isolation:
 
 ## Bridges and limits
 
-The pre-authorized test-registration bridge added one root package script for
-the committed mutation runner. No policy-seam bridge was taken.
+Two pre-authorized test bridges were used: one root package script registers the
+committed mutation runner, and the web contract census advanced from 29 to 30
+when the new subject-bearing message code was added. The first contracts run
+reported that exact stale count; no semantic assertion was weakened. No
+policy-seam bridge was taken.
 
 Valid future work, not packet defects:
 
@@ -171,7 +174,23 @@ Observed output:
 }
 ```
 
-The managed dev container stopped cleanly after the observation. Final
-prescribed gates remain pending. No full matrix is run before external review.
-Review is executed by the user in a separate online seat, never by this writer
-lane.
+The managed dev container stopped cleanly after the observation.
+
+The exact executable tip `bda817ae3ce53a2a2bb9289bb198816cb74d351f`
+passed the prescribed sequence after the contract-census bridge:
+
+- `pnpm typecheck`, `pnpm lint`, `pnpm format` — pass;
+- `pnpm test:postgres` — 203 passed, 0 failed;
+- `pnpm test:browser` — 90 passed, 0 failed;
+- `pnpm test:integration` — 140 passed, 0 failed; and
+- `pnpm test:contracts` — 16 passed, 0 failed.
+
+The final review candidate adds only these evidence records above that executable
+tip. No full matrix is run before external review. Review is executed by the
+user in a separate online seat, never by this writer lane.
+
+The program-review trigger is not run at this freeze because the application is
+not yet cleanly integrated, which is an explicit anti-trigger. Re-evaluate it
+immediately after acceptance and integration: this packet establishes the first
+user-visible legal-entity-scoped write immediately before relation and PUR
+fan-out, so the first-end-to-end-slice trigger is likely due then.
