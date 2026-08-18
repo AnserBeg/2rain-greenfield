@@ -532,3 +532,20 @@ reading that measures and the 73.9% one that declined.
 has settled, re-verify the registry is still empty at that moment, and report both
 figures with the decision. **A marginal reading is a reason to sample again, not a
 reason to spend a run.**
+
+## ADR NUMBER COLLISION — ruled 2026-08-13
+
+**Two live lanes minted `ADR-0054` independently.** `inventory-form-anatomy` wrote
+`ADR-0054-a-record-form-declares-the-anatomy-that-renders-it.md`;
+`scoped-create-operand` wrote `ADR-0054-legal-entity-create-scope-is-gateway-issued.md`.
+Neither was wrong to: `0054` was the next free number when each looked, and nothing
+reserves a number.
+
+**Ruling: `inventory-form-anatomy` keeps `ADR-0054`. `scoped-create-operand` renumbers
+to `ADR-0055`.** The anatomy packet integrates and the design probe never does, so the
+integrating packet keeps the number it has already gated tests and records against;
+renumbering a preserved probe costs one file rename and a reference sweep.
+
+**The durable fix is not a convention, it is that a number nobody reserves will
+collide again the moment two lanes run.** Two lanes is now normal here. Filed as a
+queue row rather than solved by asking lanes to be careful.

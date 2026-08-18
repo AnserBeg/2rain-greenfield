@@ -1,7 +1,12 @@
 # ADR-0050: `transitionStateEffect` is honoured, and it decides `stateMachines` with it
 
 Date: 2026-08-08
-Status: proposed by packet `5g3-sm`; ratified when that packet is accepted
+Status: **ratified** — `5g3-sm-impl` was accepted (ledger; reviewed `80b890bb`, matrix `8a806d7b`) and the
+gateway now carries four `transitionStateEffect` references where it previously carried zero.
+Status line corrected 2026-08-13; it had still read *"ratified when that packet is
+accepted"* after acceptance, while `purchasing-sales-v1-plan.md` §7.11 already recorded
+the ratification. **This is the stale-authority shape `PS-2` flagged on ADR-0049 —
+an ADR whose own status line disagrees with the plan that governs it.**
 Tier: Critical (it decides how every business document changes state)
 
 ## Context
