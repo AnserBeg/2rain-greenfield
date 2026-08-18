@@ -10,7 +10,8 @@ Status: **ACCEPTED.** Reviewed candidate
 `56eb2c7d4cfc82a308b1f135fff65a9b0a663142`; integrated by the required
 packet-to-main `--no-ff` merge at
 `d048dc0625d5215bb3f6edd1000cd2aba3b4b820`. The integrated executable tree is
-byte-identical to the matrix-green tree.
+byte-identical to the matrix-green tree. Codex and independent user-run Fable
+max Critical reviews both returned PASS on the identical reviewed candidate.
 
 ## Packet definition
 
@@ -405,7 +406,7 @@ first office-worker write:
 remain explicit blockers. The first-end-to-end-slice trigger becomes live when
 those compose into a real write, before any module fan-out.
 
-## Review round 2 and acceptance
+## Critical reviews and acceptance
 
 The fresh Critical confirm reviewed frozen candidate
 `9d478e4a3e18f5f48a5e92baa866fd6e0f39ab01` and returned **PASS**: all eleven
@@ -417,6 +418,12 @@ accepted in this record:
   rendering short-circuit;
 - the literal `124 -> 104` movement is 30 violations removed and 10 added,
   net 20. The checked-in wording "two fewer missing slots" remains accurate.
+
+The user then ran the bounded Fable max Critical confirmation against the same
+candidate and reported **PASS**. Only the verdict was supplied in this thread,
+so this record adds no unreported findings or claims. No executable content
+changed between the two reviews; together, the Codex and Fable results complete
+the required Critical review sequence.
 
 After review converged, the exact reviewed packet was merged into a staged
 integration tree at `56eb2c7d4cfc82a308b1f135fff65a9b0a663142` and the full
