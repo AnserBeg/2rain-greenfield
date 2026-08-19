@@ -6,10 +6,9 @@ import {
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
 } from '../../../packages/compiler/src/protocol.js';
 import {
-  assertPinnedOperationDefinition,
-  parsePinnedOperationInputContract,
+  OPERATION_CATALOG_PAYLOAD_VERSION,
+  parsePinnedOperationCatalog,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
-import type { PinnedOperationEffectKind } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type {
   RegisteredOperationDefinition,
   RegisteredOperationInputContract,
@@ -52,8 +51,6 @@ export const COMPILED_FIELD_KINDS = Object.freeze([
   'textFieldType',
   'timeFieldType',
 ] as const);
-const operationCatalogPayloadVersion =
-  'northstar.operation-catalog-payload/v0-provisional' as const;
 const slotsByArchetype = Object.freeze({
   builder: Object.freeze([
     'modeSwitch',
@@ -455,24 +452,27 @@ export function readCompiledSurfaceDataBinding(
   }
 
   const projection = view.projections.operation;
-  const payload = projection.payload;
-  if (
-    projection.payloadSchemaVersion !== operationCatalogPayloadVersion ||
-    !isRecord(payload) ||
-    payload.kind !== 'operationCatalogPayload' ||
-    payload.schemaVersion !== operationCatalogPayloadVersion ||
-    !Array.isArray(payload.operations)
-  ) {
-    throw invalidBinding('pinned operation catalog has an invalid envelope');
+  if (projection.payloadSchemaVersion !== OPERATION_CATALOG_PAYLOAD_VERSION) {
+    throw invalidBinding(
+      'pinned operation projection has an invalid payload version',
+    );
+  }
+  let operationCatalog: readonly RegisteredOperationDefinition[];
+  try {
+    operationCatalog = parsePinnedOperationCatalog(projection.payload);
+  } catch (error) {
+    throw invalidBinding(
+      `pinned operation catalog is invalid: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   const byOperationId = new Map<string, CompiledSurfaceOperationBinding>();
   const intentCount = new Map<SurfaceOperationIntent, number>();
   let relationInputs: readonly CompiledSurfaceRelationInput[] | null = null;
-  let sawCreate = false;
   let authorityUnavailable = false;
-  const seenOperationIds = new Set<string>();
-  for (const value of payload.operations) {
+  for (const value of operationCatalog) {
     const operation = parseOperationBinding(value);
     const entityId =
       operation.entityId ??
@@ -483,7 +483,6 @@ export function readCompiledSurfaceDataBinding(
     // property of the entity, and an update form must disclose that they are
     // frozen even where the create effect has been retired.
     if (operation.intent === 'create') {
-      sawCreate = true;
       // A create with NO contract carries no authority, so the entity's
       // authority is unavailable even though a create exists. `known` requires
       // that EVERY create declared one and that they agree.
@@ -512,15 +511,6 @@ export function readCompiledSurfaceDataBinding(
       );
     }
     intentCount.set(operation.intent, bound);
-    // Operation identities are keys here as well: `byOperationId` is a Map, so
-    // a repeat silently overwrites. The gateway refuses a duplicated operation
-    // id catalog-wide; this reader must not disagree with it.
-    if (seenOperationIds.has(operation.operationId)) {
-      throw invalidBinding(
-        'pinned operation catalog repeats an operation identity',
-      );
-    }
-    seenOperationIds.add(operation.operationId);
     byOperationId.set(
       operation.operationId,
       Object.freeze({
@@ -552,7 +542,7 @@ export function readCompiledSurfaceDataBinding(
     ),
     query,
     relationInputs:
-      !sawCreate || authorityUnavailable || relationInputs === null
+      authorityUnavailable || relationInputs === null
         ? Object.freeze({ status: 'unavailable' as const })
         : Object.freeze({ relationInputs, status: 'known' as const }),
   });
@@ -1071,7 +1061,7 @@ function parseTemporalField<K extends CompiledTemporalKind>(
   }) as CompiledTemporalField<K>;
 }
 
-function parseOperationBinding(value: unknown): {
+function parseOperationBinding(value: RegisteredOperationDefinition): {
   readonly capabilityId: string | null;
   readonly confirmation: RegisteredOperationDefinition['confirmation'];
   readonly entityId: string | null;
@@ -1088,67 +1078,21 @@ function parseOperationBinding(value: unknown): {
     RegisteredOperationSystemInput['argumentKey'] | null;
   readonly tier: RegisteredOperationDefinition['tier'];
 } {
-  // The COMPLETE pinned-operation authority, run before this reader interprets
-  // anything. Without it the browser validated only the slice it consumed and
-  // bound catalogs the gateway refuses -- `fields: null`, absent
-  // `writableFieldIds`, an unknown top-level key, a non-string closed argument
-  // key. One artifact must not have two interpretations.
-  try {
-    assertPinnedOperationDefinition(value);
-  } catch (error) {
-    throw invalidBinding(
-      `pinned operation catalog contains an invalid operation: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-  if (
-    !isRecord(value) ||
-    (value.confirmation !== 'none' && value.confirmation !== 'humanRequired') ||
-    (value.lifecycle !== 'active' && value.lifecycle !== 'retired') ||
-    (value.tier !== 'o0' && value.tier !== 'o1') ||
-    !isNonBlank(value.operationId) ||
-    !isNonBlank(value.readBackQueryId) ||
-    !isRecord(value.effect) ||
-    !isRecord(value.precondition)
-  ) {
-    throw invalidBinding(
-      'pinned operation catalog contains an invalid operation',
-    );
-  }
-  // Read through a plain record view: the shared authority above has already
-  // narrowed `value` to a discriminated union, so reaching for the arm this
-  // reader wants is cleaner than re-narrowing at every access.
-  const effect = value.effect as Record<string, unknown>;
+  // The whole catalog was admitted before entity selection, so this reader
+  // only interprets the shared authority's discriminated result. It keeps no
+  // envelope, identity, or per-definition validator of its own.
+  const effect = value.effect;
   const capabilityEffect = effect.kind === 'registeredCapabilityEffect';
-  const entity = isRecord(effect.entity) ? effect.entity : null;
-  const capability = isRecord(effect.capability) ? effect.capability : null;
-  const intent = capabilityEffect
-    ? 'command'
-    : operationIntent(effect.kind as string);
+  const intent = capabilityEffect ? 'command' : operationIntent(effect.kind);
   if (!intent) {
     throw invalidBinding(
       'pinned operation catalog contains a destructive or unknown effect',
     );
   }
-  // Tier follows the EFFECT, not the intent. A capability command is o1
-  // because ADR-0038 binds it there structurally; a transition is a record
-  // effect and stays o0, and both present as `command`. Keying this check on
-  // the intent instead would refuse the transition for being what it is.
-  if (
-    (capabilityEffect &&
-      (value.tier !== 'o1' ||
-        !capability ||
-        !isNonBlank(capability.targetId))) ||
-    (!capabilityEffect &&
-      (value.tier !== 'o0' || !entity || !isNonBlank(entity.targetId)))
-  ) {
-    throw invalidBinding('pinned operation effect does not match its tier');
-  }
   return {
-    capabilityId: capabilityEffect ? String(capability!.targetId) : null,
+    capabilityId: capabilityEffect ? effect.capability.targetId : null,
     confirmation: value.confirmation,
-    entityId: capabilityEffect ? null : String(entity!.targetId),
+    entityId: capabilityEffect ? null : effect.entity.targetId,
     inputFields:
       value.inputContract === undefined
         ? null
@@ -1168,22 +1112,13 @@ function parseOperationBinding(value: unknown): {
       Record<string, RuntimeViewContract.ImmutableJsonValue>
     >,
     readBackQueryId: value.readBackQueryId,
-    relationInputs: parseRelationInputs(
-      value.inputContract,
-      value.effect.kind as PinnedOperationEffectKind,
-    ),
+    relationInputs: parseRelationInputs(value.inputContract),
     systemInputArgumentKey:
       value.inputContract?.systemInput?.argumentKey ?? null,
     tier: value.tier,
   };
 }
 
-/**
- * Delegates to the operation gateway's parser rather than reimplementing it. An
- * independent reader here is exactly how a browser and a gateway drift into
- * admitting different artifacts, which is a defect this seam has already had
- * once.
- */
 /**
  * Returns `null` when the operation declares NO input contract at all, which is
  * a legitimate compiled state: the projection emits `inputContract` only for the
@@ -1192,21 +1127,19 @@ function parseOperationBinding(value: unknown): {
  * cannot support, and it is what re-collapsed unknown into none once already.
  */
 function parseRelationInputs(
-  inputContract: unknown,
-  effectKind: PinnedOperationEffectKind,
+  inputContract: RegisteredOperationInputContract | undefined,
 ): readonly CompiledSurfaceRelationInput[] | null {
   if (inputContract === undefined) return null;
+  const carriesTargets =
+    inputContract.schemaVersion === 'northstar.module-input-contract/v3' ||
+    inputContract.schemaVersion === 'northstar.module-input-contract/v4';
   return Object.freeze(
-    parsePinnedOperationInputContract(
-      inputContract,
-      effectKind,
-      invalidBinding,
-    ).map((relation) =>
+    inputContract.relationInputs.map((relation) =>
       Object.freeze({
         archiveBehavior: relation.archiveBehavior,
         relationId: relation.relationId,
         required: relation.required,
-        targetEntityId: relation.targetEntityId,
+        targetEntityId: carriesTargets ? relation.targetEntityId! : null,
       }),
     ),
   );

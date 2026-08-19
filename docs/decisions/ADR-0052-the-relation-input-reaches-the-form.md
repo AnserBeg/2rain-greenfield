@@ -1,15 +1,16 @@
 # ADR-0052: A relation input reaches the form, and is create-only by declaration
 
 Date: 2026-08-10
-Status: accepted — ruled by the orchestrator before `ux-reference-picker`, which
-implements it. The create-only limit and its UI disclosure were ruled on
-2026-08-09 in `current-plan.md` row `relation-update-fork`; this ADR records the
-wire that makes the create half reachable and carries that ruling into a
-decision record.
+Status: accepted — ruled by the orchestrator before `ux-reference-picker`, then
+amended 2026-08-19 by `relation-scoped-enumeration` after the first two attempts
+proved that unscoped enumeration did not close the first-party case. The
+create-only limit and its UI disclosure were ruled on 2026-08-09 in
+`current-plan.md` row `relation-update-fork`; this ADR records the wire and the
+scoped enumeration that make the create half reachable.
 Tier: Critical (it changes compiled operation-contract output)
 
-> **PARTIALLY SATISFIED — updated 2026-08-12 by `relation-contract-integrity`,
-> packet 1 of 3 from the `ux-reference-picker` re-charter.**
+> **SATISFIED — updated 2026-08-19 by `relation-scoped-enumeration`, which also
+> absorbs the blocked `relation-contract-integrity` remainder.**
 >
 > **Settled by packet 1 (§1, §2, §3, §4's enforcement):** the contract carries
 > the target; one EFFECT-AWARE parser owns every relation rule and both the
@@ -19,19 +20,18 @@ Tier: Critical (it changes compiled operation-contract output)
 > authority reported explicitly rather than collapsed into an empty list. Each
 > is backed by a negative control verified to red alone.
 >
-> **NOT yet satisfied, and owed by `relation-scoped-enumeration` (packet 2):**
+> **Settled by the final packet (§5-§7):** the current legal-entity selection is
+> carried into each target list under that list's own declared operand; the
+> target query therefore offers same-scope records only. `hasMore` is the
+> completeness boundary, `truncatedByMaximum` is not an independent refusal,
+> optional targetless relations render nothing, and every named enumeration
+> refusal carries the relation id. The form uses a native `<select>`, and update
+> forms disclose the create-only freeze.
 >
-> - **§7's claim that a picker caller cannot supply a legal-entity scope is
->   FALSE**, and until packet 2 lands, **no picker is rendered at all**. Every
->   first-party inventory target list is legal-entity-scoped, so a picker that
->   excludes scoped lists leaves `inventory_transaction_line_form`,
->   `stock_count_form` and `stock_count_line_form` uncreatable. Packet 1
->   deliberately ships **no renderer**, so the ADR's consequence — that a module
->   with a required relation becomes web-creatable — is **not yet true**.
-> - §5's refusal behaviour and §6's control shape are packet 2's to implement.
->
-> Tracked as `relation-picker-rechartered` in `docs/execution/current-plan.md`.
-> The blocked first attempt is preserved at tag `ux-reference-picker-reviewed-r2`.
+> The packet also closes the remaining catalog-authority split: both the browser
+> and operation gateway now admit the complete catalog through one parser before
+> selecting an entity or operation. Extra root keys and cross-entity operation-id
+> collisions therefore receive the same decision for the same reason.
 
 ## Context
 
@@ -136,6 +136,14 @@ relations-are-create-only, v3/v4-are-create-only, the `systemInput` create-only
 rule, and the `relations` closed-key biconditional. Both the gateway and the
 browser's surface contract call it and consume its result.
 
+**The complete catalog has one authority too.**
+`parsePinnedOperationCatalog(payload)` owns the closed root, validates every
+definition, and enforces operation-id uniqueness over the whole payload before
+any consumer selects an entity. The browser no longer keeps a second envelope
+check or a post-filter identity set. This ordering matters: an extra root key or
+an operation-id collision on another entity makes the whole pinned artifact
+malformed even though neither changes the selected surface's apparent slice.
+
 **Two earlier shapes were wrong, and the second is the subtler one.** The first
 exported a parser that validated a strict SUBSET of the gateway's checks while
 leaving the gateway's own loop in place, so the browser accepted five
@@ -239,16 +247,24 @@ picker. **Corrected 2026-08-10 after review**, which rejected the original
 routing of this to `ux-list-usability` as future UX work; it is a correctness
 defect in the write path and belongs here.
 
-**An OPTIONAL relation with no resolvable target renders nothing**, rather than a
-`<select>` whose only choice is `None`. Under the adopted profile no relation
-carries a target, so that is the normal case until v2 adoption, and rendering an
-inert control there would reintroduce exactly the defect this ADR removes.
+`hasMore` is the boundary because it observes an omitted candidate.
+`truncatedByMaximum` describes how the requested page size was bounded and does
+not independently prove an omission, so a result with `hasMore: false` remains
+complete when that flag is true. A complete empty list is complete too: the
+required picker renders its unselected “Choose…” state and the optional picker
+renders `None`; neither is misreported as an enumeration failure.
 
-The refusal reuses `QUERY_UNSUPPORTED`, because the missing thing genuinely is a
-semantic data capability. **The reuse is declared, not silent:** that sentence
-does not name *which* capability is absent, which is worse for an operator than a
-dedicated code would be. Routed as `relation-refusal-unnamed` rather than fixed
-here, to keep this ADR's diff on the wire.
+**An OPTIONAL relation with no resolvable target renders nothing**, rather than a
+`<select>` whose only choice is `None`. Generation-1 historical artifacts may
+still carry that shape; rendering an inert control for them would reintroduce
+exactly the defect this ADR removes. The current profile-v2 first-party required
+relations all carry targets.
+
+Named enumeration failures use the dedicated blocking message
+`RELATION_ENUMERATION_UNAVAILABLE`, whose subject is the relation id. An
+operator therefore sees which relation prevents the form from rendering rather
+than an unattributed “Save unavailable.” A wholly unavailable entity relation
+authority is still not read as a known empty list; the surface refuses instead.
 
 ### 6. No scripted control
 
@@ -260,30 +276,48 @@ a licence to add a combobox.
 ### 7. One picker, generalised — not a second one
 
 `pickerListSurfaceFor` and `recordPickerOptions` are extracted from the existing
-legal-entity context bar and serve both callers. The legal-entity control's
-exclusion of legal-entity-scoped target lists generalises unchanged: such a list
-refuses without a scope argument the picker cannot supply, so admitting it would
-render an empty control rather than a working one.
+legal-entity context bar and serve both callers.
+
+**AMENDED 2026-08-19: the former scoped-list exclusion was false.** The caller
+already has the current legal-entity selection. For a scoped target list it
+reissues that selection under the TARGET query's declared operand parameter id,
+which need not be the form query's parameter id. The query gateway then applies
+the existing sealed Q1-P5 read scope. This means a scoped child may select only a
+parent visible in the same legal entity. It does **not** make the selected legal
+entity a sealed write capability: on create it remains ADR-0055's untrusted,
+permission-authorized system operand.
+
+If the form itself requires legal-entity scope and none is selected, its existing
+`QUERY_LEGAL_ENTITY_SCOPE_REQUIRED` refusal runs before picker enumeration. If a
+scoped target is reached without exactly one selection (including a future
+unscoped form targeting a scoped entity), that relation refuses by id; the
+runtime never guesses a scope.
 
 Requiring **exactly one** candidate list surface also generalises: two lists over
 one entity is an authoring ambiguity the runtime must not resolve by picking.
 
+For a target set beyond the declared list maximum, this generation stops at the
+observed `hasMore` refusal; it does not chase cursors invisibly or present a
+prefix. The bounded follow-on path belongs to `ux-list-usability`: a
+server-rendered, non-operation relation-search submission carries the current
+validated form strings and relation selections, invokes one target-list page at
+its declared maximum, and returns the form with opaque previous/next cursors.
+Search and paging never invoke Save, never manufacture list arguments, and add
+no scripted control. Until that path exists, refusing an incomplete set is the
+only honest behaviour.
+
 ## Consequences
 
-- A module with a required relation is creatable from the web at profile v2.
+- A module with a required relation is creatable from the web on the current
+  profile-v2 release, including the four first-party scoped cases.
 - The compiled operation contract gains two version constants and one key.
-- Historical lineage is untouched; the shipped app is unchanged until v2 adoption.
-- The v2 adoption packet now carries two accumulated fields, not one.
+- Historical lineage before profile-v2 adoption remains untouched.
 - `updateRecordEffect` still cannot change a relation, and now says so on screen.
 
 ## What this ADR does not decide
 
-- **Whether the form wire should carry typed JSON or validated strings.** Relation
-  ids travel fine as strings because `parseMutationInput` reads them through
-  `uuidRecord`. Field values do not — `validateFieldValue` demands a native
-  boolean for `booleanFieldType` alone, and an empty control posts `""` which
-  every non-text kind refuses. Both are filed as `form-write-untyped-wire` and
-  `form-empty-means-nothing` and neither is touched here.
-- **When profile v2 is adopted.** That is a separate packet, per ADR-0047 §2.
+- **The form-wire representation.** ADR-0053 has since ruled validated strings
+  with explicit empty intent. Relation ids already travel natively as strings
+  and need no coercion.
 - **Whether a relation should ever be updatable.** §4 declines to buy it now; it
   does not rule it out.

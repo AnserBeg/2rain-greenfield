@@ -40,7 +40,7 @@ export const SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION =
 export type TrustedInvocationChannel =
   'AGENT' | 'API' | 'IMPORT' | 'SYSTEM' | 'UI' | 'WORKFLOW';
 
-const OPERATION_CATALOG_PAYLOAD_VERSION =
+export const OPERATION_CATALOG_PAYLOAD_VERSION =
   'northstar.operation-catalog-payload/v0-provisional' as const;
 const OPERATION_POLICY_INPUT_VERSION =
   'northstar.semantic-operation-policy-input/v1' as const;
@@ -949,7 +949,22 @@ function readPinnedOperationCatalog(
       'pinned operation projection has an invalid family or version',
     );
   }
-  const payload = projection.payload;
+  return parsePinnedOperationCatalog(projection.payload);
+}
+
+/**
+ * The complete operation-catalog authority shared by every consumer.
+ *
+ * A definition parser is not a catalog parser: the catalog root is closed and
+ * operation identity is unique across the WHOLE payload, including entities a
+ * particular surface will never bind. Keeping those two rules at each call
+ * site let the browser accept an extra root key and a cross-entity identity
+ * collision that the gateway refused. Callers may select only after this
+ * function has admitted the complete payload.
+ */
+export function parsePinnedOperationCatalog(
+  payload: unknown,
+): readonly RegisteredOperationDefinition[] {
   if (!isRecord(payload)) {
     throw new MalformedPinnedOperationCatalogError(
       'pinned operation catalog must be an object',
@@ -1504,11 +1519,13 @@ function assertOperationInputContract(
     !Array.isArray(value.fields) ||
     !Array.isArray(value.relationInputs) ||
     !Array.isArray(value.writableFieldIds) ||
-    !value.closedArgumentKeys.every((entry) => typeof entry === 'string') ||
     !value.writableFieldIds.every((entry) => typeof entry === 'string')
   ) {
     throw invalid('pinned operation input contract has an invalid shape');
   }
+  // Element types inside `closedArgumentKeys` belong to the effect-aware
+  // authority below. Rechecking them here made that authority deletion-dead
+  // when the complete catalog parser called both functions in sequence.
   // Field identities are keys too: the provider builds a Map from them, so a
   // repeated fieldId silently discards every declaration but the last -- which
   // may disagree on kind, bounds, requiredness or normalization.
