@@ -4,11 +4,11 @@ Date: 2026-08-18
 Base: `22154a7db5cdae739cacaae2ea46771d805b20cf` (`origin/main`, verified before cut)
 Branch: `packet/scoped-create-operand-impl`
 Tier: Critical
-Status: evidence-ready and matrix-green; round 2 passed both external
+Status: accepted by required packet-to-main `--no-ff` merge `fa75076`; round 2 passed both external
 Critical arms at `ad7c6b8`, then the first full matrix found an unleased,
 unregistered manual mutation entrypoint; executable correction `2c747ed` passed
 both fresh narrow arms at identical candidate `ae6df65`; full matrix passed at
-`1a407a7`; packet-to-main `--no-ff` integration owed
+`1a407a7`; narrative freeze `1580b2a` is the merge's second parent
 
 ## Packet definition
 
@@ -267,6 +267,13 @@ lock. `origin/main` remained the packet base `22154a7`, so the required
 packet-to-main merge introduces the same executable tree the matrix measured.
 Review was executed by the user in separate online seats, never by this writer
 lane.
+
+Integration used `git merge --no-ff packet/scoped-create-operand-impl` in the
+required direction. Merge `fa75076d558effd01aa4b6d780e3f9bf1bc5b94d`
+has first parent `22154a7db5cdae739cacaae2ea46771d805b20cf` and second parent
+`1580b2a67e69c25ae84674cae919b3099a1ec9fd`. The executable diff from
+matrix SHA `1a407a7` to the merge is empty under git-workflow's exact narrative
+exclusions, so the reviewed matrix is the acceptance matrix.
 
 The program-review trigger is not run at this freeze because the application is
 not yet cleanly integrated, which is an explicit anti-trigger. Re-evaluate it
