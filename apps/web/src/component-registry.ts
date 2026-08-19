@@ -752,8 +752,12 @@ function renderSections(context: SurfaceComponentContext): string {
       'sections-slot',
     );
   }
+  const relationContent = renderRelationContent(context, record);
+  if (relationContent.refusal !== '') {
+    return slotPanel(context, relationContent.refusal, 'sections-slot');
+  }
   if (!operationAvailableForRecord(operation, record)) {
-    return slotPanel(context, '', 'sections-slot');
+    return slotPanel(context, relationContent.freeze, 'sections-slot');
   }
   const recordId = record?.recordId ?? randomUUID();
   const compatibilityFeedback = hasSurfaceSlot(context, 'titleStatus')
@@ -762,10 +766,6 @@ function renderSections(context: SurfaceComponentContext): string {
   const compatibilityCommand = hasSurfaceSlot(context, 'commandBar')
     ? ''
     : '<button type="submit">Save</button>';
-  const relationContent = renderRelationContent(context, record);
-  if (relationContent.refusal !== '') {
-    return slotPanel(context, relationContent.refusal, 'sections-slot');
-  }
   return slotPanel(
     context,
     `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context.surface, operation, record)}</div>${compatibilityCommand}</form></section>`,

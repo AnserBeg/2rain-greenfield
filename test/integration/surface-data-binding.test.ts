@@ -707,6 +707,7 @@ test('a capability command is artifact-bound, render-minted, and deliberately co
 
 const CHILD_FORM_SURFACE = `${FIXTURE_IDS.namespace}:surface.master_role_form`;
 const CHILD_CREATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_create`;
+const CHILD_UPDATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_update`;
 const REQUIRED_RELATION_ID = `${FIXTURE_IDS.namespace}:relation.master_role_parent`;
 
 test('a required relation renders a complete target list as a native picker', async () => {
@@ -1013,11 +1014,75 @@ test('relation inputs are visibly frozen on update forms', async () => {
     semanticGateways(policy, executor),
   );
   assert.match(rendered.html, /data-relation-freeze/u);
+  assert.match(rendered.html, /<form id="surface-record-form"/u);
+  assert.match(rendered.html, /<button type="submit">Save<\/button>/u);
   assert.match(
     rendered.html,
     new RegExp(`data-relation-id="${REQUIRED_RELATION_ID}"`),
   );
   assert.match(rendered.html, /cannot be changed here/u);
+  assert.doesNotMatch(
+    rendered.html,
+    new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
+  );
+});
+
+test('relation inputs stay visibly frozen when the update precondition does not hold', async () => {
+  const definition = ordinaryModuleV1();
+  assert.ok(Array.isArray(definition.operations));
+  const update = definition.operations.find(
+    (operation) => operation.operationId === CHILD_UPDATE_OPERATION,
+  );
+  assert.ok(update, 'the fixture must contribute a child update operation');
+  assert.equal(
+    update.precondition,
+    undefined,
+    'the refusal specimen must vary only the update precondition',
+  );
+  update.precondition = {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v3',
+      targetId: FIXTURE_IDS.fieldIds.childRole,
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'equals',
+    schemaVersion: 'v3',
+    value: {
+      kind: 'textValue',
+      schemaVersion: 'v3',
+      value: FIXTURE_IDS.optionIds.buyer,
+    },
+  };
+
+  const compiled = compileFixture(definition);
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const childRecordId = executor.seedValues(
+    tenantA,
+    { [FIXTURE_IDS.fieldIds.childRole]: FIXTURE_IDS.optionIds.owner },
+    FIXTURE_IDS.entityIds.child,
+  );
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}&record=${childRecordId}`,
+    semanticGateways(policy, executor),
+  );
+  assert.match(rendered.html, /data-relation-freeze/u);
+  assert.match(
+    rendered.html,
+    new RegExp(`data-relation-id="${REQUIRED_RELATION_ID}"`),
+  );
+  assert.match(rendered.html, /cannot be changed here/u);
+  assert.doesNotMatch(rendered.html, /<form id="surface-record-form"/u);
+  assert.doesNotMatch(rendered.html, />Save<\/button>/u);
   assert.doesNotMatch(
     rendered.html,
     new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
@@ -2035,13 +2100,14 @@ class InMemoryGenericExecutor
   seedValues(
     tenantId: string,
     values: Readonly<Record<string, ImmutableJsonValue>>,
+    entityId: string = FIXTURE_IDS.entityIds.parent,
   ): string {
     const recordId = randomUUID();
     this.tenantRecords(tenantId).set(
       recordId,
       Object.freeze({
         archived: false,
-        entityId: FIXTURE_IDS.entityIds.parent,
+        entityId,
         recordId,
         revision: 1,
         values: Object.freeze({ ...values }),
