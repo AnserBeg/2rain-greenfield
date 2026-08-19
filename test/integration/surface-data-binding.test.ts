@@ -711,7 +711,7 @@ const CHILD_UPDATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_u
 const REQUIRED_RELATION_ID = `${FIXTURE_IDS.namespace}:relation.master_role_parent`;
 
 function fixtureWithRefusingChildUpdate(): Record<string, unknown> {
-  const definition = ordinaryModuleV1();
+  const definition = fixtureWithChildFormAnatomy();
   assert.ok(Array.isArray(definition.operations));
   const update = definition.operations.find(
     (operation) => operation.operationId === CHILD_UPDATE_OPERATION,
@@ -1074,7 +1074,7 @@ test('a second candidate list surface refuses instead of choosing by order', asy
 });
 
 test('relation inputs are visibly frozen on update forms', async () => {
-  const compiled = compileFixture();
+  const compiled = compileFixture(fixtureWithChildFormAnatomy());
   const policy = new RecordingPolicy('ALLOW');
   const executor = new InMemoryGenericExecutor();
   const childRecordId = executor.seed(
@@ -1096,7 +1096,11 @@ test('relation inputs are visibly frozen on update forms', async () => {
   );
   assert.match(rendered.html, /data-relation-freeze/u);
   assert.match(rendered.html, /<form id="surface-record-form"/u);
-  assert.match(rendered.html, /<button type="submit">Save<\/button>/u);
+  assert.match(rendered.html, /data-platform-slot="record:commandBar"/u);
+  assert.match(
+    rendered.html,
+    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  );
   assert.match(
     rendered.html,
     new RegExp(`data-relation-id="${REQUIRED_RELATION_ID}"`),
@@ -1136,7 +1140,11 @@ test('relation inputs stay visibly frozen when the update precondition does not 
   );
   assert.match(rendered.html, /cannot be changed here/u);
   assert.doesNotMatch(rendered.html, /<form id="surface-record-form"/u);
-  assert.doesNotMatch(rendered.html, />Save<\/button>/u);
+  assert.match(rendered.html, /data-platform-slot="record:commandBar"/u);
+  assert.doesNotMatch(
+    rendered.html,
+    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  );
   assert.doesNotMatch(
     rendered.html,
     new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
@@ -1804,7 +1812,14 @@ test('unavailable relation authority remains named when the update precondition 
     /<form id="surface-record-form"/u,
     'unavailable relation authority must refuse rather than masquerade as no relations',
   );
-  assert.doesNotMatch(unavailableUpdate.html, />Save<\/button>/u);
+  assert.match(
+    unavailableUpdate.html,
+    /data-platform-slot="record:commandBar"/u,
+  );
+  assert.doesNotMatch(
+    unavailableUpdate.html,
+    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  );
   assert.doesNotMatch(
     unavailableUpdate.html,
     new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
