@@ -6,8 +6,8 @@ Branch: `packet/scoped-create-operand-impl`
 Tier: Critical
 Status: evidence-ready matrix-bridge revision; round 2 passed both external
 Critical arms at `ad7c6b8`, then the first full matrix found an unleased,
-unregistered manual mutation entrypoint; executable correction `2c747ed`
-requires a fresh narrow review before the matrix reruns
+unregistered manual mutation entrypoint; executable correction `2c747ed` passed
+both fresh narrow arms at identical candidate `ae6df65`; full matrix rerun owed
 
 ## Packet definition
 
@@ -112,8 +112,12 @@ returned PASS on identical candidate
 `ad7c6b8c6ac1e601bd1d93f09b5e89cefc13c984`. The first arm closed D-F with no
 new material defect; only the Codex arm supplied detailed findings. The later
 matrix bridge changes no product logic, ADR ruling, PostgreSQL specimen or
-mutation victim, but it changes executable package metadata and therefore owes
-a fresh narrow review at its new SHA.
+mutation victim. Fresh Codex and Fable confirmation arms both returned PASS on
+identical bridge candidate `ae6df65e785868792d2b71be86e4ce8ae0c189bf`:
+the `evidence:*` classification is honest, the exclusive lease spans the whole
+harness and its children, the victim tests remain CI-reachable through their
+ordinary suites, and all three architecture failures close without weakening
+their assertions. A-E CLOSED with no material finding.
 
 ## Direct generic execution — observed and accepted
 
@@ -239,9 +243,9 @@ The failed matrix token is retained exactly:
 FULL_MATRIX_FAILED rc=1 sha=ad7c6b8c6ac1e601bd1d93f09b5e89cefc13c984
 ```
 
-The matrix rerun waits for the fresh narrow review required by the executable
-package-script correction. Review is executed by the user in a separate online
-seat, never by this writer lane.
+Fresh Codex and Fable narrow reviews both passed identical candidate `ae6df65`.
+The full matrix rerun is now the remaining acceptance gate. Review was executed
+by the user in separate online seats, never by this writer lane.
 
 The program-review trigger is not run at this freeze because the application is
 not yet cleanly integrated, which is an explicit anti-trigger. Re-evaluate it
