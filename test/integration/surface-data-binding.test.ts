@@ -710,6 +710,36 @@ const CHILD_CREATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_c
 const CHILD_UPDATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_update`;
 const REQUIRED_RELATION_ID = `${FIXTURE_IDS.namespace}:relation.master_role_parent`;
 
+function fixtureWithRefusingChildUpdate(): Record<string, unknown> {
+  const definition = ordinaryModuleV1();
+  assert.ok(Array.isArray(definition.operations));
+  const update = definition.operations.find(
+    (operation) => operation.operationId === CHILD_UPDATE_OPERATION,
+  );
+  assert.ok(update, 'the fixture must contribute a child update operation');
+  assert.equal(
+    update.precondition,
+    undefined,
+    'the refusal specimen must vary only the update precondition',
+  );
+  update.precondition = {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v3',
+      targetId: FIXTURE_IDS.fieldIds.childRole,
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'equals',
+    schemaVersion: 'v3',
+    value: {
+      kind: 'textValue',
+      schemaVersion: 'v3',
+      value: FIXTURE_IDS.optionIds.buyer,
+    },
+  };
+  return definition;
+}
+
 test('a required relation renders a complete target list as a native picker', async () => {
   const compiled = compileFixture();
   const policy = new RecordingPolicy('ALLOW');
@@ -1028,34 +1058,7 @@ test('relation inputs are visibly frozen on update forms', async () => {
 });
 
 test('relation inputs stay visibly frozen when the update precondition does not hold', async () => {
-  const definition = ordinaryModuleV1();
-  assert.ok(Array.isArray(definition.operations));
-  const update = definition.operations.find(
-    (operation) => operation.operationId === CHILD_UPDATE_OPERATION,
-  );
-  assert.ok(update, 'the fixture must contribute a child update operation');
-  assert.equal(
-    update.precondition,
-    undefined,
-    'the refusal specimen must vary only the update precondition',
-  );
-  update.precondition = {
-    field: {
-      kind: 'fieldReference',
-      schemaVersion: 'v3',
-      targetId: FIXTURE_IDS.fieldIds.childRole,
-    },
-    kind: 'fieldComparisonPredicate',
-    operator: 'equals',
-    schemaVersion: 'v3',
-    value: {
-      kind: 'textValue',
-      schemaVersion: 'v3',
-      value: FIXTURE_IDS.optionIds.buyer,
-    },
-  };
-
-  const compiled = compileFixture(definition);
+  const compiled = compileFixture(fixtureWithRefusingChildUpdate());
   const policy = new RecordingPolicy('ALLOW');
   const executor = new InMemoryGenericExecutor();
   const childRecordId = executor.seedValues(
@@ -1683,9 +1686,9 @@ test('the browser refuses every contract the gateway refuses', async () => {
  * relations, and reporting `[]` there is a positive assertion the reader cannot
  * support -- indistinguishable from an entity whose create declares none.
  */
-test('an entity with no create operation reports unavailable, not empty', async () => {
+test('unavailable relation authority remains named when the update precondition does not hold', async () => {
   const policy = new RecordingPolicy('ALLOW');
-  const compiled = compileFixture();
+  const compiled = compileFixture(fixtureWithRefusingChildUpdate());
   const projections = runtimeProjections(compiled);
 
   const withoutCreate = structuredClone(projections.operation.payload) as {
@@ -1750,6 +1753,12 @@ test('an entity with no create operation reports unavailable, not empty', async 
     /<form id="surface-record-form"/u,
     'unavailable relation authority must refuse rather than masquerade as no relations',
   );
+  assert.doesNotMatch(unavailableUpdate.html, />Save<\/button>/u);
+  assert.doesNotMatch(
+    unavailableUpdate.html,
+    new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
+  );
+  assert.doesNotMatch(unavailableUpdate.html, /data-relation-freeze/u);
 
   // ADMISSION TWIN: with the create operation present the same tree is `known`,
   // so this cannot pass against a reader that always reports unavailable.
