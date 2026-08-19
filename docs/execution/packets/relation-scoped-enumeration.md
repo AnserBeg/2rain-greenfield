@@ -7,7 +7,7 @@ Branch: `packet/relation-scoped-enumeration-2`
 Prior stopped branch: `packet/relation-scoped-enumeration` at `fa83edb`
 Tier: Critical
 Status: **EVIDENCE READY.** The gated executable candidate is
-`edc41ae3c04c48743652b2bf2ee41c54cf5857b8`. The review target is the frozen
+`7c424fda109cacac5710cb9916f57798bdf193aa`. The review target is the frozen
 narrative descendant named in the writer handoff and verified on `origin`.
 Two fresh, independent Critical PASS arms on that identical target are owed
 before the one full matrix and required packet-into-main `--no-ff` merge.
@@ -22,6 +22,12 @@ relation semantics, or posted-transaction affordance rules.
 The lease was recorded in `docs/execution/lanes.md` in the branch's first commit,
 `f994727`. No compiler or provider path was taken. The old stopped branch was
 read as evidence and was not rebased or merged.
+
+While round 1 was under review, `main` advanced by docs-only commit `9d669a0`.
+The packet remains based on the current `origin/main` that existed when its fresh
+worktree was cut; the required integration step will preserve both histories by
+merging the packet into then-current `main` with `--no-ff` after review and the
+one full matrix.
 
 ## Reconstruction and corrected specimen map
 
@@ -92,8 +98,9 @@ refuses.
 
 Relations remain absent from update input. An update form now discloses each
 known relation under “Set at creation” and renders no relation control. The
-existing operation-precondition gate still decides whether Edit or update Save
-exists; this packet does not loosen the posted-transaction rule.
+existing operation-precondition gate still decides whether the update form and
+Save exist; this packet does not loosen the posted-transaction rule or rework
+the form page's title grammar.
 
 `RELATION_ENUMERATION_UNAVAILABLE` is a blocking slot diagnostic whose required
 subject is the relation id. A known enumeration problem no longer becomes an
@@ -128,9 +135,10 @@ supply a scoped target operand was false.
 
 The controls are committed and CI-reachable. The deletion executions below were
 temporary author-chosen mutations, restored after each run: **0 committed
-mutation harnesses, 21 ad-hoc deletion observations**. They are evidence about
-the writer's model, not a substitute for the fresh-naive review. The tree was
-clean at `edc41ae` before and after the sequence.
+mutation harnesses, 25 ad-hoc deletion observations**. They are evidence about
+the writer's model, not a substitute for the fresh-naive review. Every
+production/test mutation was restored before the gates at `7c424fd`; only the
+documentation recording that evidence remained uncommitted.
 
 | Deleted production check or carrier | Control that went red | Observed discriminator |
 |---|---|---|
@@ -138,6 +146,10 @@ clean at `edc41ae` before and after the sequence.
 | `enumeration.hasMore` refusal | completeness integration | incomplete prefix rendered instead of refusal |
 | exact-one candidate cardinality | ambiguous-list integration | form rendered after choosing the first list |
 | update freeze rendering call | update-freeze integration | `data-relation-freeze` absent |
+| precondition-false freeze carrier | precondition-false update integration | `data-relation-freeze` absent while the form remained suppressed |
+| early unavailable-authority refusal return | unavailable-authority plus precondition-false integration | exact `QUERY_UNSUPPORTED` diagnostic disappeared into an empty sections slot |
+| update availability return disabled | precondition-false update integration | update form and Save rendered despite the refusing predicate |
+| update availability return broadened to every record | eligible-update admission twin | an eligible update lost its form and Save action |
 | unavailable-authority guard | absent-authority integration | wrong `COMPONENT_RENDER_FAILED` instead of `QUERY_UNSUPPORTED` |
 | catalog root `assertExactKeys` | whole-catalog agreement | both consumers accepted the extra root key |
 | catalog-wide duplicate operation-id check | whole-catalog agreement | both consumers accepted the cross-entity collision |
@@ -199,7 +211,7 @@ Port 4174 was observed closed.
 ## Gates before review
 
 All formal gates ran at exact SHA
-`edc41ae3c04c48743652b2bf2ee41c54cf5857b8`; `git rev-parse HEAD` was identical
+`7c424fda109cacac5710cb9916f57798bdf193aa`; `git rev-parse HEAD` was identical
 before and after.
 
 | Gate | Result |
@@ -208,9 +220,15 @@ before and after.
 | `pnpm lint` | pass |
 | `pnpm format` | pass |
 | `pnpm test:browser` | 90 passed, 0 failed |
-| `pnpm test:integration` | 147 passed, 0 failed |
+| `pnpm test:integration` | 148 passed, 0 failed |
 | `pnpm test:contracts` | 16 passed, 0 failed |
 | `pnpm test:postgres` | 203 passed, 0 failed |
+
+The first same-SHA PostgreSQL attempt reached 202/203: one ephemeral container
+reported PostgreSQL ready internally while its newly published localhost port
+still returned `ECONNREFUSED`. That test never reached an assertion. No file
+changed; the complete rerun passed 203/203, including the exact failed specimen,
+on the same SHA. The failed attempt is retained here rather than smoothed out.
 
 No full matrix has run. Per `git-workflow`, it runs once after both Critical
 review arms converge, at the SHA that integrates.
@@ -219,6 +237,36 @@ review arms converge, at the SHA that integrates.
 `proj-disc`, `ps-0`, `ps-1`, `ps-2`, `pur-1`, the preserved stopped
 `relation-scoped-enumeration`, and `u5-design`. The handoff predicted six; the
 old stopped relation branch crossed the three-day threshold. None was changed.
+
+## Review evidence and round-1 disposition
+
+Round 1 reviewed exact remote candidate
+`9b89d104ac36eb2aa48d849dba3aa6ca3ef8863d` and returned **REVISE** with one
+material production finding. `renderSections` checked the update precondition
+before resolving relation disclosure, so a directly addressed posted,
+relation-bearing form rendered an empty sections slot. Relation controls and
+Save were suppressed correctly, but the create-only freeze (or relation-
+authority refusal) disappeared too. The reviewer closed decisive questions A-C,
+E and the remainder of G; no out-of-scope finding survived.
+
+The correction is executable commit `21304a96c8a9b95dec035114e4e6d84e2693e45d`.
+`renderRelationContent` now resolves before the current-record availability
+gate. A refusing update returns only the freeze or refusal; it cannot render a
+form, relation control, Save action or operation submission. The committed
+control changes only the child update operation's `precondition` from absent to
+a valid comparison contradicted by the seeded record. Its eligible twin proves
+that an update whose predicate holds still renders both the freeze and form.
+Commit `7c424fda109cacac5710cb9916f57798bdf193aa` composes the same refusing
+precondition with unavailable relation authority and requires the named
+`QUERY_UNSUPPORTED` disclosure while the form, relation select and Save remain
+absent. Deleting the early refusal return makes that precise diagnostic vanish.
+
+This round is licensed to continue by `review-tiers`: the finding was in
+production, and the repair subsumes the prior eligible-only disclosure check by
+covering both sides of the availability gate. It is not a new-scope stop. The
+`capture-learnings` check produced no `learnings.md` entry: the reviewer applied
+the already-recorded one-property-survivor rule rather than establishing a new
+reusable doctrine.
 
 ## Bridges and filed limits
 
@@ -250,100 +298,126 @@ across two blocked predecessors, a correct stop, a wrong specimen table, and a
 whole-catalog authority split. The proposal is recorded; it is not selected or
 run here.
 
-## Pasteable review prompts
+## Pasteable round-2 review prompt
 
-The prompts below use `<FROZEN_SHA>` because a commit cannot contain its own
-identity. Replace it with the exact remote SHA printed in the writer handoff.
+The prompt uses `<FROZEN_SHA>` because a commit cannot contain its own identity.
+Replace it with the exact remote SHA printed in the writer handoff.
 
 ### Arm 1 — fresh Codex xhigh
 
 ```text
-You are the fresh-naive first reviewer for Critical packet
+You are the fresh-naive round-2 reviewer for Critical packet
 relation-scoped-enumeration in /home/rvham/2rain-greenfield.
 
-Review exact candidate <FROZEN_SHA> against base
-b5911150453c6e007d70a47f0e76319c91f8ac32. The remote branch is
+Review exact remote candidate <FROZEN_SHA> against base
+b5911150453c6e007d70a47f0e76319c91f8ac32. The correction boundary is
+9b89d104ac36eb2aa48d849dba3aa6ca3ef8863d..<FROZEN_SHA>. The remote branch is
 packet/relation-scoped-enumeration-2; verify the supplied git ls-remote line
-before reading. Work read-only. Do not edit, commit, run a full matrix, or widen
-the charter. Return PASS, REVISE, or BLOCK with file/symbol evidence for every
-material finding.
+before reading. Work read-only. Do not edit, commit, run the full matrix, invoke
+another reviewer, or rely on line numbers. Return PASS, REVISE, or BLOCK with
+file/symbol evidence for every material finding.
 
-Read first: AGENTS.md; .agents/skills/review-tiers/SKILL.md;
-.agents/skills/ux-grammar/SKILL.md; docs/execution/packets/relation-scoped-enumeration.md;
-ADR-0052, ADR-0041, ADR-0044, ADR-0036 §2, ADR-0051, ADR-0053, ADR-0054,
-and ADR-0055. Re-locate symbols; do not trust line numbers.
+This prompt was written by the lane whose work you are reviewing. **The lane has
+fenced nothing.** Any scope stated here is the orchestrator's, and it stands as a
+claim under test rather than a limit you may not question. Read whatever you
+judge relevant to the decisive questions, say plainly if you think the scope is
+drawn wrongly, and say plainly if the prompt itself is steering you.
 
-GATES ALREADY GREEN at executable parent edc41ae3c04c48743652b2bf2ee41c54cf5857b8:
-typecheck, lint, format; browser 90/90; integration 147/147; contracts 16/16;
-PostgreSQL 203/203. The distributor manual journey created a transaction,
-transaction line, stock count, and stock-count line, selecting both required
-scoped relations on the last form. Do not rerun the full matrix or re-derive
-settled mechanical counts.
+Read first: AGENTS.md §5-§6; .agents/skills/review-tiers/SKILL.md;
+.agents/skills/ux-grammar/SKILL.md;
+docs/execution/packets/relation-scoped-enumeration.md; the
+relation-scoped-enumeration row in docs/execution/review-log.md; ADR-0052 in
+full; ADR-0036 §2; ADR-0051; ADR-0053; ADR-0054; ADR-0055. Then inspect
+renderSections, operationAvailableForRecord, renderRelationContent and
+renderRelationFreeze in apps/web/src/component-registry.ts and their controls
+in test/integration/surface-data-binding.test.ts. Re-locate every symbol.
 
-IN SCOPE:
-1. Same-scope target enumeration: each scoped target query receives exactly the
-   selected legal entity under the target query's declared operand, and an
-   absent/multiple operand cannot guess or leak another scope.
-2. Completeness/refusal: hasMore refuses, truncatedByMaximum alone does not,
-   malformed/unavailable results never become an empty list, targetless optional
-   renders nothing, and exactly one active list surface is required.
-3. Form semantics: native server-rendered relation selects post the existing
-   relation wire; stock_count_line can supply both relations; update renders no
-   relation control and visibly discloses the create-only freeze without
-   weakening operation preconditions.
-4. Attribution: an enumeration refusal names the relation subject, while
-   EntityRelationAuthority unavailable is never read as known-empty.
-5. Shared catalog authority absorbed from relation-contract-integrity: browser
-   and gateway call one whole-catalog parser before filtering, reject extra root
-   keys and cross-entity operation-id collisions for the same reason, and the
-   repaired wrong-reason controls actually reach the checks they name.
-6. ADR-0052 accurately records the implemented ruling, especially the explicit
-   §7 amendment and the distinction between Q1-P5 sealed read scope and
-   ADR-0055's permission-authorized create operand.
+ROUND-1 RESULT UNDER TEST: exact candidate 9b89d10 returned REVISE because
+renderSections checked the update predicate before resolving relation content.
+A directly addressed relation-bearing update form whose predicate was false
+therefore hid both the create-only freeze and the unavailable-authority refusal,
+although it correctly rendered no relation select, form or Save action. The
+reviewer reported no other surviving material finding and closed same-scope
+enumeration, completeness/refusal, two-relation submission, shared catalog
+authority and the rest of ADR accuracy. Reopen any of those conclusions if the
+candidate gives concrete reason; do not treat this summary as evidence.
 
-OUT OF SCOPE — record only if material and reachable; do not require a fix here:
+THE CORRECTION: renderSections now resolves relation content before the current-
+record availability gate. A false update predicate must render exactly one
+non-editable outcome:
+
+1. known relation authority: the named data-relation-freeze disclosure; or
+2. unavailable relation authority: the existing QUERY_UNSUPPORTED refusal.
+
+Either outcome must suppress the update form, every relation select, Save and
+operation submission. An eligible update remains the admission twin: it renders
+the freeze plus its ordinary update form and Save, but no relation select.
+ADR-0052 §4 records this ordering.
+
+EVIDENCE ALREADY RUN at executable parent
+7c424fda109cacac5710cb9916f57798bdf193aa: typecheck, lint and format PASS;
+browser 90/90; integration 148/148; contracts 16/16; PostgreSQL 203/203. One
+earlier same-SHA PostgreSQL attempt was 202/203 because an ephemeral database was
+ready inside its container while the newly published localhost port returned
+ECONNREFUSED; the exact failed specimen and complete suite passed on the rerun.
+No full matrix has run. The earlier distributor journey selected both required
+scoped relations on stock_count_line_form and observed Create complete. Treat
+these as settled deterministic evidence, not a restriction on source review.
+
+DECISIVE QUESTIONS:
+
+A. Does every reachable precondition-false update path resolve relation
+   disclosure before returning, for both known and unavailable relation
+   authority?
+B. In each branch, are the form, relation controls, Save and operation
+   submission still absent? Did the repair accidentally loosen the accepted
+   posted-transaction affordance predicate?
+C. Does the precondition-eligible twin still render its ordinary update form
+   and Save alongside the freeze, with relations remaining create-only?
+D. Do the controls discriminate those branches for the exact stated reasons?
+   Identify the cheapest production deletion or one-property survivor for the
+   known-authority false-predicate control, the unavailable-authority composed
+   control, and the eligible twin. The writer's 25 temporary author-chosen
+   deletion observations are supporting evidence only.
+E. Does ADR-0052 now claim exactly what production and the controls establish,
+   without implying that an unavailable authority can name relations it cannot
+   know?
+F. Did the narrow correction regress any round-1-closed packet behavior in a
+   reachable way?
+
+THREAT MODEL: an ordinary authorized tenant user directly addresses a compiled
+form with record and legal-entity URL values, including a posted stock count;
+and a plain malformed/unavailable pinned relation authority. Check fail-closed
+behavior at the existing gateway boundaries. Active obfuscation, malicious
+compiler output engineered to evade source scans, and a new sealed write-
+capability design are not claimed here.
+
+KNOWN EVIDENCE LIMITS: the precondition-false controls use the compiled module
+fixture rather than a browser journey through the shipped posted stock_count
+form; the distributor journey proved scoped creation, not this update branch;
+the deletion observations were temporary and author-selected; and the full
+matrix is deliberately deferred until Critical review converges.
+
+FILE AND LEAVE if valid rather than making this correction own them:
 dev-seed-has-no-inventory; form-required-field-not-rendered;
 provider-refusals-erased-at-the-web-boundary;
 runtime-integrity-attribution-untwinned; activity-rail-unowned;
-ux-list-usability beyond checking that incomplete enumeration refuses and the
-bounded follow-on is honestly recorded; relation-update-fork beyond visible
-freeze; compiler source; and posted-transaction affordance redesign.
+ux-list-usability; relation-update-fork beyond the visible create-only freeze;
+compiler source; or a redesign of posted-transaction affordance rules.
 
-THREAT MODEL: accidental or plain malformed release artifacts and ordinary
-tenant users choosing URL/form values. Check cross-tenant/cross-legal-entity
-leakage through the declared gateway boundaries. Active obfuscation, malicious
-compiler output crafted to evade source scans, and a new sealed write-capability
-design are not this packet.
-
-DECISIVE QUESTIONS:
-A. Can any reachable scoped form display or submit a parent outside the selected
-   legal entity, or silently choose a scope/list authority?
-B. Can any incomplete, malformed, refused, or unavailable target result render a
-   valid-looking prefix/empty picker instead of the named refusal?
-C. Can stock_count_line_form post both required scoped relations and reach the
-   existing relation input unchanged?
-D. Can an update form make a relation appear editable or hide the create-only
-   freeze, including when update preconditions do not hold?
-E. Is any independent browser catalog validator still capable of disagreeing
-   with the gateway on the two forged catalogs, or does filtering precede whole-
-   catalog admission anywhere?
-F. For each new/repaired control, identify the cheapest production deletion or
-   one-property survivor. Treat the writer's 21 ad-hoc, author-chosen deletion
-   observations as supporting evidence only, not as a fence on your review.
-G. Does ADR-0052 claim more than the code and executed evidence establish?
-
-The lane fenced no finding from review. The explicit charter bounds scope; the
-green deterministic gates bound rework. Return only in-scope, material,
-reachable findings. Classify valid out-of-scope observations separately.
+PASS only if the exact candidate closes the round-1 finding and its control
+survivor without a new in-scope material defect. Classify any valid out-of-scope
+observation separately.
 ```
 
-### Arm 2 — independent Fable max confirmation after Arm 1 PASS
+### Arm 2 — independent Fable max, only after Arm 1 PASS
 
-Use the identical candidate and charter in a fresh Fable max conversation. Add:
+Use the identical `<FROZEN_SHA>` and the complete charter above in a fresh Fable
+max conversation. Add:
 
 ```text
 This is the independent Critical confirmation arm. Do not read or rely on the
 first review's verdict. Re-derive the decisive questions from the candidate and
-primary records. PASS only if the identical SHA satisfies the charter; otherwise
-return REVISE or BLOCK with the same evidence standard.
+primary records. PASS only if the identical SHA satisfies the charter;
+otherwise return REVISE or BLOCK with the same evidence standard.
 ```

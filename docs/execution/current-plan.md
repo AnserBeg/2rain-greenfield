@@ -23,7 +23,7 @@ all read as equally urgent.
 |---|---|
 | `relation-picker-rechartered` | **EVIDENCE READY in `relation-scoped-enumeration`.** The blocked predecessor's contract and picker halves are combined on one reviewed target; two external Critical PASS arms, the post-review full matrix, and integration remain. |
 | `required-relation-uncreatable` | **EVIDENCE READY.** The distributor checkpoint created the hardest first-party specimen, `stock_count_line`, through both required scoped relation controls and observed `Create complete`. Not closed until review, matrix, and integration. |
-| `relation-scoped-enumeration` | **EVIDENCE READY at gated executable SHA `edc41ae3`.** Same-scope native pickers, complete-list refusal, named relation diagnostics, visible update freeze, and shared whole-catalog authority are frozen for user-run Critical review. |
+| `relation-scoped-enumeration` | **EVIDENCE READY at round-2 gated SHA `7c424fd`.** Round 1 returned REVISE because a precondition-false update hid the create-only freeze; the correction resolves disclosure before availability while still suppressing the form, controls and Save. Composed controls cover both permitted disclosure outcomes: the known-relation freeze and the named unavailable-authority refusal. Same-scope native pickers, complete-list refusal, named relation diagnostics and shared whole-catalog authority remain unchanged. A fresh Codex PASS and then Fable PASS on one identical SHA are owed. |
 | `form-empty-means-nothing` | **ACCEPTED in `form-wire-semantics` at `88f66b0`:** a blank optional date or quantity carries an explicit server-rendered intent; every one-line or typed control that cannot faithfully show its stored value discloses it and leaves it unchanged. The central guard owns whole-subject erasure; the existing absent-primary branch and closed intent parser own the two one-sided omissions. Fresh Codex review and the full matrix passed on the identical SHA. |
 | `form-write-untyped-wire` | **ACCEPTED in `form-wire-semantics` at `88f66b0`:** the string form wire normalises exact boolean spellings against the pinned input contract, including the adopted profile-v1 bare-input path. Fresh Codex review and the full matrix passed on the identical SHA. |
 | `relation-refusal-unnamed` | **EVIDENCE READY.** `RELATION_ENUMERATION_UNAVAILABLE` carries the blocking relation id as its required subject; review and integration remain. |
@@ -373,15 +373,19 @@ retain their discovery history, but their trailing `OPEN` wording is now stale
 for the candidate under review. `relation-scoped-enumeration`,
 `required-relation-uncreatable`, `relation-picker-rechartered`, and
 `relation-refusal-unnamed` are **evidence ready, not accepted**, at gated
-executable parent `edc41ae3c04c48743652b2bf2ee41c54cf5857b8`; the exact frozen
+executable parent `7c424fda109cacac5710cb9916f57798bdf193aa`; the exact frozen
 narrative descendant is named in the writer handoff. The candidate enumerates
 all five required targets, including both scoped relations on
 `stock_count_line_form`, and attributes refusal to the relation. It also makes
 the create-only freeze visible, satisfying only that disclosure half of
 `relation-update-fork`; update capability remains open. Its ruled bounded
 search/page continuation belongs to `ux-list-usability`, which remains open.
-No row in this overlay is accepted until two independent Critical PASSes, one
-full matrix, and the required packet-into-main `--no-ff` merge.
+Round 1 returned REVISE on a precondition-false update that hid this freeze; the
+round-2 tree keeps both the freeze and unavailable-authority refusal ahead of
+availability and still suppresses every edit affordance. No row in this overlay
+is accepted until two independent
+Critical PASSes, one full matrix, and the required packet-into-main `--no-ff`
+merge.
 
 | # | Packet | Tier | Why here |
 |---|---|---|---|
