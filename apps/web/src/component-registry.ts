@@ -598,18 +598,10 @@ function recordTitle(
 function renderCommandBar(context: SurfaceComponentContext): string {
   const record = recordFrom(context.data);
   if (context.surface.surfaceRole === 'form') {
-    const intent = record ? 'update' : 'create';
-    const operation = operationForIntent(context, intent);
+    const admission = resolveFormAdmission(context, record);
     return slotPanel(
       context,
-      operation &&
-        operationAvailableForRecord(operation, record) &&
-        surfaceSupportsRuntimeIntent(
-          context.view,
-          context.surface,
-          context.surfaces ?? [],
-          intent,
-        )
+      admission.status === 'admitted'
         ? `<div class="command-bar" aria-label="Record commands"><button type="submit" form="surface-record-form">Save</button></div>`
         : '',
       'command-bar-slot',
@@ -733,32 +725,24 @@ function renderSections(context: SurfaceComponentContext): string {
       'sections-slot',
     );
   }
-  const intent = record ? 'update' : 'create';
-  if (
-    !surfaceSupportsRuntimeIntent(
-      context.view,
-      context.surface,
-      context.surfaces ?? [],
-      intent,
-    )
-  ) {
+  const admission = resolveFormAdmission(context, record);
+  if (admission.status === 'surfaceUnsupported') {
     return slotPanel(context, '', 'sections-slot');
   }
-  const operation = operationForIntent(context, intent);
-  if (!operation) {
+  if (admission.status === 'operationUnsupported') {
     return slotPanel(
       context,
       dataDiagnostic('QUERY_UNSUPPORTED'),
       'sections-slot',
     );
   }
-  const relationContent = renderRelationContent(context, record);
-  if (relationContent.refusal !== '') {
-    return slotPanel(context, relationContent.refusal, 'sections-slot');
+  if (admission.status === 'relationRefused') {
+    return slotPanel(context, admission.refusal, 'sections-slot');
   }
-  if (!operationAvailableForRecord(operation, record)) {
-    return slotPanel(context, relationContent.freeze, 'sections-slot');
+  if (admission.status === 'predicateRefused') {
+    return slotPanel(context, admission.freeze, 'sections-slot');
   }
+  const { operation, relationContent } = admission;
   const recordId = record?.recordId ?? randomUUID();
   const compatibilityFeedback = hasSurfaceSlot(context, 'titleStatus')
     ? ''
@@ -771,6 +755,54 @@ function renderSections(context: SurfaceComponentContext): string {
     `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context.surface, operation, record)}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
+}
+
+type FormAdmissionDecision =
+  | {
+      readonly operation: CompiledSurfaceOperationBinding;
+      readonly relationContent: ReturnType<typeof renderRelationContent>;
+      readonly status: 'admitted';
+    }
+  | { readonly status: 'surfaceUnsupported' }
+  | { readonly status: 'operationUnsupported' }
+  | { readonly refusal: string; readonly status: 'relationRefused' }
+  | { readonly freeze: string; readonly status: 'predicateRefused' };
+
+/**
+ * Form content and its command bar are two slots presenting one admission
+ * decision. Neither may offer its half when the other refuses the operation.
+ */
+function resolveFormAdmission(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto | null,
+): FormAdmissionDecision {
+  const intent = record ? 'update' : 'create';
+  if (
+    !surfaceSupportsRuntimeIntent(
+      context.view,
+      context.surface,
+      context.surfaces ?? [],
+      intent,
+    )
+  ) {
+    return { status: 'surfaceUnsupported' };
+  }
+  const operation = operationForIntent(context, intent);
+  if (!operation) return { status: 'operationUnsupported' };
+  const relationContent = renderRelationContent(context, record);
+  if (relationContent.refusal !== '') {
+    return {
+      refusal: relationContent.refusal,
+      status: 'relationRefused',
+    };
+  }
+  if (!operationAvailableForRecord(operation, record)) {
+    return {
+      freeze: relationContent.freeze,
+      status: 'predicateRefused',
+    };
+  }
+  return { operation, relationContent, status: 'admitted' };
 }
 
 function renderRelationContent(

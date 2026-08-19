@@ -740,6 +740,36 @@ function fixtureWithRefusingChildUpdate(): Record<string, unknown> {
   return definition;
 }
 
+function fixtureWithChildFormAnatomy(): Record<string, unknown> {
+  const definition = ordinaryModuleV1();
+  assert.ok(Array.isArray(definition.surfaces));
+  const form = definition.surfaces
+    .map(asRecord)
+    .find((surface) => surface.surfaceId === CHILD_FORM_SURFACE);
+  assert.ok(form && Array.isArray(form.slots));
+  assert.equal(
+    form.slots.length,
+    1,
+    'the baseline fixture must isolate the sections-only survivor',
+  );
+  const section = asRecord(form.slots[0]);
+  form.slots = (
+    [
+      ['breadcrumb', 10],
+      ['titleStatus', 20],
+      ['commandBar', 30],
+      ['keyFacts', 40],
+      ['sections', 50],
+    ] as const
+  ).map(([slot, orderKey]) => ({
+    ...structuredClone(section),
+    orderKey,
+    slot,
+    slotId: `${FIXTURE_IDS.namespace}:slot.master_role_form_${String(orderKey)}`,
+  }));
+  return definition;
+}
+
 test('a required relation renders a complete target list as a native picker', async () => {
   const compiled = compileFixture();
   const policy = new RecordingPolicy('ALLOW');
@@ -823,7 +853,7 @@ test('a scoped target list receives the selected entity under its own declared o
 });
 
 test('hasMore refuses a relation picker while truncation alone does not', async () => {
-  const compiled = compileFixture();
+  const compiled = compileFixture(fixtureWithChildFormAnatomy());
   const policy = new RecordingPolicy('ALLOW');
   const view = await issuedView(
     runtimeEntry(compiled, policy, {
@@ -860,6 +890,14 @@ test('hasMore refuses a relation picker while truncation alone does not', async 
       },
     );
 
+  const complete = await renderWithCoverage(false, false);
+  assert.match(complete.html, /<form id="surface-record-form"/u);
+  assert.match(complete.html, /data-platform-slot="record:commandBar"/u);
+  assert.match(
+    complete.html,
+    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  );
+
   const incomplete = await renderWithCoverage(true, false);
   assert.match(
     incomplete.html,
@@ -870,9 +908,22 @@ test('hasMore refuses a relation picker while truncation alone does not', async 
     new RegExp(`<code data-message-subject>${REQUIRED_RELATION_ID}</code>`),
   );
   assert.doesNotMatch(incomplete.html, /<form id="surface-record-form"/u);
+  assert.doesNotMatch(
+    incomplete.html,
+    new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
+  );
+  assert.match(incomplete.html, /data-platform-slot="record:commandBar"/u);
+  assert.doesNotMatch(
+    incomplete.html,
+    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  );
 
   const clampedButComplete = await renderWithCoverage(false, true);
   assert.match(clampedButComplete.html, /<form id="surface-record-form"/u);
+  assert.match(
+    clampedButComplete.html,
+    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  );
   assert.match(
     clampedButComplete.html,
     new RegExp(`relation:${REQUIRED_RELATION_ID}`),
