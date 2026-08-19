@@ -4,8 +4,9 @@ Date: 2026-08-18
 Base: `22154a7db5cdae739cacaae2ea46771d805b20cf` (`origin/main`, verified before cut)
 Branch: `packet/scoped-create-operand-impl`
 Tier: Critical
-Status: active revision round 2; external round 1 returned REVISE on incomplete
-generic archive enforcement and a malformed recorded base SHA
+Status: evidence-ready revision round 2; external round 1 returned REVISE on
+incomplete generic archive enforcement and a malformed recorded base SHA;
+fresh external Critical review remains owed
 
 ## Packet definition
 
@@ -68,7 +69,8 @@ generic provider.
 `test:scoped-create-operand-mutations`. It requires a clean tracked tree,
 replaces one unique production victim, runs the named control in a fresh
 process, verifies the expected red text, and restores the exact source in
-`finally`. All nine mutations were executed one at a time:
+`finally`. One uninterrupted invocation against gated tree `fe7d514` executed
+all nine mutations one at a time and restored a clean tracked tree:
 
 | Production victim | Admission/refusal discriminator | Observed red |
 |---|---|---|
@@ -190,8 +192,10 @@ Observed output:
 
 The managed dev container stopped cleanly after the observation.
 
-The exact executable tip `bda817ae3ce53a2a2bb9289bb198816cb74d351f`
-passed the prescribed sequence after the contract-census bridge:
+The exact gated tree `fe7d5146ecb09f461cae42c7615a52eaf2208712`
+passed the prescribed sequence. Its latest executable commit is
+`a7154234253fdc98654e8271def58e950b78d2d2`; the intervening `fe7d514` commit
+changes only ADR prose:
 
 - `pnpm typecheck`, `pnpm lint`, `pnpm format` — pass;
 - `pnpm test:postgres` — 203 passed, 0 failed;
@@ -199,8 +203,8 @@ passed the prescribed sequence after the contract-census bridge:
 - `pnpm test:integration` — 140 passed, 0 failed; and
 - `pnpm test:contracts` — 16 passed, 0 failed.
 
-The final review candidate adds only these evidence records above that executable
-tip. No full matrix is run before external review. Review is executed by the
+The final review candidate adds only these evidence records above that gated
+tree. No full matrix is run before external review. Review is executed by the
 user in a separate online seat, never by this writer lane.
 
 The program-review trigger is not run at this freeze because the application is

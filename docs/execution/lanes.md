@@ -19,7 +19,7 @@ writer is holding those paths right now.
 | **CANON** *(Opus)* | `Q1-P5` — the legal-entity query operand, canonical v4 | **active, added 2026-07-30.** First non-Codex writer lane. Same review chain: Codex for everything, Fable on Critical. Holding its frozen candidate while `Q1-P4` takes the slot; authoring the deferred gateway binding meanwhile. |
 | **KERNEL** | — | idle since `G3-P2b-4` (2026-07-29). |
 | **DEPLOY** | — | idle since `1g2` (2026-07-29). |
-| **WRITER** | `scoped-create-operand-impl` — permission-authorized legal-entity create operand | **evidence_ready 2026-08-18** in `/home/rvham/2rain-greenfield-scopedimpl` on `packet/scoped-create-operand-impl`. Gated executable tip `bda817a`; final review candidate is its narrative-only descendant. The branch is frozen for the user-run external Critical review. No full matrix or integration has run. No compiler path was taken. |
+| **WRITER** | `scoped-create-operand-impl` — permission-authorized legal-entity create operand | **evidence_ready revision round 2, 2026-08-19** in `/home/rvham/2rain-greenfield-scopedimpl` on `packet/scoped-create-operand-impl`. Gated tree `fe7d514` (latest executable commit `a715423`); final review candidate is its narrative-only descendant. Round 1's generic-archive finding is addressed with both real lock orders and a predicate-only committed mutation. The branch is frozen for the user-run external Critical review. No full matrix or integration has run. No compiler path was taken. |
 
 **Lane identity is per packet, not per theme.** The earlier model assigned
 standing themes (KERNEL owns canonical, FIX owns correctness). That broke on
