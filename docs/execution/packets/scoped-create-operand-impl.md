@@ -4,9 +4,10 @@ Date: 2026-08-18
 Base: `22154a7db5cdae739cacaae2ea46771d805b20cf` (`origin/main`, verified before cut)
 Branch: `packet/scoped-create-operand-impl`
 Tier: Critical
-Status: evidence-ready revision round 2; external round 1 returned REVISE on
-incomplete generic archive enforcement and a malformed recorded base SHA;
-fresh external Critical review remains owed
+Status: evidence-ready matrix-bridge revision; round 2 passed both external
+Critical arms at `ad7c6b8`, then the first full matrix found an unleased,
+unregistered manual mutation entrypoint; executable correction `2c747ed`
+requires a fresh narrow review before the matrix reruns
 
 ## Packet definition
 
@@ -105,6 +106,14 @@ but ignore the independent generic archive marker changed by
 `legal_entity_archive`. The correction subsumes that finding by reading both
 compiler-derived lifecycle facts from the same locked row. The new mutation
 removes only the archive comparison; the status check remains intact.
+
+External Codex xhigh round 2 and the independent Fable max confirmation both
+returned PASS on identical candidate
+`ad7c6b8c6ac1e601bd1d93f09b5e89cefc13c984`. The first arm closed D-F with no
+new material defect; only the Codex arm supplied detailed findings. The later
+matrix bridge changes no product logic, ADR ruling, PostgreSQL specimen or
+mutation victim, but it changes executable package metadata and therefore owes
+a fresh narrow review at its new SHA.
 
 ## Direct generic execution — observed and accepted
 
@@ -206,9 +215,33 @@ changes only ADR prose:
 - `pnpm test:integration` — 140 passed, 0 failed; and
 - `pnpm test:contracts` — 16 passed, 0 failed.
 
-The final review candidate adds only these evidence records above that gated
-tree. No full matrix is run before external review. Review is executed by the
-user in a separate online seat, never by this writer lane.
+The first full matrix ran against exact reviewed candidate `ad7c6b8` after both
+Critical arms passed. Its performance gate passed, then `test:architecture`
+reported 138 passed and 3 failed before later matrix suites or the online
+security tail ran:
+
+- the `test:scoped-create-operand-mutations` root command acquired no repository
+  lock;
+- lock derivation therefore observed undefined rather than shared access; and
+- CI reachability found that root `test:*` entrypoint neither invoked nor
+  explicitly justified.
+
+All three were one registration defect. Executable correction
+`2c747edfbf351fb907c42d5d22cca5d963c59d19` renames the command to the manual
+`evidence:*` namespace and places the complete mutation harness under an
+exclusive lock. This is evidence that intentionally mutates tracked production
+files and expects red tests, so it does not claim CI suite or reachability
+status. On that corrected tree, `pnpm typecheck`, `pnpm lint`, `pnpm format` and
+`pnpm test:architecture` pass; architecture reports 141 passed and 0 failed.
+The failed matrix token is retained exactly:
+
+```text
+FULL_MATRIX_FAILED rc=1 sha=ad7c6b8c6ac1e601bd1d93f09b5e89cefc13c984
+```
+
+The matrix rerun waits for the fresh narrow review required by the executable
+package-script correction. Review is executed by the user in a separate online
+seat, never by this writer lane.
 
 The program-review trigger is not run at this freeze because the application is
 not yet cleanly integrated, which is an explicit anti-trigger. Re-evaluate it
