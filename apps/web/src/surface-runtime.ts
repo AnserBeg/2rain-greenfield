@@ -271,7 +271,16 @@ export async function submitSurfaceRuntimeIntent(
   const intent = operation.intent;
   let input: SurfaceOperationInput;
   try {
-    input = operationInput(selection.selected, operation, intent, submission);
+    input = operationInput(
+      selection.selected,
+      operation,
+      intent,
+      submission,
+      legalEntitySelectionForSurface(
+        binding,
+        new URL(requestUrl, 'http://surface-runtime.local'),
+      ),
+    );
   } catch (error) {
     if (error instanceof InvalidSurfaceSubmissionError) {
       return operationDiagnostic('OPERATION_INPUT_INVALID', 422);
@@ -312,10 +321,10 @@ export async function submitSurfaceRuntimeIntent(
       gateways.operationMediation.issueInvocation(view, 'UI'),
     );
   } catch (error) {
-    const code = operationMessageCode(error);
+    const ref = operationMessageRef(error);
     return renderApplicationDiagnostic(
-      code === 'OPERATION_PERMISSION_DENIED' ? 403 : 422,
-      { code },
+      ref.code === 'OPERATION_PERMISSION_DENIED' ? 403 : 422,
+      ref,
     );
   }
   if (result.outcome !== 'succeeded' || !result.readBack) {
@@ -340,6 +349,26 @@ export async function submitSurfaceRuntimeIntent(
     ),
     null,
   );
+}
+
+function operationMessageRef(error: unknown): SurfaceMessageRef {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE' &&
+    'subjectId' in error &&
+    typeof error.subjectId === 'string'
+  ) {
+    return {
+      code: 'OPERATION_LEGAL_ENTITY_INACTIVE',
+      subject: error.subjectId,
+    };
+  }
+  const code = operationMessageCode(error);
+  return code === 'OPERATION_LEGAL_ENTITY_INACTIVE'
+    ? { code: 'OPERATION_UNAVAILABLE' }
+    : { code };
 }
 
 function renderSelectedSurface(
@@ -705,6 +734,7 @@ function operationInput(
   operation: CompiledSurfaceDataBinding['operations'][number],
   intent: SurfaceOperationIntent,
   submission: SurfaceRuntimeSubmission,
+  legalEntitySelection: readonly string[],
 ): SurfaceOperationInput {
   const values = fieldInput(surface, operation, intent, submission);
   if (intent === 'create') {
@@ -717,9 +747,11 @@ function operationInput(
     // refusal for a missing REQUIRED relation where it is already declared and
     // discriminating -- on the provider, by name -- instead of turning it into
     // a uuid-parse failure on an empty string.
+    const systemInput = createSystemInput(operation, legalEntitySelection);
     return {
       recordId: submission.recordId ?? '',
       relations: relationInput(submission),
+      ...systemInput,
       values,
     };
   }
@@ -731,6 +763,27 @@ function operationInput(
   return intent === 'update'
     ? { expectedRevision, patch: values, recordId }
     : { expectedRevision, recordId };
+}
+
+function createSystemInput(
+  operation: CompiledSurfaceDataBinding['operations'][number],
+  legalEntitySelection: readonly string[],
+): Readonly<Record<string, string>> {
+  const argumentKey = operation.systemInputArgumentKey;
+  if (argumentKey === null) {
+    if (legalEntitySelection.length !== 0) {
+      throw new InvalidSurfaceSubmissionError(
+        'an unscoped create cannot accept a legal-entity operand',
+      );
+    }
+    return Object.freeze({});
+  }
+  if (legalEntitySelection.length !== 1) {
+    throw new InvalidSurfaceSubmissionError(
+      'a scoped create requires exactly one legal-entity operand',
+    );
+  }
+  return Object.freeze({ [argumentKey]: legalEntitySelection[0]! });
 }
 
 type SurfaceOperationInput = Record<
@@ -957,7 +1010,7 @@ export function semanticOperationRequestFor(
 }
 
 function operationDiagnostic(
-  code: OperationDiagnosticCode,
+  code: Exclude<OperationDiagnosticCode, 'OPERATION_LEGAL_ENTITY_INACTIVE'>,
   statusCode: number,
 ): SurfaceRuntimeResponse {
   return renderApplicationDiagnostic(statusCode, { code });

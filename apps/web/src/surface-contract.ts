@@ -13,6 +13,7 @@ import type { PinnedOperationEffectKind } from '../../../packages/runtime/src/se
 import type {
   RegisteredOperationDefinition,
   RegisteredOperationInputContract,
+  RegisteredOperationSystemInput,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   registeredSemanticQueryFromPinnedView,
@@ -312,6 +313,13 @@ export interface CompiledSurfaceOperationBinding {
   readonly precondition: Readonly<
     Record<string, RuntimeViewContract.ImmutableJsonValue>
   >;
+  /**
+   * The compiler-declared key for a create operand supplied by the web
+   * boundary. The selected value remains untrusted operation input; this
+   * carrier prevents the browser from inventing or hardcoding the key.
+   */
+  readonly systemInputArgumentKey:
+    RegisteredOperationSystemInput['argumentKey'] | null;
 }
 
 export interface CompiledSurfaceInputField {
@@ -523,6 +531,7 @@ export function readCompiledSurfaceDataBinding(
         label: operationLabel(operation.operationId),
         operationId: operation.operationId,
         precondition: operation.precondition,
+        systemInputArgumentKey: operation.systemInputArgumentKey,
       }),
     );
   }
@@ -1075,6 +1084,8 @@ function parseOperationBinding(value: unknown): {
   >;
   readonly readBackQueryId: string;
   readonly relationInputs: readonly CompiledSurfaceRelationInput[] | null;
+  readonly systemInputArgumentKey:
+    RegisteredOperationSystemInput['argumentKey'] | null;
   readonly tier: RegisteredOperationDefinition['tier'];
 } {
   // The COMPLETE pinned-operation authority, run before this reader interprets
@@ -1161,6 +1172,8 @@ function parseOperationBinding(value: unknown): {
       value.inputContract,
       value.effect.kind as PinnedOperationEffectKind,
     ),
+    systemInputArgumentKey:
+      value.inputContract?.systemInput?.argumentKey ?? null,
     tier: value.tier,
   };
 }

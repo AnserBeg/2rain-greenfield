@@ -23,6 +23,7 @@ import {
   SURFACE_MESSAGE_CODES,
   type QueryDiagnosticCode,
   type SurfaceMessageCode,
+  type SurfaceMessageRef,
 } from '../../src/message-catalog.js';
 import { readCompiledSurfaceManifest } from '../../src/surface-contract.js';
 import { renderApplicationDiagnostic } from '../../src/surface-runtime.js';
@@ -53,6 +54,22 @@ import { compiledFixturePath, demoEntry } from '../helpers.js';
  * fixture, never from the renderer under test.
  */
 const CENSUS_SUBJECT = 'northstar.shell:component.absent';
+const CENSUS_LEGAL_ENTITY_SUBJECT = '74000000-0000-4000-8000-000000000099';
+const CENSUS_SUBJECTS = Object.freeze({
+  OPERATION_LEGAL_ENTITY_INACTIVE: CENSUS_LEGAL_ENTITY_SUBJECT,
+  UNSUPPORTED_COMPONENT: CENSUS_SUBJECT,
+});
+
+function censusMessageRef(code: SurfaceMessageCode): SurfaceMessageRef {
+  switch (code) {
+    case 'OPERATION_LEGAL_ENTITY_INACTIVE':
+      return { code, subject: CENSUS_LEGAL_ENTITY_SUBJECT };
+    case 'UNSUPPORTED_COMPONENT':
+      return { code, subject: CENSUS_SUBJECT };
+    default:
+      return { code };
+  }
+}
 
 interface MessagePart {
   readonly count: number;
@@ -368,14 +385,7 @@ async function censusServerUrl(): Promise<string> {
       response.end(
         renderApplicationDiagnostic(
           422,
-          code === 'UNSUPPORTED_COMPONENT'
-            ? { code, subject: CENSUS_SUBJECT }
-            : {
-                code: code as Exclude<
-                  SurfaceMessageCode,
-                  'UNSUPPORTED_COMPONENT'
-                >,
-              },
+          censusMessageRef(code as SurfaceMessageCode),
         ).html,
       );
     }),
@@ -543,7 +553,7 @@ const REAL_PATH_DRIVERS: Readonly<
  * missing is an executed request, so reachability for these rests on the
  * source-literal scan in `surface-runtime-contract.test.ts`.
  *
- * The 15 are **three different things, and calling them all "structural" was
+ * The 16 are **three different things, and calling them all "structural" was
  * wrong**:
  *
  * - **1 is intrinsically unreachable** — `INVALID_SURFACE_BINDING`. No request
@@ -552,7 +562,7 @@ const REAL_PATH_DRIVERS: Readonly<
  *   `INVALID_SURFACE_NAVIGATION`, `QUERY_LEGAL_ENTITY_SCOPE_REQUIRED`,
  *   `QUERY_NOT_FOUND`, `QUERY_UNAVAILABLE`, `QUERY_UNSUPPORTED`. Their
  *   reachability is observed; only the text assertion lives elsewhere.
- * - **9 are engineering calls about fixture cost and ownership** — the six
+ * - **10 are engineering calls about fixture cost and ownership** — the seven
  *   `OPERATION_*` codes plus `QUERY_AMBIGUOUS`, `QUERY_PARAMETER_REQUIRED` and
  *   `QUERY_PERMISSION_DENIED`. Each needs the compile-and-serve gateway fixture
  *   another spec owns. Judgements, defensible, and not structural facts.
@@ -589,6 +599,11 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'intent requests beside their admission twins in surface-data-binding.spec.ts. ' +
     'That file owns the compiled field-kind release and stateful executor needed ' +
     'to prove the request is refused before semantic invocation.',
+  OPERATION_LEGAL_ENTITY_INACTIVE:
+    'Write path, and driven by a request through the compiled web binding in ' +
+    'surface-data-binding.test.ts beside its exact provider subject assertion. ' +
+    'A browser driver additionally needs the composed PostgreSQL fixture and ' +
+    'an archived legal-entity seed, which this catalog fixture does not own.',
   OPERATION_PERMISSION_DENIED:
     'Write path, same gateway fixture, plus a denying CurrentPolicyGateway. ' +
     'Every server in this file composes an allow-policy because the codes it ' +
@@ -733,9 +748,11 @@ test('every registered code renders the sentence the catalog registers', async (
   for (const code of SURFACE_MESSAGE_CODES) {
     await page.goto(`${censusUrl}/?code=${encodeURIComponent(code)}`);
     violations.push(
-      ...observeCatalogMessages(await readMessageSamples(page), [code], {
-        UNSUPPORTED_COMPONENT: CENSUS_SUBJECT,
-      }),
+      ...observeCatalogMessages(
+        await readMessageSamples(page),
+        [code],
+        CENSUS_SUBJECTS,
+      ),
     );
   }
   expect(violations).toEqual([]);

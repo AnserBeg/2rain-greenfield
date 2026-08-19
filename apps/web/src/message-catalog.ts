@@ -55,13 +55,16 @@ export const REFUSED_MESSAGE_PLACEMENTS = Object.freeze([
 ] as const);
 
 /**
- * The one declared subject kind. A message never interpolates a value into its
+ * The closed subject-kind vocabulary. A message never interpolates a value into its
  * sentence; where it must name something, it names it in a separate element.
  * See the template ruling in this packet's report — the short form is that a
  * held-out subject keeps every catalog sentence a literal, which is what lets
  * the gate compare rendered text against a string it never computed.
  */
-export const MESSAGE_SUBJECT_KINDS = Object.freeze(['componentId'] as const);
+export const MESSAGE_SUBJECT_KINDS = Object.freeze([
+  'componentId',
+  'legalEntityId',
+] as const);
 
 export type MessageSubjectKind = (typeof MESSAGE_SUBJECT_KINDS)[number];
 
@@ -209,6 +212,15 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     placements: ['page'],
     sentence: 'Form input invalid',
     subject: null,
+  },
+  OPERATION_LEGAL_ENTITY_INACTIVE: {
+    consequence: 'blocking',
+    detail:
+      'The selected legal entity is not active and cannot own a new business record.',
+    nextAction: 'Choose an active legal entity, then save again.',
+    placements: ['page'],
+    sentence: 'Legal entity unavailable for new work',
+    subject: 'legalEntityId',
   },
   OPERATION_UNAVAILABLE: {
     consequence: 'blocking',
@@ -371,6 +383,7 @@ export const OPERATION_DIAGNOSTIC_CODES = Object.freeze([
   'OPERATION_CONFIRMATION_REQUIRED',
   'OPERATION_CONFIRMATION_STALE',
   'OPERATION_INPUT_INVALID',
+  'OPERATION_LEGAL_ENTITY_INACTIVE',
   'OPERATION_PERMISSION_DENIED',
   'OPERATION_UNAVAILABLE',
   'OPERATION_UNSUPPORTED',

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
@@ -76,6 +76,9 @@ import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
+  type SemanticOperationExecutionRequest,
+  type SemanticOperationExecutor,
+  type SemanticOperationNonAcceptedRequest,
   type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
@@ -1616,6 +1619,7 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
   assert.ok(movement?.legalEntity?.column);
   assert.ok(transaction?.legalEntity?.column);
   assert.ok(transactionLine?.legalEntity?.column);
+  const transactionLegalEntityColumn = transaction.legalEntity.column;
 
   const tenant = 'd1000000-0000-4000-8000-000000000001';
   const environment = 'd2000000-0000-4000-8000-000000000002';
@@ -1769,7 +1773,10 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           humanActorIssuer(),
         );
         const queryGateway = new SemanticQueryGateway(policy, interpreter);
-        const gateway = operationGatewayFor(policy, interpreter);
+        const recordingExecutor = new RecordingForwardingOperationExecutor(
+          interpreter,
+        );
+        const gateway = operationGatewayFor(policy, recordingExecutor);
         const activePointer = await pool.query<{
           fence: string;
           pointer_id: string;
@@ -1822,6 +1829,80 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           tenant,
           environment,
           sharedLocationId,
+        );
+
+        const gatewayCreateRecordId = randomUUID();
+        const gatewayCreateInput = inventoryTransactionCreateInput(
+          legalEntityId,
+          gatewayCreateRecordId,
+          'DIRECT-OPERAND-GATEWAY',
+        );
+        const gatewayCreated = await operation(
+          gateway,
+          view,
+          'inventory_transaction_create',
+          gatewayCreateInput,
+          APPLICATION_NAMESPACE,
+        );
+        assert.equal(gatewayCreated.outcome, 'succeeded');
+        const gatewayExecution = recordingExecutor.calls.at(-1);
+        assert.ok(gatewayExecution);
+
+        // The exact gateway-built request is accepted when handed straight to
+        // the public generic executor. This is intentionally NOT a sealed
+        // receipt: under the untrusted-operand ruling an internal adapter can
+        // construct the same request and the provider cannot distinguish it.
+        const directReplay = await interpreter.execute(
+          Object.freeze({ ...gatewayExecution }),
+        );
+        assert.equal(directReplay.outcome, 'succeeded');
+        assert.deepEqual(directReplay.trust, gatewayCreated.trust);
+
+        // A fresh direct request proves that success above is not merely the
+        // idempotency receipt. Only record/idempotency identity changes to
+        // avoid a primary-key collision; the legal-entity operand and business
+        // values are the same, and the request never crosses the gateway.
+        const directCreateRecordId = randomUUID();
+        const directInput = inventoryTransactionCreateInput(
+          legalEntityId,
+          directCreateRecordId,
+          'DIRECT-OPERAND-EXECUTOR',
+        );
+        const directCreated = await interpreter.execute(
+          Object.freeze({
+            ...gatewayExecution,
+            idempotencyKey: randomUUID(),
+            input: directInput,
+            inputDigest: digestTestOperationInput(directInput),
+          }),
+        );
+        assert.equal(directCreated.outcome, 'succeeded');
+        const directlyPersisted = await pool.query<{
+          legal_entity_id: string;
+          record_id: string;
+        }>(
+          `SELECT ${transaction.recordIdentity.column}::text AS record_id,
+                  ${transactionLegalEntityColumn}::text AS legal_entity_id
+             FROM north_star_module.${transaction.physicalTableName}
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND ${transaction.recordIdentity.column} = ANY($3::uuid[])
+            ORDER BY ${transaction.recordIdentity.column}`,
+          [tenant, environment, [gatewayCreateRecordId, directCreateRecordId]],
+        );
+        assert.deepEqual(
+          directlyPersisted.rows,
+          [
+            {
+              legal_entity_id: legalEntityId,
+              record_id: gatewayCreateRecordId,
+            },
+            {
+              legal_entity_id: legalEntityId,
+              record_id: directCreateRecordId,
+            },
+          ].toSorted((left, right) =>
+            left.record_id.localeCompare(right.record_id),
+          ),
         );
 
         await insertScopedTestRecord(
@@ -3394,12 +3475,65 @@ const operationMediationByGateway = new WeakMap<
 
 function operationGatewayFor(
   policy: CurrentPolicyGateway,
-  interpreter: PostgresModuleRuntimeInterpreter,
+  interpreter: SemanticOperationExecutor,
 ): SemanticOperationGateway {
   const mediation = new SemanticOperationMediationAuthority();
   const gateway = new SemanticOperationGateway(policy, interpreter, mediation);
   operationMediationByGateway.set(gateway, mediation);
   return gateway;
+}
+
+class RecordingForwardingOperationExecutor implements SemanticOperationExecutor {
+  readonly calls: SemanticOperationExecutionRequest[] = [];
+
+  constructor(private readonly delegate: SemanticOperationExecutor) {}
+
+  execute(
+    request: SemanticOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope> {
+    this.calls.push(request);
+    return this.delegate.execute(request);
+  }
+
+  recordNonAccepted(
+    request: SemanticOperationNonAcceptedRequest,
+  ): Promise<void> {
+    return this.delegate.recordNonAccepted(request);
+  }
+}
+
+function inventoryTransactionCreateInput(
+  legalEntityId: string,
+  recordId: string,
+  number: string,
+): Readonly<Record<string, ImmutableJsonValue>> {
+  return Object.freeze({
+    legalEntityId,
+    recordId,
+    relations: Object.freeze({}),
+    values: Object.freeze({
+      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.actorId)]:
+        'direct-operand-control',
+      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.effectiveAt)]:
+        '2026-08-18T12:00:00.000Z',
+      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.number)]:
+        number,
+      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.recordedAt)]:
+        '2026-08-18T12:00:00.000Z',
+      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.sourceId)]:
+        number.toLowerCase(),
+      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.sourceType)]:
+        'test',
+      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.state)]:
+        `${APPLICATION_NAMESPACE}:option.inventory_transaction_state_draft`,
+      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.type)]:
+        `${APPLICATION_NAMESPACE}:option.inventory_transaction_type_adjustment`,
+    }),
+  });
+}
+
+function digestTestOperationInput(input: ImmutableJsonValue): string {
+  return createHash('sha256').update(canonicalize(input)).digest('hex');
 }
 
 function instrumentPinnedArtifactReads(
