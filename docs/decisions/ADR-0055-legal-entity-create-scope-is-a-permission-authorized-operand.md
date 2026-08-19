@@ -1,8 +1,15 @@
 # ADR-0055: Legal-entity create scope is a permission-authorized operand
 
 Date: 2026-08-18
-Status: proposed — the orchestrator ruled the model; packet acceptance still
-requires the external Critical review and integrated full matrix
+Status: **ratified** — `scoped-create-operand-impl` was accepted on 2026-08-19
+(ledger; integrated `fa75076d558effd01aa4b6d780e3f9bf1bc5b94d`). Both required arms
+returned PASS on the identical round-2 candidate `ad7c6b8c…`, with independent Fable
+max confirmation, and both were re-confirmed across the matrix bridge at `ae6df65e…`.
+Status line corrected 2026-08-19 by the orchestrator; it still read *"proposed …
+packet acceptance still requires the external Critical review"* after that review had
+run and the packet had been accepted. **Same stale-authority shape corrected on
+ADR-0050 six days earlier** — an ADR whose own status line disagrees with the ledger
+that governs it.
 Tier: Critical (the value attributes writes, enters authorization, confirmation,
 idempotency and execution, and controls whether archived masters can own new work)
 
