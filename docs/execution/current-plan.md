@@ -21,14 +21,21 @@ all read as equally urgent.
 
 | row | why it blocks |
 |---|---|
-| `relation-picker-rechartered` | **`PUR-1`'s last blocker.** `ux-reference-picker` returned BLOCK at round 2 and re-chartered into this. |
-| `required-relation-uncreatable` | A purchase order needs a supplier; a module with a required relation **cannot be created from any web surface**. |
-| `relation-scoped-enumeration` | The picker that actually makes a required relation fillable. |
+| `relation-picker-rechartered` | **EVIDENCE READY in `relation-scoped-enumeration`.** The blocked predecessor's contract and picker halves are combined on one reviewed target; two external Critical PASS arms, the post-review full matrix, and integration remain. |
+| `required-relation-uncreatable` | **EVIDENCE READY.** The distributor checkpoint created the hardest first-party specimen, `stock_count_line`, through both required scoped relation controls and observed `Create complete`. Not closed until review, matrix, and integration. |
+| `relation-scoped-enumeration` | **EVIDENCE READY at gated executable SHA `edc41ae3`.** Same-scope native pickers, complete-list refusal, named relation diagnostics, visible update freeze, and shared whole-catalog authority are frozen for user-run Critical review. |
 | `form-empty-means-nothing` | **ACCEPTED in `form-wire-semantics` at `88f66b0`:** a blank optional date or quantity carries an explicit server-rendered intent; every one-line or typed control that cannot faithfully show its stored value discloses it and leaves it unchanged. The central guard owns whole-subject erasure; the existing absent-primary branch and closed intent parser own the two one-sided omissions. Fresh Codex review and the full matrix passed on the identical SHA. |
 | `form-write-untyped-wire` | **ACCEPTED in `form-wire-semantics` at `88f66b0`:** the string form wire normalises exact boolean spellings against the pinned input contract, including the adopted profile-v1 bare-input path. Fresh Codex review and the full matrix passed on the identical SHA. |
-| `relation-refusal-unnamed` | When the form cannot offer a required relation it refuses as `QUERY_*`, so the operator cannot act on what they are told. |
+| `relation-refusal-unnamed` | **EVIDENCE READY.** `RELATION_ENUMERATION_UNAVAILABLE` carries the blocking relation id as its required subject; review and integration remain. |
 | `inventory-form-anatomy` | **ACCEPTED 2026-08-18.** Reviewed candidate `9d478e4`; matrix-green staged integration `56eb2c7`; required packet-to-main `--no-ff` merge `d048dc0`, with an empty executable diff between matrix and integration trees. The five-slot anatomy is upheld. Making `inventory_transaction_form` operable had activated generic Edit on a posted transaction, allowing posted → draft → Post and a second movement set keyed by a later source revision. The accepted correction uses ADR-0034's existing predicate carrier: transaction create admits draft only; update requires prior and projected draft; Edit/direct-form Save follow the same compiled predicate; archive/restore carry no transaction-state predicate because they preserve state (independent relation constraints still apply); and parent-scoped lines inherit the posted boundary. The composed browser journey observes one post, a refused rewind, one movement and unchanged on-hand; the real PostgreSQL admission twins cover candidate, prior, projected and inherited-parent cases. Critical round 1 returned REVISE; round 2 closed all eleven claims with PASS and no new executable defect. An independent user-run Fable max confirmation then returned PASS on the identical candidate, completing the Critical review sequence. The complete matrix passed, including browser 90/90, PostgreSQL 203/203, and reachability 104/104. `activity` removal remains correct: it removes only the unsupported-slot failure card, while the omitted requirement remains named by conformance debt. |
 | `scoped-create-missing-legal-entity-input` | **ACCEPTED 2026-08-19 by required packet-to-main `--no-ff` merge `fa75076`.** The implementation carries each selected URL legal entity under the selected create contract's declared system-input key, never a hardcoded key or UUID. The generic PostgreSQL interpreter enforces ADR-0015's archived-owner rule inside the create transaction from both business status and independent generic archive state. Both registered-archive lock orders and an archive-predicate-only mutation address round 1's survivor. Codex xhigh and Fable max both returned PASS on identical product candidate `ad7c6b8`. Its first full matrix exposed the manual mutation runner as an unlocked, non-CI `test:*` entrypoint; correction `2c747ed` names it as manual `evidence:*` under the exclusive repository lock. Fresh Codex and Fable arms both passed identical bridge candidate `ae6df65`, independently closing classification, lock coverage, victim reachability, architecture closure and rerun safety. After one same-SHA performance-indeterminate start, the complete matrix passed at `1a407a7`: architecture 141/141, PostgreSQL 203/203, browser 90/90, reachability 104/104 and online security green. Narrative freeze `1580b2a` is the merge's second parent, and the executable integration diff is empty. This closes the legal-entity operand half; `relation-scoped-enumeration` remains the separate required-relation blocker for `PUR-1`. |
+
+**Program-review trigger at the relation checkpoint:** do not run one against the
+unintegrated candidate. If `relation-scoped-enumeration` is accepted, propose a
+whole-app review before the next fan-out: this is the first complete required-
+relation office-worker slice, and its route exposed systemic cross-packet drift
+across two blocked predecessors, one correct stop, a wrong specimen table, and a
+split catalog authority. The user still selects it; no packet substitutes for it.
 
 #### TIER 1 SPLITS IN TWO, and the reason was measured at `3509ce8` on 2026-08-13
 
@@ -149,10 +156,12 @@ row filed the same week.** `5g3-term` gates the inventory **mount**;
 
 ### TIER 2 — an operator can work, but badly. Immediately after `PUR-1`.
 
-`ux-list-usability` (100 items, no search box, forward-only pagination) ·
+`ux-list-usability` (100 items, no search box, forward-only pagination; now also
+owns the ruled server-rendered search/page follow-on for oversized relation targets) ·
 `surface-command-order` (Cancel renders before Release on the purchase order's own
-command bar) · `relation-update-fork` (supplier frozen after create — must be
-**visible**, not discovered) · `ux-clutter` (labels leaking compiler vocabulary).
+command bar) · `relation-update-fork` (the update capability remains open; the
+candidate now makes the create-only freeze **visible**) · `ux-clutter` (labels
+leaking compiler vocabulary).
 
 ### TIER 3 — taxes every packet, and one of them makes our evidence unsound.
 
@@ -358,6 +367,21 @@ fifteen ranked findings. Three change this queue's order:
   The composition gap itself was recorded four times and owned by no row. New
   standing lesson: *a recorded finding with no owning row is a disposition with
   no executing gate.*
+
+**EVIDENCE-READY disposition overlay — 2026-08-19.** The detailed rows below
+retain their discovery history, but their trailing `OPEN` wording is now stale
+for the candidate under review. `relation-scoped-enumeration`,
+`required-relation-uncreatable`, `relation-picker-rechartered`, and
+`relation-refusal-unnamed` are **evidence ready, not accepted**, at gated
+executable parent `edc41ae3c04c48743652b2bf2ee41c54cf5857b8`; the exact frozen
+narrative descendant is named in the writer handoff. The candidate enumerates
+all five required targets, including both scoped relations on
+`stock_count_line_form`, and attributes refusal to the relation. It also makes
+the create-only freeze visible, satisfying only that disclosure half of
+`relation-update-fork`; update capability remains open. Its ruled bounded
+search/page continuation belongs to `ux-list-usability`, which remains open.
+No row in this overlay is accepted until two independent Critical PASSes, one
+full matrix, and the required packet-into-main `--no-ff` merge.
 
 | # | Packet | Tier | Why here |
 |---|---|---|---|

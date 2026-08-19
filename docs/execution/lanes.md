@@ -19,7 +19,7 @@ writer is holding those paths right now.
 | **CANON** *(Opus)* | `Q1-P5` — the legal-entity query operand, canonical v4 | **active, added 2026-07-30.** First non-Codex writer lane. Same review chain: Codex for everything, Fable on Critical. Holding its frozen candidate while `Q1-P4` takes the slot; authoring the deferred gateway binding meanwhile. |
 | **KERNEL** | — | idle since `G3-P2b-4` (2026-07-29). |
 | **DEPLOY** | — | idle since `1g2` (2026-07-29). |
-| **WRITER** | `relation-scoped-enumeration` — complete same-scope required-relation pickers | **active on `packet/relation-scoped-enumeration-2`, cut from current `origin/main` at `b591115` on 2026-08-19.** Owns the bounded lease recorded below. The prior stopped branch `packet/relation-scoped-enumeration` remains preserved at `fa83edb`; it is evidence, not a live lane and will not be rebased. No compiler path is authorized. |
+| **WRITER** | `relation-scoped-enumeration` — complete same-scope required-relation pickers | **frozen for user-run Critical review on `packet/relation-scoped-enumeration-2`.** The executable candidate `edc41ae3c04c48743652b2bf2ee41c54cf5857b8` passed every pre-review gate; the exact pushed narrative descendant is named in the writer handoff. The bounded lease remains held until review converges. The branch was cut from current `origin/main` at `b591115` on 2026-08-19. The prior stopped branch `packet/relation-scoped-enumeration` remains preserved at `fa83edb`; it is evidence, not a live lane and will not be rebased. No compiler path is authorized. |
 
 **Lane identity is per packet, not per theme.** The earlier model assigned
 standing themes (KERNEL owns canonical, FIX owns correctness). That broke on
