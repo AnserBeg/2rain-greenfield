@@ -7,10 +7,11 @@ Branch: `packet/relation-scoped-enumeration-2`
 Prior stopped branch: `packet/relation-scoped-enumeration` at `fa83edb`
 Tier: Critical
 Status: **EVIDENCE READY.** The gated executable candidate is
-`92c447fb9610c7473fa5c6bfbd8909bbb803aea8`. The review target is the frozen
+`8f1b7d8ba70a2ce6f6f1b50d734eb92c763fb37c`. The review target is the frozen
 narrative descendant named in the writer handoff and verified on `origin`.
-Two fresh, independent Critical PASS arms on that identical target are owed
-before the one full matrix and required packet-into-main `--no-ff` merge.
+A fresh Codex PASS is owed before the independent Fable arm may begin on that
+identical target. Then the one full matrix and required packet-into-main
+`--no-ff` merge remain.
 
 ## Packet definition
 
@@ -144,9 +145,9 @@ supply a scoped target operand was false.
 
 The controls are committed and CI-reachable. The deletion executions below were
 temporary author-chosen mutations, restored after each run: **0 committed
-mutation harnesses, 26 ad-hoc deletion observations**. They are evidence about
+mutation harnesses, 29 ad-hoc deletion observations**. They are evidence about
 the writer's model, not a substitute for the fresh-naive review. Every
-production/test mutation was restored before the gates at `92c447f`; only the
+production/test mutation was restored before the gates at `8f1b7d8`; only the
 documentation recording that evidence remained uncommitted.
 
 | Deleted production check or carrier | Control that went red | Observed discriminator |
@@ -161,6 +162,9 @@ documentation recording that evidence remained uncommitted.
 | update availability return broadened to every record | eligible-update admission twin | an eligible update lost its form and Save action |
 | unavailable-authority guard | absent-authority integration | wrong `COMPONENT_RENDER_FAILED` instead of `QUERY_UNSUPPORTED` |
 | command-bar admitted-status guard | five-slot incomplete-enumeration integration | blocking relation diagnostic and absent form/select remained, but the detached command-bar Save appeared |
+| admitted-only guard changed to `status !== 'relationRefused'` | five-slot `hasMore` and predicate-refused update controls | relation-refused create stayed green; predicate-refused update exposed detached command-bar Save and red on the exact absence assertion |
+| unavailable authority explicitly admitted in the command bar | eligible and unavailable-authority update controls | eligible update stayed green; `QUERY_UNSUPPORTED` remained while the unavailable update exposed detached Save and red on its exact absence assertion |
+| command-bar admission changed to unconditional false | predicate-refused and eligible update controls | refusing update stayed green; eligible update retained its form/freeze but lost the separately rendered Save and red on the exact presence assertion |
 | catalog root `assertExactKeys` | whole-catalog agreement | both consumers accepted the extra root key |
 | catalog-wide duplicate operation-id check | whole-catalog agreement | both consumers accepted the cross-entity collision |
 | entity create-contract agreement throw | relation-authority agreement | disagreeing contracts bound instead of refusing |
@@ -192,6 +196,16 @@ an incomplete enumeration has its named diagnostic but no form, relation select
 or command-bar Save; a complete enumeration has all three. Deleting only the
 command-bar admitted-status guard failed that exact final assertion while the
 other refusal assertions still held.
+
+Round 3 found production sound and the evidence still too narrow. The new
+five-slot specimen crossed both slots only for `admitted` and
+`relationRefused`; predicate-refused and unavailable-authority update controls
+still used the sections-only anatomy. Test-only commit `8f1b7d8` makes those
+updates and their eligible twin use the same five registered slots. The
+reviewer's exact one-property mutation, `status !== 'relationRefused'`, now
+leaves the relation-refusal control green and fails the predicate-refused
+no-Save assertion. The two complementary mutations above prove the unavailable
+refusal and eligible admission assertions are independently load-bearing.
 
 ## User-observable checkpoint
 
@@ -230,7 +244,7 @@ Port 4174 was observed closed.
 ## Gates before review
 
 All formal gates ran at exact SHA
-`92c447fb9610c7473fa5c6bfbd8909bbb803aea8`; `git rev-parse HEAD` was identical
+`8f1b7d8ba70a2ce6f6f1b50d734eb92c763fb37c`; `git rev-parse HEAD` was identical
 before and after.
 
 | Gate | Result |
@@ -249,7 +263,8 @@ reported PostgreSQL ready internally while its newly published localhost port
 still returned `ECONNREFUSED`. That test never reached an assertion. No file
 changed; the complete rerun passed 203/203, including the exact failed specimen,
 on that SHA. The new `92c447f` run passed 203/203 on its first attempt. The prior
-failed attempt is retained here rather than smoothed out.
+failed attempt is retained here rather than smoothed out. The test-only
+`8f1b7d8` correction also passed 203/203 on its first attempt.
 
 No full matrix has run. Per `git-workflow`, it runs once after both Critical
 review arms converge, at the SHA that integrates.
@@ -259,7 +274,7 @@ review arms converge, at the SHA that integrates.
 `relation-scoped-enumeration`, and `u5-design`. The handoff predicted six; the
 old stopped relation branch crossed the three-day threshold. None was changed.
 
-## Review evidence and rounds 1-2 disposition
+## Review evidence and rounds 1-3 disposition
 
 Round 1 reviewed exact remote candidate
 `9b89d104ac36eb2aa48d849dba3aa6ca3ef8863d` and returned **REVISE** with one
@@ -310,14 +325,41 @@ named diagnostic with no form, relation select or Save; its complete twin keeps
 all three. Deleting the command-bar admitted-status guard alone makes only the
 Save-absence assertion red.
 
-This next arm is round 3, so the continuing criterion is explicit:
-`review-tiers` says a production defect always continues. The correction is
-subsuming rather than another condition beside two independent decisions: it
-replaces the separate sections and command-bar admission paths with one shared
-authority. The `capture-learnings` check again produced no new entry. The
-existing 2026-08-02 lesson “Force the branch a negative control claims to
-cover” already names the exact failure: the old sections-only specimen never
-entered the shipped command-bar branch.
+Round 3 reviewed exact remote candidate
+`39d19834ff8c76021b6594d327f8fb3c85edd7d2` and returned **REVISE** on evidence
+only. It found no remaining production defect and accepted the shared
+`resolveFormAdmission` correction as subsuming. It also found that the five-slot
+control exercised only `admitted` and `relationRefused`. The predicate-refused
+and unavailable-authority update specimens remained sections-only, so changing
+the command-bar guard to `status !== 'relationRefused'` left the new control
+green while restoring detached Save on a reachable predicate-refused update.
+No out-of-scope finding survived.
+
+The correction is test-only commit
+`8f1b7d8ba70a2ce6f6f1b50d734eb92c763fb37c`. The refusing update fixture now
+starts from the five-slot anatomy; eligible, predicate-refused and unavailable-
+authority updates all render the separate command bar. The eligible twin
+requires its Save. Both refusal twins require the exact disclosure, no form, no
+relation select and no command-bar Save. The reviewer's exact mutation leaves
+the relation-refusal control green and fails the predicate-refused assertion.
+An unavailable-authority-only admission mutation and unconditional command-bar
+suppression fail their respective refusal and admission assertions.
+
+Round 4 is still required because AGENTS.md §4 invalidates every prior review
+after a code or test change. It is a narrow fresh Codex confirmation, not a new
+production-design round. The repeated fixture omission is treated as a lane
+process failure: the next claim is limited to the three shipped-anatomy outcomes
+the correction actually measures—`admitted`, `relationRefused` (including wholly
+unavailable authority), and `predicateRefused`. It does not claim fresh
+per-status attribution for `surfaceUnsupported` or `operationUnsupported`.
+Those statuses remain correctly suppressed in unchanged production source, but
+an exhaustive decision-table proof is not the scope of this evidence-only
+delta. Fable begins only after Codex PASS on the identical SHA.
+
+The `capture-learnings` check again produced no new entry. The existing
+2026-08-02 lesson “Force the branch a negative control claims to cover” already
+names the exact recurring failure: a specimen that omits the shipped branch
+cannot hold a claim about that branch.
 
 ## Bridges and filed limits
 
@@ -349,7 +391,7 @@ across two blocked predecessors, a correct stop, a wrong specimen table, and a
 whole-catalog authority split. The proposal is recorded; it is not selected or
 run here.
 
-## Pasteable round-3 review prompt
+## Pasteable round-4 review prompt
 
 The prompt uses `<FROZEN_SHA>` because a commit cannot contain its own identity.
 Replace it with the exact remote SHA printed in the writer handoff.
@@ -357,12 +399,12 @@ Replace it with the exact remote SHA printed in the writer handoff.
 ### Arm 1 — fresh Codex xhigh
 
 ```text
-You are the fresh-naive round-3 reviewer for Critical packet
+You are the fresh-naive round-4 reviewer for Critical packet
 relation-scoped-enumeration in /home/rvham/2rain-greenfield.
 
 Review exact remote candidate <FROZEN_SHA> against base
 b5911150453c6e007d70a47f0e76319c91f8ac32. The correction boundary is
-854b0dd856fdcccd2596af4f0f6aab6c905088c9..<FROZEN_SHA>. The remote branch is
+39d19834ff8c76021b6594d327f8fb3c85edd7d2..<FROZEN_SHA>. The remote branch is
 packet/relation-scoped-enumeration-2; verify the supplied git ls-remote line
 before reading. Work read-only. Do not edit, commit, run the full matrix, invoke
 another reviewer, or rely on line numbers. Return PASS, REVISE, or BLOCK with
@@ -391,61 +433,75 @@ Exact candidate 854b0dd corrected that order, and round 2 accepted it, but
 returned REVISE because the independently rendered command bar could still
 offer Save when sections refused relation enumeration and emitted no form. All
 relation-refusal controls used a sections-only fixture and therefore could not
-observe the shipped five-slot form's separate command bar. Reopen any earlier
-closed conclusion if the candidate gives concrete reason; do not treat this
-summary as evidence.
+observe the shipped five-slot form's separate command bar. Exact candidate
+39d1983 replaced those independent production decisions with
+resolveFormAdmission. Round 3 found that production correction sound and
+subsuming, but returned REVISE because its cross-slot evidence covered only
+admitted/relation-refused. Predicate-refused and unavailable-authority updates
+still used a sections-only fixture, so changing the command-bar guard to
+`status !== 'relationRefused'` left the new control green while restoring a
+detached Save on predicate refusal. Reopen an earlier conclusion only for a
+concrete candidate reason; do not treat this summary as evidence.
 
-THE ROUND-3 CORRECTION: renderCommandBar and renderSections now consume the same
-resolveFormAdmission result. It checks surface support, operation binding,
-relation content/refusal and current-record precondition in that order. A
-relation refusal renders its existing diagnostic through sections and must
-suppress the form, every relation select, the command-bar Save and operation
-submission. An admitted create twin renders the form, relation picker and Save.
-The round-1 update branches must remain unchanged: known authority with a false
-predicate renders the freeze; unavailable authority renders QUERY_UNSUPPORTED;
-an eligible update renders freeze plus form and Save but no relation select.
-ADR-0052 §§4-5 record both contracts.
+THE ROUND-4 CORRECTION IS TEST-ONLY: `fixtureWithRefusingChildUpdate` now starts
+from the same five-slot anatomy as the shipped Inventory forms. The eligible,
+predicate-refused and unavailable-authority update specimens therefore all
+exercise `record:sections` and the separately rendered `record:commandBar`.
+Eligible update must retain freeze, form and command-bar Save with no relation
+select. Predicate refusal must retain the freeze while suppressing form, select
+and command-bar Save. Unavailable authority must render exact
+QUERY_UNSUPPORTED while suppressing form, select, freeze and command-bar Save.
+Production `component-registry.ts` is byte-identical to executable parent
+92c447f.
 
 EVIDENCE ALREADY RUN at executable parent
-92c447fb9610c7473fa5c6bfbd8909bbb803aea8: typecheck, lint and format PASS;
+8f1b7d8ba70a2ce6f6f1b50d734eb92c763fb37c: typecheck, lint and format PASS;
 browser 90/90; integration 148/148; contracts 16/16; PostgreSQL 203/203. The
-five-slot control passed at that SHA. Deleting only the command-bar
-admitted-status guard left the blocking diagnostic and absent form/select
-intact, but made its no-Save assertion fail. No full matrix has run. The earlier
-distributor journey selected both required scoped relations on
-stock_count_line_form and observed Create complete. Treat these as settled
-deterministic evidence, not a restriction on source review.
+five-slot update controls passed at that SHA. Three temporary mutations were
+run separately and restored: the reviewer's exact `!== 'relationRefused'`
+survivor kept relation refusal green and red only predicate-refused no-Save; an
+unavailable-authority-only allow kept eligible green and red its no-Save; and
+unconditional false kept predicate refusal green and red eligible Save. There
+are 29 author-chosen deletion observations in the packet record; they are
+supporting evidence only. No full matrix has run. The earlier distributor
+journey selected both required scoped relations on stock_count_line_form and
+observed Create complete. Treat these as settled deterministic evidence, not a
+restriction on source review.
 
-ROUND-3 CONVERGENCE CLAIM UNDER TEST: the continuing criterion is “production
-defect always continues.” The correction is claimed to subsume, not enumerate:
-one form-admission authority replaces the independent slot decisions that made
-the survivor possible. Say plainly if the implementation does not earn that
-classification.
+ROUND-4 CONTINUING CRITERION: AGENTS.md §4 requires fresh review after the test
+change. Production was closed in round 3; this is a narrow evidence confirm.
+After the same fixture class recurred, the claim is deliberately narrowed to
+the three shipped-anatomy outcomes this correction measures: admitted,
+relationRefused (including wholly unavailable authority), and predicateRefused.
+It does not claim new per-status attribution for surfaceUnsupported or
+operationUnsupported. Say plainly if that claim is still broader than its
+specimens or if the evidence-only delta changes production behavior.
 
 DECISIVE QUESTIONS:
 
-A. On an otherwise-eligible five-slot create whose relation enumeration refuses,
-   is the precise diagnostic present while the sections form, relation select,
-   command-bar Save and operation submission are all absent?
-B. Do sections and command-bar Save genuinely consume one form-admission
-   authority, or does an independent admission path survive for either slot?
-   Check every status of resolveFormAdmission, not only hasMore.
-C. Does the one-property complete enumeration twin still render its form,
-   relation select and command-bar Save? Did centralising admission suppress a
-   valid create or change truncatedByMaximum's admitted meaning?
-D. Are both round-1 update outcomes preserved before the predicate return:
-   known authority yields the freeze, unavailable authority yields the named
-   refusal, and neither exposes form/select/Save when the predicate is false?
-   Does the eligible update twin still retain freeze, form and Save with no
-   relation picker?
-E. Does the five-slot control reach the shipped cross-slot branch for the exact
-   stated reason? Identify the cheapest deletion or one-property survivor that
-   would leave it green. The writer's 26 temporary author-chosen deletion
-   observations are supporting evidence only.
-F. Does ADR-0052 claim exactly the shared admission and update-disclosure
-   behavior production establishes? Did the correction regress scoped
-   enumeration, completeness, two-relation submission, whole-catalog authority
-   or posted-transaction predicate handling in a reachable way?
+A. Is the correction boundary executable change limited to
+   `test/integration/surface-data-binding.test.ts`, with production
+   `component-registry.ts` unchanged from 92c447f?
+B. On a five-slot predicate-refused update, is the freeze present while the
+   form, relation select and separate command-bar Save are absent? Does the
+   control kill the reviewer's exact `status !== 'relationRefused'` survivor
+   while the relation-refusal specimen remains green for the intended reason?
+C. On a five-slot unavailable-authority update, is exact QUERY_UNSUPPORTED
+   present while form, relation select, freeze and command-bar Save are absent?
+   Is this branch independently load-bearing rather than merely passing through
+   the predicate-refused assertion?
+D. Does the eligible five-slot update twin retain freeze, form and the separate
+   command-bar Save with no relation picker? Does it kill unconditional or
+   over-broad Save suppression?
+E. Do all three controls reach the registered `record:commandBar` renderer
+   through the compiled five-slot fixture rather than direct helper calls or a
+   sections-only compatibility Save? Identify the cheapest one-property
+   survivor within this three-outcome claim that would leave the tests green.
+F. Do the packet and ADR accurately distinguish unchanged shared-admission
+   production behavior from this test-only correction? Did the correction
+   regress scoped enumeration, completeness, two-relation submission,
+   whole-catalog authority or posted-transaction predicate handling in a
+   reachable way?
 
 THREAT MODEL: an ordinary authorized tenant user directly addresses a compiled
 form with record and legal-entity URL values, including a posted stock count;
@@ -456,12 +512,12 @@ boundaries and across separately rendered form slots. Active obfuscation,
 malicious compiler output engineered to evade source scans, and a new sealed
 write-capability design are not claimed here.
 
-KNOWN EVIDENCE LIMITS: the five-slot refusal control reproduces the shipped
-Record anatomy in a compiled integration fixture rather than driving a browser
-journey through a first-party incomplete target list; the precondition-false
-controls likewise use that fixture rather than the shipped posted stock_count
-form; the distributor journey proved scoped creation, not either refusal
-branch; the deletion observations were temporary and author-selected; and the
+KNOWN EVIDENCE LIMITS: the five-slot controls reproduce the shipped Record
+anatomy in a compiled integration fixture rather than driving a browser journey
+through the first-party posted stock_count form; the distributor journey proved
+scoped creation, not these refusal branches; `surfaceUnsupported` and
+`operationUnsupported` are not claimed as freshly attributed by this test-only
+delta; the deletion observations were temporary and author-selected; and the
 full matrix is deliberately deferred until Critical review converges.
 
 FILE AND LEAVE if valid rather than making this correction own them:
@@ -471,9 +527,10 @@ runtime-integrity-attribution-untwinned; activity-rail-unowned;
 ux-list-usability; relation-update-fork beyond the visible create-only freeze;
 compiler source; or a redesign of posted-transaction affordance rules.
 
-PASS only if the exact candidate closes the round-2 cross-slot Save survivor,
-preserves the round-1 update correction, and introduces no new in-scope material
-defect. Classify any valid out-of-scope observation separately.
+PASS only if the exact candidate closes the round-3 control survivor for all
+three claimed shipped-anatomy outcomes, leaves the already accepted production
+correction unchanged, and introduces no new in-scope material defect. Classify
+any valid out-of-scope observation separately.
 ```
 
 ### Arm 2 — independent Fable max, only after Arm 1 PASS
