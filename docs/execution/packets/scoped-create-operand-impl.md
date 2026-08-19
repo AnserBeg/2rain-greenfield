@@ -4,10 +4,11 @@ Date: 2026-08-18
 Base: `22154a7db5cdae739cacaae2ea46771d805b20cf` (`origin/main`, verified before cut)
 Branch: `packet/scoped-create-operand-impl`
 Tier: Critical
-Status: evidence-ready matrix-bridge revision; round 2 passed both external
+Status: evidence-ready and matrix-green; round 2 passed both external
 Critical arms at `ad7c6b8`, then the first full matrix found an unleased,
 unregistered manual mutation entrypoint; executable correction `2c747ed` passed
-both fresh narrow arms at identical candidate `ae6df65`; full matrix rerun owed
+both fresh narrow arms at identical candidate `ae6df65`; full matrix passed at
+`1a407a7`; packet-to-main `--no-ff` integration owed
 
 ## Packet definition
 
@@ -244,8 +245,28 @@ FULL_MATRIX_FAILED rc=1 sha=ad7c6b8c6ac1e601bd1d93f09b5e89cefc13c984
 ```
 
 Fresh Codex and Fable narrow reviews both passed identical candidate `ae6df65`.
-The full matrix rerun is now the remaining acceptance gate. Review was executed
-by the user in separate online seats, never by this writer lane.
+The first matrix start at narrative descendant `1a407a7` stopped at the
+performance gate as explicitly indeterminate: observed CPU idle was 84.7%,
+below the required 90%. The same clean SHA was retried after the transient load
+cleared; the estimator observed 97.9% idle and the complete matrix passed:
+
+```text
+PERFORMANCE_GATE_FAILED rc=1 sha=1a407a7d46fb8f8be525c98ce348a86b652f8912
+FULL_MATRIX_FAILED rc=1 sha=1a407a7d46fb8f8be525c98ce348a86b652f8912
+PERFORMANCE_GATE_PASS_SHA=1a407a7d46fb8f8be525c98ce348a86b652f8912
+FULL_MATRIX_PASS_SHA=1a407a7d46fb8f8be525c98ce348a86b652f8912
+```
+
+The successful retry recorded performance 5/5, unit 120/120, compiler 150/150,
+integration 140/140, agent 3/3, architecture 141/141, contracts 16/16,
+PostgreSQL 203/203, locale 1/1, browser 90/90 and observability 11/11.
+Language coverage passed its 2,050-obligation decision partition, reachability
+observed 104/104 test files through 10 producer artifacts, and the online
+security scans passed. The runner left the frozen tree clean and released its
+lock. `origin/main` remained the packet base `22154a7`, so the required
+packet-to-main merge introduces the same executable tree the matrix measured.
+Review was executed by the user in separate online seats, never by this writer
+lane.
 
 The program-review trigger is not run at this freeze because the application is
 not yet cleanly integrated, which is an explicit anti-trigger. Re-evaluate it
