@@ -912,11 +912,16 @@ test('hasMore refuses a relation picker while truncation alone does not', async 
     incomplete.html,
     new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
   );
-  assert.match(incomplete.html, /data-platform-slot="record:commandBar"/u);
-  assert.doesNotMatch(
-    incomplete.html,
-    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  const incompleteCommandBar = incomplete.html.match(
+    /<div\b[^>]*data-platform-slot="record:commandBar"[^>]*>[\s\S]*?<\/div>/u,
   );
+  assert.ok(incompleteCommandBar);
+  assert.match(incompleteCommandBar[0], /data-slot-state="ready"/u);
+  assert.doesNotMatch(
+    incompleteCommandBar[0],
+    /<button\b[^>]*>\s*Save\s*<\/button>/u,
+  );
+  assert.doesNotMatch(incompleteCommandBar[0], /COMPONENT_RENDER_FAILED/u);
 
   const clampedButComplete = await renderWithCoverage(false, true);
   assert.match(clampedButComplete.html, /<form id="surface-record-form"/u);
@@ -1140,11 +1145,16 @@ test('relation inputs stay visibly frozen when the update precondition does not 
   );
   assert.match(rendered.html, /cannot be changed here/u);
   assert.doesNotMatch(rendered.html, /<form id="surface-record-form"/u);
-  assert.match(rendered.html, /data-platform-slot="record:commandBar"/u);
-  assert.doesNotMatch(
-    rendered.html,
-    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  const refusedCommandBar = rendered.html.match(
+    /<div\b[^>]*data-platform-slot="record:commandBar"[^>]*>[\s\S]*?<\/div>/u,
   );
+  assert.ok(refusedCommandBar);
+  assert.match(refusedCommandBar[0], /data-slot-state="ready"/u);
+  assert.doesNotMatch(
+    refusedCommandBar[0],
+    /<button\b[^>]*>\s*Save\s*<\/button>/u,
+  );
+  assert.doesNotMatch(refusedCommandBar[0], /COMPONENT_RENDER_FAILED/u);
   assert.doesNotMatch(
     rendered.html,
     new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
@@ -1812,14 +1822,16 @@ test('unavailable relation authority remains named when the update precondition 
     /<form id="surface-record-form"/u,
     'unavailable relation authority must refuse rather than masquerade as no relations',
   );
-  assert.match(
-    unavailableUpdate.html,
-    /data-platform-slot="record:commandBar"/u,
+  const unavailableCommandBar = unavailableUpdate.html.match(
+    /<div\b[^>]*data-platform-slot="record:commandBar"[^>]*>[\s\S]*?<\/div>/u,
   );
+  assert.ok(unavailableCommandBar);
+  assert.match(unavailableCommandBar[0], /data-slot-state="ready"/u);
   assert.doesNotMatch(
-    unavailableUpdate.html,
-    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+    unavailableCommandBar[0],
+    /<button\b[^>]*>\s*Save\s*<\/button>/u,
   );
+  assert.doesNotMatch(unavailableCommandBar[0], /COMPONENT_RENDER_FAILED/u);
   assert.doesNotMatch(
     unavailableUpdate.html,
     new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
