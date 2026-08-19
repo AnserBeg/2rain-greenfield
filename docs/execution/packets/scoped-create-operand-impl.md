@@ -65,8 +65,11 @@ generic provider.
 
 ## Controls and committed mutation evidence
 
-`test/integration/scoped-create-operand-mutations.mjs` is registered as
-`test:scoped-create-operand-mutations`. It requires a clean tracked tree,
+`test/integration/scoped-create-operand-mutations.mjs` is registered as the
+manual `evidence:scoped-create-operand-mutations` entrypoint. The complete
+harness runs under an exclusive repository test lock because three mutations
+execute the PostgreSQL composed-application control; it is evidence that
+expects red tests, not a CI `test:*` suite. It requires a clean tracked tree,
 replaces one unique production victim, runs the named control in a fresh
 process, verifies the expected red text, and restores the exact source in
 `finally`. One uninterrupted invocation against gated tree `fe7d514` executed
