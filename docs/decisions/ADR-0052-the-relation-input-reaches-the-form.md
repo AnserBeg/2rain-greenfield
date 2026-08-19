@@ -275,6 +275,16 @@ operator therefore sees which relation prevents the form from rendering rather
 than an unattributed “Save unavailable.” A wholly unavailable entity relation
 authority is still not read as a known empty list; the surface refuses instead.
 
+**CORRECTED 2026-08-19 after the second `relation-scoped-enumeration` review.**
+The command bar and sections are independently rendered slots, but they consume
+one form-admission decision. A relation refusal suppresses both the sections
+form and the command-bar Save action; an admitted twin renders both. The prior
+control used a compiler-valid sections-only form, so it proved that the form
+disappeared without observing the separate Save path used by the shipped
+five-slot Inventory anatomy. A blocking diagnostic beside a detached, dead Save
+button is still a write control offered for an unsatisfiable form and does not
+satisfy this section.
+
 ### 6. No scripted control
 
 ADR-0036 §2 authorises exactly four client behaviours and a server-rendered
@@ -322,6 +332,8 @@ only honest behaviour.
 - The compiled operation contract gains two version constants and one key.
 - Historical lineage before profile-v2 adoption remains untouched.
 - `updateRecordEffect` still cannot change a relation, and now says so on screen.
+- A relation refusal suppresses both form content and the separately rendered
+  command-bar Save action.
 
 ## What this ADR does not decide
 
