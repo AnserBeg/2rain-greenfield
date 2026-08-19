@@ -231,6 +231,15 @@ control.** The update form states it: the relation is named, and the sentence sa
 it is set at creation and cannot be changed there. A limit that is declared is a
 product decision; a limit you find by failing is a defect.
 
+**CORRECTED 2026-08-19 after the first `relation-scoped-enumeration` review.**
+The disclosure is resolved before the update operation's current-record
+precondition gates editable content. If that predicate does not hold, the
+sections slot still renders the relation freeze (or the relation-authority
+refusal), while the form, relation controls, Save action and operation submission
+remain absent. The first candidate evaluated the predicate first and returned an
+empty sections slot, so a directly addressed posted record hid exactly the
+restriction this section requires it to declare.
+
 ### 5. A form that cannot be satisfied refuses, and does not render
 
 If a required relation's target entity cannot be enumerated — no pinned list
