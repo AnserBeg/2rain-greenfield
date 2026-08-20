@@ -6,11 +6,11 @@ confirmed unchanged before the fresh worktree was cut)
 Branch: `packet/relation-scoped-enumeration-2`
 Prior stopped branch: `packet/relation-scoped-enumeration` at `fa83edb`
 Tier: Critical
-Status: **EVIDENCE READY.** The gated executable candidate is
-`8f1b7d8ba70a2ce6f6f1b50d734eb92c763fb37c`. The review target is the frozen
-narrative descendant named in the writer handoff and verified on `origin`.
-A fresh Codex PASS is owed before the independent Fable arm may begin on that
-identical target. Then the one full matrix and required packet-into-main
+Status: **REVIEW CONVERGED; MATRIX PENDING.** The exact reviewed candidate is
+`c56b37fb21ce27afe9aa45c3acb6442ee5ac100a`, verified identical on `origin`.
+Independent Fable max returned PASS after the user ruled the final evidence-only
+correction would proceed directly to that arm with no further Codex arm. The one
+full matrix on the reconciled integration tree and required packet-into-main
 `--no-ff` merge remain.
 
 ## Packet definition
@@ -345,16 +345,31 @@ the relation-refusal control green and fails the predicate-refused assertion.
 An unavailable-authority-only admission mutation and unconditional command-bar
 suppression fail their respective refusal and admission assertions.
 
-Round 4 is still required because AGENTS.md §4 invalidates every prior review
-after a code or test change. It is a narrow fresh Codex confirmation, not a new
-production-design round. The repeated fixture omission is treated as a lane
-process failure: the next claim is limited to the three shipped-anatomy outcomes
-the correction actually measures—`admitted`, `relationRefused` (including wholly
-unavailable authority), and `predicateRefused`. It does not claim fresh
-per-status attribution for `surfaceUnsupported` or `operationUnsupported`.
-Those statuses remain correctly suppressed in unchanged production source, but
-an exhaustive decision-table proof is not the scope of this evidence-only
-delta. Fable begins only after Codex PASS on the identical SHA.
+Round 4 reviewed frozen candidate
+`2e614bf9dd3ac7dc0c739b690c51964533ad47b1` and returned **REVISE** on one final
+evidence survivor, with production still closed. The refusal assertions rejected
+only a Save carrying `form="surface-record-form"`; replacing the refused
+command-bar arm with a bare `<button type="submit">Save</button>` left all 33
+focused tests green. The orchestrator reproduced that exact survivor.
+
+The final correction is test-only commit
+`c56b37fb21ce27afe9aa45c3acb6442ee5ac100a`. The same three refusal specimens now
+capture the real `record:commandBar` slot, require it to be ready and free of
+`COMPONENT_RENDER_FAILED`, and reject any flat Save button independent of its
+attributes. Before widening, the exact bare-Save mutant passed 33/33. After
+widening, the identical mutant passed 30/33 and failed exactly the incomplete-
+enumeration create, predicate-refused update and unavailable-authority update
+controls; after restoration the file passed 33/33. Production remained byte-
+identical throughout.
+
+The user ruled this the last evidence round and directed the fresh Fable arm
+without another Codex arm. Independent Fable max verified the exact remote
+candidate and returned **PASS**. It confirmed the test-only boundary, real-slot
+isolation, mutation failure signature, admitted twins, unchanged shared form-
+admission production authority, ADR-0052 agreement and absence of a reachable
+one-property survivor within production's current submit grammar. No material or
+out-of-scope finding survived. Review is therefore converged by explicit user
+ruling; the full matrix remains the acceptance gate.
 
 The `capture-learnings` check again produced no new entry. The existing
 2026-08-02 lesson “Force the branch a negative control claims to cover” already
