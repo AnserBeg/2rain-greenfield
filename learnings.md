@@ -574,3 +574,17 @@ and opened posted → draft → Post twice. How to apply: enumerate every newly
 reachable New, Edit, command and lifecycle path; execute state-boundary twins
 through the provider, and make affordances follow the same compiled predicates.
 See ADR-0054 and `docs/execution/packets/inventory-form-anatomy.md`.
+
+## Sweep every renderer that owns operator-visible copy
+Date: 2026-08-20
+Why: `inventory-surface-legibility` audited the slot renderer but missed Task-page
+copy in `surface-runtime.ts`, leaving “compiled release” and a canonical ID live.
+How to apply: trace page-level and slot-level renderers for every shipped archetype,
+then assert the absence of implementation copy on a real product journey.
+
+## Preserve authored copy; normalize identifiers only
+Date: 2026-08-20
+Why: one label helper corrupted VAT, R&D and iPhone while using transformed display
+copy to infer canonical field prefixes. How to apply: preserve authored labels
+except contract-declared role suffixes, and derive structure only from compiled
+canonical identity; test a display label that differs from that identity.

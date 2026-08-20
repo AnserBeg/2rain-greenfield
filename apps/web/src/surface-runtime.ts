@@ -424,20 +424,18 @@ function renderSelectedSurface(
       view,
     }),
   );
-  const legacyHeading =
+  const pageHeading =
     selected.archetype === 'list' || selected.archetype === 'record'
       ? ''
       : `<header class="surface-heading">
       <div>
-        <p class="eyebrow">${escapeHtml(selected.archetype)} surface · compiled release</p>
         <h1>${escapeHtml(selected.label)}</h1>
-        <p class="surface-id">${escapeHtml(selected.surfaceId)}</p>
       </div>
       <div class="surface-status" aria-label="Surface status roles">
         ${selected.statusRoles.map((role) => `<span data-status-role="${escapeHtml(role)}">${escapeHtml(role)}</span>`).join('')}
       </div>
     </header>`;
-  const body = `${legacyHeading}
+  const body = `${pageHeading}
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
       ${renderedSlots.map((result) => result.html).join('')}
     </div>`;

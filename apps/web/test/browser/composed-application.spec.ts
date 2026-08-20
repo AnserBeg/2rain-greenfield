@@ -1051,6 +1051,11 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(page.locator('[data-aggregate-value]')).toHaveCount(0);
 
   await page.goto(surfaceUrl(baseUrl, 'inventory_on_hand_lookup'));
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'On-hand lookup' }),
+  ).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('compiled release');
+  await expect(page.locator('.surface-id')).toHaveCount(0);
   await page
     .getByRole('navigation', { name: 'Legal entity' })
     .getByRole('link', {

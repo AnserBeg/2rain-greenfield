@@ -758,7 +758,7 @@ function renderSections(context: SurfaceComponentContext): string {
     return slotPanel(
       context,
       record
-        ? `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, context.surface))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
+        ? `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
         : dataDiagnostic('QUERY_NOT_FOUND'),
       'sections-slot',
     );
@@ -790,7 +790,7 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context.surface, operation, record)}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context, operation, record)}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
 }
@@ -862,7 +862,7 @@ function renderRelationContent(
   if (record) {
     return {
       controls: '',
-      freeze: renderRelationFreeze(context.surface, authority.relationInputs),
+      freeze: renderRelationFreeze(context, authority.relationInputs),
       refusal: '',
     };
   }
@@ -886,7 +886,7 @@ function renderRelationContent(
   }
   return {
     controls: pickerState.pickers
-      .map((picker) => renderRelationPicker(context.surface, picker))
+      .map((picker) => renderRelationPicker(context, picker))
       .join(''),
     freeze: '',
     refusal: '',
@@ -894,10 +894,10 @@ function renderRelationContent(
 }
 
 function renderRelationPicker(
-  surface: CompiledSurfaceDefinition,
+  context: SurfaceComponentContext,
   picker: SurfaceRelationPicker,
 ): string {
-  const label = fieldLabel(picker.relationId, surface);
+  const label = fieldLabel(picker.relationId, surfaceEntityId(context));
   const first = picker.required
     ? `<option value="">Choose ${escapeHtml(label)}</option>`
     : '<option value="">None</option>';
@@ -911,11 +911,11 @@ function renderRelationPicker(
 }
 
 function renderRelationFreeze(
-  surface: CompiledSurfaceDefinition,
+  context: SurfaceComponentContext,
   relations: readonly CompiledSurfaceRelationInput[],
 ): string {
   if (relations.length === 0) return '';
-  return `<aside class="relation-freeze" data-relation-freeze role="note"><h3>Locked after creation</h3><ul>${relations.map((relation) => `<li data-relation-id="${escapeHtml(relation.relationId)}"><strong>${escapeHtml(fieldLabel(relation.relationId, surface))}</strong> is chosen when this record is created and cannot be changed later.</li>`).join('')}</ul></aside>`;
+  return `<aside class="relation-freeze" data-relation-freeze role="note"><h3>Locked after creation</h3><ul>${relations.map((relation) => `<li data-relation-id="${escapeHtml(relation.relationId)}"><strong>${escapeHtml(fieldLabel(relation.relationId, surfaceEntityId(context)))}</strong> is chosen when this record is created and cannot be changed later.</li>`).join('')}</ul></aside>`;
 }
 
 function renderReleaseSummary({
@@ -970,8 +970,18 @@ function renderListSurfaceContent(
   detail?: CompiledSurfaceDefinition,
   linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
 ): string {
+  const sourceEntityId = linkContext
+    ? readCompiledSurfaceDataBinding(linkContext.view, surface).query
+        .sourceEntityId
+    : (records[0]?.entityId ?? '');
   if (result?.listCoverage) {
-    return renderSharedListSurface(surface, result, detail, linkContext);
+    return renderSharedListSurface(
+      surface,
+      result,
+      sourceEntityId,
+      detail,
+      linkContext,
+    );
   }
   if (records.length === 0) {
     return emptyDataPanel();
@@ -979,10 +989,10 @@ function renderListSurfaceContent(
   const selectable = hasNamedSlot(surface, 'bulkActions');
   const formId = bulkSelectionFormId(surface);
   const recordLabel = entityLabel(surface);
-  return `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(recordLabel)}</h2></div><span class="status-pill">${records.length} visible</span></div><div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">${escapeHtml(recordLabel)}</th>${surface.fieldIds.map((fieldId) => `<th scope="col">${escapeHtml(fieldLabel(fieldId, surface))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${records
+  return `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(recordLabel)}</h2></div><span class="status-pill">${records.length} visible</span></div><div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">${escapeHtml(recordLabel)}</th>${surface.fieldIds.map((fieldId) => `<th scope="col">${escapeHtml(fieldLabel(fieldId, sourceEntityId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${records
     .map((record) => {
       const title = listRecordTitle(surface, record, linkContext);
-      return `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${selectable ? selectionCell(formId, record, recordLabel, title) : ''}<td data-column-label="${escapeHtml(recordLabel)}" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, record.recordId, record.archived, linkContext))}" aria-label="Open ${escapeHtml(recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}</td>${surface.fieldIds.map((fieldId, index) => `<td data-column-label="${escapeHtml(fieldLabel(fieldId, surface))}" data-column-priority="${String(index + 1)}" data-field-id="${escapeHtml(fieldId)}">${renderValue(record.values[fieldId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(surface.fieldIds.length + 1)}">${record.archived ? 'Archived' : 'Active'}</td></tr>`;
+      return `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${selectable ? selectionCell(formId, record, recordLabel, title) : ''}<td data-column-label="${escapeHtml(recordLabel)}" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, record.recordId, record.archived, linkContext))}" aria-label="Open ${escapeHtml(recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}</td>${surface.fieldIds.map((fieldId, index) => `<td data-column-label="${escapeHtml(fieldLabel(fieldId, sourceEntityId))}" data-column-priority="${String(index + 1)}" data-field-id="${escapeHtml(fieldId)}">${renderValue(record.values[fieldId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(surface.fieldIds.length + 1)}">${record.archived ? 'Archived' : 'Active'}</td></tr>`;
     })
     .join('')}</tbody></table></div></section>`;
 }
@@ -990,6 +1000,7 @@ function renderListSurfaceContent(
 function renderSharedListSurface(
   surface: CompiledSurfaceDefinition,
   result: SemanticQueryResultEnvelope,
+  sourceEntityId: string,
   detail?: CompiledSurfaceDefinition,
   linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
 ): string {
@@ -1018,10 +1029,10 @@ function renderSharedListSurface(
   const body =
     view.rows.length === 0
       ? `<div class="data-empty" data-data-state="empty" data-list-zero-input="true"><h3>No records yet</h3><p>This search has zero visible records for the current tenant, environment, and principal.</p></div>`
-      : `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">${escapeHtml(recordLabel)}</th>${columns.map((column) => `<th scope="col">${escapeHtml(fieldLabel(column.columnId, surface))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${view.rows
+      : `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">${escapeHtml(recordLabel)}</th>${columns.map((column) => `<th scope="col">${escapeHtml(fieldLabel(column.columnId, sourceEntityId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${view.rows
           .map((row) => {
             const title = listRecordTitle(surface, row.record, linkContext);
-            return `<tr data-compact-card="true" data-record-id="${escapeHtml(row.record.recordId)}">${selectable ? selectionCell(formId, row.record, recordLabel, title) : ''}<td data-column-label="${escapeHtml(recordLabel)}" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, row.record.recordId, row.archived, linkContext))}" aria-label="Open ${escapeHtml(recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}</td>${columns.map((column, index) => `<td data-column-label="${escapeHtml(fieldLabel(column.columnId, surface))}" data-column-priority="${String(index + 1)}" ${column.kind === 'relation' ? 'data-relation-id' : 'data-field-id'}="${escapeHtml(column.columnId)}">${renderValue(row.cells[column.columnId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(columns.length + 1)}"><span class="status-pill" data-status-role="${row.archived ? 'attention' : 'success'}">${row.archived ? 'Archived' : 'Active'}</span></td></tr>`;
+            return `<tr data-compact-card="true" data-record-id="${escapeHtml(row.record.recordId)}">${selectable ? selectionCell(formId, row.record, recordLabel, title) : ''}<td data-column-label="${escapeHtml(recordLabel)}" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, row.record.recordId, row.archived, linkContext))}" aria-label="Open ${escapeHtml(recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}</td>${columns.map((column, index) => `<td data-column-label="${escapeHtml(fieldLabel(column.columnId, sourceEntityId))}" data-column-priority="${String(index + 1)}" ${column.kind === 'relation' ? 'data-relation-id' : 'data-field-id'}="${escapeHtml(column.columnId)}">${renderValue(row.cells[column.columnId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(columns.length + 1)}"><span class="status-pill" data-status-role="${row.archived ? 'attention' : 'success'}">${row.archived ? 'Archived' : 'Active'}</span></td></tr>`;
           })
           .join('')}</tbody></table></div>`;
   const search = renderListSearch(surface, view.listCoverage, linkContext);
@@ -1169,21 +1180,14 @@ function dataDiagnostic(
   return diagnostic({ code });
 }
 
-function fieldLabel(
-  fieldId: string,
-  surface?: CompiledSurfaceDefinition,
-): string {
+function fieldLabel(fieldId: string, entityId = ''): string {
   const local = fieldId.slice(fieldId.lastIndexOf('.') + 1);
-  const entityPrefix = surface
-    ? entityLabel(surface)
-        .toLowerCase()
-        .replaceAll(/[^a-z0-9]+/g, '_')
-    : '';
+  const entityPrefix = entityId.slice(entityId.lastIndexOf('.') + 1);
   const withoutEntity =
     entityPrefix.length > 0 && local.startsWith(`${entityPrefix}_`)
       ? local.slice(entityPrefix.length + 1)
       : local;
-  return businessLabel(withoutEntity.replace(/_id$/u, ''));
+  return identifierLabel(withoutEntity.replace(/_id$/u, ''));
 }
 
 const BUSINESS_ACRONYMS: Readonly<Record<string, string>> = Object.freeze({
@@ -1195,7 +1199,7 @@ const BUSINESS_ACRONYMS: Readonly<Record<string, string>> = Object.freeze({
   url: 'URL',
 });
 
-function businessLabel(value: string): string {
+function identifierLabel(value: string): string {
   const words = value
     .trim()
     .replaceAll(/[^A-Za-z0-9]+/g, ' ')
@@ -1376,7 +1380,12 @@ function appendLegalEntitySelection(
 }
 
 function entityLabel(surface: CompiledSurfaceDefinition): string {
-  return businessLabel(surface.label.replace(/\s+(?:detail|form|list)$/i, ''));
+  return surface.label.replace(/\s+(?:detail|form|list)$/i, '');
+}
+
+function surfaceEntityId(context: SurfaceComponentContext): string {
+  return readCompiledSurfaceDataBinding(context.view, context.surface).query
+    .sourceEntityId;
 }
 
 function hasSurfaceSlot(
@@ -1460,10 +1469,11 @@ const ENUM_SELECT_MAXIMUM_OPTIONS = 5;
 export const FORM_EMPTY_INTENT_PREFIX = 'empty:';
 
 function renderFormFields(
-  surface: CompiledSurfaceDefinition,
+  context: SurfaceComponentContext,
   operation: CompiledSurfaceOperationBinding,
   record: SemanticRecordDto | null,
 ): string {
+  const { surface } = context;
   const fieldsById = new Map(
     (surface.fields ?? []).map((field) => [field.fieldId, field]),
   );
@@ -1472,7 +1482,7 @@ function renderFormFields(
   );
   return surface.fieldIds
     .map((fieldId, index) => {
-      const label = fieldLabel(fieldId, surface);
+      const label = fieldLabel(fieldId, surfaceEntityId(context));
       const value = record ? record.values[fieldId] : undefined;
       const field = fieldsById.get(fieldId);
       const inputField = inputFieldsById.get(fieldId);

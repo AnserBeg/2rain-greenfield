@@ -168,6 +168,75 @@ test('record title falls back to short identity when its compiled display value 
   ).toHaveCount(0);
 });
 
+test('authored business labels survive while field prefixes follow canonical entity identity', async ({
+  page,
+}) => {
+  const compiled = compileFixture(true, false, (authored) => {
+    const surfaces = authored.surfaces as Array<Record<string, unknown>>;
+    const list = surfaces.find(
+      (surface) =>
+        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_list`,
+    );
+    const form = surfaces.find(
+      (surface) =>
+        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_form`,
+    );
+    assert.ok(list);
+    assert.ok(form);
+    list.label = 'VAT & R&D orders list';
+    form.label = 'iPhone orders form';
+  });
+  const policy = allowPolicy();
+  const labelExecutor = new BrowserFixtureExecutor(null);
+  labelExecutor.createSeed('Business label specimen');
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const labelServer = createSurfaceRuntimeServer(
+    runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        labelExecutor,
+        operationMediation,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, labelExecutor),
+    },
+  );
+  const labelBaseUrl = await listen(labelServer);
+
+  try {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    await page.goto(
+      `${labelBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_list`)}`,
+    );
+    await expect(
+      page.getByRole('heading', {
+        level: 1,
+        name: 'VAT & R&D orders',
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('columnheader', { name: 'Name', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('columnheader', { name: 'Master name' }),
+    ).toHaveCount(0);
+
+    await page.goto(
+      `${labelBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+    );
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'New iPhone orders' }),
+    ).toBeVisible();
+    await expect(page.getByLabel('Number', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      labelServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
 test.afterAll(async () => {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
@@ -1304,7 +1373,7 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
   await page.goto(
     `${baseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_list`)}`,
   );
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Master');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('master');
   await expect(
     page.getByRole('cell', { name: 'Existing live master', exact: true }),
   ).toBeVisible();
@@ -1484,12 +1553,12 @@ test('a failed data slot stays inline while ready siblings render without JavaSc
       page.locator(
         '[data-platform-slot="record:breadcrumb"][data-slot-state="ready"]',
       ),
-    ).toContainText('Master');
+    ).toContainText('master');
     await expect(
       page.locator(
         '[data-platform-slot="record:titleStatus"][data-slot-state="ready"]',
       ),
-    ).toContainText('Master');
+    ).toContainText('master');
     await expect(
       page.locator(
         '[data-platform-slot="record:commandBar"][data-slot-state="ready"]',
