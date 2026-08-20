@@ -6,12 +6,13 @@ confirmed unchanged before the fresh worktree was cut)
 Branch: `packet/relation-scoped-enumeration-2`
 Prior stopped branch: `packet/relation-scoped-enumeration` at `fa83edb`
 Tier: Critical
-Status: **REVIEW CONVERGED; MATRIX PENDING.** The exact reviewed candidate is
+Status: **MATRIX GREEN; INTEGRATION PENDING.** The exact reviewed candidate is
 `c56b37fb21ce27afe9aa45c3acb6442ee5ac100a`, verified identical on `origin`.
 Independent Fable max returned PASS after the user ruled the final evidence-only
 correction would proceed directly to that arm with no further Codex arm. The one
-full matrix on the reconciled integration tree and required packet-into-main
-`--no-ff` merge remain.
+full matrix passed on reconciled tree
+`ee6c5fa1af47682a194a6fe08328a275d5552460`; the required packet-into-main
+`--no-ff` merge remains.
 
 ## Packet definition
 
@@ -266,8 +267,20 @@ on that SHA. The new `92c447f` run passed 203/203 on its first attempt. The prio
 failed attempt is retained here rather than smoothed out. The test-only
 `8f1b7d8` correction also passed 203/203 on its first attempt.
 
-No full matrix has run. Per `git-workflow`, it runs once after both Critical
-review arms converge, at the SHA that integrates.
+The one post-review full matrix ran after review convergence on the reconciled,
+clean tree. `git rev-parse HEAD` was pinned before and after and remained
+`ee6c5fa1af47682a194a6fe08328a275d5552460`. The runner emitted:
+
+```text
+FULL_MATRIX_PASS_SHA=ee6c5fa1af47682a194a6fe08328a275d5552460
+```
+
+The pass includes performance at 98.3% CPU idle, architecture 141/141,
+integration 148/148, contracts 16/16, PostgreSQL 203/203, locale 1/1, browser
+90/90, reachability 104/104 with 10 producer artifacts, language coverage and
+security. The composed browser journey “renders repaired forms and saves two
+required scoped relations” passed in that run. The matrix changed no tracked
+file.
 
 `scripts/check-parked-work.sh` exited 1 and reported seven stale branches:
 `proj-disc`, `ps-0`, `ps-1`, `ps-2`, `pur-1`, the preserved stopped
