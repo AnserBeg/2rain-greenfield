@@ -1,13 +1,14 @@
 # inventory-surface-legibility — operator-readable inventory surfaces
 
-Date: 2026-08-19; revised 2026-08-20 after Behavioral review round 1
+Date: 2026-08-19; revised 2026-08-20 after Behavioral review rounds 1–2
 Base: `ca6fe310cb10da883a009525dab6b3fb9f8a872c`
 Branch: `packet/inventory-surface-legibility`
 Tier: Behavioral
-Status: **EVIDENCE READY — round-1 REVISE corrected; awaiting a fresh
-Behavioral review.** The corrected product and tests are committed at
-`f95d6e5`; the bounded command-order ruling remains at `c395788`. The exact
-frozen packet tip is named in the emitted review prompt. No full matrix has run.
+Status: **EVIDENCE READY — round-2 evidence REVISE corrected; awaiting a fresh
+Behavioral review.** The corrected product remains committed at `f95d6e5`; the
+round-2 test-only correction is `a0b1100`; the bounded command-order ruling
+remains at `c395788`. The exact frozen packet tip is named in the emitted review
+prompt. No full matrix has run.
 
 ## Packet definition
 
@@ -53,7 +54,10 @@ normalized or used to infer canonical structure.
 
 The independent Task-page renderer no longer emits “task surface · compiled
 release” or the canonical surface ID. The real shipped `On-hand lookup` journey
-asserts its operator heading and the absence of both implementation leaks.
+reads its authored label, archetype, statuses and canonical ID from the compiled
+subject. It asserts the heading's direct operator-visible content: exactly the
+authored title plus declared statuses, with neither the canonical ID nor the
+entire `${archetype} surface` vocabulary.
 
 The live Item table rendered `Item`, `Base unit`, `Description`, `Name`, and
 `SKU`; its first record link read `Field notebook`, not a UUID.
@@ -100,14 +104,23 @@ tree.
 | entity-prefix stripping | table browser test observed `PARTY ROLE KIND` |
 | command presentation sort | command browser test observed `Cancel, Release` instead of `Release, Cancel` |
 | relation-freeze rendering | composed Inventory journey failed because `[data-relation-freeze]` was absent |
-| Task compiler eyebrow restored by itself | real on-hand journey observed `compiled release` in the page body |
-| Task canonical surface ID restored by itself | real on-hand journey observed one `.surface-id` instead of zero |
+| classless canonical Task ID rendered under the title | real on-hand journey observed the independently read compiled `surfaceId` in the heading |
+| renamed `task surface · runtime release` eyebrow rendered | real on-hand journey rejected `${archetype} surface` and the heading's extra direct content |
 | authored-label normalization restored | label browser test could not find `VAT & R&D orders` |
-| display-copy prefix inference restored | label browser test could not find the form field `Number` when authored copy differed from canonical entity identity |
+| product List prefix authority changed from `query.sourceEntityId` to its opaque surface ID | label browser test could not find the `Name` column |
+| Form field prefix authority changed from the compiled source entity to its opaque surface ID | label browser test could not find the `Number` field |
+| Record-section field prefix authority changed from the compiled source entity to its opaque surface ID | label browser test could not find the `Name` fact |
+| Record breadcrumb passed through identifier normalization | label browser test could not find authored `A/P & VAT audit` copy |
+| compatibility List prefix authority changed from `record.entityId` to its divergent label/surface ID | direct integration specimen rendered `Master name` instead of `Name` |
+| relation-picker prefix authority changed from the compiled source entity to its divergent form surface ID | required-relation integration specimen rendered `Master role parent` instead of `Parent` |
+| relation-freeze prefix authority changed from the compiled source entity to its divergent form surface ID | update integration specimen rendered `Master role parent` instead of `Parent` |
 
-These are ten independent vacuity vectors for the four filed rows; the three
-list defects and the four label/copy defects are not treated as interchangeable
-assertions.
+The first-round historical exact-spelling/class mutations also red, but are not
+used as closure evidence after round 2 demonstrated their proxy coupling. The
+nine second-round mutations above use equivalent spelling/class survivors and
+path-local authority reversions. They supplement the original search, paging,
+row-identity, command-order, whole-freeze and authored-copy controls rather than
+treating those subjects as interchangeable assertions.
 
 ## Behavioral review round 1
 
@@ -129,15 +142,35 @@ relation freeze, and the assertion bridges. Those closed claims are not
 reopened by the narrow correction; the fresh review is chartered on the two
 corrected findings and their regression boundary.
 
+## Behavioral review round 2
+
+The user reviewed exact remote candidate
+`e72fb612a586edeb8c68188d30077c598047a62e`. The correction range contained
+product commit `f95d6e5` and narrative-only freeze `e72fb61`. The reviewer
+closed both round-1 production findings and again found form admission
+unchanged, but returned REVISE on the controls.
+
+Two evidence findings were accepted. First, absence of the former
+`.surface-id` class and exact phrase `compiled release` did not exclude a
+classless canonical ID or renamed runtime eyebrow. Second, the divergent-copy
+fixture still correlated entity and surface identifiers and did not reach the
+compatibility List, relation, Record-section and breadcrumb paths changed by
+the production fix. Test-only commit `a0b1100` now derives Task expectations
+from the compiled subject, uses opaque List/Form/Record surface IDs, and gives
+each source-sensitive renderer a divergent specimen. The nine equivalent or
+path-local mutations recorded above each red independently. No production or
+form-admission code changed in this round.
+
 ## Required pre-review gates
 
-All ran on the restored executable tree containing `f95d6e5`:
+All reran on the restored executable tree containing production commit
+`f95d6e5` and test-only correction `a0b1100`:
 
 - `pnpm typecheck` — pass
 - `pnpm lint` — pass
 - `pnpm format` — pass
 - `pnpm test:browser` — **91/91 pass**
-- `pnpm test:integration` — **148/148 pass**
+- `pnpm test:integration` — **149/149 pass**
 - `pnpm test:contracts` — **16/16 pass**
 
 Per the packet charter and `git-workflow`, the full matrix runs once only after
@@ -175,6 +208,8 @@ the port had no listener.
 - Review round 1 granted the bounded `apps/web/src/surface-runtime.ts` bridge:
   that file independently owned the Task-page implementation copy named by the
   finding. No other out-of-lease product bridge was taken.
+- Review round 2 required only owned browser/integration evidence and
+  `learnings.md`; it introduced no product bridge.
 - The generic command-order carrier remains intentionally deferred until the
   replacement trigger in ADR-0056 fires.
 - A program review is already **DUE** at the completed required-relation
