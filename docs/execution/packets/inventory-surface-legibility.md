@@ -6,7 +6,7 @@ Branch: `packet/inventory-surface-legibility`
 Tier: Behavioral
 Status: **EVIDENCE READY — round-2 evidence REVISE corrected; awaiting a fresh
 Behavioral review.** The corrected product remains committed at `f95d6e5`; the
-round-2 test-only correction is `a0b1100`; the bounded command-order ruling
+round-2 test-only correction culminates at `19b83e5`; the bounded command-order ruling
 remains at `c395788`. The exact frozen packet tip is named in the emitted review
 prompt. No full matrix has run.
 
@@ -55,9 +55,10 @@ normalized or used to infer canonical structure.
 The independent Task-page renderer no longer emits “task surface · compiled
 release” or the canonical surface ID. The real shipped `On-hand lookup` journey
 reads its authored label, archetype, statuses and canonical ID from the compiled
-subject. It asserts the heading's direct operator-visible content: exactly the
-authored title plus declared statuses, with neither the canonical ID nor the
-entire `${archetype} surface` vocabulary.
+subject. It asserts the heading's complete direct operator-visible content is
+exactly the authored title plus declared statuses, rejects the entire
+`${archetype} surface` vocabulary there, and rejects the canonical ID from all
+rendered surface text.
 
 The live Item table rendered `Item`, `Base unit`, `Description`, `Name`, and
 `SKU`; its first record link read `Field notebook`, not a UUID.
@@ -104,8 +105,8 @@ tree.
 | entity-prefix stripping | table browser test observed `PARTY ROLE KIND` |
 | command presentation sort | command browser test observed `Cancel, Release` instead of `Release, Cancel` |
 | relation-freeze rendering | composed Inventory journey failed because `[data-relation-freeze]` was absent |
-| classless canonical Task ID rendered under the title | real on-hand journey observed the independently read compiled `surfaceId` in the heading |
-| renamed `task surface · runtime release` eyebrow rendered | real on-hand journey rejected `${archetype} surface` and the heading's extra direct content |
+| classless canonical Task ID moved outside the heading into surface content | real on-hand journey observed the independently read compiled `surfaceId` anywhere in rendered `#surface-content` |
+| extra `runtime release` heading child with neither the old phrase nor `${archetype} surface` | real on-hand journey rejected the extra direct heading content |
 | authored-label normalization restored | label browser test could not find `VAT & R&D orders` |
 | product List prefix authority changed from `query.sourceEntityId` to its opaque surface ID | label browser test could not find the `Name` column |
 | Form field prefix authority changed from the compiled source entity to its opaque surface ID | label browser test could not find the `Number` field |
@@ -115,9 +116,10 @@ tree.
 | relation-picker prefix authority changed from the compiled source entity to its divergent form surface ID | required-relation integration specimen rendered `Master role parent` instead of `Parent` |
 | relation-freeze prefix authority changed from the compiled source entity to its divergent form surface ID | update integration specimen rendered `Master role parent` instead of `Parent` |
 
-The first-round historical exact-spelling/class mutations also red, but are not
-used as closure evidence after round 2 demonstrated their proxy coupling. The
-nine second-round mutations above use equivalent spelling/class survivors and
+The first-round historical exact-spelling/class mutations and two weaker
+intermediate second-round variants also red, but are not used as closure
+evidence after round 2 demonstrated their proxy coupling. The nine strongest
+second-round mutations above use equivalent spelling/placement survivors and
 path-local authority reversions. They supplement the original search, paging,
 row-identity, command-order, whole-freeze and authored-copy controls rather than
 treating those subjects as interchangeable assertions.
@@ -155,16 +157,17 @@ Two evidence findings were accepted. First, absence of the former
 classless canonical ID or renamed runtime eyebrow. Second, the divergent-copy
 fixture still correlated entity and surface identifiers and did not reach the
 compatibility List, relation, Record-section and breadcrumb paths changed by
-the production fix. Test-only commit `a0b1100` now derives Task expectations
-from the compiled subject, uses opaque List/Form/Record surface IDs, and gives
-each source-sensitive renderer a divergent specimen. The nine equivalent or
-path-local mutations recorded above each red independently. No production or
-form-admission code changed in this round.
+the production fix. Test-only commits `a0b1100` and `19b83e5` derive Task
+expectations from the compiled subject, fence its complete direct heading plus
+all rendered surface text, use opaque List/Form/Record surface IDs, and give
+each source-sensitive renderer a divergent specimen. The nine strongest
+equivalent or path-local mutations recorded above each red independently. No
+production or form-admission code changed in this round.
 
 ## Required pre-review gates
 
 All reran on the restored executable tree containing production commit
-`f95d6e5` and test-only correction `a0b1100`:
+`f95d6e5` and test-only correction through `19b83e5`:
 
 - `pnpm typecheck` — pass
 - `pnpm lint` — pass
