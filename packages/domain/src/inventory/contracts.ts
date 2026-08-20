@@ -40,6 +40,12 @@ export interface InventoryFactStorageRuleV1 {
   readonly mutability: 'appendOnly';
 }
 
+export interface InventoryProviderWrittenReadModelRuleV1 {
+  readonly classification: 'providerWritten';
+  readonly familyId: string;
+  readonly maintainerId: string;
+}
+
 export interface InventoryStorageReferenceRuleV1 {
   readonly fieldLocalId: string;
   readonly required: boolean;
@@ -67,6 +73,20 @@ export const INVENTORY_FACT_STORAGE_V1 = Object.freeze([
     partitionBy: 'tenantBusinessPeriod',
   },
 ] as const satisfies readonly InventoryFactStorageRuleV1[]);
+
+/**
+ * Provider-written read models are pinned domain policy, never an authored
+ * entity flag. Each rule names the implementation contract that must maintain
+ * and rebuild the projection before conformance may omit authored CRUD.
+ */
+export const INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1 = Object.freeze([
+  {
+    classification: 'providerWritten',
+    familyId: 'posted_stock_balance',
+    maintainerId:
+      'northstar.postgresql-module-provider:posted-stock-balance/v1',
+  },
+] as const satisfies readonly InventoryProviderWrittenReadModelRuleV1[]);
 
 export const INVENTORY_STORAGE_REFERENCES_V1 = Object.freeze([
   {
@@ -137,6 +157,7 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
   { classification: 'entityOwned', familyId: 'inventory_period_lock' },
+  { classification: 'entityOwned', familyId: 'posted_stock_balance' },
   { classification: 'entityOwned', familyId: 'reservation' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
@@ -272,6 +293,10 @@ export interface InventoryContractDefinitionV1 {
       readonly disposition: 'compileFailure';
     };
     readonly version: typeof LEGAL_ENTITY_FAMILY_CONTRACT_VERSION;
+  };
+  readonly readModels: {
+    readonly authoredOperations: 'forbidden';
+    readonly providerWritten: typeof INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1;
   };
   readonly configuration: {
     readonly dials: {
@@ -620,6 +645,10 @@ export const INVENTORY_CONTRACT_V1 = Object.freeze({
       disposition: 'compileFailure',
     },
     version: LEGAL_ENTITY_FAMILY_CONTRACT_VERSION,
+  },
+  readModels: {
+    authoredOperations: 'forbidden',
+    providerWritten: INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1,
   },
   configuration: {
     dials: {

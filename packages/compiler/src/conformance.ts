@@ -43,6 +43,7 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
   { classification: 'entityOwned', familyId: 'inventory_period_lock' },
+  { classification: 'entityOwned', familyId: 'posted_stock_balance' },
   { classification: 'entityOwned', familyId: 'reservation' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
@@ -52,6 +53,14 @@ const INVENTORY_FACT_STORAGE_RULES = Object.freeze([
     familyId: 'inventory_movement',
     mutability: 'appendOnly',
     partitionBy: 'tenantBusinessPeriod',
+  },
+] as const);
+const INVENTORY_PROVIDER_WRITTEN_READ_MODEL_RULES = Object.freeze([
+  {
+    classification: 'providerWritten',
+    familyId: 'posted_stock_balance',
+    maintainerId:
+      'northstar.postgresql-module-provider:posted-stock-balance/v1',
   },
 ] as const);
 const INVENTORY_STORAGE_REFERENCE_RULES = Object.freeze([
@@ -599,6 +608,12 @@ export interface PinnedInventoryFactStorageRule {
   partitionBy: 'tenantBusinessPeriod';
 }
 
+export interface PinnedInventoryProviderWrittenReadModelRule {
+  classification: 'providerWritten';
+  familyId: string;
+  maintainerId: string;
+}
+
 export interface PinnedInventoryStorageReferenceRule {
   fieldLocalId: string;
   required: boolean;
@@ -624,6 +639,24 @@ export function resolvePinnedInventoryFactStorage(
   const familyId = canonicalFamilyId(entityId);
   if (!familyId) return null;
   const rule = INVENTORY_FACT_STORAGE_RULES.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  return rule ? { ...rule } : null;
+}
+
+/**
+ * Resolves the compiler's pinned provider-written contract. No authored key
+ * participates: an entity earns the classification only by matching a pinned
+ * canonical family rule with a named maintainer. This mirrors fact storage so
+ * the family survives composition under the application package identity.
+ */
+export function resolvePinnedInventoryProviderWrittenReadModel(
+  _packageId: string,
+  entityId: string,
+): PinnedInventoryProviderWrittenReadModelRule | null {
+  const familyId = canonicalFamilyId(entityId);
+  if (!familyId) return null;
+  const rule = INVENTORY_PROVIDER_WRITTEN_READ_MODEL_RULES.find(
     (candidate) => candidate.familyId === familyId,
   );
   return rule ? { ...rule } : null;
@@ -1402,6 +1435,11 @@ export function validateModuleConformance(
       packageRevision.package.packageId,
       entity.entityId,
     );
+    const providerWrittenReadModel =
+      resolvePinnedInventoryProviderWrittenReadModel(
+        packageRevision.package.packageId,
+        entity.entityId,
+      );
     const periodLockStorage = resolvePinnedInventoryPeriodLockStorage(
       entity.entityId,
     );
@@ -1455,10 +1493,21 @@ export function validateModuleConformance(
         ),
       );
     }
+    if (providerWrittenReadModel && operationEffects.size > 0) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED',
+          'wholeModelValidation',
+          '$.operations.providerWritten',
+          entity.entityId,
+        ),
+      );
+    }
     for (const effect of REQUIRED_OPERATION_EFFECTS) {
       if (
         factStorage?.mutability !== 'appendOnly' &&
         !periodLockStorage &&
+        !providerWrittenReadModel &&
         !operationEffects.has(effect)
       ) {
         missing(
@@ -1530,7 +1579,9 @@ export function validateModuleConformance(
     for (const role of REQUIRED_SURFACE_ROLES) {
       if (
         !(
-          (factStorage?.mutability === 'appendOnly' || periodLockStorage) &&
+          (factStorage?.mutability === 'appendOnly' ||
+            periodLockStorage ||
+            providerWrittenReadModel) &&
           role === 'form'
         ) &&
         !surfaceRoles.has(role)
@@ -1890,6 +1941,7 @@ function validateInventoryContractDefinition(
   expectInventoryLiteral(diagnostics, definition, ['capabilityVersion'], 1);
 
   validateLegalEntityContract(diagnostics, definition);
+  validateProviderWrittenReadModelContract(diagnostics, definition);
   validateStockDimensionSet(diagnostics, definition);
   validateMovementContract(diagnostics, definition);
   validateCountEvidenceContract(diagnostics, definition);
@@ -1902,6 +1954,118 @@ function validateInventoryContractDefinition(
   validateV2DecimalLimit(diagnostics, definition);
 
   return sortInventoryDiagnostics(diagnostics);
+}
+
+function validateProviderWrittenReadModelContract(
+  diagnostics: InventoryContractDiagnostic[],
+  definition: Record<string, unknown>,
+): void {
+  expectInventoryLiteral(
+    diagnostics,
+    definition,
+    ['readModels', 'authoredOperations'],
+    'forbidden',
+  );
+  const readModels = nestedRecord(definition, ['readModels']);
+  if (
+    !readModels ||
+    !hasExactKeys(readModels, ['authoredOperations', 'providerWritten'])
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.readModels',
+        'providerWritten',
+      ),
+    );
+    return;
+  }
+  const rules = readModels.providerWritten;
+  if (!Array.isArray(rules)) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.readModels.providerWritten',
+        null,
+      ),
+    );
+    return;
+  }
+  const observed = new Set<string>();
+  for (const rule of rules) {
+    if (
+      !isRecord(rule) ||
+      !hasExactKeys(rule, ['classification', 'familyId', 'maintainerId']) ||
+      rule.classification !== 'providerWritten' ||
+      typeof rule.familyId !== 'string' ||
+      typeof rule.maintainerId !== 'string' ||
+      rule.maintainerId.length === 0 ||
+      observed.has(rule.familyId)
+    ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          '$.readModels.providerWritten',
+          isRecord(rule) && typeof rule.familyId === 'string'
+            ? rule.familyId
+            : null,
+        ),
+      );
+      continue;
+    }
+    observed.add(rule.familyId);
+  }
+  for (const expected of INVENTORY_PROVIDER_WRITTEN_READ_MODEL_RULES) {
+    const rule = rules.find(
+      (candidate) =>
+        isRecord(candidate) && candidate.familyId === expected.familyId,
+    );
+    if (
+      !isRecord(rule) ||
+      rule.classification !== expected.classification ||
+      rule.maintainerId !== expected.maintainerId
+    ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.readModels.providerWritten.${expected.familyId}`,
+          expected.familyId,
+        ),
+      );
+    }
+  }
+  for (const familyId of observed) {
+    if (
+      !INVENTORY_PROVIDER_WRITTEN_READ_MODEL_RULES.some(
+        (rule) => rule.familyId === familyId,
+      )
+    ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.readModels.providerWritten.${familyId}`,
+          familyId,
+        ),
+      );
+    }
+  }
+  if (
+    rules.length === INVENTORY_PROVIDER_WRITTEN_READ_MODEL_RULES.length &&
+    !rules.every(
+      (rule, index) =>
+        isRecord(rule) &&
+        rule.familyId ===
+          INVENTORY_PROVIDER_WRITTEN_READ_MODEL_RULES[index]?.familyId,
+    )
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.readModels.providerWritten',
+        'canonicalOrder',
+      ),
+    );
+  }
 }
 
 function validateCountEvidenceContract(

@@ -16,21 +16,36 @@ const migrationsDirectory = resolve('db/migrations');
 const snapshotPath = resolve(
   'test/postgres/fresh-tenant-full-replay-schema.snapshot.json',
 );
+// The first release whose registered search queries remain serviceable under
+// the current runtime. Starting here still applies every earlier physical
+// transition through the bounded fresh-install path; every successor is then
+// activated individually so the resulting snapshot observes full transition
+// replay without claiming obsolete pre-search heads can still serve.
+const FULL_REPLAY_SERVING_FLOOR_ROOT =
+  'd726ad313780bc595c97a0ecb30c9eaec84984e4a19fa28c2e8f5361e7edf12e';
 
 async function main(): Promise<void> {
   const compiledApplication = JSON.parse(
     await readFile(compiledArtifactPath, 'utf8'),
   ) as {
-    applications: unknown[];
+    applications: { releaseRoot?: string }[];
     bootstrap: unknown;
     schemaVersion: string;
   };
+  const servingFloorIndex = compiledApplication.applications.findIndex(
+    (application) => application.releaseRoot === FULL_REPLAY_SERVING_FLOOR_ROOT,
+  );
+  if (servingFloorIndex < 0) {
+    throw new Error(
+      `recorded lineage no longer contains full-replay serving floor ${FULL_REPLAY_SERVING_FLOOR_ROOT}`,
+    );
+  }
 
   await withEphemeralPostgres(
     'fresh-tenant-full-replay',
     async ({ connection, pool }) => {
       for (
-        let index = 0;
+        let index = servingFloorIndex;
         index < compiledApplication.applications.length;
         index += 1
       ) {

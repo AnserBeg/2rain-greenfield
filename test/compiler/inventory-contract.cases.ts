@@ -15,6 +15,7 @@ import {
 } from '../../packages/compiler/src/index.js';
 import {
   compileInventoryContract,
+  resolvePinnedInventoryProviderWrittenReadModel,
   validateInventoryBaseUnitChange,
   validateInventoryMovementCandidate,
   type CompiledInventoryContractV1,
@@ -26,6 +27,7 @@ import {
   INVENTORY_FACT_STORAGE_V1,
   INVENTORY_NAMESPACE,
   INVENTORY_PERIOD_LOCK_STORAGE_V1,
+  INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1,
   INVENTORY_STORAGE_REFERENCES_V1,
   LEGAL_ENTITY_FAMILY_MAP_V1,
   LEGAL_ENTITY_RELATION_SEMANTICS_V1,
@@ -52,6 +54,10 @@ interface MutableInventoryContract {
     families: Array<Record<string, unknown>>;
     relations: Array<Record<string, unknown>>;
   };
+  readModels: {
+    authoredOperations: string;
+    providerWritten: Array<Record<string, unknown>>;
+  };
   movement: {
     fields: Array<Record<string, unknown>>;
   };
@@ -65,6 +71,124 @@ type InventoryContractCase = (name: string, run: () => void) => void;
 export function registerInventoryContractCases(
   register: InventoryContractCase,
 ): void {
+  register(
+    'posted stock is an operationless legal-entity row model whose labels state its temporal limit',
+    () => {
+      const definition = inventoryModuleDefinition() as {
+        entities: Array<{ entityId: string; label: string }>;
+        operations: Array<
+          Record<string, unknown> & {
+            effect: { entity?: { targetId?: string } };
+            operationId: string;
+          }
+        >;
+        surfaces: Array<{ label: string; surfaceId: string }>;
+      };
+      const entityId = `${INVENTORY_NAMESPACE}:entity.posted_stock_balance`;
+      const assertHonestLabels = (candidate: typeof definition): void => {
+        assert.equal(
+          candidate.entities.find((entity) => entity.entityId === entityId)
+            ?.label,
+          'Posted stock balance',
+        );
+        assert.deepEqual(
+          candidate.surfaces
+            .filter((surface) =>
+              surface.surfaceId.includes('.posted_stock_balance_'),
+            )
+            .map((surface) => surface.label),
+          ['Posted stock list', 'Posted stock detail'],
+        );
+      };
+      assertHonestLabels(definition);
+      assert.equal(
+        definition.operations.some(
+          (operation) => operation.effect.entity?.targetId === entityId,
+        ),
+        false,
+        'the platform-written projection authors no operation',
+      );
+      assert.deepEqual(INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1, [
+        {
+          classification: 'providerWritten',
+          familyId: 'posted_stock_balance',
+          maintainerId:
+            'northstar.postgresql-module-provider:posted-stock-balance/v1',
+        },
+      ]);
+      assert.deepEqual(
+        resolvePinnedInventoryProviderWrittenReadModel(
+          `${INVENTORY_NAMESPACE}:package.inventory`,
+          entityId,
+        ),
+        INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1[0],
+        'the exemption is resolved from the pinned family contract',
+      );
+      assert.equal(
+        resolvePinnedInventoryProviderWrittenReadModel(
+          'northstar.catalog:package.catalog',
+          'northstar.catalog:entity.unpinned_projection',
+        ),
+        null,
+        'an unpinned family cannot earn the exemption',
+      );
+
+      const admitted = compileApplication(moduleInput(definition));
+      assert.equal(
+        admitted.status,
+        'compiled',
+        'removing the provider-written conformance branch must red here with missing CRUD/form diagnostics',
+      );
+
+      const withAuthoredOperation = structuredClone(
+        definition,
+      ) as typeof definition & {
+        operations: Array<Record<string, unknown>>;
+      };
+      const exemplar = withAuthoredOperation.operations.find(
+        (operation) =>
+          operation.operationId ===
+          `${INVENTORY_NAMESPACE}:operation.legal_entity_create`,
+      );
+      assert.ok(exemplar);
+      const operation = structuredClone(exemplar) as {
+        effect: { entity: { targetId: string } };
+        operationId: string;
+        permission: { targetId: string };
+        readBack: { targetId: string };
+      };
+      operation.operationId = `${INVENTORY_NAMESPACE}:operation.posted_stock_balance_create_probe`;
+      operation.effect.entity.targetId = entityId;
+      operation.permission.targetId = `${INVENTORY_NAMESPACE}:permission.posted_stock_balance_read`;
+      operation.readBack.targetId = `${INVENTORY_NAMESPACE}:query.posted_stock_balance_get`;
+      withAuthoredOperation.operations.push(operation);
+      const refused = compileApplication(moduleInput(withAuthoredOperation));
+      assert.equal(refused.status, 'failed');
+      assert.deepEqual(
+        refused.diagnostics
+          .filter((diagnostic) => diagnostic.subjectId === entityId)
+          .map((diagnostic) => [diagnostic.code, diagnostic.path]),
+        [
+          [
+            'COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED',
+            '$.operations.providerWritten',
+          ],
+        ],
+        'one otherwise-valid authored operation must hit the provider-written refusing twin by name',
+      );
+
+      const impliedAsOf = structuredClone(definition);
+      impliedAsOf.entities.find(
+        (entity) => entity.entityId === entityId,
+      )!.label = 'On-hand balance';
+      assert.throws(
+        () => assertHonestLabels(impliedAsOf),
+        /Posted stock balance/u,
+        'one changed label makes the honesty control red',
+      );
+    },
+  );
+
   register(
     'entity-owned Inventory reads declare one legal-entity operand while the master stays tenant-shared',
     () => {
@@ -95,11 +219,11 @@ export function registerInventoryContractCases(
         }>;
       }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
       const scoped = queries.filter((query) => query.legalEntityScope);
-      assert.equal(scoped.length, 23);
+      assert.equal(scoped.length, 27);
       const scopedRowQueries = scoped.filter(
         (query) => query.queryType !== 'aggregate',
       );
-      assert.equal(scopedRowQueries.length, 22);
+      assert.equal(scopedRowQueries.length, 26);
       assert.equal(
         queries.some(
           (query) =>
@@ -932,6 +1056,22 @@ export function registerInventoryContractCases(
         legalEntity.relations,
         LEGAL_ENTITY_RELATION_SEMANTICS_V1,
       );
+      assert.deepEqual(compiled.release.contract.readModels, {
+        authoredOperations: 'forbidden',
+        providerWritten: INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1,
+      });
+
+      const wrongMaintainer = mutableContract();
+      wrongMaintainer.readModels.providerWritten[0]!.maintainerId =
+        'northstar.postgresql-module-provider:unmaintained/v1';
+      const wrongMaintainerResult = compileInventoryContract(wrongMaintainer);
+      assert.equal(wrongMaintainerResult.status, 'failed');
+      assertHasDiagnostic(
+        wrongMaintainerResult.diagnostics,
+        'INVENTORY_CONTRACT_INVALID',
+        '$.readModels.providerWritten.posted_stock_balance',
+        'posted_stock_balance',
+      );
 
       const missingFamily = mutableContract();
       missingFamily.legalEntity.families =
@@ -945,6 +1085,22 @@ export function registerInventoryContractCases(
         'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
         '$.legalEntity.families.inventory_movement',
         'inventory_movement',
+      );
+
+      const missingPostedStockFamily = mutableContract();
+      missingPostedStockFamily.legalEntity.families =
+        missingPostedStockFamily.legalEntity.families.filter(
+          (rule) => rule.familyId !== 'posted_stock_balance',
+        );
+      const missingPostedStockResult = compileInventoryContract(
+        missingPostedStockFamily,
+      );
+      assert.equal(missingPostedStockResult.status, 'failed');
+      assertHasDiagnostic(
+        missingPostedStockResult.diagnostics,
+        'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+        '$.legalEntity.families.posted_stock_balance',
+        'posted_stock_balance',
       );
 
       const missingRelation = mutableContract();
@@ -1982,6 +2138,7 @@ function releaseSummary(compiled: CompiledInventoryContractV1): unknown {
     dependencySetRoot: dependencies.dependencySetRoot,
     dependencySetVersion: dependencies.version,
     legalEntity: contract.legalEntity,
+    readModels: contract.readModels,
     movement: {
       fields: movement.fields.map((field) => ({
         fieldId: field.fieldId,

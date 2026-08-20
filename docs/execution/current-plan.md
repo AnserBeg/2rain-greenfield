@@ -181,6 +181,19 @@ renderer change but needs a posting-maintained projection and **would not natura
 preserve the audited bitemporal semantics.** That trade is the fork whoever charters
 this must settle.
 
+**RE-CHARTERED 2026-08-20 by program-review finding R6.** The grouped-aggregate
+stop above remains correct; its pricing does not. ADR-0007 already sanctions a
+rebuildable read-model projection, `inventory_movement` already proves an
+operationless platform-written entity can ship, and the provider already owns
+posting-linked generation and reconciliation. `stock-balance-read-model` now
+implements the bounded alternative as **Posted stock**, explicitly the sum of
+all posted movements and never an as-of claim. One row remains selected legal
+entity × item × location; the five-parameter bitemporal lookup remains intact;
+maintenance, rebuild, and reconciliation reuse the existing generation lock.
+The existing List renderer is sufficient, so `apps/web/src` remains unchanged.
+The packet is active on `packet/stock-balance-read-model`; Critical review and
+the post-review full matrix are still owed.
+
 #### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2
 
 **Measured from the shipped release, not predicted.** `inventory_movement_on_hand`

@@ -602,3 +602,28 @@ Why: entity, field and surface locals all said `master`, so surface-ID-derived
 prefixes passed a test claiming query/record authority. How to apply: make every
 non-authoritative identifier opaque and divergent, then exercise each changed
 branch directly so the wrong authority produces a different observation.
+
+## Measure dependency fences before chartering paths
+Date: 2026-08-20
+Why: two correct stock-balance stops were caused by charters that fenced the
+family-registration files before checking the already-pinned legal-entity map.
+How to apply: trace every required registration and generated-contract dependency
+before assigning owned paths; fence by measured intent, then name the bounded files.
+
+## Make conformance exemptions earned and two-sided
+Date: 2026-08-20
+Why: ADR-0007 sanctioned provider-written read models, but generic conformance
+could not admit one without an explicit exemption category.
+How to apply: resolve every exemption from a pinned contract, name its maintainer,
+and ship the refusing twin that rejects authored behavior in the exempted category.
+
+## A database type is not the platform's canonical value contract
+Date: 2026-08-20
+Why: PostgreSQL accepted a raw MD5 digest as `uuid`, and privileged arithmetic
+controls read the projection green, but the generic record runtime refused that
+identifier because it was not UUIDv4. Only the ordinary gateway/browser path
+observed the mismatch.
+How to apply: provider-generated values must satisfy the canonical runtime
+contract, not merely the database type. Read a generated row back through the
+ordinary gateway and assert the exact canonical shape; rebuild must reproduce
+the same value.
