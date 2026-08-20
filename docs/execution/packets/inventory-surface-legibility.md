@@ -1,13 +1,13 @@
 # inventory-surface-legibility — operator-readable inventory surfaces
 
-Date: 2026-08-19
+Date: 2026-08-19; revised 2026-08-20 after Behavioral review round 1
 Base: `ca6fe310cb10da883a009525dab6b3fb9f8a872c`
 Branch: `packet/inventory-surface-legibility`
 Tier: Behavioral
-Status: **EVIDENCE READY — awaiting the user-run Behavioral review.** The
-product, tests and bounded command-order ruling are committed at `c395788`.
-The exact frozen packet tip is named in the emitted review prompt. No review or
-full matrix has run yet.
+Status: **EVIDENCE READY — round-1 REVISE corrected; awaiting a fresh
+Behavioral review.** The corrected product and tests are committed at
+`f95d6e5`; the bounded command-order ruling remains at `c395788`. The exact
+frozen packet tip is named in the emitted review prompt. No full matrix has run.
 
 ## Packet definition
 
@@ -16,11 +16,12 @@ like their compiler/runtime implementation, closing `ux-list-usability`,
 `ux-clutter`, `surface-command-order`, and the visibility half of
 `relation-update-fork` in one presentation subject.
 
-One product source file changed: `apps/web/src/component-registry.ts`. Browser
-and integration assertions changed only where the rendered business vocabulary
-or order changed. No file under `packages/domain/**` or `apps/web/release/**`
-was touched; those paths remained with the concurrent
-`stock-on-hand-browsable` lane. No form-admission function or condition changed.
+Two product presentation files changed: `apps/web/src/component-registry.ts`
+and the reviewer-required bridge `apps/web/src/surface-runtime.ts`. Browser and
+integration assertions changed only where rendered business vocabulary or
+order changed. No file under `packages/domain/**` or `apps/web/release/**` was
+touched; those paths remained with the concurrent `stock-on-hand-browsable`
+lane. No form-admission function or condition changed.
 
 ## What changed
 
@@ -42,12 +43,17 @@ record `Air filter — 20 × 20 in` returned `1–1 of 1`.
 
 ### Labels use business vocabulary
 
-`fieldLabel()` now removes the current entity prefix and trailing identity
-suffix before sentence-casing, while preserving the closed acronym spellings
-API, ERP, ID, SKU, UOM and URL. `entityLabel()` applies the same business-label
-rule after removing the surface-role suffix. Redundant eyebrows and copy about
-compiled workspaces, releases, manifests and record-scoped implementation were
-removed or rewritten as operator-facing workspace language.
+`entityLabel()` now preserves authored operator copy after removing only the
+known surface-role suffix. `fieldLabel()` remains identifier formatting: it
+derives the removable prefix from the compiled query's canonical
+`sourceEntityId` (or a semantic record's `entityId` in the compatibility
+renderer), removes the trailing identity suffix, and preserves the closed
+acronym spellings API, ERP, ID, SKU, UOM and URL. Authored copy is no longer
+normalized or used to infer canonical structure.
+
+The independent Task-page renderer no longer emits “task surface · compiled
+release” or the canonical surface ID. The real shipped `On-hand lookup` journey
+asserts its operator heading and the absence of both implementation leaks.
 
 The live Item table rendered `Item`, `Base unit`, `Description`, `Name`, and
 `SKU`; its first record link read `Field notebook`, not a UUID.
@@ -82,9 +88,9 @@ records; that already-filed `dev-seed-has-no-inventory` row remains out of scope
 
 Every control is CI-reachable through an existing browser or integration file.
 No new test file or reachability registration was needed. Each mutation below
-was applied only after the green implementation commit and restored by patch;
-`git diff --exit-code -- apps/web/src/component-registry.ts` then confirmed the
-committed source was restored.
+was applied only after its green implementation commit and restored by patch;
+`git diff --exit-code` then confirmed both product sources matched the committed
+tree.
 
 | Temporarily removed or bypassed | Observed red |
 |---|---|
@@ -94,18 +100,43 @@ committed source was restored.
 | entity-prefix stripping | table browser test observed `PARTY ROLE KIND` |
 | command presentation sort | command browser test observed `Cancel, Release` instead of `Release, Cancel` |
 | relation-freeze rendering | composed Inventory journey failed because `[data-relation-freeze]` was absent |
+| Task compiler eyebrow restored by itself | real on-hand journey observed `compiled release` in the page body |
+| Task canonical surface ID restored by itself | real on-hand journey observed one `.surface-id` instead of zero |
+| authored-label normalization restored | label browser test could not find `VAT & R&D orders` |
+| display-copy prefix inference restored | label browser test could not find the form field `Number` when authored copy differed from canonical entity identity |
 
-These are six independent vacuity vectors for the four filed rows; the three
-list defects are not treated as one interchangeable assertion.
+These are ten independent vacuity vectors for the four filed rows; the three
+list defects and the four label/copy defects are not treated as interchangeable
+assertions.
+
+## Behavioral review round 1
+
+The user reviewed the exact remote candidate `be87317bba4670a2ba7adc9e9e421410bdfa6b6f`
+over `ca6fe310cb10da883a009525dab6b3fb9f8a872c..be87317bba4670a2ba7adc9e9e421410bdfa6b6f`
+and returned REVISE. The executable delta from product candidate `c395788` to
+that frozen head was empty.
+
+Two findings were accepted. First, the shipped Inventory Task still exposed a
+compiler eyebrow and canonical surface ID through `surface-runtime.ts`, outside
+the packet's original one-file premise. Second, the label helper transformed
+valid authored business copy and inferred canonical field structure from that
+display copy. The correction and four independent deletion controls are
+recorded above.
+
+The same review found no form-admission change, upheld ADR-0056 as a bounded
+rule, and closed search, backward paging, row identity, command dispatch/order,
+relation freeze, and the assertion bridges. Those closed claims are not
+reopened by the narrow correction; the fresh review is chartered on the two
+corrected findings and their regression boundary.
 
 ## Required pre-review gates
 
-All ran on the restored executable tree containing `c395788`:
+All ran on the restored executable tree containing `f95d6e5`:
 
 - `pnpm typecheck` — pass
 - `pnpm lint` — pass
 - `pnpm format` — pass
-- `pnpm test:browser` — **90/90 pass**
+- `pnpm test:browser` — **91/91 pass**
 - `pnpm test:integration` — **148/148 pass**
 - `pnpm test:contracts` — **16/16 pass**
 
@@ -138,8 +169,12 @@ the port had no listener.
 ## Bridges, limits and next boundary
 
 - Assertion-shape bridges were confined to preserving existing browser-test
-  meaning after business record titles made broad text locators ambiguous.
-- No out-of-lease product bridge was taken.
+  meaning after business record titles made broad text locators ambiguous and
+  to expecting the fixture's authored lowercase `master` after the old
+  title-casing side effect was removed.
+- Review round 1 granted the bounded `apps/web/src/surface-runtime.ts` bridge:
+  that file independently owned the Task-page implementation copy named by the
+  finding. No other out-of-lease product bridge was taken.
 - The generic command-order carrier remains intentionally deferred until the
   replacement trigger in ADR-0056 fires.
 - A program review is already **DUE** at the completed required-relation
