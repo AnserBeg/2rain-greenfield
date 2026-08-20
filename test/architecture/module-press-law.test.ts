@@ -11,15 +11,24 @@ import {
   removeArchitectureFixture,
 } from '../helpers/architecture-fixture.js';
 
-// Row 1c owns this exact pre-existing contradiction. Keeping the observations
-// exact is a two-way ratchet: another branch fails, and resolving either one
-// also fails until the routed debt is deliberately removed from this record.
-const routedPlatformDebt: readonly ModulePressLawViolation[] = [
+// Keeping every routed observation exact is a two-way ratchet: another branch
+// fails, and resolving one also fails until its owning row deliberately removes
+// it from this record.
+const routedPressLawDebt: readonly ModulePressLawViolation[] = [
   // Row 1e-2 owns this accepted G3-P1a module identity, newly visible when
   // Inventory became definition-backed; keep it exact until that row lands.
   {
     file: 'packages/compiler/src/conformance.ts',
     line: 1888,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
+  // Row press-law-evasion owns the posting provider's module identity until
+  // row 1e-2 packages module context into the contract compiler.
+  {
+    file: 'packages/postgres-provider/src/inventory-posting-service.ts',
+    line: 37,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
@@ -57,7 +66,7 @@ test('one auto-discovered guard covers every definition-backed product module', 
     'press-law guard read zero production files',
   );
   assert.ok(result.scannedFiles > 0, 'press-law guard read zero files');
-  assert.deepEqual(result.violations, routedPlatformDebt);
+  assert.deepEqual(result.violations, routedPressLawDebt);
 });
 
 test('consolidated guard red: the previously omitted Platform module is observed', () => {
@@ -67,7 +76,7 @@ test('consolidated guard red: the previously omitted Platform module is observed
   );
   assert.deepEqual(
     platformViolations,
-    routedPlatformDebt.filter(
+    routedPressLawDebt.filter(
       (violation) => violation.moduleDirectory === 'platform',
     ),
   );
@@ -142,6 +151,69 @@ test('consolidated guard distinguishes a module namespace from a longer contract
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts':
       "export const schema = 'northstar.widget-contract/v1';\n",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard red: a statically interpolated module identity cannot hide from PRESS006', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts':
+      "export const capabilityId = `${'northstar'}.${'widget'}:capability.posting`;\n",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 1,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard red: a statically concatenated module identity cannot hide from PRESS006', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts':
+      "export const capabilityId = 'northstar' + '.' + 'widget' + ':capability.posting';\n",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 1,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard admission: a module may spell its own identity in its definition', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': 'export const generic = true;\n',
     'packages/domain/src/widget/definition.ts': [
       "export const WIDGET_NAMESPACE = 'northstar.widget';",
       'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',

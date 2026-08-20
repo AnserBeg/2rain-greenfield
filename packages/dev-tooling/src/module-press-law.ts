@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
+import ts from 'typescript';
 
 export type ModulePressLawRuleId =
   | 'PRESS001_NO_MODULES'
@@ -45,6 +46,16 @@ const scannedExtensions = new Set([
   '.mts',
   '.sh',
   '.sql',
+  '.ts',
+  '.tsx',
+]);
+const staticStringSourceExtensions = new Set([
+  '.cjs',
+  '.cts',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.mts',
   '.ts',
   '.tsx',
 ]);
@@ -115,8 +126,11 @@ export function checkModulePressLaw(
     scanned.add(file);
     const source = readFileSync(file, 'utf8');
     const repoPath = normalizePath(relative(root, file));
+    const constructedStrings = staticallyConstructedStrings(source, repoPath);
     for (const module of modules) {
-      const identityMatch = moduleIdentityMatch(source, module);
+      const identityMatch =
+        moduleIdentityMatch(source, module) ??
+        constructedModuleIdentityMatch(constructedStrings, module);
       if (identityMatch) {
         add(
           violations,
@@ -346,6 +360,107 @@ function moduleIdentityMatch(
   ];
   const match = new RegExp(patterns.join('|'), 'u').exec(source);
   return match ? { index: match.index, value: match[0] } : undefined;
+}
+
+interface StaticStringConstruction {
+  readonly index: number;
+  readonly value: string;
+}
+
+function staticallyConstructedStrings(
+  source: string,
+  repoPath: string,
+): readonly StaticStringConstruction[] {
+  if (!staticStringSourceExtensions.has(extname(repoPath))) return [];
+  if (!source.includes('${') && !source.includes('+')) return [];
+
+  const sourceFile = ts.createSourceFile(
+    repoPath,
+    source,
+    ts.ScriptTarget.Latest,
+    false,
+    scriptKind(repoPath),
+  );
+  const constructions: StaticStringConstruction[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isTemplateExpression(node) || isStringConcatenation(node)) {
+      const value = evaluateStaticString(node);
+      if (value !== undefined) {
+        constructions.push({ index: node.getStart(sourceFile), value });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return constructions;
+}
+
+function constructedModuleIdentityMatch(
+  constructions: readonly StaticStringConstruction[],
+  module: ModuleDescriptor,
+): { index: number; value: string } | undefined {
+  for (const construction of constructions) {
+    const match = moduleIdentityMatch(construction.value, module);
+    if (match) {
+      return {
+        index: construction.index,
+        value: match.value,
+      };
+    }
+  }
+  return undefined;
+}
+
+function evaluateStaticString(node: ts.Expression): string | undefined {
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isParenthesizedExpression(node)) {
+    return evaluateStaticString(node.expression);
+  }
+  if (
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isNonNullExpression(node)
+  ) {
+    return evaluateStaticString(node.expression);
+  }
+  if (ts.isTemplateExpression(node)) {
+    let value = node.head.text;
+    for (const span of node.templateSpans) {
+      const expression = evaluateStaticString(span.expression);
+      if (expression === undefined) return undefined;
+      value += expression + span.literal.text;
+    }
+    return value;
+  }
+  if (isStringConcatenation(node)) {
+    const left = evaluateStaticString(node.left);
+    const right = evaluateStaticString(node.right);
+    return left === undefined || right === undefined ? undefined : left + right;
+  }
+  return undefined;
+}
+
+function isStringConcatenation(node: ts.Node): node is ts.BinaryExpression {
+  return (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.PlusToken
+  );
+}
+
+function scriptKind(repoPath: string): ts.ScriptKind {
+  switch (extname(repoPath)) {
+    case '.js':
+    case '.cjs':
+    case '.mjs':
+      return ts.ScriptKind.JS;
+    case '.jsx':
+      return ts.ScriptKind.JSX;
+    case '.tsx':
+      return ts.ScriptKind.TSX;
+    default:
+      return ts.ScriptKind.TS;
+  }
 }
 
 function moduleGlueMatch(
