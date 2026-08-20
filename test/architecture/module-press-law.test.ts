@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -15,11 +16,62 @@ import {
 // fails, and resolving one also fails until its owning row deliberately removes
 // it from this record.
 const routedPressLawDebt: readonly ModulePressLawViolation[] = [
-  // Row 1e-2 owns this accepted G3-P1a module identity, newly visible when
-  // Inventory became definition-backed; keep it exact until that row lands.
+  // Row 1e-2 owns these accepted G3-P1a module identities, newly visible when
+  // Inventory became definition-backed. Occurrence-complete PRESS006 exposes
+  // every pinned compiler assertion; keep all of them exact until that row
+  // replaces the hard-coded contract pattern.
   {
     file: 'packages/compiler/src/conformance.ts',
     line: 1888,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
+  {
+    file: 'packages/compiler/src/conformance.ts',
+    line: 2338,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
+  {
+    file: 'packages/compiler/src/conformance.ts',
+    line: 2377,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
+  {
+    file: 'packages/compiler/src/conformance.ts',
+    line: 2546,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
+  {
+    file: 'packages/compiler/src/conformance.ts',
+    line: 2550,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
+  {
+    file: 'packages/compiler/src/conformance.ts',
+    line: 2555,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
+  {
+    file: 'packages/compiler/src/conformance.ts',
+    line: 2559,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
+  {
+    file: 'packages/compiler/src/conformance.ts',
+    line: 2693,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
@@ -215,6 +267,118 @@ test('consolidated guard red: a statically concatenated module identity cannot h
   }
 });
 
+test('consolidated guard red: direct and later constructed identities are additive in one file', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      "export const routed = 'northstar.widget:capability.routed';",
+      'export const later =',
+      "  `${'northstar'}.${'widget'}:capability.later`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 1,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 3,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard records one observation when direct and constructed matches describe the same construction', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts':
+      "export const routed = 'northstar.widget' + ':capability.routed';\n",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 1,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard red: the routed Inventory literal cannot mask a later live-comparison splice', () => {
+  const providerPath =
+    'packages/postgres-provider/src/inventory-posting-service.ts';
+  const providerSource = readFileSync(providerPath, 'utf8');
+  const inventoryDefinition = readFileSync(
+    'packages/domain/src/inventory/definition.ts',
+    'utf8',
+  );
+  assert.match(
+    providerSource,
+    /export const INVENTORY_POSTING_CAPABILITY_ID =\n {2}'northstar\.inventory:capability\.posting' as const;/u,
+  );
+  const mutatedProvider = providerSource.replace(
+    'registration.capabilityId !== INVENTORY_POSTING_CAPABILITY_ID',
+    "registration.capabilityId !==\n      `${'northstar'}.${'inventory'}:capability.posting`",
+  );
+  assert.notEqual(mutatedProvider, providerSource);
+
+  const root = createArchitectureFixture({
+    [providerPath]: mutatedProvider,
+    'packages/domain/src/inventory/definition.ts': inventoryDefinition,
+  });
+  try {
+    assert.deepEqual(
+      checkModulePressLaw(root).violations.filter(
+        (violation) =>
+          violation.ruleId === 'PRESS006_MODULE_ID_IN_PRESS' &&
+          violation.message ===
+            'generic press references inventory identity northstar.inventory',
+      ),
+      [
+        {
+          file: providerPath,
+          line: 37,
+          message:
+            'generic press references inventory identity northstar.inventory',
+          moduleDirectory: 'inventory',
+          ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+        },
+        {
+          file: providerPath,
+          line: 866,
+          message:
+            'generic press references inventory identity northstar.inventory',
+          moduleDirectory: 'inventory',
+          ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+        },
+      ],
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard admission: completed static constructions may name a longer contract namespace', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [
@@ -256,6 +420,96 @@ test('consolidated guard admission: a tagged template body is not an ordinary co
     'apps/api/src/generic.ts': [
       'declare const tag: (parts: TemplateStringsArray, ...values: unknown[]) => string;',
       "export const schema = tag`${'northstar'}.${'widget'}:capability.posting`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard red: a completed concatenation in a tagged substitution is observed', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const tag: (parts: TemplateStringsArray, ...values: unknown[]) => string;',
+      "export const value = tag`${'northstar' + '.' + 'widget'}`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 2,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard admission: a completed tagged substitution may name a longer contract namespace', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const tag: (parts: TemplateStringsArray, ...values: unknown[]) => string;',
+      "export const value = tag`${'northstar' + '.' + 'widget' + '-contract/v1'}`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard red: a completed call argument beneath a dynamic concatenation is observed', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const wrap: (value: string) => string;',
+      'declare const suffix: string;',
+      "export const value = wrap('northstar' + '.' + 'widget') + suffix;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 3,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard admission: a completed call argument may name a longer contract namespace', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const wrap: (value: string) => string;',
+      'declare const suffix: string;',
+      "export const value = wrap('northstar' + '.' + 'widget' + '-contract/v1') + suffix;",
     ].join('\n'),
     'packages/domain/src/widget/definition.ts': [
       "export const WIDGET_NAMESPACE = 'northstar.widget';",

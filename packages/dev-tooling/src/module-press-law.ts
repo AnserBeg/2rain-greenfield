@@ -128,10 +128,22 @@ export function checkModulePressLaw(
     const repoPath = normalizePath(relative(root, file));
     const constructedStrings = staticallyConstructedStrings(source, repoPath);
     for (const module of modules) {
-      const identityMatch =
-        moduleIdentityMatch(source, module) ??
-        constructedModuleIdentityMatch(constructedStrings, module);
-      if (identityMatch) {
+      const directMatches = moduleIdentityMatches(source, module);
+      const constructedMatches = constructedModuleIdentityMatches(
+        constructedStrings,
+        module,
+      ).filter(
+        (constructedMatch) =>
+          !directMatches.some((directMatch) =>
+            constructedMatch.literalRanges.some(
+              (literalRange) =>
+                directMatch.index >= literalRange.start &&
+                directMatch.index + directMatch.value.length <=
+                  literalRange.end,
+            ),
+          ),
+      );
+      for (const identityMatch of [...directMatches, ...constructedMatches]) {
         add(
           violations,
           repoPath,
@@ -349,21 +361,33 @@ function filesBelow(directory: string): string[] {
   return files.sort();
 }
 
-function moduleIdentityMatch(
+interface ModuleIdentityMatch {
+  readonly index: number;
+  readonly value: string;
+}
+
+function moduleIdentityMatches(
   source: string,
   module: ModuleDescriptor,
-): { index: number; value: string } | undefined {
+): readonly ModuleIdentityMatch[] {
   const patterns = [
     `${escapeRegExp(module.namespace)}(?![A-Za-z0-9_./-])`,
     `\\b${escapeRegExp(module.symbolPrefix)}_(?:IDS|NAMESPACE)\\b`,
     ...module.localIds.map((localId) => `\\b${escapeRegExp(localId)}\\b`),
   ];
-  const match = new RegExp(patterns.join('|'), 'u').exec(source);
-  return match ? { index: match.index, value: match[0] } : undefined;
+  return [...source.matchAll(new RegExp(patterns.join('|'), 'gu'))].map(
+    (match) => ({ index: match.index, value: match[0] }),
+  );
+}
+
+interface SourceRange {
+  readonly end: number;
+  readonly start: number;
 }
 
 interface StaticStringConstruction {
   readonly index: number;
+  readonly literalRanges: readonly SourceRange[];
   readonly value: string;
 }
 
@@ -384,57 +408,90 @@ function staticallyConstructedStrings(
   const constructions: StaticStringConstruction[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isTaggedTemplateExpression(node)) {
-      // A tag, rather than the template syntax, determines the runtime value.
-      // Its tag expression can still contain an ordinary construction, but the
-      // template body is not an independently completed string.
+      // The tag controls the aggregate result, so do not infer a value for the
+      // tagged template. Substitution expressions are completed before the tag
+      // receives them and remain independently observable.
       visit(node.tag);
+      if (ts.isTemplateExpression(node.template)) {
+        for (const span of node.template.templateSpans) {
+          visit(span.expression);
+        }
+      }
       return;
     }
     if (ts.isTemplateExpression(node) || isStringConcatenation(node)) {
       const value = evaluateStaticString(node);
       if (value !== undefined) {
-        constructions.push({ index: node.getStart(sourceFile), value });
+        constructions.push({
+          index: node.getStart(sourceFile),
+          literalRanges: staticStringLiteralRanges(node, sourceFile),
+          value,
+        });
+        // A complete construction is one value. Its direct construction
+        // fragments are not independently completed values.
+        return;
       }
-      // Observe the maximal ordinary construction once. Descending would turn
-      // an internal prefix into a standalone value, including beneath a
-      // dynamic outer expression that cannot itself be evaluated.
+
+      // The direct operands of an incomplete construction are not completed
+      // values. Continue only through semantic boundaries within those
+      // operands, where an independently completed construction can exist.
+      if (ts.isTemplateExpression(node)) {
+        for (const span of node.templateSpans) {
+          visitIncompleteConstructionOperand(span.expression);
+        }
+      } else {
+        visitIncompleteConstructionOperand(node.left);
+        visitIncompleteConstructionOperand(node.right);
+      }
       return;
     }
     ts.forEachChild(node, visit);
+  };
+  const visitIncompleteConstructionOperand = (node: ts.Expression): void => {
+    const expression = unwrapStaticStringExpression(node);
+    if (isStringConcatenation(expression)) {
+      visitIncompleteConstructionOperand(expression.left);
+      visitIncompleteConstructionOperand(expression.right);
+      return;
+    }
+    if (ts.isTemplateExpression(expression)) {
+      for (const span of expression.templateSpans) {
+        visitIncompleteConstructionOperand(span.expression);
+      }
+      return;
+    }
+    visit(expression);
   };
   visit(sourceFile);
   return constructions;
 }
 
-function constructedModuleIdentityMatch(
+interface ConstructedModuleIdentityMatch extends ModuleIdentityMatch {
+  readonly literalRanges: readonly SourceRange[];
+}
+
+function constructedModuleIdentityMatches(
   constructions: readonly StaticStringConstruction[],
   module: ModuleDescriptor,
-): { index: number; value: string } | undefined {
+): readonly ConstructedModuleIdentityMatch[] {
+  const matches: ConstructedModuleIdentityMatch[] = [];
   for (const construction of constructions) {
-    const match = moduleIdentityMatch(construction.value, module);
+    const match = moduleIdentityMatches(construction.value, module)[0];
     if (match) {
-      return {
+      matches.push({
         index: construction.index,
+        literalRanges: construction.literalRanges,
         value: match.value,
-      };
+      });
     }
   }
-  return undefined;
+  return matches;
 }
 
 function evaluateStaticString(node: ts.Expression): string | undefined {
   if (ts.isStringLiteralLike(node)) return node.text;
-  if (ts.isParenthesizedExpression(node)) {
-    return evaluateStaticString(node.expression);
-  }
-  if (
-    ts.isAsExpression(node) ||
-    ts.isTypeAssertionExpression(node) ||
-    ts.isSatisfiesExpression(node) ||
-    ts.isNonNullExpression(node)
-  ) {
-    return evaluateStaticString(node.expression);
-  }
+  const expression = unwrapStaticStringExpression(node);
+  if (expression !== node) return evaluateStaticString(expression);
   if (ts.isTemplateExpression(node)) {
     let value = node.head.text;
     for (const span of node.templateSpans) {
@@ -450,6 +507,44 @@ function evaluateStaticString(node: ts.Expression): string | undefined {
     return left === undefined || right === undefined ? undefined : left + right;
   }
   return undefined;
+}
+
+function unwrapStaticStringExpression(node: ts.Expression): ts.Expression {
+  let expression = node;
+  while (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isAsExpression(expression) ||
+    ts.isTypeAssertionExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isNonNullExpression(expression)
+  ) {
+    expression = expression.expression;
+  }
+  return expression;
+}
+
+function staticStringLiteralRanges(
+  node: ts.Expression,
+  sourceFile: ts.SourceFile,
+): readonly SourceRange[] {
+  const ranges: SourceRange[] = [];
+  const visit = (current: ts.Node): void => {
+    if (
+      ts.isStringLiteralLike(current) ||
+      current.kind === ts.SyntaxKind.TemplateHead ||
+      current.kind === ts.SyntaxKind.TemplateMiddle ||
+      current.kind === ts.SyntaxKind.TemplateTail
+    ) {
+      ranges.push({
+        end: current.getEnd(),
+        start: current.getStart(sourceFile),
+      });
+      return;
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return ranges;
 }
 
 function isStringConcatenation(node: ts.Node): node is ts.BinaryExpression {
@@ -530,7 +625,7 @@ function copiedModuleGuardMatch(
       continue;
     }
     for (const module of modules) {
-      if (moduleIdentityMatch(call, module)) return { index };
+      if (moduleIdentityMatches(call, module).length > 0) return { index };
       if (
         module.glueNames.some((name) =>
           new RegExp(`\\b${escapeRegExp(name)}_`, 'iu').test(call),
