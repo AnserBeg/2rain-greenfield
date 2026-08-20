@@ -154,6 +154,33 @@ legal_entity forms"* to `5g3-term`. **That is wrong and would have duplicated a
 row filed the same week.** `5g3-term` gates the inventory **mount**;
 `inventory-form-anatomy` owns the **slot anatomy** and is the live packet.
 
+#### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2
+
+**Measured from the shipped release, not predicted.** `inventory_movement_on_hand`
+is an **aggregate** query taking five parameters — `on_hand_legal_entity_id`,
+`on_hand_item_id`, `on_hand_location_id`, `on_hand_at_time`,
+`on_hand_recorded_at_horizon` — surfaced as the `task`-archetype
+`inventory_on_hand_lookup`. **It answers "how much of item X at location Y", and
+nothing else.**
+
+**There is no browsable balance view.** The 31 shipped surfaces include
+`inventory_movement_list` (the movement ledger, an audit trail rather than a
+balance), but **no stock-on-hand list** — no "all stock at this location", no "all
+locations holding this item", no low-stock view. An operator who does not already
+know an item id cannot ask what they have.
+
+**Why this was not caught earlier:** every packet in this area asked whether the
+*posting* path is correct, and it is. Nobody asked whether an operator can *see the
+result* without knowing the answer first. `G3-P6b-2` put the on-hand balance "on
+screen" and that row is accurate — it mounted the lookup. A lookup is not a stock
+list, and the gap between those two was never written down.
+
+**Tier 2, not Tier 1:** it does not block receiving or shipping, which is the
+triage question. **But it is the difference between a system that works and a
+system that feels like an inventory system**, and it is the first thing a pilot
+user will ask for. **Do not fold it into `ux-list-usability`** — that row is about
+search and paging on lists that exist; this is a surface that does not exist.
+
 ### TIER 2 — an operator can work, but badly. Immediately after `PUR-1`.
 
 `ux-list-usability` (100 items, no search box, forward-only pagination; now also
