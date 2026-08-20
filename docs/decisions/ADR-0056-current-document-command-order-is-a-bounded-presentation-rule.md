@@ -1,8 +1,13 @@
 # ADR-0056: Current document command order is a bounded presentation rule
 
 Date: 2026-08-19
-Status: proposed — implemented by `inventory-surface-legibility`; ratification
-requires packet acceptance
+Status: **ratified** — `inventory-surface-legibility` was accepted 2026-08-20
+(ledger; reviewed `58e5ac14243a5ae597d9554c486baca5551b4ebc`, integrated
+`f2096b754fcb4f1b00298c262dac3419f3a79934` by required packet-into-main `--no-ff`).
+Ratified by the orchestrator at acceptance rather than left to be discovered: this
+is the **fourth** ADR this month whose status line would otherwise have outlived its
+own review (ADR-0049, ADR-0050, ADR-0055 preceded it). **Ratification is a step
+nothing enforces, and that is now a pattern rather than an accident.**
 Tier: Behavioral (presentation order changes; reachability and operation
 admission do not)
 
