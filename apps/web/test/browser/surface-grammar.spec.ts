@@ -204,7 +204,7 @@ test('compiled groups keep six list surfaces reachable through five primary entr
 
   const expectedSurfaceLabels = Array.from(
     { length: 6 },
-    (_, index) => `Budget item ${index + 1} list`,
+    (_, index) => `Budget item ${index + 1}`,
   );
   for (let index = 0; index < expectedSurfaceLabels.length; index += 1) {
     if (index >= 4) {

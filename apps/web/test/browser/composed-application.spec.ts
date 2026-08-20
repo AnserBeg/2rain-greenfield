@@ -156,7 +156,10 @@ composedTest.describe('composed application journeys', () => {
         surfaceUrl(composedApplication.currentBaseUrl(), 'party_list'),
       );
       await expect(
-        page.getByRole('cell', { name: 'Browser-persisted Party' }),
+        page.getByRole('cell', {
+          name: 'Browser-persisted Party',
+          exact: true,
+        }),
       ).toBeVisible();
     },
   );
@@ -877,7 +880,7 @@ async function inventoryNavigationJourney(
     page.locator('[data-platform-slot="list:dataGrid"]'),
   ).toBeVisible();
   await expect(
-    page.getByRole('cell', { name: 'Alpine Office Supply' }),
+    page.getByRole('cell', { name: 'Alpine Office Supply', exact: true }),
   ).toBeVisible();
   const responsiveList = page.locator(
     '[data-list-rendering="responsive-single"]',
@@ -934,20 +937,20 @@ async function inventoryNavigationJourney(
 
   await navigation.getByRole('link', { name: 'Catalog', exact: true }).click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Item list' }),
+    page.getByRole('heading', { level: 1, name: 'Item' }),
   ).toBeVisible();
   await expect(
-    page.getByRole('cell', { name: 'Field notebook' }),
+    page.getByRole('cell', { name: 'Field notebook', exact: true }),
   ).toBeVisible();
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
   await navigation.getByRole('link', { name: 'Location', exact: true }).click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Location list' }),
+    page.getByRole('heading', { level: 1, name: 'Location' }),
   ).toBeVisible();
   await expect(
-    page.getByRole('cell', { name: 'Calgary warehouse' }),
+    page.getByRole('cell', { name: 'Calgary warehouse', exact: true }),
   ).toBeVisible();
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
@@ -1165,7 +1168,7 @@ async function scopedInventoryJourney(
   await page.setViewportSize({ height: 720, width: 1280 });
   await defaultLegalEntity.click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Inventory movement list' }),
+    page.getByRole('heading', { level: 1, name: 'Inventory movement' }),
   ).toBeVisible();
   let movementRow = page.locator('tr', {
     hasText: 'browser-posted-adjustment',
@@ -1176,7 +1179,7 @@ async function scopedInventoryJourney(
     .getByRole('link', { name: browserAlternateInventoryScope.entityCode })
     .click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Inventory movement list' }),
+    page.getByRole('heading', { level: 1, name: 'Inventory movement' }),
   ).toBeVisible();
   await expect(movementRow).toHaveCount(0);
   expect(
@@ -1434,15 +1437,13 @@ async function repairedFormAnatomyJourney(
   // problem and is closed by the same one-line change.
   await page.goto(surfaceUrl(baseUrl, 'legal_entity_form'));
   await expectRenderedRecordForm(page, 'New Legal entity');
-  await page.getByLabel('Legal Entity Code', { exact: true }).fill('LE-ANAT-1');
+  await page.getByLabel('Code', { exact: true }).fill('LE-ANAT-1');
+  await page.getByLabel('Name', { exact: true }).fill('Anatomy Legal Entity');
   await page
-    .getByLabel('Legal Entity Name', { exact: true })
-    .fill('Anatomy Legal Entity');
-  await page
-    .getByRole('combobox', { exact: true, name: 'Legal Entity Status' })
+    .getByRole('combobox', { exact: true, name: 'Status' })
     .selectOption({ label: 'active' });
   await page
-    .getByRole('combobox', { exact: true, name: 'Legal Entity Is Default' })
+    .getByRole('combobox', { exact: true, name: 'Is default' })
     .selectOption({ label: 'No' });
   await page
     .locator('[data-platform-slot="record:commandBar"]')
@@ -1566,7 +1567,7 @@ async function createScopedStockCountLineWithRelations(
   );
   const transactionPicker = page.getByRole('combobox', {
     exact: true,
-    name: 'Stock Count Transaction',
+    name: 'Transaction',
   });
   await expect(transactionPicker).toBeVisible();
   await expect(
@@ -1576,20 +1577,16 @@ async function createScopedStockCountLineWithRelations(
     transactionPicker.locator('option', { hasText: 'TXN-SCOPE-B' }),
   ).toHaveCount(0);
   await transactionPicker.selectOption({ label: 'TXN-SCOPE-A' });
+  await page.getByLabel('Number', { exact: true }).fill('COUNT-SCOPE-A');
   await page
-    .getByLabel('Stock Count Number', { exact: true })
-    .fill('COUNT-SCOPE-A');
-  await page
-    .getByRole('combobox', { exact: true, name: 'Stock Count Kind' })
+    .getByRole('combobox', { exact: true, name: 'Kind' })
     .selectOption({ label: 'initial' });
   await page
-    .getByRole('combobox', { exact: true, name: 'Stock Count State' })
+    .getByRole('combobox', { exact: true, name: 'State' })
     .selectOption({ label: 'draft' });
+  await page.getByLabel('Location', { exact: true }).fill(demoLocationId);
   await page
-    .getByLabel('Stock Count Location Id', { exact: true })
-    .fill(demoLocationId);
-  await page
-    .getByLabel('Stock Count Counted At', { exact: true })
+    .getByLabel('Counted at', { exact: true })
     .fill('2026-07-30T12:00:00.000Z');
   const stockCountId = await page
     .locator('form#surface-record-form input[name="recordId"]')
@@ -1601,7 +1598,7 @@ async function createScopedStockCountLineWithRelations(
   await expect(page.getByRole('status')).toContainText('Create complete');
   await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
   await expect(page.locator('[data-relation-freeze]')).toContainText(
-    'Stock Count Transaction',
+    'Transaction',
   );
 
   const stockCountLineScopeParameterId = await loadSurfaceScopeParameterId(
@@ -1617,11 +1614,11 @@ async function createScopedStockCountLineWithRelations(
   );
   const sessionPicker = page.getByRole('combobox', {
     exact: true,
-    name: 'Stock Count Line Session',
+    name: 'Session',
   });
   const transactionLinePicker = page.getByRole('combobox', {
     exact: true,
-    name: 'Stock Count Line Transaction Line',
+    name: 'Transaction line',
   });
   await expect(sessionPicker).toBeVisible();
   await expect(transactionLinePicker).toBeVisible();
@@ -1632,22 +1629,12 @@ async function createScopedStockCountLineWithRelations(
     ),
   ).toHaveCount(1);
   await transactionLinePicker.selectOption(browserTransactionLineId);
-  await page
-    .getByLabel('Stock Count Line Line Number', { exact: true })
-    .fill('1');
-  await page
-    .getByLabel('Stock Count Line Item Id', { exact: true })
-    .fill(demoItemId);
-  await page
-    .getByLabel('Stock Count Line Expected Quantity', { exact: true })
-    .fill('5');
-  await page
-    .getByLabel('Stock Count Line Counted Quantity', { exact: true })
-    .fill('5');
-  await page
-    .getByLabel('Stock Count Line Variance Quantity', { exact: true })
-    .fill('0');
-  await page.getByLabel('Stock Count Line Unit Id', { exact: true }).fill('EA');
+  await page.getByLabel('Line number', { exact: true }).fill('1');
+  await page.getByLabel('Item', { exact: true }).fill(demoItemId);
+  await page.getByLabel('Expected quantity', { exact: true }).fill('5');
+  await page.getByLabel('Counted quantity', { exact: true }).fill('5');
+  await page.getByLabel('Variance quantity', { exact: true }).fill('0');
+  await page.getByLabel('Unit', { exact: true }).fill('EA');
   await page
     .locator('[data-platform-slot="record:commandBar"]')
     .getByRole('button', { name: 'Save' })
@@ -1655,10 +1642,13 @@ async function createScopedStockCountLineWithRelations(
   await expect(page.getByRole('status')).toContainText('Create complete');
   await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
   const frozenRelations = page.locator('[data-relation-freeze]');
-  await expect(frozenRelations).toContainText('Stock Count Line Session');
-  await expect(frozenRelations).toContainText(
-    'Stock Count Line Transaction Line',
-  );
+  await expect(
+    frozenRelations.getByRole('heading', { name: 'Locked after creation' }),
+  ).toBeVisible();
+  await expect(frozenRelations).toContainText('Session');
+  await expect(frozenRelations).toContainText('Transaction line');
+  await expect(frozenRelations).not.toContainText('Stock Count Line Session');
+  await expect(frozenRelations).toContainText('cannot be changed later');
   await expect(sessionPicker).toHaveCount(0);
   await expect(transactionLinePicker).toHaveCount(0);
 }
@@ -1667,34 +1657,28 @@ async function fillInventoryTransactionForm(
   page: Page,
   transactionNumber: string,
 ): Promise<void> {
-  await page
-    .getByLabel('Inventory Transaction Number', { exact: true })
-    .fill(transactionNumber);
+  await page.getByLabel('Number', { exact: true }).fill(transactionNumber);
   // Enum controls are addressed by ROLE, not by label text. A wrapping
   // `<label>` around a `<select>` has the option labels inside its text
   // content, so an exact getByLabel never matches one -- it works for the
   // `<input>` fields above only because an input contributes no text.
   await page
-    .getByRole('combobox', { exact: true, name: 'Inventory Transaction Type' })
+    .getByRole('combobox', { exact: true, name: 'Type' })
     .selectOption({ label: 'adjustment' });
   await page
-    .getByRole('combobox', { exact: true, name: 'Inventory Transaction State' })
+    .getByRole('combobox', { exact: true, name: 'State' })
     .selectOption({ label: 'draft' });
+  await page.getByLabel('Source type', { exact: true }).fill('browser');
   await page
-    .getByLabel('Inventory Transaction Source Type', { exact: true })
-    .fill('browser');
-  await page
-    .getByLabel('Inventory Transaction Source Id', { exact: true })
+    .getByLabel('Source', { exact: true })
     .fill(transactionNumber.toLowerCase());
   await page
-    .getByLabel('Inventory Transaction Effective At', { exact: true })
+    .getByLabel('Effective at', { exact: true })
     .fill('2026-07-30T12:00:00.000Z');
   await page
-    .getByLabel('Inventory Transaction Recorded At', { exact: true })
+    .getByLabel('Recorded at', { exact: true })
     .fill('2026-07-30T12:00:00.000Z');
-  await page
-    .getByLabel('Inventory Transaction Actor Id', { exact: true })
-    .fill('anatomy-actor');
+  await page.getByLabel('Actor', { exact: true }).fill('anatomy-actor');
 }
 
 async function createScopedInventoryTransaction(
@@ -1743,7 +1727,9 @@ async function expectScopedInventoryTransactions(
       legalEntityId,
     ),
   );
-  await expect(page.getByText(visibleNumber, { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('cell', { name: visibleNumber, exact: true }),
+  ).toBeVisible();
   await expect(page.getByText(hiddenNumber, { exact: true })).toHaveCount(0);
 }
 
@@ -1986,10 +1972,12 @@ async function partyLifecycleJourney(
   await expect(
     page.locator('[data-platform-slot="record:sections"]'),
   ).toBeVisible();
-  await page.getByLabel('Party Number').fill('P-BROWSER-REAL-001');
-  await page.getByLabel('Party Name').fill('Browser-persisted Party');
+  await page.getByLabel('Number', { exact: true }).fill('P-BROWSER-REAL-001');
   await page
-    .getByLabel('Party Contact Summary', { exact: true })
+    .getByLabel('Name', { exact: true })
+    .fill('Browser-persisted Party');
+  await page
+    .getByLabel('Contact summary', { exact: true })
     .fill('browser-persisted@example.test');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Create complete');
@@ -2000,10 +1988,13 @@ async function partyLifecycleJourney(
   await page.goto(surfaceUrl(baseUrl, 'party_list'));
   await page.reload();
   await expect(
-    page.getByRole('cell', { name: 'Browser-persisted Party' }),
+    page.getByRole('cell', {
+      name: 'Browser-persisted Party',
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
-    page.getByRole('cell', { name: 'P-BROWSER-REAL-001' }),
+    page.getByRole('cell', { name: 'P-BROWSER-REAL-001', exact: true }),
   ).toBeVisible();
   const createdRow = page.locator('tr', { hasText: 'Browser-persisted Party' });
   const createdRecordId = await createdRow.getAttribute('data-record-id');
@@ -2063,7 +2054,7 @@ async function partyLifecycleJourney(
     page.getByRole('heading', { level: 1, name: 'Edit Party' }),
   ).toBeVisible();
   await page
-    .getByLabel('Party Contact Summary', { exact: true })
+    .getByLabel('Contact summary', { exact: true })
     .fill('updated-after-navigation@example.test');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Update complete');

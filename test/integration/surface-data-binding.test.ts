@@ -1110,7 +1110,8 @@ test('relation inputs are visibly frozen on update forms', async () => {
     rendered.html,
     new RegExp(`data-relation-id="${REQUIRED_RELATION_ID}"`),
   );
-  assert.match(rendered.html, /cannot be changed here/u);
+  assert.match(rendered.html, /Locked after creation/u);
+  assert.match(rendered.html, /cannot be changed later/u);
   assert.doesNotMatch(
     rendered.html,
     new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
@@ -1143,7 +1144,8 @@ test('relation inputs stay visibly frozen when the update precondition does not 
     rendered.html,
     new RegExp(`data-relation-id="${REQUIRED_RELATION_ID}"`),
   );
-  assert.match(rendered.html, /cannot be changed here/u);
+  assert.match(rendered.html, /Locked after creation/u);
+  assert.match(rendered.html, /cannot be changed later/u);
   assert.doesNotMatch(rendered.html, /<form id="surface-record-form"/u);
   const refusedCommandBar = rendered.html.match(
     /<div\b[^>]*data-platform-slot="record:commandBar"[^>]*>[\s\S]*?<\/div>/u,
@@ -2984,7 +2986,7 @@ test('the merged command bar renders both halves on the same two transition form
   const labels = forms.map(
     (form) => /<button type="submit">([^<]+)<\/button>/.exec(form)?.[1],
   );
-  assert.deepEqual(labels, ['Cancel', 'Release']);
+  assert.deepEqual(labels, ['Release', 'Cancel']);
 });
 
 /** `ordinaryModuleV1` restamped at v5, carrying a two-transition machine. */

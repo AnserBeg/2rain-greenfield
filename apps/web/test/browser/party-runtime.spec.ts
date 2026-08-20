@@ -15,8 +15,12 @@ test('real Party surface renders roles, creates, and archives/restores through t
     await page.setExtraHTTPHeaders({ authorization: 'a' });
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'party_role_list'));
-    await expect(page.getByRole('cell', { name: 'Supplier' })).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'Customer' })).toBeVisible();
+    await expect(
+      page.getByRole('cell', { name: 'Supplier', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('cell', { name: 'Customer', exact: true }),
+    ).toBeVisible();
     await expect(page.locator('body')).not.toContainText(
       `${namespace}:option.supplier`,
     );
@@ -49,10 +53,12 @@ test('real Party surface renders roles, creates, and archives/restores through t
     await expect(page.getByText(/Active · revision 3/)).toBeVisible();
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'party_form'));
-    await page.getByLabel('Party Number').fill('P-WEB-004');
-    await page.getByLabel('Party Name').fill('Browser-created Party');
+    await page.getByLabel('Number', { exact: true }).fill('P-WEB-004');
     await page
-      .getByLabel('Party Contact Summary', { exact: true })
+      .getByLabel('Name', { exact: true })
+      .fill('Browser-created Party');
+    await page
+      .getByLabel('Contact summary', { exact: true })
       .fill('created@example.test');
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
@@ -62,9 +68,11 @@ test('real Party surface renders roles, creates, and archives/restores through t
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'party_list'));
     await expect(
-      page.getByRole('cell', { name: 'Browser-created Party' }),
+      page.getByRole('cell', { name: 'Browser-created Party', exact: true }),
     ).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'P-WEB-004' })).toBeVisible();
+    await expect(
+      page.getByRole('cell', { name: 'P-WEB-004', exact: true }),
+    ).toBeVisible();
     await expect(page.locator('body')).not.toContainText('north_star_module');
     await expect(page.locator('body')).not.toContainText('storageClass');
   } finally {
