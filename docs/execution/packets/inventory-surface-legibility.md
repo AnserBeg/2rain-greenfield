@@ -4,13 +4,16 @@ Date: 2026-08-19; revised 2026-08-20 after Behavioral review rounds 1–3
 Base: `ca6fe310cb10da883a009525dab6b3fb9f8a872c`
 Branch: `packet/inventory-surface-legibility`
 Tier: Behavioral
-Status: **MATRIX GREEN — ready for required packet-to-main `--no-ff`
-integration.** Round 3 returned REVISE with no production finding; by explicit
-user ruling no further review arm will run. The corrected product remains
-committed at `f95d6e5`; the round-2 test-only correction culminates at
-`19b83e5`; the bounded command-order ruling remains at `c395788`. Round 3's
-single final test-only correction is `58e5ac1`, and the full matrix passed at
-that exact SHA.
+Status: **ACCEPTED** by required packet-to-main `--no-ff` merge
+`f2096b754fcb4f1b00298c262dac3419f3a79934`. Round 3 returned REVISE with no
+production finding; by explicit user ruling no further review arm ran. The
+corrected product remains committed at `f95d6e5`; the round-2 test-only
+correction culminates at `19b83e5`; the bounded command-order ruling remains
+at `c395788`. Round 3's single final test-only correction is `58e5ac1`, and the
+full matrix passed at that exact SHA. The merge's first parent is prior main
+`795a4ba5bb521e1e41302600bca5d28e01a2521d`; its second parent is frozen packet
+tip `8016e31a884ea84e8e807f9c4028c0c6ced725b1`. Its executable content is
+byte-identical to the matrix tree.
 
 ## Packet definition
 
@@ -249,6 +252,6 @@ the port had no listener.
 - The generic command-order carrier remains intentionally deferred until the
   replacement trigger in ADR-0056 fires.
 - A program review is already **DUE** at the completed required-relation
-  checkpoint. This packet is still mid-flight and therefore an anti-trigger;
-  propose the read-only whole-app review on clean integrated `main` after this
-  packet is accepted and before another fan-out. Do not run it from this lane.
+  checkpoint. This packet is now accepted on clean integrated `main`; propose
+  the read-only whole-app review before another fan-out. It was not run from
+  this lane.
