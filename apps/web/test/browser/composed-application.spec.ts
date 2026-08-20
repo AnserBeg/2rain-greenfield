@@ -1061,6 +1061,9 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
     onHandLookup.label,
     onHandLookup.statusRoles.join(''),
   ]);
+  await expect(taskPageHeading).toHaveText(
+    [onHandLookup.label, onHandLookup.statusRoles.join('')].join(' '),
+  );
   await expect(taskPageHeading.locator('[data-status-role]')).toHaveText(
     onHandLookup.statusRoles,
   );

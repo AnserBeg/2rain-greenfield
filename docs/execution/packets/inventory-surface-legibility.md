@@ -1,14 +1,15 @@
 # inventory-surface-legibility — operator-readable inventory surfaces
 
-Date: 2026-08-19; revised 2026-08-20 after Behavioral review rounds 1–2
+Date: 2026-08-19; revised 2026-08-20 after Behavioral review rounds 1–3
 Base: `ca6fe310cb10da883a009525dab6b3fb9f8a872c`
 Branch: `packet/inventory-surface-legibility`
 Tier: Behavioral
-Status: **EVIDENCE READY — round-2 evidence REVISE corrected; awaiting a fresh
-Behavioral review.** The corrected product remains committed at `f95d6e5`; the
-round-2 test-only correction culminates at `19b83e5`; the bounded command-order ruling
-remains at `c395788`. The exact frozen packet tip is named in the emitted review
-prompt. No full matrix has run.
+Status: **FINAL REVIEW-CAP CORRECTION IN PROGRESS — round 3 returned REVISE
+with no production finding; by explicit user ruling no further review arm will
+run.** The corrected product remains committed at `f95d6e5`; the round-2
+test-only correction culminates at `19b83e5`; the bounded command-order ruling
+remains at `c395788`. Round 3's final test-only correction closes the bare-text
+heading survivor. No full matrix has run.
 
 ## Packet definition
 
@@ -106,7 +107,7 @@ tree.
 | command presentation sort | command browser test observed `Cancel, Release` instead of `Release, Cancel` |
 | relation-freeze rendering | composed Inventory journey failed because `[data-relation-freeze]` was absent |
 | classless canonical Task ID moved outside the heading into surface content | real on-hand journey observed the independently read compiled `surfaceId` anywhere in rendered `#surface-content` |
-| extra `runtime release` heading child with neither the old phrase nor `${archetype} surface` | real on-hand journey rejected the extra direct heading content |
+| Task-only bare `runtime release` text node inserted directly inside the surface heading | real on-hand journey rejected the heading's changed complete normalized text |
 | authored-label normalization restored | label browser test could not find `VAT & R&D orders` |
 | product List prefix authority changed from `query.sourceEntityId` to its opaque surface ID | label browser test could not find the `Name` column |
 | Form field prefix authority changed from the compiled source entity to its opaque surface ID | label browser test could not find the `Number` field |
@@ -163,6 +164,26 @@ all rendered surface text, use opaque List/Form/Record surface IDs, and give
 each source-sensitive renderer a divergent specimen. The nine strongest
 equivalent or path-local mutations recorded above each red independently. No
 production or form-admission code changed in this round.
+
+## Behavioral review round 3
+
+The user reviewed exact remote candidate
+`abed0f98c9a0109d569d47b82ce71ef476efadad` and returned REVISE with no
+production finding. The sole finding was a control gap:
+`taskPageHeading.locator(':scope > *')` inventories element children only, so a
+bare text node directly inside the heading could add operator-visible copy while
+the claimed complete-heading census stayed green.
+
+The final test-only correction asserts the heading locator's own complete
+normalized `textContent` equals the compiled title plus the concatenated compiled
+statuses. Its focused negative control inserts Task-only bare `runtime release`
+text directly inside `<header class="surface-heading">`, observes the composed
+on-hand Task journey red at that equality, and restores the production file.
+Focused before / mutated / restored counts were **1/1 pass → 0/1 pass (one
+failure at the new equality) → 1/1 pass**. This is one reviewer-selected ad-hoc
+mutation and a committed victim assertion; the focused filtered invocation is
+not reachability evidence. By explicit user ruling this is the last round and no
+further review arm will run.
 
 ## Required pre-review gates
 
