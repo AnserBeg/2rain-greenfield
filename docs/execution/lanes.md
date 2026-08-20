@@ -19,7 +19,7 @@ writer is holding those paths right now.
 | **CANON** *(Opus)* | `Q1-P5` — the legal-entity query operand, canonical v4 | **active, added 2026-07-30.** First non-Codex writer lane. Same review chain: Codex for everything, Fable on Critical. Holding its frozen candidate while `Q1-P4` takes the slot; authoring the deferred gateway binding meanwhile. |
 | **KERNEL** | — | idle since `G3-P2b-4` (2026-07-29). |
 | **DEPLOY** | — | idle since `1g2` (2026-07-29). |
-| **WRITER** | `inventory-surface-legibility` | **active from `ca6fe310` in `/home/rvham/2rain-greenfield-legibility`.** Behavioral presentation packet: one product source file plus browser/integration evidence and execution records. It must freeze after the blast-radius suites and emit, not run, its review prompt. |
+| **WRITER** | `inventory-surface-legibility` | **evidence ready from `ca6fe310` in `/home/rvham/2rain-greenfield-legibility`; product/test/ADR candidate `c395788`.** Typecheck, lint and format pass; browser 90/90, integration 148/148 and contracts 16/16 pass. The lane freezes with the execution records above that executable candidate, emits its prompt, and stops without running review or the full matrix. Paths remain held until review converges and the required packet-to-main `--no-ff` integration completes. |
 
 **Lane identity is per packet, not per theme.** The earlier model assigned
 standing themes (KERNEL owns canonical, FIX owns correctness). That broke on
