@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -13,6 +14,11 @@ import {
 
 import * as listBehavior from '../../../packages/runtime/src/list-behavior/index.js';
 import { ModuleRuntimeInterpreterError } from '../../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { AuthenticatedRequestEntryAdapter } from '../../../packages/runtime/src/request-context.js';
+import {
+  AuthenticatedRequestRuntimeEntryAdapter,
+  type CurrentPolicyGateway,
+} from '../../../packages/runtime/src/request-runtime-view.js';
 import * as resolveByName from '../../../packages/runtime/src/resolve-by-name.js';
 import * as operationGateway from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import * as queryGateway from '../../../packages/runtime/src/semantic-query-gateway.js';
@@ -21,7 +27,7 @@ import {
   MAPPED_QUERY_ERROR_NAMES,
   operationMessageRef,
 } from '../src/gateway-error-codes.js';
-import { runtimeViewRefusalMessage } from '../src/app-server.js';
+import { createSurfaceRuntimeServer } from '../src/app-server.js';
 import {
   MESSAGE_PLACEMENTS,
   OPERATION_DIAGNOSTIC_CODES,
@@ -45,6 +51,28 @@ import {
   readCompiledSurfaceManifest,
 } from '../src/surface-contract.js';
 import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
+
+const APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT =
+  "import { RequestRuntimeViewLoadError } from '@north-star/postgres-provider/request-runtime-view-service';\n";
+
+function assertAppServerProviderBoundary(source: string): void {
+  const occurrences =
+    source.split(APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      'only RequestRuntimeViewLoadError may cross the app-server provider boundary',
+    );
+  }
+  const withoutAllowedImport = source.replace(
+    APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT,
+    '',
+  );
+  if (/postgres-provider/u.test(withoutAllowedImport)) {
+    throw new Error(
+      'only RequestRuntimeViewLoadError may cross the app-server provider boundary',
+    );
+  }
+}
 
 test('checked-in shell artifact is parse-normalized deterministic compiler output', () => {
   execFileSync(
@@ -122,9 +150,18 @@ test('renderer accepts one issued view and has no ambient release access', async
     serverSource,
     /ActiveReleasePointer|releaseRepository|global[A-Z][A-Za-z]*Release|process\.env|node:fs/,
   );
-  assert.match(
-    serverSource,
-    /@north-star\/postgres-provider\/request-runtime-view-service/u,
+  assertAppServerProviderBoundary(serverSource);
+});
+
+test('app-server provider boundary red: the loader cannot share the error-class import', () => {
+  const withAmbientLoader = APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT.replace(
+    '{ RequestRuntimeViewLoadError }',
+    '{ PostgresRequestRuntimeViewService, RequestRuntimeViewLoadError }',
+  );
+  assert.notEqual(withAmbientLoader, APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT);
+  assert.throws(
+    () => assertAppServerProviderBoundary(withAmbientLoader),
+    /only RequestRuntimeViewLoadError may cross the app-server provider boundary/u,
   );
 });
 
@@ -146,17 +183,77 @@ const REQUEST_RUNTIME_VIEW_LOAD_CODES = Object.freeze({
   UNSUPPORTED_RUNTIME_CAPABILITY: true,
 } as const satisfies Readonly<Record<RequestRuntimeViewLoadErrorCode, true>>);
 
-test('every typed runtime-view refusal crosses the HTTP boundary with its code', () => {
+test('every typed runtime-view refusal crosses the HTTP boundary with its code', async () => {
   assert.equal(Object.keys(REQUEST_RUNTIME_VIEW_LOAD_CODES).length, 15);
-  for (const code of Object.keys(
-    REQUEST_RUNTIME_VIEW_LOAD_CODES,
-  ) as RequestRuntimeViewLoadErrorCode[]) {
-    assert.deepEqual(
-      runtimeViewRefusalMessage(
-        new RequestRuntimeViewLoadError(code, 'typed refusal'),
-      ),
-      { code: 'REQUEST_RUNTIME_VIEW_REFUSED', subject: code },
-    );
+  let refusalCode: RequestRuntimeViewLoadErrorCode = 'ACTIVE_POINTER_MISSING';
+  const currentPolicy: CurrentPolicyGateway = Object.freeze({
+    async authorize() {
+      return Object.freeze({
+        decision: 'ALLOW' as const,
+        decisionVersion: 'northstar.current-policy-decision/v1' as const,
+        policyVersion: 'runtime-view-refusal-gate-v1',
+      });
+    },
+    async readCurrentVersion() {
+      return Object.freeze({
+        policyVersion: 'runtime-view-refusal-gate-v1',
+      });
+    },
+  });
+  const server = createSurfaceRuntimeServer(
+    new AuthenticatedRequestRuntimeEntryAdapter(
+      new AuthenticatedRequestEntryAdapter(async () => ({
+        environmentId: '20000000-0000-4000-8000-000000000002',
+        principalId: '40000000-0000-4000-8000-000000000004',
+        tenantId: '10000000-0000-4000-8000-000000000001',
+      })),
+      Object.freeze({
+        async load(): Promise<never> {
+          throw new RequestRuntimeViewLoadError(
+            refusalCode,
+            'typed refusal from the runtime-view loader',
+          );
+        },
+      }),
+      currentPolicy,
+    ),
+  );
+  const baseUrl = await listen(server);
+
+  try {
+    for (const code of Object.keys(
+      REQUEST_RUNTIME_VIEW_LOAD_CODES,
+    ) as RequestRuntimeViewLoadErrorCode[]) {
+      refusalCode = code;
+      const response = await fetch(baseUrl);
+      assert.equal(response.status, 500, code);
+      const html = await response.text();
+      assert.match(html, /data-message="REQUEST_RUNTIME_VIEW_REFUSED"/u, code);
+      assert.match(
+        html,
+        /data-diagnostic-code="REQUEST_RUNTIME_VIEW_REFUSED"/u,
+        code,
+      );
+      assert.match(html, /data-status-role="blocked"/u, code);
+      assert.match(
+        html,
+        /<h1 data-message-sentence>Runtime view refused<\/h1>/u,
+        code,
+      );
+      assert.match(
+        html,
+        new RegExp(`<code data-message-subject>${code}</code>`, 'u'),
+        code,
+      );
+      assert.match(
+        html,
+        /<code data-message-code>REQUEST_RUNTIME_VIEW_REFUSED<\/code>/u,
+        code,
+      );
+      assert.doesNotMatch(html, /REQUEST_RUNTIME_VIEW_UNAVAILABLE/u, code);
+    }
+  } finally {
+    await close(server);
   }
 });
 
@@ -759,4 +856,20 @@ function record(value: unknown): Record<string, unknown> {
 function arrayOfRecords(value: unknown): Record<string, unknown>[] {
   assert.ok(Array.isArray(value));
   return value.map(record);
+}
+
+async function listen(server: Server): Promise<string> {
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function close(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
 }

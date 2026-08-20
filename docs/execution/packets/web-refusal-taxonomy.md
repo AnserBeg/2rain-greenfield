@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: frozen for Critical review
+Status: frozen for fresh Critical review after round 1 corrections
 
 ## Goal
 
@@ -89,10 +89,12 @@ immediately reverted.
 |---|---|---|
 | A non-mutation slot cannot veto writes | Restored `surfaceHasUnsupportedComponent(surface) ||` in `surfaceSupportsRuntimeIntent` | `test:contracts` 17/18; `closed registry returns diagnostics for unknown and failing components` received `false` where writable was required |
 | An identified provider refusal does not collapse to unavailable | Replaced the open-code residual return with `OPERATION_UNAVAILABLE` | `test:contracts` 17/18; expected `OPERATION_REFUSED` plus `MODULE_REQUIRED_FIELD_MISSING`, received `OPERATION_UNAVAILABLE` |
-| A runtime-view refusal preserves its exact typed code | Replaced `subject: error.code` with one erased constant | `test:contracts` 17/18; first table member expected `ACTIVE_POINTER_MISSING`, received `ERASED_RUNTIME_VIEW_CODE` |
+| The mapper helper preserves its exact typed code | Replaced `subject: error.code` with one erased constant | `test:contracts` 17/18; first table member expected `ACTIVE_POINTER_MISSING`, received `ERASED_RUNTIME_VIEW_CODE`. Round 1 correctly ruled this a helper-level proxy, not HTTP-boundary evidence; it is retained as historical evidence but does not count for the boundary claim. |
 | The typed runtime-view table is exhaustive | Deleted only `ACTIVE_POINTER_MISSING` from the 15-code record | `typecheck` exit 2, TS1360: required property `ACTIVE_POINTER_MISSING` is missing |
 | Invalid binding remains distinct from unsupported query | Changed only the invalid-binding render code back to `QUERY_UNSUPPORTED` | focused browser control 0/1; complete observable expected `INVALID_SURFACE_BINDING`, received `QUERY_UNSUPPORTED` |
 | No fixture-only Save is synthesized | Restored only the conditional compatibility Save branch | focused browser control 0/1; expected zero Save buttons, received one |
+| Every typed code traverses the HTTP catch-and-render boundary | Narrowed only the `RequestRuntimeViewLoadError` catch to `UNSUPPORTED_RUNTIME_CAPABILITY`, the one existing browser census member | `test:contracts` 18/19; the first non-browser member, `ACTIVE_POINTER_MISSING`, rendered `REQUEST_RUNTIME_VIEW_UNAVAILABLE` where the HTTP census required `REQUEST_RUNTIME_VIEW_REFUSED` |
+| Only the refusal class crosses the app-server provider boundary | Added only `PostgresRequestRuntimeViewService` as a second named specifier on the allowed import | `test:contracts` 18/19; `renderer accepts one issued view and has no ambient release access` failed with `only RequestRuntimeViewLoadError may cross the app-server provider boundary` |
 
 The focused Playwright mutant invocations intentionally carry a name filter;
 the repository's unfiltered reporter therefore also reports the filter as an
@@ -109,7 +111,8 @@ change was complete:
 - `pnpm format`: green;
 - `pnpm test:browser`: 92/92 green;
 - `pnpm test:integration`: 149/149 green; and
-- `pnpm test:contracts`: 18/18 green.
+- `pnpm test:contracts`: 18/18 green at round 1 and 19/19 green after the
+  corrected HTTP-boundary and exact-import controls landed.
 
 The full CI matrix is deliberately deferred until review converges, as the
 packet charter requires.
@@ -146,3 +149,26 @@ eight stale pre-existing branches: `packet/proj-disc`, `packet/ps-0`,
 `packet/u5-design`. It exited 1 as designed. Those refs are outside this lane's
 ownership and require an orchestrator decision; this packet did not modify or
 delete them.
+
+## Review evidence
+
+### Round 1 — `d0fa6410808ea166f198b3c0f6167e9ab8d9e421`
+
+Fresh-naive Codex xhigh returned `REVISE` with two material control findings:
+
+1. the exhaustive 15-code test called `runtimeViewRefusalMessage` directly and
+   therefore proved the mapper helper rather than the HTTP boundary named by
+   the test; and
+2. the source boundary required the provider module path but did not restrict
+   that exception to `RequestRuntimeViewLoadError`, so the ambient
+   `PostgresRequestRuntimeViewService` loader could join the import without a
+   red.
+
+Both findings were accepted. The first correction keeps the compile-time union
+record but iterates every member through a real loopback request whose loader
+throws `RequestRuntimeViewLoadError`; it observes HTTP status, diagnostic code,
+status role, visible sentence, visible subject, visible code, and absence of the
+generic-unavailable code. The second removes exactly the one allowed import
+declaration before applying the provider prohibition to the remainder of
+`app-server.ts`, and carries a committed single-property loader-import red.
+Neither correction changes production behavior or enters `packages/**`.
