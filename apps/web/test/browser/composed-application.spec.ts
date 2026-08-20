@@ -1057,16 +1057,19 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
   const taskPageHeading = page.locator(
     '#surface-content > header.surface-heading',
   );
-  await expect(taskPageHeading.locator(':scope > div').first()).toHaveText(
+  await expect(taskPageHeading.locator(':scope > *')).toHaveText([
     onHandLookup.label,
-  );
+    onHandLookup.statusRoles.join(''),
+  ]);
   await expect(taskPageHeading.locator('[data-status-role]')).toHaveText(
     onHandLookup.statusRoles,
   );
   await expect(taskPageHeading).not.toContainText(
     `${onHandLookup.archetype} surface`,
   );
-  await expect(taskPageHeading).not.toContainText(onHandLookup.surfaceId);
+  await expect(page.locator('#surface-content')).not.toContainText(
+    onHandLookup.surfaceId,
+  );
   await page
     .getByRole('navigation', { name: 'Legal entity' })
     .getByRole('link', {
