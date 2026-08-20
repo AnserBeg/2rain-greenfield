@@ -4,12 +4,13 @@ Date: 2026-08-19; revised 2026-08-20 after Behavioral review rounds 1–3
 Base: `ca6fe310cb10da883a009525dab6b3fb9f8a872c`
 Branch: `packet/inventory-surface-legibility`
 Tier: Behavioral
-Status: **FINAL REVIEW-CAP CORRECTION IN PROGRESS — round 3 returned REVISE
-with no production finding; by explicit user ruling no further review arm will
-run.** The corrected product remains committed at `f95d6e5`; the round-2
-test-only correction culminates at `19b83e5`; the bounded command-order ruling
-remains at `c395788`. Round 3's final test-only correction closes the bare-text
-heading survivor. No full matrix has run.
+Status: **MATRIX GREEN — ready for required packet-to-main `--no-ff`
+integration.** Round 3 returned REVISE with no production finding; by explicit
+user ruling no further review arm will run. The corrected product remains
+committed at `f95d6e5`; the round-2 test-only correction culminates at
+`19b83e5`; the bounded command-order ruling remains at `c395788`. Round 3's
+single final test-only correction is `58e5ac1`, and the full matrix passed at
+that exact SHA.
 
 ## Packet definition
 
@@ -185,7 +186,7 @@ mutation and a committed victim assertion; the focused filtered invocation is
 not reachability evidence. By explicit user ruling this is the last round and no
 further review arm will run.
 
-## Required pre-review gates
+## Gate results
 
 All reran on the restored executable tree containing production commit
 `f95d6e5` and test-only correction through `19b83e5`:
@@ -198,7 +199,18 @@ All reran on the restored executable tree containing production commit
 - `pnpm test:contracts` — **16/16 pass**
 
 Per the packet charter and `git-workflow`, the full matrix runs once only after
-review converges. It has not been run early and no matrix result is claimed.
+review converges. After the user-capped round-3 correction, the complete
+serialized matrix passed at
+`FULL_MATRIX_PASS_SHA=58e5ac14243a5ae597d9554c486baca5551b4ebc`:
+
+- performance **5/5**
+- unit **120/120**; compiler **150/150**; integration **149/149**; agent **3/3**
+- architecture **141/141**; contracts **16/16**
+- PostgreSQL **203/203**; non-C locale **1/1**; browser **91/91**
+- observability **11/11**; executed-file reachability **104/104** from 10
+  producer artifacts
+- format, lint, typecheck, build, boundaries (160 files), schema (21/21), both
+  release freshness checks, language coverage and security passed
 
 ## Human checkpoint and cleanup
 
