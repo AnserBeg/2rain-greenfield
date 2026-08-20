@@ -10,7 +10,10 @@ import {
   type SemanticQueryResultEnvelope,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import type { SemanticQueryGateway } from '../../../packages/runtime/src/semantic-query-gateway.js';
-import { SHARED_LIST_QUERY_VERSION } from '../../../packages/runtime/src/list-behavior/index.js';
+import {
+  requireSharedListResult,
+  SHARED_LIST_QUERY_VERSION,
+} from '../../../packages/runtime/src/list-behavior/index.js';
 
 import {
   FORM_EMPTY_INTENT_PREFIX,
@@ -18,6 +21,9 @@ import {
   surfaceSupportsRuntimeIntent,
   type SurfaceDataRenderState,
   type SurfaceOperationFeedback,
+  type SurfaceRelationPicker,
+  type SurfaceRelationPickerOption,
+  type SurfaceRelationPickerState,
 } from './component-registry.js';
 import { DESIGN_TOKENS } from './design-tokens.js';
 import { escapeHtml, shortIdentity } from './html.js';
@@ -41,6 +47,7 @@ import {
   type CompiledSurfaceDataBinding,
   type CompiledSurfaceDefinition,
   type CompiledSurfaceInputField,
+  type EntityRelationAuthority,
   type SurfaceOperationIntent,
 } from './surface-contract.js';
 
@@ -147,6 +154,7 @@ export async function renderSurfaceRuntimeWithData(
       legalEntitySelection,
       workspaceContext,
       queryParameterValues,
+      binding.relationInputs,
     );
   }
   if (binding.query.queryType === 'aggregate') {
@@ -170,9 +178,18 @@ export async function renderSurfaceRuntimeWithData(
         legalEntitySelection,
         workspaceContext,
         queryParameterValues,
+        binding.relationInputs,
       );
     }
   }
+  const relationPickers = await loadRelationPickers(
+    view,
+    selection,
+    binding,
+    gateways.queryGateway,
+    legalEntitySelection,
+    url,
+  );
   const queryArguments = argumentsForSurface(binding, url);
   if (queryArguments === null) {
     const state: SurfaceDataRenderState =
@@ -189,6 +206,8 @@ export async function renderSurfaceRuntimeWithData(
       legalEntitySelection,
       workspaceContext,
       queryParameterValues,
+      binding.relationInputs,
+      relationPickers,
     );
   }
 
@@ -224,6 +243,8 @@ export async function renderSurfaceRuntimeWithData(
     legalEntitySelection,
     workspaceContext,
     queryParameterValues,
+    binding.relationInputs,
+    relationPickers,
   );
 }
 
@@ -348,6 +369,8 @@ export async function submitSurfaceRuntimeIntent(
       new URL(requestUrl, 'http://surface-runtime.local'),
     ),
     null,
+    Object.freeze({}),
+    binding.relationInputs,
   );
 }
 
@@ -381,6 +404,8 @@ function renderSelectedSurface(
   legalEntitySelection: readonly string[] = [],
   workspaceContext: WorkspaceContextBar | null = null,
   queryParameterValues: Readonly<Record<string, string>> = Object.freeze({}),
+  relationInputs: EntityRelationAuthority | null = null,
+  relationPickers: SurfaceRelationPickerState | null = null,
 ): SurfaceRuntimeResponse {
   // Compact and full layouts are alternative renderings of these same slots;
   // a responsive implementation must never mount both at once.
@@ -391,6 +416,8 @@ function renderSelectedSurface(
       legalEntitySelection,
       operations,
       queryParameterValues,
+      ...(relationInputs ? { relationInputs } : {}),
+      ...(relationPickers ? { relationPickers } : {}),
       slot,
       surface: selected,
       surfaces,
@@ -591,22 +618,14 @@ async function loadWorkspaceContextBar(
   )[0];
   if (!entityNamespace) return null;
   const legalEntityId = `${entityNamespace}:entity.legal_entity`;
-  const candidates = selection.surfaces.flatMap((surface) => {
-    if (surface.surfaceRole !== 'list') return [];
-    try {
-      const binding = readCompiledSurfaceDataBinding(view, surface);
-      return binding.query.lifecycle === 'active' &&
-        binding.query.queryType === 'list' &&
-        binding.query.sourceEntityId === legalEntityId &&
-        binding.query.legalEntityScope === undefined
-        ? [{ binding, surface }]
-        : [];
-    } catch {
-      return [];
-    }
-  });
-  if (candidates.length !== 1) return null;
-  const legalEntityList = candidates[0]!;
+  const legalEntityList = pickerListSurfaceFor(
+    view,
+    selection.surfaces,
+    legalEntityId,
+  );
+  if (!legalEntityList || legalEntityList.binding.query.legalEntityScope) {
+    return null;
+  }
   const targetSurface =
     selection.selected.surfaceRole === 'list' ||
     selectedBinding.query.queryType === 'aggregate'
@@ -628,46 +647,15 @@ async function loadWorkspaceContextBar(
     targetSurface?.binding.query.legalEntityScope?.operand.parameterId;
   if (!targetSurface || !parameterId) return null;
 
-  let result: SemanticQueryResultEnvelope;
-  try {
-    result = await queryGateway.invoke(view, {
-      arguments: {
-        includeArchived: false,
-        list: {
-          cursor: null,
-          matchMode: 'substring',
-          pageSize: legalEntityList.binding.query.maximumResultCount,
-          relationLabels: [],
-          schemaVersion: SHARED_LIST_QUERY_VERSION,
-          search: '',
-          sort: [],
-        },
-      },
-      queryId: legalEntityList.binding.query.queryId,
-      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-    });
-  } catch {
-    return null;
-  }
-  if (result.outcome !== 'exact') return null;
-  const displayFieldId = legalEntityList.binding.displayFieldId;
-  const options = result.records
-    .map((record) => {
-      const displayValue = displayFieldId
-        ? (record.displayValues?.[displayFieldId] ??
-          record.values[displayFieldId])
-        : null;
-      return Object.freeze({
-        label:
-          typeof displayValue === 'string' && displayValue.trim() !== ''
-            ? displayValue
-            : shortIdentity(record.recordId),
-        recordId: record.recordId,
-      });
-    })
-    .sort((left, right) => left.label.localeCompare(right.label));
+  const enumeration = await recordPickerOptions(
+    view,
+    legalEntityList,
+    queryGateway,
+    [],
+  );
+  if (!enumeration) return null;
   return Object.freeze({
-    options: Object.freeze(options),
+    options: enumeration.options,
     parameterId,
     preservedParameters: Object.freeze(
       targetSurface.binding.query.queryType === 'aggregate'
@@ -684,6 +672,161 @@ async function loadWorkspaceContextBar(
       legalEntitySelection.length === 1 ? legalEntitySelection[0]! : null,
     targetSurfaceId: targetSurface.surface.surfaceId,
   });
+}
+
+interface PickerListSurface {
+  readonly binding: CompiledSurfaceDataBinding;
+  readonly surface: CompiledSurfaceDefinition;
+}
+
+interface RecordPickerEnumeration {
+  readonly hasMore: boolean;
+  readonly options: readonly SurfaceRelationPickerOption[];
+}
+
+/** Exactly one active list surface is the candidate authority for one entity. */
+function pickerListSurfaceFor(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  targetEntityId: string,
+): PickerListSurface | null {
+  const candidates = surfaces.flatMap((surface) => {
+    if (surface.surfaceRole !== 'list') return [];
+    try {
+      const binding = readCompiledSurfaceDataBinding(view, surface);
+      return binding.query.lifecycle === 'active' &&
+        binding.query.queryType === 'list' &&
+        binding.query.sourceEntityId === targetEntityId
+        ? [{ binding, surface }]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  return candidates.length === 1 ? candidates[0]! : null;
+}
+
+async function recordPickerOptions(
+  view: RuntimeViewContract.RequestRuntimeView,
+  target: PickerListSurface,
+  queryGateway: SemanticQueryGateway,
+  legalEntitySelection: readonly string[],
+): Promise<RecordPickerEnumeration | null> {
+  const scope = target.binding.query.legalEntityScope;
+  if (scope && legalEntitySelection.length !== 1) return null;
+  try {
+    const result = await queryGateway.invoke(view, {
+      arguments: {
+        includeArchived: false,
+        list: {
+          cursor: null,
+          matchMode: 'substring',
+          pageSize: target.binding.query.maximumResultCount,
+          relationLabels: [],
+          schemaVersion: SHARED_LIST_QUERY_VERSION,
+          search: '',
+          sort: [],
+        },
+        ...(scope
+          ? { [scope.operand.parameterId]: legalEntitySelection[0]! }
+          : {}),
+      },
+      queryId: target.binding.query.queryId,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    });
+    if (result.outcome !== 'exact') return null;
+    const shared = requireSharedListResult(result);
+    const displayFieldId = target.binding.displayFieldId;
+    const options = shared.records
+      .map((record) => {
+        const displayValue = displayFieldId
+          ? (record.displayValues?.[displayFieldId] ??
+            record.values[displayFieldId])
+          : null;
+        return Object.freeze({
+          label:
+            typeof displayValue === 'string' && displayValue.trim() !== ''
+              ? displayValue
+              : shortIdentity(record.recordId),
+          recordId: record.recordId,
+        });
+      })
+      .sort((left, right) => left.label.localeCompare(right.label));
+    return Object.freeze({
+      hasMore: shared.listCoverage.hasMore,
+      options: Object.freeze(options),
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function loadRelationPickers(
+  view: RuntimeViewContract.RequestRuntimeView,
+  selection: SelectedSurface,
+  selectedBinding: CompiledSurfaceDataBinding,
+  queryGateway: SemanticQueryGateway,
+  legalEntitySelection: readonly string[],
+  currentUrl: URL,
+): Promise<SurfaceRelationPickerState | null> {
+  if (
+    selection.selected.surfaceRole !== 'form' ||
+    currentUrl.searchParams.has('record')
+  ) {
+    return null;
+  }
+  const authority = selectedBinding.relationInputs;
+  if (authority.status === 'unavailable') {
+    return Object.freeze({ status: 'unavailable' });
+  }
+  const pickers: SurfaceRelationPicker[] = [];
+  for (const relation of authority.relationInputs) {
+    // A generation-1 optional relation without a target cannot offer a false
+    // choice. A required one makes the form unsatisfiable and refuses by name.
+    if (relation.targetEntityId === null) {
+      if (relation.required) {
+        return Object.freeze({
+          relationId: relation.relationId,
+          status: 'refused',
+        });
+      }
+      continue;
+    }
+    const target = pickerListSurfaceFor(
+      view,
+      selection.surfaces,
+      relation.targetEntityId,
+    );
+    if (!target) {
+      return Object.freeze({
+        relationId: relation.relationId,
+        status: 'refused',
+      });
+    }
+    const enumeration = await recordPickerOptions(
+      view,
+      target,
+      queryGateway,
+      legalEntitySelection,
+    );
+    // `hasMore` is the completeness boundary. `truncatedByMaximum` is not an
+    // independent refusal: a complete result remains complete even where the
+    // request was clamped to the list's declared maximum.
+    if (!enumeration || enumeration.hasMore) {
+      return Object.freeze({
+        relationId: relation.relationId,
+        status: 'refused',
+      });
+    }
+    pickers.push(
+      Object.freeze({
+        options: enumeration.options,
+        relationId: relation.relationId,
+        required: relation.required,
+      }),
+    );
+  }
+  return Object.freeze({ pickers: Object.freeze(pickers), status: 'ready' });
 }
 
 function dataState(

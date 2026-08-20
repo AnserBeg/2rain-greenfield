@@ -31,7 +31,7 @@ const journeyTimeoutMilliseconds = Object.freeze({
   onHandLookup: 20_000,
   partyLifecycle: 20_000,
   postingRoute: 20_000,
-  repairedFormAnatomy: 40_000,
+  repairedFormAnatomy: 60_000,
   scopedInventory: 20_000,
 });
 const sharedSetupTimeoutMilliseconds = 180_000;
@@ -134,7 +134,7 @@ composedTest.describe('composed application journeys', () => {
   );
 
   composedTest(
-    'renders every repaired Inventory record form',
+    'renders repaired forms and saves two required scoped relations',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.repairedFormAnatomy);
       await repairedFormAnatomyJourney(
@@ -1502,6 +1502,11 @@ async function repairedFormAnatomyJourney(
     'TXN-SCOPE-A',
   );
 
+  // The hardest current specimen: stock_count_line has TWO required relations,
+  // both targeting legal-entity-scoped lists. Create its parent through one
+  // scoped picker, then create the line through both scoped pickers.
+  await createScopedStockCountLineWithRelations(page, baseUrl);
+
   const multipleScopeUrl = new URL(
     scopedSurfaceUrl(
       baseUrl,
@@ -1543,6 +1548,119 @@ async function repairedFormAnatomyJourney(
     'TXN-SCOPE-MALFORMED',
     'OPERATION_UNAVAILABLE',
   );
+}
+
+async function createScopedStockCountLineWithRelations(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
+  const stockCountScopeParameterId =
+    await loadSurfaceScopeParameterId('stock_count_form');
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'stock_count_form',
+      stockCountScopeParameterId,
+      browserLegalEntityId,
+    ),
+  );
+  const transactionPicker = page.getByRole('combobox', {
+    exact: true,
+    name: 'Stock Count Transaction',
+  });
+  await expect(transactionPicker).toBeVisible();
+  await expect(
+    transactionPicker.locator('option', { hasText: 'TXN-SCOPE-A' }),
+  ).toHaveCount(1);
+  await expect(
+    transactionPicker.locator('option', { hasText: 'TXN-SCOPE-B' }),
+  ).toHaveCount(0);
+  await transactionPicker.selectOption({ label: 'TXN-SCOPE-A' });
+  await page
+    .getByLabel('Stock Count Number', { exact: true })
+    .fill('COUNT-SCOPE-A');
+  await page
+    .getByRole('combobox', { exact: true, name: 'Stock Count Kind' })
+    .selectOption({ label: 'initial' });
+  await page
+    .getByRole('combobox', { exact: true, name: 'Stock Count State' })
+    .selectOption({ label: 'draft' });
+  await page
+    .getByLabel('Stock Count Location Id', { exact: true })
+    .fill(demoLocationId);
+  await page
+    .getByLabel('Stock Count Counted At', { exact: true })
+    .fill('2026-07-30T12:00:00.000Z');
+  const stockCountId = await page
+    .locator('form#surface-record-form input[name="recordId"]')
+    .inputValue();
+  await page
+    .locator('[data-platform-slot="record:commandBar"]')
+    .getByRole('button', { name: 'Save' })
+    .click();
+  await expect(page.getByRole('status')).toContainText('Create complete');
+  await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
+  await expect(page.locator('[data-relation-freeze]')).toContainText(
+    'Stock Count Transaction',
+  );
+
+  const stockCountLineScopeParameterId = await loadSurfaceScopeParameterId(
+    'stock_count_line_form',
+  );
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'stock_count_line_form',
+      stockCountLineScopeParameterId,
+      browserLegalEntityId,
+    ),
+  );
+  const sessionPicker = page.getByRole('combobox', {
+    exact: true,
+    name: 'Stock Count Line Session',
+  });
+  const transactionLinePicker = page.getByRole('combobox', {
+    exact: true,
+    name: 'Stock Count Line Transaction Line',
+  });
+  await expect(sessionPicker).toBeVisible();
+  await expect(transactionLinePicker).toBeVisible();
+  await sessionPicker.selectOption(stockCountId);
+  await expect(
+    transactionLinePicker.locator(
+      `option[value="${browserTransactionLineId}"]`,
+    ),
+  ).toHaveCount(1);
+  await transactionLinePicker.selectOption(browserTransactionLineId);
+  await page
+    .getByLabel('Stock Count Line Line Number', { exact: true })
+    .fill('1');
+  await page
+    .getByLabel('Stock Count Line Item Id', { exact: true })
+    .fill(demoItemId);
+  await page
+    .getByLabel('Stock Count Line Expected Quantity', { exact: true })
+    .fill('5');
+  await page
+    .getByLabel('Stock Count Line Counted Quantity', { exact: true })
+    .fill('5');
+  await page
+    .getByLabel('Stock Count Line Variance Quantity', { exact: true })
+    .fill('0');
+  await page.getByLabel('Stock Count Line Unit Id', { exact: true }).fill('EA');
+  await page
+    .locator('[data-platform-slot="record:commandBar"]')
+    .getByRole('button', { name: 'Save' })
+    .click();
+  await expect(page.getByRole('status')).toContainText('Create complete');
+  await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
+  const frozenRelations = page.locator('[data-relation-freeze]');
+  await expect(frozenRelations).toContainText('Stock Count Line Session');
+  await expect(frozenRelations).toContainText(
+    'Stock Count Line Transaction Line',
+  );
+  await expect(sessionPicker).toHaveCount(0);
+  await expect(transactionLinePicker).toHaveCount(0);
 }
 
 async function fillInventoryTransactionForm(

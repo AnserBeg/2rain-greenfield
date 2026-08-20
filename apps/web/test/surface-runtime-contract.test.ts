@@ -267,11 +267,12 @@ test('the message catalog honours the vocabulary it declares', () => {
   assert.equal(Object.isFrozen(SURFACE_MESSAGE_CATALOG), true);
   // 27 -> 28 with `ux-picker`'s `INVALID_SURFACE_FIELD`, 29 with
   // `form-wire-semantics`' `OPERATION_INPUT_INVALID`, then 30 with the scoped
-  // create operand's subject-bearing inactive-legal-entity refusal. The count
+  // create operand's subject-bearing inactive-legal-entity refusal, then 31
+  // with the relation-id-bearing incomplete-enumeration refusal. The count
   // is pinned so
   // registering a code is a deliberate, visible edit; moving it is the intended
   // cost of adding one, not a symptom.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 30);
+  assert.equal(SURFACE_MESSAGE_CODES.length, 31);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];

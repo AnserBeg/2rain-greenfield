@@ -55,8 +55,10 @@ import { compiledFixturePath, demoEntry } from '../helpers.js';
  */
 const CENSUS_SUBJECT = 'northstar.shell:component.absent';
 const CENSUS_LEGAL_ENTITY_SUBJECT = '74000000-0000-4000-8000-000000000099';
+const CENSUS_RELATION_SUBJECT = 'northstar.inventory:relation.line_transaction';
 const CENSUS_SUBJECTS = Object.freeze({
   OPERATION_LEGAL_ENTITY_INACTIVE: CENSUS_LEGAL_ENTITY_SUBJECT,
+  RELATION_ENUMERATION_UNAVAILABLE: CENSUS_RELATION_SUBJECT,
   UNSUPPORTED_COMPONENT: CENSUS_SUBJECT,
 });
 
@@ -64,6 +66,8 @@ function censusMessageRef(code: SurfaceMessageCode): SurfaceMessageRef {
   switch (code) {
     case 'OPERATION_LEGAL_ENTITY_INACTIVE':
       return { code, subject: CENSUS_LEGAL_ENTITY_SUBJECT };
+    case 'RELATION_ENUMERATION_UNAVAILABLE':
+      return { code, subject: CENSUS_RELATION_SUBJECT };
     case 'UNSUPPORTED_COMPONENT':
       return { code, subject: CENSUS_SUBJECT };
     default:
@@ -553,14 +557,15 @@ const REAL_PATH_DRIVERS: Readonly<
  * missing is an executed request, so reachability for these rests on the
  * source-literal scan in `surface-runtime-contract.test.ts`.
  *
- * The 16 are **three different things, and calling them all "structural" was
+ * The 17 are **three different things, and calling them all "structural" was
  * wrong**:
  *
  * - **1 is intrinsically unreachable** — `INVALID_SURFACE_BINDING`. No request
  *   can produce it. That is a defect, not a coverage decision.
- * - **5 are already driven by a real request in another spec** —
+ * - **6 are already driven by a real request in another spec** —
  *   `INVALID_SURFACE_NAVIGATION`, `QUERY_LEGAL_ENTITY_SCOPE_REQUIRED`,
- *   `QUERY_NOT_FOUND`, `QUERY_UNAVAILABLE`, `QUERY_UNSUPPORTED`. Their
+ *   `QUERY_NOT_FOUND`, `QUERY_UNAVAILABLE`, `QUERY_UNSUPPORTED`, and
+ *   `RELATION_ENUMERATION_UNAVAILABLE`. Their
  *   reachability is observed; only the text assertion lives elsewhere.
  * - **10 are engineering calls about fixture cost and ownership** — the seven
  *   `OPERATION_*` codes plus `QUERY_AMBIGUOUS`, `QUERY_PARAMETER_REQUIRED` and
@@ -643,6 +648,11 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'Read path, and already driven by a real request in ' +
     'surface-data-binding.spec.ts:364 — the exact tree ADR-0048 was ruled on. ' +
     'Same gateway-fixture reason.',
+  RELATION_ENUMERATION_UNAVAILABLE:
+    'Relation create path, and driven by a real request in ' +
+    'surface-data-binding.test.ts beside the hasMore completeness control. ' +
+    'That compiled relation fixture owns the target list and query gateway ' +
+    'needed to produce the named slot refusal.',
 };
 
 /**

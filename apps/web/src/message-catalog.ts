@@ -64,6 +64,7 @@ export const REFUSED_MESSAGE_PLACEMENTS = Object.freeze([
 export const MESSAGE_SUBJECT_KINDS = Object.freeze([
   'componentId',
   'legalEntityId',
+  'relationId',
 ] as const);
 
 export type MessageSubjectKind = (typeof MESSAGE_SUBJECT_KINDS)[number];
@@ -295,6 +296,16 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     placements: ['page', 'slot'],
     sentence: 'Capability unavailable',
     subject: null,
+  },
+  RELATION_ENUMERATION_UNAVAILABLE: {
+    consequence: 'blocking',
+    detail:
+      'The complete set of permitted target records could not be loaded for this relation.',
+    nextAction:
+      'Return after the relation target list is available and complete.',
+    placements: ['slot'],
+    sentence: 'Relation choices unavailable',
+    subject: 'relationId',
   },
   REQUEST_RUNTIME_VIEW_UNAVAILABLE: {
     consequence: 'blocking',

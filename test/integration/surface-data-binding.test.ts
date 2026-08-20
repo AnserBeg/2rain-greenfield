@@ -21,6 +21,7 @@ import {
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
 import {
+  SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
@@ -706,7 +707,527 @@ test('a capability command is artifact-bound, render-minted, and deliberately co
 
 const CHILD_FORM_SURFACE = `${FIXTURE_IDS.namespace}:surface.master_role_form`;
 const CHILD_CREATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_create`;
+const CHILD_UPDATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_update`;
 const REQUIRED_RELATION_ID = `${FIXTURE_IDS.namespace}:relation.master_role_parent`;
+
+function fixtureWithRefusingChildUpdate(): Record<string, unknown> {
+  const definition = fixtureWithChildFormAnatomy();
+  assert.ok(Array.isArray(definition.operations));
+  const update = definition.operations.find(
+    (operation) => operation.operationId === CHILD_UPDATE_OPERATION,
+  );
+  assert.ok(update, 'the fixture must contribute a child update operation');
+  assert.equal(
+    update.precondition,
+    undefined,
+    'the refusal specimen must vary only the update precondition',
+  );
+  update.precondition = {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v3',
+      targetId: FIXTURE_IDS.fieldIds.childRole,
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'equals',
+    schemaVersion: 'v3',
+    value: {
+      kind: 'textValue',
+      schemaVersion: 'v3',
+      value: FIXTURE_IDS.optionIds.buyer,
+    },
+  };
+  return definition;
+}
+
+function fixtureWithChildFormAnatomy(): Record<string, unknown> {
+  const definition = ordinaryModuleV1();
+  assert.ok(Array.isArray(definition.surfaces));
+  const form = definition.surfaces
+    .map(asRecord)
+    .find((surface) => surface.surfaceId === CHILD_FORM_SURFACE);
+  assert.ok(form && Array.isArray(form.slots));
+  assert.equal(
+    form.slots.length,
+    1,
+    'the baseline fixture must isolate the sections-only survivor',
+  );
+  const section = asRecord(form.slots[0]);
+  form.slots = (
+    [
+      ['breadcrumb', 10],
+      ['titleStatus', 20],
+      ['commandBar', 30],
+      ['keyFacts', 40],
+      ['sections', 50],
+    ] as const
+  ).map(([slot, orderKey]) => ({
+    ...structuredClone(section),
+    orderKey,
+    slot,
+    slotId: `${FIXTURE_IDS.namespace}:slot.master_role_form_${String(orderKey)}`,
+  }));
+  return definition;
+}
+
+test('a required relation renders a complete target list as a native picker', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const parentRecordId = executor.seed(tenantA, 'Northwind supplier');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+    semanticGateways(policy, executor),
+  );
+
+  assert.equal(rendered.statusCode, 200);
+  assert.match(rendered.html, /<form id="surface-record-form"/u);
+  assert.match(
+    rendered.html,
+    new RegExp(
+      `<select name="relation:${REQUIRED_RELATION_ID}"[^>]* required>`,
+      'u',
+    ),
+  );
+  assert.match(
+    rendered.html,
+    new RegExp(
+      `<option value="${parentRecordId}">Northwind supplier</option>`,
+      'u',
+    ),
+  );
+  assert.doesNotMatch(rendered.html, /<script\b/iu);
+});
+
+test('a scoped target list receives the selected entity under its own declared operand', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  executor.seed(tenantA, 'Scoped supplier');
+  const sourceScopeParameterId = `${FIXTURE_IDS.namespace}:parameter.master_role_get_scope`;
+  const targetScopeParameterId = `${FIXTURE_IDS.namespace}:parameter.master_list_scope`;
+  const legalEntityId = 'af000000-0000-4000-8000-00000000000f';
+  const view = await issuedView(
+    runtimeEntry(
+      compiled,
+      policy,
+      { a: identity(tenantA, environmentA, principalA) },
+      (projections) =>
+        scopedRelationProjections(
+          projections,
+          sourceScopeParameterId,
+          targetScopeParameterId,
+        ),
+    ),
+    'a',
+  );
+
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}&${encodeURIComponent(sourceScopeParameterId)}=${legalEntityId}`,
+    semanticGateways(policy, executor),
+  );
+
+  assert.equal(rendered.statusCode, 200);
+  assert.match(rendered.html, new RegExp(`relation:${REQUIRED_RELATION_ID}`));
+  const targetCall = executor.queryCalls.find(
+    (call) =>
+      call.definition.queryId === `${FIXTURE_IDS.namespace}:query.master_list`,
+  );
+  assert.ok(targetCall, 'the declared target list query must execute');
+  const targetArguments = asRecord(targetCall.arguments);
+  assert.equal(targetArguments[targetScopeParameterId], legalEntityId);
+  assert.equal(
+    Object.hasOwn(targetArguments, sourceScopeParameterId),
+    false,
+    'the target query receives its own declared key, not the source form key',
+  );
+});
+
+test('hasMore refuses a relation picker while truncation alone does not', async () => {
+  const compiled = compileFixture(fixtureWithChildFormAnatomy());
+  const policy = new RecordingPolicy('ALLOW');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const parent = record(
+    randomUUID(),
+    'Bounded supplier',
+    FIXTURE_IDS.entityIds.parent,
+  );
+  const renderWithCoverage = (hasMore: boolean, truncatedByMaximum: boolean) =>
+    renderSurfaceRuntimeWithData(
+      view,
+      `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+      {
+        operationGateway: new SemanticOperationGateway(
+          policy,
+          new InMemoryGenericExecutor(),
+        ),
+        operationMediation: new SemanticOperationMediationAuthority(),
+        queryGateway: fixedQueryGateway(
+          'exact',
+          [parent],
+          (request, count) => ({
+            ...listCoverage(request, count),
+            hasMore,
+            nextCursor: hasMore ? 'next-page-exists' : null,
+            totalCount: count + (hasMore ? 1 : 0),
+            truncatedByMaximum,
+          }),
+        ),
+      },
+    );
+
+  const complete = await renderWithCoverage(false, false);
+  assert.match(complete.html, /<form id="surface-record-form"/u);
+  assert.match(complete.html, /data-platform-slot="record:commandBar"/u);
+  assert.match(
+    complete.html,
+    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  );
+
+  const incomplete = await renderWithCoverage(true, false);
+  assert.match(
+    incomplete.html,
+    /data-diagnostic-code="RELATION_ENUMERATION_UNAVAILABLE"/u,
+  );
+  assert.match(
+    incomplete.html,
+    new RegExp(`<code data-message-subject>${REQUIRED_RELATION_ID}</code>`),
+  );
+  assert.doesNotMatch(incomplete.html, /<form id="surface-record-form"/u);
+  assert.doesNotMatch(
+    incomplete.html,
+    new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
+  );
+  const incompleteCommandBar = incomplete.html.match(
+    /<div\b[^>]*data-platform-slot="record:commandBar"[^>]*>[\s\S]*?<\/div>/u,
+  );
+  assert.ok(incompleteCommandBar);
+  assert.match(incompleteCommandBar[0], /data-slot-state="ready"/u);
+  assert.doesNotMatch(
+    incompleteCommandBar[0],
+    /<button\b[^>]*>\s*Save\s*<\/button>/u,
+  );
+  assert.doesNotMatch(incompleteCommandBar[0], /COMPONENT_RENDER_FAILED/u);
+
+  const clampedButComplete = await renderWithCoverage(false, true);
+  assert.match(clampedButComplete.html, /<form id="surface-record-form"/u);
+  assert.match(
+    clampedButComplete.html,
+    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  );
+  assert.match(
+    clampedButComplete.html,
+    new RegExp(`relation:${REQUIRED_RELATION_ID}`),
+  );
+  assert.doesNotMatch(
+    clampedButComplete.html,
+    /RELATION_ENUMERATION_UNAVAILABLE/u,
+  );
+
+  const completeEmpty = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        new InMemoryGenericExecutor(),
+      ),
+      operationMediation: new SemanticOperationMediationAuthority(),
+      queryGateway: fixedQueryGateway('exact', []),
+    },
+  );
+  assert.match(completeEmpty.html, /<form id="surface-record-form"/u);
+  assert.match(
+    completeEmpty.html,
+    new RegExp(
+      `<select name="relation:${REQUIRED_RELATION_ID}"[^>]* required>`,
+    ),
+  );
+  const emptyRelationSelect = completeEmpty.html.match(
+    new RegExp(
+      `<select name="relation:${REQUIRED_RELATION_ID}"[^>]*>(.*?)</select>`,
+      'u',
+    ),
+  );
+  assert.ok(emptyRelationSelect);
+  assert.doesNotMatch(
+    emptyRelationSelect[1]!,
+    new RegExp(`<option value="[^"]+">`),
+    'an empty but complete result renders no invented target and is not an enumeration refusal',
+  );
+});
+
+test('a targetless optional relation renders nothing while a required one refuses by name', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const render = async (required: boolean) => {
+    const executor = new InMemoryGenericExecutor();
+    const view = await issuedView(
+      runtimeEntry(
+        compiled,
+        policy,
+        { a: identity(tenantA, environmentA, principalA) },
+        (projections) => targetlessRelationProjections(projections, required),
+      ),
+      'a',
+    );
+    return {
+      executor,
+      response: await renderSurfaceRuntimeWithData(
+        view,
+        `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+        semanticGateways(policy, executor),
+      ),
+    };
+  };
+
+  const optional = await render(false);
+  assert.match(optional.response.html, /<form id="surface-record-form"/u);
+  assert.doesNotMatch(
+    optional.response.html,
+    /class="form-field relation-picker"/u,
+  );
+  assert.equal(
+    optional.executor.queryCalls.length,
+    0,
+    'a targetless optional relation must not invent a query or a None-only picker',
+  );
+
+  const required = await render(true);
+  assert.match(
+    required.response.html,
+    /data-diagnostic-code="RELATION_ENUMERATION_UNAVAILABLE"/u,
+  );
+  assert.match(
+    required.response.html,
+    new RegExp(`<code data-message-subject>${REQUIRED_RELATION_ID}</code>`),
+  );
+  assert.doesNotMatch(
+    required.response.html,
+    /<form id="surface-record-form"/u,
+  );
+});
+
+test('a second candidate list surface refuses instead of choosing by order', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  executor.seed(tenantA, 'Ambiguous supplier');
+  const view = await issuedView(
+    runtimeEntry(
+      compiled,
+      policy,
+      { a: identity(tenantA, environmentA, principalA) },
+      (projections) => {
+        const payload = structuredClone(projections.surface.payload) as {
+          surfaces: Record<string, unknown>[];
+        };
+        const target = payload.surfaces.find(
+          (surface) =>
+            surface.surfaceId ===
+            `${FIXTURE_IDS.namespace}:surface.master_list`,
+        );
+        assert.ok(target);
+        payload.surfaces.push({
+          ...structuredClone(target),
+          surfaceId: `${FIXTURE_IDS.namespace}:surface.master_list_alternate`,
+        });
+        return {
+          ...projections,
+          surface: {
+            ...projections.surface,
+            payload: payload as unknown as ImmutableJsonValue,
+          },
+        };
+      },
+    ),
+    'a',
+  );
+
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+    semanticGateways(policy, executor),
+  );
+  assert.match(
+    rendered.html,
+    /data-diagnostic-code="RELATION_ENUMERATION_UNAVAILABLE"/u,
+  );
+  assert.match(
+    rendered.html,
+    new RegExp(`<code data-message-subject>${REQUIRED_RELATION_ID}</code>`),
+  );
+  assert.equal(
+    executor.queryCalls.length,
+    0,
+    'ambiguous list authority must refuse before either candidate is invoked',
+  );
+});
+
+test('relation inputs are visibly frozen on update forms', async () => {
+  const compiled = compileFixture(fixtureWithChildFormAnatomy());
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const childRecordId = executor.seed(
+    tenantA,
+    'Existing role',
+    FIXTURE_IDS.entityIds.child,
+  );
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}&record=${childRecordId}`,
+    semanticGateways(policy, executor),
+  );
+  assert.match(rendered.html, /data-relation-freeze/u);
+  assert.match(rendered.html, /<form id="surface-record-form"/u);
+  assert.match(rendered.html, /data-platform-slot="record:commandBar"/u);
+  assert.match(
+    rendered.html,
+    /<button[^>]+form="surface-record-form"[^>]*>Save<\/button>/u,
+  );
+  assert.match(
+    rendered.html,
+    new RegExp(`data-relation-id="${REQUIRED_RELATION_ID}"`),
+  );
+  assert.match(rendered.html, /cannot be changed here/u);
+  assert.doesNotMatch(
+    rendered.html,
+    new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
+  );
+});
+
+test('relation inputs stay visibly frozen when the update precondition does not hold', async () => {
+  const compiled = compileFixture(fixtureWithRefusingChildUpdate());
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const childRecordId = executor.seedValues(
+    tenantA,
+    { [FIXTURE_IDS.fieldIds.childRole]: FIXTURE_IDS.optionIds.owner },
+    FIXTURE_IDS.entityIds.child,
+  );
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}&record=${childRecordId}`,
+    semanticGateways(policy, executor),
+  );
+  assert.match(rendered.html, /data-relation-freeze/u);
+  assert.match(
+    rendered.html,
+    new RegExp(`data-relation-id="${REQUIRED_RELATION_ID}"`),
+  );
+  assert.match(rendered.html, /cannot be changed here/u);
+  assert.doesNotMatch(rendered.html, /<form id="surface-record-form"/u);
+  const refusedCommandBar = rendered.html.match(
+    /<div\b[^>]*data-platform-slot="record:commandBar"[^>]*>[\s\S]*?<\/div>/u,
+  );
+  assert.ok(refusedCommandBar);
+  assert.match(refusedCommandBar[0], /data-slot-state="ready"/u);
+  assert.doesNotMatch(
+    refusedCommandBar[0],
+    /<button\b[^>]*>\s*Save\s*<\/button>/u,
+  );
+  assert.doesNotMatch(refusedCommandBar[0], /COMPONENT_RENDER_FAILED/u);
+  assert.doesNotMatch(
+    rendered.html,
+    new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
+  );
+});
+
+test('the browser and gateway share whole-catalog root and identity authority', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const projections = runtimeProjections(compiled);
+  const validPayload = structuredClone(projections.operation.payload) as {
+    operations: Record<string, unknown>[];
+    [key: string]: unknown;
+  };
+  const viewFor = (payload: ImmutableJsonValue) =>
+    issuedView(
+      runtimeEntry(
+        compiled,
+        policy,
+        { a: identity(tenantA, environmentA, principalA) },
+        (current) => ({
+          ...current,
+          operation: { ...current.operation, payload },
+        }),
+      ),
+      'a',
+    );
+
+  const valid = await operationCatalogConsumerDecisions(
+    await viewFor(validPayload as unknown as ImmutableJsonValue),
+    policy,
+  );
+  assert.deepEqual(valid, { browser: 'accepted', gateway: 'accepted' });
+
+  const extraRoot = structuredClone(validPayload);
+  extraRoot.forged = true;
+  assert.deepEqual(
+    await operationCatalogConsumerDecisions(
+      await viewFor(extraRoot as unknown as ImmutableJsonValue),
+      policy,
+    ),
+    {
+      browser:
+        'pinned operation catalog is invalid: object keys do not match the closed contract',
+      gateway: 'object keys do not match the closed contract',
+    },
+    'both consumers must refuse the extra root key for the shared closed-root reason',
+  );
+
+  const crossEntityCollision = structuredClone(validPayload);
+  const otherEntityOperation = crossEntityCollision.operations.find(
+    (operation) =>
+      operation.operationId ===
+      `${FIXTURE_IDS.namespace}:operation.master_update`,
+  );
+  assert.ok(otherEntityOperation);
+  // One property changes. The operation remains on the parent entity, so if
+  // catalog-wide identity admission is deleted the child surface sees one
+  // create and cannot fail through its per-entity create arity instead.
+  otherEntityOperation.operationId = CHILD_CREATE_OPERATION;
+  assert.deepEqual(
+    await operationCatalogConsumerDecisions(
+      await viewFor(crossEntityCollision as unknown as ImmutableJsonValue),
+      policy,
+    ),
+    {
+      browser:
+        'pinned operation catalog is invalid: pinned operation catalog contains a duplicate operationId',
+      gateway: 'pinned operation catalog contains a duplicate operationId',
+    },
+    'both consumers must refuse a collision on another entity for the shared catalog-wide reason',
+  );
+});
 
 /**
  * The write wire this whole re-charter exists to reach: `operationInput` builds
@@ -1087,16 +1608,22 @@ test('create contracts declaring different relations refuse rather than resolve 
   await assert.rejects(
     read(
       withSecondCreate((clone) => {
-        (clone.inputContract as Record<string, unknown>).relationInputs = [];
-        (clone.inputContract as Record<string, unknown>).closedArgumentKeys = [
-          'recordId',
-          'values',
-        ];
+        const contract = clone.inputContract as Record<string, unknown>;
+        // Keep the second contract independently valid. v3 with zero relations
+        // is malformed before agreement is considered, which made this control
+        // pass for the wrong reason and never reach the block it named.
+        contract.schemaVersion = 'northstar.module-input-contract/v1';
+        contract.relationInputs = [];
+        contract.closedArgumentKeys = ['recordId', 'relations', 'values'];
       }),
     ),
     (error: unknown) => {
       assert.ok(error instanceof SurfaceProjectionError);
       assert.equal(error.code, 'INVALID_SURFACE_BINDING');
+      assert.equal(
+        error.message,
+        'surface entity has create operations declaring different relation inputs',
+      );
       return true;
     },
     'disagreeing create contracts must refuse by name, not pick the longer one',
@@ -1170,10 +1697,11 @@ test('the browser refuses every contract the gateway refuses', async () => {
   assert.equal(baseline.relationInputs.status, 'known');
 
   const refusals: ReadonlyArray<
-    readonly [string, (operation: Record<string, unknown>) => void]
+    readonly [string, string, (operation: Record<string, unknown>) => void]
   > = [
     [
       'relations declared on an update effect',
+      'pinned relation inputs are admitted only on create effects',
       (operation) => {
         (operation.effect as Record<string, unknown>).kind =
           'updateRecordEffect';
@@ -1181,6 +1709,7 @@ test('the browser refuses every contract the gateway refuses', async () => {
     ],
     [
       'a create contract omitting the relations closed key',
+      'pinned relation argument key and operation effect disagree',
       (operation) => {
         (
           operation.inputContract as Record<string, unknown>
@@ -1189,6 +1718,7 @@ test('the browser refuses every contract the gateway refuses', async () => {
     ],
     [
       'a duplicated relation identity',
+      'pinned relation inputs repeat a relation identity',
       (operation) => {
         const contract = operation.inputContract as Record<string, unknown>;
         const relations = contract.relationInputs as unknown[];
@@ -1197,13 +1727,21 @@ test('the browser refuses every contract the gateway refuses', async () => {
     ],
   ];
 
-  for (const [reason, mutate] of refusals) {
+  for (const [reason, expectedDiagnostic, mutate] of refusals) {
     await assert.rejects(
       read(forge(mutate)),
       (error: unknown) => {
         assert.ok(
           error instanceof SurfaceProjectionError,
           `${reason}: the BROWSER must refuse, got ${String(error)}`,
+        );
+        assert.equal(error.code, 'INVALID_SURFACE_BINDING');
+        assert.match(
+          error.message,
+          new RegExp(
+            expectedDiagnostic.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&'),
+          ),
+          `${reason}: refusal carried the wrong reason`,
         );
         return true;
       },
@@ -1217,9 +1755,9 @@ test('the browser refuses every contract the gateway refuses', async () => {
  * relations, and reporting `[]` there is a positive assertion the reader cannot
  * support -- indistinguishable from an entity whose create declares none.
  */
-test('an entity with no create operation reports unavailable, not empty', async () => {
+test('unavailable relation authority remains named when the update precondition does not hold', async () => {
   const policy = new RecordingPolicy('ALLOW');
-  const compiled = compileFixture();
+  const compiled = compileFixture(fixtureWithRefusingChildUpdate());
   const projections = runtimeProjections(compiled);
 
   const withoutCreate = structuredClone(projections.operation.payload) as {
@@ -1264,6 +1802,41 @@ test('an entity with no create operation reports unavailable, not empty', async 
     'unavailable',
     'no create operation means no authority, which is not the same as none',
   );
+  const executor = new InMemoryGenericExecutor();
+  const childRecordId = executor.seed(
+    tenantA,
+    'Unknown relation authority',
+    FIXTURE_IDS.entityIds.child,
+  );
+  const unavailableUpdate = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}&record=${childRecordId}`,
+    semanticGateways(policy, executor),
+  );
+  assert.match(
+    unavailableUpdate.html,
+    /data-diagnostic-code="QUERY_UNSUPPORTED"/u,
+  );
+  assert.doesNotMatch(
+    unavailableUpdate.html,
+    /<form id="surface-record-form"/u,
+    'unavailable relation authority must refuse rather than masquerade as no relations',
+  );
+  const unavailableCommandBar = unavailableUpdate.html.match(
+    /<div\b[^>]*data-platform-slot="record:commandBar"[^>]*>[\s\S]*?<\/div>/u,
+  );
+  assert.ok(unavailableCommandBar);
+  assert.match(unavailableCommandBar[0], /data-slot-state="ready"/u);
+  assert.doesNotMatch(
+    unavailableCommandBar[0],
+    /<button\b[^>]*>\s*Save\s*<\/button>/u,
+  );
+  assert.doesNotMatch(unavailableCommandBar[0], /COMPONENT_RENDER_FAILED/u);
+  assert.doesNotMatch(
+    unavailableUpdate.html,
+    new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
+  );
+  assert.doesNotMatch(unavailableUpdate.html, /data-relation-freeze/u);
 
   // ADMISSION TWIN: with the create operation present the same tree is `known`,
   // so this cannot pass against a reader that always reports unavailable.
@@ -1342,16 +1915,18 @@ test('the browser refuses contracts malformed outside the relation slice', async
   );
 
   const refusals: ReadonlyArray<
-    readonly [string, (operation: Record<string, unknown>) => void]
+    readonly [string, string, (operation: Record<string, unknown>) => void]
   > = [
     [
       'fields set to null',
+      'pinned operation input contract has an invalid shape',
       (operation) => {
         (operation.inputContract as Record<string, unknown>).fields = null;
       },
     ],
     [
       'writableFieldIds omitted',
+      'object keys do not match the closed contract',
       (operation) => {
         delete (operation.inputContract as Record<string, unknown>)
           .writableFieldIds;
@@ -1359,12 +1934,14 @@ test('the browser refuses contracts malformed outside the relation slice', async
     ],
     [
       'an unknown top-level contract key',
+      'object keys do not match the closed contract',
       (operation) => {
         (operation.inputContract as Record<string, unknown>).forged = 1;
       },
     ],
     [
       'a non-string closed argument key',
+      'pinned operation input contract has an invalid shape',
       (operation) => {
         (
           operation.inputContract as Record<string, unknown>
@@ -1373,22 +1950,16 @@ test('the browser refuses contracts malformed outside the relation slice', async
     ],
     [
       'a repeated field identity',
+      'pinned field inputs repeat a field identity',
       (operation) => {
         const contract = operation.inputContract as Record<string, unknown>;
         const fields = contract.fields as unknown[];
         contract.fields = [fields[0], structuredClone(fields[0])];
       },
     ],
-    [
-      'a repeated operation identity',
-      (operation) => {
-        void operation;
-      },
-    ],
   ];
 
-  for (const [reason, mutate] of refusals) {
-    if (reason === 'a repeated operation identity') continue;
+  for (const [reason, expectedDiagnostic, mutate] of refusals) {
     await assert.rejects(
       read(forge(mutate)),
       (error: unknown) => {
@@ -1396,30 +1967,24 @@ test('the browser refuses contracts malformed outside the relation slice', async
           error instanceof SurfaceProjectionError,
           `${reason}: the BROWSER must refuse, got ${String(error)}`,
         );
+        assert.equal(error.code, 'INVALID_SURFACE_BINDING');
+        assert.match(
+          error.message,
+          new RegExp(
+            expectedDiagnostic.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&'),
+          ),
+          `${reason}: refusal carried the wrong reason`,
+        );
         return true;
       },
       reason,
     );
   }
 
-  // Operation identity is a KEY in the browser's own Map, so a repeat silently
-  // overwrote one binding while the gateway refused the whole catalog.
-  const duplicated = structuredClone(projections.operation.payload) as {
-    operations: Record<string, unknown>[];
-  };
-  const original = duplicated.operations.find(
-    (candidate) => candidate.operationId === CHILD_CREATE_OPERATION,
-  );
-  assert.ok(original);
-  duplicated.operations.push(structuredClone(original));
-  await assert.rejects(
-    read(duplicated as unknown as ImmutableJsonValue),
-    (error: unknown) => {
-      assert.ok(error instanceof SurfaceProjectionError);
-      return true;
-    },
-    'a repeated operation identity must refuse, not overwrite',
-  );
+  // Catalog-wide identity (including the cross-entity deletion-dead control)
+  // is exercised against BOTH consumers above. Keeping the old same-entity
+  // clone here would be dishonest: deleting duplicate-id admission made it
+  // refuse later through create arity and left the supposed control green.
 });
 
 /**
@@ -1533,6 +2098,56 @@ class RecordingPolicy implements CurrentPolicyGateway {
   }
 }
 
+async function operationCatalogConsumerDecisions(
+  view: RequestRuntimeView,
+  policy: CurrentPolicyGateway,
+): Promise<Readonly<{ browser: string; gateway: string }>> {
+  const manifest = readCompiledSurfaceManifest(view);
+  const surface = manifest.surfaces.find(
+    (candidate) => candidate.surfaceId === CHILD_FORM_SURFACE,
+  );
+  assert.ok(surface);
+  let browser = 'accepted';
+  try {
+    readCompiledSurfaceDataBinding(view, surface);
+  } catch (error) {
+    assert.ok(error instanceof SurfaceProjectionError);
+    assert.equal(error.code, 'INVALID_SURFACE_BINDING');
+    browser = error.message;
+  }
+
+  const mediation = new SemanticOperationMediationAuthority();
+  const gateway = new SemanticOperationGateway(
+    policy,
+    new InMemoryGenericExecutor(),
+    mediation,
+  );
+  let gatewayDecision = 'accepted';
+  try {
+    await gateway.invoke(
+      view,
+      {
+        confirmationGrant: null,
+        idempotencyKey: randomUUID(),
+        input: {
+          recordId: randomUUID(),
+          relations: { [REQUIRED_RELATION_ID]: randomUUID() },
+          values: {
+            [FIXTURE_IDS.fieldIds.childRole]: FIXTURE_IDS.optionIds.owner,
+          },
+        },
+        operationId: CHILD_CREATE_OPERATION,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      mediation.issueInvocation(view, 'UI'),
+    );
+  } catch (error) {
+    assert.ok(error instanceof Error);
+    gatewayDecision = error.message;
+  }
+  return Object.freeze({ browser, gateway: gatewayDecision });
+}
+
 class InMemoryGenericExecutor
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
@@ -1550,11 +2165,15 @@ class InMemoryGenericExecutor
 
   constructor(private readonly operationFailure: Error | null = null) {}
 
-  seed(tenantId: string, name: string): string {
+  seed(
+    tenantId: string,
+    name: string,
+    entityId: string = FIXTURE_IDS.entityIds.parent,
+  ): string {
     const recordId = randomUUID();
     this.tenantRecords(tenantId).set(
       recordId,
-      record(recordId, name, FIXTURE_IDS.entityIds.parent),
+      record(recordId, name, entityId),
     );
     return recordId;
   }
@@ -1568,13 +2187,14 @@ class InMemoryGenericExecutor
   seedValues(
     tenantId: string,
     values: Readonly<Record<string, ImmutableJsonValue>>,
+    entityId: string = FIXTURE_IDS.entityIds.parent,
   ): string {
     const recordId = randomUUID();
     this.tenantRecords(tenantId).set(
       recordId,
       Object.freeze({
         archived: false,
-        entityId: FIXTURE_IDS.entityIds.parent,
+        entityId,
         recordId,
         revision: 1,
         values: Object.freeze({ ...values }),
@@ -1702,6 +2322,10 @@ function hiddenValue(html: string, name: string): string {
 function fixedQueryGateway(
   outcome: SemanticQueryResultEnvelope['outcome'],
   records: readonly SemanticRecordDto[],
+  coverage: (
+    request: SemanticQueryExecutionRequest,
+    returnedCount: number,
+  ) => NonNullable<SemanticQueryResultEnvelope['listCoverage']> = listCoverage,
 ): SurfaceRuntimeGateways['queryGateway'] {
   return new SemanticQueryGateway(new RecordingPolicy('ALLOW'), {
     async execute(request) {
@@ -1719,7 +2343,7 @@ function fixedQueryGateway(
       return request.list
         ? {
             ...result,
-            listCoverage: listCoverage(request, projectedRecords.length),
+            listCoverage: coverage(request, projectedRecords.length),
           }
         : result;
     },
@@ -1879,6 +2503,113 @@ function scopedCreateProjections(
     query: {
       ...projections.query,
       payload: queryPayload as unknown as ImmutableJsonValue,
+    },
+  };
+}
+
+function scopedRelationProjections(
+  projections: LoadedRequestRuntimeDefinition['projections'],
+  sourceScopeParameterId: string,
+  targetScopeParameterId: string,
+): LoadedRequestRuntimeDefinition['projections'] {
+  const operationPayload = structuredClone(projections.operation.payload) as {
+    operations: Record<string, unknown>[];
+  };
+  const create = operationPayload.operations.find(
+    (operation) => operation.operationId === CHILD_CREATE_OPERATION,
+  );
+  assert.ok(create);
+  const contract = asRecord(create.inputContract);
+  assert.equal(contract.schemaVersion, 'northstar.module-input-contract/v3');
+  assert.ok(Array.isArray(contract.closedArgumentKeys));
+  contract.closedArgumentKeys = [
+    ...contract.closedArgumentKeys,
+    'legalEntityId',
+  ];
+  contract.schemaVersion = 'northstar.module-input-contract/v4';
+  contract.systemInput = {
+    argumentKey: 'legalEntityId',
+    classification: 'INTERNAL',
+    immutableAfterCreate: true,
+    physicalColumn: 'legal_entity_id',
+    required: true,
+    valueKind: 'uuid',
+  };
+
+  const queryPayload = structuredClone(projections.query.payload) as {
+    queries: Record<string, unknown>[];
+  };
+  const scopeQuery = (queryId: string, parameterId: string): void => {
+    const query = queryPayload.queries.find(
+      (candidate) => candidate.queryId === queryId,
+    );
+    assert.ok(query, `${queryId} must exist in the fixture`);
+    query.legalEntityScope = {
+      cardinality: 'exactlyOne',
+      kind: 'queryLegalEntityScope',
+      operand: {
+        kind: 'queryParameterReference',
+        parameterId,
+        schemaVersion: 'v5',
+      },
+      schemaVersion: 'v5',
+    };
+    query.parameters = [
+      {
+        orderKey: 10,
+        parameterId,
+        parameterType: {
+          kind: 'legalEntityReferenceParameterType',
+          schemaVersion: 'v5',
+        },
+      },
+    ];
+  };
+  scopeQuery(
+    `${FIXTURE_IDS.namespace}:query.master_role_get`,
+    sourceScopeParameterId,
+  );
+  scopeQuery(
+    `${FIXTURE_IDS.namespace}:query.master_list`,
+    targetScopeParameterId,
+  );
+  return {
+    ...projections,
+    operation: {
+      ...projections.operation,
+      payload: operationPayload as unknown as ImmutableJsonValue,
+    },
+    query: {
+      ...projections.query,
+      payload: queryPayload as unknown as ImmutableJsonValue,
+    },
+  };
+}
+
+function targetlessRelationProjections(
+  projections: LoadedRequestRuntimeDefinition['projections'],
+  required: boolean,
+): LoadedRequestRuntimeDefinition['projections'] {
+  const operationPayload = structuredClone(projections.operation.payload) as {
+    operations: Record<string, unknown>[];
+  };
+  const create = operationPayload.operations.find(
+    (operation) => operation.operationId === CHILD_CREATE_OPERATION,
+  );
+  assert.ok(create);
+  const contract = asRecord(create.inputContract);
+  assert.equal(contract.schemaVersion, 'northstar.module-input-contract/v3');
+  assert.ok(Array.isArray(contract.relationInputs));
+  const relation = contract.relationInputs[0];
+  assert.ok(isRecord(relation));
+  contract.schemaVersion = 'northstar.module-input-contract/v1';
+  delete relation.targetEntityId;
+  relation.required = required;
+  return {
+    ...projections,
+    operation: {
+      ...projections.operation,
+      payload: operationPayload as unknown as ImmutableJsonValue,
     },
   };
 }

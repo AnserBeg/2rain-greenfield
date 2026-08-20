@@ -24,9 +24,30 @@ import type {
   CompiledSurfaceField,
   CompiledSurfaceInputField,
   CompiledSurfaceOperationBinding,
+  CompiledSurfaceRelationInput,
   CompiledSurfaceSlot,
+  EntityRelationAuthority,
   SurfaceOperationIntent,
 } from './surface-contract.js';
+
+export interface SurfaceRelationPickerOption {
+  readonly label: string;
+  readonly recordId: string;
+}
+
+export interface SurfaceRelationPicker {
+  readonly options: readonly SurfaceRelationPickerOption[];
+  readonly relationId: string;
+  readonly required: boolean;
+}
+
+export type SurfaceRelationPickerState =
+  | {
+      readonly pickers: readonly SurfaceRelationPicker[];
+      readonly status: 'ready';
+    }
+  | { readonly relationId: string; readonly status: 'refused' }
+  | { readonly status: 'unavailable' };
 
 export interface SurfaceComponentContext {
   readonly data?: SurfaceDataRenderState;
@@ -34,6 +55,8 @@ export interface SurfaceComponentContext {
   readonly legalEntitySelection?: readonly string[];
   readonly operations?: readonly CompiledSurfaceOperationBinding[];
   readonly queryParameterValues?: Readonly<Record<string, string>>;
+  readonly relationInputs?: EntityRelationAuthority;
+  readonly relationPickers?: SurfaceRelationPickerState;
   readonly slot: CompiledSurfaceSlot;
   readonly surface: CompiledSurfaceDefinition;
   readonly surfaces?: readonly CompiledSurfaceDefinition[];
@@ -575,18 +598,10 @@ function recordTitle(
 function renderCommandBar(context: SurfaceComponentContext): string {
   const record = recordFrom(context.data);
   if (context.surface.surfaceRole === 'form') {
-    const intent = record ? 'update' : 'create';
-    const operation = operationForIntent(context, intent);
+    const admission = resolveFormAdmission(context, record);
     return slotPanel(
       context,
-      operation &&
-        operationAvailableForRecord(operation, record) &&
-        surfaceSupportsRuntimeIntent(
-          context.view,
-          context.surface,
-          context.surfaces ?? [],
-          intent,
-        )
+      admission.status === 'admitted'
         ? `<div class="command-bar" aria-label="Record commands"><button type="submit" form="surface-record-form">Save</button></div>`
         : '',
       'command-bar-slot',
@@ -710,28 +725,24 @@ function renderSections(context: SurfaceComponentContext): string {
       'sections-slot',
     );
   }
-  const intent = record ? 'update' : 'create';
-  if (
-    !surfaceSupportsRuntimeIntent(
-      context.view,
-      context.surface,
-      context.surfaces ?? [],
-      intent,
-    )
-  ) {
+  const admission = resolveFormAdmission(context, record);
+  if (admission.status === 'surfaceUnsupported') {
     return slotPanel(context, '', 'sections-slot');
   }
-  const operation = operationForIntent(context, intent);
-  if (!operation) {
+  if (admission.status === 'operationUnsupported') {
     return slotPanel(
       context,
       dataDiagnostic('QUERY_UNSUPPORTED'),
       'sections-slot',
     );
   }
-  if (!operationAvailableForRecord(operation, record)) {
-    return slotPanel(context, '', 'sections-slot');
+  if (admission.status === 'relationRefused') {
+    return slotPanel(context, admission.refusal, 'sections-slot');
   }
+  if (admission.status === 'predicateRefused') {
+    return slotPanel(context, admission.freeze, 'sections-slot');
+  }
+  const { operation, relationContent } = admission;
   const recordId = record?.recordId ?? randomUUID();
   const compatibilityFeedback = hasSurfaceSlot(context, 'titleStatus')
     ? ''
@@ -741,9 +752,126 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${renderFormFields(context.surface, operation, record)}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context.surface, operation, record)}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
+}
+
+type FormAdmissionDecision =
+  | {
+      readonly operation: CompiledSurfaceOperationBinding;
+      readonly relationContent: ReturnType<typeof renderRelationContent>;
+      readonly status: 'admitted';
+    }
+  | { readonly status: 'surfaceUnsupported' }
+  | { readonly status: 'operationUnsupported' }
+  | { readonly refusal: string; readonly status: 'relationRefused' }
+  | { readonly freeze: string; readonly status: 'predicateRefused' };
+
+/**
+ * Form content and its command bar are two slots presenting one admission
+ * decision. Neither may offer its half when the other refuses the operation.
+ */
+function resolveFormAdmission(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto | null,
+): FormAdmissionDecision {
+  const intent = record ? 'update' : 'create';
+  if (
+    !surfaceSupportsRuntimeIntent(
+      context.view,
+      context.surface,
+      context.surfaces ?? [],
+      intent,
+    )
+  ) {
+    return { status: 'surfaceUnsupported' };
+  }
+  const operation = operationForIntent(context, intent);
+  if (!operation) return { status: 'operationUnsupported' };
+  const relationContent = renderRelationContent(context, record);
+  if (relationContent.refusal !== '') {
+    return {
+      refusal: relationContent.refusal,
+      status: 'relationRefused',
+    };
+  }
+  if (!operationAvailableForRecord(operation, record)) {
+    return {
+      freeze: relationContent.freeze,
+      status: 'predicateRefused',
+    };
+  }
+  return { operation, relationContent, status: 'admitted' };
+}
+
+function renderRelationContent(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto | null,
+): {
+  readonly controls: string;
+  readonly freeze: string;
+  readonly refusal: string;
+} {
+  const authority = context.relationInputs;
+  if (!authority || authority.status === 'unavailable') {
+    return {
+      controls: '',
+      freeze: '',
+      refusal: dataDiagnostic('QUERY_UNSUPPORTED'),
+    };
+  }
+  if (record) {
+    return {
+      controls: '',
+      freeze: renderRelationFreeze(authority.relationInputs),
+      refusal: '',
+    };
+  }
+  const pickerState = context.relationPickers;
+  if (!pickerState || pickerState.status === 'unavailable') {
+    return {
+      controls: '',
+      freeze: '',
+      refusal: dataDiagnostic('QUERY_UNSUPPORTED'),
+    };
+  }
+  if (pickerState.status === 'refused') {
+    return {
+      controls: '',
+      freeze: '',
+      refusal: diagnostic({
+        code: 'RELATION_ENUMERATION_UNAVAILABLE',
+        subject: pickerState.relationId,
+      }),
+    };
+  }
+  return {
+    controls: pickerState.pickers.map(renderRelationPicker).join(''),
+    freeze: '',
+    refusal: '',
+  };
+}
+
+function renderRelationPicker(picker: SurfaceRelationPicker): string {
+  const label = fieldLabel(picker.relationId);
+  const first = picker.required
+    ? `<option value="">Choose ${escapeHtml(label)}</option>`
+    : '<option value="">None</option>';
+  const options = picker.options
+    .map(
+      (option) =>
+        `<option value="${escapeHtml(option.recordId)}">${escapeHtml(option.label)}</option>`,
+    )
+    .join('');
+  return `<div class="form-field relation-picker" data-relation-id="${escapeHtml(picker.relationId)}"><label><span>${escapeHtml(label)}</span><select name="relation:${escapeHtml(picker.relationId)}" autocomplete="off"${picker.required ? ' required' : ''}>${first}${options}</select></label></div>`;
+}
+
+function renderRelationFreeze(
+  relations: readonly CompiledSurfaceRelationInput[],
+): string {
+  if (relations.length === 0) return '';
+  return `<aside class="relation-freeze" data-relation-freeze><p class="eyebrow">Relations</p><h3>Set at creation</h3><ul>${relations.map((relation) => `<li data-relation-id="${escapeHtml(relation.relationId)}"><strong>${escapeHtml(fieldLabel(relation.relationId))}</strong> is set when this record is created and cannot be changed here.</li>`).join('')}</ul></aside>`;
 }
 
 function renderReleaseSummary({
