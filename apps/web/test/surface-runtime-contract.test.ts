@@ -60,7 +60,7 @@ function assertAppServerProviderBoundary(source: string): void {
     source.split(APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT).length - 1;
   if (occurrences !== 1) {
     throw new Error(
-      'only RequestRuntimeViewLoadError may cross the app-server provider boundary',
+      'app-server must import exactly one RequestRuntimeViewLoadError provider boundary declaration',
     );
   }
   const withoutAllowedImport = source.replace(
@@ -69,7 +69,7 @@ function assertAppServerProviderBoundary(source: string): void {
   );
   if (/postgres-provider/u.test(withoutAllowedImport)) {
     throw new Error(
-      'only RequestRuntimeViewLoadError may cross the app-server provider boundary',
+      'app-server may not import any other postgres-provider authority',
     );
   }
 }
@@ -153,15 +153,34 @@ test('renderer accepts one issued view and has no ambient release access', async
   assertAppServerProviderBoundary(serverSource);
 });
 
-test('app-server provider boundary red: the loader cannot share the error-class import', () => {
-  const withAmbientLoader = APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT.replace(
-    '{ RequestRuntimeViewLoadError }',
-    '{ PostgresRequestRuntimeViewService, RequestRuntimeViewLoadError }',
+test('app-server provider boundary red: the required error-class import cannot disappear', () => {
+  const serverSource = readFileSync(`${webRoot}/src/app-server.ts`, 'utf8');
+  const withoutErrorClassImport = serverSource.replace(
+    APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT,
+    '',
   );
-  assert.notEqual(withAmbientLoader, APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT);
+  assert.notEqual(withoutErrorClassImport, serverSource);
+  assert.doesNotMatch(withoutErrorClassImport, /postgres-provider/u);
+  assert.throws(
+    () => assertAppServerProviderBoundary(withoutErrorClassImport),
+    /app-server must import exactly one RequestRuntimeViewLoadError provider boundary declaration/u,
+  );
+});
+
+test('app-server provider boundary red: a separate provider loader import is refused', () => {
+  const serverSource = readFileSync(`${webRoot}/src/app-server.ts`, 'utf8');
+  const withAmbientLoader = serverSource.replace(
+    APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT,
+    `${APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT}import { PostgresRequestRuntimeViewService } from '@north-star/postgres-provider/request-runtime-view-service';\n`,
+  );
+  assert.notEqual(withAmbientLoader, serverSource);
+  assert.equal(
+    withAmbientLoader.split(APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT).length - 1,
+    1,
+  );
   assert.throws(
     () => assertAppServerProviderBoundary(withAmbientLoader),
-    /only RequestRuntimeViewLoadError may cross the app-server provider boundary/u,
+    /app-server may not import any other postgres-provider authority/u,
   );
 });
 

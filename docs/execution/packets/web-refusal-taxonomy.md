@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: frozen for fresh Critical review after round 1 corrections
+Status: frozen for the last narrow Codex confirm
 
 ## Goal
 
@@ -82,8 +82,9 @@ The committed controls include:
 
 ### Negative controls — one property varied per claim
 
-All mutants were applied to the otherwise passing working tree, run, and
-immediately reverted.
+The provider-boundary source specimens are committed controls. Production-code
+mutants were applied to the otherwise passing working tree, run, and immediately
+reverted.
 
 | Claim | One-property mutant | Observed red |
 |---|---|---|
@@ -94,7 +95,8 @@ immediately reverted.
 | Invalid binding remains distinct from unsupported query | Changed only the invalid-binding render code back to `QUERY_UNSUPPORTED` | focused browser control 0/1; complete observable expected `INVALID_SURFACE_BINDING`, received `QUERY_UNSUPPORTED` |
 | No fixture-only Save is synthesized | Restored only the conditional compatibility Save branch | focused browser control 0/1; expected zero Save buttons, received one |
 | Every typed code traverses the HTTP catch-and-render boundary | Narrowed only the `RequestRuntimeViewLoadError` catch to `UNSUPPORTED_RUNTIME_CAPABILITY`, the one existing browser census member | `test:contracts` 18/19; the first non-browser member, `ACTIVE_POINTER_MISSING`, rendered `REQUEST_RUNTIME_VIEW_UNAVAILABLE` where the HTTP census required `REQUEST_RUNTIME_VIEW_REFUSED` |
-| Only the refusal class crosses the app-server provider boundary | Added only `PostgresRequestRuntimeViewService` as a second named specifier on the allowed import | `test:contracts` 18/19; `renderer accepts one issued view and has no ambient release access` failed with `only RequestRuntimeViewLoadError may cross the app-server provider boundary` |
+| The exact error-class exception is required | Removed only the exact allowed declaration from the actual `app-server.ts` source, leaving no provider reference for the residual predicate to reject | With the exact-occurrence predicate deleted, `test:contracts` 19/20; only `app-server provider boundary red: the required error-class import cannot disappear` failed with `Missing expected exception` |
+| No second provider authority may cross the boundary | Preserved the exact allowed declaration once and appended a separate `PostgresRequestRuntimeViewService` import to the actual source | With the residual-provider predicate deleted, `test:contracts` 19/20; only `app-server provider boundary red: a separate provider loader import is refused` failed with `Missing expected exception` |
 
 The focused Playwright mutant invocations intentionally carry a name filter;
 the repository's unfiltered reporter therefore also reports the filter as an
@@ -111,8 +113,9 @@ change was complete:
 - `pnpm format`: green;
 - `pnpm test:browser`: 92/92 green;
 - `pnpm test:integration`: 149/149 green; and
-- `pnpm test:contracts`: 18/18 green at round 1 and 19/19 green after the
-  corrected HTTP-boundary and exact-import controls landed.
+- `pnpm test:contracts`: 18/18 green at round 1, 19/19 green after the
+  corrected HTTP-boundary control, and 20/20 green after the provider-boundary
+  predicates received separately attributable controls.
 
 The full CI matrix is deliberately deferred until review converges, as the
 packet charter requires.
@@ -172,3 +175,28 @@ generic-unavailable code. The second removes exactly the one allowed import
 declaration before applying the provider prohibition to the remainder of
 `app-server.ts`, and carries a committed single-property loader-import red.
 Neither correction changes production behavior or enters `packages/**`.
+
+### Round 2 — `5ff6db8a134aca151e523b886c4aa5e25dc038f5`
+
+Fresh-naive Codex xhigh returned `REVISE` with one material evidence finding.
+The committed provider-boundary mutant changed the exact allowed declaration by
+adding the loader as a second named specifier. That made both the exact-occurrence
+predicate and the residual-provider predicate fail, so deleting either predicate
+left the control green. The record's single-property and attribution claim was
+therefore false.
+
+The finding was accepted. The combined specimen is replaced by two committed
+controls over the actual `app-server.ts` source: one removes the exact allowed
+declaration while proving no provider reference remains, and the other preserves
+that declaration exactly once while appending a separate loader import. Each
+predicate was then deleted alone; exactly its corresponding control failed while
+the sibling stayed green, as recorded in the negative-control table. The two
+predicates also carry distinct failure messages so the committed controls observe
+which rule rejected the source.
+
+Round-three continuation is licensed by the convergence rule's subsuming-control
+criterion: the confounded specimen was not extended with another adjacent case;
+it was decomposed into one-property specimens per predicate, and each predicate
+was removed independently. Production remains unchanged, the claimed boundary
+has not widened, and another same-class attribution finding would require
+narrowing or routing rather than another specimen.
