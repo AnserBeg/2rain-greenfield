@@ -1,6 +1,6 @@
 # stock-balance-read-model — honest posted-stock browsing
 
-Status: active; implementation complete, final blast gates and checkpoint pending
+Status: evidence_ready; frozen Critical review candidate pending independent arms
 
 Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b`
 
@@ -221,8 +221,12 @@ control now compares historical entries by pinned roots, separately pins the
 new 174-scenario serving count, and the repository replay helper generated the
 new snapshot. A subsequent full run passed 204/204 before the browser found the
 UUID-version defect; the focused stock-count control and full-replay schema
-regeneration pass with that fix. The exact final full PostgreSQL rerun remains
-pending at this record state.
+regeneration pass with that fix. The exact executable candidate then passed
+`pnpm test:postgres` at
+`4b265c913bcda103c74f1320e249d20d810df1af`: 204/204, zero failures, in
+742046 ms. The freeze commit above that gate SHA changes only this narrative
+record and execution status; the executable diff is empty under the repository's
+identical-tree rule.
 
 ## User-observable checkpoint
 
@@ -248,11 +252,10 @@ a draft does not create stock; a movement must be posted.
 
 ## Review state
 
-No review has run. After every required pre-freeze gate and the port-4174
-checkpoint are green, freeze one SHA and stop with the Critical charter. Arm 1
-is fresh-naive Codex at xhigh to PASS. Only then may independent Fable max
-confirm the identical SHA. The full CI matrix remains deliberately deferred
-until both arms converge.
+No review has run. Every required pre-freeze gate and the port-4174 checkpoint
+are green. Arm 1 is fresh-naive Codex at xhigh to PASS. Only then may independent
+Fable max confirm the identical freeze SHA. The full CI matrix remains
+deliberately deferred until both arms converge.
 
 ## Program-review trigger assessment
 

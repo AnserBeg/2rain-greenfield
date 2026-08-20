@@ -191,8 +191,11 @@ all posted movements and never an as-of claim. One row remains selected legal
 entity × item × location; the five-parameter bitemporal lookup remains intact;
 maintenance, rebuild, and reconciliation reuse the existing generation lock.
 The existing List renderer is sufficient, so `apps/web/src` remains unchanged.
-The packet is active on `packet/stock-balance-read-model`; Critical review and
-the post-review full matrix are still owed.
+The packet is `evidence_ready` on `packet/stock-balance-read-model`: every
+pre-freeze gate is green, including PostgreSQL 204/204 on executable SHA
+`4b265c913bcda103c74f1320e249d20d810df1af`. Fresh-naive Codex xhigh, then
+Fable max on the identical freeze SHA, and the post-review full matrix are still
+owed.
 
 #### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2
 
