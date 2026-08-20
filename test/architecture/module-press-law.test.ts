@@ -24,8 +24,9 @@ const routedPressLawDebt: readonly ModulePressLawViolation[] = [
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
   },
-  // Row press-law-evasion owns the posting provider's module identity until
-  // row 1e-2 packages module context into the contract compiler.
+  // Row press-law-evasion owns the posting provider's exact frozen identity.
+  // Its retirement path is not adjudicated; row 1e-2 owns only the separate
+  // compiler-conformance identity.
   {
     file: 'packages/postgres-provider/src/inventory-posting-service.ts',
     line: 37,
@@ -165,8 +166,11 @@ test('consolidated guard distinguishes a module namespace from a longer contract
 
 test('consolidated guard red: a statically interpolated module identity cannot hide from PRESS006', () => {
   const root = createArchitectureFixture({
-    'apps/api/src/generic.ts':
-      "export const capabilityId = `${'northstar'}.${'widget'}:capability.posting`;\n",
+    'apps/api/src/generic.ts': [
+      "export const unrelated = 'ordinary' + '-value';",
+      'export const capabilityId =',
+      "  `${'northstar'}.${'widget'}:capability.posting`;",
+    ].join('\n'),
     'packages/domain/src/widget/definition.ts': [
       "export const WIDGET_NAMESPACE = 'northstar.widget';",
       'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
@@ -176,7 +180,7 @@ test('consolidated guard red: a statically interpolated module identity cannot h
     assert.deepEqual(checkModulePressLaw(root).violations, [
       {
         file: 'apps/api/src/generic.ts',
-        line: 1,
+        line: 3,
         message: 'generic press references widget identity northstar.widget',
         moduleDirectory: 'widget',
         ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
@@ -206,6 +210,60 @@ test('consolidated guard red: a statically concatenated module identity cannot h
         ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
       },
     ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard admission: completed static constructions may name a longer contract namespace', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      "export const concatenated = 'northstar' + '.' + 'widget' + '-contract/v1';",
+      "export const interpolated = `${'northstar'}.${'widget'}-contract/v1`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard admission: a static prefix beneath a dynamic outer construction is not a completed value', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      "const suffix = '-contract/v1';",
+      "export const schema = 'northstar' + '.' + 'widget' + suffix;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard admission: a tagged template body is not an ordinary completed string', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const tag: (parts: TemplateStringsArray, ...values: unknown[]) => string;',
+      "export const schema = tag`${'northstar'}.${'widget'}:capability.posting`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
   } finally {
     removeArchitectureFixture(root);
   }

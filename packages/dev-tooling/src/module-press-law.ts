@@ -383,11 +383,22 @@ function staticallyConstructedStrings(
   );
   const constructions: StaticStringConstruction[] = [];
   const visit = (node: ts.Node): void => {
+    if (ts.isTaggedTemplateExpression(node)) {
+      // A tag, rather than the template syntax, determines the runtime value.
+      // Its tag expression can still contain an ordinary construction, but the
+      // template body is not an independently completed string.
+      visit(node.tag);
+      return;
+    }
     if (ts.isTemplateExpression(node) || isStringConcatenation(node)) {
       const value = evaluateStaticString(node);
       if (value !== undefined) {
         constructions.push({ index: node.getStart(sourceFile), value });
       }
+      // Observe the maximal ordinary construction once. Descending would turn
+      // an internal prefix into a standalone value, including beneath a
+      // dynamic outer expression that cannot itself be evaluated.
+      return;
     }
     ts.forEachChild(node, visit);
   };
