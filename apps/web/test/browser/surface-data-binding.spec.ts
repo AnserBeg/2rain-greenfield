@@ -168,6 +168,114 @@ test('record title falls back to short identity when its compiled display value 
   ).toHaveCount(0);
 });
 
+test('authored business labels survive while field prefixes follow canonical entity identity', async ({
+  page,
+}) => {
+  const listSurfaceId = `${FIXTURE_IDS.namespace}:surface.opaque_orders_list`;
+  const formSurfaceId = `${FIXTURE_IDS.namespace}:surface.handset_orders_form`;
+  const recordSurfaceId = `${FIXTURE_IDS.namespace}:surface.audit_entry_record`;
+  const compiled = compileFixture(
+    true,
+    false,
+    (authored) => {
+      const surfaces = authored.surfaces as Array<Record<string, unknown>>;
+      const list = surfaces.find(
+        (surface) =>
+          surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_list`,
+      );
+      const form = surfaces.find(
+        (surface) =>
+          surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_form`,
+      );
+      const record = surfaces.find(
+        (surface) =>
+          surface.surfaceId ===
+          `${FIXTURE_IDS.namespace}:surface.master_record`,
+      );
+      assert.ok(list);
+      assert.ok(form);
+      assert.ok(record);
+      list.label = 'VAT & R&D orders list';
+      list.surfaceId = listSurfaceId;
+      form.label = 'iPhone orders form';
+      form.surfaceId = formSurfaceId;
+      record.label = 'A/P & VAT audit detail';
+      record.surfaceId = recordSurfaceId;
+    },
+    true,
+  );
+  const policy = allowPolicy();
+  const labelExecutor = new BrowserFixtureExecutor(null);
+  const labelRecordId = labelExecutor.createSeed('Business label specimen');
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const labelServer = createSurfaceRuntimeServer(
+    runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        labelExecutor,
+        operationMediation,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, labelExecutor),
+    },
+  );
+  const labelBaseUrl = await listen(labelServer);
+
+  try {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    await page.goto(
+      `${labelBaseUrl}/?surface=${encodeURIComponent(listSurfaceId)}`,
+    );
+    await expect(
+      page.getByRole('heading', {
+        level: 1,
+        name: 'VAT & R&D orders',
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('columnheader', { name: 'Name', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('columnheader', { name: 'Master name' }),
+    ).toHaveCount(0);
+
+    await page.goto(
+      `${labelBaseUrl}/?surface=${encodeURIComponent(formSurfaceId)}`,
+    );
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'New iPhone orders' }),
+    ).toBeVisible();
+    await expect(page.getByLabel('Number', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
+
+    await page.goto(
+      `${labelBaseUrl}/?surface=${encodeURIComponent(recordSurfaceId)}&record=${encodeURIComponent(labelRecordId)}`,
+    );
+    const breadcrumb = page.getByRole('navigation', { name: 'Breadcrumb' });
+    await expect(
+      breadcrumb.getByText('VAT & R&D orders list', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      breadcrumb.getByText('A/P & VAT audit', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', {
+        level: 2,
+        name: 'A/P & VAT audit information',
+      }),
+    ).toBeVisible();
+    await expect(
+      page.locator('dt').getByText('Name', { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('dt').getByText('Master name')).toHaveCount(0);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      labelServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
 test.afterAll(async () => {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
@@ -465,8 +573,8 @@ test('a create sets a boolean and omits a blank optional date', async ({
   await page.goto(
     `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
   );
-  await page.getByLabel('Master Name').fill('Boolean and blank date');
-  await page.getByLabel('Master Number').fill('WIRE-001');
+  await page.getByLabel('Name', { exact: true }).fill('Boolean and blank date');
+  await page.getByLabel('Number', { exact: true }).fill('WIRE-001');
   await page
     .locator(`[name="value:${EVERY_KIND_FIELD_IDS.active}"]`)
     .selectOption('true');
@@ -501,8 +609,8 @@ test('the adopted profile-v1 bare form converts a boolean and omits a blank date
   await page.goto(
     `${adoptedFieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
   );
-  await page.getByLabel('Master Name').fill('Adopted profile wire');
-  await page.getByLabel('Master Number').fill('WIRE-V1-001');
+  await page.getByLabel('Name', { exact: true }).fill('Adopted profile wire');
+  await page.getByLabel('Number', { exact: true }).fill('WIRE-V1-001');
   const active = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.active}"]`);
   const due = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.due}"]`);
   await expect(active).toHaveJSProperty('type', 'text');
@@ -589,7 +697,7 @@ for (const profile of [
         'nothing',
       );
 
-      await page.getByLabel('Master Name', { exact: true }).fill(changedName);
+      await page.getByLabel('Name', { exact: true }).fill(changedName);
       const posted = capturePost(page);
       const before = profileExecutor.providerVerdicts.length;
       await page.getByRole('button', { name: 'Save' }).click();
@@ -648,7 +756,7 @@ for (const profile of [
       page.locator(`[name="empty:${FIXTURE_IDS.fieldIds.parentName}"]`),
     ).toHaveValue('nothing');
     await page
-      .getByLabel('Master Number', { exact: true })
+      .getByLabel('Number', { exact: true })
       .fill('AFTER-REQUIRED-TEXT');
     const requiredPosted = capturePost(page);
     const requiredBefore = profileExecutor.providerVerdicts.length;
@@ -920,9 +1028,7 @@ test('an unrelated edit preserves both stored null and absent optional values', 
     [FIXTURE_IDS.fieldIds.parentName]: 'Before unrelated edit',
   });
   await page.goto(formUrl(recordId));
-  await page
-    .getByLabel('Master Name', { exact: true })
-    .fill('After unrelated edit');
+  await page.getByLabel('Name', { exact: true }).fill('After unrelated edit');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Update complete');
 
@@ -979,7 +1085,7 @@ test('typed controls preserve and disclose every stored value they cannot displa
   }
 
   await page
-    .getByLabel('Master Name', { exact: true })
+    .getByLabel('Name', { exact: true })
     .fill('After unavailable preservation');
   const posted = capturePost(page);
   const before = fieldKindExecutor.providerVerdicts.length;
@@ -1306,11 +1412,9 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
   await page.goto(
     `${baseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_list`)}`,
   );
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
-    'master list',
-  );
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('master');
   await expect(
-    page.getByRole('cell', { name: 'Existing live master' }),
+    page.getByRole('cell', { name: 'Existing live master', exact: true }),
   ).toBeVisible();
   await expect(page.locator('[data-data-state="exact"]')).toBeVisible();
 
@@ -1318,8 +1422,8 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
   await expect(
     page.getByRole('heading', { level: 1, name: 'New master' }),
   ).toBeVisible();
-  await page.getByLabel('Master Name').fill('Browser-created master');
-  await page.getByLabel('Master Number').fill('BROWSER-001');
+  await page.getByLabel('Name', { exact: true }).fill('Browser-created master');
+  await page.getByLabel('Number', { exact: true }).fill('BROWSER-001');
   const before = executor.providerVerdicts.length;
   await page.getByRole('button', { name: 'Save' }).click();
 
@@ -1335,7 +1439,7 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
   await expect(page.getByRole('status')).toContainText(
     'trust evidence is linked',
   );
-  await expect(page.getByLabel('Master Name', { exact: true })).toHaveValue(
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue(
     'Browser-created master',
   );
 
@@ -1344,7 +1448,7 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
     .getByRole('link', { name: 'master', exact: true })
     .click();
   await expect(
-    page.getByRole('cell', { name: 'Browser-created master' }),
+    page.getByRole('cell', { name: 'Browser-created master', exact: true }),
   ).toBeVisible();
   const createdRow = page.locator('tr', { hasText: 'Browser-created master' });
   const createdRecordId = await createdRow.getAttribute('data-record-id');
@@ -1394,8 +1498,10 @@ test('compiler-valid one-slot Record surfaces retain fallback actions and feedba
     await expect(
       page.locator('[data-platform-slot="record:commandBar"]'),
     ).toHaveCount(0);
-    await page.getByLabel('Master Name').fill('Legacy one-slot master');
-    await page.getByLabel('Master Number').fill('LEGACY-001');
+    await page
+      .getByLabel('Name', { exact: true })
+      .fill('Legacy one-slot master');
+    await page.getByLabel('Number', { exact: true }).fill('LEGACY-001');
     const before = executor.providerVerdicts.length;
     await page.getByRole('button', { name: 'Save' }).click();
     expect(executor.providerVerdicts.slice(before)).toEqual([
@@ -1486,7 +1592,7 @@ test('a failed data slot stays inline while ready siblings render without JavaSc
       page.locator(
         '[data-platform-slot="record:breadcrumb"][data-slot-state="ready"]',
       ),
-    ).toContainText('master list');
+    ).toContainText('master');
     await expect(
       page.locator(
         '[data-platform-slot="record:titleStatus"][data-slot-state="ready"]',
@@ -1645,6 +1751,10 @@ test('a record command bar renders every granted command as its own operable con
     await expect(commandBar).toBeVisible();
     const commands = commandBar.locator('form.capability-command');
     await expect(commands).toHaveCount(2);
+    expect(await commands.getByRole('button').allTextContents()).toEqual([
+      'Release',
+      'Cancel',
+    ]);
 
     // Operable, not merely present: two enabled submit controls carrying
     // distinct accessible names, each naming its own operation on the wire.
@@ -2338,6 +2448,7 @@ function compileFixture(
   withPartialAnatomy = true,
   withInvalidFormBinding = false,
   amend?: (authored: Record<string, unknown>) => void,
+  includeRecordSections = false,
 ): CompileSuccess {
   const authored = ordinaryModuleV1();
   exposeRequiredMasterNumber(authored);
@@ -2351,7 +2462,13 @@ function compileFixture(
         ? ['title', 'dataGrid']
         : surfaceId.endsWith('_form')
           ? ['breadcrumb', 'titleStatus', 'commandBar', 'sections']
-          : ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts'];
+          : [
+              'breadcrumb',
+              'titleStatus',
+              'commandBar',
+              'keyFacts',
+              ...(includeRecordSections ? ['sections'] : []),
+            ];
       const exemplar = existingSlots[0];
       assert.ok(exemplar);
       surface.slots = requiredSlots.map((slot, index) => ({

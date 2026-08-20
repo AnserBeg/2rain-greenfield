@@ -52,6 +52,7 @@ import {
   type RuntimeProjection,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import { createSurfaceRuntimeServer } from '../../apps/web/src/app-server.js';
+import { renderSurfaceDataComponent } from '../../apps/web/src/component-registry.js';
 import {
   renderSurfaceRuntimeWithData,
   semanticOperationRequestFor,
@@ -81,6 +82,52 @@ const principalA = 'a3000000-0000-4000-8000-000000000003';
 const principalB = 'b3000000-0000-4000-8000-000000000003';
 const releaseId = 'd4000000-0000-4000-8000-000000000004';
 const pointerId = 'd5000000-0000-4000-8000-000000000005';
+
+test('the compatibility list derives field prefixes from record identity', async () => {
+  const definition = ordinaryModuleV1();
+  const compatibilitySurfaceId = `${FIXTURE_IDS.namespace}:surface.receipts_queue_list`;
+  const surfaces = definition.surfaces as Array<Record<string, unknown>>;
+  const authoredList = surfaces.find(
+    (surface) =>
+      surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_list`,
+  );
+  assert.ok(authoredList);
+  authoredList.label = 'A/P receipts list';
+  authoredList.surfaceId = compatibilitySurfaceId;
+
+  const compiled = compileFixture(definition);
+  const policy = new RecordingPolicy('ALLOW');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const surface = readCompiledSurfaceManifest(view).surfaces.find(
+    (candidate) => candidate.surfaceId === compatibilitySurfaceId,
+  );
+  assert.ok(surface);
+
+  const html = renderSurfaceDataComponent({
+    data: {
+      records: [
+        record(
+          'a6000000-0000-4000-8000-000000000006',
+          'Compatibility specimen',
+          FIXTURE_IDS.entityIds.parent,
+        ),
+      ],
+      status: 'READY',
+    },
+    feedback: null,
+    operations: [],
+    surface,
+  });
+
+  assert.match(html, /<h2>A\/P receipts<\/h2>/u);
+  assert.match(html, /<th scope="col">Name<\/th>/u);
+  assert.doesNotMatch(html, /Master name|Receipts queue name/u);
+});
 
 test('compiled fixture surfaces bind live Q0/O0 data through one pinned request path', async () => {
   const compiled = compileFixture();
@@ -706,6 +753,7 @@ test('a capability command is artifact-bound, render-minted, and deliberately co
 });
 
 const CHILD_FORM_SURFACE = `${FIXTURE_IDS.namespace}:surface.master_role_form`;
+const DIVERGENT_CHILD_FORM_SURFACE = `${FIXTURE_IDS.namespace}:surface.rfq_assignment_form`;
 const CHILD_CREATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_create`;
 const CHILD_UPDATE_OPERATION = `${FIXTURE_IDS.namespace}:operation.master_role_update`;
 const REQUIRED_RELATION_ID = `${FIXTURE_IDS.namespace}:relation.master_role_parent`;
@@ -770,8 +818,20 @@ function fixtureWithChildFormAnatomy(): Record<string, unknown> {
   return definition;
 }
 
+function fixtureWithDivergentChildForm(): Record<string, unknown> {
+  const definition = fixtureWithChildFormAnatomy();
+  assert.ok(Array.isArray(definition.surfaces));
+  const form = definition.surfaces
+    .map(asRecord)
+    .find((surface) => surface.surfaceId === CHILD_FORM_SURFACE);
+  assert.ok(form);
+  form.label = 'RFQ & R&D assignment form';
+  form.surfaceId = DIVERGENT_CHILD_FORM_SURFACE;
+  return definition;
+}
+
 test('a required relation renders a complete target list as a native picker', async () => {
-  const compiled = compileFixture();
+  const compiled = compileFixture(fixtureWithDivergentChildForm());
   const policy = new RecordingPolicy('ALLOW');
   const executor = new InMemoryGenericExecutor();
   const parentRecordId = executor.seed(tenantA, 'Northwind supplier');
@@ -784,7 +844,7 @@ test('a required relation renders a complete target list as a native picker', as
 
   const rendered = await renderSurfaceRuntimeWithData(
     view,
-    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+    `/?surface=${encodeURIComponent(DIVERGENT_CHILD_FORM_SURFACE)}`,
     semanticGateways(policy, executor),
   );
 
@@ -796,6 +856,11 @@ test('a required relation renders a complete target list as a native picker', as
       `<select name="relation:${REQUIRED_RELATION_ID}"[^>]* required>`,
       'u',
     ),
+  );
+  assert.match(rendered.html, /<span>Parent<\/span><select/u);
+  assert.doesNotMatch(
+    rendered.html,
+    /Master role parent|RFQ R&amp;D assignment parent/u,
   );
   assert.match(
     rendered.html,
@@ -1079,7 +1144,7 @@ test('a second candidate list surface refuses instead of choosing by order', asy
 });
 
 test('relation inputs are visibly frozen on update forms', async () => {
-  const compiled = compileFixture(fixtureWithChildFormAnatomy());
+  const compiled = compileFixture(fixtureWithDivergentChildForm());
   const policy = new RecordingPolicy('ALLOW');
   const executor = new InMemoryGenericExecutor();
   const childRecordId = executor.seed(
@@ -1096,7 +1161,7 @@ test('relation inputs are visibly frozen on update forms', async () => {
 
   const rendered = await renderSurfaceRuntimeWithData(
     view,
-    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}&record=${childRecordId}`,
+    `/?surface=${encodeURIComponent(DIVERGENT_CHILD_FORM_SURFACE)}&record=${childRecordId}`,
     semanticGateways(policy, executor),
   );
   assert.match(rendered.html, /data-relation-freeze/u);
@@ -1110,7 +1175,10 @@ test('relation inputs are visibly frozen on update forms', async () => {
     rendered.html,
     new RegExp(`data-relation-id="${REQUIRED_RELATION_ID}"`),
   );
-  assert.match(rendered.html, /cannot be changed here/u);
+  assert.match(rendered.html, /<strong>Parent<\/strong>/u);
+  assert.doesNotMatch(rendered.html, /Master role parent/u);
+  assert.match(rendered.html, /Locked after creation/u);
+  assert.match(rendered.html, /cannot be changed later/u);
   assert.doesNotMatch(
     rendered.html,
     new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}"`),
@@ -1143,7 +1211,8 @@ test('relation inputs stay visibly frozen when the update precondition does not 
     rendered.html,
     new RegExp(`data-relation-id="${REQUIRED_RELATION_ID}"`),
   );
-  assert.match(rendered.html, /cannot be changed here/u);
+  assert.match(rendered.html, /Locked after creation/u);
+  assert.match(rendered.html, /cannot be changed later/u);
   assert.doesNotMatch(rendered.html, /<form id="surface-record-form"/u);
   const refusedCommandBar = rendered.html.match(
     /<div\b[^>]*data-platform-slot="record:commandBar"[^>]*>[\s\S]*?<\/div>/u,
@@ -2984,7 +3053,7 @@ test('the merged command bar renders both halves on the same two transition form
   const labels = forms.map(
     (form) => /<button type="submit">([^<]+)<\/button>/.exec(form)?.[1],
   );
-  assert.deepEqual(labels, ['Cancel', 'Release']);
+  assert.deepEqual(labels, ['Release', 'Cancel']);
 });
 
 /** `ordinaryModuleV1` restamped at v5, carrying a two-transition machine. */

@@ -574,3 +574,31 @@ and opened posted → draft → Post twice. How to apply: enumerate every newly
 reachable New, Edit, command and lifecycle path; execute state-boundary twins
 through the provider, and make affordances follow the same compiled predicates.
 See ADR-0054 and `docs/execution/packets/inventory-form-anatomy.md`.
+
+## Sweep every renderer that owns operator-visible copy
+Date: 2026-08-20
+Why: `inventory-surface-legibility` audited the slot renderer but missed Task-page
+copy in `surface-runtime.ts`, leaving “compiled release” and a canonical ID live.
+How to apply: trace page-level and slot-level renderers for every shipped archetype,
+then assert the absence of implementation copy on a real product journey.
+
+## Preserve authored copy; normalize identifiers only
+Date: 2026-08-20
+Why: one label helper corrupted VAT, R&D and iPhone while using transformed display
+copy to infer canonical field prefixes. How to apply: preserve authored labels
+except contract-declared role suffixes, and derive structure only from compiled
+canonical identity; test a display label that differs from that identity.
+
+## Mutate to the cheapest equivalent defect, not only the old spelling
+Date: 2026-08-20
+Why: restoring `.surface-id` and “compiled release” red while a classless ID and
+renamed runtime eyebrow stayed green. How to apply: obtain the forbidden value
+independently and assert visible content at its semantic boundary; mutate class,
+wording and placement away from the historical markup.
+
+## Uncorrelate fixtures that claim one authority
+Date: 2026-08-20
+Why: entity, field and surface locals all said `master`, so surface-ID-derived
+prefixes passed a test claiming query/record authority. How to apply: make every
+non-authoritative identifier opaque and divergent, then exercise each changed
+branch directly so the wrong authority produces a different observation.

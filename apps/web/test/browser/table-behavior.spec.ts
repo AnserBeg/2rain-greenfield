@@ -15,6 +15,8 @@ test('compiled list surface preserves covered paging, pre-page search, archive c
     await page.setExtraHTTPHeaders({ authorization: 'a' });
     await page.goto(surfaceUrl(fixture.baseUrl, 'party_list'));
 
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Party');
+    await expect(page.locator('body')).not.toContainText('compiled workspace');
     const coverage = page.locator('[data-list-coverage]');
     await expect(coverage).toHaveAttribute('data-status-role', 'attention');
     await expect(coverage).toHaveAttribute(
@@ -24,6 +26,22 @@ test('compiled list surface preserves covered paging, pre-page search, archive c
     await expect(
       page.getByText('Page Two Needle', { exact: true }),
     ).toHaveCount(0);
+    await expect(
+      page.getByRole('link', { name: 'Open Party Page filler 001' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('checkbox', { name: 'Select Party Page filler 001' }),
+    ).toBeVisible();
+    await expect(page.locator('.record-link code')).toHaveCount(0);
+    await expect(
+      page.getByRole('columnheader', { name: 'Number' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('columnheader', { name: 'Name' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('columnheader', { name: 'Contact summary' }),
+    ).toBeVisible();
     const next = page.getByRole('link', { name: 'Next page' });
     await expect(next).toBeVisible();
     expect(
@@ -35,15 +53,33 @@ test('compiled list surface preserves covered paging, pre-page search, archive c
       '101–102 of 102',
     );
     await expect(
-      page.getByText('Page Two Needle', { exact: true }),
+      page.getByRole('link', { name: 'Open Party Page Two Needle' }),
     ).toBeVisible();
-
-    await page.goto(
-      `${surfaceUrl(fixture.baseUrl, 'party_list')}&q=${encodeURIComponent('Page Two Needle')}`,
+    const previous = page.getByRole('link', { name: 'Previous page' });
+    await expect(previous).toBeVisible();
+    expect(
+      await previous.evaluate(
+        (element) => element.getBoundingClientRect().height,
+      ),
+    ).toBeGreaterThanOrEqual(44);
+    await previous.click();
+    await expect(coverage).toHaveAttribute(
+      'data-list-coverage',
+      '1–100 of 102',
     );
-    await expect(coverage).toHaveAttribute('data-list-coverage', '1–1 of 1');
     await expect(
       page.getByText('Page Two Needle', { exact: true }),
+    ).toHaveCount(0);
+
+    const search = page.locator('[data-list-search]');
+    await search
+      .getByRole('searchbox', { name: 'Search records' })
+      .fill('Page Two Needle');
+    await search.getByRole('button', { name: 'Search' }).click();
+    await expect(page).toHaveURL(/q=Page\+Two\+Needle/u);
+    await expect(coverage).toHaveAttribute('data-list-coverage', '1–1 of 1');
+    await expect(
+      page.getByRole('link', { name: 'Open Party Page Two Needle' }),
     ).toBeVisible();
 
     await page.goto(
@@ -55,15 +91,24 @@ test('compiled list surface preserves covered paging, pre-page search, archive c
       `${surfaceUrl(fixture.baseUrl, 'party_list')}&q=${encodeURIComponent('Archived Needle')}&archived=yes`,
     );
     await expect(
-      page.getByText('Archived Needle', { exact: true }),
+      page.getByRole('link', { name: 'Open Party Archived Needle' }),
     ).toBeVisible();
     await expect(
       page.locator('tr[data-record-id] [data-status-role="attention"]'),
     ).toHaveText('Archived');
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'party_role_list'));
-    await expect(page.getByRole('cell', { name: 'Supplier' })).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'Customer' })).toBeVisible();
+    const roleHeaders = await page.locator('thead').innerText();
+    expect(roleHeaders).toContain('KIND');
+    expect(roleHeaders).toContain('PARTY');
+    expect(roleHeaders).not.toContain('PARTY ROLE KIND');
+    expect(roleHeaders).not.toContain('PARTY ROLE PARTY');
+    await expect(
+      page.getByRole('cell', { name: 'Supplier', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('cell', { name: 'Customer', exact: true }),
+    ).toBeVisible();
     await expect(page.locator('body')).not.toContainText(
       `${namespace}:option.supplier`,
     );

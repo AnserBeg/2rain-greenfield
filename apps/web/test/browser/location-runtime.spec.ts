@@ -41,8 +41,10 @@ test('real Location surface creates a location and archives/restores through the
     await expect(page.getByText(/Active · revision 3/)).toBeVisible();
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'location_form'));
-    await page.getByLabel('Location Code').fill('LOC-WEB-004');
-    await page.getByLabel('Location Name').fill('Browser-created Location');
+    await page.getByLabel('Code', { exact: true }).fill('LOC-WEB-004');
+    await page
+      .getByLabel('Name', { exact: true })
+      .fill('Browser-created Location');
     // `fill` -> `selectOption`, corrected by `profile-v2-adoption`, and this one
     // line is the sharpest evidence in the repository that the adoption reaches
     // a real user.
@@ -60,7 +62,7 @@ test('real Location surface creates a location and archives/restores through the
     // every browser spec targets a `textFieldType` and is untouched; this is the
     // only enum any of them writes, which is why it is the only correction.
     await page
-      .getByLabel('Location Type')
+      .getByRole('combobox', { name: 'Type', exact: true })
       .selectOption(`${namespace}:option.store`);
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
@@ -70,9 +72,14 @@ test('real Location surface creates a location and archives/restores through the
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'location_list'));
     await expect(
-      page.getByRole('cell', { name: 'Browser-created Location' }),
+      page.getByRole('cell', {
+        name: 'Browser-created Location',
+        exact: true,
+      }),
     ).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'LOC-WEB-004' })).toBeVisible();
+    await expect(
+      page.getByRole('cell', { name: 'LOC-WEB-004', exact: true }),
+    ).toBeVisible();
     await expect(page.locator('body')).not.toContainText('north_star_module');
     await expect(page.locator('body')).not.toContainText('storageClass');
     await expect(page.locator('body')).not.toContainText(

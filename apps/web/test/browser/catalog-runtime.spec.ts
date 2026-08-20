@@ -43,11 +43,11 @@ test('real Catalog surface creates an item and archives/restores through the gen
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'item_form'));
     await page.getByLabel('SKU').fill('SKU-WEB-004');
-    await page.getByLabel('Item Name').fill('Browser-created Item');
+    await page.getByLabel('Name', { exact: true }).fill('Browser-created Item');
     await page
-      .getByLabel('Item Description', { exact: true })
+      .getByLabel('Description', { exact: true })
       .fill('Created through generic form');
-    await page.getByLabel('Base Unit').fill('EA');
+    await page.getByLabel('Base unit', { exact: true }).fill('EA');
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
     await expect(page.getByRole('status')).toContainText(
@@ -56,9 +56,11 @@ test('real Catalog surface creates an item and archives/restores through the gen
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'item_list'));
     await expect(
-      page.getByRole('cell', { name: 'Browser-created Item' }),
+      page.getByRole('cell', { name: 'Browser-created Item', exact: true }),
     ).toBeVisible();
-    await expect(page.getByRole('cell', { name: 'SKU-WEB-004' })).toBeVisible();
+    await expect(
+      page.getByRole('cell', { name: 'SKU-WEB-004', exact: true }),
+    ).toBeVisible();
     await expect(page.locator('body')).not.toContainText('north_star_module');
     await expect(page.locator('body')).not.toContainText('storageClass');
     await expect(page.locator('body')).not.toContainText(

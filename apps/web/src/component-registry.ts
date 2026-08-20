@@ -8,6 +8,10 @@ import {
   type SemanticQueryResultEnvelope,
   type SemanticRecordDto,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  encodeSharedListCursor,
+  SHARED_LIST_QUERY_VERSION,
+} from '../../../packages/runtime/src/list-behavior/index.js';
 
 import { escapeHtml, shortIdentity } from './html.js';
 import { sharedListView } from './list-runtime.js';
@@ -363,7 +367,7 @@ function renderListTitle(context: SurfaceComponentContext): string {
   const archiveToggle = renderArchiveToggle(context);
   return slotPanel(
     context,
-    `<header class="surface-heading surface-heading--slot"><div><p class="eyebrow">List · compiled workspace</p><h1>${escapeHtml(context.surface.label)}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${archiveToggle}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>` : ''}</div></header>`,
+    `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(entityLabel(context.surface))}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${archiveToggle}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>` : ''}</div></header>`,
     'surface-title-slot',
   );
 }
@@ -406,7 +410,7 @@ function renderBulkActions(context: SurfaceComponentContext): string {
   const formId = bulkSelectionFormId(context.surface);
   return slotPanel(
     context,
-    `<form class="bulk-bar" id="${escapeHtml(formId)}" data-bulk-selection-form><div><p class="eyebrow">Bulk actions</p><strong class="bulk-empty">Select records to begin</strong><strong class="bulk-ready">Selection ready</strong><p>This release keeps business actions record-scoped.</p></div><button class="secondary-action bulk-ready" type="reset">Clear selection</button></form>`,
+    `<form class="bulk-bar" id="${escapeHtml(formId)}" data-bulk-selection-form><div><strong class="bulk-empty">Select records to begin</strong><strong class="bulk-ready">Selection ready</strong><p>Choose one or more records to see the available actions.</p></div><button class="secondary-action bulk-ready" type="reset">Clear selection</button></form>`,
     'bulk-actions-slot',
   );
 }
@@ -557,7 +561,7 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
           : '';
   return slotPanel(
     context,
-    `<header class="surface-heading surface-heading--slot"><div><p class="eyebrow">${form ? 'Record form' : 'Record detail'} · compiled workspace</p><h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
+    `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
     'title-status-slot',
   );
 }
@@ -583,13 +587,22 @@ function recordTitle(
   context: SurfaceComponentContext,
   record: SemanticRecordDto,
 ): string {
-  const displayFieldId = readCompiledSurfaceDataBinding(
-    context.view,
-    context.surface,
-  ).displayFieldId;
+  return listRecordTitle(context.surface, record, context);
+}
+
+function listRecordTitle(
+  surface: CompiledSurfaceDefinition,
+  record: SemanticRecordDto,
+  linkContext?: Pick<SurfaceComponentContext, 'view'>,
+): string {
+  const displayFieldId = linkContext
+    ? readCompiledSurfaceDataBinding(linkContext.view, surface).displayFieldId
+    : undefined;
   const displayValue = displayFieldId
     ? (record.displayValues?.[displayFieldId] ?? record.values[displayFieldId])
-    : undefined;
+    : Object.values(record.displayValues ?? {}).find(
+        (value) => typeof value === 'string' && value.trim().length > 0,
+      );
   return typeof displayValue === 'string' && displayValue.trim().length > 0
     ? displayValue
     : shortIdentity(record.recordId);
@@ -624,6 +637,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
           ).outcome === 'holds',
       )
     : [];
+  const orderedCommands = [...commands].sort(commandPresentationOrder);
   const actions = [
     record && form && update && operationAvailableForRecord(update, record)
       ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, record.recordId, false, context))}">Edit</a>`
@@ -632,7 +646,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
       ? `<a class="secondary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>`
       : '',
     record
-      ? commands
+      ? orderedCommands
           .map((command) => renderCapabilityCommand(context, record, command))
           .join('')
       : '',
@@ -643,6 +657,30 @@ function renderCommandBar(context: SurfaceComponentContext): string {
     `<div class="command-bar" aria-label="Record commands">${actions}</div>`,
     'command-bar-slot',
   );
+}
+
+/**
+ * The current document workflow has one settled primary/secondary pair but no
+ * authored command-order carrier: Release advances the document and Cancel is
+ * the alternative. Keep every other command in the binding's deterministic
+ * order rather than inventing meaning for unknown verbs.
+ */
+function commandPresentationOrder(
+  left: CompiledSurfaceOperationBinding,
+  right: CompiledSurfaceOperationBinding,
+): number {
+  return commandPresentationRank(left) - commandPresentationRank(right);
+}
+
+function commandPresentationRank(
+  operation: CompiledSurfaceOperationBinding,
+): number {
+  const verb = operation.operationId.slice(
+    operation.operationId.lastIndexOf('_') + 1,
+  );
+  if (verb === 'release') return 0;
+  if (verb === 'cancel') return 2;
+  return 1;
 }
 
 /**
@@ -683,7 +721,7 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
   if (!record && context.surface.surfaceRole === 'form') {
     return slotPanel(
       context,
-      `<section class="panel key-facts-panel" data-data-state="empty"><div class="panel__heading"><div><p class="eyebrow">Key facts</p><h2>New ${escapeHtml(entityLabel(context.surface))}</h2></div></div><dl class="key-fact-grid"><div><dt>Mode</dt><dd>New record</dd></div><div><dt>Fields</dt><dd>${String(context.surface.fieldIds.length)} declared</dd></div><div><dt>State</dt><dd><span class="status-pill" data-status-role="inProgress">Draft</span></dd></div></dl></section>`,
+      `<section class="panel key-facts-panel" data-data-state="empty"><div class="panel__heading"><div><h2>New ${escapeHtml(entityLabel(context.surface))}</h2></div></div><dl class="key-fact-grid"><div><dt>Mode</dt><dd>New record</dd></div><div><dt>Fields</dt><dd>${String(context.surface.fieldIds.length)} ready</dd></div><div><dt>State</dt><dd><span class="status-pill" data-status-role="inProgress">Draft</span></dd></div></dl></section>`,
       'key-facts-slot',
     );
   }
@@ -701,7 +739,7 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
   return slotPanel(
     context,
     record
-      ? `${compatibilityFeedback}<section class="panel key-facts-panel" data-data-state="exact" data-record-id="${escapeHtml(record.recordId)}"><div class="panel__heading"><div><p class="eyebrow">Key facts</p><h2>${escapeHtml(recordTitle(context, record))}</h2></div>${compatibilityStatus}</div><dl class="key-fact-grid"><div><dt>Record</dt><dd><code>${escapeHtml(shortIdentity(record.recordId))}</code></dd></div><div><dt>State</dt><dd>${record.archived ? 'Archived' : 'Active'}</dd></div><div><dt>Revision</dt><dd>${String(record.revision)}</dd></div></dl>${compatibilityActions}</section>`
+      ? `${compatibilityFeedback}<section class="panel key-facts-panel" data-data-state="exact" data-record-id="${escapeHtml(record.recordId)}"><div class="panel__heading"><div><h2>${escapeHtml(recordTitle(context, record))}</h2></div>${compatibilityStatus}</div><dl class="key-fact-grid"><div><dt>Record</dt><dd><code>${escapeHtml(shortIdentity(record.recordId))}</code></dd></div><div><dt>State</dt><dd>${record.archived ? 'Archived' : 'Active'}</dd></div><div><dt>Revision</dt><dd>${String(record.revision)}</dd></div></dl>${compatibilityActions}</section>`
       : dataDiagnostic('QUERY_NOT_FOUND'),
     'key-facts-slot',
   );
@@ -720,7 +758,7 @@ function renderSections(context: SurfaceComponentContext): string {
     return slotPanel(
       context,
       record
-        ? `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
+        ? `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
         : dataDiagnostic('QUERY_NOT_FOUND'),
       'sections-slot',
     );
@@ -752,7 +790,7 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context.surface, operation, record)}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context, operation, record)}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
 }
@@ -824,7 +862,7 @@ function renderRelationContent(
   if (record) {
     return {
       controls: '',
-      freeze: renderRelationFreeze(authority.relationInputs),
+      freeze: renderRelationFreeze(context, authority.relationInputs),
       refusal: '',
     };
   }
@@ -847,14 +885,19 @@ function renderRelationContent(
     };
   }
   return {
-    controls: pickerState.pickers.map(renderRelationPicker).join(''),
+    controls: pickerState.pickers
+      .map((picker) => renderRelationPicker(context, picker))
+      .join(''),
     freeze: '',
     refusal: '',
   };
 }
 
-function renderRelationPicker(picker: SurfaceRelationPicker): string {
-  const label = fieldLabel(picker.relationId);
+function renderRelationPicker(
+  context: SurfaceComponentContext,
+  picker: SurfaceRelationPicker,
+): string {
+  const label = fieldLabel(picker.relationId, surfaceEntityId(context));
   const first = picker.required
     ? `<option value="">Choose ${escapeHtml(label)}</option>`
     : '<option value="">None</option>';
@@ -868,10 +911,11 @@ function renderRelationPicker(picker: SurfaceRelationPicker): string {
 }
 
 function renderRelationFreeze(
+  context: SurfaceComponentContext,
   relations: readonly CompiledSurfaceRelationInput[],
 ): string {
   if (relations.length === 0) return '';
-  return `<aside class="relation-freeze" data-relation-freeze><p class="eyebrow">Relations</p><h3>Set at creation</h3><ul>${relations.map((relation) => `<li data-relation-id="${escapeHtml(relation.relationId)}"><strong>${escapeHtml(fieldLabel(relation.relationId))}</strong> is set when this record is created and cannot be changed here.</li>`).join('')}</ul></aside>`;
+  return `<aside class="relation-freeze" data-relation-freeze role="note"><h3>Locked after creation</h3><ul>${relations.map((relation) => `<li data-relation-id="${escapeHtml(relation.relationId)}"><strong>${escapeHtml(fieldLabel(relation.relationId, surfaceEntityId(context)))}</strong> is chosen when this record is created and cannot be changed later.</li>`).join('')}</ul></aside>`;
 }
 
 function renderReleaseSummary({
@@ -884,13 +928,13 @@ function renderReleaseSummary({
       : surface.statusRoles.join(' · ');
   return `<section class="panel panel--hero">
     <div class="panel__accent" aria-hidden="true">↗</div>
-    <p class="eyebrow">Pinned application definition</p>
-    <h2>${escapeHtml(surface.label)} is release-defined</h2>
-    <p class="lede">This request is rendering one immutable compiled surface. A later activation can change the next request without changing this one.</p>
+    <p class="eyebrow">Workspace version</p>
+    <h2>${escapeHtml(surface.label)} is ready</h2>
+    <p class="lede">This view stays consistent while you work. A newly published version appears when you reopen it.</p>
     <dl class="fact-grid">
-      <div><dt>Release</dt><dd>${escapeHtml(shortIdentity(view.release.releaseId))}</dd></div>
-      <div><dt>Fence</dt><dd>${view.pointer.fence}</dd></div>
-      <div><dt>Status grammar</dt><dd>${escapeHtml(roles)}</dd></div>
+      <div><dt>Version</dt><dd>${escapeHtml(shortIdentity(view.release.releaseId))}</dd></div>
+      <div><dt>Revision</dt><dd>${view.pointer.fence}</dd></div>
+      <div><dt>Available statuses</dt><dd>${escapeHtml(roles)}</dd></div>
     </dl>
   </section>`;
 }
@@ -902,15 +946,15 @@ function renderSetupChecklist({
   return `<section class="panel">
     <div class="panel__heading">
       <div>
-        <p class="eyebrow">Compiled setup</p>
+        <p class="eyebrow">Workspace setup</p>
         <h2>${escapeHtml(surface.label)} checklist</h2>
       </div>
       <span class="status-pill">Release ${escapeHtml(shortIdentity(view.release.releaseId))}</span>
     </div>
     <ol class="checklist">
-      <li><span aria-hidden="true">01</span><div><strong>Surface manifest loaded</strong><p>${surface.slots.length} release-defined slot${surface.slots.length === 1 ? '' : 's'} selected.</p></div></li>
-      <li><span aria-hidden="true">02</span><div><strong>Request definition pinned</strong><p>Fence ${view.pointer.fence} remains stable for this unit of work.</p></div></li>
-      <li><span aria-hidden="true">03</span><div><strong>Projection ready</strong><p>${surface.fieldIds.length} compiled field reference${surface.fieldIds.length === 1 ? '' : 's'} available to later data screens.</p></div></li>
+      <li><span aria-hidden="true">01</span><div><strong>Workspace ready</strong><p>${surface.slots.length} area${surface.slots.length === 1 ? '' : 's'} available.</p></div></li>
+      <li><span aria-hidden="true">02</span><div><strong>Version confirmed</strong><p>Revision ${view.pointer.fence} remains stable while you work.</p></div></li>
+      <li><span aria-hidden="true">03</span><div><strong>Fields ready</strong><p>${surface.fieldIds.length} field${surface.fieldIds.length === 1 ? '' : 's'} available.</p></div></li>
     </ol>
   </section>`;
 }
@@ -926,20 +970,37 @@ function renderListSurfaceContent(
   detail?: CompiledSurfaceDefinition,
   linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
 ): string {
+  const sourceEntityId = linkContext
+    ? readCompiledSurfaceDataBinding(linkContext.view, surface).query
+        .sourceEntityId
+    : (records[0]?.entityId ?? '');
   if (result?.listCoverage) {
-    return renderSharedListSurface(surface, result, detail, linkContext);
+    return renderSharedListSurface(
+      surface,
+      result,
+      sourceEntityId,
+      detail,
+      linkContext,
+    );
   }
   if (records.length === 0) {
     return emptyDataPanel();
   }
   const selectable = hasNamedSlot(surface, 'bulkActions');
   const formId = bulkSelectionFormId(surface);
-  return `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><p class="eyebrow">Records</p><h2>${escapeHtml(surface.label)}</h2></div><span class="status-pill">${records.length} visible</span></div><div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">Record</th>${surface.fieldIds.map((fieldId) => `<th scope="col">${escapeHtml(fieldLabel(fieldId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${records.map((record) => `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${selectable ? selectionCell(formId, record) : ''}<td data-column-label="Record" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, record.recordId, record.archived, linkContext))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(record.recordId))}"><code>${escapeHtml(shortIdentity(record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(record.recordId))}</code>`}</td>${surface.fieldIds.map((fieldId, index) => `<td data-column-label="${escapeHtml(fieldLabel(fieldId))}" data-column-priority="${String(index + 1)}" data-field-id="${escapeHtml(fieldId)}">${renderValue(record.values[fieldId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(surface.fieldIds.length + 1)}">${record.archived ? 'Archived' : 'Active'}</td></tr>`).join('')}</tbody></table></div></section>`;
+  const recordLabel = entityLabel(surface);
+  return `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(recordLabel)}</h2></div><span class="status-pill">${records.length} visible</span></div><div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">${escapeHtml(recordLabel)}</th>${surface.fieldIds.map((fieldId) => `<th scope="col">${escapeHtml(fieldLabel(fieldId, sourceEntityId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${records
+    .map((record) => {
+      const title = listRecordTitle(surface, record, linkContext);
+      return `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${selectable ? selectionCell(formId, record, recordLabel, title) : ''}<td data-column-label="${escapeHtml(recordLabel)}" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, record.recordId, record.archived, linkContext))}" aria-label="Open ${escapeHtml(recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}</td>${surface.fieldIds.map((fieldId, index) => `<td data-column-label="${escapeHtml(fieldLabel(fieldId, sourceEntityId))}" data-column-priority="${String(index + 1)}" data-field-id="${escapeHtml(fieldId)}">${renderValue(record.values[fieldId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(surface.fieldIds.length + 1)}">${record.archived ? 'Archived' : 'Active'}</td></tr>`;
+    })
+    .join('')}</tbody></table></div></section>`;
 }
 
 function renderSharedListSurface(
   surface: CompiledSurfaceDefinition,
   result: SemanticQueryResultEnvelope,
+  sourceEntityId: string,
   detail?: CompiledSurfaceDefinition,
   linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
 ): string {
@@ -964,14 +1025,103 @@ function renderSharedListSurface(
       : 'success';
   const selectable = hasNamedSlot(surface, 'bulkActions');
   const formId = bulkSelectionFormId(surface);
+  const recordLabel = entityLabel(surface);
   const body =
     view.rows.length === 0
       ? `<div class="data-empty" data-data-state="empty" data-list-zero-input="true"><h3>No records yet</h3><p>This search has zero visible records for the current tenant, environment, and principal.</p></div>`
-      : `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">Record</th>${columns.map((column) => `<th scope="col">${escapeHtml(fieldLabel(column.columnId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${view.rows.map((row) => `<tr data-compact-card="true" data-record-id="${escapeHtml(row.record.recordId)}">${selectable ? selectionCell(formId, row.record) : ''}<td data-column-label="Record" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, row.record.recordId, row.archived, linkContext))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(row.record.recordId))}"><code>${escapeHtml(shortIdentity(row.record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(row.record.recordId))}</code>`}</td>${columns.map((column, index) => `<td data-column-label="${escapeHtml(fieldLabel(column.columnId))}" data-column-priority="${String(index + 1)}" ${column.kind === 'relation' ? 'data-relation-id' : 'data-field-id'}="${escapeHtml(column.columnId)}">${renderValue(row.cells[column.columnId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(columns.length + 1)}"><span class="status-pill" data-status-role="${row.archived ? 'attention' : 'success'}">${row.archived ? 'Archived' : 'Active'}</span></td></tr>`).join('')}</tbody></table></div>`;
+      : `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">${escapeHtml(recordLabel)}</th>${columns.map((column) => `<th scope="col">${escapeHtml(fieldLabel(column.columnId, sourceEntityId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${view.rows
+          .map((row) => {
+            const title = listRecordTitle(surface, row.record, linkContext);
+            return `<tr data-compact-card="true" data-record-id="${escapeHtml(row.record.recordId)}">${selectable ? selectionCell(formId, row.record, recordLabel, title) : ''}<td data-column-label="${escapeHtml(recordLabel)}" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, row.record.recordId, row.archived, linkContext))}" aria-label="Open ${escapeHtml(recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}</td>${columns.map((column, index) => `<td data-column-label="${escapeHtml(fieldLabel(column.columnId, sourceEntityId))}" data-column-priority="${String(index + 1)}" ${column.kind === 'relation' ? 'data-relation-id' : 'data-field-id'}="${escapeHtml(column.columnId)}">${renderValue(row.cells[column.columnId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(columns.length + 1)}"><span class="status-pill" data-status-role="${row.archived ? 'attention' : 'success'}">${row.archived ? 'Archived' : 'Active'}</span></td></tr>`;
+          })
+          .join('')}</tbody></table></div>`;
+  const search = renderListSearch(surface, view.listCoverage, linkContext);
+  const previous = previousPageHref(surface, view.listCoverage, linkContext);
   const next = view.listCoverage.nextCursor
     ? `<a class="list-page-link" href="${escapeHtml(nextPageHref(surface, view.listCoverage.nextCursor, view.listCoverage.search, view.listCoverage.includeArchived, linkContext))}">Next page</a>`
     : '';
-  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(view.listCoverage.schemaVersion)}"><div class="panel__heading"><div><p class="eyebrow">Records</p><h2>${escapeHtml(surface.label)}</h2></div><span class="status-pill" data-status-role="${coverageRole}" data-list-coverage="${escapeHtml(coverage)}">${escapeHtml(coverage)} visible</span></div>${body}<nav class="list-pagination" aria-label="List pages">${next}</nav></section>`;
+  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(view.listCoverage.schemaVersion)}"><div class="panel__heading"><div><h2>${escapeHtml(recordLabel)}</h2></div><span class="status-pill" data-status-role="${coverageRole}" data-list-coverage="${escapeHtml(coverage)}">${escapeHtml(coverage)} visible</span></div>${search}${body}<nav class="list-pagination surface-heading__actions" aria-label="List pages">${previous}${next}</nav></section>`;
+}
+
+function renderListSearch(
+  surface: CompiledSurfaceDefinition,
+  coverage: NonNullable<SemanticQueryResultEnvelope['listCoverage']>,
+  linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
+): string {
+  const parameters = listParameters(
+    surface,
+    coverage.search,
+    coverage.includeArchived,
+    linkContext,
+  );
+  parameters.delete('q');
+  const hidden = [...parameters.entries()]
+    .map(
+      ([name, value]) =>
+        `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+    )
+    .join('');
+  const clear =
+    coverage.search.length > 0
+      ? `<a class="secondary-action" href="/?${escapeHtml(parameters.toString())}">Clear</a>`
+      : '';
+  return `<form class="form-fields" data-list-search method="get" action="/">${hidden}<div class="form-field"><label><span>Search records</span><input type="search" name="q" value="${escapeHtml(coverage.search)}" maxlength="240" autocomplete="off"></label></div><div class="surface-heading__actions"><button type="submit">Search</button>${clear}</div></form>`;
+}
+
+function previousPageHref(
+  surface: CompiledSurfaceDefinition,
+  coverage: NonNullable<SemanticQueryResultEnvelope['listCoverage']>,
+  linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
+): string {
+  if (coverage.pageOffset === 0 || !linkContext) return '';
+  const previousOffset = Math.max(
+    0,
+    coverage.pageOffset - coverage.effectivePageSize,
+  );
+  const parameters = listParameters(
+    surface,
+    coverage.search,
+    coverage.includeArchived,
+    linkContext,
+  );
+  if (previousOffset > 0) {
+    const queryId = readCompiledSurfaceDataBinding(linkContext.view, surface)
+      .query.queryId;
+    parameters.set(
+      'cursor',
+      encodeSharedListCursor(
+        queryId,
+        {
+          cursor: null,
+          effectivePageSize: coverage.effectivePageSize,
+          includeArchived: coverage.includeArchived,
+          matchMode: coverage.matchMode,
+          pageOffset: previousOffset,
+          relationLabels: [],
+          requestedPageSize: coverage.requestedPageSize,
+          schemaVersion: SHARED_LIST_QUERY_VERSION,
+          search: coverage.search,
+          sort: coverage.sort,
+          truncatedByMaximum: coverage.truncatedByMaximum,
+        },
+        previousOffset,
+      ),
+    );
+  }
+  return `<a class="list-page-link" href="/?${escapeHtml(parameters.toString())}">Previous page</a>`;
+}
+
+function listParameters(
+  surface: CompiledSurfaceDefinition,
+  search: string,
+  includeArchived: boolean,
+  linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
+): URLSearchParams {
+  const parameters = new URLSearchParams({ surface: surface.surfaceId });
+  if (search.length > 0) parameters.set('q', search);
+  if (includeArchived) parameters.set('archived', 'yes');
+  appendLegalEntitySelection(parameters, surface, linkContext);
+  return parameters;
 }
 
 function nextPageHref(
@@ -1030,12 +1180,41 @@ function dataDiagnostic(
   return diagnostic({ code });
 }
 
-function fieldLabel(fieldId: string): string {
+function fieldLabel(fieldId: string, entityId = ''): string {
   const local = fieldId.slice(fieldId.lastIndexOf('.') + 1);
-  return local
-    .split('_')
+  const entityPrefix = entityId.slice(entityId.lastIndexOf('.') + 1);
+  const withoutEntity =
+    entityPrefix.length > 0 && local.startsWith(`${entityPrefix}_`)
+      ? local.slice(entityPrefix.length + 1)
+      : local;
+  return identifierLabel(withoutEntity.replace(/_id$/u, ''));
+}
+
+const BUSINESS_ACRONYMS: Readonly<Record<string, string>> = Object.freeze({
+  api: 'API',
+  erp: 'ERP',
+  id: 'ID',
+  sku: 'SKU',
+  uom: 'UOM',
+  url: 'URL',
+});
+
+function identifierLabel(value: string): string {
+  const words = value
+    .trim()
+    .replaceAll(/[^A-Za-z0-9]+/g, ' ')
+    .split(' ')
     .filter(Boolean)
-    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .map((word) => word.toLowerCase());
+  if (words.length === 0) return 'Record';
+  return words
+    .map((word, index) => {
+      const acronym = BUSINESS_ACRONYMS[word];
+      if (acronym) return acronym;
+      return index === 0
+        ? word.slice(0, 1).toUpperCase() + word.slice(1)
+        : word;
+    })
     .join(' ');
 }
 
@@ -1059,7 +1238,7 @@ function feedbackHtml(
 }
 
 function emptyDataPanel(): string {
-  return `<section class="panel data-empty" data-data-state="empty"><p class="eyebrow">Records</p><h2>No records yet</h2><p class="lede">This view has no visible records for the current tenant, environment, and principal.</p></section>`;
+  return `<section class="panel data-empty" data-data-state="empty"><h2>No records yet</h2><p class="lede">This view has no visible records for the current tenant, environment, and principal.</p></section>`;
 }
 
 function recordFrom(
@@ -1204,6 +1383,11 @@ function entityLabel(surface: CompiledSurfaceDefinition): string {
   return surface.label.replace(/\s+(?:detail|form|list)$/i, '');
 }
 
+function surfaceEntityId(context: SurfaceComponentContext): string {
+  return readCompiledSurfaceDataBinding(context.view, context.surface).query
+    .sourceEntityId;
+}
+
 function hasSurfaceSlot(
   context: SurfaceComponentContext,
   slot: string,
@@ -1222,8 +1406,14 @@ function bulkSelectionFormId(surface: CompiledSurfaceDefinition): string {
   return `bulk-selection-${surface.surfaceId}`;
 }
 
-function selectionCell(formId: string, record: SemanticRecordDto): string {
-  return `<td class="selection-cell" data-column-label="Select"><label class="record-selector"><span class="sr-only">Select ${escapeHtml(shortIdentity(record.recordId))}</span><input aria-label="Select ${escapeHtml(shortIdentity(record.recordId))}" class="record-selector__input" form="${escapeHtml(formId)}" name="recordId" type="checkbox" value="${escapeHtml(record.recordId)}"></label></td>`;
+function selectionCell(
+  formId: string,
+  record: SemanticRecordDto,
+  recordLabel: string,
+  title: string,
+): string {
+  const label = `Select ${recordLabel} ${title}`;
+  return `<td class="selection-cell" data-column-label="Select"><label class="record-selector"><span class="sr-only">${escapeHtml(label)}</span><input aria-label="${escapeHtml(label)}" class="record-selector__input" form="${escapeHtml(formId)}" name="recordId" type="checkbox" value="${escapeHtml(record.recordId)}"></label></td>`;
 }
 
 function declaredStatusRoles(surface: CompiledSurfaceDefinition): string {
@@ -1279,10 +1469,11 @@ const ENUM_SELECT_MAXIMUM_OPTIONS = 5;
 export const FORM_EMPTY_INTENT_PREFIX = 'empty:';
 
 function renderFormFields(
-  surface: CompiledSurfaceDefinition,
+  context: SurfaceComponentContext,
   operation: CompiledSurfaceOperationBinding,
   record: SemanticRecordDto | null,
 ): string {
+  const { surface } = context;
   const fieldsById = new Map(
     (surface.fields ?? []).map((field) => [field.fieldId, field]),
   );
@@ -1291,6 +1482,7 @@ function renderFormFields(
   );
   return surface.fieldIds
     .map((fieldId, index) => {
+      const label = fieldLabel(fieldId, surfaceEntityId(context));
       const value = record ? record.values[fieldId] : undefined;
       const field = fieldsById.get(fieldId);
       const inputField = inputFieldsById.get(fieldId);
@@ -1304,6 +1496,7 @@ function renderFormFields(
       const emptyIntent = renderEmptyIntentControl(
         inputField,
         fieldId,
+        label,
         value,
         record !== null,
         control.storedValueUnavailable,
@@ -1311,7 +1504,7 @@ function renderFormFields(
       const unavailableValue = control.storedValueUnavailable
         ? renderUnavailableStoredValue(fieldId, index, inputField, value)
         : '';
-      return `<div class="form-field"><label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
+      return `<div class="form-field"><label><span>${escapeHtml(label)}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
     })
     .join('');
 }
@@ -1338,6 +1531,7 @@ function renderFormFields(
 function renderEmptyIntentControl(
   field: CompiledSurfaceInputField | undefined,
   fieldId: string,
+  fieldLabelText: string,
   value: unknown,
   updating: boolean,
   storedValueUnavailable: boolean,
@@ -1350,7 +1544,7 @@ function renderEmptyIntentControl(
   ): string =>
     `<option value="${intent}"${selectedIntent === intent ? ' selected' : ''}>${label}</option>`;
   const select = (options: readonly string[]): string =>
-    `<label class="form-empty-intent"><span>When ${escapeHtml(fieldLabel(fieldId))} is blank</span><select name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" data-empty-intent-for="${escapeHtml(fieldId)}" autocomplete="off">${options.join('')}</select></label>`;
+    `<label class="form-empty-intent"><span>When ${escapeHtml(fieldLabelText)} is blank</span><select name="${FORM_EMPTY_INTENT_PREFIX}${escapeHtml(fieldId)}" data-empty-intent-for="${escapeHtml(fieldId)}" autocomplete="off">${options.join('')}</select></label>`;
   if (field.required) {
     if (!updating) return '';
     if (field.kind === 'textFieldType') {
