@@ -1052,10 +1052,21 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
 
   await page.goto(surfaceUrl(baseUrl, 'inventory_on_hand_lookup'));
   await expect(
-    page.getByRole('heading', { level: 1, name: 'On-hand lookup' }),
+    page.getByRole('heading', { level: 1, name: onHandLookup.label }),
   ).toBeVisible();
-  await expect(page.locator('body')).not.toContainText('compiled release');
-  await expect(page.locator('.surface-id')).toHaveCount(0);
+  const taskPageHeading = page.locator(
+    '#surface-content > header.surface-heading',
+  );
+  await expect(taskPageHeading.locator(':scope > div').first()).toHaveText(
+    onHandLookup.label,
+  );
+  await expect(taskPageHeading.locator('[data-status-role]')).toHaveText(
+    onHandLookup.statusRoles,
+  );
+  await expect(taskPageHeading).not.toContainText(
+    `${onHandLookup.archetype} surface`,
+  );
+  await expect(taskPageHeading).not.toContainText(onHandLookup.surfaceId);
   await page
     .getByRole('navigation', { name: 'Legal entity' })
     .getByRole('link', {
@@ -2716,12 +2727,16 @@ interface CompiledApplicationRelease {
 }
 
 interface CompiledOnHandLookupProjection {
+  readonly archetype: 'task';
   readonly inputParameters: readonly {
     readonly orderKey: number;
     readonly parameterId: string;
   }[];
+  readonly label: string;
   readonly legalEntityParameterId: string;
   readonly parameterIds: readonly string[];
+  readonly statusRoles: readonly string[];
+  readonly surfaceId: string;
 }
 
 async function loadOnHandLookupProjection(): Promise<CompiledOnHandLookupProjection> {
@@ -2740,6 +2755,8 @@ async function loadOnHandLookupProjection(): Promise<CompiledOnHandLookupProject
     readonly surfaces: readonly {
       readonly archetype: string;
       readonly dataSourceQueryId: string;
+      readonly label: string;
+      readonly statusRoles: readonly string[];
       readonly surfaceId: string;
     }[];
   };
@@ -2785,15 +2802,19 @@ async function loadOnHandLookupProjection(): Promise<CompiledOnHandLookupProject
     throw new TypeError('compiled on-hand parameter contract is malformed');
   }
   return Object.freeze({
+    archetype: 'task',
     inputParameters: Object.freeze(
       parameters.filter(
         (parameter) => parameter.parameterId !== legalEntityParameterId,
       ),
     ),
+    label: surface.label,
     legalEntityParameterId,
     parameterIds: Object.freeze(
       parameters.map((parameter) => parameter.parameterId),
     ),
+    statusRoles: Object.freeze([...surface.statusRoles]),
+    surfaceId: surface.surfaceId,
   });
 }
 

@@ -588,3 +588,17 @@ Why: one label helper corrupted VAT, R&D and iPhone while using transformed disp
 copy to infer canonical field prefixes. How to apply: preserve authored labels
 except contract-declared role suffixes, and derive structure only from compiled
 canonical identity; test a display label that differs from that identity.
+
+## Mutate to the cheapest equivalent defect, not only the old spelling
+Date: 2026-08-20
+Why: restoring `.surface-id` and “compiled release” red while a classless ID and
+renamed runtime eyebrow stayed green. How to apply: obtain the forbidden value
+independently and assert visible content at its semantic boundary; mutate class,
+wording and placement away from the historical markup.
+
+## Uncorrelate fixtures that claim one authority
+Date: 2026-08-20
+Why: entity, field and surface locals all said `master`, so surface-ID-derived
+prefixes passed a test claiming query/record authority. How to apply: make every
+non-authoritative identifier opaque and divergent, then exercise each changed
+branch directly so the wrong authority produces a different observation.

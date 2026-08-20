@@ -171,24 +171,42 @@ test('record title falls back to short identity when its compiled display value 
 test('authored business labels survive while field prefixes follow canonical entity identity', async ({
   page,
 }) => {
-  const compiled = compileFixture(true, false, (authored) => {
-    const surfaces = authored.surfaces as Array<Record<string, unknown>>;
-    const list = surfaces.find(
-      (surface) =>
-        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_list`,
-    );
-    const form = surfaces.find(
-      (surface) =>
-        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_form`,
-    );
-    assert.ok(list);
-    assert.ok(form);
-    list.label = 'VAT & R&D orders list';
-    form.label = 'iPhone orders form';
-  });
+  const listSurfaceId = `${FIXTURE_IDS.namespace}:surface.opaque_orders_list`;
+  const formSurfaceId = `${FIXTURE_IDS.namespace}:surface.handset_orders_form`;
+  const recordSurfaceId = `${FIXTURE_IDS.namespace}:surface.audit_entry_record`;
+  const compiled = compileFixture(
+    true,
+    false,
+    (authored) => {
+      const surfaces = authored.surfaces as Array<Record<string, unknown>>;
+      const list = surfaces.find(
+        (surface) =>
+          surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_list`,
+      );
+      const form = surfaces.find(
+        (surface) =>
+          surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_form`,
+      );
+      const record = surfaces.find(
+        (surface) =>
+          surface.surfaceId ===
+          `${FIXTURE_IDS.namespace}:surface.master_record`,
+      );
+      assert.ok(list);
+      assert.ok(form);
+      assert.ok(record);
+      list.label = 'VAT & R&D orders list';
+      list.surfaceId = listSurfaceId;
+      form.label = 'iPhone orders form';
+      form.surfaceId = formSurfaceId;
+      record.label = 'A/P & VAT audit detail';
+      record.surfaceId = recordSurfaceId;
+    },
+    true,
+  );
   const policy = allowPolicy();
   const labelExecutor = new BrowserFixtureExecutor(null);
-  labelExecutor.createSeed('Business label specimen');
+  const labelRecordId = labelExecutor.createSeed('Business label specimen');
   const operationMediation = new SemanticOperationMediationAuthority();
   const labelServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -207,7 +225,7 @@ test('authored business labels survive while field prefixes follow canonical ent
   try {
     await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
     await page.goto(
-      `${labelBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_list`)}`,
+      `${labelBaseUrl}/?surface=${encodeURIComponent(listSurfaceId)}`,
     );
     await expect(
       page.getByRole('heading', {
@@ -223,13 +241,34 @@ test('authored business labels survive while field prefixes follow canonical ent
     ).toHaveCount(0);
 
     await page.goto(
-      `${labelBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+      `${labelBaseUrl}/?surface=${encodeURIComponent(formSurfaceId)}`,
     );
     await expect(
       page.getByRole('heading', { level: 1, name: 'New iPhone orders' }),
     ).toBeVisible();
     await expect(page.getByLabel('Number', { exact: true })).toBeVisible();
     await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
+
+    await page.goto(
+      `${labelBaseUrl}/?surface=${encodeURIComponent(recordSurfaceId)}&record=${encodeURIComponent(labelRecordId)}`,
+    );
+    const breadcrumb = page.getByRole('navigation', { name: 'Breadcrumb' });
+    await expect(
+      breadcrumb.getByText('VAT & R&D orders list', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      breadcrumb.getByText('A/P & VAT audit', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', {
+        level: 2,
+        name: 'A/P & VAT audit information',
+      }),
+    ).toBeVisible();
+    await expect(
+      page.locator('dt').getByText('Name', { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('dt').getByText('Master name')).toHaveCount(0);
   } finally {
     await new Promise<void>((resolve, reject) => {
       labelServer.close((error) => (error ? reject(error) : resolve()));
@@ -2409,6 +2448,7 @@ function compileFixture(
   withPartialAnatomy = true,
   withInvalidFormBinding = false,
   amend?: (authored: Record<string, unknown>) => void,
+  includeRecordSections = false,
 ): CompileSuccess {
   const authored = ordinaryModuleV1();
   exposeRequiredMasterNumber(authored);
@@ -2422,7 +2462,13 @@ function compileFixture(
         ? ['title', 'dataGrid']
         : surfaceId.endsWith('_form')
           ? ['breadcrumb', 'titleStatus', 'commandBar', 'sections']
-          : ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts'];
+          : [
+              'breadcrumb',
+              'titleStatus',
+              'commandBar',
+              'keyFacts',
+              ...(includeRecordSections ? ['sections'] : []),
+            ];
       const exemplar = existingSlots[0];
       assert.ok(exemplar);
       surface.slots = requiredSlots.map((slot, index) => ({
