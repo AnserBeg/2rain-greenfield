@@ -6,13 +6,15 @@ confirmed unchanged before the fresh worktree was cut)
 Branch: `packet/relation-scoped-enumeration-2`
 Prior stopped branch: `packet/relation-scoped-enumeration` at `fa83edb`
 Tier: Critical
-Status: **MATRIX GREEN; INTEGRATION PENDING.** The exact reviewed candidate is
+Status: **ACCEPTED.** The exact reviewed candidate is
 `c56b37fb21ce27afe9aa45c3acb6442ee5ac100a`, verified identical on `origin`.
 Independent Fable max returned PASS after the user ruled the final evidence-only
 correction would proceed directly to that arm with no further Codex arm. The one
 full matrix passed on reconciled tree
-`ee6c5fa1af47682a194a6fe08328a275d5552460`; the required packet-into-main
-`--no-ff` merge remains.
+`ee6c5fa1af47682a194a6fe08328a275d5552460`. Required packet-into-main
+`--no-ff` merge `9248f97fb0fef5fae77402a18de2d6615997dc0e` preserves packet tip
+`8cd5a35b9a8d1365dedf64e06269cb2b2732c61e` as its second parent; both reviewed-
+to-merge and matrix-to-merge executable diffs are empty.
 
 ## Packet definition
 
