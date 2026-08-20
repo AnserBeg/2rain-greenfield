@@ -6,15 +6,22 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { STATUS_ROLES } from '@north-star/canonical-model';
+import {
+  RequestRuntimeViewLoadError,
+  type RequestRuntimeViewLoadErrorCode,
+} from '@north-star/postgres-provider/request-runtime-view-service';
 
 import * as listBehavior from '../../../packages/runtime/src/list-behavior/index.js';
+import { ModuleRuntimeInterpreterError } from '../../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import * as resolveByName from '../../../packages/runtime/src/resolve-by-name.js';
 import * as operationGateway from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import * as queryGateway from '../../../packages/runtime/src/semantic-query-gateway.js';
 import {
   MAPPED_OPERATION_ERROR_NAMES,
   MAPPED_QUERY_ERROR_NAMES,
+  operationMessageRef,
 } from '../src/gateway-error-codes.js';
+import { runtimeViewRefusalMessage } from '../src/app-server.js';
 import {
   MESSAGE_PLACEMENTS,
   OPERATION_DIAGNOSTIC_CODES,
@@ -29,6 +36,7 @@ import {
   SURFACE_SLOT_RESOLUTION_STATES,
   renderRegisteredSurfaceComponent,
   surfaceHasUnsupportedComponent,
+  surfaceSupportsRuntimeIntent,
 } from '../src/component-registry.js';
 import { readDemoCompiledFixture } from '../src/demo-runtime.js';
 import { renderSurfaceRuntime } from '../src/surface-runtime.js';
@@ -99,7 +107,6 @@ test('renderer accepts one issued view and has no ambient release access', async
   );
 
   for (const relativePath of [
-    'src/app-server.ts',
     'src/component-registry.ts',
     'src/surface-contract.ts',
     'src/surface-runtime.ts',
@@ -110,6 +117,90 @@ test('renderer accepts one issued view and has no ambient release access', async
       /ActiveReleasePointer|releaseRepository|global[A-Z][A-Za-z]*Release|process\.env|postgres-provider|node:fs/,
     );
   }
+  const serverSource = readFileSync(`${webRoot}/src/app-server.ts`, 'utf8');
+  assert.doesNotMatch(
+    serverSource,
+    /ActiveReleasePointer|releaseRepository|global[A-Z][A-Za-z]*Release|process\.env|node:fs/,
+  );
+  assert.match(
+    serverSource,
+    /@north-star\/postgres-provider\/request-runtime-view-service/u,
+  );
+});
+
+const REQUEST_RUNTIME_VIEW_LOAD_CODES = Object.freeze({
+  ACTIVE_POINTER_MISSING: true,
+  ACTIVE_RELEASE_NOT_ADMITTED: true,
+  ACTIVE_RELEASE_NOT_VISIBLE: true,
+  INVALIDATION_AHEAD_OF_AUTHORITY: true,
+  INVALIDATION_CONTEXT_MISMATCH: true,
+  MALFORMED_RELEASE: true,
+  MALFORMED_REQUIRED_PROJECTION: true,
+  NULL_ACTIVE_RELEASE: true,
+  PIN_CONTEXT_MISMATCH: true,
+  POINTER_CHANGED_DURING_LOAD: true,
+  POINTER_IDENTITY_CHANGED: true,
+  REQUEST_CONTEXT_MISMATCH: true,
+  REQUIRED_PROJECTION_DUPLICATE: true,
+  REQUIRED_PROJECTION_MISSING: true,
+  UNSUPPORTED_RUNTIME_CAPABILITY: true,
+} as const satisfies Readonly<Record<RequestRuntimeViewLoadErrorCode, true>>);
+
+test('every typed runtime-view refusal crosses the HTTP boundary with its code', () => {
+  assert.equal(Object.keys(REQUEST_RUNTIME_VIEW_LOAD_CODES).length, 15);
+  for (const code of Object.keys(
+    REQUEST_RUNTIME_VIEW_LOAD_CODES,
+  ) as RequestRuntimeViewLoadErrorCode[]) {
+    assert.deepEqual(
+      runtimeViewRefusalMessage(
+        new RequestRuntimeViewLoadError(code, 'typed refusal'),
+      ),
+      { code: 'REQUEST_RUNTIME_VIEW_REFUSED', subject: code },
+    );
+  }
+});
+
+test('provider refusals retain known copy and otherwise use an honest code-bearing residual', () => {
+  assert.deepEqual(
+    operationMessageRef(
+      new ModuleRuntimeInterpreterError(
+        'MODULE_LEGAL_ENTITY_CREATE_INACTIVE',
+        'inactive',
+        'legal-entity-42',
+      ),
+    ),
+    {
+      code: 'OPERATION_LEGAL_ENTITY_INACTIVE',
+      subject: 'legal-entity-42',
+    },
+  );
+  assert.deepEqual(
+    operationMessageRef(
+      new ModuleRuntimeInterpreterError(
+        'MODULE_REQUIRED_FIELD_MISSING',
+        'required',
+      ),
+    ),
+    {
+      code: 'OPERATION_REFUSED',
+      subject: 'MODULE_REQUIRED_FIELD_MISSING',
+    },
+  );
+  assert.deepEqual(
+    operationMessageRef(
+      new ModuleRuntimeInterpreterError(
+        'MODULE_EXTENSION_REFUSAL_ADDED_LATER',
+        'extension',
+      ),
+    ),
+    {
+      code: 'OPERATION_REFUSED',
+      subject: 'MODULE_EXTENSION_REFUSAL_ADDED_LATER',
+    },
+  );
+  assert.deepEqual(operationMessageRef(new Error('failure without identity')), {
+    code: 'OPERATION_UNAVAILABLE',
+  });
 });
 
 test('closed registry returns diagnostics for unknown and failing components', async () => {
@@ -139,6 +230,28 @@ test('closed registry returns diagnostics for unknown and failing components', a
     assert.ok(failing?.slots[0]);
     assert.equal(surfaceHasUnsupportedComponent(unsupported), true);
     assert.equal(surfaceHasUnsupportedComponent(failing), false);
+    const formWithUnsupportedActivity = {
+      ...unsupported,
+      archetype: 'record' as const,
+      slots: [
+        { ...unsupported.slots[0], slot: 'sections' as const },
+        { ...unsupported.slots[0], slot: 'activity' as const },
+      ],
+      surfaceRole: 'form' as const,
+    };
+    assert.equal(
+      surfaceHasUnsupportedComponent(formWithUnsupportedActivity),
+      true,
+    );
+    assert.equal(
+      surfaceSupportsRuntimeIntent(
+        view,
+        formWithUnsupportedActivity,
+        [],
+        'create',
+      ),
+      true,
+    );
     const unsupportedResult = renderRegisteredSurfaceComponent({
       slot: unsupported.slots[0],
       surface: unsupported,
@@ -268,11 +381,12 @@ test('the message catalog honours the vocabulary it declares', () => {
   // 27 -> 28 with `ux-picker`'s `INVALID_SURFACE_FIELD`, 29 with
   // `form-wire-semantics`' `OPERATION_INPUT_INVALID`, then 30 with the scoped
   // create operand's subject-bearing inactive-legal-entity refusal, then 31
-  // with the relation-id-bearing incomplete-enumeration refusal. The count
+  // with the relation-id-bearing incomplete-enumeration refusal, then 33 with
+  // the code-bearing provider and runtime-view refusals. The count
   // is pinned so
   // registering a code is a deliberate, visible edit; moving it is the intended
   // cost of adding one, not a symptom.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 31);
+  assert.equal(SURFACE_MESSAGE_CODES.length, 33);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];

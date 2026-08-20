@@ -77,11 +77,12 @@ action. It is `sections` — the slot carrying create/update intents — that ma
 the related form operable and thereby re-admits New, Edit, archive and restore
 on the paired surfaces.
 
-**2. `activity` is not declared by any first-party module.** A slot declared
-with no registered renderer is forbidden. This is **not** ADR-0041's
-accepted-and-ignored state: authoring and compilation accept the declaration,
-then `surfaceHasUnsupportedComponent` explicitly refuses the whole surface at
-runtime. It is a late, whole-surface refusal.
+**2. `activity` is not declared by any first-party module.** At the time of this
+decision a slot declared with no registered renderer caused
+`surfaceHasUnsupportedComponent` to refuse the whole surface at runtime. That
+was not ADR-0041's accepted-and-ignored state, but it was a late refusal with an
+over-broad consequence. Decision 6 below narrows that consequence without
+pretending the slot is implemented.
 
 The G2-composition review recorded that **the language cannot express "declared,
 intentionally unregistered."** That is still true, and it is decisive here: a
@@ -123,6 +124,22 @@ rule without new language:
   parent transaction's update predicate for child mutation. Lines under a
   posted transaction are consequently immutable without a second line-level
   predicate.
+
+**6. Amendment 2026-08-20: an unsupported non-mutation slot fails locally and
+does not veto a write rendered by another slot.** Write support is derived from
+the registered slot that owns the requested mutation intent. An unregistered
+`activity` or `childTables` slot still renders `UNSUPPORTED_COMPONENT`, with its
+component identifier, in that slot's failed state; it cannot suppress a
+registered `sections` create/update control or `commandBar` command. Registering
+either slot without its real trust-history or child-table semantics would
+contradict this ADR and ADR-0041, so both remain unregistered until their actual
+renderers exist.
+
+This is a presentation-admission boundary, not a mutation-admission change.
+`resolveFormAdmission`, record-level operation predicates, command-bar
+admission, and posted-transaction preconditions remain authoritative and are
+unchanged. A surface with no registered slot for the requested mutation intent
+is still inert.
 
 ## Consequences
 
@@ -214,9 +231,11 @@ rule without new language:
   `surface-grammar-conformance.baseline.ts` and fails on a change in **either**
   direction, so re-introducing `activity` on a form moves a count and must move
   the reviewed artifact with it.
-- **Refused at render:** `surfaceHasUnsupportedComponent` still refuses any
-  surface declaring an unregistered slot, by name, with the component id as a
-  declared subject.
+- **Refused at the declaring slot:** an unregistered slot renders
+  `UNSUPPORTED_COMPONENT`, by name, with the component id as a declared
+  subject. `surfaceSupportsRuntimeIntent` separately requires a registered slot
+  that owns the requested mutation intent; unrelated failed slots do not take
+  part in that decision.
 - **Refused at execution:** the operation catalog carries the draft predicate;
   the PostgreSQL interpreter evaluates create candidate plus update prior and
   projected images, including the inherited parent check for line mutations.
@@ -225,11 +244,9 @@ rule without new language:
   no update form at the direct URL when the current image refuses.
 
 **The honest limit.** There is **no static gate binding "every declared slot has
-a registered renderer."** The conformance checker reads compiled definitions and
-has no view of the web registry; the registry's slot keys are not exported. Such
-a gate would need `apps/web/src/component-registry.ts`. The round-1 bridge edits
-that registry only to make transaction update affordances predicate-aware; it
-does not build the cross-registry static gate. **This is the residual, and it is
-the shape of the original defect:** what this ADR fixes is observed per surface,
-and what would prevent the next instance is not yet mechanized. It is filed as
-future work rather than left implicit.
+a registered renderer."** The conformance checker reads compiled definitions
+and has no view of the web registry. That absence no longer makes an unrelated
+write inert, but it still produces a visibly failed slot. The browser control
+therefore composes a form with registered `sections` and `commandBar` plus an
+unregistered `activity`, observes the failed slot, and observes the create
+complete. A real `activity` or `childTables` renderer remains future work.

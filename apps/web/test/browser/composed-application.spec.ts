@@ -1569,7 +1569,8 @@ async function repairedFormAnatomyJourney(
       'not-a-uuid',
     ),
     'TXN-SCOPE-MALFORMED',
-    'OPERATION_UNAVAILABLE',
+    'OPERATION_REFUSED',
+    'MODULE_INPUT_MALFORMED',
   );
 }
 
@@ -1761,7 +1762,8 @@ async function expectScopedInventoryCreateRefusal(
   scopeParameterId: string,
   action: string,
   transactionNumber: string,
-  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'OPERATION_UNAVAILABLE',
+  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'OPERATION_REFUSED',
+  refusalCode?: string,
 ): Promise<void> {
   await page.goto(
     scopedSurfaceUrl(
@@ -1785,6 +1787,11 @@ async function expectScopedInventoryCreateRefusal(
   await expect(
     page.locator(`[data-diagnostic-code="${diagnosticCode}"]`),
   ).toHaveCount(1);
+  if (refusalCode !== undefined) {
+    await expect(page.locator('[data-message-subject]')).toHaveText(
+      refusalCode,
+    );
+  }
 }
 
 const inventoryFormHeadings = Object.freeze({
@@ -1931,7 +1938,10 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     },
   });
   expect(refusedRewind.status()).toBe(422);
-  expect(await refusedRewind.text()).toContain('OPERATION_UNAVAILABLE');
+  const refusedRewindHtml = await refusedRewind.text();
+  expect(refusedRewindHtml).toContain('OPERATION_REFUSED');
+  expect(refusedRewindHtml).toContain('MODULE_OPERATION_PRECONDITION_REFUSED');
+  expect(refusedRewindHtml).not.toContain('OPERATION_UNAVAILABLE');
 
   // One source effect remains one movement and one +3 on-hand delta. A rewind
   // followed by a second post would make these 2 and 11 respectively because

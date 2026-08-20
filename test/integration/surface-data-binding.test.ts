@@ -20,6 +20,7 @@ import {
   AuthenticatedRequestEntryAdapter,
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
+import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
@@ -336,7 +337,7 @@ test('compiler-valid collection queries fail closed on singular surfaces', async
   );
 
   assert.equal(result.statusCode, 422);
-  assert.match(result.html, /QUERY_UNSUPPORTED/);
+  assert.match(result.html, /INVALID_SURFACE_BINDING/);
   assert.equal(executor.queryCalls.length, 0);
 });
 
@@ -1472,12 +1473,10 @@ test('an inactive legal-entity refusal keeps its provider subject at the web bou
   const compiled = compileFixture();
   const policy = new RecordingPolicy('ALLOW');
   const legalEntityId = 'ae000000-0000-4000-8000-00000000000e';
-  const failure = Object.assign(
-    new Error('legal entity is not active for new work'),
-    {
-      code: 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE',
-      subjectId: legalEntityId,
-    },
+  const failure = new ModuleRuntimeInterpreterError(
+    'MODULE_LEGAL_ENTITY_CREATE_INACTIVE',
+    'legal entity is not active for new work',
+    legalEntityId,
   );
   const executor = new InMemoryGenericExecutor(failure);
   const scopeParameterId = `${FIXTURE_IDS.namespace}:parameter.master_get_legal_entity_scope`;
@@ -2889,11 +2888,11 @@ async function postIntent(
  * singular intents and asserted on the CODE rather than on a rendered page.
  *
  * The browser arm this supplements exercised `create` alone and observed a
- * page-level `QUERY_UNSUPPORTED`, so three holes stayed green: a per-intent
+ * page-level `INVALID_SURFACE_BINDING`, so three holes stayed green: a per-intent
  * exemption (`intent !== 'update' && bound > arity`), the same independently
  * for `archive` and `restore`, and a bare `throw` swapped in for
- * `invalidBinding(...)`. `QUERY_UNSUPPORTED` is what the runtime renders for
- * ANY unreadable binding, so it cannot tell those apart.
+ * `invalidBinding(...)`. `INVALID_SURFACE_BINDING` is what the runtime renders
+ * for any unreadable binding, so it cannot tell those apart.
  *
  * Each intent carries its admission twin, because a refusal control alone is
  * satisfiable by refusing everything (`review-tiers`, af44c6f).

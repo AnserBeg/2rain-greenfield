@@ -6,6 +6,7 @@ import {
   UntrustedIdentityInputError,
 } from '@north-star/runtime/request-context';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
+import { RequestRuntimeViewLoadError } from '@north-star/postgres-provider/request-runtime-view-service';
 
 import {
   renderApplicationDiagnostic,
@@ -92,6 +93,13 @@ async function handleRequest(
       );
       return;
     }
+    if (error instanceof RequestRuntimeViewLoadError) {
+      writeHtml(
+        response,
+        renderApplicationDiagnostic(500, runtimeViewRefusalMessage(error)),
+      );
+      return;
+    }
     writeHtml(
       response,
       renderApplicationDiagnostic(500, {
@@ -99,6 +107,13 @@ async function handleRequest(
       }),
     );
   }
+}
+
+export function runtimeViewRefusalMessage(error: RequestRuntimeViewLoadError) {
+  return {
+    code: 'REQUEST_RUNTIME_VIEW_REFUSED' as const,
+    subject: error.code,
+  };
 }
 
 async function readFormSubmission(

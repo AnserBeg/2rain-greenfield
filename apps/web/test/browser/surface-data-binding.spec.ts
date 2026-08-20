@@ -64,6 +64,10 @@ import {
   everyFieldKindModule,
 } from '../../../../test/fixtures/g2/module-conformance/field-kinds.js';
 import { createSurfaceRuntimeServer } from '../../src/app-server.js';
+import {
+  SURFACE_MESSAGE_CATALOG,
+  type SurfaceMessageCode,
+} from '../../src/message-catalog.js';
 
 const tenantId = 'a1000000-0000-4000-8000-000000000001';
 const environmentId = 'a2000000-0000-4000-8000-000000000002';
@@ -1393,7 +1397,15 @@ test('a provider refusal cannot be manufactured into browser success', async ({
   });
 
   assert.equal(response.status(), 422);
-  assert.doesNotMatch(await response.text(), /Create complete/);
+  const refusalHtml = await response.text();
+  assert.doesNotMatch(refusalHtml, /Create complete/);
+  await page.setContent(refusalHtml);
+  await expectCompleteMessage(page, {
+    code: 'OPERATION_REFUSED',
+    fullText:
+      'APPLICATION DIAGNOSTIC Operation refused The provider refused this operation for a reason this application cannot yet present in plain language. Give the refusal code to an administrator before trying this operation again. MODULE_REQUIRED_FIELD_MISSINGOPERATION_REFUSED',
+    subject: 'MODULE_REQUIRED_FIELD_MISSING',
+  });
   assert.deepEqual(executor.providerVerdicts.slice(before), [
     {
       accepted: false,
@@ -1469,7 +1481,7 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
   await expect(page.locator('body')).not.toContainText('storageClass');
 });
 
-test('compiler-valid one-slot Record surfaces retain fallback actions and feedback', async ({
+test('compiler-valid one-slot Record surfaces do not synthesize mutation controls', async ({
   page,
 }) => {
   const compiled = compileFixture(false);
@@ -1498,28 +1510,17 @@ test('compiler-valid one-slot Record surfaces retain fallback actions and feedba
     await expect(
       page.locator('[data-platform-slot="record:commandBar"]'),
     ).toHaveCount(0);
-    await page
-      .getByLabel('Name', { exact: true })
-      .fill('Legacy one-slot master');
-    await page.getByLabel('Number', { exact: true }).fill('LEGACY-001');
-    const before = executor.providerVerdicts.length;
-    await page.getByRole('button', { name: 'Save' }).click();
-    expect(executor.providerVerdicts.slice(before)).toEqual([
-      {
-        accepted: true,
-        code: null,
-        stage: 'operation-input',
-        subjectId: null,
-      },
-    ]);
-    await expect(page.getByRole('status')).toContainText('Create complete');
+    await expect(page.getByRole('button', { name: 'Save' })).toHaveCount(0);
+
+    const recordId = executor.createSeed('Legacy one-slot master');
 
     await page
       .getByRole('navigation', { name: 'Release navigation' })
       .getByRole('link', { name: 'master', exact: true })
       .click();
-    const row = page.locator('tr', { hasText: 'Legacy one-slot master' });
-    await row.getByRole('link').click();
+    await page.goto(
+      `${legacyBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}&record=${encodeURIComponent(recordId)}`,
+    );
     await expect(
       page.locator('[data-platform-slot="record:keyFacts"]'),
     ).toBeVisible();
@@ -1655,15 +1656,77 @@ test('an empty data slot is observably distinct from a failed slot', async ({
   }
 });
 
-test('an invalid selected-surface binding remains page-level before slot composition', async ({
+test('an unsupported non-mutation slot stays visible without vetoing a write', async ({
   page,
 }) => {
-  const compiled = compileFixture(true, true);
+  const compiled = compileFixture(true, false, undefined, false, true);
   const policy = allowPolicy();
-  const invalidExecutor = new BrowserFixtureExecutor(null);
+  const slotExecutor = new BrowserFixtureExecutor(null);
   const operationMediation = new SemanticOperationMediationAuthority();
-  const invalidServer = createSurfaceRuntimeServer(
+  const slotServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        slotExecutor,
+        operationMediation,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, slotExecutor),
+    },
+  );
+  const slotBaseUrl = await listen(slotServer);
+
+  try {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    await page.goto(
+      `${slotBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+    );
+    const activity = page.locator(
+      '[data-platform-slot="record:activity"][data-slot-state="failed"]',
+    );
+    await expect(
+      activity.locator('[data-message="UNSUPPORTED_COMPONENT"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator(
+        '[data-platform-slot="record:sections"][data-slot-state="ready"]',
+      ),
+    ).toBeVisible();
+    await expect(
+      page.locator(
+        '[data-platform-slot="record:commandBar"][data-slot-state="ready"]',
+      ),
+    ).toBeVisible();
+
+    await page.getByLabel('Name', { exact: true }).fill('Slot-local refusal');
+    await page.getByLabel('Number', { exact: true }).fill('SLOT-001');
+    const before = slotExecutor.providerVerdicts.length;
+    await page.getByRole('button', { name: 'Save' }).click();
+    expect(slotExecutor.providerVerdicts.slice(before)).toEqual([
+      {
+        accepted: true,
+        code: null,
+        stage: 'operation-input',
+        subjectId: null,
+      },
+    ]);
+    await expect(page.getByRole('status')).toContainText('Create complete');
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      slotServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test('invalid binding, unsupported query, and unavailable runtime view remain distinct', async ({
+  page,
+}) => {
+  const policy = allowPolicy();
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const invalidExecutor = new BrowserFixtureExecutor(null);
+  const invalidServer = createSurfaceRuntimeServer(
+    runtimeEntry(compileFixture(true, true), policy),
     {
       operationGateway: new SemanticOperationGateway(
         policy,
@@ -1674,24 +1737,85 @@ test('an invalid selected-surface binding remains page-level before slot composi
       queryGateway: new SemanticQueryGateway(policy, invalidExecutor),
     },
   );
-  const invalidBaseUrl = await listen(invalidServer);
+  const unsupportedExecutor = new BrowserFixtureExecutor(null, 'unsupported');
+  const unsupportedRecordId = unsupportedExecutor.createSeed(
+    'Unsupported query target',
+  );
+  const unsupportedServer = createSurfaceRuntimeServer(
+    runtimeEntry(compileFixture(), policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        unsupportedExecutor,
+        operationMediation,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, unsupportedExecutor),
+    },
+  );
+  const unavailableServer = createSurfaceRuntimeServer(
+    new AuthenticatedRequestRuntimeEntryAdapter(
+      new AuthenticatedRequestEntryAdapter(async () => ({
+        environmentId,
+        principalId,
+        tenantId,
+      })),
+      {
+        async load(): Promise<never> {
+          throw new Error('runtime view unavailable');
+        },
+      },
+      policy,
+    ),
+  );
+  const invalidUrl = await listen(invalidServer);
+  const unsupportedUrl = await listen(unsupportedServer);
+  const unavailableUrl = await listen(unavailableServer);
 
   try {
     await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
-    const response = await page.goto(
-      `${invalidBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+    const invalidResponse = await page.goto(
+      `${invalidUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
     );
-    expect(response?.status()).toBe(422);
-    await expect(
-      page.locator(
-        '.standalone__card[role="alert"][data-diagnostic-code="QUERY_UNSUPPORTED"]',
-      ),
-    ).toBeVisible();
-    await expect(page.locator('[data-platform-slot]')).toHaveCount(0);
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      invalidServer.close((error) => (error ? reject(error) : resolve()));
+    expect(invalidResponse?.status()).toBe(422);
+    const invalidCode = await expectCompleteMessage(page, {
+      code: 'INVALID_SURFACE_BINDING',
+      fullText:
+        'PINNED RELEASE DIAGNOSTIC Surface binding unreadable The selected surface does not have a valid pinned semantic binding. INVALID_SURFACE_BINDING Release d4000000…0004 · fence 1',
     });
+    await expect(page.locator('[data-platform-slot]')).toHaveCount(0);
+
+    const unsupportedResponse = await page.goto(
+      `${unsupportedUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}&record=${encodeURIComponent(unsupportedRecordId)}`,
+    );
+    expect(unsupportedResponse?.status()).toBe(200);
+    const unsupportedCode = await expectCompleteMessage(page, {
+      code: 'QUERY_UNSUPPORTED',
+      fullText:
+        '! RELEASE DIAGNOSTIC Capability unavailable The pinned release does not provide this semantic data capability. QUERY_UNSUPPORTED',
+    });
+
+    const unavailableResponse = await page.goto(unavailableUrl);
+    expect(unavailableResponse?.status()).toBe(500);
+    const unavailableCode = await expectCompleteMessage(page, {
+      code: 'REQUEST_RUNTIME_VIEW_UNAVAILABLE',
+      fullText:
+        'APPLICATION DIAGNOSTIC Application shell unavailable The request could not construct its pinned runtime view. REQUEST_RUNTIME_VIEW_UNAVAILABLE',
+    });
+
+    expect(new Set([invalidCode, unsupportedCode, unavailableCode]).size).toBe(
+      3,
+    );
+  } finally {
+    for (const target of [
+      invalidServer,
+      unsupportedServer,
+      unavailableServer,
+    ]) {
+      await new Promise<void>((resolve, reject) => {
+        target.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   }
 });
 
@@ -1840,9 +1964,7 @@ test('an intent rendered by one control still refuses a second operation by name
     );
     expect(response?.status()).toBe(422);
     await expect(
-      page.locator(
-        '.standalone__card[role="alert"][data-diagnostic-code="QUERY_UNSUPPORTED"]',
-      ),
+      page.locator('[data-message="INVALID_SURFACE_BINDING"]'),
     ).toBeVisible();
   } finally {
     await new Promise<void>((resolve, reject) => {
@@ -1984,7 +2106,10 @@ class BrowserFixtureExecutor
    * refuses. There is no ignore-refusal mode: adding one would make the two
    * states expressible again and recreate the false green this packet removes.
    */
-  constructor(private readonly failedQueryId: string | null) {}
+  constructor(
+    private readonly failedQueryId: string | null,
+    private readonly forcedQueryOutcome: 'unsupported' | null = null,
+  ) {}
 
   /**
    * What the REAL provider decided about each operation input it was handed.
@@ -2096,6 +2221,16 @@ class BrowserFixtureExecutor
     if ('arguments' in request) {
       if (request.definition.queryId === this.failedQueryId) {
         throw new Error('intentional slot data failure');
+      }
+      if (this.forcedQueryOutcome === 'unsupported') {
+        return {
+          kind: 'semanticQueryResult',
+          outcome: 'unsupported',
+          queryId: request.definition.queryId,
+          records: [],
+          schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+          unsupportedReason: 'fixture runtime does not support this query',
+        };
       }
       const args = recordValue(request.arguments);
       const records =
@@ -2449,6 +2584,7 @@ function compileFixture(
   withInvalidFormBinding = false,
   amend?: (authored: Record<string, unknown>) => void,
   includeRecordSections = false,
+  includeUnsupportedActivity = false,
 ): CompileSuccess {
   const authored = ordinaryModuleV1();
   exposeRequiredMasterNumber(authored);
@@ -2478,6 +2614,22 @@ function compileFixture(
         slotId: `${surfaceId.replace(':surface.', ':slot.')}_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
       }));
     }
+  }
+  if (includeUnsupportedActivity) {
+    const form = surfaces.find(
+      (surface) =>
+        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_form`,
+    );
+    assert.ok(form);
+    const slots = form.slots as Array<Record<string, unknown>>;
+    const exemplar = slots[0];
+    assert.ok(exemplar);
+    slots.push({
+      ...exemplar,
+      orderKey: 50,
+      slot: 'activity',
+      slotId: `${FIXTURE_IDS.namespace}:slot.master_form_activity`,
+    });
   }
   if (withInvalidFormBinding) {
     const form = surfaces.find(
@@ -2515,6 +2667,7 @@ function compileEveryFieldKindFixture(
 ): CompileSuccess {
   const authored = everyFieldKindModule();
   exposeRequiredMasterNumber(authored);
+  declareFixtureFormAnatomy(authored);
   const normalized = normalizeApplicationPackage(authored);
   const result = compileApplication({
     dependencies: [],
@@ -2533,6 +2686,26 @@ function compileEveryFieldKindFixture(
   });
   assert.equal(result.status, 'compiled');
   return result as CompileSuccess;
+}
+
+function declareFixtureFormAnatomy(authored: Record<string, unknown>): void {
+  const surfaces = authored.surfaces as Array<Record<string, unknown>>;
+  for (const surface of surfaces.filter((candidate) =>
+    String(candidate.surfaceId).endsWith('_form'),
+  )) {
+    const surfaceId = String(surface.surfaceId);
+    const slots = surface.slots as Array<Record<string, unknown>>;
+    const exemplar = slots[0];
+    assert.ok(exemplar);
+    surface.slots = ['breadcrumb', 'titleStatus', 'commandBar', 'sections'].map(
+      (slot, index) => ({
+        ...exemplar,
+        orderKey: (index + 1) * 10,
+        slot,
+        slotId: `${surfaceId.replace(':surface.', ':slot.')}_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
+      }),
+    );
+  }
 }
 
 async function listen(target: Server): Promise<string> {
@@ -2564,6 +2737,58 @@ async function expectClosedSlotStates(page: Page): Promise<void> {
       ['pending', 'ready', 'empty', 'failed'].includes(state ?? ''),
     ),
   ).toBe(true);
+}
+
+interface CompleteMessageExpectation {
+  readonly code: SurfaceMessageCode;
+  readonly fullText: string;
+  readonly subject?: string;
+}
+
+async function expectCompleteMessage(
+  page: Page,
+  expected: CompleteMessageExpectation,
+): Promise<string> {
+  const messages = page.locator('[data-message]');
+  await expect(messages).toHaveCount(1);
+  const message = messages.first();
+  const catalog = SURFACE_MESSAGE_CATALOG[expected.code];
+  await expect(message).toBeVisible();
+  await expect(message).toHaveAttribute('data-message', expected.code);
+  await expect(message).toHaveAttribute('data-diagnostic-code', expected.code);
+  await expect(message).toHaveAttribute(
+    'data-status-role',
+    catalog.consequence === 'blocking' ? 'blocked' : 'attention',
+  );
+  await expect(message.locator('[data-message-sentence]')).toHaveText(
+    catalog.sentence,
+  );
+  await expect(message.locator('[data-message-detail]')).toHaveText(
+    catalog.detail,
+  );
+  const nextAction = message.locator('[data-message-next-action]');
+  if (catalog.nextAction === null) {
+    await expect(nextAction).toHaveCount(0);
+  } else {
+    await expect(nextAction).toHaveText(catalog.nextAction);
+  }
+  const subject = message.locator('[data-message-subject]');
+  if (expected.subject === undefined) {
+    await expect(subject).toHaveCount(0);
+  } else {
+    await expect(subject).toHaveText(expected.subject);
+  }
+  await expect(message.locator('[data-message-code]')).toHaveText(
+    expected.code,
+  );
+  expect(normalizeVisibleText(await message.innerText())).toBe(
+    expected.fullText,
+  );
+  return (await message.getAttribute('data-message')) ?? '';
+}
+
+function normalizeVisibleText(value: string): string {
+  return value.replaceAll(/\s+/gu, ' ').trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

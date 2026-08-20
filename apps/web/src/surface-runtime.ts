@@ -28,7 +28,7 @@ import {
 import { DESIGN_TOKENS } from './design-tokens.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
-  operationMessageCode,
+  operationMessageRef,
   queryMessageCode,
 } from './gateway-error-codes.js';
 import type { OperationDiagnosticCode } from './message-catalog.js';
@@ -120,14 +120,8 @@ export async function renderSurfaceRuntimeWithData(
   try {
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
   } catch {
-    // The code is inaccurate and stays that way here on purpose: the throw is a
-    // SurfaceProjectionError('INVALID_SURFACE_BINDING'), so this site names a
-    // missing capability for what is really an unreadable binding. Correcting
-    // it moves a `data-diagnostic-code` this packet is fenced from moving; it
-    // is reported as a finding and INVALID_SURFACE_BINDING is declared
-    // unreachable in the gate rather than silently absent.
     return Object.freeze({
-      html: diagnosticDocument(view, { code: 'QUERY_UNSUPPORTED' }),
+      html: diagnosticDocument(view, { code: 'INVALID_SURFACE_BINDING' }),
       statusCode: 422,
     });
   }
@@ -372,26 +366,6 @@ export async function submitSurfaceRuntimeIntent(
     Object.freeze({}),
     binding.relationInputs,
   );
-}
-
-function operationMessageRef(error: unknown): SurfaceMessageRef {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE' &&
-    'subjectId' in error &&
-    typeof error.subjectId === 'string'
-  ) {
-    return {
-      code: 'OPERATION_LEGAL_ENTITY_INACTIVE',
-      subject: error.subjectId,
-    };
-  }
-  const code = operationMessageCode(error);
-  return code === 'OPERATION_LEGAL_ENTITY_INACTIVE'
-    ? { code: 'OPERATION_UNAVAILABLE' }
-    : { code };
 }
 
 function renderSelectedSurface(
@@ -1151,7 +1125,10 @@ export function semanticOperationRequestFor(
 }
 
 function operationDiagnostic(
-  code: Exclude<OperationDiagnosticCode, 'OPERATION_LEGAL_ENTITY_INACTIVE'>,
+  code: Exclude<
+    OperationDiagnosticCode,
+    'OPERATION_LEGAL_ENTITY_INACTIVE' | 'OPERATION_REFUSED'
+  >,
   statusCode: number,
 ): SurfaceRuntimeResponse {
   return renderApplicationDiagnostic(statusCode, { code });
