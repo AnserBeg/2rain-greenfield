@@ -101,7 +101,10 @@ reverted.
 | Runtime entry preserves an identified loader refusal | Re-threw the recognized provider error instead of translating it to `RequestRuntimeViewRefusalError` | `test:contracts` 20/21; `ACTIVE_POINTER_MISSING` rendered `REQUEST_RUNTIME_VIEW_UNAVAILABLE` where the HTTP census required `REQUEST_RUNTIME_VIEW_REFUSED` |
 | Translation is confined to the loader call | Applied the same translation around `unitOfWork(view)` | `test:contracts` 20/21; the untouched-failure control received `RequestRuntimeViewRefusalError` instead of the exact original `RequestRuntimeViewLoadError` object |
 | Translation preserves synchronous evaluation and immediate rejection precedence | Made only `startRuntimeDefinitionLoad` `async` and awaited the loader | `test:contracts` 21/24; the synchronous-loader control observed one policy call instead of zero, the immediate dual rejection returned the policy error, and synchronous near-miss loaders also called policy |
+| Synchronous policy evaluation is not deferred behind an already-rejected loader | Wrapped only `readCurrentVersion(subject)` in `Promise.resolve().then(...)` | `test:contracts` 28/29; `a synchronous policy throw wins before an already-rejected loader is joined` received translated loader code `ACTIVE_RELEASE_NOT_VISIBLE` instead of the exact raw policy error `ACTIVE_RELEASE_NOT_ADMITTED` |
+| Either pending input settles the join without waiting for its sibling | Replaced only the two-input join with `Promise.allSettled`, still preferring the loader when both reject | `test:contracts` 27/29; both controlled first-rejection specimens remained `pending` across the observed event-loop turn while their sibling stayed unresolved |
 | A provider-shaped policy failure is outside loader translation | Sent only the policy rejection handler through `runtimeDefinitionFailure` | `test:contracts` 23/24; `runtime entry translation is confined to loader failures` received `RequestRuntimeViewRefusalError` instead of the exact policy error object; the unit-of-work arm remained green |
+| An asynchronously rejected unit of work remains outside loader translation | Invoked `unitOfWork(view)` before a `try`, then translated only rejection from awaiting its returned promise | `test:contracts` 27/29; the adapter identity control received `RequestRuntimeViewRefusalError`, and the loopback response rendered `REQUEST_RUNTIME_VIEW_REFUSED` instead of `REQUEST_RUNTIME_VIEW_UNAVAILABLE` |
 | Only real `Error` instances can carry the provider refusal shape | Replaced only the `instanceof Error` predicate with a structural non-null-object predicate | `test:contracts` 23/24; the plain-object specimen was translated instead of remaining the exact original object and rendering the unavailable fallback |
 | The provider refusal name must be exact | Deleted only the exact-name predicate | `test:contracts` 23/24; the wrong-name `Error` specimen was translated instead of remaining the exact original object and rendering the unavailable fallback |
 | A string code must belong to the runtime-owned closed map | Deleted only the `Object.hasOwn` membership predicate | `test:contracts` 23/24; the unknown-string specimen was translated instead of remaining the exact original object and rendering the unavailable fallback. Missing and numeric code specimens are committed adjacent one-property controls. |
@@ -231,6 +234,27 @@ After reverting every recorded mutant, the corrected executable tree passed:
 production correction after that review is the bounded runtime entry seam in
 `packages/runtime/src/request-runtime-view.ts`. The full matrix remains deferred
 until the corrected Critical reviews converge.
+
+### Evidence-only correction gates — `b852ffc05482d0ea710881e417e08ac9869d8611`
+
+Production is byte-identical to `fa4139e96fec14602bdafa1e7aa0dab043e50273`.
+The only executable correction is
+`apps/web/test/surface-runtime-contract.test.ts`, which passed:
+
+- `pnpm typecheck`: green;
+- `pnpm lint`: green;
+- `pnpm format`: green; and
+- `pnpm --filter @north-star/web test:contracts`: 29/29 green.
+
+The reviewer-selected mutants were then applied separately and immediately
+reverted. Deferred policy invocation produced 28/29, with only the synchronous
+policy specimen red. The `Promise.allSettled` join produced 27/29, with both
+pending first-rejection specimens still pending while their siblings were held.
+Translating an awaited unit-of-work rejection produced 27/29, with the exact
+adapter identity and loopback unavailable diagnostic both red. A final restored
+run returned 29/29. Browser, integration and architecture were not rerun because
+their production inputs are unchanged; the full matrix remains deferred until
+fresh Critical review converges.
 
 ### Live composed-application observation
 
@@ -400,3 +424,29 @@ The contract and real browser write journey now each enumerate `activity` and
 amendment is explicitly proposed pending packet acceptance, and the active-plan
 row is Critical. No `packages/postgres-provider/**` byte changed and the runtime
 seam design remains unchanged.
+
+### Second runtime-translation review — `347685c570ed3c9fe9cf875e649698333006cbf7`
+
+Fresh Codex xhigh returned `REVISE` with no production or architecture finding.
+The corrected runtime join preserves the base evaluation and settlement
+semantics, the five structural near misses are discriminating, both vocabulary
+drift directions fail typecheck, and both unsupported non-mutation slots remain
+locally failed without vetoing a write.
+
+Three evidence gaps remained. The committed controls did not execute a
+synchronous policy throw after an already-rejected loader, either first pending
+rejection while its sibling remained unresolved, or an asynchronously rejected
+unit of work. Consequently, a deferred policy invocation, an `allSettled` join
+that waited for both inputs before preferring the loader, and a catch around the
+awaited unit-of-work result were cheap broken implementations that remained
+green. The packet's statement that all original ordering cases were committed
+therefore exceeded its measurements.
+
+The correction is test- and record-only. Controlled promises now reject policy
+and loader first in separate specimens, keep the sibling pending across an
+event-loop turn, and require the adapter result to have settled before releasing
+that sibling. A synchronous policy specimen starts from an already-rejected
+loader and requires the exact raw policy error. The asynchronous unit-of-work
+twin requires exact object identity at the adapter and the generic unavailable
+diagnostic through a loopback HTTP server. Production remains byte-identical to
+`fa4139e96fec14602bdafa1e7aa0dab043e50273`.
