@@ -501,6 +501,66 @@ test('consolidated guard admission: completed values own direct literal-token bo
   }
 });
 
+test('consolidated guard red: type-literal ownership is unchanged by an empty runtime concatenation', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'export const direct =',
+      "  'ordinary' satisfies 'ordinary' | 'northstar.widget';",
+      'export const constructed =',
+      "  ('ordinary' satisfies 'ordinary' | 'northstar.widget') + '';",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    const expectedViolation: ModulePressLawViolation = {
+      file: 'apps/api/src/generic.ts',
+      line: 2,
+      message: 'generic press references widget identity northstar.widget',
+      moduleDirectory: 'widget',
+      ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    };
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      expectedViolation,
+      { ...expectedViolation, line: 4 },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard red: runtime construction and independent type literal retain separate ownership', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'export const value =',
+      "  ('northstar.widget:capability.runtime' satisfies",
+      "    string | 'northstar.widget:capability.type') +",
+      "  '';",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    const expectedViolation: ModulePressLawViolation = {
+      file: 'apps/api/src/generic.ts',
+      line: 2,
+      message: 'generic press references widget identity northstar.widget',
+      moduleDirectory: 'widget',
+      ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    };
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      expectedViolation,
+      { ...expectedViolation, line: 3 },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard admission: a static prefix beneath a dynamic outer construction is not a completed value', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [

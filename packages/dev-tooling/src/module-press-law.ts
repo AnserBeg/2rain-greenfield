@@ -436,7 +436,7 @@ function staticallyConstructedStrings(
         constructions.push({
           index: node.getStart(sourceFile),
           leftBoundaryKnown: true,
-          literalRanges: staticStringLiteralRanges(node, sourceFile),
+          literalRanges: runtimeStringLiteralRanges(node, sourceFile),
           rightBoundaryKnown: true,
           value,
         });
@@ -527,7 +527,7 @@ function staticallyKnownStringRuns(
     if (ts.isStringLiteralLike(unwrapped)) {
       appendStatic(
         unwrapped.text,
-        staticStringLiteralRanges(unwrapped, sourceFile),
+        runtimeStringLiteralRanges(unwrapped, sourceFile),
         unwrapped.getStart(sourceFile),
       );
       return;
@@ -634,25 +634,39 @@ function unwrapStaticStringExpression(node: ts.Expression): ts.Expression {
   return expression;
 }
 
-function staticStringLiteralRanges(
+function runtimeStringLiteralRanges(
   node: ts.Expression,
   sourceFile: ts.SourceFile,
 ): readonly SourceRange[] {
   const ranges: SourceRange[] = [];
-  const visit = (current: ts.Node): void => {
-    if (
-      ts.isStringLiteralLike(current) ||
-      current.kind === ts.SyntaxKind.TemplateHead ||
-      current.kind === ts.SyntaxKind.TemplateMiddle ||
-      current.kind === ts.SyntaxKind.TemplateTail
-    ) {
-      ranges.push({
-        end: current.getEnd(),
-        start: current.getStart(sourceFile),
-      });
+  // Mirror evaluateStaticString's runtime-expression grammar. Type children of
+  // wrappers are source occurrences, not tokens owned by the runtime value.
+  const append = (current: ts.Node): void => {
+    ranges.push(sourceRange(current, sourceFile));
+  };
+  const visit = (current: ts.Expression): void => {
+    if (ts.isStringLiteralLike(current)) {
+      append(current);
       return;
     }
-    ts.forEachChild(current, visit);
+
+    const expression = unwrapStaticStringExpression(current);
+    if (expression !== current) {
+      visit(expression);
+      return;
+    }
+    if (ts.isTemplateExpression(expression)) {
+      append(expression.head);
+      for (const span of expression.templateSpans) {
+        visit(span.expression);
+        append(span.literal);
+      }
+      return;
+    }
+    if (isStringConcatenation(expression)) {
+      visit(expression.left);
+      visit(expression.right);
+    }
   };
   visit(node);
   return ranges;
