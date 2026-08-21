@@ -353,6 +353,28 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
     shape: { kind: 'text', maximumLength: 80 },
   },
 ] as const satisfies readonly InventoryMovementModuleFieldRule[]);
+const POSTED_STOCK_BALANCE_MODULE_FIELD_RULES = Object.freeze([
+  {
+    fieldLocalId: 'posted_stock_balance_item_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'posted_stock_balance_location_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'posted_stock_balance_posted_quantity',
+    presence: 'required',
+    shape: { kind: 'decimal', precision: 38, scale: 18 },
+  },
+  {
+    fieldLocalId: 'posted_stock_balance_unit_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 32 },
+  },
+] as const satisfies readonly InventoryMovementModuleFieldRule[]);
 const STOCK_COUNT_MODULE_FIELD_RULES = Object.freeze([
   {
     fieldLocalId: 'stock_count_number',
@@ -645,10 +667,12 @@ export function resolvePinnedInventoryFactStorage(
 }
 
 /**
- * Resolves the compiler's pinned provider-written contract. No authored key
- * participates: an entity earns the classification only by matching a pinned
- * canonical family rule with a named maintainer. This mirrors fact storage so
- * the family survives composition under the application package identity.
+ * Resolves the compiler's pinned provider-written candidate rule. No authored
+ * key participates, and packageId is deliberately not an authority because
+ * composition rewrites the containing package identity. Module conformance
+ * separately proves the maintainer's exact field ABI before this rule earns
+ * the CRUD/Form exemption. This mirrors fact storage's resolver-plus-shape
+ * validation split while preserving canonical family identity in composition.
  */
 export function resolvePinnedInventoryProviderWrittenReadModel(
   _packageId: string,
@@ -898,6 +922,103 @@ function validatePinnedInventoryMovementEntity(
       ),
     );
   }
+}
+
+/**
+ * Proves the storage ABI named by the pinned PostgreSQL maintainer before the
+ * provider-written classification may omit authored CRUD and Form. The exact
+ * field set is intentional: an extra required field would be just as orphaned
+ * as a missing one because the provider never authors a value for it.
+ */
+function validatePinnedPostedStockBalanceEntity(
+  packageRevision: NormalizedApplicationPackage,
+  entityId: string,
+  diagnostics: CompilerDiagnostic[],
+): boolean {
+  const diagnosticCount = diagnostics.length;
+  const expected = new Map<string, InventoryMovementModuleFieldRule>(
+    POSTED_STOCK_BALANCE_MODULE_FIELD_RULES.map((rule) => [
+      rule.fieldLocalId,
+      rule,
+    ]),
+  );
+  const observed = new Set<string>();
+  for (const field of packageRevision.fields.filter(
+    (candidate) => candidate.entity.targetId === entityId,
+  )) {
+    const localId = canonicalFieldLocalId(field.fieldId);
+    const rule = localId ? expected.get(localId) : undefined;
+    if (!rule) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.fields.${localId ?? field.fieldId}`,
+          field.fieldId,
+        ),
+      );
+      continue;
+    }
+    observed.add(rule.fieldLocalId);
+    if (
+      !inventoryMovementFieldShapeMatches(
+        field,
+        rule,
+        packageRevision.package.namespace,
+      )
+    ) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.fields.${rule.fieldLocalId}`,
+          field.fieldId,
+        ),
+      );
+    }
+  }
+  for (const rule of POSTED_STOCK_BALANCE_MODULE_FIELD_RULES) {
+    if (observed.has(rule.fieldLocalId)) continue;
+    diagnostics.push(
+      inventoryModuleDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        `$.fields.${rule.fieldLocalId}`,
+        `${packageRevision.package.namespace}:field.${rule.fieldLocalId}`,
+      ),
+    );
+  }
+  const movementEntities = packageRevision.entities.filter(
+    (candidate) =>
+      candidate.lifecycle === 'active' &&
+      canonicalFamilyId(candidate.entityId) === 'inventory_movement',
+  );
+  if (movementEntities.length !== 1) {
+    diagnostics.push(
+      inventoryModuleDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.entities.inventory_movement',
+        `${packageRevision.package.namespace}:entity.inventory_movement`,
+      ),
+    );
+  }
+  return diagnostics.length === diagnosticCount;
+}
+
+function operationTargetsEntity(
+  packageRevision: NormalizedApplicationPackage,
+  operation: NormalizedApplicationPackage['operations'][number],
+  entityId: string,
+): boolean {
+  if ('entity' in operation.effect) {
+    return operation.effect.entity.targetId === entityId;
+  }
+  if (operation.effect.kind !== 'transitionStateEffect') return false;
+  const transitionId = operation.effect.transition.targetId;
+  return packageRevision.stateMachines.some(
+    (machine) =>
+      machine.entity.targetId === entityId &&
+      machine.transitions.some(
+        (transition) => transition.transitionId === transitionId,
+      ),
+  );
 }
 
 function validatePinnedInventoryCountEntity(
@@ -1164,6 +1285,7 @@ export function validateModuleConformance(
       mapping,
     ]),
   );
+  const qualifiedProviderWrittenReadModels = new Set<string>();
 
   for (const entity of packageRevision.entities) {
     const family = resolvePinnedLegalEntityFamily(
@@ -1174,14 +1296,18 @@ export function validateModuleConformance(
       continue;
     }
     if (
-      ['inventory_movement', 'stock_count', 'stock_count_line'].includes(
-        family.familyId,
-      ) &&
+      [
+        'inventory_movement',
+        'posted_stock_balance',
+        'stock_count',
+        'stock_count_line',
+      ].includes(family.familyId) &&
       entity.lifecycle !== 'active'
     ) {
       diagnostics.push(
         inventoryModuleDiagnostic(
-          family.familyId === 'inventory_movement'
+          family.familyId === 'inventory_movement' ||
+            family.familyId === 'posted_stock_balance'
             ? 'INVENTORY_CONTRACT_INVALID'
             : 'INVENTORY_COUNT_EVIDENCE_INVALID',
           `$.entities.${family.familyId}.lifecycle`,
@@ -1195,6 +1321,17 @@ export function validateModuleConformance(
         entity.entityId,
         diagnostics,
       );
+    } else if (family.familyId === 'posted_stock_balance') {
+      if (
+        entity.lifecycle === 'active' &&
+        validatePinnedPostedStockBalanceEntity(
+          packageRevision,
+          entity.entityId,
+          diagnostics,
+        )
+      ) {
+        qualifiedProviderWrittenReadModels.add(entity.entityId);
+      }
     } else if (family.familyId === 'stock_count') {
       validatePinnedInventoryCountEntity(
         packageRevision,
@@ -1435,11 +1572,16 @@ export function validateModuleConformance(
       packageRevision.package.packageId,
       entity.entityId,
     );
-    const providerWrittenReadModel =
+    const providerWrittenReadModelRule =
       resolvePinnedInventoryProviderWrittenReadModel(
         packageRevision.package.packageId,
         entity.entityId,
       );
+    const providerWrittenReadModel =
+      providerWrittenReadModelRule &&
+      qualifiedProviderWrittenReadModels.has(entity.entityId)
+        ? providerWrittenReadModelRule
+        : null;
     const periodLockStorage = resolvePinnedInventoryPeriodLockStorage(
       entity.entityId,
     );
@@ -1483,6 +1625,11 @@ export function validateModuleConformance(
     const operationEffects = new Set(
       entityOperations.map((operation) => operation.effect.kind),
     );
+    const authoredEntityOperations = providerWrittenReadModelRule
+      ? packageRevision.operations.filter((operation) =>
+          operationTargetsEntity(packageRevision, operation, entity.entityId),
+        )
+      : [];
     if (factStorage?.mutability === 'appendOnly' && operationEffects.size > 0) {
       diagnostics.push(
         compilerDiagnostic(
@@ -1493,7 +1640,7 @@ export function validateModuleConformance(
         ),
       );
     }
-    if (providerWrittenReadModel && operationEffects.size > 0) {
+    if (providerWrittenReadModelRule && authoredEntityOperations.length > 0) {
       diagnostics.push(
         compilerDiagnostic(
           'COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED',
@@ -3553,7 +3700,7 @@ const INVENTORY_DIAGNOSTIC_RULES: Readonly<
   INVENTORY_CONFIGURATION_REQUIRED:
     'every required inventory posting dial declares its type and release-recorded default',
   INVENTORY_CONTRACT_INVALID:
-    'the inventory posting capability compiles only its frozen v1 declaration shape',
+    'the inventory capability compiles only its pinned declaration and provider ABI shapes',
   INVENTORY_COUNT_EVIDENCE_INVALID:
     'stock-count evidence preserves its reviewed session, line linkage, and expected, counted, and variance quantities as distinct facts',
   INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN:
@@ -3596,7 +3743,7 @@ function inventoryModuleDiagnostic(
   const acceptedAlternative: Readonly<Record<typeof code, string>> =
     Object.freeze({
       INVENTORY_CONTRACT_INVALID:
-        'make the compiled inventory movement entity match the pinned quantity-only movement declaration exactly',
+        'make the compiled Inventory family match its pinned contract shape exactly',
       INVENTORY_COUNT_EVIDENCE_INVALID:
         'declare the complete stock-count session and line evidence shape, including all three distinct quantity values and its posting links',
       INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN:

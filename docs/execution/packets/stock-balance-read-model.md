@@ -1,6 +1,6 @@
 # stock-balance-read-model — honest posted-stock browsing
 
-Status: evidence_ready; frozen Critical review candidate pending independent arms
+Status: active; Critical round-1 corrections implemented, replacement freeze pending
 
 Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b`
 
@@ -62,6 +62,17 @@ bounded to omitting CRUD/Form conformance. It imposed three conditions now met:
 No compiler lowering, projection shape, aggregate contract, language schema,
 posting service, or web renderer changed.
 
+Critical review round 1 then found two holes in how the classification was
+earned. The refusing twin reused the narrower active-`o0` direct-effect set used
+to prove ordinary CRUD, so an `o1` record effect or a transition effect could
+enter the emitted operation catalog without the promised refusal. The family
+resolver also granted CRUD/Form omission before proving the four fields the
+named PostgreSQL maintainer requires. Both findings were accepted and corrected
+inside the authorized classification: operation ownership now spans every
+authored tier and lifecycle and resolves transition ownership through its state
+machine, while the pinned rule remains only a candidate until the exact
+provider field ABI and its movement companion validate.
+
 ## Maintenance, rebuild, and reconciliation
 
 The PostgreSQL module materializer installs an `AFTER INSERT` movement trigger.
@@ -112,11 +123,11 @@ otherwise unchanged posted-stock definition fail with five exact
 `COMPILER_ENTITY_PROJECTION_MISSING` diagnostics:
 
 ```text
-$.operation.archive
-$.operation.create
-$.operation.restore
-$.operation.update
-$.surface.form
+$.conformance.operation.archive
+$.conformance.operation.create
+$.conformance.operation.restore
+$.conformance.operation.update
+$.conformance.surface.form
 ```
 
 Restoring that condition returned the focused compiler case to green. This is
@@ -132,9 +143,27 @@ $.operations.providerWritten
 subject: northstar.inventory:entity.posted_stock_balance
 ```
 
-The committed one-property contract controls also vary only the posted-stock
-entity label, family registration, or maintainer id and observe their exact
-diagnostic paths. An unpinned family resolves to `null`.
+Round 1 added three discriminating controls. Restoring the old active-`o0`
+direct-effect filter admitted the direct `o1` probe as `compiled`. Removing only
+the all-lifecycle arm separately admitted a retired `o0` probe as `compiled`.
+Removing only transition-to-machine ownership erased the named provider-written
+diagnostic from the transition probe. All are now refused at
+`$.operations.providerWritten`, independent of whether another conformance rule
+also rejects the specimen.
+
+The provider rule earns CRUD/Form omission only after the active reserved
+family carries exactly these required fields and types: item text(80), location
+text(80), posted quantity exact decimal(38,18), and unit text(32), with exactly
+one active movement companion. Renaming only the unit field while updating its
+references records both the missing pinned slot and the unmaintained replacement
+as `INVENTORY_CONTRACT_INVALID`, and records the returned
+`$.conformance.operation.create` requirement. Awarding the exemption before ABI
+qualification makes that last assertion red. Four one-property type mutations
+independently cover each provider field.
+
+The committed contract controls also vary only the posted-stock entity label,
+family registration, or maintainer id and observe their exact diagnostic paths.
+An unpinned family resolves to `null`.
 
 ### Real arithmetic and `5g3-stale` reaching sequence
 
@@ -221,12 +250,14 @@ control now compares historical entries by pinned roots, separately pins the
 new 174-scenario serving count, and the repository replay helper generated the
 new snapshot. A subsequent full run passed 204/204 before the browser found the
 UUID-version defect; the focused stock-count control and full-replay schema
-regeneration pass with that fix. The exact executable candidate then passed
+regeneration pass with that fix. The superseded round-1 executable candidate
+then passed
 `pnpm test:postgres` at
 `4b265c913bcda103c74f1320e249d20d810df1af`: 204/204, zero failures, in
-742046 ms. The freeze commit above that gate SHA changes only this narrative
-record and execution status; the executable diff is empty under the repository's
-identical-tree rule.
+742046 ms. Round 1 changed executable conformance and tests after that run, so
+the SHA is retained as history but carries no evidence forward to the
+replacement candidate. Replacement focused and required gate evidence follows
+after the correction converges.
 
 ## User-observable checkpoint
 
@@ -252,10 +283,13 @@ a draft does not create stock; a movement must be posted.
 
 ## Review state
 
-No review has run. Every required pre-freeze gate and the port-4174 checkpoint
-are green. Arm 1 is fresh-naive Codex at xhigh to PASS. Only then may independent
-Fable max confirm the identical freeze SHA. The full CI matrix remains
-deliberately deferred until both arms converge.
+Critical round 1 returned REVISE on frozen SHA
+`c781aafa09d1841732d6307416051e0960f0f879`. Its two findings are accepted and
+the corrections are implemented, but no independent review has read the
+replacement candidate. After its required gates are green, freeze a new SHA and
+restart arm 1 with fresh-naive Codex at xhigh. Only after PASS may independent
+Fable max confirm the identical new SHA. The full CI matrix remains deliberately
+deferred until both arms converge.
 
 ## Program-review trigger assessment
 

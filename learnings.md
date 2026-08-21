@@ -627,3 +627,14 @@ How to apply: provider-generated values must satisfy the canonical runtime
 contract, not merely the database type. Read a generated row back through the
 ordinary gateway and assert the exact canonical shape; rebuild must reproduce
 the same value.
+
+## A refusing twin must inspect the full emitted catalog
+Date: 2026-08-20
+Why: the provider-written refusal reused the narrower set built to prove required
+active `o0` CRUD. An `o1` record effect and a transition effect whose entity was
+resolved only during lowering therefore entered the operation catalog without
+the promised compile-time refusal.
+How to apply: derive refusing-twin ownership over every authored lifecycle and
+tier the compiler emits, resolving indirect carriers such as state-machine
+transitions. Keep the narrower admissibility set separate; it answers a different
+question. Prove each carrier with a mutant that removes only its ownership arm.

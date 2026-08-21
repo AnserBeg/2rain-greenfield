@@ -55,12 +55,16 @@ non-zero result.
 The pinned Inventory contract classifies this family as `providerWritten` and
 names its maintainer as
 `northstar.postgresql-module-provider:posted-stock-balance/v1`. Authors cannot
-set that classification: compiler conformance resolves the canonical family
-against the pinned Inventory contract, as it already does for append-only fact
-storage, including after composition under the application package identity.
-The classification omits generic CRUD and Form requirements, and its refusing
-twin rejects any authored operation on the family. An unpinned family earns
-nothing.
+set that classification: compiler conformance resolves a candidate canonical
+family against the pinned Inventory contract, as it already does for append-only
+fact storage, including after composition under the application package
+identity. The candidate earns generic CRUD and Form omission only after its
+active item, location, posted-quantity and unit fields match the named
+maintainer's exact IDs, required presence and storage types, and exactly one
+active movement companion is present. Its refusing twin examines every authored
+operation tier and lifecycle and resolves transition effects through their state
+machine, rather than reusing the narrower active-`o0` CRUD set. An unpinned or
+ABI-incompatible family earns nothing.
 
 The PostgreSQL provider installs an `AFTER INSERT` movement trigger after the
 existing reservation/generation trigger. In the same posting transaction it
@@ -138,9 +142,12 @@ stock count before the Posted stock list has a row to show.
 - Compiler controls pin the operationless entity, all three honest surface and
   entity labels, exactly-one legal-entity query scope, the resolved
   `providerWritten` classification and its named maintainer. Deleting the
-  resolved exemption makes CRUD/Form requirements red; adding one otherwise
-  valid authored operation hits the refusing twin. One-property label and
-  family-registration mutations also record the expected red.
+  resolved exemption makes CRUD/Form requirements red; direct `o0`, direct
+  `o1`, and transition-authored operations hit the refusing twin. Renaming one
+  provider field while updating its references loses the exemption and reports
+  the missing and unexpected ABI members; one-property type mutations cover all
+  four fields. One-property label and family-registration mutations also record
+  the expected red.
 - PostgreSQL controls post real quantities and assert the stored arithmetic,
   post a correction and assert the same row moves, destroy and rebuild the
   projection with the same canonical UUIDv4 identity, and corrupt one stored

@@ -191,11 +191,12 @@ all posted movements and never an as-of claim. One row remains selected legal
 entity × item × location; the five-parameter bitemporal lookup remains intact;
 maintenance, rebuild, and reconciliation reuse the existing generation lock.
 The existing List renderer is sufficient, so `apps/web/src` remains unchanged.
-The packet is `evidence_ready` on `packet/stock-balance-read-model`: every
-pre-freeze gate is green, including PostgreSQL 204/204 on executable SHA
-`4b265c913bcda103c74f1320e249d20d810df1af`. Fresh-naive Codex xhigh, then
-Fable max on the identical freeze SHA, and the post-review full matrix are still
-owed.
+Critical round 1 returned REVISE on `c781aaf`: the refusing twin ignored `o1`
+and transition-owned operations, and the reserved family earned CRUD/Form
+omission without proving the PostgreSQL maintainer's four-field ABI. Both
+findings are accepted and corrected on `packet/stock-balance-read-model`; the
+replacement pre-freeze gates and fresh Codex arm are active. Fable max on the
+identical replacement SHA and the post-review full matrix remain owed.
 
 #### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2
 

@@ -74,14 +74,36 @@ export function registerInventoryContractCases(
   register(
     'posted stock is an operationless legal-entity row model whose labels state its temporal limit',
     () => {
-      const definition = inventoryModuleDefinition() as {
+      const definition = inventoryModuleDefinition() as unknown as {
         entities: Array<{ entityId: string; label: string }>;
+        fields: Array<{
+          entity: { targetId: string };
+          fieldId: string;
+          fieldType: {
+            kind: string;
+            maximumLength?: number;
+            scale?: number;
+          };
+        }>;
+        languageVersion: string;
         operations: Array<
           Record<string, unknown> & {
-            effect: { entity?: { targetId?: string } };
+            effect: { entity?: { targetId?: string }; kind: string };
+            lifecycle?: string;
             operationId: string;
+            permission: { targetId: string };
+            readBack: { targetId: string };
+            tier: string;
           }
         >;
+        permissions: Array<
+          Record<string, unknown> & {
+            label: string;
+            permissionId: string;
+            resource: { targetId: string };
+          }
+        >;
+        stateMachines: Array<Record<string, unknown>>;
         surfaces: Array<{ label: string; surfaceId: string }>;
       };
       const entityId = `${INVENTORY_NAMESPACE}:entity.posted_stock_balance`;
@@ -122,7 +144,7 @@ export function registerInventoryContractCases(
           entityId,
         ),
         INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1[0],
-        'the exemption is resolved from the pinned family contract',
+        'the pinned candidate rule is resolved by canonical family before ABI qualification',
       );
       assert.equal(
         resolvePinnedInventoryProviderWrittenReadModel(
@@ -140,41 +162,133 @@ export function registerInventoryContractCases(
         'removing the provider-written conformance branch must red here with missing CRUD/form diagnostics',
       );
 
-      const withAuthoredOperation = structuredClone(
-        definition,
-      ) as typeof definition & {
-        operations: Array<Record<string, unknown>>;
+      const assertProviderOperationRefused = (
+        candidate: typeof definition,
+        message: string,
+      ): void => {
+        const refused = compileApplication(moduleInput(candidate));
+        assert.equal(refused.status, 'failed', message);
+        if (refused.status !== 'failed') return;
+        assert.deepEqual(
+          refused.diagnostics
+            .filter(
+              (diagnostic) =>
+                diagnostic.path === '$.operations.providerWritten',
+            )
+            .map((diagnostic) => [diagnostic.code, diagnostic.subjectId]),
+          [['COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED', entityId]],
+          message,
+        );
       };
-      const exemplar = withAuthoredOperation.operations.find(
-        (operation) =>
-          operation.operationId ===
-          `${INVENTORY_NAMESPACE}:operation.legal_entity_create`,
+      for (const probe of [
+        { label: 'active o0', lifecycle: undefined, tier: 'o0' },
+        { label: 'active o1', lifecycle: undefined, tier: 'o1' },
+        { label: 'retired o0', lifecycle: 'retired', tier: 'o0' },
+      ]) {
+        const withAuthoredOperation = structuredClone(definition);
+        const exemplar = withAuthoredOperation.operations.find(
+          (operation) =>
+            operation.operationId ===
+            `${INVENTORY_NAMESPACE}:operation.legal_entity_create`,
+        );
+        assert.ok(exemplar);
+        const operation = structuredClone(exemplar);
+        assert.ok(operation.effect.entity);
+        operation.operationId = `${INVENTORY_NAMESPACE}:operation.posted_stock_balance_create_${probe.label.replace(' ', '_')}_probe`;
+        operation.effect.entity.targetId = entityId;
+        operation.permission.targetId = `${INVENTORY_NAMESPACE}:permission.posted_stock_balance_read`;
+        operation.readBack.targetId = `${INVENTORY_NAMESPACE}:query.posted_stock_balance_get`;
+        operation.tier = probe.tier;
+        if (probe.lifecycle) operation.lifecycle = probe.lifecycle;
+        withAuthoredOperation.operations.push(operation);
+        assertProviderOperationRefused(
+          withAuthoredOperation,
+          `a direct ${probe.label} operation must hit the provider-written refusing twin by entity name`,
+        );
+      }
+
+      const withTransitionOperation = structuredClone(definition);
+      const transitionPermission = structuredClone(
+        withTransitionOperation.permissions.find(
+          (permission) =>
+            permission.permissionId ===
+            `${INVENTORY_NAMESPACE}:permission.inventory_transaction_post`,
+        ),
       );
-      assert.ok(exemplar);
-      const operation = structuredClone(exemplar) as {
-        effect: { entity: { targetId: string } };
-        operationId: string;
-        permission: { targetId: string };
-        readBack: { targetId: string };
-      };
-      operation.operationId = `${INVENTORY_NAMESPACE}:operation.posted_stock_balance_create_probe`;
-      operation.effect.entity.targetId = entityId;
-      operation.permission.targetId = `${INVENTORY_NAMESPACE}:permission.posted_stock_balance_read`;
-      operation.readBack.targetId = `${INVENTORY_NAMESPACE}:query.posted_stock_balance_get`;
-      withAuthoredOperation.operations.push(operation);
-      const refused = compileApplication(moduleInput(withAuthoredOperation));
-      assert.equal(refused.status, 'failed');
-      assert.deepEqual(
-        refused.diagnostics
-          .filter((diagnostic) => diagnostic.subjectId === entityId)
-          .map((diagnostic) => [diagnostic.code, diagnostic.path]),
-        [
-          [
-            'COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED',
-            '$.operations.providerWritten',
-          ],
+      assert.ok(transitionPermission);
+      transitionPermission.permissionId = `${INVENTORY_NAMESPACE}:permission.posted_stock_balance_transition_probe`;
+      transitionPermission.label = 'posted stock transition probe';
+      transitionPermission.resource.targetId = entityId;
+      withTransitionOperation.permissions.push(transitionPermission);
+      const transitionId = `${INVENTORY_NAMESPACE}:transition.posted_stock_balance_probe`;
+      const openStateId = `${INVENTORY_NAMESPACE}:state.posted_stock_balance_open_probe`;
+      const closedStateId = `${INVENTORY_NAMESPACE}:state.posted_stock_balance_closed_probe`;
+      const reference = (kind: string, targetId: string) => ({
+        kind,
+        schemaVersion: definition.languageVersion,
+        targetId,
+      });
+      withTransitionOperation.stateMachines.push({
+        entity: reference('entityReference', entityId),
+        initialState: reference('stateReference', openStateId),
+        kind: 'stateMachineDefinition',
+        machineId: `${INVENTORY_NAMESPACE}:machine.posted_stock_balance_probe`,
+        schemaVersion: definition.languageVersion,
+        states: [
+          {
+            kind: 'stateDefinition',
+            label: 'Open',
+            orderKey: 10,
+            schemaVersion: definition.languageVersion,
+            stateId: openStateId,
+          },
+          {
+            kind: 'stateDefinition',
+            label: 'Closed',
+            orderKey: 20,
+            schemaVersion: definition.languageVersion,
+            stateId: closedStateId,
+            terminal: true,
+          },
         ],
-        'one otherwise-valid authored operation must hit the provider-written refusing twin by name',
+        transitions: [
+          {
+            fromState: reference('stateReference', openStateId),
+            kind: 'transitionDefinition',
+            label: 'Close probe',
+            orderKey: 10,
+            permission: reference(
+              'permissionReference',
+              transitionPermission.permissionId,
+            ),
+            schemaVersion: definition.languageVersion,
+            toState: reference('stateReference', closedStateId),
+            transitionId,
+          },
+        ],
+      });
+      const transitionOperation = structuredClone(
+        withTransitionOperation.operations.find(
+          (operation) =>
+            operation.operationId ===
+            `${INVENTORY_NAMESPACE}:operation.legal_entity_create`,
+        ),
+      );
+      assert.ok(transitionOperation);
+      transitionOperation.operationId = `${INVENTORY_NAMESPACE}:operation.posted_stock_balance_transition_probe`;
+      transitionOperation.effect = {
+        kind: 'transitionStateEffect',
+        schemaVersion: definition.languageVersion,
+        transition: reference('transitionReference', transitionId),
+      } as typeof transitionOperation.effect;
+      transitionOperation.permission.targetId =
+        transitionPermission.permissionId;
+      transitionOperation.readBack.targetId = `${INVENTORY_NAMESPACE}:query.posted_stock_balance_get`;
+      transitionOperation.tier = 'o0';
+      withTransitionOperation.operations.push(transitionOperation);
+      assertProviderOperationRefused(
+        withTransitionOperation,
+        'a transition effect must resolve through its machine to the provider-written entity',
       );
 
       const impliedAsOf = structuredClone(definition);
@@ -186,6 +300,146 @@ export function registerInventoryContractCases(
         /Posted stock balance/u,
         'one changed label makes the honesty control red',
       );
+    },
+  );
+
+  register(
+    'posted-stock provider status requires the exact maintainer storage ABI',
+    () => {
+      const definition = inventoryModuleDefinition() as unknown as {
+        entities: Array<{ entityId: string; lifecycle?: string }>;
+        fields: Array<{
+          entity: { targetId: string };
+          fieldId: string;
+          fieldType: {
+            kind: string;
+            maximumLength?: number;
+            scale?: number;
+          };
+        }>;
+      };
+      const unitFieldId = `${INVENTORY_NAMESPACE}:field.posted_stock_balance_unit_id`;
+      const renamedUnitFieldId = `${INVENTORY_NAMESPACE}:field.posted_stock_balance_unit_identifier`;
+      const renamed = replaceExactString(
+        definition,
+        unitFieldId,
+        renamedUnitFieldId,
+      );
+      const renamedResult = compileApplication(moduleInput(renamed));
+      assert.equal(renamedResult.status, 'failed');
+      if (renamedResult.status === 'failed') {
+        assert.deepEqual(
+          new Set(
+            renamedResult.diagnostics
+              .filter(
+                (diagnostic) =>
+                  diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+                  diagnostic.path.startsWith(
+                    '$.fields.posted_stock_balance_unit_',
+                  ),
+              )
+              .map((diagnostic) => diagnostic.path),
+          ),
+          new Set([
+            '$.fields.posted_stock_balance_unit_id',
+            '$.fields.posted_stock_balance_unit_identifier',
+          ]),
+          'renaming the provider unit field must name both the missing ABI slot and the unmaintained replacement',
+        );
+        assert.equal(
+          renamedResult.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'COMPILER_ENTITY_PROJECTION_MISSING' &&
+              diagnostic.path === '$.conformance.operation.create',
+          ),
+          true,
+          'an ABI-incompatible reserved family must not earn the CRUD/Form exemption',
+        );
+      }
+
+      for (const [fieldLocalId, mutate] of [
+        [
+          'posted_stock_balance_item_id',
+          (field: (typeof definition.fields)[number]) => {
+            field.fieldType.maximumLength = 81;
+          },
+        ],
+        [
+          'posted_stock_balance_location_id',
+          (field: (typeof definition.fields)[number]) => {
+            field.fieldType.maximumLength = 81;
+          },
+        ],
+        [
+          'posted_stock_balance_posted_quantity',
+          (field: (typeof definition.fields)[number]) => {
+            field.fieldType.scale = 17;
+          },
+        ],
+        [
+          'posted_stock_balance_unit_id',
+          (field: (typeof definition.fields)[number]) => {
+            field.fieldType.maximumLength = 33;
+          },
+        ],
+      ] as const) {
+        const incompatible = structuredClone(definition);
+        const field = incompatible.fields.find(
+          (candidate) =>
+            candidate.fieldId ===
+            `${INVENTORY_NAMESPACE}:field.${fieldLocalId}`,
+        );
+        assert.ok(field);
+        mutate(field);
+        const result = compileApplication(moduleInput(incompatible));
+        assert.equal(result.status, 'failed');
+        if (result.status !== 'failed') continue;
+        assert.equal(
+          result.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+              diagnostic.path === `$.fields.${fieldLocalId}` &&
+              diagnostic.subjectId === field.fieldId,
+          ),
+          true,
+          `${fieldLocalId} must match the provider's pinned type`,
+        );
+      }
+
+      const withoutActiveMovement = structuredClone(definition);
+      const movement = withoutActiveMovement.entities.find(
+        (entity) =>
+          entity.entityId ===
+          `${INVENTORY_NAMESPACE}:entity.inventory_movement`,
+      );
+      assert.ok(movement);
+      movement.lifecycle = 'retired';
+      const withoutMovementResult = compileApplication(
+        moduleInput(withoutActiveMovement),
+      );
+      assert.equal(withoutMovementResult.status, 'failed');
+      if (withoutMovementResult.status === 'failed') {
+        assert.equal(
+          withoutMovementResult.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+              diagnostic.path === '$.entities.inventory_movement',
+          ),
+          true,
+          'the named maintainer requires exactly one active movement companion',
+        );
+        assert.equal(
+          withoutMovementResult.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'COMPILER_ENTITY_PROJECTION_MISSING' &&
+              diagnostic.path === '$.conformance.operation.create' &&
+              diagnostic.subjectId ===
+                `${INVENTORY_NAMESPACE}:entity.posted_stock_balance`,
+          ),
+          true,
+          'a provider family without its movement companion must not earn the exemption',
+        );
+      }
     },
   );
 

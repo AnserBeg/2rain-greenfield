@@ -19,7 +19,7 @@ const routedPlatformDebt: readonly ModulePressLawViolation[] = [
   // Inventory became definition-backed; keep it exact until that row lands.
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 1939,
+    line: 2086,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
