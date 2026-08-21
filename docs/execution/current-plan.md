@@ -193,16 +193,17 @@ maintenance, rebuild, and reconciliation reuse the existing generation lock.
 The existing List renderer is sufficient, so `apps/web/src` remains unchanged.
 Critical round 1 returned REVISE on `c781aaf`: the refusing twin ignored `o1`
 and transition-owned operations, and the reserved family earned CRUD/Form
-omission without proving the PostgreSQL maintainer's four-field ABI. Both
-findings are accepted and corrected on `packet/stock-balance-read-model`; the
-replacement executable tree is green at `5b50168` (compiler 152/152,
-architecture 141/141, PostgreSQL 204/204, browser 91/91). Critical round 2 then
-closed operation attribution but found that canonical storage metadata could
-still contradict the provider ABI, malformed fields could retain the exemption,
-and an invalid movement companion still qualified internally. The subsuming
-exact-descriptor and explicit-validity correction is active. Replacement gates,
-a fresh Codex arm, Fable max on the identical replacement SHA, and the
-post-review full matrix remain owed.
+omission without proving the PostgreSQL maintainer's four-field ABI. Critical
+round 2 on `ab34546` closed operation attribution but found that canonical
+storage metadata could still contradict the provider ABI, malformed fields
+could retain the exemption, and an invalid movement companion still qualified
+internally. Both rounds' findings are accepted and corrected on
+`packet/stock-balance-read-model`. The replacement executable tree is green at
+`f8f36df` (compiler 152/152, architecture 141/141, PostgreSQL 204/204, browser
+91/91); the subsuming correction pins every current storage-shaping property,
+uses explicit validity, and subject-pins the full returned requirement set.
+Fresh Codex review is next, then Fable max on the identical frozen SHA, then the
+post-review full matrix.
 
 #### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2
 

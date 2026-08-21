@@ -1,6 +1,6 @@
 # stock-balance-read-model — honest posted-stock browsing
 
-Status: active; Critical round-2 corrections implemented, replacement gates pending
+Status: evidence_ready; Critical round-2 replacement frozen for fresh review
 
 Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b`
 
@@ -189,12 +189,20 @@ evolution, presence, and lifecycle one property at a time. It also covers a
 renamed field, an absent active movement companion, and an active companion with
 one malformed movement field. The unmodified descriptor is the admission twin.
 
-Three author-chosen ad-hoc deletions establish branch attribution. Leaving the
+Four author-chosen ad-hoc deletions establish branch attribution. Leaving the
 movement diagnostic but not marking its validator invalid loses the five
 companion-control paths. Leaving a posted field type diagnostic but not marking
 the balance invalid loses the same five paths. Removing business-key comparison
-makes the ordinary item specimen compile. Each mutation failed only the exact
-ABI test and was restored before the replacement gates.
+makes the ordinary item specimen compile. Leaving a storage-metadata diagnostic
+but not marking the balance invalid preserves that diagnostic while losing the
+same five paths. Each mutation failed only the exact ABI test and was restored
+before the replacement gates.
+
+`defaultValue` cannot be varied alone while `defaultSemantics: none` remains
+canonical: the language schema structurally requires the value to be absent.
+The descriptor still compares both properties. The control varies
+`defaultSemantics` alone; it does not manufacture a confounded two-property
+specimen and call it a one-property red.
 
 The committed contract controls also vary only the posted-stock entity label,
 family registration, or maintainer id and observe their exact diagnostic paths.
@@ -264,9 +272,9 @@ activated one-by-one through the new head before the schema snapshot is written.
 
 ## Gate record
 
-The original round-1 gates below remain historical evidence only. The complete
-replacement pre-freeze set is green on executable commit
-`5b5016839228400b38d8b5dd01f54453f2fc9fcc`:
+The original round-1 and first round-2 gates below remain historical evidence
+only. The complete replacement pre-freeze set is green on executable commit
+`f8f36df0ea9d00112dac1ffc0efe120c935bcc83`:
 
 - `pnpm typecheck`
 - `pnpm lint`
@@ -275,10 +283,20 @@ replacement pre-freeze set is green on executable commit
 - `pnpm check:demo-release`
 - `pnpm test:compiler` — 152/152
 - `pnpm test:architecture` — 141/141 with successful executed-file evidence
-- focused stock-count, reconciliation, and complete module-storage-transition
-  controls
 - `pnpm test:browser` — 91/91, including the posted-stock List journey
-- `pnpm test:postgres` — 204/204, zero failures, in 1,418,545 ms
+- `pnpm test:postgres` — 204/204, zero failures, in 1,294,911 ms
+
+The first replacement `test:compiler` invocation exited 75 before executing a
+test because another lane held the shared test lock. It is scheduling history,
+not gate evidence. The observed rerun above acquired the lock and passed
+152/152. No product or gate change was made in between.
+
+The four round-2 author mutants each moved the focused compiler suite from
+61/61 to 60/61: (1) retaining movement diagnostics while returning movement
+validity; (2) retaining a field-type diagnostic while returning balance
+validity; (3) omitting the business-key comparison; and (4) retaining a
+storage-metadata diagnostic while returning balance validity. Restored source
+returned the focused suite to 61/61 before the full replacement gates.
 
 The correction controls ran before that freeze. Restoring the old direct,
 active-`o0` operation filter failed the focused compiler suite because the
@@ -287,10 +305,10 @@ provider-written refusal disappeared. Restoring the active-only lifecycle
 filter failed because the retired operation compiled. Awarding CRUD/Form
 omission from the family rule before exact ABI qualification failed because the
 renamed-unit specimen retained the exemption. Each mutation changed only the
-named arm and was restored before the replacement gates. The first replacement
-architecture run also caught its own exact source-line ratchet moving from 2068
-to 2086; correcting that test-only coordinate returned the full 141/141 suite
-to green.
+named arm and was restored before the replacement gates. The round-2
+replacement architecture run also caught its own exact source-line ratchet
+moving from 2086 to 2199; correcting that test-only coordinate returned the
+full 141/141 suite to green.
 
 The first full `test:postgres` run reached 196/197. Its only failure was a stale
 historical test assumption and then the deliberately generated full-replay
@@ -309,6 +327,11 @@ the SHA is retained as history but carries no evidence forward to the
 replacement candidate. The replacement PostgreSQL run above re-observed real
 arithmetic, rebuild, correction, non-healing reconciliation, and the shared
 generation guard on the corrected executable tree.
+
+A manual `PORT=4174 pnpm dev` check then opened **Inventory → Posted stock →
+DEFAULT** in headless Chromium. It observed heading `Posted stock`, zero rows,
+and zero `UNSUPPORTED_COMPONENT` diagnostics. The zero is expected from the dev
+seed and confirms that the user checkpoint must post a movement first.
 
 ## User-observable checkpoint
 
@@ -341,10 +364,10 @@ attribution and found the storage-metadata, exemption-control, and companion-
 validity defects above. Continuing is licensed by `review-tiers`: the round
 found a reachable production collision, and the correction subsumes the class
 with an exact storage descriptor and explicit validity rather than adding a
-business-key exception beside the type checks. Replacement gates and a fresh
-Codex arm remain owed. Only after PASS may independent Fable max confirm the
-identical new SHA. The full CI matrix remains deliberately deferred until both
-arms converge.
+business-key exception beside the type checks. Replacement gates are green and
+the fresh Codex arm is now ready. Only after PASS may independent Fable max
+confirm the identical frozen SHA. The full CI matrix remains deliberately
+deferred until both arms converge.
 
 ## Program-review trigger assessment
 
