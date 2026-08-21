@@ -33,12 +33,18 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // from four missing required slots to two -- `childTables` and `activity`,
     // the two the web registry renders nowhere for any module. Two fewer
     // missing slots on each of SG003 and SG009, five surfaces: 124 - 20 = 104.
+    // `stock-balance-read-model` adds one operationless provider-written entity
+    // through the existing read-only List/Record shape. That shape adds exactly
+    // 12 already-known residuals: List omits savedViews and bulkActions, and
+    // Record omits commandBar, sections, childTables and activity, with each
+    // omission observed once in the full and once in the compact projection.
+    // 104 + 12 = 116. No new violation kind or renderer exemption is introduced.
     // MEASURED by compiling the module, not derived from this arithmetic; the
     // arithmetic is recorded so a future reader can tell WHICH surfaces moved.
     // The residual is the platform-wide `childTables`/`activity` gap that
     // catalog, location and party carry identically, and it is not this
     // packet's to close.
-    violationCount: 104,
+    violationCount: 116,
   }),
   Object.freeze({
     moduleId: 'northstar.location:module.location',

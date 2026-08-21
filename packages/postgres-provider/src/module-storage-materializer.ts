@@ -28,8 +28,13 @@ import {
   type RenderedModuleTransitionDiff,
   digestModuleTransitionElements,
 } from '@north-star/platform-runtime';
-import type { TrustedRequestContext } from '@north-star/runtime';
+import {
+  assertTrustedRequestContext,
+  type TrustedRequestContext,
+} from '@north-star/runtime';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
+
+import { aggregateGenerationLockKey } from './module-runtime-interpreter.js';
 
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
@@ -42,6 +47,7 @@ const storageTargetPayloadV3Version: Exclude<
   typeof STORAGE_TARGET_PAYLOAD_VERSION
 > = 'northstar.storage-target-payload/v3';
 const unicodeCaseFoldFunctionName = 'nsm_unicode_case_fold_v1';
+const postedStockBalanceFunctionName = 'nsm_posted_stock_balance_v1';
 const allowedTypes = [
   /^boolean$/,
   /^date$/,
@@ -127,6 +133,11 @@ export interface ModuleStorageAttemptResult {
   readonly deferredOnlineFamilyElementsProcessed: number | null;
   readonly disposition: 'READY_TO_SWAP' | 'RECONCILING';
   readonly receipt: ModuleStorageCatalogReceipt | null;
+}
+
+export interface PostedStockBalanceRebuildResult {
+  readonly movementCount: number;
+  readonly rowCount: number;
 }
 
 export interface ModuleStorageMaterializerFaultHooks {
@@ -360,6 +371,11 @@ export class PostgresModuleStorageMaterializer {
         await applyDdlElement(client, target.target, element);
         await appendApplication(client, command, element, 'APPLIED', null);
       }
+      await ensurePostedStockBalanceProjection(
+        client,
+        target.target,
+        command.context,
+      );
       await persistRootMembership(
         client,
         command,
@@ -698,6 +714,55 @@ export class PostgresModuleStorageMaterializer {
         throw failure('CATALOG_DRIFT', result.drift.join('; '));
       }
       await reconcileReferenceCounts(client, context, roots);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await rollbackQuietly(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Rebuilds only the derived posted-stock rows for the trusted tenant and
+   * environment. The movement ledger remains untouched. The same advisory
+   * generation lock used by posting and aggregate reads pins the ledger while
+   * the projection is replaced.
+   */
+  async rebuildPostedStockBalances(
+    context: TrustedRequestContext,
+  ): Promise<PostedStockBalanceRebuildResult> {
+    const client = await this.materializerPool.connect();
+    try {
+      assertTrustedRequestContext(context);
+      await assertMaterializerSession(client);
+      await beginLocked(client);
+      await setMaterializerScope(client, context);
+      const pointer = await requiredOne<{ release_id: string | null }>(
+        client,
+        `SELECT release_id
+           FROM north_star_internal.module_storage_read_active_release_pointer($1, $2)`,
+        [context.tenantId, context.environmentId],
+        'active release pointer',
+      );
+      if (!pointer.release_id) {
+        throw failure(
+          'POSTED_STOCK_BALANCE_RELEASE_MISSING',
+          'posted-stock rebuild requires an active release',
+        );
+      }
+      const release = await loadVerifiedReleaseStorage(
+        client,
+        context.tenantId,
+        context.environmentId,
+        pointer.release_id,
+      );
+      const result = await rebuildPostedStockBalanceOnClient(
+        client,
+        release.target,
+        context,
+      );
       await client.query('COMMIT');
       return result;
     } catch (error) {
@@ -1276,6 +1341,7 @@ async function createManagedTable(
   target: StorageTargetPayloadV1,
   entity: StorageEntityTarget,
 ): Promise<void> {
+  const postedStockProjection = isPostedStockBalanceEntity(entity);
   const relationColumns = target.relations
     .filter(
       (relation) =>
@@ -1409,8 +1475,8 @@ async function createManagedTable(
         command === 'SELECT'
           ? `USING (${predicate})`
           : command === 'INSERT'
-            ? `WITH CHECK (${predicate})`
-            : `USING (${predicate}) WITH CHECK (${predicate})`;
+            ? `WITH CHECK (${predicate}${postedStockProjection ? ' AND pg_trigger_depth() > 0' : ''})`
+            : `USING (${predicate}${postedStockProjection ? ' AND pg_trigger_depth() > 0' : ''}) WITH CHECK (${predicate}${postedStockProjection ? ' AND pg_trigger_depth() > 0' : ''})`;
       await client.query(
         `CREATE POLICY ${quoted(policy)} ON north_star_module.${quoted(entity.physicalTableName)}
            FOR ${command} TO north_star_module_runtime ${clause}`,
@@ -1419,6 +1485,12 @@ async function createManagedTable(
   }
   if (entity.factStorage || entity.legalEntity || entity.legalEntityMaster) {
     await ensureMaterializerSelectPolicy(client, entity.physicalTableName);
+  }
+  if (postedStockProjection) {
+    await ensureMaterializerProjectionMutationPolicies(
+      client,
+      entity.physicalTableName,
+    );
   }
   await client.query(
     `REVOKE ALL ON north_star_module.${quoted(entity.physicalTableName)} FROM PUBLIC`,
@@ -1745,6 +1817,509 @@ async function ensureMaterializerSeedInsertPolicy(
          AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
        )`,
   );
+}
+
+async function ensureMaterializerProjectionMutationPolicies(
+  client: PoolClient,
+  tableName: string,
+): Promise<void> {
+  const predicate = `tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid`;
+  for (const command of ['INSERT', 'UPDATE'] as const) {
+    const policyName = managedMaterializerProjectionPolicyName(
+      tableName,
+      command,
+    );
+    const exists = await client.query<{ present: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM pg_policies
+        WHERE schemaname = 'north_star_module'
+          AND tablename = $1
+          AND policyname = $2) AS present`,
+      [tableName, policyName],
+    );
+    if (exists.rows[0]?.present) continue;
+    const clause =
+      command === 'INSERT'
+        ? `WITH CHECK (${predicate})`
+        : `USING (${predicate}) WITH CHECK (${predicate})`;
+    await client.query(
+      `CREATE POLICY ${quoted(policyName)} ON north_star_module.${quoted(tableName)}
+         FOR ${command} TO north_star_module_materializer ${clause}`,
+    );
+  }
+}
+
+interface PostedStockBalanceProjectionBinding {
+  readonly balance: StorageEntityTarget;
+  readonly balanceArchiveColumn: string;
+  readonly balanceItemColumn: string;
+  readonly balanceLegalEntityColumn: string;
+  readonly balanceLocationColumn: string;
+  readonly balanceQuantityColumn: string;
+  readonly balanceRecordIdColumn: string;
+  readonly balanceRevisionColumn: string;
+  readonly balanceUnitColumn: string;
+  readonly movement: StorageEntityTarget;
+  readonly movementArchiveColumn: string;
+  readonly movementItemColumn: string;
+  readonly movementLegalEntityColumn: string;
+  readonly movementLocationColumn: string;
+  readonly movementQuantityColumn: string;
+  readonly movementUnitColumn: string;
+  readonly triggerName: string;
+}
+
+interface MaterializerScope {
+  readonly environmentId: string;
+  readonly tenantId: string;
+}
+
+function isPostedStockBalanceEntity(entity: StorageEntityTarget): boolean {
+  return entity.entityId.endsWith(':entity.posted_stock_balance');
+}
+
+function postedStockBalanceProjection(
+  target: StorageTargetPayloadV1,
+): PostedStockBalanceProjectionBinding | null {
+  return postedStockBalanceProjectionFromEntities(target.entities);
+}
+
+function postedStockBalanceProjectionFromEntities(
+  entities: readonly StorageEntityTarget[],
+): PostedStockBalanceProjectionBinding | null {
+  const balances = entities.filter(isPostedStockBalanceEntity);
+  if (balances.length === 0) return null;
+  const movements = entities.filter((entity) =>
+    entity.entityId.endsWith(':entity.inventory_movement'),
+  );
+  if (balances.length !== 1 || movements.length !== 1) {
+    throw failure(
+      'POSTED_STOCK_BALANCE_STORAGE_INVALID',
+      `posted-stock projection requires one balance and one movement entity; received ${String(balances.length)} and ${String(movements.length)}`,
+    );
+  }
+  const balance = balances[0]!;
+  const movement = movements[0]!;
+  if (!balance.legalEntity || !movement.legalEntity || !movement.factStorage) {
+    throw failure(
+      'POSTED_STOCK_BALANCE_STORAGE_INVALID',
+      'posted-stock projection requires legal-entity-owned balance and append-only movement storage',
+    );
+  }
+  return Object.freeze({
+    balance,
+    balanceArchiveColumn: balance.archive.archivedAtColumn,
+    balanceItemColumn: requiredLocalStorageColumn(
+      balance,
+      'posted_stock_balance_item_id',
+    ),
+    balanceLegalEntityColumn: balance.legalEntity.column,
+    balanceLocationColumn: requiredLocalStorageColumn(
+      balance,
+      'posted_stock_balance_location_id',
+    ),
+    balanceQuantityColumn: requiredLocalStorageColumn(
+      balance,
+      'posted_stock_balance_posted_quantity',
+    ),
+    balanceRecordIdColumn: balance.recordIdentity.column,
+    balanceRevisionColumn: balance.optimisticRevision.column,
+    balanceUnitColumn: requiredLocalStorageColumn(
+      balance,
+      'posted_stock_balance_unit_id',
+    ),
+    movement,
+    movementArchiveColumn: movement.archive.archivedAtColumn,
+    movementItemColumn: requiredLocalStorageColumn(
+      movement,
+      'inventory_movement_item_id',
+    ),
+    movementLegalEntityColumn: movement.legalEntity.column,
+    movementLocationColumn: requiredLocalStorageColumn(
+      movement,
+      'inventory_movement_location_id',
+    ),
+    movementQuantityColumn: requiredLocalStorageColumn(
+      movement,
+      'inventory_movement_quantity_delta',
+    ),
+    movementUnitColumn: requiredLocalStorageColumn(
+      movement,
+      'inventory_movement_unit_id',
+    ),
+    triggerName: postedStockBalanceTriggerName(balance),
+  });
+}
+
+function requiredPostedStockBalanceProjection(
+  target: StorageTargetPayloadV1,
+): PostedStockBalanceProjectionBinding {
+  const projection = postedStockBalanceProjection(target);
+  if (!projection) {
+    throw failure(
+      'POSTED_STOCK_BALANCE_STORAGE_INVALID',
+      'active release does not contain the posted-stock projection',
+    );
+  }
+  return projection;
+}
+
+function requiredLocalStorageColumn(
+  entity: StorageEntityTarget,
+  localId: string,
+): string {
+  const matches = entity.columns.filter(
+    (column) => column.canonicalFieldId.split(':field.').at(-1) === localId,
+  );
+  if (matches.length !== 1) {
+    throw failure(
+      'POSTED_STOCK_BALANCE_STORAGE_INVALID',
+      `${entity.entityId} requires exactly one ${localId} field`,
+    );
+  }
+  return matches[0]!.physicalName;
+}
+
+function postedStockBalanceTriggerName(entity: StorageEntityTarget): string {
+  const match = /^nsm_t_([a-z2-7]{52})$/u.exec(entity.physicalTableName);
+  if (!match?.[1]) {
+    throw failure(
+      'PHYSICAL_TABLE_NAME_INVALID',
+      `posted-stock balance table has invalid name ${entity.physicalTableName}`,
+    );
+  }
+  // PostgreSQL fires same-event triggers in name order. `nsm_z_` sorts after
+  // the existing `nsm_g_` reservation/generation trigger, so the balance never
+  // advances before the posting-linked generation has advanced.
+  return `nsm_z_${match[1]}`;
+}
+
+async function ensurePostedStockBalanceProjection(
+  client: PoolClient,
+  target: StorageTargetPayloadV1,
+  scope: MaterializerScope,
+): Promise<void> {
+  if (!postedStockBalanceProjection(target)) return;
+  // DDL elements are content-address sorted, not entity-order sorted. Wire the
+  // cross-table projection only after every prepared table exists.
+  await ensurePostedStockBalanceFunction(client);
+  await rebuildPostedStockBalanceOnClient(client, target, scope);
+  await ensurePostedStockBalanceTrigger(client, target);
+}
+
+async function ensurePostedStockBalanceFunction(
+  client: PoolClient,
+): Promise<void> {
+  const expectedSource = postedStockBalanceFunctionSource();
+  const existing = await client.query<{ source: string }>(
+    `SELECT routine.prosrc AS source
+       FROM pg_proc AS routine
+       JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND routine.proname = $1
+        AND pg_get_function_identity_arguments(routine.oid) = ''`,
+    [postedStockBalanceFunctionName],
+  );
+  if (existing.rows.length > 1) {
+    throw failure(
+      'POSTED_STOCK_BALANCE_FUNCTION_AMBIGUOUS',
+      `${postedStockBalanceFunctionName}() resolved to ${String(existing.rows.length)} catalog entries`,
+    );
+  }
+  if (existing.rows[0]?.source !== undefined) {
+    if (existing.rows[0].source !== expectedSource) {
+      throw failure(
+        'POSTED_STOCK_BALANCE_FUNCTION_MISMATCH',
+        `${postedStockBalanceFunctionName}() exists with a different body`,
+      );
+    }
+    return;
+  }
+  await client.query(
+    `CREATE FUNCTION north_star_module.${postedStockBalanceFunctionName}()
+       RETURNS trigger
+       LANGUAGE plpgsql
+       SET search_path = pg_catalog, north_star_internal
+       AS $posted_stock_balance$${expectedSource}$posted_stock_balance$;
+     REVOKE ALL ON FUNCTION north_star_module.${postedStockBalanceFunctionName}() FROM PUBLIC`,
+  );
+}
+
+function postedStockBalanceFunctionSource(): string {
+  return `
+DECLARE
+  affected_rows bigint;
+  balance_relation regclass;
+BEGIN
+  IF TG_NARGS <> 14 THEN
+    RAISE EXCEPTION 'POSTED_STOCK_BALANCE_TRIGGER_ARGUMENTS_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  balance_relation := TG_ARGV[0]::regclass;
+  PERFORM 1
+    FROM north_star_internal.semantic_aggregate_generations
+   WHERE tenant_id = NEW.tenant_id
+     AND environment_id = NEW.environment_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'POSTED_STOCK_BALANCE_GENERATION_MISSING'
+      USING ERRCODE = 'P0001';
+  END IF;
+  EXECUTE format(
+    'INSERT INTO %s AS balance (
+       tenant_id, environment_id, %I, %I, %I, %I, %I, %I, %I, %I
+     ) VALUES (
+       $1.tenant_id, $1.environment_id, $1.%I,
+       overlay(
+         overlay(
+           md5(jsonb_build_array(
+             ''northstar.posted-stock-balance-row/v1'',
+             $1.tenant_id::text, $1.environment_id::text,
+             $1.%I::text, $1.%I::text, $1.%I::text
+           )::text)
+           placing ''4'' from 13 for 1
+         )
+         placing ''8'' from 17 for 1
+       )::uuid,
+       1, NULL, $1.%I, $1.%I, $1.%I, $1.%I
+     )
+     ON CONFLICT (tenant_id, environment_id, %I, %I) DO UPDATE
+       SET %I = balance.%I + EXCLUDED.%I,
+           %I = balance.%I + 1
+     WHERE balance.%I = EXCLUDED.%I
+       AND balance.%I = EXCLUDED.%I
+       AND balance.%I = EXCLUDED.%I
+       AND balance.%I = EXCLUDED.%I
+       AND balance.%I IS NULL',
+    balance_relation,
+    TG_ARGV[6], TG_ARGV[11], TG_ARGV[12], TG_ARGV[13],
+    TG_ARGV[7], TG_ARGV[8], TG_ARGV[9], TG_ARGV[10],
+    TG_ARGV[1], TG_ARGV[1], TG_ARGV[2], TG_ARGV[3],
+    TG_ARGV[2], TG_ARGV[3], TG_ARGV[4], TG_ARGV[5],
+    TG_ARGV[6], TG_ARGV[11],
+    TG_ARGV[9], TG_ARGV[9], TG_ARGV[9],
+    TG_ARGV[12], TG_ARGV[12],
+    TG_ARGV[6], TG_ARGV[6],
+    TG_ARGV[7], TG_ARGV[7],
+    TG_ARGV[8], TG_ARGV[8],
+    TG_ARGV[10], TG_ARGV[10],
+    TG_ARGV[13]
+  ) USING NEW;
+  GET DIAGNOSTICS affected_rows = ROW_COUNT;
+  IF affected_rows <> 1 THEN
+    RAISE EXCEPTION 'POSTED_STOCK_BALANCE_IDENTITY_COLLISION'
+      USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END
+`;
+}
+
+function postedStockBalanceTriggerArguments(
+  projection: PostedStockBalanceProjectionBinding,
+): readonly string[] {
+  return Object.freeze([
+    `north_star_module.${projection.balance.physicalTableName}`,
+    projection.movementLegalEntityColumn,
+    projection.movementItemColumn,
+    projection.movementLocationColumn,
+    projection.movementQuantityColumn,
+    projection.movementUnitColumn,
+    projection.balanceLegalEntityColumn,
+    projection.balanceItemColumn,
+    projection.balanceLocationColumn,
+    projection.balanceQuantityColumn,
+    projection.balanceUnitColumn,
+    projection.balanceRecordIdColumn,
+    projection.balanceRevisionColumn,
+    projection.balanceArchiveColumn,
+  ]);
+}
+
+async function ensurePostedStockBalanceTrigger(
+  client: PoolClient,
+  target: StorageTargetPayloadV1,
+): Promise<void> {
+  const projection = requiredPostedStockBalanceProjection(target);
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_trigger AS trigger_record
+       JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND relation.relname = $1
+        AND trigger_record.tgname = $2
+        AND NOT trigger_record.tgisinternal
+     ) AS present`,
+    [projection.movement.physicalTableName, projection.triggerName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `GRANT TRIGGER ON north_star_module.${quoted(projection.movement.physicalTableName)}
+       TO north_star_module_materializer`,
+  );
+  await client.query(
+    `CREATE TRIGGER ${quoted(projection.triggerName)}
+       AFTER INSERT ON north_star_module.${quoted(projection.movement.physicalTableName)}
+       FOR EACH ROW EXECUTE FUNCTION north_star_module.${postedStockBalanceFunctionName}(
+         ${postedStockBalanceTriggerArguments(projection).map(triggerArgumentLiteral).join(', ')}
+       )`,
+  );
+  await client.query(
+    `REVOKE TRIGGER ON north_star_module.${quoted(projection.movement.physicalTableName)}
+       FROM north_star_module_materializer`,
+  );
+}
+
+async function rebuildPostedStockBalanceOnClient(
+  client: PoolClient,
+  target: StorageTargetPayloadV1,
+  scope: MaterializerScope,
+): Promise<PostedStockBalanceRebuildResult> {
+  const projection = requiredPostedStockBalanceProjection(target);
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    aggregateGenerationLockKey(scope.tenantId, scope.environmentId),
+  ]);
+  const mixedUnit = await client.query<{
+    itemId: string;
+    legalEntityId: string;
+    locationId: string;
+  }>(
+    `SELECT ${quoted(projection.movementLegalEntityColumn)}::text AS "legalEntityId",
+            ${quoted(projection.movementItemColumn)}::text AS "itemId",
+            ${quoted(projection.movementLocationColumn)}::text AS "locationId"
+       FROM north_star_module.${quoted(projection.movement.physicalTableName)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(projection.movementArchiveColumn)} IS NULL
+      GROUP BY ${quoted(projection.movementLegalEntityColumn)},
+               ${quoted(projection.movementItemColumn)},
+               ${quoted(projection.movementLocationColumn)}
+     HAVING count(DISTINCT ${quoted(projection.movementUnitColumn)}) <> 1
+      LIMIT 1`,
+    [scope.tenantId, scope.environmentId],
+  );
+  if (mixedUnit.rows[0]) {
+    const row = mixedUnit.rows[0];
+    throw failure(
+      'POSTED_STOCK_BALANCE_UNIT_DIVERGED',
+      `stock identity ${row.legalEntityId}/${row.itemId}/${row.locationId} carries multiple units`,
+    );
+  }
+  const movementCountResult = await client.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM north_star_module.${quoted(projection.movement.physicalTableName)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(projection.movementArchiveColumn)} IS NULL`,
+    [scope.tenantId, scope.environmentId],
+  );
+  const movementCount = Number(movementCountResult.rows[0]?.count ?? '0');
+  if (!Number.isSafeInteger(movementCount) || movementCount < 0) {
+    throw failure(
+      'POSTED_STOCK_BALANCE_MOVEMENT_COUNT_INVALID',
+      'movement count exceeds the provider rebuild contract',
+    );
+  }
+  const identityCountResult = await client.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM (
+         SELECT 1
+           FROM north_star_module.${quoted(projection.movement.physicalTableName)}
+          WHERE tenant_id = $1 AND environment_id = $2
+            AND ${quoted(projection.movementArchiveColumn)} IS NULL
+          GROUP BY ${quoted(projection.movementLegalEntityColumn)},
+                   ${quoted(projection.movementItemColumn)},
+                   ${quoted(projection.movementLocationColumn)}
+       ) AS stock_identity`,
+    [scope.tenantId, scope.environmentId],
+  );
+  const identityCount = Number(identityCountResult.rows[0]?.count ?? '0');
+  if (!Number.isSafeInteger(identityCount) || identityCount < 0) {
+    throw failure(
+      'POSTED_STOCK_BALANCE_IDENTITY_COUNT_INVALID',
+      'stock identity count exceeds the provider rebuild contract',
+    );
+  }
+  await client.query(
+    `UPDATE north_star_module.${quoted(projection.balance.physicalTableName)}
+        SET ${quoted(projection.balanceArchiveColumn)} = statement_timestamp(),
+            ${quoted(projection.balanceRevisionColumn)} = ${quoted(projection.balanceRevisionColumn)} + 1
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(projection.balanceArchiveColumn)} IS NULL`,
+    [scope.tenantId, scope.environmentId],
+  );
+  const inserted = await client.query(
+    `INSERT INTO north_star_module.${quoted(projection.balance.physicalTableName)} AS balance (
+       tenant_id,
+       environment_id,
+       ${quoted(projection.balanceLegalEntityColumn)},
+       ${quoted(projection.balanceRecordIdColumn)},
+       ${quoted(projection.balanceRevisionColumn)},
+       ${quoted(projection.balanceArchiveColumn)},
+       ${quoted(projection.balanceItemColumn)},
+       ${quoted(projection.balanceLocationColumn)},
+       ${quoted(projection.balanceQuantityColumn)},
+       ${quoted(projection.balanceUnitColumn)}
+     )
+     SELECT $1::uuid,
+            $2::uuid,
+            movement.${quoted(projection.movementLegalEntityColumn)},
+            overlay(
+              overlay(
+                md5(jsonb_build_array(
+                  'northstar.posted-stock-balance-row/v1',
+                  $1::text,
+                  $2::text,
+                  movement.${quoted(projection.movementLegalEntityColumn)}::text,
+                  movement.${quoted(projection.movementItemColumn)}::text,
+                  movement.${quoted(projection.movementLocationColumn)}::text
+                )::text)
+                placing '4' from 13 for 1
+              )
+              placing '8' from 17 for 1
+            )::uuid,
+            1,
+            NULL,
+            movement.${quoted(projection.movementItemColumn)},
+            movement.${quoted(projection.movementLocationColumn)},
+            SUM(movement.${quoted(projection.movementQuantityColumn)})::numeric(38,18),
+            MIN(movement.${quoted(projection.movementUnitColumn)})
+       FROM north_star_module.${quoted(projection.movement.physicalTableName)} AS movement
+      WHERE movement.tenant_id = $1 AND movement.environment_id = $2
+        AND movement.${quoted(projection.movementArchiveColumn)} IS NULL
+      GROUP BY movement.${quoted(projection.movementLegalEntityColumn)},
+               movement.${quoted(projection.movementItemColumn)},
+               movement.${quoted(projection.movementLocationColumn)}
+      ORDER BY movement.${quoted(projection.movementLegalEntityColumn)},
+               movement.${quoted(projection.movementItemColumn)},
+               movement.${quoted(projection.movementLocationColumn)}
+     ON CONFLICT (tenant_id, environment_id,
+                  ${quoted(projection.balanceLegalEntityColumn)},
+                  ${quoted(projection.balanceRecordIdColumn)}) DO UPDATE
+       SET ${quoted(projection.balanceRevisionColumn)} = balance.${quoted(projection.balanceRevisionColumn)} + 1,
+           ${quoted(projection.balanceArchiveColumn)} = NULL,
+           ${quoted(projection.balanceItemColumn)} = EXCLUDED.${quoted(projection.balanceItemColumn)},
+           ${quoted(projection.balanceLocationColumn)} = EXCLUDED.${quoted(projection.balanceLocationColumn)},
+           ${quoted(projection.balanceQuantityColumn)} = EXCLUDED.${quoted(projection.balanceQuantityColumn)},
+           ${quoted(projection.balanceUnitColumn)} = EXCLUDED.${quoted(projection.balanceUnitColumn)}
+     WHERE balance.${quoted(projection.balanceLegalEntityColumn)} = EXCLUDED.${quoted(projection.balanceLegalEntityColumn)}
+       AND balance.${quoted(projection.balanceItemColumn)} = EXCLUDED.${quoted(projection.balanceItemColumn)}
+       AND balance.${quoted(projection.balanceLocationColumn)} = EXCLUDED.${quoted(projection.balanceLocationColumn)}
+       AND balance.${quoted(projection.balanceUnitColumn)} = EXCLUDED.${quoted(projection.balanceUnitColumn)}`,
+    [scope.tenantId, scope.environmentId],
+  );
+  if (inserted.rowCount !== identityCount) {
+    throw failure(
+      'POSTED_STOCK_BALANCE_IDENTITY_COLLISION',
+      `rebuild applied ${String(inserted.rowCount ?? 0)} of ${String(identityCount)} stock identities`,
+    );
+  }
+  return Object.freeze({
+    movementCount,
+    rowCount: identityCount,
+  });
+}
+
+function triggerArgumentLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 async function ensureRejectMutationTrigger(
@@ -2375,10 +2950,11 @@ async function verifyCatalogOnClient(
     tableName: policy.tablename,
     withCheck: normalizePolicyExpression(policy.with_check),
   }));
+  const expectedPolicies = buildExpectedPolicies(expectedTables);
   compareCatalogCollection(
     drift,
     'managed policy',
-    buildExpectedPolicies(expectedTables),
+    expectedPolicies,
     actualPolicies,
     (value) => `${value.tableName}.${value.name}`,
   );
@@ -2507,23 +3083,7 @@ async function verifyCatalogOnClient(
   compareCatalogCollection(
     drift,
     'managed function',
-    expectedTables.size === 0
-      ? []
-      : [
-          {
-            arguments: 'value text',
-            configuration: ['search_path=pg_catalog'],
-            kind: 'f',
-            language: 'sql',
-            name: unicodeCaseFoldFunctionName,
-            owner: 'north_star_module_materializer',
-            parallel_safety: 's',
-            result_type: 'text',
-            security_definer: false,
-            strict: true,
-            volatility: 'i',
-          },
-        ],
+    buildExpectedFunctions(expectedTables),
     functions.rows,
     (value) => `${value.name}(${value.arguments})`,
   );
@@ -2552,24 +3112,7 @@ async function verifyCatalogOnClient(
   compareCatalogCollection(
     drift,
     'managed function grant',
-    expectedTables.size === 0
-      ? []
-      : [
-          {
-            arguments: 'value text',
-            grantee: 'north_star_module_materializer',
-            is_grantable: false,
-            name: unicodeCaseFoldFunctionName,
-            privilege_type: 'EXECUTE',
-          },
-          {
-            arguments: 'value text',
-            grantee: 'north_star_module_runtime',
-            is_grantable: false,
-            name: unicodeCaseFoldFunctionName,
-            privilege_type: 'EXECUTE',
-          },
-        ],
+    buildExpectedFunctionGrants(expectedTables),
     functionGrants.rows,
     (value) =>
       `${value.name}(${value.arguments}).${value.grantee}.${value.privilege_type}`,
@@ -3761,64 +4304,146 @@ function sqlTextLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'::text`;
 }
 
+function buildExpectedFunctions(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+) {
+  if (tables.size === 0) return [];
+  return [
+    {
+      arguments: 'value text',
+      configuration: ['search_path=pg_catalog'],
+      kind: 'f',
+      language: 'sql',
+      name: unicodeCaseFoldFunctionName,
+      owner: 'north_star_module_materializer',
+      parallel_safety: 's',
+      result_type: 'text',
+      security_definer: false,
+      strict: true,
+      volatility: 'i',
+    },
+    ...(postedStockBalanceProjectionFromEntities([...tables.values()])
+      ? [
+          {
+            arguments: '',
+            configuration: ['search_path=pg_catalog, north_star_internal'],
+            kind: 'f',
+            language: 'plpgsql',
+            name: postedStockBalanceFunctionName,
+            owner: 'north_star_module_materializer',
+            parallel_safety: 'u',
+            result_type: 'trigger',
+            security_definer: false,
+            strict: false,
+            volatility: 'v',
+          },
+        ]
+      : []),
+  ];
+}
+
+function buildExpectedFunctionGrants(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+) {
+  if (tables.size === 0) return [];
+  return [
+    {
+      arguments: 'value text',
+      grantee: 'north_star_module_materializer',
+      is_grantable: false,
+      name: unicodeCaseFoldFunctionName,
+      privilege_type: 'EXECUTE',
+    },
+    {
+      arguments: 'value text',
+      grantee: 'north_star_module_runtime',
+      is_grantable: false,
+      name: unicodeCaseFoldFunctionName,
+      privilege_type: 'EXECUTE',
+    },
+    ...(postedStockBalanceProjectionFromEntities([...tables.values()])
+      ? [
+          {
+            arguments: '',
+            grantee: 'north_star_module_materializer',
+            is_grantable: false,
+            name: postedStockBalanceFunctionName,
+            privilege_type: 'EXECUTE',
+          },
+        ]
+      : []),
+  ];
+}
+
 function buildExpectedTriggers(
   tables: ReadonlyMap<string, StorageEntityTarget>,
 ) {
   const legalEntityMaster = [...tables.values()].find(
     (entity) => entity.legalEntityMaster !== undefined,
   );
-  return [...tables.values()]
-    .flatMap((entity) => {
-      const triggers: Array<{
-        definition?: string;
-        name: string;
-        tableName: string;
-      }> = [];
-      if (entity.factStorage) {
-        triggers.push(
-          {
-            definition: `CREATE TRIGGER ${entity.factStorage.companion.reservationTriggerName} AFTER INSERT ON north_star_module.${entity.physicalTableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.${entity.factStorage.companion.physicalTableName}')`,
-            name: entity.factStorage.companion.reservationTriggerName,
-            tableName: entity.physicalTableName,
-          },
-          {
-            name: entity.factStorage.rejectMutationTriggerName,
-            tableName: entity.physicalTableName,
-          },
-          {
-            name: entity.factStorage.companion.rejectMutationTriggerName,
-            tableName: entity.factStorage.companion.physicalTableName,
-          },
+  const postedStockProjection = postedStockBalanceProjectionFromEntities([
+    ...tables.values(),
+  ]);
+  const triggers = [...tables.values()].flatMap((entity) => {
+    const triggers: Array<{
+      definition?: string;
+      name: string;
+      tableName: string;
+    }> = [];
+    if (entity.factStorage) {
+      triggers.push(
+        {
+          definition: `CREATE TRIGGER ${entity.factStorage.companion.reservationTriggerName} AFTER INSERT ON north_star_module.${entity.physicalTableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.${entity.factStorage.companion.physicalTableName}')`,
+          name: entity.factStorage.companion.reservationTriggerName,
+          tableName: entity.physicalTableName,
+        },
+        {
+          name: entity.factStorage.rejectMutationTriggerName,
+          tableName: entity.physicalTableName,
+        },
+        {
+          name: entity.factStorage.companion.rejectMutationTriggerName,
+          tableName: entity.factStorage.companion.physicalTableName,
+        },
+      );
+    }
+    if (entity.periodLock) {
+      if (!legalEntityMaster) {
+        throw failure(
+          'LEGAL_ENTITY_MASTER_TARGET_INVALID',
+          'period-lock provisioning requires a legal-entity master',
         );
       }
-      if (entity.periodLock) {
-        if (!legalEntityMaster) {
-          throw failure(
-            'LEGAL_ENTITY_MASTER_TARGET_INVALID',
-            'period-lock provisioning requires a legal-entity master',
-          );
-        }
-        triggers.push({
-          definition: `CREATE TRIGGER ${entity.periodLock.provisioningTriggerName} AFTER INSERT ON north_star_module.${legalEntityMaster.physicalTableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.provision_inventory_period_lock('north_star_module.${entity.physicalTableName}')`,
-          name: entity.periodLock.provisioningTriggerName,
-          tableName: legalEntityMaster.physicalTableName,
-        });
-      }
-      return triggers.map((trigger) => ({
-        definition: normalizeSqlExpressionRequired(
-          trigger.definition !== undefined
-            ? trigger.definition
-            : `CREATE TRIGGER ${trigger.name} BEFORE DELETE OR UPDATE ON north_star_module.${trigger.tableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()`,
-        ),
-        name: trigger.name,
-        tableName: trigger.tableName,
-      }));
-    })
-    .toSorted((left, right) =>
-      `${left.tableName}.${left.name}`.localeCompare(
-        `${right.tableName}.${right.name}`,
+      triggers.push({
+        definition: `CREATE TRIGGER ${entity.periodLock.provisioningTriggerName} AFTER INSERT ON north_star_module.${legalEntityMaster.physicalTableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.provision_inventory_period_lock('north_star_module.${entity.physicalTableName}')`,
+        name: entity.periodLock.provisioningTriggerName,
+        tableName: legalEntityMaster.physicalTableName,
+      });
+    }
+    return triggers.map((trigger) => ({
+      definition: normalizeSqlExpressionRequired(
+        trigger.definition !== undefined
+          ? trigger.definition
+          : `CREATE TRIGGER ${trigger.name} BEFORE DELETE OR UPDATE ON north_star_module.${trigger.tableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()`,
       ),
-    );
+      name: trigger.name,
+      tableName: trigger.tableName,
+    }));
+  });
+  if (postedStockProjection) {
+    triggers.push({
+      definition: normalizeSqlExpressionRequired(
+        `CREATE TRIGGER ${postedStockProjection.triggerName} AFTER INSERT ON north_star_module.${postedStockProjection.movement.physicalTableName} FOR EACH ROW EXECUTE FUNCTION north_star_module.${postedStockBalanceFunctionName}(${postedStockBalanceTriggerArguments(postedStockProjection).map(triggerArgumentLiteral).join(', ')})`,
+      ),
+      name: postedStockProjection.triggerName,
+      tableName: postedStockProjection.movement.physicalTableName,
+    });
+  }
+  return triggers.toSorted((left, right) =>
+    `${left.tableName}.${left.name}`.localeCompare(
+      `${right.tableName}.${right.name}`,
+    ),
+  );
 }
 
 function buildExpectedPolicies(
@@ -3833,6 +4458,12 @@ function buildExpectedPolicies(
      AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid`,
   );
   return [...tables.values()].flatMap((entity) => {
+    const postedStockProjection = isPostedStockBalanceEntity(entity);
+    const triggerMutationPredicate = normalizePolicyExpression(
+      `tenant_id = north_star_internal.trusted_tenant_id()
+       AND environment_id = north_star_internal.trusted_environment_id()
+       AND pg_trigger_depth() > 0`,
+    );
     const tablePolicies = [
       {
         commands: entity.factStorage
@@ -3853,15 +4484,23 @@ function buildExpectedPolicies(
     ];
     return [
       ...tablePolicies.flatMap(({ commands, tableName }) =>
-        commands.map((command) => ({
-          command,
-          name: managedPolicyName(tableName, command),
-          permissive: true,
-          qual: command === 'INSERT' ? null : predicate,
-          roles: ['north_star_module_runtime'],
-          tableName,
-          withCheck: command === 'SELECT' ? null : predicate,
-        })),
+        commands.map((command) => {
+          const effectivePredicate =
+            postedStockProjection &&
+            tableName === entity.physicalTableName &&
+            command !== 'SELECT'
+              ? triggerMutationPredicate
+              : predicate;
+          return {
+            command,
+            name: managedPolicyName(tableName, command),
+            permissive: true,
+            qual: command === 'INSERT' ? null : effectivePredicate,
+            roles: ['north_star_module_runtime'],
+            tableName,
+            withCheck: command === 'SELECT' ? null : effectivePredicate,
+          };
+        }),
       ),
       ...(entity.factStorage || entity.legalEntity || entity.legalEntityMaster
         ? tablePolicies
@@ -3891,6 +4530,20 @@ function buildExpectedPolicies(
               withCheck: materializerPredicate,
             },
           ]
+        : []),
+      ...(postedStockProjection
+        ? (['INSERT', 'UPDATE'] as const).map((command) => ({
+            command,
+            name: managedMaterializerProjectionPolicyName(
+              entity.physicalTableName,
+              command,
+            ),
+            permissive: true,
+            qual: command === 'INSERT' ? null : materializerPredicate,
+            roles: ['north_star_module_materializer'],
+            tableName: entity.physicalTableName,
+            withCheck: materializerPredicate,
+          }))
         : []),
     ];
   });
@@ -4054,6 +4707,18 @@ function managedMaterializerSeedInsertPolicyName(tableName: string): string {
     .update(tableName)
     .update('\0')
     .update('MATERIALIZER_SEED_INSERT')
+    .digest('hex')
+    .slice(0, 32)}`;
+}
+
+function managedMaterializerProjectionPolicyName(
+  tableName: string,
+  command: 'INSERT' | 'UPDATE',
+): string {
+  return `nsm_p_${createHash('sha256')
+    .update(tableName)
+    .update('\0')
+    .update(`MATERIALIZER_POSTED_STOCK_${command}`)
     .digest('hex')
     .slice(0, 32)}`;
 }

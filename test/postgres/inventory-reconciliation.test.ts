@@ -158,6 +158,7 @@ interface TestStorageBinding {
   readonly legalEntity: TestEntityBinding;
   readonly location: TestEntityBinding;
   readonly movement: TestEntityBinding;
+  readonly postedStockBalance: TestEntityBinding;
   readonly schemaName: string;
   readonly storageTarget: StorageTargetPayloadV1;
   readonly transaction: TestEntityBinding;
@@ -184,6 +185,7 @@ interface StateSnapshot {
   readonly anchors: unknown[];
   readonly discrepancies: unknown[];
   readonly movements: unknown[];
+  readonly postedStockBalances: unknown[];
   readonly transactionLines: unknown[];
 }
 
@@ -382,12 +384,70 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           const anchors = arm(report, 'aggregateAnchors');
           assert.deepEqual(anchors.consistentSubjectIds, [readAnchorKey]);
           assert.equal(anchors.outcome, 'consistent');
-          assert.equal(report.subjectCount, 4);
+          const postedStock = arm(report, 'postedStockBalances');
+          assert.deepEqual(postedStock.consistentSubjectIds, [
+            postedStockSubject(legalEntityA, itemPrimary, locationPrimary),
+            postedStockSubject(legalEntityA, itemPrimary, locationSecondary),
+          ]);
+          assert.equal(postedStock.outcome, 'consistent');
+          assert.equal(report.subjectCount, 6);
           assert.equal(
             observations.filter(
               (observation) => observation.kind === 'reconciled',
             ).length,
             1,
+          );
+        },
+      );
+
+      await t.test(
+        'one corrupted posted quantity is named as ledger divergence and never repaired',
+        async () => {
+          const subjectId = postedStockSubject(
+            legalEntityA,
+            itemPrimary,
+            locationPrimary,
+          );
+          await setPostedStockQuantity(
+            database.pool,
+            scopeA,
+            binding,
+            locationPrimary,
+            '999',
+          );
+          const before = await readPostedStockQuantity(
+            database.pool,
+            scopeA,
+            binding,
+            locationPrimary,
+          );
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [legalEntityA],
+            scopeId: 'posted-stock-corruption',
+          });
+          const finding = findingFor(
+            report,
+            'POSTED_STOCK_BALANCE_LEDGER_DIVERGED',
+            subjectId,
+          );
+          assert.equal(finding.declaredValue, '999');
+          assert.equal(finding.observedValue, '6');
+          assert.equal(
+            await readPostedStockQuantity(
+              database.pool,
+              scopeA,
+              binding,
+              locationPrimary,
+            ),
+            before,
+            'the read-only reconciliation must preserve the corrupted projection for explicit repair',
+          );
+          await setPostedStockQuantity(
+            database.pool,
+            scopeA,
+            binding,
+            locationPrimary,
+            '6',
           );
         },
       );
@@ -784,7 +844,11 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           assert.equal(report.subjectCount, 0);
           assert.deepEqual(
             report.findings.map((finding) => finding.code),
-            ['SCOPE_OBSERVED_NO_SUBJECTS', 'SCOPE_OBSERVED_NO_SUBJECTS'],
+            [
+              'SCOPE_OBSERVED_NO_SUBJECTS',
+              'SCOPE_OBSERVED_NO_SUBJECTS',
+              'SCOPE_OBSERVED_NO_SUBJECTS',
+            ],
           );
           for (const armReport of report.arms) {
             assert.equal(armReport.outcome, 'indeterminate');
@@ -2272,6 +2336,11 @@ async function snapshotState(
     `SELECT to_jsonb(line) AS row FROM ${table(binding, binding.transactionLine)} AS line
       ORDER BY ${quoted(binding.transactionLine.recordIdColumn)}`,
   );
+  const postedStockBalances = await pool.query(
+    `SELECT to_jsonb(balance) AS row
+       FROM ${table(binding, binding.postedStockBalance)} AS balance
+      ORDER BY ${quoted(binding.postedStockBalance.recordIdColumn)}`,
+  );
   const anchors = await pool.query(
     `SELECT to_jsonb(anchor) AS row
        FROM north_star_internal.semantic_aggregate_anchors AS anchor
@@ -2287,8 +2356,68 @@ async function snapshotState(
     anchors: anchors.rows,
     discrepancies: discrepancies.rows,
     movements: movements.rows,
+    postedStockBalances: postedStockBalances.rows,
     transactionLines: transactionLines.rows,
   };
+}
+
+function postedStockSubject(
+  legalEntityId: string,
+  itemId: string,
+  locationId: string,
+): string {
+  return `posted-stock:${legalEntityId}:${itemId}:${locationId}`;
+}
+
+async function readPostedStockQuantity(
+  pool: Pool,
+  scope: TenantScope,
+  binding: TestStorageBinding,
+  locationId: string,
+): Promise<string | null> {
+  const result = await pool.query<{ quantity: string }>(
+    `SELECT ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_posted_quantity').physicalName)}::text AS quantity
+       FROM ${table(binding, binding.postedStockBalance)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.postedStockBalance.legalEntityColumn!)} = $3
+        AND ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_item_id').physicalName)} = $4
+        AND ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_location_id').physicalName)} = $5`,
+    [
+      scope.tenantId,
+      scope.environmentId,
+      scope.legalEntityId,
+      itemPrimary,
+      locationId,
+    ],
+  );
+  assert.ok(result.rowCount === 0 || result.rowCount === 1);
+  return result.rows[0]?.quantity ?? null;
+}
+
+async function setPostedStockQuantity(
+  pool: Pool,
+  scope: TenantScope,
+  binding: TestStorageBinding,
+  locationId: string,
+  quantity: string,
+): Promise<void> {
+  const result = await pool.query(
+    `UPDATE ${table(binding, binding.postedStockBalance)}
+        SET ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_posted_quantity').physicalName)} = $6
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.postedStockBalance.legalEntityColumn!)} = $3
+        AND ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_item_id').physicalName)} = $4
+        AND ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_location_id').physicalName)} = $5`,
+    [
+      scope.tenantId,
+      scope.environmentId,
+      scope.legalEntityId,
+      itemPrimary,
+      locationId,
+      quantity,
+    ],
+  );
+  assert.equal(result.rowCount, 1);
 }
 
 async function onlyAnchorCacheKey(
@@ -3565,6 +3694,7 @@ function testStorageBinding(
     legalEntity: bind('legal_entity'),
     location: bind('location'),
     movement: bind('inventory_movement'),
+    postedStockBalance: bind('posted_stock_balance'),
     schemaName: target.providerAbi.managedSchema,
     storageTarget: target,
     transaction: bind('inventory_transaction'),
