@@ -198,12 +198,16 @@ round 2 on `ab34546` closed operation attribution but found that canonical
 storage metadata could still contradict the provider ABI, malformed fields
 could retain the exemption, and an invalid movement companion still qualified
 internally. Both rounds' findings are accepted and corrected on
-`packet/stock-balance-read-model`. The replacement executable tree is green at
-`f8f36df` (compiler 152/152, architecture 141/141, PostgreSQL 204/204, browser
-91/91); the subsuming correction pins every current storage-shaping property,
-uses explicit validity, and subject-pins the full returned requirement set.
-Fresh Codex review is next, then Fable max on the identical frozen SHA, then the
-post-review full matrix.
+`packet/stock-balance-read-model`. Critical round 3 on `fc788cb` accepted those
+repairs but found that the movement companion still proved logical shape rather
+than its physical storage ABI: a `source_type.businessKey` edit compiled and
+produced an invalid unique constraint. The replacement executable tree is green
+at `83a8b55` (compiler 152/152, architecture 141/141, PostgreSQL 204/204,
+browser 91/91). It pins every current lowerer-consumed property on all 16
+movement fields, returns false on any mismatch, subject-pins the full dependent
+requirement set, and proves operation refusal remains candidate-based even when
+qualification fails. Fresh Codex review is next, then Fable max on the identical
+frozen SHA, then the post-review full matrix.
 
 #### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2
 

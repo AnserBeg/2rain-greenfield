@@ -1,6 +1,6 @@
 # stock-balance-read-model — honest posted-stock browsing
 
-Status: evidence_ready; Critical round-2 replacement frozen for fresh review
+Status: evidence_ready; Critical round-3 replacement frozen for fresh review
 
 Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b`
 
@@ -84,6 +84,17 @@ subsumingly: qualification now compares every current field property that shapes
 storage, both validators return explicit validity rather than infer it from a
 mutable diagnostic count, and the balance requires its active companion's
 pinned ABI to be valid.
+
+Critical review round 3 accepted those explicit validator results and the exact
+posted-stock descriptor, but found that the movement companion's validity still
+proved only its logical field shape. An ordinary one-property `businessKey`
+edit on `inventory_movement_source_type` therefore left the companion valid
+while asking storage lowering to install a physical uniqueness constraint that
+normal posting cannot satisfy. The correction makes the movement companion an
+exact storage ABI too: all 16 movement fields pin their business key,
+collation, default semantics and value, search mapping, and storage evolution.
+Any mismatch both receives its exact movement-field diagnostic and withholds
+all five dependent posted-stock CRUD/Form omissions.
 
 ## Maintenance, rebuild, and reconciliation
 
@@ -189,6 +200,23 @@ evolution, presence, and lifecycle one property at a time. It also covers a
 renamed field, an absent active movement companion, and an active companion with
 one malformed movement field. The unmodified descriptor is the admission twin.
 
+The active movement companion is likewise exact across all 16 pinned fields.
+Every field forbids a business key, uses binary collation, carries its pinned
+required-or-nullable default semantics with a null default, has no storage
+evolution, and uses the pinned search mapping (`source_id` searchable; the
+other 15 fields not searchable). The committed movement table varies a
+non-none business key on every field, collation, required and optional default
+semantics, both search directions, storage evolution, and a logical field type.
+Each specimen requires its exact movement-field
+`INVENTORY_CONTRACT_INVALID` diagnostic and the exact five subject-pinned
+posted-stock requirements above.
+
+A separate specimen combines the malformed movement `source_type` business
+key with an authored direct `o0` operation on `posted_stock_balance`. It still
+requires the exact provider-written operation refusal. This proves the refusing
+twin is based on the pinned candidate classification, not on successful CRUD/
+Form qualification.
+
 Four author-chosen ad-hoc deletions establish branch attribution. Leaving the
 movement diagnostic but not marking its validator invalid loses the five
 companion-control paths. Leaving a posted field type diagnostic but not marking
@@ -197,6 +225,16 @@ makes the ordinary item specimen compile. Leaving a storage-metadata diagnostic
 but not marking the balance invalid preserves that diagnostic while losing the
 same five paths. Each mutation failed only the exact ABI test and was restored
 before the replacement gates.
+
+Round 3 added three more discriminating author mutants. Bypassing movement
+storage-metadata comparison made the first business-key specimen compile.
+Keeping the exact movement diagnostic while omitting `valid = false` left the
+diagnostic present but returned none of the five posted-stock requirements.
+Changing operation refusal from the pinned candidate to the qualified read
+model erased the exact refusal only from the malformed-companion-plus-operation
+specimen. Each moved the focused compiler suite from 61/61 to 60/61 and was
+restored before the replacement gates. No mutation harness is committed; the
+ordinary specimens and their exact assertions are committed.
 
 `defaultValue` cannot be varied alone while `defaultSemantics: none` remains
 canonical: the language schema structurally requires the value to be absent.
@@ -270,11 +308,29 @@ remain serviceable under the current runtime. That first bounded install still
 materializes every earlier physical transition; every successor is then
 activated one-by-one through the new head before the schema snapshot is written.
 
+## Round-3 pre-fix reproduction
+
+Before changing conformance, a one-property mutation set
+`inventory_movement_source_type.businessKey` to
+`tenantEnvironmentCaseInsensitiveUnique`. The compiler returned `compiled`.
+Its storage projection contained a folded source-type column and a unique key
+over tenant × environment × legal entity × source type, proving that the
+property was not inert.
+
+The same mutation was then applied temporarily to the real PostgreSQL Inventory
+posting test. Materialization failed before a command could post with SQLSTATE
+`0A000`: PostgreSQL refused the generated unique constraint because the
+partitioned movement table's `business_period` partition key was absent. Thus
+the review's activation-failure branch was directly observed; the proposed
+two-fact transfer was unreachable because the invalid index prevented
+activation. The temporary provider-test mutation was restored before the
+production correction and is not present in the committed tree.
+
 ## Gate record
 
-The original round-1 and first round-2 gates below remain historical evidence
-only. The complete replacement pre-freeze set is green on executable commit
-`f8f36df0ea9d00112dac1ffc0efe120c935bcc83`:
+The original round-1 and round-2 gates remain historical evidence only. The
+complete round-3 replacement pre-freeze set is green on executable commit
+`83a8b558fdba5dfb47a4ee678cf540ec4c69140d`:
 
 - `pnpm typecheck`
 - `pnpm lint`
@@ -284,7 +340,13 @@ only. The complete replacement pre-freeze set is green on executable commit
 - `pnpm test:compiler` — 152/152
 - `pnpm test:architecture` — 141/141 with successful executed-file evidence
 - `pnpm test:browser` — 91/91, including the posted-stock List journey
-- `pnpm test:postgres` — 204/204, zero failures, in 1,294,911 ms
+- `pnpm test:postgres` — 204/204, zero failures, in 1,159,141 ms
+
+The focused compiler suite is 61/61 after restoring all three round-3 mutants.
+`check:app-release` reproduced all 12 predecessors under their own recorded
+profiles and retained the existing 12 → 13 lineage delta. The valid definition
+and generated release output are unchanged from the round-2 executable; the
+new executable work changes only conformance admission and its controls.
 
 The first replacement `test:compiler` invocation exited 75 before executing a
 test because another lane held the shared test lock. It is scheduling history,
@@ -361,10 +423,12 @@ Critical round 1 returned REVISE on
 `c781aafa09d1841732d6307416051e0960f0f879`; round 2 returned REVISE on
 `ab345464be089edfa9445c4dfb56a32740ce7e66`. Round 2 closed operation
 attribution and found the storage-metadata, exemption-control, and companion-
-validity defects above. Continuing is licensed by `review-tiers`: the round
-found a reachable production collision, and the correction subsumes the class
-with an exact storage descriptor and explicit validity rather than adding a
-business-key exception beside the type checks. Replacement gates are green and
+validity defects above. Round 3 returned REVISE on
+`fc788cbded7131f873a0b8ea936f534f913cb237`: the balance descriptor and explicit
+validity correction were sound, but movement companion validity omitted
+lowerer-consumed storage metadata. The round-3 correction subsumes that class
+with the exact movement storage descriptor across all 16 fields, plus a
+candidate-versus-qualified operation control. Replacement gates are green and
 the fresh Codex arm is now ready. Only after PASS may independent Fable max
 confirm the identical frozen SHA. The full CI matrix remains deliberately
 deferred until both arms converge.
