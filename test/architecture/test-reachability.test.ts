@@ -45,21 +45,6 @@ const playwrightSelectionArguments =
 test('node reporter credits only real non-skip non-todo results', () => {
   const file = resolve('test/example.test.ts');
   assert.equal(
-    creditableNodeResultPath(nodeResult(file, file)),
-    undefined,
-    'a synthetic file-level pass must not receive credit',
-  );
-  // THE ADMISSION TWIN, and the reason the title cannot carry this rule. A real
-  // test whose name happens to equal its own relative path must still be
-  // credited. A guard that resolved relative titles against cwd dropped it —
-  // measured 2026-08-21 against Node's own events, where the real result and the
-  // synthetic pass are indistinguishable by name alone.
-  assert.equal(
-    creditableNodeResultPath(nodeResult(relative(process.cwd(), file), file)),
-    file,
-    'a real test named after its own relative path must receive credit',
-  );
-  assert.equal(
     creditableNodeResultPath(nodeResult('real test', file, { skip: true })),
     undefined,
   );
@@ -68,40 +53,79 @@ test('node reporter credits only real non-skip non-todo results', () => {
     undefined,
   );
   assert.equal(creditableNodeResultPath(nodeResult('real test', file)), file);
+
+  // BOTH ADMISSION TWINS, and they are why this predicate no longer looks at
+  // the title at all. A real test may be named after its own file in either
+  // form, and two successive title guards each discarded one of them while
+  // admitting an impostor. Synthetic results are refused by the ledger below,
+  // from stream position, and by reconciliation against Node's own counts.
+  assert.equal(
+    creditableNodeResultPath(nodeResult(file, file)),
+    file,
+    'a real test named by its absolute file path must receive credit',
+  );
+  assert.equal(
+    creditableNodeResultPath(nodeResult(relative(process.cwd(), file), file)),
+    file,
+    'a real test named by its relative file path must receive credit',
+  );
 });
 
-test('the result ledger refuses a synthetic pass by stream order, not by name', () => {
-  // Node emits, for a file whose --test-name-pattern matched nothing: the
-  // file's own `test:summary` with counts.tests 0, and THEN a synthetic
-  // `test:pass` naming the file. A real result always precedes its file
-  // summary. That ordering is the fact; the title's shape is a coincidence a
-  // real test can reproduce, which is why two successive title-based guards
-  // each got one of the two cases wrong.
+test('the result ledger refuses synthetic results by provenance, not by name', () => {
+  // Measured against Node 22.22.2 on 2026-08-21. Three shapes are not executed
+  // tests, and none of them is distinguishable by title:
+  //   - the synthetic pass: file summary with counts.tests 0, THEN a pass
+  //     naming the file;
+  //   - the file wrapper: a lone test:fail named by the file's relative path,
+  //     with NO file summary, emitted when the file throws at import;
+  //   - cancellation: a child left pending when its parent ends.
   const file = resolve('test/example.test.ts');
-  const summary = (tests: number) => ({
+  const named = relative(process.cwd(), file);
+  const summary = (counts: Record<string, number>) => ({
     type: 'test:summary' as const,
-    data: { file, counts: { tests } },
+    data: { file, counts },
   });
 
   const executed = createNodeResultLedger();
-  assert.equal(
-    executed.observe(nodeResult(relative(process.cwd(), file), file)),
-    file,
+  executed.observe(nodeResult(named, file));
+  executed.observe(summary({ tests: 1, passed: 1, failed: 0, cancelled: 0 }));
+  assert.deepEqual(
+    executed.credited().map((record) => record.file),
+    [file],
     'a real path-named result arriving before the file summary is credited',
   );
-  assert.equal(executed.observe(summary(1)), undefined);
+  assert.deepEqual(executed.summaries().get(file), {
+    tests: 1,
+    passed: 1,
+    failed: 0,
+    cancelled: 0,
+  });
 
   const selectedNothing = createNodeResultLedger();
-  assert.equal(selectedNothing.observe(summary(0)), undefined);
-  assert.equal(
-    selectedNothing.observe(nodeResult(relative(process.cwd(), file), file)),
-    undefined,
-    'a result arriving after its file reported zero executed tests is synthetic',
+  selectedNothing.observe(summary({ tests: 0, passed: 0, failed: 0 }));
+  selectedNothing.observe(nodeResult(named, file));
+  selectedNothing.observe(nodeResult(file, file));
+  assert.deepEqual(
+    selectedNothing.credited(),
+    [],
+    'results after their file reported zero executed tests are synthetic',
   );
-  assert.equal(
-    selectedNothing.observe(nodeResult(file, file)),
-    undefined,
-    'and the absolutely-named form of the same synthetic pass is refused too',
+
+  // The file wrapper. No summary is emitted at all, so nothing it reports can
+  // be reconciled, and it must earn no credit.
+  const crashedAtImport = createNodeResultLedger();
+  crashedAtImport.observe({
+    type: 'test:fail' as const,
+    data: {
+      name: named,
+      file,
+      details: { type: 'test', error: { failureType: 'testCodeFailure' } },
+    },
+  });
+  assert.deepEqual(
+    crashedAtImport.credited(),
+    [],
+    'a file that reported no summary did not complete, so its lone result is Node\'s wrapper',
   );
 });
 

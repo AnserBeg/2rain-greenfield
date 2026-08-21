@@ -148,6 +148,16 @@ if [ "${1:-}" = '--self-test' ]; then
     'C5 a declared victim that vanished while another failure carried the token'
   control wrong-file-kill run 'not attributable' \
     'C6 a kill declared against the wrong one of two files sharing a test name'
+  # C7 and C8 are the round-2 review's specimens, and both are about PROVENANCE:
+  # a `test:fail` is not necessarily an executed test. C7's file throws at
+  # import, and Node reports that as a lone failure named by the file's own
+  # relative path — the same identity as the real test the admission rule
+  # credits. C8's child is cancelled because its parent ended, which Node counts
+  # under `counts.cancelled` and which never ran at all.
+  control import-failure-impersonates run 'reported no summary' \
+    "C7 Node's file-level failure impersonating the real test that shares its name"
+  control cancelled-child-is-not-a-kill run 'stopped passing without failing' \
+    'C8 a cancelled child declared as one of two kills'
 
   # --- The manifest format's own load-bearing fields. ----------------------
   control claim-missing validate EXPECTED_RED_CLAIM_MISSING \
