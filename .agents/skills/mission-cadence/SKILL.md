@@ -30,6 +30,35 @@ large batches — even when the next step seems obvious.
    whole-app review may be due at a fan-out point, a new correctness domain,
    or accumulated drift — propose one if a trigger fires), then STOP and wait.
 
+## PRE-FLIGHT — the orchestrator measures before it charters (binding, 2026-08-21)
+
+**Run this before emitting any packet prompt, bridge grant, or scope ruling. Every
+item is mechanical and takes seconds. Skipping it is the largest single source of
+lane stops measured to date.**
+
+1. **Every path in the lease exists and is unheld.** `ls` it; run the empirical
+   disjointness check in `lanes.md`. **Do not predict ownership from the partition
+   table** — it has been stale in every row at least once.
+2. **Every cited ADR, file, symbol and line resolves.** `ls docs/decisions/<name>`
+   and `grep -n <symbol>`. **Cite by symbol, never by line number.**
+3. **Every specimen is verified REACHABLE, not merely present.** Measuring one half
+   of a subject and asserting the whole is the specific error that has cost the
+   most.
+4. **Every fence is checked against what the work needs**, not what the charter
+   assumes. A path fenced by package name will eventually fence out a two-line
+   registry entry. **Fence by intent and say so.**
+5. **Every claim the prompt states as fact was measured in this session**, not
+   recalled. If it cannot be measured, write it as a claim under test.
+
+**Measured on 2026-08-21: eight orchestrator errors in one session, every one of
+them a detail that a single command would have settled.** Three caused a full lane
+stop; one caused a redesign that discarded two review PASSes; one produced a
+routed trigger keyed to the wrong predicate, which a reviewer then had to refute.
+**No tooling catches these. Only the pre-flight does.**
+
+**A lane that stops because the charter was wrong is doing the protocol correctly.
+The charter being wrong that often is not.**
+
 ## Packet definition
 
 A packet must have all of:

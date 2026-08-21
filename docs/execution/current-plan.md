@@ -1,5 +1,22 @@
 # Current plan — active execution state
 
+## PROGRAM REVIEW — 2026-08-20, DONE. Read this before assuming one is due.
+
+**The first-office-worker-slice program review is COMPLETE**, two arms converged, recorded
+at [`program-reviews/2026-08-20-first-office-worker-slice.md`](program-reviews/2026-08-20-first-office-worker-slice.md)
+against `7e1c815`, with a ledger pointer row. **Do not treat the fan-out trigger as
+pending — it fired and was discharged.**
+
+**A DIFFERENT program review is still open and is not this one:** row `5g3-prog`, the
+major-correctness-domain review for the inventory ledger. **A lane reading only the queue
+mistook that row for the fan-out trigger on 2026-08-20**, which is exactly the failure
+this section now prevents.
+
+**Recorded as an orchestrator error:** the review was written, committed and pushed, and
+**the queue was never told.** That is finding **R1 of the review itself** — a record
+outliving its truth — committed two hours after writing the finding. **The instrument that
+would have caught it is R1's own `check-records.sh`, which is not built yet.**
+
 ## TRIAGE — 2026-08-13. Read this before the queue.
 
 **The queue holds 134 rows and they all looked equally live. They are not.** Every
@@ -180,6 +197,50 @@ date it never meant.**
 renderer change but needs a posting-maintained projection and **would not naturally
 preserve the audited bitemporal semantics.** That trade is the fork whoever charters
 this must settle.
+
+**RE-CHARTERED 2026-08-20 by program-review finding R6.** The grouped-aggregate
+stop above remains correct; its pricing does not. ADR-0007 already sanctions a
+rebuildable read-model projection, `inventory_movement` already proves an
+operationless platform-written entity can ship, and the provider already owns
+posting-linked generation and reconciliation. `stock-balance-read-model` now
+implements the bounded alternative as **Posted stock**, explicitly the sum of
+all posted movements and never an as-of claim. One row remains selected legal
+entity × item × location; the five-parameter bitemporal lookup remains intact;
+maintenance, rebuild, and reconciliation reuse the existing generation lock.
+The existing List renderer is sufficient, so `apps/web/src` remains unchanged.
+Critical round 1 returned REVISE on `c781aaf`: the refusing twin ignored `o1`
+and transition-owned operations, and the reserved family earned CRUD/Form
+omission without proving the PostgreSQL maintainer's four-field ABI. Critical
+round 2 on `ab34546` closed operation attribution but found that canonical
+storage metadata could still contradict the provider ABI, malformed fields
+could retain the exemption, and an invalid movement companion still qualified
+internally. Both rounds' findings are accepted and corrected on
+`packet/stock-balance-read-model`. Critical round 3 on `fc788cb` accepted those
+repairs but found that the movement companion still proved logical shape rather
+than its physical storage ABI: a `source_type.businessKey` edit compiled and
+produced an invalid unique constraint. The round-3 replacement executable tree was green
+at `83a8b55` (compiler 152/152, architecture 141/141, PostgreSQL 204/204,
+browser 91/91). It pins every current lowerer-consumed property on all 16
+movement fields, returns false on any mismatch, subject-pins the full dependent
+requirement set, and proves operation refusal remains candidate-based even when
+qualification fails. Fresh Codex returned PASS on `97eaa36`, but independent
+Fable confirmation found declared relations are a
+second authored input to the movement physical ABI: an extra movement relation
+compiled, retained the exemption, changed the physical table, and made posting
+reject the ambiguous transaction binding. Replacement executable `0021bcf` pins
+exactly the two provider-maintained movement relations and every property that
+changes their material participation. The exact missing, extra and one-property
+controls return both their relation diagnostic and all five posted-stock CRUD/
+Form requirements. **ACCEPTED 2026-08-21.** Fresh-naive Codex xhigh and
+independent Fable max both returned PASS on identical frozen SHA `07c1b44`; the
+Fable arm independently ran the focused suite 61/61 and four discriminating
+mutants at 60/61. The complete staged-tree matrix is green at `75e6ee8`: unit
+120/120, compiler 152/152, performance 5/5, integration 149/149, agent 3/3,
+architecture 141/141, contracts 16/16, PostgreSQL 204/204, locale 1/1, browser
+91/91, observability 11/11, language coverage PASS, and reachability 104/104.
+The first matrix attempt's sole Docker endpoint-publication failure reproduced
+green 3/3 in isolation; the full unchanged-tree rerun passed. Lineage remains
+12→13 with all predecessors reproduced under their own ADR-0047 §5 profiles.
 
 #### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2
 

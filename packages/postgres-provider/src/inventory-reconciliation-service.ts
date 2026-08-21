@@ -25,7 +25,7 @@ const scaleFactor = 10n ** decimalScale;
 const maximumScaledMagnitude = 10n ** 38n;
 
 export type InventoryReconciliationArmIdV1 =
-  'aggregateAnchors' | 'sourceDocuments';
+  'aggregateAnchors' | 'postedStockBalances' | 'sourceDocuments';
 
 /**
  * Three outcomes, never two. ADR-0044's rule applied to reconciliation:
@@ -52,6 +52,12 @@ export type InventoryReconciliationFindingCodeV1 =
   | 'AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED'
   | 'AGGREGATE_ANCHOR_QUERY_UNRECOGNIZED'
   | 'AGGREGATE_ANCHOR_SCOPE_DIVERGED'
+  | 'POSTED_STOCK_BALANCE_DUPLICATED'
+  | 'POSTED_STOCK_BALANCE_LEDGER_DIVERGED'
+  | 'POSTED_STOCK_BALANCE_MISSING'
+  | 'POSTED_STOCK_BALANCE_SHAPE_UNRECOGNIZED'
+  | 'POSTED_STOCK_BALANCE_UNEXPECTED'
+  | 'POSTED_STOCK_BALANCE_UNIT_DIVERGED'
   | 'RECORDED_ANCHOR_DISCREPANCY_PRESERVED'
   | 'SCOPE_OBSERVED_NO_SUBJECTS'
   | 'SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED'
@@ -285,6 +291,11 @@ interface ReconciliationStorageBinding {
   readonly movementQuantityColumn: string;
   readonly movementRelationToLineColumn: string;
   readonly movementRelationToTransactionColumn: string;
+  readonly postedStockBalance: EntityBinding;
+  readonly postedStockBalanceItemColumn: string;
+  readonly postedStockBalanceLocationColumn: string;
+  readonly postedStockBalanceQuantityColumn: string;
+  readonly postedStockBalanceUnitColumn: string;
   readonly schemaName: string;
   readonly transaction: EntityBinding;
   readonly transactionAdjustmentType: string;
@@ -347,6 +358,30 @@ interface LedgerMovementRow {
 interface SourceDocumentSnapshot {
   readonly lines: readonly SourceDocumentLineRow[];
   readonly movements: readonly LedgerMovementRow[];
+}
+
+interface PostedStockLedgerRow {
+  readonly itemId: string;
+  readonly legalEntityId: string;
+  readonly locationId: string;
+  readonly movementCount: string;
+  readonly postedQuantity: string;
+  readonly unitCount: string;
+  readonly unitId: string;
+}
+
+interface PostedStockProjectionRow {
+  readonly itemId: string;
+  readonly legalEntityId: string;
+  readonly locationId: string;
+  readonly postedQuantity: string;
+  readonly recordId: string;
+  readonly unitId: string;
+}
+
+interface PostedStockSnapshot {
+  readonly ledger: readonly PostedStockLedgerRow[];
+  readonly projection: readonly PostedStockProjectionRow[];
 }
 
 /**
@@ -454,12 +489,17 @@ export class PostgresInventoryReconciliationService {
           context,
           legalEntityIds,
         );
+        const postedStockBalances = await this.#reconcilePostedStockBalances(
+          client,
+          context,
+          legalEntityIds,
+        );
         const aggregateAnchors = await this.#reconcileAggregateAnchors(
           client,
           context,
           legalEntityIds,
         );
-        const arms = [aggregateAnchors, sourceDocuments];
+        const arms = [aggregateAnchors, postedStockBalances, sourceDocuments];
         const findings = arms.flatMap((arm) => arm.findings);
         const subjectCount = arms.reduce(
           (total, arm) => total + arm.subjectCount,
@@ -860,6 +900,148 @@ export class PostgresInventoryReconciliationService {
     }
     if (divergent) arm.markDiscrepant(subjectId);
     else arm.consistent(subjectId);
+  }
+
+  /**
+   * The browsable posted-stock rows are a derived promise, not inventory
+   * truth. This arm independently groups the append-only ledger and compares
+   * every stock identity in either side while the shared movement-generation
+   * lock pins posting. It never calls the trigger or rebuild path it verifies.
+   */
+  async #reconcilePostedStockBalances(
+    client: PoolClient,
+    context: TrustedRequestContext,
+    legalEntityIds: readonly string[],
+  ): Promise<InventoryReconciliationArmReportV1> {
+    const snapshot = await selectPostedStockSnapshot(
+      client,
+      this.#binding,
+      context,
+      legalEntityIds,
+    );
+    const ledger = new Map(
+      snapshot.ledger.map((row) => [postedStockSubjectId(row), row]),
+    );
+    const projection = Map.groupBy(snapshot.projection, postedStockSubjectId);
+    const subjectIds = new Set([...ledger.keys(), ...projection.keys()]);
+    const arm = new ArmAccumulator('postedStockBalances');
+    for (const subjectId of [...subjectIds].toSorted()) {
+      const observed = ledger.get(subjectId);
+      const declared = projection.get(subjectId) ?? [];
+      arm.examined(subjectId, 'balance');
+      arm.examined(subjectId, 'integrity');
+      if (!observed) {
+        arm.discrepant(subjectId, {
+          axis: 'balance',
+          code: 'POSTED_STOCK_BALANCE_UNEXPECTED',
+          severity: 'discrepant',
+          declaredValue: declared[0]?.postedQuantity ?? null,
+          detail: {
+            recordIds: declared.map((row) => row.recordId).join(','),
+          },
+          observedValue: null,
+        });
+        continue;
+      }
+      if (declared.length === 0) {
+        arm.discrepant(subjectId, {
+          axis: 'balance',
+          code: 'POSTED_STOCK_BALANCE_MISSING',
+          severity: 'discrepant',
+          declaredValue: null,
+          detail: {
+            itemId: observed.itemId,
+            legalEntityId: observed.legalEntityId,
+            locationId: observed.locationId,
+            movementCount: observed.movementCount,
+          },
+          observedValue: renderedStoredDecimal(observed.postedQuantity),
+        });
+        continue;
+      }
+      if (declared.length !== 1) {
+        arm.discrepant(subjectId, {
+          axis: 'integrity',
+          code: 'POSTED_STOCK_BALANCE_DUPLICATED',
+          severity: 'discrepant',
+          declaredValue: String(declared.length),
+          detail: {
+            recordIds: declared.map((row) => row.recordId).join(','),
+          },
+          observedValue: '1',
+        });
+        continue;
+      }
+      const row = declared[0]!;
+      if (observed.unitCount !== '1') {
+        arm.unverifiable(subjectId, {
+          axis: 'balance',
+          code: 'POSTED_STOCK_BALANCE_SHAPE_UNRECOGNIZED',
+          severity: 'unverifiable',
+          declaredValue: row.unitId,
+          detail: {
+            itemId: observed.itemId,
+            legalEntityId: observed.legalEntityId,
+            locationId: observed.locationId,
+            movementUnitCount: observed.unitCount,
+          },
+          observedValue: observed.unitId,
+        });
+        continue;
+      }
+      let divergent = false;
+      if (row.unitId !== observed.unitId) {
+        divergent = true;
+        arm.finding({
+          axis: 'balance',
+          code: 'POSTED_STOCK_BALANCE_UNIT_DIVERGED',
+          severity: 'discrepant',
+          declaredValue: row.unitId,
+          detail: {
+            itemId: observed.itemId,
+            legalEntityId: observed.legalEntityId,
+            locationId: observed.locationId,
+            recordId: row.recordId,
+          },
+          observedValue: observed.unitId,
+          subjectId,
+        });
+      }
+      const declaredQuantity = parseStoredDecimal(row.postedQuantity);
+      const observedQuantity = parseStoredDecimal(observed.postedQuantity);
+      if (declaredQuantity === null || observedQuantity === null) {
+        arm.unverifiable(subjectId, {
+          axis: 'balance',
+          code: 'POSTED_STOCK_BALANCE_SHAPE_UNRECOGNIZED',
+          severity: 'unverifiable',
+          declaredValue: row.postedQuantity,
+          detail: { recordId: row.recordId },
+          observedValue: observed.postedQuantity,
+        });
+        continue;
+      }
+      if (declaredQuantity !== observedQuantity) {
+        divergent = true;
+        arm.finding({
+          axis: 'balance',
+          code: 'POSTED_STOCK_BALANCE_LEDGER_DIVERGED',
+          severity: 'discrepant',
+          declaredValue: scaledToDecimal(declaredQuantity),
+          detail: {
+            itemId: observed.itemId,
+            legalEntityId: observed.legalEntityId,
+            locationId: observed.locationId,
+            movementCount: observed.movementCount,
+            recordId: row.recordId,
+          },
+          observedValue: scaledToDecimal(observedQuantity),
+          subjectId,
+        });
+      }
+      if (divergent) arm.markDiscrepant(subjectId);
+      else arm.consistent(subjectId);
+    }
+    return arm.freeze();
   }
 
   /**
@@ -1862,6 +2044,81 @@ async function selectSourceDocumentSnapshot(
   });
 }
 
+function postedStockSubjectId(
+  row: Pick<
+    PostedStockLedgerRow | PostedStockProjectionRow,
+    'itemId' | 'legalEntityId' | 'locationId'
+  >,
+): string {
+  return `posted-stock:${row.legalEntityId}:${row.itemId}:${row.locationId}`;
+}
+
+async function selectPostedStockSnapshot(
+  client: PoolClient,
+  binding: ReconciliationStorageBinding,
+  context: TrustedRequestContext,
+  legalEntityIds: readonly string[],
+): Promise<PostedStockSnapshot> {
+  const movement = binding.movement;
+  const balance = binding.postedStockBalance;
+  const result = await client.query<{
+    ledger: PostedStockLedgerRow[];
+    projection: PostedStockProjectionRow[];
+  }>(
+    `WITH ledger AS (
+       SELECT ${quoted(movement.legalEntityColumn)}::text AS "legalEntityId",
+              ${quoted(requiredColumn(movement, 'inventory_movement_item_id'))}::text AS "itemId",
+              ${quoted(requiredColumn(movement, 'inventory_movement_location_id'))}::text AS "locationId",
+              SUM(${quoted(binding.movementQuantityColumn)})::text AS "postedQuantity",
+              MIN(${quoted(requiredColumn(movement, 'inventory_movement_unit_id'))})::text AS "unitId",
+              count(DISTINCT ${quoted(requiredColumn(movement, 'inventory_movement_unit_id'))})::text AS "unitCount",
+              count(*)::text AS "movementCount"
+         FROM ${table(binding, movement)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(movement.legalEntityColumn)} = ANY($3::uuid[])
+          AND ${quoted(movement.archiveColumn)} IS NULL
+        GROUP BY ${quoted(movement.legalEntityColumn)},
+                 ${quoted(requiredColumn(movement, 'inventory_movement_item_id'))},
+                 ${quoted(requiredColumn(movement, 'inventory_movement_location_id'))}
+     ), projection AS (
+       SELECT ${quoted(balance.recordIdColumn)}::text AS "recordId",
+              ${quoted(balance.legalEntityColumn)}::text AS "legalEntityId",
+              ${quoted(binding.postedStockBalanceItemColumn)}::text AS "itemId",
+              ${quoted(binding.postedStockBalanceLocationColumn)}::text AS "locationId",
+              ${quoted(binding.postedStockBalanceQuantityColumn)}::text AS "postedQuantity",
+              ${quoted(binding.postedStockBalanceUnitColumn)}::text AS "unitId"
+         FROM ${table(binding, balance)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(balance.legalEntityColumn)} = ANY($3::uuid[])
+          AND ${quoted(balance.archiveColumn)} IS NULL
+     )
+     SELECT COALESCE(
+              (SELECT jsonb_agg(to_jsonb(ledger)
+                                ORDER BY "legalEntityId", "itemId", "locationId")
+                 FROM ledger),
+              '[]'::jsonb
+            ) AS ledger,
+            COALESCE(
+              (SELECT jsonb_agg(to_jsonb(projection)
+                                ORDER BY "legalEntityId", "itemId", "locationId", "recordId")
+                 FROM projection),
+              '[]'::jsonb
+            ) AS projection`,
+    [context.tenantId, context.environmentId, [...legalEntityIds]],
+  );
+  const snapshot = result.rows[0];
+  if (!snapshot) {
+    throw new InventoryReconciliationError(
+      'INVENTORY_RECONCILIATION_STORAGE_INVALID',
+      'posted-stock snapshot returned no row',
+    );
+  }
+  return Object.freeze({
+    ledger: Object.freeze(snapshot.ledger),
+    projection: Object.freeze(snapshot.projection),
+  });
+}
+
 function validatedScope(scope: InventoryReconciliationScopeV1): string[] {
   if (typeof scope.scopeId !== 'string' || scope.scopeId.trim() === '') {
     throw new InventoryReconciliationError(
@@ -1951,6 +2208,7 @@ function resolveReconciliationStorage(
     return matches[0]!;
   };
   const movementEntity = entity('inventory_movement');
+  const postedStockBalanceEntity = entity('posted_stock_balance');
   const transactionEntity = entity('inventory_transaction');
   const transactionLineEntity = entity('inventory_transaction_line');
   if (
@@ -1964,6 +2222,7 @@ function resolveReconciliationStorage(
   }
   assertMovementColumnsClassified(movementEntity);
   const movement = bindEntity(movementEntity);
+  const postedStockBalance = bindEntity(postedStockBalanceEntity);
   const transaction = bindEntity(transactionEntity);
   const transactionLine = bindEntity(transactionLineEntity);
   const movementPostingRole = enumOptions(
@@ -2006,6 +2265,23 @@ function resolveReconciliationStorage(
       target,
       movementEntity,
       'inventory_transaction',
+    ),
+    postedStockBalance,
+    postedStockBalanceItemColumn: requiredColumn(
+      postedStockBalance,
+      'posted_stock_balance_item_id',
+    ),
+    postedStockBalanceLocationColumn: requiredColumn(
+      postedStockBalance,
+      'posted_stock_balance_location_id',
+    ),
+    postedStockBalanceQuantityColumn: requiredColumn(
+      postedStockBalance,
+      'posted_stock_balance_posted_quantity',
+    ),
+    postedStockBalanceUnitColumn: requiredColumn(
+      postedStockBalance,
+      'posted_stock_balance_unit_id',
     ),
     schemaName: target.providerAbi.managedSchema,
     transaction,

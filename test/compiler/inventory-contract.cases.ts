@@ -15,6 +15,7 @@ import {
 } from '../../packages/compiler/src/index.js';
 import {
   compileInventoryContract,
+  resolvePinnedInventoryProviderWrittenReadModel,
   validateInventoryBaseUnitChange,
   validateInventoryMovementCandidate,
   type CompiledInventoryContractV1,
@@ -26,6 +27,7 @@ import {
   INVENTORY_FACT_STORAGE_V1,
   INVENTORY_NAMESPACE,
   INVENTORY_PERIOD_LOCK_STORAGE_V1,
+  INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1,
   INVENTORY_STORAGE_REFERENCES_V1,
   LEGAL_ENTITY_FAMILY_MAP_V1,
   LEGAL_ENTITY_RELATION_SEMANTICS_V1,
@@ -52,6 +54,10 @@ interface MutableInventoryContract {
     families: Array<Record<string, unknown>>;
     relations: Array<Record<string, unknown>>;
   };
+  readModels: {
+    authoredOperations: string;
+    providerWritten: Array<Record<string, unknown>>;
+  };
   movement: {
     fields: Array<Record<string, unknown>>;
   };
@@ -65,6 +71,828 @@ type InventoryContractCase = (name: string, run: () => void) => void;
 export function registerInventoryContractCases(
   register: InventoryContractCase,
 ): void {
+  register(
+    'posted stock is an operationless legal-entity row model whose labels state its temporal limit',
+    () => {
+      const definition = inventoryModuleDefinition() as unknown as {
+        entities: Array<{ entityId: string; label: string }>;
+        fields: Array<{
+          businessKey?: string;
+          entity: { targetId: string };
+          fieldId: string;
+          fieldType: {
+            kind: string;
+            maximumLength?: number;
+            scale?: number;
+          };
+        }>;
+        languageVersion: string;
+        operations: Array<
+          Record<string, unknown> & {
+            effect: { entity?: { targetId?: string }; kind: string };
+            lifecycle?: string;
+            operationId: string;
+            permission: { targetId: string };
+            readBack: { targetId: string };
+            tier: string;
+          }
+        >;
+        permissions: Array<
+          Record<string, unknown> & {
+            label: string;
+            permissionId: string;
+            resource: { targetId: string };
+          }
+        >;
+        stateMachines: Array<Record<string, unknown>>;
+        surfaces: Array<{ label: string; surfaceId: string }>;
+      };
+      const entityId = `${INVENTORY_NAMESPACE}:entity.posted_stock_balance`;
+      const assertHonestLabels = (candidate: typeof definition): void => {
+        assert.equal(
+          candidate.entities.find((entity) => entity.entityId === entityId)
+            ?.label,
+          'Posted stock balance',
+        );
+        assert.deepEqual(
+          candidate.surfaces
+            .filter((surface) =>
+              surface.surfaceId.includes('.posted_stock_balance_'),
+            )
+            .map((surface) => surface.label),
+          ['Posted stock list', 'Posted stock detail'],
+        );
+      };
+      assertHonestLabels(definition);
+      assert.equal(
+        definition.operations.some(
+          (operation) => operation.effect.entity?.targetId === entityId,
+        ),
+        false,
+        'the platform-written projection authors no operation',
+      );
+      assert.deepEqual(INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1, [
+        {
+          classification: 'providerWritten',
+          familyId: 'posted_stock_balance',
+          maintainerId:
+            'northstar.postgresql-module-provider:posted-stock-balance/v1',
+        },
+      ]);
+      assert.deepEqual(
+        resolvePinnedInventoryProviderWrittenReadModel(
+          `${INVENTORY_NAMESPACE}:package.inventory`,
+          entityId,
+        ),
+        INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1[0],
+        'the pinned candidate rule is resolved by canonical family before ABI qualification',
+      );
+      assert.equal(
+        resolvePinnedInventoryProviderWrittenReadModel(
+          'northstar.catalog:package.catalog',
+          'northstar.catalog:entity.unpinned_projection',
+        ),
+        null,
+        'an unpinned family cannot earn the exemption',
+      );
+
+      const admitted = compileApplication(moduleInput(definition));
+      assert.equal(
+        admitted.status,
+        'compiled',
+        'removing the provider-written conformance branch must red here with missing CRUD/form diagnostics',
+      );
+
+      const assertProviderOperationRefused = (
+        candidate: typeof definition,
+        message: string,
+      ): void => {
+        const refused = compileApplication(moduleInput(candidate));
+        assert.equal(refused.status, 'failed', message);
+        if (refused.status !== 'failed') return;
+        assert.deepEqual(
+          refused.diagnostics
+            .filter(
+              (diagnostic) =>
+                diagnostic.path === '$.operations.providerWritten',
+            )
+            .map((diagnostic) => [diagnostic.code, diagnostic.subjectId]),
+          [['COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED', entityId]],
+          message,
+        );
+      };
+      for (const probe of [
+        { label: 'active o0', lifecycle: undefined, tier: 'o0' },
+        { label: 'active o1', lifecycle: undefined, tier: 'o1' },
+        { label: 'retired o0', lifecycle: 'retired', tier: 'o0' },
+      ]) {
+        const withAuthoredOperation = structuredClone(definition);
+        const exemplar = withAuthoredOperation.operations.find(
+          (operation) =>
+            operation.operationId ===
+            `${INVENTORY_NAMESPACE}:operation.legal_entity_create`,
+        );
+        assert.ok(exemplar);
+        const operation = structuredClone(exemplar);
+        assert.ok(operation.effect.entity);
+        operation.operationId = `${INVENTORY_NAMESPACE}:operation.posted_stock_balance_create_${probe.label.replace(' ', '_')}_probe`;
+        operation.effect.entity.targetId = entityId;
+        operation.permission.targetId = `${INVENTORY_NAMESPACE}:permission.posted_stock_balance_read`;
+        operation.readBack.targetId = `${INVENTORY_NAMESPACE}:query.posted_stock_balance_get`;
+        operation.tier = probe.tier;
+        if (probe.lifecycle) operation.lifecycle = probe.lifecycle;
+        withAuthoredOperation.operations.push(operation);
+        assertProviderOperationRefused(
+          withAuthoredOperation,
+          `a direct ${probe.label} operation must hit the provider-written refusing twin by entity name`,
+        );
+      }
+
+      const malformedCompanionWithAuthoredOperation =
+        structuredClone(definition);
+      const malformedMovementSourceType =
+        malformedCompanionWithAuthoredOperation.fields.find(
+          (field) =>
+            field.fieldId ===
+            `${INVENTORY_NAMESPACE}:field.inventory_movement_source_type`,
+        );
+      assert.ok(malformedMovementSourceType);
+      malformedMovementSourceType.businessKey =
+        'tenantEnvironmentCaseInsensitiveUnique';
+      const malformedCompanionOperation = structuredClone(
+        malformedCompanionWithAuthoredOperation.operations.find(
+          (operation) =>
+            operation.operationId ===
+            `${INVENTORY_NAMESPACE}:operation.legal_entity_create`,
+        ),
+      );
+      assert.ok(malformedCompanionOperation);
+      assert.ok(malformedCompanionOperation.effect.entity);
+      malformedCompanionOperation.operationId = `${INVENTORY_NAMESPACE}:operation.posted_stock_balance_malformed_companion_probe`;
+      malformedCompanionOperation.effect.entity.targetId = entityId;
+      malformedCompanionOperation.permission.targetId = `${INVENTORY_NAMESPACE}:permission.posted_stock_balance_read`;
+      malformedCompanionOperation.readBack.targetId = `${INVENTORY_NAMESPACE}:query.posted_stock_balance_get`;
+      malformedCompanionOperation.tier = 'o0';
+      malformedCompanionWithAuthoredOperation.operations.push(
+        malformedCompanionOperation,
+      );
+      assertProviderOperationRefused(
+        malformedCompanionWithAuthoredOperation,
+        'the refusing twin must remain pinned-candidate-based when the movement companion fails storage ABI qualification',
+      );
+
+      const withTransitionOperation = structuredClone(definition);
+      const transitionPermission = structuredClone(
+        withTransitionOperation.permissions.find(
+          (permission) =>
+            permission.permissionId ===
+            `${INVENTORY_NAMESPACE}:permission.inventory_transaction_post`,
+        ),
+      );
+      assert.ok(transitionPermission);
+      transitionPermission.permissionId = `${INVENTORY_NAMESPACE}:permission.posted_stock_balance_transition_probe`;
+      transitionPermission.label = 'posted stock transition probe';
+      transitionPermission.resource.targetId = entityId;
+      withTransitionOperation.permissions.push(transitionPermission);
+      const transitionId = `${INVENTORY_NAMESPACE}:transition.posted_stock_balance_probe`;
+      const openStateId = `${INVENTORY_NAMESPACE}:state.posted_stock_balance_open_probe`;
+      const closedStateId = `${INVENTORY_NAMESPACE}:state.posted_stock_balance_closed_probe`;
+      const reference = (kind: string, targetId: string) => ({
+        kind,
+        schemaVersion: definition.languageVersion,
+        targetId,
+      });
+      withTransitionOperation.stateMachines.push({
+        entity: reference('entityReference', entityId),
+        initialState: reference('stateReference', openStateId),
+        kind: 'stateMachineDefinition',
+        machineId: `${INVENTORY_NAMESPACE}:machine.posted_stock_balance_probe`,
+        schemaVersion: definition.languageVersion,
+        states: [
+          {
+            kind: 'stateDefinition',
+            label: 'Open',
+            orderKey: 10,
+            schemaVersion: definition.languageVersion,
+            stateId: openStateId,
+          },
+          {
+            kind: 'stateDefinition',
+            label: 'Closed',
+            orderKey: 20,
+            schemaVersion: definition.languageVersion,
+            stateId: closedStateId,
+            terminal: true,
+          },
+        ],
+        transitions: [
+          {
+            fromState: reference('stateReference', openStateId),
+            kind: 'transitionDefinition',
+            label: 'Close probe',
+            orderKey: 10,
+            permission: reference(
+              'permissionReference',
+              transitionPermission.permissionId,
+            ),
+            schemaVersion: definition.languageVersion,
+            toState: reference('stateReference', closedStateId),
+            transitionId,
+          },
+        ],
+      });
+      const transitionOperation = structuredClone(
+        withTransitionOperation.operations.find(
+          (operation) =>
+            operation.operationId ===
+            `${INVENTORY_NAMESPACE}:operation.legal_entity_create`,
+        ),
+      );
+      assert.ok(transitionOperation);
+      transitionOperation.operationId = `${INVENTORY_NAMESPACE}:operation.posted_stock_balance_transition_probe`;
+      transitionOperation.effect = {
+        kind: 'transitionStateEffect',
+        schemaVersion: definition.languageVersion,
+        transition: reference('transitionReference', transitionId),
+      } as typeof transitionOperation.effect;
+      transitionOperation.permission.targetId =
+        transitionPermission.permissionId;
+      transitionOperation.readBack.targetId = `${INVENTORY_NAMESPACE}:query.posted_stock_balance_get`;
+      transitionOperation.tier = 'o0';
+      withTransitionOperation.operations.push(transitionOperation);
+      assertProviderOperationRefused(
+        withTransitionOperation,
+        'a transition effect must resolve through its machine to the provider-written entity',
+      );
+
+      const impliedAsOf = structuredClone(definition);
+      impliedAsOf.entities.find(
+        (entity) => entity.entityId === entityId,
+      )!.label = 'On-hand balance';
+      assert.throws(
+        () => assertHonestLabels(impliedAsOf),
+        /Posted stock balance/u,
+        'one changed label makes the honesty control red',
+      );
+    },
+  );
+
+  register(
+    'posted-stock provider status requires the exact maintainer storage ABI',
+    () => {
+      const definition = inventoryModuleDefinition() as unknown as {
+        entities: Array<{ entityId: string; lifecycle?: string }>;
+        fields: Array<{
+          businessKey?: string;
+          collation?: string;
+          defaultSemantics?: string;
+          defaultValue?: unknown;
+          entity: { targetId: string };
+          fieldId: string;
+          fieldType: {
+            kind: string;
+            maximumLength?: number;
+            scale?: number;
+          };
+          lifecycle?: string;
+          presence?: string;
+          searchable: boolean;
+          storageEvolution?: {
+            kind: string;
+            residualReadSemantics: string;
+            schemaVersion: string;
+          };
+        }>;
+        languageVersion: string;
+        relations: Array<{
+          archiveBehavior: string;
+          lifecycle?: string;
+          orderKey: number;
+          ownership: string;
+          relationId: string;
+          required?: boolean;
+          sourceEntity: { targetId: string };
+          targetEntity: { targetId: string };
+        }>;
+      };
+      const postedStockBalanceEntityId = `${INVENTORY_NAMESPACE}:entity.posted_stock_balance`;
+      const missingProviderAuthoredProjectionPaths = [
+        '$.conformance.operation.archive',
+        '$.conformance.operation.create',
+        '$.conformance.operation.restore',
+        '$.conformance.operation.update',
+        '$.conformance.surface.form',
+      ];
+      const assertProviderExemptionWithheld = (
+        result: ReturnType<typeof compileApplication>,
+        message: string,
+      ): void => {
+        assert.equal(result.status, 'failed', message);
+        if (result.status !== 'failed') return;
+        assert.deepEqual(
+          result.diagnostics
+            .filter(
+              (diagnostic) =>
+                diagnostic.code === 'COMPILER_ENTITY_PROJECTION_MISSING' &&
+                diagnostic.subjectId === postedStockBalanceEntityId,
+            )
+            .map((diagnostic) => diagnostic.path)
+            .sort(),
+          missingProviderAuthoredProjectionPaths,
+          message,
+        );
+      };
+      assert.equal(
+        compileApplication(moduleInput(definition)).status,
+        'compiled',
+        'the exact maintainer ABI remains the admission twin',
+      );
+      const movementEntityId = `${INVENTORY_NAMESPACE}:entity.inventory_movement`;
+      const movementRelationLocalIds = definition.relations
+        .filter(
+          (relation) => relation.sourceEntity.targetId === movementEntityId,
+        )
+        .map((relation) => relation.relationId.split(':relation.')[1]);
+      assert.deepEqual(
+        movementRelationLocalIds,
+        [
+          'inventory_movement_transaction',
+          'inventory_movement_transaction_line',
+        ],
+        'the admission twin declares exactly the two relations maintained by posting',
+      );
+      const assertMovementRelationIncompatible = (
+        candidate: typeof definition,
+        diagnosticPath: string,
+        subjectId: string,
+        message: string,
+      ): void => {
+        const result = compileApplication(moduleInput(candidate));
+        assertProviderExemptionWithheld(result, message);
+        if (result.status !== 'failed') return;
+        assert.equal(
+          result.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+              diagnostic.path === diagnosticPath &&
+              diagnostic.subjectId === subjectId,
+          ),
+          true,
+          `${message}: exact movement-relation ABI diagnostic`,
+        );
+      };
+      const movementTransactionRelationId = `${INVENTORY_NAMESPACE}:relation.inventory_movement_transaction`;
+      const movementTransactionLineRelationId = `${INVENTORY_NAMESPACE}:relation.inventory_movement_transaction_line`;
+      const extraRelation = structuredClone(definition);
+      const relationExemplar = extraRelation.relations.find(
+        (relation) => relation.relationId === movementTransactionLineRelationId,
+      );
+      assert.ok(relationExemplar);
+      const duplicateRelation = structuredClone(relationExemplar);
+      duplicateRelation.relationId = `${INVENTORY_NAMESPACE}:relation.inventory_movement_transaction_line_duplicate_probe`;
+      duplicateRelation.orderKey = 35;
+      extraRelation.relations.push(duplicateRelation);
+      assertMovementRelationIncompatible(
+        extraRelation,
+        '$.relations.inventory_movement_transaction_line_duplicate_probe',
+        duplicateRelation.relationId,
+        'an extra declared movement relation must not retain the provider-written exemption',
+      );
+
+      const missingRelation = structuredClone(definition);
+      missingRelation.relations = missingRelation.relations.filter(
+        (relation) => relation.relationId !== movementTransactionLineRelationId,
+      );
+      assertMovementRelationIncompatible(
+        missingRelation,
+        '$.relations.inventory_movement_transaction_line',
+        movementTransactionLineRelationId,
+        'a missing declared movement relation must not retain the provider-written exemption',
+      );
+
+      const movementRelationMutations: Array<{
+        diagnosticSuffix: string;
+        label: string;
+        relationId: string;
+        mutate: (relation: (typeof definition.relations)[number]) => void;
+      }> = [
+        {
+          diagnosticSuffix: '.archiveBehavior',
+          label: 'movement relation archive behavior',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.archiveBehavior = 'retainReference';
+          },
+        },
+        {
+          diagnosticSuffix: '.lifecycle',
+          label: 'movement relation lifecycle',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.lifecycle = 'retired';
+          },
+        },
+        {
+          diagnosticSuffix: '.ownership',
+          label: 'movement relation ownership',
+          relationId: movementTransactionRelationId,
+          mutate: (relation) => {
+            relation.ownership = 'reference';
+          },
+        },
+        {
+          diagnosticSuffix: '.required',
+          label: 'movement relation nullability',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.required = false;
+          },
+        },
+        {
+          diagnosticSuffix: '.sourceEntity',
+          label: 'movement relation source',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.sourceEntity.targetId = `${INVENTORY_NAMESPACE}:entity.stock_count_line`;
+          },
+        },
+        {
+          diagnosticSuffix: '.targetEntity',
+          label: 'movement relation target',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.targetEntity.targetId = `${INVENTORY_NAMESPACE}:entity.inventory_transaction`;
+          },
+        },
+      ];
+      for (const {
+        diagnosticSuffix,
+        label,
+        relationId,
+        mutate,
+      } of movementRelationMutations) {
+        const incompatible = structuredClone(definition);
+        const relation = incompatible.relations.find(
+          (candidate) => candidate.relationId === relationId,
+        );
+        assert.ok(relation);
+        mutate(relation);
+        assertMovementRelationIncompatible(
+          incompatible,
+          `$.relations.${relationId.split(':relation.')[1]}${diagnosticSuffix}`,
+          relationId,
+          `${label} incompatibility must return every authored CRUD/Form requirement`,
+        );
+      }
+
+      const unitFieldId = `${INVENTORY_NAMESPACE}:field.posted_stock_balance_unit_id`;
+      const renamedUnitFieldId = `${INVENTORY_NAMESPACE}:field.posted_stock_balance_unit_identifier`;
+      const renamed = replaceExactString(
+        definition,
+        unitFieldId,
+        renamedUnitFieldId,
+      );
+      const renamedResult = compileApplication(moduleInput(renamed));
+      assert.equal(renamedResult.status, 'failed');
+      if (renamedResult.status === 'failed') {
+        assert.deepEqual(
+          new Set(
+            renamedResult.diagnostics
+              .filter(
+                (diagnostic) =>
+                  diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+                  diagnostic.path.startsWith(
+                    '$.fields.posted_stock_balance_unit_',
+                  ),
+              )
+              .map((diagnostic) => diagnostic.path),
+          ),
+          new Set([
+            '$.fields.posted_stock_balance_unit_id',
+            '$.fields.posted_stock_balance_unit_identifier',
+          ]),
+          'renaming the provider unit field must name both the missing ABI slot and the unmaintained replacement',
+        );
+      }
+      assertProviderExemptionWithheld(
+        renamedResult,
+        'a renamed provider field must return every authored CRUD/Form requirement for the exact posted-stock subject',
+      );
+
+      const fieldMutations: Array<{
+        diagnosticSuffix: string;
+        fieldLocalId: string;
+        label: string;
+        mutate: (field: (typeof definition.fields)[number]) => void;
+      }> = [
+        {
+          diagnosticSuffix: '',
+          fieldLocalId: 'posted_stock_balance_item_id',
+          label: 'item type',
+          mutate: (field) => {
+            field.fieldType.maximumLength = 81;
+          },
+        },
+        {
+          diagnosticSuffix: '',
+          fieldLocalId: 'posted_stock_balance_location_id',
+          label: 'location type',
+          mutate: (field) => {
+            field.fieldType.maximumLength = 81;
+          },
+        },
+        {
+          diagnosticSuffix: '',
+          fieldLocalId: 'posted_stock_balance_posted_quantity',
+          label: 'quantity type',
+          mutate: (field) => {
+            field.fieldType.scale = 17;
+          },
+        },
+        {
+          diagnosticSuffix: '',
+          fieldLocalId: 'posted_stock_balance_unit_id',
+          label: 'unit type',
+          mutate: (field) => {
+            field.fieldType.maximumLength = 33;
+          },
+        },
+        ...[
+          'posted_stock_balance_item_id',
+          'posted_stock_balance_location_id',
+          'posted_stock_balance_posted_quantity',
+          'posted_stock_balance_unit_id',
+        ].map((fieldLocalId) => ({
+          diagnosticSuffix: '.businessKey',
+          fieldLocalId,
+          label: `${fieldLocalId} business key`,
+          mutate: (field: (typeof definition.fields)[number]) => {
+            field.businessKey = 'tenantEnvironmentCaseInsensitiveUnique';
+          },
+        })),
+        {
+          diagnosticSuffix: '.collation',
+          fieldLocalId: 'posted_stock_balance_item_id',
+          label: 'item collation',
+          mutate: (field) => {
+            field.collation = 'unicodeCaseInsensitive';
+          },
+        },
+        {
+          diagnosticSuffix: '.defaultSemantics',
+          fieldLocalId: 'posted_stock_balance_location_id',
+          label: 'location default semantics',
+          mutate: (field) => {
+            field.defaultSemantics = 'nullable';
+          },
+        },
+        {
+          diagnosticSuffix: '.searchable',
+          fieldLocalId: 'posted_stock_balance_item_id',
+          label: 'item search mapping',
+          mutate: (field) => {
+            field.searchable = false;
+          },
+        },
+        {
+          diagnosticSuffix: '.searchable',
+          fieldLocalId: 'posted_stock_balance_location_id',
+          label: 'location search mapping',
+          mutate: (field) => {
+            field.searchable = true;
+          },
+        },
+        {
+          diagnosticSuffix: '.storageEvolution',
+          fieldLocalId: 'posted_stock_balance_unit_id',
+          label: 'unit storage evolution',
+          mutate: (field) => {
+            field.storageEvolution = {
+              kind: 'backfillEvolution',
+              residualReadSemantics: 'requiresCompleteness',
+              schemaVersion: definition.languageVersion,
+            };
+          },
+        },
+        {
+          diagnosticSuffix: '',
+          fieldLocalId: 'posted_stock_balance_item_id',
+          label: 'item presence',
+          mutate: (field) => {
+            field.presence = 'optional';
+          },
+        },
+        {
+          diagnosticSuffix: '',
+          fieldLocalId: 'posted_stock_balance_item_id',
+          label: 'item lifecycle',
+          mutate: (field) => {
+            field.lifecycle = 'retired';
+          },
+        },
+      ];
+      for (const {
+        diagnosticSuffix,
+        fieldLocalId,
+        label,
+        mutate,
+      } of fieldMutations) {
+        const incompatible = structuredClone(definition);
+        const field = incompatible.fields.find(
+          (candidate) =>
+            candidate.fieldId ===
+            `${INVENTORY_NAMESPACE}:field.${fieldLocalId}`,
+        );
+        assert.ok(field);
+        mutate(field);
+        const result = compileApplication(moduleInput(incompatible));
+        assertProviderExemptionWithheld(
+          result,
+          `${label} incompatibility must return every authored CRUD/Form requirement`,
+        );
+        if (result.status !== 'failed') continue;
+        assert.equal(
+          result.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+              diagnostic.path ===
+                `$.fields.${fieldLocalId}${diagnosticSuffix}` &&
+              diagnostic.subjectId === field.fieldId,
+          ),
+          true,
+          `${label} must be refused by its exact provider ABI path and subject`,
+        );
+      }
+
+      const withoutActiveMovement = structuredClone(definition);
+      const movement = withoutActiveMovement.entities.find(
+        (entity) =>
+          entity.entityId ===
+          `${INVENTORY_NAMESPACE}:entity.inventory_movement`,
+      );
+      assert.ok(movement);
+      movement.lifecycle = 'retired';
+      const withoutMovementResult = compileApplication(
+        moduleInput(withoutActiveMovement),
+      );
+      assert.equal(withoutMovementResult.status, 'failed');
+      if (withoutMovementResult.status === 'failed') {
+        assert.equal(
+          withoutMovementResult.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+              diagnostic.path === '$.entities.inventory_movement',
+          ),
+          true,
+          'the named maintainer requires exactly one active movement companion',
+        );
+      }
+      assertProviderExemptionWithheld(
+        withoutMovementResult,
+        'a provider family without its active movement companion must return every authored CRUD/Form requirement',
+      );
+
+      const withMalformedMovement = structuredClone(definition);
+      const malformedMovementField = withMalformedMovement.fields.find(
+        (field) =>
+          field.fieldId ===
+          `${INVENTORY_NAMESPACE}:field.inventory_movement_item_id`,
+      );
+      assert.ok(malformedMovementField);
+      malformedMovementField.fieldType.maximumLength = 81;
+      const malformedMovementResult = compileApplication(
+        moduleInput(withMalformedMovement),
+      );
+      assertProviderExemptionWithheld(
+        malformedMovementResult,
+        'a malformed active movement companion must return every authored CRUD/Form requirement',
+      );
+      if (malformedMovementResult.status === 'failed') {
+        assert.equal(
+          malformedMovementResult.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+              diagnostic.path === '$.fields.inventory_movement_item_id' &&
+              diagnostic.subjectId === malformedMovementField.fieldId,
+          ),
+          true,
+          'the malformed movement companion must retain its exact pinned-ABI diagnostic',
+        );
+      }
+
+      const movementFieldLocalIds = definition.fields
+        .filter((field) => field.entity.targetId === movementEntityId)
+        .map((field) => field.fieldId.split(':field.')[1])
+        .filter((fieldLocalId): fieldLocalId is string =>
+          Boolean(fieldLocalId),
+        );
+      assert.equal(
+        movementFieldLocalIds.length,
+        16,
+        'the movement storage-metadata table must cover the complete pinned field set',
+      );
+      const movementStorageMutations: Array<{
+        diagnosticSuffix: string;
+        fieldLocalId: string;
+        label: string;
+        mutate: (field: (typeof definition.fields)[number]) => void;
+      }> = [
+        ...movementFieldLocalIds.map((fieldLocalId) => ({
+          diagnosticSuffix: '.businessKey',
+          fieldLocalId,
+          label: `${fieldLocalId} business key`,
+          mutate: (field: (typeof definition.fields)[number]) => {
+            field.businessKey = 'tenantEnvironmentCaseInsensitiveUnique';
+          },
+        })),
+        {
+          diagnosticSuffix: '.collation',
+          fieldLocalId: 'inventory_movement_source_type',
+          label: 'movement source-type collation',
+          mutate: (field) => {
+            field.collation = 'unicodeCaseInsensitive';
+          },
+        },
+        {
+          diagnosticSuffix: '.defaultSemantics',
+          fieldLocalId: 'inventory_movement_location_id',
+          label: 'required movement default semantics',
+          mutate: (field) => {
+            field.defaultSemantics = 'nullable';
+          },
+        },
+        {
+          diagnosticSuffix: '.defaultSemantics',
+          fieldLocalId: 'inventory_movement_reason_code',
+          label: 'optional movement default semantics',
+          mutate: (field) => {
+            field.defaultSemantics = 'none';
+          },
+        },
+        {
+          diagnosticSuffix: '.searchable',
+          fieldLocalId: 'inventory_movement_source_id',
+          label: 'movement indexed search mapping',
+          mutate: (field) => {
+            field.searchable = false;
+          },
+        },
+        {
+          diagnosticSuffix: '.searchable',
+          fieldLocalId: 'inventory_movement_source_type',
+          label: 'movement unindexed search mapping',
+          mutate: (field) => {
+            field.searchable = true;
+          },
+        },
+        {
+          diagnosticSuffix: '.storageEvolution',
+          fieldLocalId: 'inventory_movement_source_line',
+          label: 'movement storage evolution',
+          mutate: (field) => {
+            field.storageEvolution = {
+              kind: 'backfillEvolution',
+              residualReadSemantics: 'requiresCompleteness',
+              schemaVersion: definition.languageVersion,
+            };
+          },
+        },
+      ];
+      for (const {
+        diagnosticSuffix,
+        fieldLocalId,
+        label,
+        mutate,
+      } of movementStorageMutations) {
+        const incompatible = structuredClone(definition);
+        const field = incompatible.fields.find(
+          (candidate) =>
+            candidate.fieldId ===
+            `${INVENTORY_NAMESPACE}:field.${fieldLocalId}`,
+        );
+        assert.ok(field);
+        mutate(field);
+        const result = compileApplication(moduleInput(incompatible));
+        assertProviderExemptionWithheld(
+          result,
+          `${label} incompatibility must return every authored CRUD/Form requirement`,
+        );
+        if (result.status !== 'failed') continue;
+        assert.equal(
+          result.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+              diagnostic.path ===
+                `$.fields.${fieldLocalId}${diagnosticSuffix}` &&
+              diagnostic.subjectId === field.fieldId,
+          ),
+          true,
+          `${label} must be refused by its exact movement ABI path and subject`,
+        );
+      }
+    },
+  );
+
   register(
     'entity-owned Inventory reads declare one legal-entity operand while the master stays tenant-shared',
     () => {
@@ -95,11 +923,11 @@ export function registerInventoryContractCases(
         }>;
       }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
       const scoped = queries.filter((query) => query.legalEntityScope);
-      assert.equal(scoped.length, 23);
+      assert.equal(scoped.length, 27);
       const scopedRowQueries = scoped.filter(
         (query) => query.queryType !== 'aggregate',
       );
-      assert.equal(scopedRowQueries.length, 22);
+      assert.equal(scopedRowQueries.length, 26);
       assert.equal(
         queries.some(
           (query) =>
@@ -932,6 +1760,22 @@ export function registerInventoryContractCases(
         legalEntity.relations,
         LEGAL_ENTITY_RELATION_SEMANTICS_V1,
       );
+      assert.deepEqual(compiled.release.contract.readModels, {
+        authoredOperations: 'forbidden',
+        providerWritten: INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1,
+      });
+
+      const wrongMaintainer = mutableContract();
+      wrongMaintainer.readModels.providerWritten[0]!.maintainerId =
+        'northstar.postgresql-module-provider:unmaintained/v1';
+      const wrongMaintainerResult = compileInventoryContract(wrongMaintainer);
+      assert.equal(wrongMaintainerResult.status, 'failed');
+      assertHasDiagnostic(
+        wrongMaintainerResult.diagnostics,
+        'INVENTORY_CONTRACT_INVALID',
+        '$.readModels.providerWritten.posted_stock_balance',
+        'posted_stock_balance',
+      );
 
       const missingFamily = mutableContract();
       missingFamily.legalEntity.families =
@@ -945,6 +1789,22 @@ export function registerInventoryContractCases(
         'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
         '$.legalEntity.families.inventory_movement',
         'inventory_movement',
+      );
+
+      const missingPostedStockFamily = mutableContract();
+      missingPostedStockFamily.legalEntity.families =
+        missingPostedStockFamily.legalEntity.families.filter(
+          (rule) => rule.familyId !== 'posted_stock_balance',
+        );
+      const missingPostedStockResult = compileInventoryContract(
+        missingPostedStockFamily,
+      );
+      assert.equal(missingPostedStockResult.status, 'failed');
+      assertHasDiagnostic(
+        missingPostedStockResult.diagnostics,
+        'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+        '$.legalEntity.families.posted_stock_balance',
+        'posted_stock_balance',
       );
 
       const missingRelation = mutableContract();
@@ -1982,6 +2842,7 @@ function releaseSummary(compiled: CompiledInventoryContractV1): unknown {
     dependencySetRoot: dependencies.dependencySetRoot,
     dependencySetVersion: dependencies.version,
     legalEntity: contract.legalEntity,
+    readModels: contract.readModels,
     movement: {
       fields: movement.fields.map((field) => ({
         fieldId: field.fieldId,

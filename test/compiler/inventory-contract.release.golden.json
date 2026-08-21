@@ -145,6 +145,10 @@
       },
       {
         "classification": "entityOwned",
+        "familyId": "posted_stock_balance"
+      },
+      {
+        "classification": "entityOwned",
         "familyId": "reservation"
       },
       {
@@ -218,6 +222,16 @@
     },
     "version": "northstar.legal-entity-family-contract/v1"
   },
+  "readModels": {
+    "authoredOperations": "forbidden",
+    "providerWritten": [
+      {
+        "classification": "providerWritten",
+        "familyId": "posted_stock_balance",
+        "maintainerId": "northstar.postgresql-module-provider:posted-stock-balance/v1"
+      }
+    ]
+  },
   "movement": {
     "fields": [
       {
@@ -263,7 +277,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "06d0477cfcb68096dbe41782183be3687cad7031665db0f9dd755d9c5ce3fac0",
+  "releaseRoot": "74e263befe5134f69e9e5c86f0a60612eed82d032251be9e9e12c405ecdc19b7",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

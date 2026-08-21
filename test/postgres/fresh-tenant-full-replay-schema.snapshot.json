@@ -898,6 +898,160 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 3,
+      "column_name": "legal_entity_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 4,
+      "column_name": "record_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 5,
+      "column_name": "revision",
+      "data_type": "bigint",
+      "is_nullable": false,
+      "column_default": "1",
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 6,
+      "column_name": "archived_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 7,
+      "column_name": "nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna",
+      "data_type": "character varying(80)",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 8,
+      "column_name": "nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q",
+      "data_type": "character varying(80)",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 9,
+      "column_name": "nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq",
+      "data_type": "numeric(38,18)",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "m",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 10,
+      "column_name": "nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa",
+      "data_type": "character varying(32)",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "ordinal_position": 11,
+      "column_name": "nsm_c_tbq5lar2ejd56rqtp42fv2twr6efay6w2ie3cnkg35xulebsz3pq",
+      "data_type": "text",
+      "is_nullable": true,
+      "column_default": "north_star_module.nsm_unicode_case_fold_v1(nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna::text)",
+      "identity_kind": "",
+      "generated_kind": "s",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.C"
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_fuuq6ggffgozl4f665u5hvhlirq5szcbp3ygt6htzp2kfv2bytqa",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -5273,6 +5427,60 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "column_name": "archived_at",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "column_name": "nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "column_name": "nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "column_name": "nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "column_name": "nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "column_name": "revision",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_q4zpsd3g3mgipuxyck2bky3byt2ps2shfdkkyjtzbqgbfiw7jwma",
       "column_name": "nsm_c_ddhevzprtvvq6dkud62nbulc7hcukdk4k5ljsvoeybdcpcoi27da",
       "grantor": "north_star_module_materializer",
@@ -5886,6 +6094,34 @@
       "no_inherit": false,
       "is_local": false,
       "inheritance_count": 1
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "domain": null,
+      "name": "nsm_e_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, legal_entity_id) REFERENCES north_star_module.nsm_t_vhndxciphfmttclfec526yknyfuljmtmbo5mkdjkerjet4acea5a(tenant_id, environment_id, record_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "domain": null,
+      "name": "nsm_k_l7ycet6er3uxhv6eody6k7kiiqvypx6624zqocwccuusvfzar63a",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, legal_entity_id, record_id)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
     },
     {
       "schema": "north_star_module",
@@ -8159,6 +8395,44 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "name": "nsm_i_v3dduos2xzokrn2zefpyioxhzbuwcrotd3dvogzw4qze2ugvgola",
+      "owner": "north_star_module_materializer",
+      "access_method": "btree",
+      "definition": "CREATE INDEX nsm_i_v3dduos2xzokrn2zefpyioxhzbuwcrotd3dvogzw4qze2ugvgola ON north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa USING btree (tenant_id, environment_id, nsm_c_tbq5lar2ejd56rqtp42fv2twr6efay6w2ie3cnkg35xulebsz3pq)",
+      "is_unique": false,
+      "is_primary": false,
+      "is_exclusion": false,
+      "is_immediate": true,
+      "is_clustered": false,
+      "is_valid": true,
+      "is_ready": true,
+      "is_live": true,
+      "is_replica_identity": false,
+      "expressions": null,
+      "predicate": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "name": "nsm_k_l7ycet6er3uxhv6eody6k7kiiqvypx6624zqocwccuusvfzar63a",
+      "owner": "north_star_module_materializer",
+      "access_method": "btree",
+      "definition": "CREATE UNIQUE INDEX nsm_k_l7ycet6er3uxhv6eody6k7kiiqvypx6624zqocwccuusvfzar63a ON north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa USING btree (tenant_id, environment_id, legal_entity_id, record_id)",
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "is_immediate": true,
+      "is_clustered": false,
+      "is_valid": true,
+      "is_ready": true,
+      "is_live": true,
+      "is_replica_identity": false,
+      "expressions": null,
+      "predicate": null
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_fuuq6ggffgozl4f665u5hvhlirq5szcbp3ygt6htzp2kfv2bytqa",
       "name": "nsm_i_kgdo33g2qfl5vwvv5bn6hmdld34vogt5knqigbrg7w6amckasgta",
       "owner": "north_star_module_materializer",
@@ -10066,6 +10340,66 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "name": "nsm_p_102784b4572fb90589c3b018dee95c44",
+      "permissive": true,
+      "roles": ["north_star_module_runtime"],
+      "command": "r",
+      "using_expression": "tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id()",
+      "check_expression": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "name": "nsm_p_47662e11b8d14a8ebce2dc6058475f2b",
+      "permissive": true,
+      "roles": ["north_star_module_materializer"],
+      "command": "w",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
+      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "name": "nsm_p_53268c95a95f7e50f3427781df196911",
+      "permissive": true,
+      "roles": ["north_star_module_runtime"],
+      "command": "a",
+      "using_expression": null,
+      "check_expression": "tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND pg_trigger_depth() > 0"
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "name": "nsm_p_a8d8e714e47df8094efb129ee673e481",
+      "permissive": true,
+      "roles": ["north_star_module_materializer"],
+      "command": "a",
+      "using_expression": null,
+      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "name": "nsm_p_b2f40dd1ea6d224f581345db001cf86d",
+      "permissive": true,
+      "roles": ["north_star_module_materializer"],
+      "command": "r",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
+      "check_expression": null
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "name": "nsm_p_ffaf7b61f682943b956298103185a5a9",
+      "permissive": true,
+      "roles": ["north_star_module_runtime"],
+      "command": "w",
+      "using_expression": "tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND pg_trigger_depth() > 0",
+      "check_expression": "tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND pg_trigger_depth() > 0"
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_fuuq6ggffgozl4f665u5hvhlirq5szcbp3ygt6htzp2kfv2bytqa",
       "name": "nsm_p_cfa84a374cce8411e884f6004b090ee9",
       "permissive": true,
@@ -10487,6 +10821,25 @@
       "options": [],
       "partition_key": null,
       "partition_bound": "FOR VALUES WITH (modulus 8, remainder 7)",
+      "view_definition": null,
+      "foreign_server": null,
+      "foreign_options": []
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "kind": "r",
+      "owner": "north_star_module_materializer",
+      "persistence": "p",
+      "row_level_security": true,
+      "force_row_level_security": true,
+      "is_partition": false,
+      "replica_identity": "d",
+      "access_method": "heap",
+      "tablespace": null,
+      "options": [],
+      "partition_key": null,
+      "partition_bound": null,
       "view_definition": null,
       "foreign_server": null,
       "foreign_options": []
@@ -10968,6 +11321,46 @@
       "grantor": "north_star_module_materializer",
       "grantee": "north_star_module_materializer",
       "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_materializer",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_materializer",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_materializer",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "SELECT",
       "is_grantable": false
     },
     {
@@ -11734,6 +12127,25 @@
   "routines": [
     {
       "schema": "north_star_module",
+      "name": "nsm_posted_stock_balance_v1",
+      "identity_arguments": "",
+      "kind": "f",
+      "language": "plpgsql",
+      "owner": "north_star_module_materializer",
+      "result_type": "trigger",
+      "definition": "CREATE OR REPLACE FUNCTION north_star_module.nsm_posted_stock_balance_v1()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog', 'north_star_internal'\nAS $function$\nDECLARE\n  affected_rows bigint;\n  balance_relation regclass;\nBEGIN\n  IF TG_NARGS <> 14 THEN\n    RAISE EXCEPTION 'POSTED_STOCK_BALANCE_TRIGGER_ARGUMENTS_INVALID'\n      USING ERRCODE = 'P0001';\n  END IF;\n  balance_relation := TG_ARGV[0]::regclass;\n  PERFORM 1\n    FROM north_star_internal.semantic_aggregate_generations\n   WHERE tenant_id = NEW.tenant_id\n     AND environment_id = NEW.environment_id;\n  IF NOT FOUND THEN\n    RAISE EXCEPTION 'POSTED_STOCK_BALANCE_GENERATION_MISSING'\n      USING ERRCODE = 'P0001';\n  END IF;\n  EXECUTE format(\n    'INSERT INTO %s AS balance (\n       tenant_id, environment_id, %I, %I, %I, %I, %I, %I, %I, %I\n     ) VALUES (\n       $1.tenant_id, $1.environment_id, $1.%I,\n       overlay(\n         overlay(\n           md5(jsonb_build_array(\n             ''northstar.posted-stock-balance-row/v1'',\n             $1.tenant_id::text, $1.environment_id::text,\n             $1.%I::text, $1.%I::text, $1.%I::text\n           )::text)\n           placing ''4'' from 13 for 1\n         )\n         placing ''8'' from 17 for 1\n       )::uuid,\n       1, NULL, $1.%I, $1.%I, $1.%I, $1.%I\n     )\n     ON CONFLICT (tenant_id, environment_id, %I, %I) DO UPDATE\n       SET %I = balance.%I + EXCLUDED.%I,\n           %I = balance.%I + 1\n     WHERE balance.%I = EXCLUDED.%I\n       AND balance.%I = EXCLUDED.%I\n       AND balance.%I = EXCLUDED.%I\n       AND balance.%I = EXCLUDED.%I\n       AND balance.%I IS NULL',\n    balance_relation,\n    TG_ARGV[6], TG_ARGV[11], TG_ARGV[12], TG_ARGV[13],\n    TG_ARGV[7], TG_ARGV[8], TG_ARGV[9], TG_ARGV[10],\n    TG_ARGV[1], TG_ARGV[1], TG_ARGV[2], TG_ARGV[3],\n    TG_ARGV[2], TG_ARGV[3], TG_ARGV[4], TG_ARGV[5],\n    TG_ARGV[6], TG_ARGV[11],\n    TG_ARGV[9], TG_ARGV[9], TG_ARGV[9],\n    TG_ARGV[12], TG_ARGV[12],\n    TG_ARGV[6], TG_ARGV[6],\n    TG_ARGV[7], TG_ARGV[7],\n    TG_ARGV[8], TG_ARGV[8],\n    TG_ARGV[10], TG_ARGV[10],\n    TG_ARGV[13]\n  ) USING NEW;\n  GET DIAGNOSTICS affected_rows = ROW_COUNT;\n  IF affected_rows <> 1 THEN\n    RAISE EXCEPTION 'POSTED_STOCK_BALANCE_IDENTITY_COLLISION'\n      USING ERRCODE = 'P0001';\n  END IF;\n  RETURN NEW;\nEND\n$function$\n",
+      "security_definer": false,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, north_star_internal"]
+    },
+    {
+      "schema": "north_star_module",
       "name": "nsm_unicode_case_fold_v1",
       "identity_arguments": "value text",
       "kind": "f",
@@ -11753,6 +12165,15 @@
     }
   ],
   "routinePrivileges": [
+    {
+      "schema": "north_star_module",
+      "name": "nsm_posted_stock_balance_v1",
+      "identity_arguments": "",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_materializer",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
     {
       "schema": "north_star_module",
       "name": "nsm_unicode_case_fold_v1",
@@ -11822,6 +12243,15 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_dv3lbb2vsc7qzodxdqzih4xgwdmxj4jef6zpzr72gma7gv2ivy7a",
+      "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_dv3lbb2vsc7qzodxdqzih4xgwdmxj4jef6zpzr72gma7gv2ivy7a FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq",
       "name": "nsm_g_6swdzhcydfk5c37wtnyxzwffgwn5kpstemastm6qcfhumrag22za",
       "definition": "CREATE TRIGGER nsm_g_6swdzhcydfk5c37wtnyxzwffgwn5kpstemastm6qcfhumrag22za BEFORE DELETE OR UPDATE ON north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()",
@@ -11849,6 +12279,15 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_jykrutlb7uc5rxjfzvvxgwzumgqjsjtbp7h5uk7qiankillyv75q",
+      "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_jykrutlb7uc5rxjfzvvxgwzumgqjsjtbp7h5uk7qiankillyv75q FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq",
       "name": "nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va",
       "definition": "CREATE TRIGGER nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va AFTER INSERT ON north_star_module.nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq')",
@@ -11861,6 +12300,15 @@
       "relation": "nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq",
       "name": "nsm_g_n6e5tujowx5bpovpy7d76x3gvcmaswjlc3f6x57njo7wfg7rrxla",
       "definition": "CREATE TRIGGER nsm_g_n6e5tujowx5bpovpy7d76x3gvcmaswjlc3f6x57njo7wfg7rrxla BEFORE DELETE OR UPDATE ON north_star_module.nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq",
+      "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_kgnpjkcrujufxck72cprbbteujf3of3i66ewzd46vobqgtq3fqnq FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false
@@ -11885,6 +12333,15 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_ktdpvib7oomhgxkzzv5morfey2npfz7bbvufk2gva23k5rwla2gq",
+      "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_ktdpvib7oomhgxkzzv5morfey2npfz7bbvufk2gva23k5rwla2gq FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq",
       "name": "nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va",
       "definition": "CREATE TRIGGER nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va AFTER INSERT ON north_star_module.nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq')",
@@ -11897,6 +12354,15 @@
       "relation": "nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq",
       "name": "nsm_g_n6e5tujowx5bpovpy7d76x3gvcmaswjlc3f6x57njo7wfg7rrxla",
       "definition": "CREATE TRIGGER nsm_g_n6e5tujowx5bpovpy7d76x3gvcmaswjlc3f6x57njo7wfg7rrxla BEFORE DELETE OR UPDATE ON north_star_module.nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq",
+      "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_mysjpkvgrulnwuek2hdysnuqso6omdjkgzhmb2olsab2smc6wpuq FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false
@@ -11921,6 +12387,15 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_nir3fh6bthiwndoonwqm37omk2zmsiz5c4wbsclocsyizlvfpwzq",
+      "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_nir3fh6bthiwndoonwqm37omk2zmsiz5c4wbsclocsyizlvfpwzq FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa",
       "name": "nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va",
       "definition": "CREATE TRIGGER nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va AFTER INSERT ON north_star_module.nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq')",
@@ -11933,6 +12408,15 @@
       "relation": "nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa",
       "name": "nsm_g_n6e5tujowx5bpovpy7d76x3gvcmaswjlc3f6x57njo7wfg7rrxla",
       "definition": "CREATE TRIGGER nsm_g_n6e5tujowx5bpovpy7d76x3gvcmaswjlc3f6x57njo7wfg7rrxla BEFORE DELETE OR UPDATE ON north_star_module.nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa",
+      "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_slxhbphakyl7qqmsbidwe5gkpjj5l4b4d52f3oho2zc6ohbvqraa FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false
@@ -11966,6 +12450,15 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_wwpcxa55fqy254f66ddzk2zlhblwakys5nkyqocpsjuhokmo3a7a",
+      "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_wwpcxa55fqy254f66ddzk2zlhblwakys5nkyqocpsjuhokmo3a7a FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q",
       "name": "nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va",
       "definition": "CREATE TRIGGER nsm_g_f2c672cpziwhhkplhft3je3pwgeqrlnuuabs2a63tst3ir73x7va AFTER INSERT ON north_star_module.nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq')",
@@ -11978,6 +12471,15 @@
       "relation": "nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q",
       "name": "nsm_g_n6e5tujowx5bpovpy7d76x3gvcmaswjlc3f6x57njo7wfg7rrxla",
       "definition": "CREATE TRIGGER nsm_g_n6e5tujowx5bpovpy7d76x3gvcmaswjlc3f6x57njo7wfg7rrxla BEFORE DELETE OR UPDATE ON north_star_module.nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q",
+      "name": "nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa",
+      "definition": "CREATE TRIGGER nsm_z_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa AFTER INSERT ON north_star_module.nsm_t_ykaenmkuqgf57envdhqm3i75bznv67upf3jce3als4uuzrxt642q FOR EACH ROW EXECUTE FUNCTION north_star_module.nsm_posted_stock_balance_v1('north_star_module.nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa', 'legal_entity_id', 'nsm_c_qi6spv6qbdes7hqtx3oswzsxmyarezpziigbcuh54jkrmeupoiga', 'nsm_c_canca4uikvhuudam3eo34x7eqqq7cilvzxbh22bw7ggyuiy7yuwq', 'nsm_c_cvdc4mahadxspmy7twbj6sojp5eqd6ehvvvs7lyu24cpnblc4ppq', 'nsm_c_2j7onp2ifygf573efmn35yg7mmvu46oc7ah4sswhkycjjx2rvpnq', 'legal_entity_id', 'nsm_c_hs3hw367fldrfmc7w3gpe4mq6627n5qoaxc7hthrmjq66e55vvna', 'nsm_c_3bemmg64f7l7buxjcqsti6m357nltwjj7tstsh3ij4b45yw3ez5q', 'nsm_c_rd4svq6s3x6grcyk2ethe4de4qnjsmaf6qepdkvtiksgysv36hdq', 'nsm_c_5silpiuxythkzlmg5q3ai4i3tte2jjduatr2k5hxcosfb2cu4zfa', 'record_id', 'revision', 'archived_at')",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false

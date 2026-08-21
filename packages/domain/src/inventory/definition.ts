@@ -26,6 +26,7 @@ function ids(namespace: string) {
       legalEntity: entity('legal_entity'),
       movement: entity('inventory_movement'),
       periodLock: entity('inventory_period_lock'),
+      postedStockBalance: entity('posted_stock_balance'),
       stockCount: entity('stock_count'),
       stockCountLine: entity('stock_count_line'),
       transaction: entity('inventory_transaction'),
@@ -64,6 +65,12 @@ function ids(namespace: string) {
       },
       periodLock: {
         closedThrough: field('inventory_period_lock', 'closed_through'),
+      },
+      postedStockBalance: {
+        itemId: field('posted_stock_balance', 'item_id'),
+        locationId: field('posted_stock_balance', 'location_id'),
+        postedQuantity: field('posted_stock_balance', 'posted_quantity'),
+        unitId: field('posted_stock_balance', 'unit_id'),
       },
       stockCount: {
         actorId: field('stock_count', 'actor_id'),
@@ -149,6 +156,7 @@ export const INVENTORY_IDS = Object.freeze(defaultIds);
 const ENTITY_OWNED_QUERY_FAMILIES = new Set([
   'inventory_movement',
   'inventory_period_lock',
+  'posted_stock_balance',
   'inventory_transaction',
   'inventory_transaction_line',
   'stock_count',
@@ -178,11 +186,13 @@ export function inventoryModuleDefinition(
     ['stock_count_line', 'Stock count line', entityIds.stockCountLine],
   ] as const;
   const movementFields = Object.values(fieldIds.movement);
+  const postedStockBalanceFields = Object.values(fieldIds.postedStockBalance);
 
   return {
     assertions: [
       ...standardEntities.map(([local]) => assertion(definitionIds, local)),
       assertion(definitionIds, 'inventory_movement'),
+      assertion(definitionIds, 'posted_stock_balance'),
       onHandScopeAssertion(definitionIds),
       postingRouteAssertion(definitionIds),
     ],
@@ -225,6 +235,13 @@ export function inventoryModuleDefinition(
         'Inventory movement',
         entityIds.movement,
         70,
+      ),
+      entity(
+        definitionIds,
+        'posted_stock_balance',
+        'Posted stock balance',
+        entityIds.postedStockBalance,
+        80,
       ),
     ],
     fields: [
@@ -688,6 +705,7 @@ export function inventoryModuleDefinition(
         text(80),
         { optional: true },
       ),
+
       field(
         definitionIds,
         entityIds.movement,
@@ -713,6 +731,40 @@ export function inventoryModuleDefinition(
         160,
         text(80),
         { optional: true },
+      ),
+
+      field(
+        definitionIds,
+        entityIds.postedStockBalance,
+        fieldIds.postedStockBalance.itemId,
+        'Item id',
+        10,
+        text(80),
+        { searchable: true },
+      ),
+      field(
+        definitionIds,
+        entityIds.postedStockBalance,
+        fieldIds.postedStockBalance.locationId,
+        'Location id',
+        20,
+        text(80),
+      ),
+      field(
+        definitionIds,
+        entityIds.postedStockBalance,
+        fieldIds.postedStockBalance.postedQuantity,
+        'Posted quantity',
+        30,
+        decimal(),
+      ),
+      field(
+        definitionIds,
+        entityIds.postedStockBalance,
+        fieldIds.postedStockBalance.unitId,
+        'Unit id',
+        40,
+        text(32),
       ),
     ],
     hashAlgorithm: 'sha256',
@@ -768,6 +820,12 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         true,
       ),
+      ...permissions(
+        definitionIds,
+        'posted_stock_balance',
+        entityIds.postedStockBalance,
+        true,
+      ),
       {
         action: 'transition',
         kind: 'permissionDefinition',
@@ -795,6 +853,13 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         movementFields,
         fieldIds.movement.sourceId,
+      ),
+      ...queries(
+        definitionIds,
+        'posted_stock_balance',
+        entityIds.postedStockBalance,
+        postedStockBalanceFields,
+        fieldIds.postedStockBalance.itemId,
       ),
       onHandQuery(definitionIds),
     ],
@@ -854,6 +919,11 @@ export function inventoryModuleDefinition(
         storageMapping(definitionIds, local, entityId),
       ),
       storageMapping(definitionIds, 'inventory_movement', entityIds.movement),
+      storageMapping(
+        definitionIds,
+        'posted_stock_balance',
+        entityIds.postedStockBalance,
+      ),
     ],
     surfaces: [
       ...standardEntities.flatMap(([local, label]) =>
@@ -871,6 +941,7 @@ export function inventoryModuleDefinition(
         'Inventory movement',
         true,
       ),
+      ...surfaces(definitionIds, 'posted_stock_balance', 'Posted stock', true),
       onHandSurface(definitionIds),
     ],
   };
