@@ -474,6 +474,64 @@ test('consolidated guard admission: a static prefix beneath a dynamic outer cons
   }
 });
 
+test('consolidated guard red: a statically bounded identity cannot hide inside a dynamic outer construction', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const tenantId: string;',
+      'declare const version: string;',
+      'export const message =',
+      "  `${'northstar'}.${'widget'}:capability.posting denied for ${tenantId}`;",
+      'export const route =',
+      "  'northstar.' + 'widget:capability.posting/' + version;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 4,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 6,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard admission: an unbounded static prefix may continue through a runtime value', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const suffix: string;',
+      'export const interpolated =',
+      "  `${'northstar'}.${'widget'}${suffix}`;",
+      'export const concatenated =',
+      "  'northstar' + '.' + 'widget' + suffix;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard admission: a tagged template body is not an ordinary completed string', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [

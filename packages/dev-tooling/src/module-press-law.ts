@@ -388,6 +388,7 @@ interface SourceRange {
 interface StaticStringConstruction {
   readonly index: number;
   readonly literalRanges: readonly SourceRange[];
+  readonly rightBoundaryKnown: boolean;
   readonly value: string;
 }
 
@@ -425,6 +426,7 @@ function staticallyConstructedStrings(
         constructions.push({
           index: node.getStart(sourceFile),
           literalRanges: staticStringLiteralRanges(node, sourceFile),
+          rightBoundaryKnown: true,
           value,
         });
         // A complete construction is one value. Its direct construction
@@ -432,9 +434,13 @@ function staticallyConstructedStrings(
         return;
       }
 
+      constructions.push(...staticallyKnownStringRuns(node, sourceFile));
+
       // The direct operands of an incomplete construction are not completed
-      // values. Continue only through semantic boundaries within those
-      // operands, where an independently completed construction can exist.
+      // values. Statically known runs above are observable only where their
+      // right boundary is also known. Continue through semantic boundaries
+      // within the operands, where an independently completed construction can
+      // exist.
       if (ts.isTemplateExpression(node)) {
         for (const span of node.templateSpans) {
           visitIncompleteConstructionOperand(span.expression);
@@ -466,6 +472,74 @@ function staticallyConstructedStrings(
   return constructions;
 }
 
+function staticallyKnownStringRuns(
+  node: ts.Expression,
+  sourceFile: ts.SourceFile,
+): readonly StaticStringConstruction[] {
+  const runs: StaticStringConstruction[] = [];
+  let current:
+    | {
+        index: number;
+        literalRanges: SourceRange[];
+        value: string;
+      }
+    | undefined;
+
+  const appendStatic = (
+    value: string,
+    literalRanges: readonly SourceRange[],
+    index: number,
+  ): void => {
+    current ??= { index, literalRanges: [], value: '' };
+    current.value += value;
+    current.literalRanges.push(...literalRanges);
+  };
+  const finish = (rightBoundaryKnown: boolean): void => {
+    if (current && current.value.length > 0) {
+      runs.push({ ...current, rightBoundaryKnown });
+    }
+    current = undefined;
+  };
+  const appendDynamic = (): void => finish(false);
+  const flatten = (expression: ts.Expression): void => {
+    const unwrapped = unwrapStaticStringExpression(expression);
+    if (ts.isStringLiteralLike(unwrapped)) {
+      appendStatic(
+        unwrapped.text,
+        staticStringLiteralRanges(unwrapped, sourceFile),
+        unwrapped.getStart(sourceFile),
+      );
+      return;
+    }
+    if (ts.isTemplateExpression(unwrapped)) {
+      appendStatic(
+        unwrapped.head.text,
+        [sourceRange(unwrapped.head, sourceFile)],
+        unwrapped.getStart(sourceFile),
+      );
+      for (const span of unwrapped.templateSpans) {
+        flatten(span.expression);
+        appendStatic(
+          span.literal.text,
+          [sourceRange(span.literal, sourceFile)],
+          span.literal.getStart(sourceFile),
+        );
+      }
+      return;
+    }
+    if (isStringConcatenation(unwrapped)) {
+      flatten(unwrapped.left);
+      flatten(unwrapped.right);
+      return;
+    }
+    appendDynamic();
+  };
+
+  flatten(node);
+  finish(true);
+  return runs;
+}
+
 interface ConstructedModuleIdentityMatch extends ModuleIdentityMatch {
   readonly literalRanges: readonly SourceRange[];
 }
@@ -476,7 +550,12 @@ function constructedModuleIdentityMatches(
 ): readonly ConstructedModuleIdentityMatch[] {
   const matches: ConstructedModuleIdentityMatch[] = [];
   for (const construction of constructions) {
-    const match = moduleIdentityMatches(construction.value, module)[0];
+    const match = moduleIdentityMatches(construction.value, module).find(
+      (identityMatch) =>
+        construction.rightBoundaryKnown ||
+        identityMatch.index + identityMatch.value.length <
+          construction.value.length,
+    );
     if (match) {
       matches.push({
         index: construction.index,
@@ -545,6 +624,13 @@ function staticStringLiteralRanges(
   };
   visit(node);
   return ranges;
+}
+
+function sourceRange(node: ts.Node, sourceFile: ts.SourceFile): SourceRange {
+  return {
+    end: node.getEnd(),
+    start: node.getStart(sourceFile),
+  };
 }
 
 function isStringConcatenation(node: ts.Node): node is ts.BinaryExpression {

@@ -7,10 +7,11 @@ Branch: `packet/press-law-splice`
 Tier: Critical — the diff changes what an architecture gate proves
 Status: active; candidates `318c0dd719a7d759d313ee45ca080017e5e36b44`,
 `4f0d19e475977956f26e3e5238ef90bcc90936a5`, and
-`358ba5fe7a66d530b1388979953a12bea81e2aae` returned REVISE from user-run
-online reviews; round 3 found production correct, and its bounded test-only
-correction has all declared pre-review gates green for the next Critical arm;
-the full matrix remains deferred until review converges
+`358ba5fe7a66d530b1388979953a12bea81e2aae` returned REVISE; candidate
+`e02c15c9dc772cb772ceb3c851c606a95eb209c6` received a fresh Codex PASS and
+then a Fable REVISE on a newly found production false green. The round-5
+production correction has all declared pre-review gates green for a fresh
+Critical arm; the full matrix remains deferred until review converges
 
 ## Packet definition
 
@@ -73,13 +74,16 @@ capability-local adapter distinction, would need its own ruling.
 
 ### Refuse literal splicing of module identities in production press source
 
-Yes, for statically evaluable JavaScript/TypeScript string constructions. The
-guard now parses production source and evaluates only string literals,
-parentheses/type wrappers, template expressions whose substitutions are static,
-and `+` expressions whose operands are static. The resulting value is checked by
-the same `moduleIdentityMatch` authority as a contiguous spelling. The guard
-therefore reports `PRESS006`, rather than introducing a parallel rule or an
-allowlist.
+Yes, for statically observable JavaScript/TypeScript string constructions. The
+guard parses production source and evaluates string literals,
+parentheses/type wrappers, template expressions, and `+` expressions. It
+observes a completed construction as one value. Inside an otherwise dynamic
+ordinary construction it also observes maximal statically known runs when the
+identity's right boundary is fixed by static text or by the end of the
+construction; a match ending immediately before an unknown runtime continuation
+is not inferred. Every observed value is checked by the same
+`moduleIdentityMatches` authority as a contiguous spelling. The guard therefore
+reports `PRESS006`, rather than introducing a parallel rule or an allowlist.
 
 The observer measures each completed ordinary construction once. Direct source
 matches and independently completed constructed matches are additive, so an
@@ -90,20 +94,27 @@ existing compiler contract literal under row `1e-2`, rather than only its first
 occurrence.
 
 Within an incomplete ordinary template or `+` construction, direct construction
-operands remain incomplete and are not recorded. Traversal continues through
-non-construction semantic boundaries, so a complete concatenation passed to a
-call is still observed. A tagged template's aggregate result is not inferred,
-but each substitution expression is evaluated before the tag receives it and is
-therefore visited. These boundaries avoid both failures found by review: round 1
-recursed through every AST child and falsely treated nested prefixes as values;
-round 2 returned beneath whole subtrees and missed independently completed call
-arguments and tagged substitutions.
+operands remain incomplete values. Their statically known runs are considered
+only when the identity and its right boundary are both fixed; an unbounded
+`northstar.widget` prefix before a runtime suffix remains admitted. Traversal
+also continues through non-construction semantic boundaries, so a complete
+concatenation passed to a call is still observed. A tagged template's aggregate
+result is not inferred, but each substitution expression is evaluated before
+the tag receives it and is therefore visited. These boundaries avoid the three
+failures found by review: round 1 recursed through every AST child and falsely
+treated nested prefixes as values; round 2 returned beneath whole subtrees and
+missed independently completed call arguments and tagged substitutions; the
+round-4 Fable confirmation found that treating every incomplete construction as
+opaque also missed an identity followed by a statically fixed `:` before a
+runtime tail.
 
-This remains deliberately narrower than symbolic execution. An identity
-assembled through runtime values or identifier indirection is not resolved, and
-a tag's return value is not inferred. That is an explicit limit: the current
-threat is an honest developer or AI writer reaching for the cheap complete
-literal-interpolation or literal-concatenation dodge, not active obfuscation.
+This remains deliberately narrower than symbolic execution. Unknown runtime
+values and identifier indirection are not resolved, and a tag's return value is
+not inferred. Static text on either side of those unknown values is still
+observed when it independently fixes the identity boundary. That is an explicit
+limit: the current threat is an honest developer or AI writer reaching for the
+cheap literal-interpolation or literal-concatenation dodge, not active
+obfuscation.
 Banning all interpolation or all concatenation in production would reject
 ordinary application code and would be a broader language-policy packet, not a
 proportionate correction here.
@@ -133,6 +144,8 @@ not rely on the routed Inventory debt:
 | provider mutation | retain the honest line-37 Inventory literal and splice the real `validateRegistration` comparison | Inventory PRESS006 contains both line 37 and the later comparison line; the routed literal cannot mask the reintroduced defect |
 | constructed admission | concatenated and interpolated `northstar.widget-contract/v1` values in generic production source | zero violations; the completed legal values are measured without refusing nested prefixes |
 | dynamic-boundary admission | static `northstar.widget` prefix plus an identifier-held legal suffix | zero violations; an unevaluable outer value is not partially observed |
+| dynamic-tail refusal | interpolated and concatenated splices fix `northstar.widget:` before an identifier-held tail | two exact violations; a dynamic outer construction cannot hide an already bounded identity |
+| dynamic-tail admission | the same interpolated and concatenated static prefixes end immediately before an identifier-held suffix | zero violations; the observer does not invent a right boundary before an unknown continuation |
 | tagged-boundary admission | a tag receives the spliced template body | zero violations; the tag controls the runtime result |
 | tagged-substitution refusal/admission | a tag receives a completed concatenation spelling either `northstar.widget` or `northstar.widget-contract/v1` | the module identity refuses; the longer contract namespace admits |
 | call-boundary refusal/admission | a completed concatenation is a call argument beneath a dynamic outer `+`, spelling either module or longer contract namespace | the module identity refuses; the longer contract namespace admits |
@@ -151,6 +164,12 @@ independence control by omitting its second observation. Both focused mutation
 runs selected their corresponding committed control. Both mutations were
 restored with explicit inverse patches; the production file is byte-identical to
 candidate `358ba5f`.
+
+The round-5 focused run passes 27/27. Its new paired fixtures hold the Fable
+finding directly: interpolation and concatenation each refuse when static text
+fixes the `:` boundary before a runtime tail, while the otherwise equivalent
+prefixes admit when the runtime value begins immediately after `widget` and no
+right boundary can be inferred.
 
 ## Gate evidence
 
@@ -214,6 +233,23 @@ Both exclusive suites acquired the repository's serialized lease after a
 transient wait. The evidence-only documentation update after those executable
 runs changes no executable path.
 
+Round 5 corrects the production false green found by the Fable confirmation and
+reran the declared sequence:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` | PASS — 27/27; before the implementation change the new refusal returned `[]` while its unbounded-prefix admission passed |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 158/158, including 27/27 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 1,274,397.2 ms |
+
+Both exclusive suites acquired the repository's serialized lease. The focused
+expected red was run before the implementation change and failed specifically
+because both required PRESS006 observations were absent; its admission twin was
+already green.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -271,6 +307,25 @@ closures. If another arm finds the same occurrence/deduplication evidence class
 outrunning these specimens while production remains unchanged, the packet must
 narrow or stop rather than enumerate another adjacent fixture.
 
+Candidate `e02c15c9dc772cb772ceb3c851c606a95eb209c6` then received the required
+fresh-naive Codex xhigh arm and returned **PASS**: both round-3 control survivors
+were closed, the correction was test-only, and production remained byte-identical
+to `358ba5f`. The identical-SHA Fable max confirmation returned **REVISE** on one
+new production defect. An incomplete template or concatenation was treated as
+wholly opaque even when its static text already contained the full module
+identity followed by a fixed boundary character before a runtime tail. The
+reviewer's template and `+` probes returned zero violations; the contiguous twin
+returned one.
+
+Round 5 continues because this is a production defect, which `review-tiers`
+explicitly licenses regardless of round count. The correction is semantic rather
+than another adjacent evidence specimen: it models maximal statically known runs
+and whether their right boundary is known, preserving the existing admission for
+an unbounded prefix before an unknown continuation. Because production changed,
+the next arm is fresh Critical review, not a narrow confirmation. The prompt-path
+error is also corrected: the ratified ADR-0023 is
+`ADR-0023-storageless-platform-capability-tier.md`.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -284,3 +339,9 @@ additively, and deduplicate only when two channels describe the same constructio
 For evidence, plural behavior requires two subjects in the same channel, and
 provenance deduplication requires a same-location unrelated twin; otherwise
 first-only and location-coincidence proxies remain green.
+
+A second reusable rule follows from the confirmed Fable finding: **partial
+evaluation must preserve known semantic boundaries rather than classifying an
+entire expression as either static or dynamic.** Unknown values block inference
+across their edge; they do not erase independently fixed text and delimiters on
+the same side.
