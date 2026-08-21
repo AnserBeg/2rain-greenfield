@@ -287,14 +287,17 @@ no claim of exhaustive original-promise settlement evidence.
 The orchestrator ruled that routed case non-gating for this packet; the lane did
 not infer the disposition. The narrowing depends on the current reachability
 fact: the composed production request path uses `AllowAllLocalPolicy`, release
-verification and demo wiring are also allow-only, and no production
-`CurrentPolicyGateway` can reject. Exactly one join input can therefore fail in
-production, so same-turn precedence is not contested. The routing is a hard
-trigger rather than an indefinite deferral: row 7's policy/identity-kernel
-packet, or any earlier packet that introduces a deny-capable production gateway,
-must ship the subsuming two-pending, policy-then-loader, exact-identity control
-before admitting that gateway. The row fires as soon as the production gateway
-set stops being allow-only.
+verification and demo wiring are also allow-only, and all three
+`readCurrentVersion()` implementations return fixed successful evidence without
+a fallible read, adapter, validator, normalizer, or wrapper. No
+production-reachable policy-side promise supplied to the join can therefore
+reject, so same-turn precedence is not contested. The routing is a hard trigger
+rather than an indefinite deferral: before any production-reachable policy-side
+promise supplied to `joinRuntimeDefinitionAndPolicy` can reject — including
+through a deny-capable gateway, version-read failure, validator, normalizer,
+adapter, or post-invocation wrapper — the owning packet must ship the subsuming
+two-pending, policy-then-loader, exact-identity control first. The row fires on
+policy-side rejectability, not only on authorization denial.
 
 The source comment on `joinRuntimeDefinitionAndPolicy` is narrowed to the same
 five measured classes and names the unproved routed case. Its prior statement
@@ -514,23 +517,21 @@ existing timing cases rather than subsuming promise ordering. Under
 narrowing round therefore writes the claim from the measurements, records the
 ad-hoc survivor, routes same-turn staggered precedence to its own row, and stops.
 
-### Orchestrator narrowing ruling — `c86dede458ea8199d4056719937e7fcadb5059b4`
+### Superseded trigger wording — `c86dede458ea8199d4056719937e7fcadb5059b4`
 
-The orchestrator ruled `runtime-refusal-same-turn-precedence` non-gating for
-this packet because no production `CurrentPolicyGateway` is deny-capable. The
-composed request path uses `AllowAllLocalPolicy`; release verification and demo
-wiring are also allow-only. The same-turn survivor is real but unreachable while
-only one join input can reject.
+The orchestrator ruled `runtime-refusal-same-turn-precedence` non-gating for this
+packet because every current production wiring returns fixed successful policy
+version evidence. This first recording keyed that fact too narrowly to whether a
+production `CurrentPolicyGateway` was deny-capable. The review of `5c9e1cb`
+correctly distinguished authorization denial from rejection of the
+`readCurrentVersion()` promise actually supplied to the join; the corrected
+trigger below supersedes the denial-based wording.
 
-This correction gives the routed row a hard firing trigger: row 7's
-policy/identity-kernel packet, or any earlier packet that adds a deny-capable
-production gateway, must ship the subsuming same-turn exact-identity control
-before admitting that gateway. It also narrows
-`joinRuntimeDefinitionAndPolicy`'s source comment to the five committed timing
-classes and names the unproved routed case. Runtime behavior is unchanged from
-`fa4139e96fec14602bdafa1e7aa0dab043e50273`; the only runtime-source difference
-is that comment. The trigger is a plan-level admission obligation, not an
-executable detector of new gateway implementations.
+The source comment was still correctly narrowed to the five committed timing
+classes and named the unproved routed case. Runtime behavior remained unchanged
+from `fa4139e96fec14602bdafa1e7aa0dab043e50273`; the only runtime-source
+difference was that comment. The trigger remains a plan-level admission
+obligation, not an executable detector of new policy-side rejectability.
 
 The correction tree passed:
 
@@ -542,3 +543,21 @@ The correction tree passed:
 No browser, integration, architecture or full-matrix suite was rerun for this
 comment-and-record-only correction. The full matrix remains deferred until the
 fresh Critical arms converge.
+
+### Fourth narrow review — `5c9e1cb02554a44a5c4126057ad5bc4497e0f314`
+
+Fresh Codex xhigh returned `REVISE` with no present production or architecture
+finding. It confirmed that the composed request path, release verification and
+demo wiring all return fixed successful policy-version evidence, that the five
+source-comment observations match committed controls, and that the routed row's
+denial-based wording was non-deferrable for the event it named.
+
+One material claim defect remained: `AuthenticatedRequestRuntimeEntryAdapter`
+joins `readCurrentVersion()`, not `authorize()`. A validator, normalizer, adapter
+or post-invocation wrapper can make that policy-side promise reject while the
+gateway remains allow-only, making the recorded same-turn survivor reachable
+before row 7 without firing the denial-based trigger. The correction therefore
+keys the obligation to the load-bearing predicate: the subsuming control must
+ship before any production-reachable policy-side promise supplied to the join
+can reject, regardless of which layer introduces that rejectability. Production
+logic and the routed-control scope remain unchanged.

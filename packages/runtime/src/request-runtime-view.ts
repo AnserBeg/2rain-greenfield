@@ -486,7 +486,9 @@ function startRuntimeDefinitionLoad(
  * They do not establish policy-first identity when two pending promises reject
  * in one turn through a post-invocation policy-promise wrapper. That same-turn
  * case is routed as `runtime-refusal-same-turn-precedence` and becomes required
- * before any deny-capable production policy gateway lands.
+ * before any production-reachable policy-side promise supplied to this join can
+ * reject, whether through its gateway, version read, validation, normalization,
+ * adapter, or post-invocation wrapper.
  */
 function joinRuntimeDefinitionAndPolicy(
   definitionLoad: Promise<LoadedRequestRuntimeDefinition>,
