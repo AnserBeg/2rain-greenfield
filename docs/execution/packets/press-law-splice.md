@@ -19,8 +19,12 @@ construction ownership included type-literal descendants that do not contribute
 to the runtime value. Candidate
 `a58d3e7356b32d1e9d839fcfbd00318e40d6c94a` returned REVISE with production
 correct and one shared transparent-wrapper-grammar control survivor. The
-round-9 test-only correction pins all five wrapper forms and is gate-green for a
-fresh Critical arm; the full matrix remains deferred until review converges.
+round-9 test-only correction pinned all five wrapper forms. Candidate
+`93a0f37715378bf227dcdee17e5558afd1301456` returned REVISE because a
+literal-only TypeScript template-literal type fell outside the runtime-expression
+observer. The round-10 production correction adds that bounded type-space form
+and is gate-green for a fresh Critical arm; the full matrix remains deferred
+until review converges.
 
 ## Packet definition
 
@@ -84,34 +88,40 @@ capability-local adapter distinction, would need its own ruling.
 ### Refuse literal splicing of module identities in production press source
 
 Yes, for statically observable JavaScript/TypeScript string constructions. The
-guard parses production source and evaluates string literals,
-parentheses/type wrappers, template expressions, and `+` expressions. It
-observes a completed construction as one value. Inside an otherwise dynamic
-ordinary construction it also observes maximal statically known runs while
-preserving whether either adjacent construction edge borders an unknown runtime
-value. Unknown adjacency is conservatively represented by a character that is
-both a word character and a namespace-continuation character before calling the
-same `moduleIdentityMatches` authority as a contiguous spelling. Thus the
-matcher may report only when static text or the real construction edge proves
-the boundaries its identity family requires; it never invents a string boundary
-at the edge of an isolated run. The guard therefore reports `PRESS006`, rather
+guard parses production source and evaluates runtime string literals,
+parentheses/type wrappers, template expressions, and `+` expressions. It also
+evaluates TypeScript `TemplateLiteralTypeNode` values when every span is itself
+a string-literal type. It observes a completed construction as one value. Inside
+an otherwise dynamic ordinary runtime construction it also observes maximal
+statically known runs while preserving whether either adjacent construction
+edge borders an unknown runtime value. Unknown adjacency is conservatively
+represented by a character that is both a word character and a
+namespace-continuation character before calling the same
+`moduleIdentityMatches` authority as a contiguous spelling. Thus the matcher
+may report only when static text or the real construction edge proves the
+boundaries its identity family requires; it never invents a string boundary at
+the edge of an isolated run. The guard therefore reports `PRESS006`, rather
 than introducing a parallel rule or an allowlist.
 
-The observer measures each completed ordinary construction once and every
-bounded partial run inside an incomplete one. Raw and constructed observation
-are disjoint by AST ownership: raw matching owns source occurrences outside
-ordinary construction literal tokens, while the construction observer owns all
-matches inside those tokens and judges them with their runtime construction
-adjacency. Ownership follows only the same runtime expression positions the
-static evaluator understands: wrapper expressions, `+` operands, and template
-segments/substitutions. Type children of `as`, angle-bracket assertions, and
-`satisfies` remain raw source occurrences because they do not contribute tokens
-to the runtime string. This prevents quotes, backticks, interpolation syntax, or
-type syntax from proxying runtime ownership, while an already-routed literal
-still cannot mask a later splice in the same file. Multiple identities inside
-one completed construction are all retained. This occurrence-complete rule
-exposes every existing compiler contract literal under row `1e-2`, rather than
-only its first occurrence.
+The observer measures each completed ordinary runtime construction once, every
+bounded partial run inside an incomplete runtime construction, and each
+literal-only template-literal type once. Raw and constructed observation are
+disjoint by AST ownership: raw matching owns source occurrences outside static
+construction literal tokens, while the construction observer owns matches
+inside those tokens and judges them with the construction's semantic value and
+adjacency. Runtime ownership follows only the same runtime expression positions
+the static evaluator understands: wrapper expressions, `+` operands, and
+template segments/substitutions. Type children of `as`, angle-bracket
+assertions, and `satisfies` remain raw source occurrences because they do not
+contribute tokens to the runtime string. Literal-only template-literal types are
+a separate completed static value: ownership includes their head/tail tokens
+and string-literal type spans, but does not resolve aliases, generics,
+identifiers, or type-checker state. This prevents quotes, backticks,
+interpolation syntax, or unrelated type syntax from proxying ownership, while
+an already-routed literal still cannot mask a later splice in the same file.
+Multiple identities inside one completed construction are all retained. This
+occurrence-complete rule exposes every existing compiler contract literal under
+row `1e-2`, rather than only its first occurrence.
 
 Within an incomplete ordinary template or `+` construction, direct construction
 operands remain incomplete values. Their statically known runs are considered
@@ -132,12 +142,14 @@ and the round-6 review found that isolating a run after an unknown prefix
 invented a left word boundary for local IDs and `*_IDS` symbols.
 
 This remains deliberately narrower than symbolic execution. Unknown runtime
-values and identifier indirection are not resolved, and a tag's return value is
-not inferred. Static text on either side of those unknown values is still
+values, runtime identifier indirection, nonliteral type-template spans, type
+aliases, generic type parameters, and identifier-held types are not resolved;
+the TypeScript type checker is not consulted; and a tag's return value is not
+inferred. Static runtime text on either side of unknown runtime values is still
 observed when it independently fixes the identity boundary. That is an explicit
 limit: the current threat is an honest developer or AI writer reaching for the
-cheap literal-interpolation or literal-concatenation dodge, not active
-obfuscation.
+cheap literal-interpolation or literal-concatenation dodge in ordinary runtime
+or literal-only type syntax, not active obfuscation.
 Banning all interpolation or all concatenation in production would reject
 ordinary application code and would be a broader language-policy packet, not a
 proportionate correction here.
@@ -176,6 +188,7 @@ not rely on the routed Inventory debt:
 | type-literal ownership twin | one direct `satisfies` type literal is repeated beneath an empty runtime concatenation | both direct source occurrences report; adding a semantically neutral construction cannot transfer the type token to runtime ownership |
 | runtime/type provenance companion | one completed construction contains a runtime module identity and an independent module identity in its `satisfies` type | two observations at their distinct runtime-construction and raw type-literal lines |
 | transparent-wrapper grammar | the runtime namespace is split across a parenthesized, `as`, angle-bracket-asserted, `satisfies`, or non-null operand; the three typed forms also contain an independent type-literal identity | eight exact observations: one construction-derived result for every wrapper plus one raw type-literal result for each typed wrapper; deleting any shared unwrap predicate loses its construction observation |
+| literal-only template type | a direct string-literal type, an equivalent spliced `TemplateLiteralTypeNode`, and a spliced longer contract type share one generic production fixture | the direct and spliced module identities each report at their own source line; the longer contract type admits; deleting the type-template construction branch loses only the spliced observation |
 | unknown-left admission/refusal | local ID `widget_list` and symbol `WIDGET_IDS` each follow an unknown prefix either directly or after a static `:` | the directly adjacent identities admit because the runtime prefix may erase `\b`; the colon-bounded twins refuse exactly at their construction lines |
 | partial-run multiplicity | one incomplete outer concatenation contains two independently colon-bounded spliced namespaces separated by an unknown value | two exact observations at the two static-run positions; first-partial-run-only compression fails |
 | tagged-boundary admission | a tag receives the spliced template body | zero violations; the tag controls the runtime result |
@@ -247,6 +260,18 @@ independent type-literal companions for `as`, angle-bracket assertion, and
 `satisfies`. Replaying that exact predicate deletion now fails only the new
 wrapper control, leaving the other 35 green. The inverse patch restored the
 production source before the final focused run; no mutation runner is committed.
+
+The round-10 focused run passes 37/37. Before the production correction, the
+new type-space fixture reported only its direct string-literal type and omitted
+the equivalent literal-only template-literal type; the longer contract template
+type remained admitted. The bounded `TemplateLiteralTypeNode` observer now
+evaluates only string-literal type spans, records only their value-contributing
+literal ranges, and sends the completed value through the existing matcher.
+Deleting only that node branch reproduces the same one missing observation: the
+direct type literal remains reported, the spliced type disappears, and the
+longer contract type remains admitted. The explicit inverse patch restored the
+production source before the final focused 37/37 run; no mutation runner is
+committed.
 
 ## Gate evidence
 
@@ -433,6 +458,28 @@ tests 7, 8, and 9 passed in 104.3 s, 149.4 s, and 221.7 s respectively. The
 discarded mutation replay is corroboration; the committed exact fixture is the
 reproducible evidence. No production source or mutation runner changed.
 
+Round 10 corrects the literal-only type-template false green found in the review
+of `93a0f37`:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` before the production correction | EXPECTED RED — 36/37; the direct string-literal type reported, the equivalent spliced template-literal type was absent, and the longer contract type admitted |
+| focused `module-press-law.test.ts` | PASS — 37/37, including the direct/spliced type refusal pair and longer-contract type admission |
+| reviewer-selected type-template construction-branch deletion | EXPECTED RED — only the new control failed; its direct type-literal observation remained and only its spliced observation disappeared; the longer contract type remained admitted; the inverse patch restored production before the final focused run |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 168/168, including 37/37 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 1,338,344.7 ms |
+
+Before both exclusive suites, no competing test runner or repository container
+was present. Architecture began with about 5.6 GiB available memory and a
+five-second CPU sample at 95–97% idle; it passed in 63,344.9 ms. PostgreSQL began
+with about 5.5 GiB available and the same 95–97% idle range. Its historically
+long tests 7, 8, and 9 passed in 96.5 s, 146.9 s, and 213.3 s. The discarded
+branch deletion is corroboration only; the committed direct/spliced/admission
+fixture is the reproducible evidence. No mutation runner is committed.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -587,6 +634,26 @@ arm produces another adjacent wrapper-list specimen without identifying a
 production defect or a distinct authority/proxy class, the packet must stop or
 narrow its claim rather than enumerate syntax indefinitely.
 
+The fresh review of candidate
+`93a0f37715378bf227dcdee17e5558afd1301456` closed the shared-wrapper control,
+runtime-expression ownership, occurrence/boundary semantics, provider
+comparison, debt, and ADR questions. It returned **REVISE** on one new
+production false green: a literal-only TypeScript template-literal type is a
+statically exact string construction but parses as `TemplateLiteralTypeNode`,
+not a runtime `ts.Expression`, so neither existing observation channel saw a
+spliced module identity in type space.
+
+Round 10 adds a narrowly bounded type-template construction observer. It accepts
+only string-literal type spans, records only the head/span/tail tokens that
+contribute to that type's exact string value, delegates identity classification
+to the existing shared matcher, and attributes the observation to the template
+type's source position. It performs no alias, generic, identifier, or type-checker
+resolution. The direct/spliced/longer-contract fixture and exact branch-deletion
+replay hold the one-property defect and admission. Continuation remains licensed
+because this is a new in-scope production false green in the gate. Production
+changed, so the next review is a fresh full Critical arm; nothing from round 9
+is fenced as settled.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -616,6 +683,15 @@ unwrap helper, they can agree on the same omission. Each explicitly supported
 entry needs a construction-channel specimen that raw source cannot satisfy,
 with type-child evidence kept orthogonal where the syntax carries both runtime
 and type positions.
+
+The round-9 review adds the population rule: **an AST claim cannot use
+`ts.Expression` as a proxy for every statically established TypeScript string.**
+The supported syntax population must be enumerated explicitly. Runtime string
+expressions and literal-only template-literal types are separate node families
+with separate ownership grammars, even though both produce an exact string for
+the same shared identity matcher. Adding type syntax does not license symbolic
+type evaluation: every admitted node must carry its own complete literal value
+and value-contributing token ranges.
 
 A second reusable rule follows from the confirmed Fable finding: **partial
 evaluation must preserve known semantic boundaries rather than classifying an
