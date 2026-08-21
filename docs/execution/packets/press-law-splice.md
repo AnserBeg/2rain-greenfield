@@ -14,8 +14,12 @@ then a Fable REVISE on a newly found production false green. Candidate
 boundary production defect and a plural partial-run control gap. Candidate
 `c5fb4e14df0edaabfd26c014e17ffae7934de5fd` returned REVISE because the raw
 source observer still mistook literal-token punctuation for runtime adjacency.
-The round-7 correction has all declared pre-review gates green for a fresh
-Critical arm; the full matrix remains deferred until review converges
+Candidate `ebbb65ecf8d93e4a3742e1c0eb7c0d2b3e950dc1` returned REVISE because
+construction ownership included type-literal descendants that do not contribute
+to the runtime value. The round-8 correction passed every gate through
+Architecture, then stopped after the required PostgreSQL gate hit the same
+fixed five-minute test timeout on two attempts. It is not frozen for review;
+the full matrix remains deferred until review converges.
 
 ## Packet definition
 
@@ -97,12 +101,16 @@ bounded partial run inside an incomplete one. Raw and constructed observation
 are disjoint by AST ownership: raw matching owns source occurrences outside
 ordinary construction literal tokens, while the construction observer owns all
 matches inside those tokens and judges them with their runtime construction
-adjacency. This prevents quotes, backticks, or interpolation syntax from acting
-as invented runtime boundaries, while an already-routed literal still cannot
-mask a later splice in the same file. Multiple identities inside one completed
-construction are all retained. This occurrence-complete rule exposes every
-existing compiler contract literal under row `1e-2`, rather than only its first
-occurrence.
+adjacency. Ownership follows only the same runtime expression positions the
+static evaluator understands: wrapper expressions, `+` operands, and template
+segments/substitutions. Type children of `as`, angle-bracket assertions, and
+`satisfies` remain raw source occurrences because they do not contribute tokens
+to the runtime string. This prevents quotes, backticks, interpolation syntax, or
+type syntax from proxying runtime ownership, while an already-routed literal
+still cannot mask a later splice in the same file. Multiple identities inside
+one completed construction are all retained. This occurrence-complete rule
+exposes every existing compiler contract literal under row `1e-2`, rather than
+only its first occurrence.
 
 Within an incomplete ordinary template or `+` construction, direct construction
 operands remain incomplete values. Their statically known runs are considered
@@ -164,6 +172,8 @@ not rely on the routed Inventory debt:
 | completed-continuation admission | contiguous `widget_list`, `WIDGET_IDS`, and `northstar.widget` literal tokens continue statically inside completed concatenations | zero violations; token quotes cannot override the completed runtime value's boundaries |
 | contiguous/split unknown-adjacency admission | local ID, symbol, and namespace families are each written once in one literal token and once across literal tokens beside an unknown runtime value | all six admit; tokenization does not change the runtime-adjacency ruling |
 | contiguous/split static-boundary refusal | the same six forms receive a static `:` at the relevant edge | six exact observations at their construction lines; the construction observer retains fixed boundaries for both tokenizations |
+| type-literal ownership twin | one direct `satisfies` type literal is repeated beneath an empty runtime concatenation | both direct source occurrences report; adding a semantically neutral construction cannot transfer the type token to runtime ownership |
+| runtime/type provenance companion | one completed construction contains a runtime module identity and an independent module identity in its `satisfies` type | two observations at their distinct runtime-construction and raw type-literal lines |
 | unknown-left admission/refusal | local ID `widget_list` and symbol `WIDGET_IDS` each follow an unknown prefix either directly or after a static `:` | the directly adjacent identities admit because the runtime prefix may erase `\b`; the colon-bounded twins refuse exactly at their construction lines |
 | partial-run multiplicity | one incomplete outer concatenation contains two independently colon-bounded spliced namespaces separated by an unknown value | two exact observations at the two static-run positions; first-partial-run-only compression fails |
 | tagged-boundary admission | a tag receives the spliced template body | zero violations; the tag controls the runtime result |
@@ -215,6 +225,16 @@ contiguous forms. Temporarily retaining only the first identity match within a
 completed construction makes the within-construction multiplicity control lose
 its second required observation. Explicit inverse patches restored both
 mutations before the final focused 33/33 run.
+
+The round-8 focused run passes 35/35. Before the production correction, the
+type-literal ownership twin lost only the occurrence beneath `+ ''`, and the
+runtime/type provenance companion lost only its independent type-literal
+observation. Replacing the runtime-only range traversal with the reviewed
+unrestricted `ts.forEachChild` proxy reproduces those same two missing
+observations. Stopping at a transparent type wrapper instead makes the stronger
+provenance companion report its runtime identity twice—once raw and once
+constructed—while retaining the independent type occurrence. Explicit inverse
+patches restored both mutations before the final focused run.
 
 ## Gate evidence
 
@@ -348,6 +368,35 @@ and container exited, the exclusive retry passed 164/164. The two discarded
 mutations are corroboration only; their committed controls are the reproducible
 evidence. PostgreSQL then acquired the exclusive lease and passed 203/203.
 
+Round 8 corrects the type-literal ownership defect found in the review of
+`ebbb65e`:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` | PASS — 35/35, including the empty-concatenation ownership twin and the separate runtime/type provenance companion |
+| unrestricted-descendant range mutation | EXPECTED RED — both new controls lost their independent type-literal observation; explicit restoration returned them green |
+| wrapper-stop range mutation | EXPECTED RED — the provenance companion gained a duplicate raw runtime observation while retaining its constructed and type-literal observations; explicit restoration returned it green |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 166/166, including 35/35 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | FAIL — test 9, `composed product advances an existing deployment to an exact compiled successor`, exceeded its fixed 300,000 ms timeout on two attempts; both runners were stopped only after the test had emitted the definitive red |
+
+The pre-fix focused run failed both new controls for exactly the missing
+type-literal observations. The discarded mutations are corroboration only; the
+committed one-property twin and provenance companion are the reproducible
+load-bearing evidence. The unrestricted-descendant replay was selected by the
+review finding; the wrapper-stop replay was author-selected. No mutation runner
+is committed. The first PostgreSQL attempt overlapped a lock-unaware
+`evidence:expected-red` run from another worktree; a clean retry began after
+that process exited but reproduced the same test-9 timeout. The retry was
+already substantially degraded before test 9 (tests 7 and 8 took 171 s and
+293.9 s), and a separate lane resumed integration work afterward. No timeout,
+PostgreSQL code, or out-of-scope behavior was changed to force a green. This is
+the packet's declared stop condition: a required gate cannot presently be made
+green honestly. No review candidate or review prompt is emitted from this
+state.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -463,6 +512,25 @@ is automatic under `review-tiers`: this is a new in-scope production defect, not
 an evidence-only checklist recurrence. Because production changed, the next
 review is a fresh full Critical arm.
 
+The fresh review of candidate
+`ebbb65ecf8d93e4a3742e1c0eb7c0d2b3e950dc1` returned **REVISE** with one
+production false green introduced by the round-7 ownership correction. The
+range collector used unrestricted AST descendant traversal, so a type literal
+beneath `satisfies` was claimed as though it contributed to the completed
+runtime construction. The raw observer then relinquished that direct source
+occurrence, while the runtime value contained no identity to replace it.
+
+Round 8 makes range ownership mirror the static evaluator's runtime expression
+grammar instead of generic AST membership. Transparent wrappers contribute only
+their `.expression`; concatenations contribute their left/right expressions;
+templates contribute their runtime segments and substitution expressions. Type
+nodes are never traversed as runtime tokens. The one-property empty-concatenation
+twin and the stronger runtime/type provenance companion hold both under-routing
+and over-retention. Continuation remains licensed because this is a production
+regression introduced by the prior correction—an explicit always-continue case
+in `review-tiers`. Production changed, so the next review is again a fresh full
+Critical arm.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -478,6 +546,13 @@ punctuation are not runtime adjacency. For evidence, plural behavior requires
 two subjects in the same channel, and provenance requires same-location and
 same-runtime-value twins; otherwise first-only, location-coincidence, and
 tokenization-sensitive proxies remain green.
+
+A third reusable rule follows from the `ebbb65e` review: **AST ownership must be
+derived from semantic child positions, never generic descendant membership.** A
+type literal, constraint, or other non-value source descendant can be textually
+inside a runtime expression's subtree without contributing a token to its value.
+When ownership suppresses another observer, every claimed range needs both an
+inside-runtime control and an independent-descendant control.
 
 A second reusable rule follows from the confirmed Fable finding: **partial
 evaluation must preserve known semantic boundaries rather than classifying an
