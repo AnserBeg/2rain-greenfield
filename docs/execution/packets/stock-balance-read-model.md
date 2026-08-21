@@ -1,6 +1,6 @@
 # stock-balance-read-model — honest posted-stock browsing
 
-Status: evidence_ready; Fable-confirmation revision frozen for fresh Critical review
+Status: accepted; integrated through the reviewed packet-to-main merge
 
 Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b`
 
@@ -384,6 +384,26 @@ removed before the production correction, and the provider test file is unchange
 
 ## Gate record
 
+The complete post-review CI matrix passed on staged integration SHA
+`75e6ee80d606b0edda183096da4e632faa0aa7ec`, whose executable content is
+identical to reviewed candidate `07c1b44bc17b10dea3777a99dca4065f787bdac2`:
+
+- release freshness: `check:demo-release` and `check:app-release` PASS;
+- unit 120/120, compiler 152/152, performance 5/5, integration 149/149,
+  agent 3/3, architecture 141/141, and contracts 16/16;
+- PostgreSQL 204/204, locale 1/1, browser 91/91, and observability 11/11;
+- language coverage PASS: 2050 obligations, 429 first-party observations; and
+- executed-file reachability PASS: 104/104 test files and 10 producer
+  artifacts.
+
+The first complete matrix attempt reached PostgreSQL 203/204 and stopped when
+Docker reported PostgreSQL ready inside its ephemeral container but refused the
+newly published WSL localhost endpoint for the final trust-substrate file. The
+exact file then passed 3/3 unchanged, including the previously unreachable
+control. A complete rerun on the same clean SHA passed every suite above. No
+source, fixture, test, configuration, or generated artifact changed between the
+transient infrastructure failure and the accepted run.
+
 All earlier gate sets remain historical evidence only. The complete
 Fable-confirmation replacement pre-freeze set is green on executable commit
 `0021bcf2889df0879c4ba44eb0444ec5026cfcf8`:
@@ -491,10 +511,16 @@ candidate-versus-qualified operation control. Fresh Codex returned PASS on
 then returned REVISE because declared relations were the second authored input
 to the movement physical ABI. The replacement pins that exact relation set and
 its storage-shaping properties, with real PostgreSQL pre-fix failure evidence,
-exact compiler controls, and green blast-radius gates. A fresh Codex arm is now
-required because executable content changed. Only after PASS may independent
-Fable max confirm the identical frozen SHA. The full CI matrix remains
-deliberately deferred until both arms converge.
+exact compiler controls, and green blast-radius gates.
+
+Fresh-naive Codex xhigh then returned PASS on frozen candidate
+`07c1b44bc17b10dea3777a99dca4065f787bdac2`. Independent Fable max confirmed
+that identical SHA, ran the focused conformance suite 61/61, replayed both
+author mutants at 60/61, and independently deleted the target comparison and
+the by-ID observation arm; each deletion produced 60/61 with the exact expected
+specimen losing attribution. Both arms found no reachable production finding
+and no material control defect. The complete matrix then passed on the
+executable-identical staged integration SHA recorded above.
 
 ## Program-review trigger assessment
 
@@ -503,5 +529,5 @@ the packet base (`8136cfaa8caf23a73221cfa2b0feb5c90987556b`) produced R6, and
 this packet is the bounded execution of that finding. It crosses no stage
 boundary, precedes no new fan-out, and implements ADR-0007's already-sanctioned
 read-model category rather than introducing another correctness domain. The
-fresh Critical packet review remains the proportionate instrument for this
+completed Critical packet review remains the proportionate instrument for this
 diff.

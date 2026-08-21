@@ -1,7 +1,7 @@
 # ADR-0057: Posted stock is a rebuildable ledger sum
 
 Date: 2026-08-20
-Status: proposed — packet `stock-balance-read-model`
+Status: accepted (packet `stock-balance-read-model`)
 Tier: Critical — the packet changes what module conformance admits
 
 ## Context

@@ -231,9 +231,16 @@ reject the ambiguous transaction binding. Replacement executable `0021bcf` pins
 exactly the two provider-maintained movement relations and every property that
 changes their material participation. The exact missing, extra and one-property
 controls return both their relation diagnostic and all five posted-stock CRUD/
-Form requirements. Compiler 152/152, architecture 141/141, PostgreSQL 204/204
-and browser 91/91 are green. Fresh Codex is next, then Fable max on the identical
-freeze, then the post-review full matrix.
+Form requirements. **ACCEPTED 2026-08-21.** Fresh-naive Codex xhigh and
+independent Fable max both returned PASS on identical frozen SHA `07c1b44`; the
+Fable arm independently ran the focused suite 61/61 and four discriminating
+mutants at 60/61. The complete staged-tree matrix is green at `75e6ee8`: unit
+120/120, compiler 152/152, performance 5/5, integration 149/149, agent 3/3,
+architecture 141/141, contracts 16/16, PostgreSQL 204/204, locale 1/1, browser
+91/91, observability 11/11, language coverage PASS, and reachability 104/104.
+The first matrix attempt's sole Docker endpoint-publication failure reproduced
+green 3/3 in isolation; the full unchanged-tree rerun passed. Lineage remains
+12→13 with all predecessors reproduced under their own ADR-0047 §5 profiles.
 
 #### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2
 
