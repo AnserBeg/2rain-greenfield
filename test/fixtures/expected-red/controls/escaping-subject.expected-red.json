@@ -9,9 +9,7 @@
       "original": "anything",
       "replacement": "something else",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/subject.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/subject.test.mjs"]
       },
       "kills": [
         {

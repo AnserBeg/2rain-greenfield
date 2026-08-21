@@ -9,9 +9,7 @@
       "original": "export const UNTRACKED_SUBJECT = 'pristine';",
       "replacement": "export const UNTRACKED_SUBJECT = 'moved';",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/subject.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/subject.test.mjs"]
       },
       "kills": [
         {

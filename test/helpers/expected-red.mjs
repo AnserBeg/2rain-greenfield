@@ -92,7 +92,9 @@ const GREEN_CANARIES = Object.freeze([
  * fails loudly instead of quietly redirecting the gate.
  */
 function manifestGlobFrom(override) {
-  return override !== undefined && override.length > 0 ? override : MANIFEST_GLOB;
+  return override !== undefined && override.length > 0
+    ? override
+    : MANIFEST_GLOB;
 }
 
 export function assertNoInheritedOverride() {
@@ -118,9 +120,16 @@ function trackedFiles(root) {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
-  assert.equal(listed.status, 0, 'EXPECTED_RED_TRACKED_LIST_FAILED: git ls-files did not run');
+  assert.equal(
+    listed.status,
+    0,
+    'EXPECTED_RED_TRACKED_LIST_FAILED: git ls-files did not run',
+  );
   return new Set(
-    listed.stdout.split('\0').filter(Boolean).map((path) => resolve(root, path)),
+    listed.stdout
+      .split('\0')
+      .filter(Boolean)
+      .map((path) => resolve(root, path)),
   );
 }
 
@@ -130,12 +139,16 @@ function pathProblem(candidate, root, tracked) {
   }
   if (isAbsolute(candidate)) return 'must be repository-relative, not absolute';
   const resolved = resolve(root, candidate);
-  if (resolved !== join(root, candidate) || relative(root, resolved).startsWith('..')) {
+  if (
+    resolved !== join(root, candidate) ||
+    relative(root, resolved).startsWith('..')
+  ) {
     return 'resolves outside the repository';
   }
   if (!existsSync(resolved)) return 'does not exist';
   const stats = lstatSync(resolved);
-  if (stats.isSymbolicLink()) return 'is a symlink, so its bytes are not the tracked entry';
+  if (stats.isSymbolicLink())
+    return 'is a symlink, so its bytes are not the tracked entry';
   if (!stats.isFile()) return 'is not a regular file';
   if (!tracked.has(resolved)) {
     return 'is not tracked by git, so it is not part of the frozen candidate';
@@ -477,7 +490,7 @@ export function runEntries(
   return entries.length;
 }
 
-function measurePhase(entry, { root, scratch, log, run, phase }) {
+function measurePhase(entry, { root, scratch, run, phase }) {
   const measured = measureSuiteRun(entry.test, {
     root,
     scratch,
@@ -558,7 +571,6 @@ function runOneEntry(entry, { root, scratch, log, run }) {
   const restored = measurePhase(entry, {
     root,
     scratch,
-    log,
     run,
     phase: 'restored',
   });
@@ -568,9 +580,7 @@ function runOneEntry(entry, { root, scratch, log, run }) {
     restored.results.length,
     `${entry.name}: the restored suite is not wholly green, so no red the mutation produced can be attributed to it`,
   );
-  log.write(
-    `EXPECTED_RED_RESTORED ${entry.name} ${reference.size} passing\n`,
-  );
+  log.write(`EXPECTED_RED_RESTORED ${entry.name} ${reference.size} passing\n`);
 
   const missing = declared.filter((identity) => !reference.has(identity));
   assert.deepEqual(

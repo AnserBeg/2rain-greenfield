@@ -84,13 +84,19 @@ reconciliation against Node's own counts is the backstop when the allowlist is
 wrong: admit `testTimeoutFailure` and reconciliation refuses C10; delete
 reconciliation as well and C10 is certified.
 
-**The mutation must be the only cause of the red, which green-then-red cannot
-show.** Every entry is measured A/B/A: the pristine suite, the mutated suite,
-then the pristine suite again, which must return the same green pass set. **No
-baseline is reused across entries.** A suite that leaves state behind otherwise
-makes its own earlier run a second sufficient cause while every other check
-passes; memoizing a baseline widened that to contamination between entries.
-Controls H1 and H2 hold it.
+**The mutation is measured FIRST, before anything else in the process has run,
+and the restored suite supplies the green reference.**
+
+*This replaces an A/B/A protocol — pristine, mutated, pristine — that round 4
+refuted.* A suite failing only when its own marker is present **and** the source
+is mutated passes green-red-green intact, with identical pass sets on both green
+runs, while the mutation **alone** from a clean start is a survivor. The marker
+its own baseline wrote is a necessary co-cause. **Green-then-red cannot tell a
+cause from a co-cause, and neither can green-red-green.** Measuring the mutation
+against the freshest state the process can offer means a red that needed the
+baseline's leavings never appears. There is no baseline to reuse across entries,
+because there is no baseline. Controls H1, H2 and H3 hold it, and H3 is certified
+the moment a pre-mutation baseline is reintroduced.
 
 **What the kill set does and does not settle — measured, 2026-08-21.** In one run all three
 of those PostgreSQL entries killed the *identical* pair of tests, and
@@ -208,7 +214,7 @@ that join.
 - `scoped-create-operand-impl`: two rounds with a committed runner, against four
   to seven for its neighbours (2026-08-20 program review, R2).
 - **Five** of the nine ported entries reproduce their reds through the shared
-  runner, in 12 seconds including two baselines. The other four are routed, not
+  runner, each measured mutation-first and then restored. The other four are routed, not
   shipped — see the packet record, and the bullet below for what exposed them.
   *(An earlier draft of this line said all nine reproduce. It was wrong, it
   contradicted the packet record in the same commit, and the review caught it.)*
@@ -219,7 +225,7 @@ that join.
   `/Missing expected rejection/u`_, is satisfied by both. The kill set made the
   difference visible; the message pattern could not have. The four PostgreSQL
   entries are routed rather than shipped, for the reason in the packet record.
-- The gate's own negative controls: **25**, in
+- The gate's own negative controls: **31**, in
   `scripts/check-expected-red.sh --self-test`, wired as its own gate so the
   proof is re-taken on every CI and matrix run rather than once at freeze.
 - **Six meta-controls, each deleting one check and requiring the control that

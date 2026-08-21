@@ -53,7 +53,7 @@ matrix; reproducing the reds costs minutes and belongs at acceptance.
 ## The three ways this gate could have betrayed itself
 
 Each has its own recorded red in `--self-test`, varying one property of an
-otherwise-correct manifest entry. **25 controls**, and the self-test is itself a
+otherwise-correct manifest entry. **31 controls**, and the self-test is itself a
 gate — `check:expected-red-controls` runs in CI and the matrix, so the proof
 that this instrument can fail is re-taken on every run rather than once at
 freeze time.
@@ -263,8 +263,8 @@ are already stable. Routed to `current-plan.md`.
 ## Cost, measured
 
 - The five focused-integration entries: **12 seconds** for five mutations,
-  including two baselines.
-- `--self-test`: seconds, **25 controls**.
+  measured mutation-first and then restored.
+- `--self-test`: seconds, **31 controls**.
 - The four PostgreSQL entries: `test/postgres/composed-application.test.ts` takes
   **9m48s** solo for one run, so an entry naming that whole file costs about
   twenty minutes for its baseline plus its mutated run. One full nine-entry run
