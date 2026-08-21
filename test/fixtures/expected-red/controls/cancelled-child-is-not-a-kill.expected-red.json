@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "cancelled-child-is-not-a-kill",
+      "claim": "A child cancelled because its parent ended never executed, so it cannot satisfy a declared kill.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "expected": "CANCELLATION_PARENT_TOKEN",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/cancellation.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/cancellation.test.mjs",
+          "name": "a parent that abandons its child under the mutation"
+        },
+        {
+          "file": "test/fixtures/expected-red/cancellation.test.mjs",
+          "name": "a child that finishes at baseline"
+        }
+      ]
+    }
+  ]
+}
