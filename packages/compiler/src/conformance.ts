@@ -251,6 +251,15 @@ interface InventoryModuleFieldStorageRule {
 interface InventoryMovementStorageModuleFieldRule extends InventoryMovementModuleFieldRule {
   storage: InventoryModuleFieldStorageRule;
 }
+interface InventoryMovementModuleRelationRule {
+  archiveBehavior: 'restrict';
+  lifecycle: 'active';
+  ownership: 'parentScopedChild' | 'reference';
+  relationLocalId: string;
+  required: true;
+  sourceEntityLocalId: 'inventory_movement';
+  targetEntityLocalId: 'inventory_transaction' | 'inventory_transaction_line';
+}
 interface PostedStockBalanceModuleFieldRule extends InventoryMovementModuleFieldRule {
   storage: InventoryModuleFieldStorageRule;
 }
@@ -398,6 +407,26 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
     storage: inventoryMovementStorageRule({ defaultSemantics: 'nullable' }),
   },
 ] as const satisfies readonly InventoryMovementStorageModuleFieldRule[]);
+const INVENTORY_MOVEMENT_MODULE_RELATION_RULES = Object.freeze([
+  {
+    archiveBehavior: 'restrict',
+    lifecycle: 'active',
+    ownership: 'parentScopedChild',
+    relationLocalId: 'inventory_movement_transaction',
+    required: true,
+    sourceEntityLocalId: 'inventory_movement',
+    targetEntityLocalId: 'inventory_transaction',
+  },
+  {
+    archiveBehavior: 'restrict',
+    lifecycle: 'active',
+    ownership: 'reference',
+    relationLocalId: 'inventory_movement_transaction_line',
+    required: true,
+    sourceEntityLocalId: 'inventory_movement',
+    targetEntityLocalId: 'inventory_transaction_line',
+  },
+] as const satisfies readonly InventoryMovementModuleRelationRule[]);
 const POSTED_STOCK_BALANCE_MODULE_FIELD_RULES = Object.freeze([
   {
     fieldLocalId: 'posted_stock_balance_item_id',
@@ -1013,6 +1042,94 @@ function validatePinnedInventoryMovementEntity(
           : 'INVENTORY_CONTRACT_INVALID',
         `$.fields.${rule.fieldLocalId}`,
         fieldId,
+      ),
+    );
+  }
+  if (
+    !validatePinnedInventoryMovementRelations(
+      packageRevision,
+      entityId,
+      diagnostics,
+    )
+  ) {
+    valid = false;
+  }
+  return valid;
+}
+
+/**
+ * Pins the declared-relation half of the movement storage ABI. Every declared
+ * relation adds a physical source column, foreign key, and index, so an extra
+ * or reshaped relation is provider input even when all 16 fields remain exact.
+ */
+function validatePinnedInventoryMovementRelations(
+  packageRevision: NormalizedApplicationPackage,
+  entityId: string,
+  diagnostics: CompilerDiagnostic[],
+): boolean {
+  let valid = true;
+  const namespace = packageRevision.package.namespace;
+  const rules = new Map<string, InventoryMovementModuleRelationRule>(
+    INVENTORY_MOVEMENT_MODULE_RELATION_RULES.map((rule) => [
+      `${namespace}:relation.${rule.relationLocalId}`,
+      rule,
+    ]),
+  );
+  const observed = new Set<string>();
+  for (const relation of packageRevision.relations.filter(
+    (candidate) =>
+      candidate.sourceEntity.targetId === entityId ||
+      rules.has(candidate.relationId),
+  )) {
+    const rule = rules.get(relation.relationId);
+    const localId = canonicalRelationLocalId(relation.relationId);
+    if (!rule) {
+      valid = false;
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.relations.${localId ?? relation.relationId}`,
+          relation.relationId,
+        ),
+      );
+      continue;
+    }
+    observed.add(rule.relationLocalId);
+    for (const property of [
+      ...(relation.archiveBehavior === rule.archiveBehavior
+        ? []
+        : ['archiveBehavior']),
+      ...(relation.lifecycle === rule.lifecycle ? [] : ['lifecycle']),
+      ...(relation.ownership === rule.ownership ? [] : ['ownership']),
+      ...(relation.required === rule.required ? [] : ['required']),
+      ...(relation.sourceEntity.targetId ===
+      `${namespace}:entity.${rule.sourceEntityLocalId}`
+        ? []
+        : ['sourceEntity']),
+      ...(relation.targetEntity.targetId ===
+      `${namespace}:entity.${rule.targetEntityLocalId}`
+        ? []
+        : ['targetEntity']),
+    ]) {
+      valid = false;
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.relations.${rule.relationLocalId}.${property}`,
+          relation.relationId,
+        ),
+      );
+    }
+  }
+  for (const rule of INVENTORY_MOVEMENT_MODULE_RELATION_RULES) {
+    if (observed.has(rule.relationLocalId)) continue;
+    valid = false;
+    const relationId = `${namespace}:relation.${rule.relationLocalId}`;
+    diagnostics.push(
+      inventoryModuleDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        `$.relations.${rule.relationLocalId}`,
+        relationId,
       ),
     );
   }
@@ -3791,6 +3908,12 @@ function canonicalFieldLocalId(fieldId: string): string | null {
   if (offset < 1) return null;
   const localId = fieldId.slice(offset + marker.length);
   return localId.length > 0 ? localId : null;
+}
+
+function canonicalRelationLocalId(relationId: string): string | null {
+  const marker = ':relation.';
+  const offset = relationId.lastIndexOf(marker);
+  return offset < 0 ? null : relationId.slice(offset + marker.length);
 }
 
 function isLegalEntityGovernedPackage(packageId: string): boolean {

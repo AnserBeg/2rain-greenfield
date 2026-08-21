@@ -364,6 +364,16 @@ export function registerInventoryContractCases(
           };
         }>;
         languageVersion: string;
+        relations: Array<{
+          archiveBehavior: string;
+          lifecycle?: string;
+          orderKey: number;
+          ownership: string;
+          relationId: string;
+          required?: boolean;
+          sourceEntity: { targetId: string };
+          targetEntity: { targetId: string };
+        }>;
       };
       const postedStockBalanceEntityId = `${INVENTORY_NAMESPACE}:entity.posted_stock_balance`;
       const missingProviderAuthoredProjectionPaths = [
@@ -397,6 +407,144 @@ export function registerInventoryContractCases(
         'compiled',
         'the exact maintainer ABI remains the admission twin',
       );
+      const movementEntityId = `${INVENTORY_NAMESPACE}:entity.inventory_movement`;
+      const movementRelationLocalIds = definition.relations
+        .filter(
+          (relation) => relation.sourceEntity.targetId === movementEntityId,
+        )
+        .map((relation) => relation.relationId.split(':relation.')[1]);
+      assert.deepEqual(
+        movementRelationLocalIds,
+        [
+          'inventory_movement_transaction',
+          'inventory_movement_transaction_line',
+        ],
+        'the admission twin declares exactly the two relations maintained by posting',
+      );
+      const assertMovementRelationIncompatible = (
+        candidate: typeof definition,
+        diagnosticPath: string,
+        subjectId: string,
+        message: string,
+      ): void => {
+        const result = compileApplication(moduleInput(candidate));
+        assertProviderExemptionWithheld(result, message);
+        if (result.status !== 'failed') return;
+        assert.equal(
+          result.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'INVENTORY_CONTRACT_INVALID' &&
+              diagnostic.path === diagnosticPath &&
+              diagnostic.subjectId === subjectId,
+          ),
+          true,
+          `${message}: exact movement-relation ABI diagnostic`,
+        );
+      };
+      const movementTransactionRelationId = `${INVENTORY_NAMESPACE}:relation.inventory_movement_transaction`;
+      const movementTransactionLineRelationId = `${INVENTORY_NAMESPACE}:relation.inventory_movement_transaction_line`;
+      const extraRelation = structuredClone(definition);
+      const relationExemplar = extraRelation.relations.find(
+        (relation) => relation.relationId === movementTransactionLineRelationId,
+      );
+      assert.ok(relationExemplar);
+      const duplicateRelation = structuredClone(relationExemplar);
+      duplicateRelation.relationId = `${INVENTORY_NAMESPACE}:relation.inventory_movement_transaction_line_duplicate_probe`;
+      duplicateRelation.orderKey = 35;
+      extraRelation.relations.push(duplicateRelation);
+      assertMovementRelationIncompatible(
+        extraRelation,
+        '$.relations.inventory_movement_transaction_line_duplicate_probe',
+        duplicateRelation.relationId,
+        'an extra declared movement relation must not retain the provider-written exemption',
+      );
+
+      const missingRelation = structuredClone(definition);
+      missingRelation.relations = missingRelation.relations.filter(
+        (relation) => relation.relationId !== movementTransactionLineRelationId,
+      );
+      assertMovementRelationIncompatible(
+        missingRelation,
+        '$.relations.inventory_movement_transaction_line',
+        movementTransactionLineRelationId,
+        'a missing declared movement relation must not retain the provider-written exemption',
+      );
+
+      const movementRelationMutations: Array<{
+        diagnosticSuffix: string;
+        label: string;
+        relationId: string;
+        mutate: (relation: (typeof definition.relations)[number]) => void;
+      }> = [
+        {
+          diagnosticSuffix: '.archiveBehavior',
+          label: 'movement relation archive behavior',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.archiveBehavior = 'retainReference';
+          },
+        },
+        {
+          diagnosticSuffix: '.lifecycle',
+          label: 'movement relation lifecycle',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.lifecycle = 'retired';
+          },
+        },
+        {
+          diagnosticSuffix: '.ownership',
+          label: 'movement relation ownership',
+          relationId: movementTransactionRelationId,
+          mutate: (relation) => {
+            relation.ownership = 'reference';
+          },
+        },
+        {
+          diagnosticSuffix: '.required',
+          label: 'movement relation nullability',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.required = false;
+          },
+        },
+        {
+          diagnosticSuffix: '.sourceEntity',
+          label: 'movement relation source',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.sourceEntity.targetId = `${INVENTORY_NAMESPACE}:entity.stock_count_line`;
+          },
+        },
+        {
+          diagnosticSuffix: '.targetEntity',
+          label: 'movement relation target',
+          relationId: movementTransactionLineRelationId,
+          mutate: (relation) => {
+            relation.targetEntity.targetId = `${INVENTORY_NAMESPACE}:entity.inventory_transaction`;
+          },
+        },
+      ];
+      for (const {
+        diagnosticSuffix,
+        label,
+        relationId,
+        mutate,
+      } of movementRelationMutations) {
+        const incompatible = structuredClone(definition);
+        const relation = incompatible.relations.find(
+          (candidate) => candidate.relationId === relationId,
+        );
+        assert.ok(relation);
+        mutate(relation);
+        assertMovementRelationIncompatible(
+          incompatible,
+          `$.relations.${relationId.split(':relation.')[1]}${diagnosticSuffix}`,
+          relationId,
+          `${label} incompatibility must return every authored CRUD/Form requirement`,
+        );
+      }
+
       const unitFieldId = `${INVENTORY_NAMESPACE}:field.posted_stock_balance_unit_id`;
       const renamedUnitFieldId = `${INVENTORY_NAMESPACE}:field.posted_stock_balance_unit_identifier`;
       const renamed = replaceExactString(
@@ -632,7 +780,6 @@ export function registerInventoryContractCases(
         );
       }
 
-      const movementEntityId = `${INVENTORY_NAMESPACE}:entity.inventory_movement`;
       const movementFieldLocalIds = definition.fields
         .filter((field) => field.entity.targetId === movementEntityId)
         .map((field) => field.fieldId.split(':field.')[1])

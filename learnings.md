@@ -655,3 +655,11 @@ materialize on the partitioned movement fact table.
 How to apply: when admission depends on a companion, validate every downstream
 storage-shaping property on both subjects and test the companion’s exact red plus
 the dependent subject’s complete returned requirements.
+
+## Qualify every authored construct that shapes a provider ABI
+Date: 2026-08-21
+Why: exact movement fields still admitted an extra declared relation whose
+column, foreign key and index made the posting provider reject the storage target.
+How to apply: enumerate fields, declared relations and every other authored
+construct family consumed by lowering; qualify every provider-maintained input
+exactly, and explicitly prove that each unpinned construct is benign.

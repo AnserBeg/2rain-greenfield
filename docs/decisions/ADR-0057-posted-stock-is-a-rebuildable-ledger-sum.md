@@ -66,10 +66,21 @@ evolution. Exactly one active movement companion must also pass its complete
 pinned ABI: exact fields and logical shapes, lifecycle and presence,
 business-key absence, binary collation, required/optional default semantics,
 null default value, the source-id-only search mapping, and no storage evolution.
-Its refusing twin examines every authored operation tier and lifecycle and
-resolves transition effects through their state machine, rather than reusing the
-narrower active-`o0` CRUD set. An unpinned or ABI-incompatible family earns
-nothing.
+Its authored relation set is also exact: the movement has one required,
+parent-scoped-child relation to its transaction and one required reference
+relation to its transaction line, both active and restrict-on-archive. A declared
+relation is provider input because lowering adds a source column, foreign key and
+index; an extra or reshaped relation would either leave an orphaned physical
+column or make posting fail. Cardinality and foreign-key actions have no alternate
+canonical physical value for these relations, while declaration order and join
+eligibility do not change the provider-maintained table contract. Resolve-query
+indexes are tolerated because they do not add a value that posting must author or
+change the provider's name-bound relation columns.
+
+The provider-written refusing twin examines every authored operation tier and
+lifecycle and resolves transition effects through their state machine, rather
+than reusing the narrower active-`o0` CRUD set. An unpinned or ABI-incompatible
+family earns nothing.
 
 The PostgreSQL provider installs an `AFTER INSERT` movement trigger after the
 existing reservation/generation trigger. In the same posting transaction it
@@ -150,9 +161,12 @@ stock count before the Posted stock list has a row to show.
   resolved exemption makes CRUD/Form requirements red; direct `o0`, direct
   `o1`, and transition-authored operations hit the refusing twin. Renaming one
   provider field while updating its references loses the exemption and reports
-  the missing and unexpected ABI members; one-property type mutations cover all
-  four fields. One-property label and family-registration mutations also record
-  the expected red.
+  the missing and unexpected ABI members; one-property field and storage
+  mutations cover the complete pinned field descriptor. Missing, extra and
+  one-property relation mutations cover the complete declared movement-relation
+  descriptor and require both the exact movement diagnostic and all five returned
+  posted-stock CRUD/Form requirements. One-property label and family-registration
+  mutations also record the expected red.
 - PostgreSQL controls post real quantities and assert the stored arithmetic,
   post a correction and assert the same row moves, destroy and rebuild the
   projection with the same canonical UUIDv4 identity, and corrupt one stored
