@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: active — correcting the first runtime-translation review
+Status: evidence_ready — corrected executable candidate awaiting narrow Critical confirmation
 
 ## Goal
 
@@ -209,6 +209,28 @@ The redesigned executable tree completed the charter's pre-review gates:
 
 The full matrix remains deferred until the fresh Critical review arms converge,
 per `git-workflow` and the packet charter.
+
+### Corrected executable candidate gates — `fa4139e96fec14602bdafa1e7aa0dab043e50273`
+
+After reverting every recorded mutant, the corrected executable tree passed:
+
+- `pnpm typecheck`: green;
+- `pnpm lint`: green;
+- `pnpm format`: green, with `git diff --check` also clean;
+- `pnpm test:browser`: 93/93 green, including separate real saves beside
+  visibly failed `activity` and `childTables` slots;
+- `pnpm test:integration`: 149/149 green;
+- `pnpm test:contracts`: 24/24 green, including synchronous evaluation,
+  immediate rejection precedence, five classifier near misses, policy and
+  unit-of-work confinement, and the 15-code real HTTP census; and
+- `pnpm test:architecture`: 141/141 green, including the unchanged no-provider
+  web boundary and provider-neutral runtime-package boundary.
+
+`apps/web/src/**` is byte-identical to the first provider-neutral redesign at
+`e8e2e014`; `packages/postgres-provider/**` is also unchanged. The only
+production correction after that review is the bounded runtime entry seam in
+`packages/runtime/src/request-runtime-view.ts`. The full matrix remains deferred
+until the corrected Critical reviews converge.
 
 ### Live composed-application observation
 
