@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: frozen for the last narrow Codex confirm
+Status: Critical review converged; full matrix pending
 
 ## Goal
 
@@ -200,3 +200,33 @@ it was decomposed into one-property specimens per predicate, and each predicate
 was removed independently. Production remains unchanged, the claimed boundary
 has not widened, and another same-class attribution finding would require
 narrowing or routing rather than another specimen.
+
+### Round 3 — `03860aa85887f41027a42d8f6e40177a871a0d51`
+
+The last narrow Codex xhigh arm returned `PASS`. Decisive question 6 was closed:
+the real-source missing-import specimen can fail only the exact-occurrence
+predicate, the separate-loader specimen can fail only the residual-provider
+predicate, their messages are distinct, and the positive real-source admission
+twin rules out unconditional refusal. The reviewer found no in-scope plain-source
+survivor. A comment or string retaining the exact import text after removing the
+real declaration was correctly recorded as an out-of-threat-model scanner limit,
+not an AST-level guarantee this packet claims.
+
+### Independent Critical confirmation — `03860aa85887f41027a42d8f6e40177a871a0d51`
+
+Fresh Fable max returned `PASS` on the identical SHA with all eight decisive
+questions closed. It independently traced the real provider error class through
+the operation gateway, the subject-bearing catalog union and escaped renderer,
+all 15 runtime-view codes through the HTTP boundary, registered mutation intent
+through the slot registry and submit path, unchanged admission/precondition
+logic, command-bar Save ownership, the three complete browser observables, and
+the separately attributable provider-import controls. No in-scope material
+defect survived.
+
+Two non-material next-touch observations are retained without changing reviewed
+bytes: a comment in `surface-runtime-contract.test.ts` still describes
+`INVALID_SURFACE_BINDING` as unreachable and cites the old real-path driver count,
+and `surfaceHasUnsupportedComponent` plus `operationMessageCode` now have no
+production callers. The valid out-of-scope finding that query-side interpreter
+refusals still collapse to `QUERY_UNAVAILABLE` is routed as
+`provider-query-refusal-taxonomy` in `current-plan.md`.
