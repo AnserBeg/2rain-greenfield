@@ -118,6 +118,24 @@ file, and says how to recover a killed run.
 passes. A gate that only ever refuses is as useless as one that only ever
 passes.
 
+**Round 2 added four checks and a specimen for each — plus one gap, stated
+because it is the same gap this packet exists to close.**
+
+| check | specimen that dies without it |
+|---|---|
+| the ledger's no-summary rule | **C7** — a file that throws at import, whose lone `test:fail` is named by the file's own relative path and is otherwise identical to the real test the admission rule credits |
+| cancellation is not a failure | **C8** — a child left pending when its parent ends, declared as one of two kills |
+| `notFailed` | **C8** — deleting it alone makes C8 report OK, which is what round 1 said no control did |
+| the observation's definition site | **D2**, unchanged, plus the narrowed claim |
+
+**The gap: reconciliation against Node's per-file counts has no specimen that
+dies when it alone is deleted.** Deleting it leaves all 21 controls green. It has
+been *observed firing* — when the ledger's no-summary rule is removed, it is what
+catches C7's impostor — but nothing committed requires it. It is a backstop
+against a reporter that invents or omits a record, which is the class round 1
+asked for and which no suite shape produces naturally. **It stays, and it is
+recorded here as belt-and-braces rather than as covered.**
+
 **And the gate's own controls are not vacuous.** Two meta-controls, each run on
 a committed tree and reverted:
 

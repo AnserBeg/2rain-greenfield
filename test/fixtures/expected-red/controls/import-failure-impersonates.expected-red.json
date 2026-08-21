@@ -10,9 +10,7 @@
       "replacement": "export const CONTROL_SENTINEL = 'moved';",
       "expected": "test failed",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/impersonator.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/impersonator.test.mjs"]
       },
       "kills": [
         {

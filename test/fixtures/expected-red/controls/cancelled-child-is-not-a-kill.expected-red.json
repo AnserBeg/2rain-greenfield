@@ -10,9 +10,7 @@
       "replacement": "export const CONTROL_SENTINEL = 'moved';",
       "expected": "CANCELLATION_PARENT_TOKEN",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/cancellation.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/cancellation.test.mjs"]
       },
       "kills": [
         {

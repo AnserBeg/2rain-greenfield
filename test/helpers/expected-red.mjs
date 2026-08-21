@@ -605,7 +605,9 @@ function withMutation(
  * throws at import reports no summary, so there is nothing to reconcile against.
  */
 function assertEvidenceReconciles(entry, measured, root, phase) {
-  const byFile = new Map(measured.files.map((file) => [resolve(root, file.file), file]));
+  const byFile = new Map(
+    measured.files.map((file) => [resolve(root, file.file), file]),
+  );
   for (const file of entry.test.files) {
     const resolved = resolve(root, file);
     const summary = byFile.get(resolved);
@@ -619,8 +621,16 @@ function assertEvidenceReconciles(entry, measured, root, phase) {
     const tally = (status) =>
       credited.filter((result) => result.status === status).length;
     assert.deepEqual(
-      { cancelled: tally('cancelled'), failed: tally('fail'), passed: tally('pass') },
-      { cancelled: summary.cancelled, failed: summary.failed, passed: summary.passed },
+      {
+        cancelled: tally('cancelled'),
+        failed: tally('fail'),
+        passed: tally('pass'),
+      },
+      {
+        cancelled: summary.cancelled,
+        failed: summary.failed,
+        passed: summary.passed,
+      },
       `${entry.name}: the ${phase} evidence for ${file} does not reconcile with Node's own counts`,
     );
   }

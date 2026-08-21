@@ -125,7 +125,7 @@ test('the result ledger refuses synthetic results by provenance, not by name', (
   assert.deepEqual(
     crashedAtImport.credited(),
     [],
-    'a file that reported no summary did not complete, so its lone result is Node\'s wrapper',
+    "a file that reported no summary did not complete, so its lone result is Node's wrapper",
   );
 });
 

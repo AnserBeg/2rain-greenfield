@@ -98,7 +98,6 @@ export function assertUnfilteredNodeArguments(arguments_, context) {
   }
 }
 
-
 /**
  * Credit decided over a WHOLE event stream, in two phases, from provenance
  * rather than from any test's title.

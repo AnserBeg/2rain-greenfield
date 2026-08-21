@@ -19,7 +19,10 @@ export interface NodeResultCounts {
 export interface NodeResultLedger {
   observe(event: NodeResultEvent): void;
   /** Results whose file completed, taken before that file reported its summary. */
-  credited(): ReadonlyArray<{ readonly event: NodeResultEvent; readonly file: string }>;
+  credited(): ReadonlyArray<{
+    readonly event: NodeResultEvent;
+    readonly file: string;
+  }>;
   /** Per-file counts Node itself reported, for reconciliation. */
   summaries(): ReadonlyMap<string, Partial<NodeResultCounts>>;
 }
