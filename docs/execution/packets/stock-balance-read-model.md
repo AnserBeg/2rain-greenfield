@@ -1,6 +1,6 @@
 # stock-balance-read-model — honest posted-stock browsing
 
-Status: evidence_ready; Critical round-3 replacement frozen for fresh review
+Status: evidence_ready; Fable-confirmation revision frozen for fresh Critical review
 
 Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b`
 
@@ -95,6 +95,19 @@ exact storage ABI too: all 16 movement fields pin their business key,
 collation, default semantics and value, search mapping, and storage evolution.
 Any mismatch both receives its exact movement-field diagnostic and withholds
 all five dependent posted-stock CRUD/Form omissions.
+
+Fresh Codex then returned PASS on frozen candidate
+`97eaa36344500ad882b4f1c4781ded6468c51196`. Independent Fable max confirmation
+confirmed every numbered field-storage and operation-attribution claim but found
+one additional authored construct family shaping the same physical ABI: declared
+relations. An extra movement-sourced reference relation compiled, retained the
+posted-stock exemption, added a required movement-table column, foreign key and
+index, and made the PostgreSQL posting provider reject the ambiguous storage
+target. The correction therefore pins the movement companion's complete declared
+relation set as well as its fields: exactly one required parent-scoped-child
+transaction relation and one required transaction-line reference, both active
+and restrict-on-archive. No lowering, provider, language or posting change was
+needed.
 
 ## Maintenance, rebuild, and reconciliation
 
@@ -211,6 +224,20 @@ Each specimen requires its exact movement-field
 `INVENTORY_CONTRACT_INVALID` diagnostic and the exact five subject-pinned
 posted-stock requirements above.
 
+Its declared relation ABI is exact too. The admission twin has precisely two
+movement-sourced relations: the required active parent-scoped-child transaction
+relation and the required active transaction-line reference, both
+restrict-on-archive. The committed table adds an otherwise valid extra relation,
+removes one required relation, and varies archive behavior, lifecycle, ownership,
+required/nullability, source endpoint and target endpoint one property at a time.
+Every specimen requires its exact relation-subject
+`INVENTORY_CONTRACT_INVALID` diagnostic and the same complete five-path
+posted-stock requirement set. Cardinality and foreign-key actions have no
+alternate canonical physical value for this relation family; order and join
+eligibility do not shape the provider-maintained columns. Resolve-query indexes
+are recorded as benign because posting authors no value for them and resolves
+neither pinned relation through them.
+
 A separate specimen combines the malformed movement `source_type` business
 key with an authored direct `o0` operation on `posted_stock_balance`. It still
 requires the exact provider-written operation refusal. This proves the refusing
@@ -235,6 +262,14 @@ model erased the exact refusal only from the malformed-companion-plus-operation
 specimen. Each moved the focused compiler suite from 61/61 to 60/61 and was
 restored before the replacement gates. No mutation harness is committed; the
 ordinary specimens and their exact assertions are committed.
+
+The relation correction adds two further author-chosen ad-hoc mutants. Bypassing
+the movement-relation validator made the extra-relation specimen compile.
+Keeping every exact relation diagnostic but ignoring the validator's returned
+`false` left the dependent posted-stock requirement set empty. Each moved the
+focused compiler suite from 61/61 to 60/61 and was restored before the current
+gates. No mutation runner is committed; the missing, extra and one-property
+relation specimens are ordinary committed controls with exact assertions.
 
 `defaultValue` cannot be varied alone while `defaultSemantics: none` remains
 canonical: the language schema structurally requires the value to be absent.
@@ -326,11 +361,32 @@ two-fact transfer was unreachable because the invalid index prevented
 activation. The temporary provider-test mutation was restored before the
 production correction and is not present in the committed tree.
 
+## Fable-confirmation pre-fix reproduction
+
+Before changing conformance, the reviewed definition was temporarily given one
+additional `ownership: reference` relation from `inventory_movement` to
+`inventory_transaction`. The canonical package compiled and retained the
+posted-stock CRUD/Form exemption. Running the real PostgreSQL Inventory posting
+control against that compiled storage target failed in approximately 12.6 seconds
+with:
+
+```text
+INVENTORY_POSTING_STORAGE_INVALID:
+northstar.app:entity.inventory_movement lacks unique relation to inventory_transaction
+```
+
+The stack reached `requiredRelationColumn`, `resolvePostingStorage`, and
+`PostgresInventoryPostingService`, observing the production failure the review
+derived. An initial probe copied the parent-scoped-child transaction relation and
+was rejected earlier as `CANON_RELATION_PARENT_OWNER_DUPLICATE`; that wrong-cause
+probe was discarded rather than cited. Both temporary PostgreSQL mutations were
+removed before the production correction, and the provider test file is unchanged.
+
 ## Gate record
 
-The original round-1 and round-2 gates remain historical evidence only. The
-complete round-3 replacement pre-freeze set is green on executable commit
-`83a8b558fdba5dfb47a4ee678cf540ec4c69140d`:
+All earlier gate sets remain historical evidence only. The complete
+Fable-confirmation replacement pre-freeze set is green on executable commit
+`0021bcf2889df0879c4ba44eb0444ec5026cfcf8`:
 
 - `pnpm typecheck`
 - `pnpm lint`
@@ -340,13 +396,15 @@ complete round-3 replacement pre-freeze set is green on executable commit
 - `pnpm test:compiler` — 152/152
 - `pnpm test:architecture` — 141/141 with successful executed-file evidence
 - `pnpm test:browser` — 91/91, including the posted-stock List journey
-- `pnpm test:postgres` — 204/204, zero failures, in 1,159,141 ms
+- `pnpm test:postgres` — 204/204, zero failures, in 1,409,762 ms
 
-The focused compiler suite is 61/61 after restoring all three round-3 mutants.
+The focused compiler suite is 61/61 after restoring both relation-correction
+mutants.
 `check:app-release` reproduced all 12 predecessors under their own recorded
 profiles and retained the existing 12 → 13 lineage delta. The valid definition
-and generated release output are unchanged from the round-2 executable; the
-new executable work changes only conformance admission and its controls.
+and generated release output are unchanged from the prior executable; the new
+executable work changes only conformance admission and its controls, the exact
+architecture source coordinate, ADR, and captured learning.
 
 The first replacement `test:compiler` invocation exited 75 before executing a
 test because another lane held the shared test lock. It is scheduling history,
@@ -428,10 +486,15 @@ validity defects above. Round 3 returned REVISE on
 validity correction were sound, but movement companion validity omitted
 lowerer-consumed storage metadata. The round-3 correction subsumes that class
 with the exact movement storage descriptor across all 16 fields, plus a
-candidate-versus-qualified operation control. Replacement gates are green and
-the fresh Codex arm is now ready. Only after PASS may independent Fable max
-confirm the identical frozen SHA. The full CI matrix remains deliberately
-deferred until both arms converge.
+candidate-versus-qualified operation control. Fresh Codex returned PASS on
+`97eaa36344500ad882b4f1c4781ded6468c51196`; independent Fable max confirmation
+then returned REVISE because declared relations were the second authored input
+to the movement physical ABI. The replacement pins that exact relation set and
+its storage-shaping properties, with real PostgreSQL pre-fix failure evidence,
+exact compiler controls, and green blast-radius gates. A fresh Codex arm is now
+required because executable content changed. Only after PASS may independent
+Fable max confirm the identical frozen SHA. The full CI matrix remains
+deliberately deferred until both arms converge.
 
 ## Program-review trigger assessment
 

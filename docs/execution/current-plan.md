@@ -201,13 +201,22 @@ internally. Both rounds' findings are accepted and corrected on
 `packet/stock-balance-read-model`. Critical round 3 on `fc788cb` accepted those
 repairs but found that the movement companion still proved logical shape rather
 than its physical storage ABI: a `source_type.businessKey` edit compiled and
-produced an invalid unique constraint. The replacement executable tree is green
+produced an invalid unique constraint. The round-3 replacement executable tree was green
 at `83a8b55` (compiler 152/152, architecture 141/141, PostgreSQL 204/204,
 browser 91/91). It pins every current lowerer-consumed property on all 16
 movement fields, returns false on any mismatch, subject-pins the full dependent
 requirement set, and proves operation refusal remains candidate-based even when
-qualification fails. Fresh Codex review is next, then Fable max on the identical
-frozen SHA, then the post-review full matrix.
+qualification fails. Fresh Codex returned PASS on `97eaa36`, but independent
+Fable confirmation found declared relations are a
+second authored input to the movement physical ABI: an extra movement relation
+compiled, retained the exemption, changed the physical table, and made posting
+reject the ambiguous transaction binding. Replacement executable `0021bcf` pins
+exactly the two provider-maintained movement relations and every property that
+changes their material participation. The exact missing, extra and one-property
+controls return both their relation diagnostic and all five posted-stock CRUD/
+Form requirements. Compiler 152/152, architecture 141/141, PostgreSQL 204/204
+and browser 91/91 are green. Fresh Codex is next, then Fable max on the identical
+freeze, then the post-review full matrix.
 
 #### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2
 
