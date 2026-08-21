@@ -49,8 +49,8 @@ import process from 'node:process';
 
 import {
   digestOf,
-  digestOfFile,
   measureSuiteRun,
+  observeMutatedRun,
 } from './expected-red-measure.mjs';
 
 export const MANIFEST_GLOB = 'test/evidence/*.expected-red.json';
@@ -424,6 +424,7 @@ function measureBaseline(entry, { root, scratch, log, run }) {
     measured.results.length > 0,
     `${entry.name}: the baseline executed no test — the pattern or file selects nothing`,
   );
+  assertEvidenceReconciles(entry, measured, root, 'baseline');
   const passing = identitiesOf(measured.results, 'pass', root);
   assert.equal(
     passing.size,
@@ -469,20 +470,19 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
   );
   const mutatedDigest = digestOf(mutatedSource);
 
+  // The observation function is DEFINED in expected-red-measure.mjs and is
+  // handed plain data — not a closure declared here, which would carry
+  // `originalSource` and this module's `writeFileSync` whatever its parameter
+  // list said. That was the round-2 review's finding 3.
   const observation = withMutation(
     { path, originalSource, mutatedSource, root },
-    () => {
-      const measured = measureSuiteRun(entry.test, {
-        root,
-        scratch,
-        label: `${run}-${entry.name}`,
-      });
-      // Read the subject back BEFORE the restore in withMutation's finally. If
-      // anything healed the file while the suite ran, the digests diverge here
-      // and the run is refused rather than credited. measureSuiteRun and
-      // digestOfFile both come from a module that imports no write capability,
-      // so this measurement genuinely cannot be the thing that healed it.
-      return { ...measured, observedDigest: digestOfFile(path) };
+    observeMutatedRun,
+    {
+      label: `${run}-${entry.name}`,
+      root,
+      scratch,
+      subjectPath: path,
+      test: entry.test,
     },
   );
 
@@ -506,6 +506,7 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
     `${entry.name}: SURVIVOR — the mutation stayed green`,
   );
 
+  assertEvidenceReconciles(entry, observation, root, 'mutated');
   const stillPassing = identitiesOf(observation.results, 'pass', root);
   const regressed = [...baseline.passing]
     .filter((identity) => !stillPassing.has(identity))
@@ -520,10 +521,16 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
   // never registered, or dropped after a parent's failure. Only the first is a
   // kill, and only the first carries a message that can be required to be the
   // declared one. Both halves are asserted against the same identities.
+  // `status === 'fail'` only. A cancelled child arrives as `test:fail` but is
+  // not an executed assertion failure, and Node counts it separately; letting it
+  // stand in for a declared kill was the round-2 review's second specimen.
   const failuresByIdentity = new Map(
     observation.results
       .filter((result) => result.status === 'fail')
-      .map((result) => [identityOf(result.file, result.name), result.message]),
+      .map((result) => [
+        identityOf(resolve(root, result.file), result.name),
+        result.message,
+      ]),
   );
   const notFailed = declared.filter(
     (identity) => !failuresByIdentity.has(identity),
@@ -558,7 +565,11 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
  * `git checkout -- <file>`, which is lossless precisely because the runner
  * refuses to start unless the tree matches HEAD.
  */
-function withMutation({ path, originalSource, mutatedSource, root }, measure) {
+function withMutation(
+  { path, originalSource, mutatedSource, root },
+  observe,
+  observeArguments,
+) {
   const journalPath = resolve(root, JOURNAL);
   mkdirSync(dirname(journalPath), { recursive: true });
   writeFileSync(
@@ -577,11 +588,41 @@ function withMutation({ path, originalSource, mutatedSource, root }, measure) {
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
   try {
-    return measure();
+    return observe(observeArguments);
   } finally {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
     restore();
+  }
+}
+
+/**
+ * What the runner credited must equal what Node counted, per file.
+ *
+ * This is the round-1 correction the lane skipped and round 2 required: without
+ * it, a record the reporter invented or omitted is invisible. It is also what
+ * refuses Node's file-level wrapper independently of the ledger — a file that
+ * throws at import reports no summary, so there is nothing to reconcile against.
+ */
+function assertEvidenceReconciles(entry, measured, root, phase) {
+  const byFile = new Map(measured.files.map((file) => [resolve(root, file.file), file]));
+  for (const file of entry.test.files) {
+    const resolved = resolve(root, file);
+    const summary = byFile.get(resolved);
+    assert.ok(
+      summary !== undefined,
+      `${entry.name}: ${file} reported no summary in the ${phase} run — the file did not complete, so any result attributed to it is Node's own wrapper rather than an executed test`,
+    );
+    const credited = measured.results.filter(
+      (result) => resolve(root, result.file) === resolved,
+    );
+    const tally = (status) =>
+      credited.filter((result) => result.status === status).length;
+    assert.deepEqual(
+      { cancelled: tally('cancelled'), failed: tally('fail'), passed: tally('pass') },
+      { cancelled: summary.cancelled, failed: summary.failed, passed: summary.passed },
+      `${entry.name}: the ${phase} evidence for ${file} does not reconcile with Node's own counts`,
+    );
   }
 }
 

@@ -33,11 +33,13 @@ export default async function* nodeTestEvidenceReporter(source) {
   const executed = createNodeResultLedger();
   let suiteSucceeded;
   for await (const event of source) {
-    const path = executed.observe(event);
-    if (path) counts.set(path, (counts.get(path) ?? 0) + 1);
+    executed.observe(event);
     if (event.type === 'test:summary' && event.data.file === undefined) {
       suiteSucceeded = event.data.success;
     }
+  }
+  for (const { file } of executed.credited()) {
+    counts.set(file, (counts.get(file) ?? 0) + 1);
   }
 
   const evidence = {

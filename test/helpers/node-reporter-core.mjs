@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 /**
  * @param {{type: string, data: {name?: unknown, file?: unknown, skip?: unknown, todo?: unknown, details?: {type?: unknown}}}} event
@@ -13,9 +13,12 @@ export function creditableNodeResultPath(event) {
   if (typeof data.file !== 'string' || typeof data.name !== 'string') {
     return undefined;
   }
-  // Under --test-name-pattern Node emits a synthetic pass whose name is the
-  // file path even though no test in that file ran. It must never earn credit.
-  if (sameFilesystemPath(data.name, data.file)) return undefined;
+  // NOTHING HERE ASKS THE TITLE WHETHER A RESULT IS SYNTHETIC. Two successive
+  // title guards each got one case wrong: comparing the pair only when both
+  // paths were absolute credited Node's synthetic pass whenever a command named
+  // its files relatively, and resolving relative titles against cwd then
+  // discarded a REAL test named after its own path. createNodeResultLedger
+  // decides it from the event stream instead.
   return data.file;
 }
 
@@ -95,47 +98,63 @@ export function assertUnfilteredNodeArguments(arguments_, context) {
   }
 }
 
-// Restored to the absolute-only pair after the 2026-08-21 review: resolving a
-// relative title against cwd made a REAL test whose title happens to equal its
-// own relative path indistinguishable from the synthetic pass, so a genuinely
-// executed file could be dropped. Title text cannot carry this rule at all —
-// createNodeResultLedger below decides it structurally instead.
-function sameFilesystemPath(left, right) {
-  if (left === right) return true;
-  if (!isAbsolute(left) || !isAbsolute(right)) return false;
-  return resolve(left) === resolve(right);
-}
 
 /**
- * Stateful credit over a whole event stream.
+ * Credit decided over a WHOLE event stream, in two phases, from provenance
+ * rather than from any test's title.
  *
- * WHY THIS EXISTS RATHER THAN A TITLE TEST. When `--test-name-pattern` selects
- * nothing in a file, Node emits a `test:summary` for that file reporting
- * `counts.tests: 0` and THEN a synthetic `test:pass` naming the file. A real
- * result always arrives BEFORE its file's summary. That ordering is the fact;
- * the title's shape is a coincidence that a real test can reproduce.
+ * Three shapes Node emits that are not executed tests, all measured against
+ * Node 22.22.2 on 2026-08-21:
  *
- * Measured 2026-08-21 against Node's own event stream, after a title-based
- * guard was found to reject a real test named after its own path — and, before
- * that, to credit the synthetic pass whenever the command named files
- * relatively. Both defects came from asking the title a question only the
- * stream can answer.
+ *  - **The synthetic pass.** A file whose `--test-name-pattern` matched nothing
+ *    emits its `test:summary` with `counts.tests: 0` and THEN a `test:pass`
+ *    naming the file. A real result always arrives BEFORE its file's summary.
+ *  - **The file wrapper.** A file that throws at import emits a single
+ *    `test:fail` named by the file's relative path, with `details.type: "test"`,
+ *    `failureType: "testCodeFailure"` and the message `"test failed"` — and NO
+ *    file summary at all. It is otherwise indistinguishable from a real test
+ *    named after its own path, which is exactly why the title cannot decide it.
+ *  - **Cancellation.** A child left pending when its parent ends is reported as
+ *    `test:fail` with `failureType: "cancelledByParent"`, and Node counts it
+ *    under `counts.cancelled` rather than `counts.failed`.
+ *
+ * So: a result is credited only when its file reported a summary and the result
+ * arrived before it. `summaries()` exposes the per-file counts so a consumer can
+ * reconcile what it credited against what Node counted — the check that catches
+ * an omitted or invented record without reference to any name.
  */
 export function createNodeResultLedger() {
-  const filesThatExecutedNothing = new Set();
+  const pending = [];
+  const summaries = new Map();
+  let sequence = 0;
   return {
-    /** @returns {string | undefined} the creditable file path, if any */
     observe(event) {
+      sequence += 1;
       if (event.type === 'test:summary') {
         const { counts, file } = event.data;
-        if (typeof file === 'string' && counts?.tests === 0) {
-          filesThatExecutedNothing.add(resolve(file));
+        if (typeof file === 'string') {
+          summaries.set(resolve(file), { counts: counts ?? {}, sequence });
         }
-        return undefined;
+        return;
       }
       const path = creditableNodeResultPath(event);
-      if (path === undefined) return undefined;
-      return filesThatExecutedNothing.has(resolve(path)) ? undefined : path;
+      if (path === undefined) return;
+      pending.push({ event, file: resolve(path), sequence });
+    },
+    credited() {
+      return pending.filter((record) => {
+        const summary = summaries.get(record.file);
+        // A file that never reported a summary did not complete its run, so its
+        // only result is Node's own wrapper rather than anything that executed.
+        if (summary === undefined) return false;
+        // A result after its file's summary is the synthetic pass.
+        return record.sequence < summary.sequence;
+      });
+    },
+    summaries() {
+      return new Map(
+        [...summaries].map(([file, entry]) => [file, entry.counts]),
+      );
     },
   };
 }

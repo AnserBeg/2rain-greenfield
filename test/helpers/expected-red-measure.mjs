@@ -53,6 +53,23 @@ export function digestOfFile(path) {
   return digestOf(readFileSync(path, 'utf8'));
 }
 
+/**
+ * The complete observation: run the suite, then read the subject back — both
+ * inside this module, from plain data arguments. Nothing here closes over the
+ * caller's scope, so the observation cannot reach `originalSource` or any write.
+ *
+ * The round-2 review was right that the earlier arrangement did not establish
+ * this: the observation was a thunk DECLARED in the writer-capable module, beside
+ * `path` and `originalSource`. Moving the two called primitives was not the same
+ * as moving the operation.
+ */
+export function observeMutatedRun({ test, root, scratch, label, subjectPath }) {
+  const measured = measureSuiteRun(test, { root, scratch, label });
+  // Read back BEFORE the caller restores. If anything healed the subject while
+  // the suite ran, the digest diverges and the run is refused.
+  return { ...measured, observedDigest: digestOfFile(subjectPath) };
+}
+
 export function measureSuiteRun(test, { root, scratch, label }) {
   const evidencePath = join(
     scratch,

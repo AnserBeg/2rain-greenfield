@@ -10,9 +10,18 @@ export interface NodeResultEvent {
   };
 }
 
+export interface NodeResultCounts {
+  readonly passed: number;
+  readonly failed: number;
+  readonly cancelled: number;
+}
+
 export interface NodeResultLedger {
-  /** The creditable file path for this event, if it is a real result. */
-  observe(event: NodeResultEvent): string | undefined;
+  observe(event: NodeResultEvent): void;
+  /** Results whose file completed, taken before that file reported its summary. */
+  credited(): ReadonlyArray<{ readonly event: NodeResultEvent; readonly file: string }>;
+  /** Per-file counts Node itself reported, for reconciliation. */
+  summaries(): ReadonlyMap<string, Partial<NodeResultCounts>>;
 }
 
 export interface NodeReporterContext {
