@@ -334,6 +334,32 @@ test('consolidated guard red: every completed constructed identity in one file i
   }
 });
 
+test('consolidated guard red: every identity in one completed construction is observed', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts':
+      "export const identities = 'northstar.widget:first ' + 'northstar.widget:second';\n",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    const expectedViolation: ModulePressLawViolation = {
+      file: 'apps/api/src/generic.ts',
+      line: 1,
+      message: 'generic press references widget identity northstar.widget',
+      moduleDirectory: 'widget',
+      ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    };
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      expectedViolation,
+      { ...expectedViolation },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard records one observation when direct and constructed matches describe the same construction', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts':
@@ -456,6 +482,25 @@ test('consolidated guard admission: completed static constructions may name a lo
   }
 });
 
+test('consolidated guard admission: completed values own direct literal-token boundaries', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      "export const local = 'widget_list' + 'er';",
+      "export const symbol = 'WIDGET_IDS' + '_EXTENSION';",
+      "export const namespace = 'northstar.widget' + '-contract/v1';",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard admission: a static prefix beneath a dynamic outer construction is not a completed value', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [
@@ -536,6 +581,97 @@ test('consolidated guard admission: an unbounded static prefix may continue thro
   });
   try {
     assert.deepEqual(checkModulePressLaw(root).violations, []);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard admission: contiguous and split literal segments preserve unknown adjacency', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const prefix: string;',
+      'declare const suffix: string;',
+      "export const contiguousLocal = prefix + 'widget_list';",
+      "export const splitLocal = prefix + 'widget' + '_' + 'list';",
+      "export const contiguousSymbol = prefix + 'WIDGET_IDS';",
+      "export const splitSymbol = prefix + 'WIDGET' + '_' + 'IDS';",
+      "export const contiguousNamespace = 'northstar.widget' + suffix;",
+      "export const splitNamespace = 'northstar' + '.' + 'widget' + suffix;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard red: contiguous and split literal segments retain static boundaries', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const prefix: string;',
+      'declare const suffix: string;',
+      "export const contiguousLocal = prefix + ':' + 'widget_list';",
+      "export const splitLocal = prefix + ':' + 'widget' + '_' + 'list';",
+      "export const contiguousSymbol = prefix + ':' + 'WIDGET_IDS';",
+      "export const splitSymbol = prefix + ':' + 'WIDGET' + '_' + 'IDS';",
+      "export const contiguousNamespace = 'northstar.widget:' + suffix;",
+      "export const splitNamespace = 'northstar' + '.' + 'widget:' + suffix;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 3,
+        message: 'generic press references widget identity widget_list',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 4,
+        message: 'generic press references widget identity widget_list',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 5,
+        message: 'generic press references widget identity WIDGET_IDS',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 6,
+        message: 'generic press references widget identity WIDGET_IDS',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 7,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 8,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
   } finally {
     removeArchitectureFixture(root);
   }

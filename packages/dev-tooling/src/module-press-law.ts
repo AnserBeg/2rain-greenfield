@@ -128,20 +128,18 @@ export function checkModulePressLaw(
     const repoPath = normalizePath(relative(root, file));
     const constructedStrings = staticallyConstructedStrings(source, repoPath);
     for (const module of modules) {
-      const directMatches = moduleIdentityMatches(source, module);
+      // Literal tokens owned by an ordinary string construction are source
+      // syntax, not runtime adjacency. Route them through the construction
+      // observer; the raw observer owns only matches outside those ranges.
+      const directMatches = moduleIdentityMatches(source, module).filter(
+        (directMatch) =>
+          !constructedStrings.some((construction) =>
+            matchFallsWithinRanges(directMatch, construction.literalRanges),
+          ),
+      );
       const constructedMatches = constructedModuleIdentityMatches(
         constructedStrings,
         module,
-      ).filter(
-        (constructedMatch) =>
-          !directMatches.some((directMatch) =>
-            constructedMatch.literalRanges.some(
-              (literalRange) =>
-                directMatch.index >= literalRange.start &&
-                directMatch.index + directMatch.value.length <=
-                  literalRange.end,
-            ),
-          ),
       );
       for (const identityMatch of [...directMatches, ...constructedMatches]) {
         add(
@@ -385,6 +383,17 @@ interface SourceRange {
   readonly start: number;
 }
 
+function matchFallsWithinRanges(
+  match: ModuleIdentityMatch,
+  ranges: readonly SourceRange[],
+): boolean {
+  return ranges.some(
+    (range) =>
+      match.index >= range.start &&
+      match.index + match.value.length <= range.end,
+  );
+}
+
 interface StaticStringConstruction {
   readonly index: number;
   readonly leftBoundaryKnown: boolean;
@@ -552,10 +561,6 @@ function staticallyKnownStringRuns(
   return runs;
 }
 
-interface ConstructedModuleIdentityMatch extends ModuleIdentityMatch {
-  readonly literalRanges: readonly SourceRange[];
-}
-
 // A word character is also a namespace-continuation character. Padding an
 // unknown adjacent runtime value with one lets the shared identity matcher
 // make the conservative boundary decision without duplicating its patterns.
@@ -564,8 +569,8 @@ const unknownIdentityNeighbor = '_';
 function constructedModuleIdentityMatches(
   constructions: readonly StaticStringConstruction[],
   module: ModuleDescriptor,
-): readonly ConstructedModuleIdentityMatch[] {
-  const matches: ConstructedModuleIdentityMatch[] = [];
+): readonly ModuleIdentityMatch[] {
+  const matches: ModuleIdentityMatch[] = [];
   for (const construction of constructions) {
     const leftPadding = construction.leftBoundaryKnown
       ? ''
@@ -576,15 +581,17 @@ function constructedModuleIdentityMatches(
     const observedValue = `${leftPadding}${construction.value}${rightPadding}`;
     const constructionStart = leftPadding.length;
     const constructionEnd = constructionStart + construction.value.length;
-    const match = moduleIdentityMatches(observedValue, module).find(
+    const constructionMatches = moduleIdentityMatches(
+      observedValue,
+      module,
+    ).filter(
       (identityMatch) =>
         identityMatch.index >= constructionStart &&
         identityMatch.index + identityMatch.value.length <= constructionEnd,
     );
-    if (match) {
+    for (const match of constructionMatches) {
       matches.push({
         index: construction.index,
-        literalRanges: construction.literalRanges,
         value: match.value,
       });
     }
