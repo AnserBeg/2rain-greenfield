@@ -50,6 +50,8 @@ jobs:
         run: corepack pnpm typecheck
       - name: Build
         run: corepack pnpm build
+      - name: Check mutation manifests still name live production text
+        run: corepack pnpm check:expected-red
       - name: Run unit tests
         run: corepack pnpm test:unit
       - name: Run compiler tests
