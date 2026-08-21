@@ -24,9 +24,9 @@ import {
   RequestRuntimeViewRefusalError,
   type CurrentPolicyGateway,
   type LoadedRequestRuntimeDefinition,
-  type RequestRuntimeView,
   type RequestRuntimeViewRefusalCode,
 } from '../../../packages/runtime/src/request-runtime-view.js';
+import type { RequestRuntimeView as IssuedRequestRuntimeView } from '../../../packages/runtime/src/request-runtime-view.js';
 import * as resolveByName from '../../../packages/runtime/src/resolve-by-name.js';
 import * as operationGateway from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import * as queryGateway from '../../../packages/runtime/src/semantic-query-gateway.js';
@@ -628,7 +628,7 @@ test('an asynchronous unit-of-work rejection remains unavailable at HTTP', async
   class AsyncUnitOfWorkFailureEntry extends AuthenticatedRequestRuntimeEntryAdapter {
     override run<T>(
       request: UntrustedRequestInput,
-      unitOfWork: (view: RequestRuntimeView) => Promise<T> | T,
+      unitOfWork: (view: IssuedRequestRuntimeView) => Promise<T> | T,
     ): Promise<T> {
       return super.run(request, async (view) => {
         await unitOfWork(view);
