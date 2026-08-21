@@ -87,7 +87,8 @@ The committed controls include:
 
 The provider-boundary source specimens are committed controls. Production-code
 mutants were applied to the otherwise passing working tree, run, and immediately
-reverted.
+reverted. Those mutants are ad-hoc observations, not a committed mutation
+harness; only the checked-in tests count as shipped executable evidence.
 
 | Claim | One-property mutant | Observed red |
 |---|---|---|
@@ -246,15 +247,42 @@ The only executable correction is
 - `pnpm format`: green; and
 - `pnpm --filter @north-star/web test:contracts`: 29/29 green.
 
-The reviewer-selected mutants were then applied separately and immediately
-reverted. Deferred policy invocation produced 28/29, with only the synchronous
-policy specimen red. The `Promise.allSettled` join produced 27/29, with both
-pending first-rejection specimens still pending while their siblings were held.
-Translating an awaited unit-of-work rejection produced 27/29, with the exact
-adapter identity and loopback unavailable diagnostic both red. A final restored
-run returned 29/29. Browser, integration and architecture were not rerun because
-their production inputs are unchanged; the full matrix remains deferred until
-fresh Critical review converges.
+Three ad-hoc reviewer-selected mutants were then applied separately and
+immediately reverted. Deferred policy invocation produced 28/29, with only the
+synchronous policy specimen red. The `Promise.allSettled` join produced 27/29,
+with both pending first-rejection specimens still pending while their siblings
+were held. Translating an awaited unit-of-work rejection produced 27/29, with the
+exact adapter identity and loopback unavailable diagnostic both red. A final
+restored run returned 29/29. These observations do not constitute three shipped
+negative gates or exhaustive promise-ordering evidence. Browser, integration and
+architecture were not rerun because their production inputs are unchanged; the
+full matrix remains deferred until fresh Critical review converges.
+
+### Measured settlement classes and declared limit
+
+The committed controls establish only these timing classes:
+
+- a synchronous loader throw is translated before policy is invoked;
+- a synchronous policy throw after the loader returns wins before the join;
+- two already-rejected inputs retain loader-first attachment precedence;
+- either single pending rejection settles without waiting for its held sibling;
+  and
+- synchronous and asynchronous unit-of-work failures remain outside loader
+  translation.
+
+They do not establish every relative ordering of two pending rejections. The
+independent reviewer named an ordinary survivor: wrap the already-invoked policy
+promise in `.then((evidence) => evidence)`, then reject policy and loader in that
+order during one resumed turn. The wrapper delays only the join's policy handler,
+so the loader can overtake it even though policy rejected first. The lane applied
+that exact mutation and observed `test:contracts` remain 29/29.
+
+Production is correct and remains unchanged. After repeated evidence-only rounds,
+`review-tiers` requires the claim to narrow rather than grow another adjacent
+timing table. Same-turn staggered precedence through a post-invocation policy
+wrapper is therefore explicitly unproved here and routed as
+`runtime-refusal-same-turn-precedence` in `current-plan.md`. This packet makes no
+claim of exhaustive original-promise settlement evidence.
 
 ### Live composed-application observation
 
@@ -450,3 +478,21 @@ loader and requires the exact raw policy error. The asynchronous unit-of-work
 twin requires exact object identity at the adapter and the generic unavailable
 diagnostic through a loopback HTTP server. Production remains byte-identical to
 `fa4139e96fec14602bdafa1e7aa0dab043e50273`.
+
+### Third runtime-translation review — `29ef493c6554d8c9f2d5c94493d737eeb5e18900`
+
+Fresh Codex xhigh returned `REVISE` with no production or architecture finding.
+It closed synchronous policy evaluation, held-sibling no-wait settlement,
+asynchronous unit-of-work identity and HTTP classification, the recorded mutant
+attribution, and record accuracy. One ordinary survivor remained: a
+post-invocation `.then(...)` wrapper on the policy promise preserved all 29
+controls while allowing a loader rejection to overtake a policy rejection issued
+first in the same resumed turn.
+
+The lane reproduced that exact survivor at 29/29 and did not add a sixth timing
+specimen. This is the same control class for a third evidence-only round while
+production remains unchanged; the previous correction added cases beside the
+existing timing cases rather than subsuming promise ordering. Under
+`review-tiers`, no convergence criterion licenses another adjacent case. The one
+narrowing round therefore writes the claim from the measurements, records the
+ad-hoc survivor, routes same-turn staggered precedence to its own row, and stops.

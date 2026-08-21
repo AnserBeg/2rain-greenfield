@@ -614,12 +614,11 @@ the provider port; downstream transports consume only the owning-layer seam.
 Date: 2026-08-20
 Why: an `async` loader wrapper converted a synchronous throw into rejection, so
 policy ran when the original `Promise.all` expression stopped before calling it.
-How to apply: preserve call order and original promise handlers; test synchronous
-throws, simultaneous rejections, and same-shaped failures from unaffected ports.
+How to apply: preserve call order and original handlers; name each timing class
+the controls directly observe instead of claiming promise precedence in general.
 
 ## Hold sibling promises pending when testing a join
 Date: 2026-08-21
-Why: an already-rejected pair did not prove first-rejection settlement; a join
-could wait for both and later prefer the wrong source while the control stayed green.
-How to apply: reject each controlled input first in turn, keep its sibling pending,
-and observe settlement before releasing the sibling; pair sync and async port twins.
+Why: an already-rejected pair did not prove first-rejection settlement.
+How to apply: reject each input first, hold its sibling, and observe settlement
+before release. Limit: this proves no-wait, not same-turn order through wrappers.
