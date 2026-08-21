@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: Critical review converged; full matrix pending
+Status: Stop 2 — full matrix requires an architecture-test bridge
 
 ## Goal
 
@@ -117,8 +117,41 @@ change was complete:
   corrected HTTP-boundary control, and 20/20 green after the provider-boundary
   predicates received separately attributable controls.
 
-The full CI matrix is deliberately deferred until review converges, as the
-packet charter requires.
+The full CI matrix was deferred until review converged, as the packet charter
+requires. Its first post-review run is recorded below.
+
+### Full-matrix attempt — RED at narrative descendant `5040a88a193a6cd8109d31e410fbf3f2cfba1d9e`
+
+The executable diff from reviewed candidate
+`03860aa85887f41027a42d8f6e40177a871a0d51` to the matrix SHA is empty under
+`git-workflow`'s exact narrative exclusions. The matrix acquired the serialized
+slot and pinned that SHA. Performance passed at 99.6% idle with a 2570.3 ms
+best-of-five CPU sample against the 5000 ms budget. Format, lint, typecheck,
+build, dependency boundaries, schema (21/21 migrations), demo/app release
+checks, unit 120/120, compiler 150/150, integration 149/149 and agent 3/3 all
+passed.
+
+Architecture then reported 140/141. The sole failure was
+`apps/web has no PostgreSQL, SQL, provider, or direct database access` in
+`test/architecture/surface-data-binding.test.ts`: its pre-packet blanket regex
+rejects the reviewed exact `RequestRuntimeViewLoadError` import in
+`apps/web/src/app-server.ts`. The run terminated honestly with
+`FULL_MATRIX_FAILED rc=1 sha=5040a88a193a6cd8109d31e410fbf3f2cfba1d9e`;
+contracts, PostgreSQL, locale, browser, reachability and security did not run in
+this matrix attempt.
+
+## Stop 2 — architecture-test bridge required
+
+The packet was explicitly granted `apps/web/src/app-server.ts`, but its owned
+paths do not include `test/architecture/surface-data-binding.test.ts`. No
+production or admission change can honestly satisfy both the granted typed
+error-class boundary and that stale blanket assertion. The smallest bridge is
+to keep the existing SQL/direct-database prohibitions, allow exactly the one
+literal `RequestRuntimeViewLoadError` declaration in `app-server.ts`, remove it
+before applying the provider prohibition to the remainder, and retain the
+already committed missing-import, additional-provider and valid-source controls.
+That gate change is outside this lane's lease and changes executable evidence,
+so this lane stopped without editing it or merging. Stop count: 2.
 
 ### Live composed-application observation
 
