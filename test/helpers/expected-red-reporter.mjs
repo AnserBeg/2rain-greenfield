@@ -52,6 +52,10 @@ export default async function* expectedRedReporter(source) {
     file,
     message: String(event.data.details?.error?.message ?? ''),
     name: String(event.data.name),
+    // Carried so the runner can tell a parent that failed BECAUSE its child did
+    // from a sibling whose hook threw. Both are `aggregate`; only the first may
+    // be suppressed as a derived consequence.
+    failureType: String(event.data.details?.error?.failureType ?? ''),
     status: classify(event),
   }));
 

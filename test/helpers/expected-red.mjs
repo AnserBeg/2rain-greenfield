@@ -589,22 +589,59 @@ function runOneEntry(entry, { root, scratch, log, run }) {
     `${entry.name}: kills names ${JSON.stringify(missing.map(readableIdentity))}, which does not pass with production restored`,
   );
 
-  // A parent reported `subtestsFailed` stops passing only because a descendant
-  // did, and a child reported `hookFailed` never entered its body. Neither is an
-  // independent regression, and neither may be a kill — so requiring them to be
-  // declared would make a mutation that breaks a NESTED test inexpressible.
-  // They are excluded from the regression set; the descendant that actually
-  // failed is still in it, so nothing hides behind them.
+  // EVERY outcome the mutation produced is accounted for, not only the declared
+  // ones. Round 5: excluding every `aggregate` identity from the regression set
+  // meant a sibling whose `beforeEach` threw under the same mutation vanished
+  // from the comparison, and a test registered only under the mutation was never
+  // looked at at all. Both are consequences the entry did not declare.
   const stillPassing = identitiesOf(observation.results, 'pass', root);
-  const derived = identitiesOf(observation.results, 'aggregate', root);
-  const regressed = [...reference]
-    .filter((identity) => !stillPassing.has(identity) && !derived.has(identity))
-    .sort();
-  assert.deepEqual(
-    regressed.map(readableIdentity),
-    declared.map(readableIdentity),
-    `${entry.name}: the red is not attributable — declared kills ${JSON.stringify(declared.map(readableIdentity))} but the mutation stopped ${JSON.stringify(regressed.map(readableIdentity))}`,
+  const resultByIdentity = new Map(
+    observation.results.map((result) => [
+      identityOf(resolve(root, result.file), result.name),
+      result,
+    ]),
   );
+  const declaredSet = new Set(declared);
+  const regressed = [...reference]
+    .filter((identity) => !stillPassing.has(identity))
+    .sort();
+
+  const keptPassing = declared.filter(
+    (identity) => !regressed.includes(identity),
+  );
+  assert.deepEqual(
+    keptPassing.map(readableIdentity),
+    [],
+    `${entry.name}: declared kills ${JSON.stringify(keptPassing.map(readableIdentity))} kept passing under the mutation`,
+  );
+
+  // An undeclared regression is admissible ONLY as a parent Node reported
+  // `subtestsFailed` in a file where a declared kill lives: that parent failed
+  // because its descendant did, and the descendant IS declared. A `hookFailed`
+  // sibling, a cancellation, or a failure type this classifier has not met is an
+  // undeclared consequence and refuses.
+  for (const identity of regressed.filter((id) => !declaredSet.has(id))) {
+    const result = resultByIdentity.get(identity);
+    const derivedFromADeclaredKill =
+      result?.status === 'aggregate' &&
+      result?.failureType === 'subtestsFailed' &&
+      declared.some((kill) => JSON.parse(kill)[0] === JSON.parse(identity)[0]);
+    assert.ok(
+      derivedFromADeclaredKill,
+      `${entry.name}: ${readableIdentity(identity)} also stopped passing and the entry does not declare it — every outcome the mutation produces must be accounted for`,
+    );
+  }
+
+  // A non-passing result the restored run never produced is a consequence too:
+  // a suite may register a test only under the mutation.
+  for (const result of observation.results) {
+    if (result.status === 'pass') continue;
+    const identity = identityOf(resolve(root, result.file), result.name);
+    assert.ok(
+      reference.has(identity),
+      `${entry.name}: ${readableIdentity(identity)} exists only under the mutation and is not accounted for`,
+    );
+  }
 
   // Only `status === 'fail'` — a body that ran and failed. A cancelled child, a
   // timeout, an abort, a parent reported `subtestsFailed` and a child reported
