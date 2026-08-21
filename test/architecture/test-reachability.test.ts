@@ -17,6 +17,7 @@ import {
 } from '../helpers/reachability-evidence.js';
 import {
   assertUnfilteredNodeArguments,
+  createNodeResultLedger,
   creditableNodeResultPath,
 } from '../helpers/node-reporter-core.mjs';
 import {
@@ -48,14 +49,17 @@ test('node reporter credits only real non-skip non-todo results', () => {
     undefined,
     'a synthetic file-level pass must not receive credit',
   );
-  // The shape Node actually emits: an absolute `file` and a RELATIVE `name`
-  // naming the same path. Only the absolute/absolute pair was pinned here, and
-  // the guard returned false for this one, so the synthetic pass was credited
-  // as a real result under --test-name-pattern.
+  // THE ADMISSION TWIN, and the reason the title cannot carry this rule. A real
+  // test whose name happens to equal its own relative path must still be
+  // credited. A guard that resolved relative titles against cwd dropped it —
+  // measured 2026-08-21 against Node's own events, where the real result and the
+  // synthetic pass are indistinguishable by name alone.
   assert.equal(
-    creditableNodeResultPath(nodeResult(relative(process.cwd(), file), file)),
-    undefined,
-    'a synthetic file-level pass named relatively must not receive credit',
+    creditableNodeResultPath(
+      nodeResult(relative(process.cwd(), file), file),
+    ),
+    file,
+    'a real test named after its own relative path must receive credit',
   );
   assert.equal(
     creditableNodeResultPath(nodeResult('real test', file, { skip: true })),
@@ -66,6 +70,41 @@ test('node reporter credits only real non-skip non-todo results', () => {
     undefined,
   );
   assert.equal(creditableNodeResultPath(nodeResult('real test', file)), file);
+});
+
+test('the result ledger refuses a synthetic pass by stream order, not by name', () => {
+  // Node emits, for a file whose --test-name-pattern matched nothing: the
+  // file's own `test:summary` with counts.tests 0, and THEN a synthetic
+  // `test:pass` naming the file. A real result always precedes its file
+  // summary. That ordering is the fact; the title's shape is a coincidence a
+  // real test can reproduce, which is why two successive title-based guards
+  // each got one of the two cases wrong.
+  const file = resolve('test/example.test.ts');
+  const summary = (tests: number) => ({
+    type: 'test:summary' as const,
+    data: { file, counts: { tests } },
+  });
+
+  const executed = createNodeResultLedger();
+  assert.equal(
+    executed.observe(nodeResult(relative(process.cwd(), file), file)),
+    file,
+    'a real path-named result arriving before the file summary is credited',
+  );
+  assert.equal(executed.observe(summary(1)), undefined);
+
+  const selectedNothing = createNodeResultLedger();
+  assert.equal(selectedNothing.observe(summary(0)), undefined);
+  assert.equal(
+    selectedNothing.observe(nodeResult(relative(process.cwd(), file), file)),
+    undefined,
+    'a result arriving after its file reported zero executed tests is synthetic',
+  );
+  assert.equal(
+    selectedNothing.observe(nodeResult(file, file)),
+    undefined,
+    'and the absolutely-named form of the same synthetic pass is refused too',
+  );
 });
 
 test('filtered commands cannot produce evidence', () => {
