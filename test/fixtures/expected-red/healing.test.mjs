@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 

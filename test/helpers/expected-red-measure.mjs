@@ -58,12 +58,16 @@ export function measureSuiteRun(test, { root, scratch, label }) {
     scratch,
     `${label.replaceAll(/[^a-z0-9-]/giu, '_')}.json`,
   );
-  const result = spawnSync(process.execPath, suiteArguments(test, evidencePath), {
-    cwd: root,
-    encoding: 'utf8',
-    env: process.env,
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const result = spawnSync(
+    process.execPath,
+    suiteArguments(test, evidencePath),
+    {
+      cwd: root,
+      encoding: 'utf8',
+      env: process.env,
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
   // A spawn that never started, or a process killed by a signal, reports status
   // null — which a bare `status !== 0` would happily read as a red.
   const spawnFailure =

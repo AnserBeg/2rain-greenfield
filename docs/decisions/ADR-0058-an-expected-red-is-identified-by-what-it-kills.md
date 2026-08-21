@@ -41,11 +41,31 @@ Three measurements say it is not, on its own.
 **A manifest entry's expected red is identified by the pair (kill set, message
 pattern), and the kill set is load-bearing.**
 
-Every entry declares `kills`: the exact set of test names that must stop passing
-under its mutation. The runner computes the actual set as *(tests passing at
-baseline) minus (tests passing under the mutation)*, read from a reporter
-artifact rather than from TAP prose, and requires set equality. A red that kills
-a different test, or more tests, or fewer, is refused as unattributable.
+Every entry declares `kills`: the exact set of tests that must stop passing under
+its mutation, each named by **file and test name together**. The runner computes
+the actual set as *(tests passing at baseline) minus (tests passing under the
+mutation)*, read from a reporter artifact rather than from TAP prose, and
+requires set equality. A red that kills a different test, or more tests, or
+fewer, is refused as unattributable.
+
+**The two halves are ONE observation, joined on the failing identity.** Each
+declared kill must be present in the mutated run as an explicit **failure** —
+absent, skipped, or never registered is not a kill — and `expected` is matched
+against **those tests' own failure messages**, never the transcript at large.
+
+*Corrected 2026-08-21, on review, and the correction is the whole point of this
+ADR.* The first implementation computed the kill set and grepped the whole
+transcript as two independent predicates that were never joined. The reviewer
+supplied the specimen: a declared victim that stops being reported without ever
+failing, a witness that keeps passing so the kill set stays exact, and a test
+that exists only under the mutation and fails carrying the declared token. Every
+separate check is green and the gate certifies a red it never observed. **A
+Cartesian conjunction of two true facts is not an identity.** That specimen is
+now control C5, and it is refused.
+
+**Kills are file-qualified for the same reason.** Two files may legitimately
+carry the same test name, so a name-only declaration is satisfied by killing
+either. Control C6 holds it.
 
 **What the kill set does and does not settle — measured, 2026-08-21.** In one run all three
 of those PostgreSQL entries killed the *identical* pair of tests, and
@@ -98,6 +118,17 @@ seconds; an entry naming a whole PostgreSQL file costs about ten minutes per
 run. Manifest authors should focus the test, and `--run` stays an
 acceptance-time entry point rather than a matrix step for exactly this reason.
 
+**The measurement cannot restore the subject, and that is now a fact about an
+import list rather than a claim.** `test/helpers/expected-red-measure.mjs`
+imports no `writeFileSync` and no `rmSync`, so a reviewer checks the separation
+by reading six lines. *The earlier arrangement claimed this because
+`withMutation` handed its measurer a narrow parameter object — while the
+measurer was a closure declared beside `path`, `originalSource` and an imported
+`writeFileSync`, and retained every capability it was supposedly denied. The
+review was right that the claim was false.* The observed half, a digest
+read-back taken before the restore, is held by control D2, whose fixture suite
+tidies up after itself by restoring the subject from `HEAD`.
+
 **Forbidden.** No mutation generation, no coverage scoring, no mutant survival
 ratios. R2 was explicit that this adds only the helpers the real journey needs,
 and `review-tiers` is explicit that a self-chosen table measures its author's
@@ -136,8 +167,11 @@ that join.
 
 - `scoped-create-operand-impl`: two rounds with a committed runner, against four
   to seven for its neighbours (2026-08-20 program review, R2).
-- The nine ported entries reproduce their reds through the shared runner; the
-  five focused-integration entries in 12 seconds, including two baselines.
+- **Five** of the nine ported entries reproduce their reds through the shared
+  runner, in 12 seconds including two baselines. The other four are routed, not
+  shipped — see the packet record, and the bullet below for what exposed them.
+  *(An earlier draft of this line said all nine reproduce. It was wrong, it
+  contradicted the packet record in the same commit, and the review caught it.)*
 - **The decision paid for itself on its own backfill.** A whole-file PostgreSQL
   entry — `unscoped-create-closed-key-fence-removed` — was observed stopping
   **two** tests in one run and **four** in another, same mutation and same argv.
@@ -145,18 +179,38 @@ that join.
   `/Missing expected rejection/u`_, is satisfied by both. The kill set made the
   difference visible; the message pattern could not have. The four PostgreSQL
   entries are routed rather than shipped, for the reason in the packet record.
-- The gate's own negative controls: 14, one per vacuity vector, in
-  `scripts/check-expected-red.sh --self-test`.
-- Two meta-controls prove the self-test can fail. Disabling the victim-absent
-  refusal makes control A1 report *"the gate reported OK"*. Restoring the subject
-  before the measurer runs makes the admission twin report *"the subject was
-  repaired before it was measured"* — §6's vector, observed by digest read-back
-  rather than argued from code shape.
-- The zero-matching-name-pattern control found a live defect in
-  `test/helpers/node-reporter-core.mjs`: the guard refusing Node's synthetic
-  file-level pass compared the pair only when both paths were absolute, and Node
-  emits a relative `name` with an absolute `file`. One "passing" test was
-  credited in a run that executed none. Fixed and pinned.
+- The gate's own negative controls: **19**, in
+  `scripts/check-expected-red.sh --self-test`, wired as its own gate so the
+  proof is re-taken on every CI and matrix run rather than once at freeze.
+- **Six meta-controls, each deleting one check and requiring the control that
+  holds it to die.** This is the deletion question asked of the CHECK rather
+  than of the control, which is what the first round failed. Deleting the entry
+  frozen-tree precondition makes D1 report both *"refused, but not by the entry
+  precondition"* and *"the runner executed a baseline or a mutation before
+  refusing"*; deleting the digest read-back makes D2 report *"the gate reported
+  OK"*; deleting the failure-join makes C5 stop refusing for its stated reason;
+  comparing the tree with the index instead of `HEAD` makes D3 report *"the
+  runner started against a staged-only modification"*; dropping the file from
+  kill identities makes C6 fail; checking the journal after loading manifests
+  makes G1 fail.
+- **The round-1 review found four checks whose controls survived their
+  deletion**, and each is recorded above with the control that now holds it. The
+  worst was D1: the entry precondition and the exit postcondition shared one
+  message, so a run could proceed on dirty bytes, restore them, and have the
+  exit assertion supply the words the control was looking for.
+- **The synthetic-pass guard was wrong twice, in opposite directions, because it
+  asked a test's TITLE a question only the event stream answers.** Comparing the
+  pair only when both paths were absolute credited Node's synthetic file-level
+  pass whenever a command named its files relatively — one "passing" test in a
+  run that executed none, found by the zero-matching-name-pattern control.
+  Resolving relative titles against cwd fixed that and broke the other side: a
+  **real** test whose name happens to equal its own relative path was discarded,
+  found by the round-1 review. Measured against Node's own events, the fact is
+  structural: a file whose filter matched nothing emits its `test:summary` with
+  `counts.tests: 0` **before** the synthetic pass, while a real result always
+  arrives **before** its file's summary. `createNodeResultLedger` reads that
+  ordering; both reporters use it; and the rule now carries an admission twin —
+  a real path-named result must still be credited.
 
 ## Enforcement
 

@@ -10,9 +10,7 @@
       "replacement": "export const CONTROL_SENTINEL = 'moved';",
       "expected": "moved",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/healing.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/healing.test.mjs"]
       },
       "kills": [
         {

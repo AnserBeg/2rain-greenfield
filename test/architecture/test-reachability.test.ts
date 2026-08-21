@@ -55,9 +55,7 @@ test('node reporter credits only real non-skip non-todo results', () => {
   // measured 2026-08-21 against Node's own events, where the real result and the
   // synthetic pass are indistinguishable by name alone.
   assert.equal(
-    creditableNodeResultPath(
-      nodeResult(relative(process.cwd(), file), file),
-    ),
+    creditableNodeResultPath(nodeResult(relative(process.cwd(), file), file)),
     file,
     'a real test named after its own relative path must receive credit',
   );

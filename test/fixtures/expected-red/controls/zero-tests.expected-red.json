@@ -10,9 +10,7 @@
       "replacement": "",
       "expected": "Missing expected exception",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/subject.test.mjs"
-        ],
+        "files": ["test/fixtures/expected-red/subject.test.mjs"],
         "namePattern": "no test anywhere carries this name"
       },
       "kills": [

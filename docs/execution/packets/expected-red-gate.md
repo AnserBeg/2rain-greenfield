@@ -53,10 +53,19 @@ matrix; reproducing the reds costs minutes and belongs at acceptance.
 ## The three ways this gate could have betrayed itself
 
 Each has its own recorded red in `--self-test`, varying one property of an
-otherwise-correct manifest entry. 15 controls in total, and the self-test is
-itself a gate — `check:expected-red-controls` runs in CI and the matrix, so the
-proof that this instrument can fail is re-taken on every run rather than once at
+otherwise-correct manifest entry. **19 controls**, and the self-test is itself a
+gate — `check:expected-red-controls` runs in CI and the matrix, so the proof
+that this instrument can fail is re-taken on every run rather than once at
 freeze time.
+
+**Round 1 of review found four checks whose controls survived deleting the check
+itself**, which is the deletion question asked of the control instead of the
+check. Each is now held: the entry frozen-tree precondition (D1, which used to
+accept the *exit* postcondition's identical message), the digest read-back (D2),
+the failure-join (C5), and file-qualified attribution (C6). Two further checks
+that had no control at all — staged-tree refusal and the real in-flight race —
+are now D3 and a rebuilt G1. **Six meta-controls run the deletion question on
+each of those checks and require the holding control to die.**
 
 **A — the mutation did not apply.** A1 an `original` absent from its file
 (`EXPECTED_RED_VICTIM_ABSENT`); A2 an `original` matching more than once, where
@@ -70,15 +79,26 @@ the baseline, before the mutation, because a suite that exits 0 having executed
 nothing is not a green baseline; B3 a mistyped entry name, refused rather than
 run as a selection of nothing.
 
-**C — the red fired for the wrong reason.** C1 an `expected` that also matches a
+**C — the red fired for the wrong reason.** *The load-bearing one is C5, and it
+came from the reviewer rather than from this lane:* a declared victim that stops
+being reported without ever failing, a witness that keeps passing so the kill set
+stays exact, and a test existing only under the mutation that fails carrying the
+declared token. Every separate check green; the gate certifying a red it never
+observed. `expected` is now matched against the declared tests' own failure
+messages, and each declared kill must be an explicit failure. C6 holds
+file-qualified attribution against two files sharing one test name. The rest: C1 an `expected` that also matches a
 green transcript (`EXPECTED_RED_PATTERN_NOT_DISCRIMINATING`, which is how `/./`
 is refused); C2 a mutation the suite does not notice (`SURVIVOR`); C3 a red
 whose text is not the declared one; C4 a red that killed a different test than
 the one declared.
 
-**D — the subject repaired before it is measured.** The measurer receives no way
-to restore: the original bytes and the writing call are captured in
-`withMutation` and never passed on. That is the structural half. The observed
+**D — the subject repaired before it is measured.** The measurement lives in
+`test/helpers/expected-red-measure.mjs`, which imports **no** `writeFileSync` and
+**no** `rmSync`, so the separation is a fact about a six-line import list. *The
+earlier version claimed this while the measurer was a closure declared beside
+`path`, `originalSource` and an imported `writeFileSync` — it was handed a narrow
+parameter object and retained every capability it was supposedly denied. The
+round-1 review was right that the claim was false.* That is the structural half. The observed
 half is a digest read-back taken after the suite exits and before the restore,
 so a subject healed mid-run is refused by name. D1 additionally proves the
 runner refuses a dirty tracked tree — which is what makes `git checkout -- <file>`
@@ -168,8 +188,17 @@ dropped and they were not kept as a red gate.**
 
 `test/integration/scoped-create-operand-mutations.mjs` is deleted, not disabled.
 Per `review-tiers`, a packet removing a harness owes a sentence naming which
-claims lose their executable evidence: **none do.** All nine moved, and each is
-now more strongly identified than it was.
+claims lose their executable evidence. **Four do**, and they are the four named
+above: the effective-input digest identity, the closed-argument-key fence on
+create, active-legal-entity enforcement, and the archived-entity predicate.
+Their manifest form is preserved in `e94441b`, and all four remain covered by
+`test:postgres` in the full matrix; what they lose is a one-property mutation
+proving each is load-bearing.
+
+*An earlier draft of this paragraph said none do, contradicting the sentence
+above it in the same file. The round-1 review caught it. The honest sentence is
+the one now written: five shipped through the new gate, four were reconstructed,
+measured, found unsuitable, and routed.*
 
 **Left: the review-log prose.** Rows across seven packets record reds as
 sentences — *"1/1 pass → 0/1 → restored"*, *"8/12 with four direct failures"*.

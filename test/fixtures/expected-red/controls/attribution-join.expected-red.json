@@ -10,9 +10,7 @@
       "replacement": "export const CONTROL_SENTINEL = 'moved';",
       "expected": "CONTROL_ATTRIBUTION_TOKEN",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/attribution.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/attribution.test.mjs"]
       },
       "kills": [
         {

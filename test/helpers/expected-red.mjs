@@ -443,7 +443,9 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
 
   // Declared kills must be tests that actually pass at baseline. A kill naming
   // a test that never ran would be satisfied by its permanent absence.
-  const missing = declared.filter((identity) => !baseline.passing.has(identity));
+  const missing = declared.filter(
+    (identity) => !baseline.passing.has(identity),
+  );
   assert.deepEqual(
     missing,
     [],
@@ -456,7 +458,10 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
     1,
     `${entry.name}: production victim must be present exactly once in ${entry.file}`,
   );
-  const mutatedSource = originalSource.replace(entry.original, entry.replacement);
+  const mutatedSource = originalSource.replace(
+    entry.original,
+    entry.replacement,
+  );
   assert.notEqual(
     mutatedSource,
     originalSource,

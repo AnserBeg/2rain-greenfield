@@ -5,8 +5,14 @@ export interface NodeResultEvent {
     readonly file?: unknown;
     readonly skip?: unknown;
     readonly todo?: unknown;
+    readonly counts?: { readonly tests?: unknown };
     readonly details?: { readonly type?: unknown };
   };
+}
+
+export interface NodeResultLedger {
+  /** The creditable file path for this event, if it is a real result. */
+  observe(event: NodeResultEvent): string | undefined;
 }
 
 export interface NodeReporterContext {
@@ -24,3 +30,5 @@ export function assertUnfilteredNodeArguments(
   arguments_: readonly string[],
   context: NodeReporterContext,
 ): void;
+
+export function createNodeResultLedger(): NodeResultLedger;
