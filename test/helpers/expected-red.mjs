@@ -115,7 +115,10 @@ export function assertNoInheritedOverride() {
  * refused because its target is not what the tracked entry names.
  */
 function trackedFiles(root) {
-  const listed = spawnSync('git', ['ls-files', '-z'], {
+  // `git ls-files` describes the INDEX, so a staged-but-uncommitted file counts
+  // as tracked. The candidate is the commit, so membership is read from the
+  // HEAD tree. Found by the round-5 review.
+  const listed = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', 'HEAD'], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
@@ -123,13 +126,10 @@ function trackedFiles(root) {
   assert.equal(
     listed.status,
     0,
-    'EXPECTED_RED_TRACKED_LIST_FAILED: git ls-files did not run',
+    'EXPECTED_RED_TRACKED_LIST_FAILED: git ls-tree HEAD did not run',
   );
   return new Set(
-    listed.stdout
-      .split('\0')
-      .filter(Boolean)
-      .map((path) => resolve(root, path)),
+    listed.stdout.split('\0').filter(Boolean).map((path) => resolve(root, path)),
   );
 }
 
@@ -786,6 +786,12 @@ function main(argv) {
   // The manifest population belongs to the frozen candidate. An inherited
   // environment override could silently redirect the real gate; it is refused.
   assertNoInheritedOverride();
+  // EVERY mode, not only `run`. `validate` and `list` read manifests, subjects
+  // and test files from the filesystem, so an uncommitted repair could make the
+  // gate answer OK while the committed candidate was still stale. Asserting the
+  // tree equals HEAD first is what makes a filesystem read a read of the
+  // candidate. Found by the round-5 review.
+  assertFrozenTree(REPOSITORY_ROOT, 'EXPECTED_RED_TREE_NOT_FROZEN');
   let override;
   const rest = [];
   for (let index = 0; index < argv.length; index += 1) {
