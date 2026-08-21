@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "interaction-co-cause",
+      "claim": "The mutation must produce the red from a clean start, not only alongside state an earlier run left behind.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/interaction.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/interaction.test.mjs",
+          "name": "a victim that needs both the marker and the mutation",
+          "expected": "INTERACTION_TOKEN"
+        }
+      ]
+    }
+  ]
+}

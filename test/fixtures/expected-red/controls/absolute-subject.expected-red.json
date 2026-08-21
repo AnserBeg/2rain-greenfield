@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "absolute-subject",
+      "claim": "A mutation subject named by an absolute path is not bound to the repository at all.",
+      "file": "/etc/hostname",
+      "original": "anything",
+      "replacement": "something else",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/subject.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/subject.test.mjs",
+          "name": "the fixture subject refuses a non-positive quantity",
+          "expected": "Missing expected exception"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "escaping-subject",
+      "claim": "A mutation subject resolving outside the repository is not part of the frozen candidate.",
+      "file": "../outside-the-repository.mjs",
+      "original": "anything",
+      "replacement": "something else",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/subject.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/subject.test.mjs",
+          "name": "the fixture subject refuses a non-positive quantity",
+          "expected": "Missing expected exception"
+        }
+      ]
+    }
+  ]
+}

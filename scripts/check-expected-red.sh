@@ -47,6 +47,7 @@ CONTROLS='test/fixtures/expected-red/controls'
 SUBJECT='test/fixtures/expected-red/subject.mjs'
 JOURNAL='test-results/expected-red/in-flight.json'
 POISON='test-results/expected-red/self-test-poison'
+UNTRACKED='test-results/expected-red/untracked-subject.mjs'
 
 if [ ! -f "$RUNNER" ]; then
   echo "check-expected-red: $RUNNER is missing" >&2
@@ -70,7 +71,7 @@ if [ "${1:-}" = '--self-test' ]; then
       rm -f "$RESTORE_FROM"
       RESTORE_FROM=''
     fi
-    rm -f "$JOURNAL" "$POISON"
+    rm -f "$JOURNAL" "$POISON" "$UNTRACKED"
     return 0
   }
   trap restore_subject EXIT
@@ -109,6 +110,8 @@ if [ "${1:-}" = '--self-test' ]; then
   }
 
   control() {
+    mkdir -p "$(dirname "$UNTRACKED")"
+    printf 'export const UNTRACKED_SUBJECT = %s;\n' "'pristine'" >"$UNTRACKED"
     rm -f "$POISON"
     expect_refusal "$CONTROLS/$1.expected-red.json" "$2" "$3" "$4"
     rm -f "$POISON"
@@ -128,7 +131,7 @@ if [ "${1:-}" = '--self-test' ]; then
   # --- Vector B: the check read zero input. --------------------------------
   expect_refusal "$CONTROLS/no-such-manifest-*.expected-red.json" validate \
     EXPECTED_RED_NO_MANIFESTS 'B1 a glob that discovers no manifest'
-  control zero-tests run 'baseline run executed no test' \
+  control zero-tests run 'the mutated run executed no test' \
     'B2 a name pattern selecting no test'
   controls=$((controls + 1))
   if node "$RUNNER" run no-such-entry-name >/dev/null 2>&1; then
@@ -149,7 +152,7 @@ if [ "${1:-}" = '--self-test' ]; then
   # Every separate check passes: the kill set is exact, the process is red, and
   # the declared token is present — supplied by a test that exists only under
   # the mutation, while the declared victim vanished without ever failing.
-  control attribution-join run 'stopped passing without failing' \
+  control attribution-join run 'stopped passing without its body failing' \
     'C5 a declared victim that vanished while another failure carried the token'
   control wrong-file-kill run 'not attributable' \
     'C6 a kill declared against the wrong one of two files sharing a test name'
@@ -165,7 +168,7 @@ if [ "${1:-}" = '--self-test' ]; then
   # through — see the meta-control record — but the ledger refuses it first.
   control import-failure-impersonates run 'the mutated run executed no test' \
     "C7 Node's file-level failure impersonating the real test that shares its name"
-  control cancelled-child-is-not-a-kill run 'stopped passing without failing' \
+  control cancelled-child-is-not-a-kill run 'stopped passing without its body failing' \
     'C8 a cancelled child declared as one of two kills'
   # C9: one pattern over the concatenated messages of every declared kill is
   # satisfied by any single one of them, so a co-declared kill may die for
@@ -174,7 +177,7 @@ if [ "${1:-}" = '--self-test' ]; then
     'C9 one of two declared kills failing for an undeclared reason'
   # C10: a timeout is reported as test:fail but Node counts it under
   # counts.cancelled — it never reached an assertion.
-  control timeout-is-not-a-kill run 'stopped passing without failing' \
+  control timeout-is-not-a-kill run 'stopped passing without its body failing' \
     'C10 a mutation-induced timeout declared as a kill'
 
   # --- Vector H: the mutation is not the only cause of the red. ------------
@@ -182,10 +185,33 @@ if [ "${1:-}" = '--self-test' ]; then
   # it. A suite that leaves state behind makes its own earlier run a second
   # sufficient cause, and every other check still passes. Requiring the restored
   # suite to return the same green is what closes it.
-  control state-poison run 'the restored suite is not green' \
+  control state-poison run 'the restored suite is not wholly green' \
     'H1 a suite whose own baseline run poisons its mutated run'
-  control cross-entry-contamination run 'the baseline suite is not green' \
-    'H2 an earlier entry contaminating a later one, caught by its fresh baseline'
+  control cross-entry-contamination run 'the restored suite is not wholly green' \
+    'H2 an earlier entry contaminating a later one'
+  # H3 is the round-4 review's counterexample to A/B/A, and the reason the
+  # mutation is measured FIRST. This suite fails only when its own marker is
+  # present AND the source is mutated. Baseline-first, it passes green-red-green
+  # intact while the mutation alone is a survivor; mutation-first, the survivor
+  # is what the gate sees.
+  control interaction-co-cause run SURVIVOR \
+    'H3 a red that needed the baseline run as a co-cause'
+
+  # --- Vector J: the gate reading something other than the candidate. -------
+  # The manifest population and every file the runner touches belong to the
+  # frozen commit. An inherited environment override could redirect the real
+  # gate at a fixture and report OK over it.
+  controls=$((controls + 1))
+  if EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/admission-twin.expected-red.json" \
+    node "$RUNNER" validate >/dev/null 2>&1; then
+    fail 'J1 an inherited manifest override redirected the gate'
+  fi
+  control untracked-subject validate EXPECTED_RED_PATH_NOT_IN_CANDIDATE \
+    'J2 a mutation subject that is not tracked by git'
+  control escaping-subject validate EXPECTED_RED_PATH_NOT_IN_CANDIDATE \
+    'J3 a mutation subject resolving outside the repository'
+  control absolute-subject validate EXPECTED_RED_PATH_NOT_IN_CANDIDATE \
+    'J4 a mutation subject named by an absolute path'
 
   # --- The manifest format's own load-bearing fields. ----------------------
   control claim-missing validate EXPECTED_RED_CLAIM_MISSING \
