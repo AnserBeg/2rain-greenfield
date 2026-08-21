@@ -16,10 +16,8 @@ boundary production defect and a plural partial-run control gap. Candidate
 source observer still mistook literal-token punctuation for runtime adjacency.
 Candidate `ebbb65ecf8d93e4a3742e1c0eb7c0d2b3e950dc1` returned REVISE because
 construction ownership included type-literal descendants that do not contribute
-to the runtime value. The round-8 correction passed every gate through
-Architecture, then stopped after the required PostgreSQL gate hit the same
-fixed five-minute test timeout on two attempts. It is not frozen for review;
-the full matrix remains deferred until review converges.
+to the runtime value. The round-8 correction is gate-green and frozen for a
+fresh Critical arm; the full matrix remains deferred until review converges.
 
 ## Packet definition
 
@@ -380,7 +378,7 @@ Round 8 corrects the type-literal ownership defect found in the review of
 | `corepack pnpm lint` | PASS |
 | `corepack pnpm format` | PASS — all matched files use Prettier style |
 | `corepack pnpm test:architecture` | PASS — 166/166, including 35/35 module-press-law tests and the unchanged exact eleven-item live debt set |
-| `corepack pnpm test:postgres` | FAIL — test 9, `composed product advances an existing deployment to an exact compiled successor`, exceeded its fixed 300,000 ms timeout on two attempts; both runners were stopped only after the test had emitted the definitive red |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 971,999.4 ms on gate tree `86d1a8554eec8d5368e7c6a2b2f07ee4ec05d5c3` |
 
 The pre-fix focused run failed both new controls for exactly the missing
 type-literal observations. The discarded mutations are corroboration only; the
@@ -391,11 +389,13 @@ is committed. The first PostgreSQL attempt overlapped a lock-unaware
 `evidence:expected-red` run from another worktree; a clean retry began after
 that process exited but reproduced the same test-9 timeout. The retry was
 already substantially degraded before test 9 (tests 7 and 8 took 171 s and
-293.9 s), and a separate lane resumed integration work afterward. No timeout,
-PostgreSQL code, or out-of-scope behavior was changed to force a green. This is
-the packet's declared stop condition: a required gate cannot presently be made
-green honestly. No review candidate or review prompt is emitted from this
-state.
+293.9 s). The packet stopped once at that declared gate condition and resumed
+only on explicit user direction. The resumed preflight found no test runner or
+repository container, 5.8 GiB available memory, load 0.39, and 98.2% CPU idle
+over five seconds. The unchanged command then acquired the exclusive lease and
+passed 203/203; the previously blocked tests 7, 8, and 9 completed in 76.7 s,
+122.8 s, and 147.8 s respectively. No timeout, PostgreSQL code, or out-of-scope
+behavior changed between the red and green runs.
 
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
