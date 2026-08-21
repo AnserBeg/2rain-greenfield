@@ -81,15 +81,18 @@ change the set and are refused.
 
 **The message pattern is retained and narrowed, not replaced.** It answers a
 question the kill set cannot: the right test can fail for the wrong reason.
-Two rules make it discriminating:
+`expected` is refused **statically** when it matches any line a green
+`node:test` transcript emits — which refuses `/./` by construction rather than by
+a literal-character heuristic, and refuses every other pattern with the same
+defect. That is a conservative rejection of trivial patterns, not a measurement
+against a real baseline, and it should not be described as one.
 
-- **Statically**, `expected` is refused when it matches any line a green
-  `node:test` transcript emits. That refuses `/./` by construction rather than
-  by a literal-character heuristic, and it refuses every other pattern with the
-  same defect.
-- **At run time**, `expected` is refused when it matches the same suite's own
-  green baseline output. Discrimination is measured against the real transcript,
-  not asserted.
+*A second rule, refusing `expected` when it matched the suite's own green
+transcript at run time, existed in the first draft and was removed once the
+pattern began matching failure messages rather than transcripts: green text is
+no longer among the data `expected` is tested against, so the rule had nothing
+left to refuse. The ADR went on claiming it until the 2026-08-21 round-2 review
+noticed. Removing it does not reopen the Cartesian join.*
 
 **Every entry also declares `claim`** — the production seam it holds, in a
 sentence. A manifest that names a file and not a seam records what was mutated
@@ -118,10 +121,22 @@ seconds; an entry naming a whole PostgreSQL file costs about ten minutes per
 run. Manifest authors should focus the test, and `--run` stays an
 acceptance-time entry point rather than a matrix step for exactly this reason.
 
-**The measurement cannot restore the subject, and that is now a fact about an
-import list rather than a claim.** `test/helpers/expected-red-measure.mjs`
-imports no `writeFileSync` and no `rmSync`, so a reviewer checks the separation
-by reading six lines. *The earlier arrangement claimed this because
+**The measurement cannot restore the subject, and the boundary is where the
+observation is DEFINED.** `observeMutatedRun` lives in
+`test/helpers/expected-red-measure.mjs`, which imports no `writeFileSync` and no
+`rmSync`, and it receives plain data — no closure over the caller's scope.
+
+*Stated at its real strength, because two weaker versions of this claim have now
+been refuted.* The first passed a narrow parameter object to a thunk declared
+beside `path`, `originalSource` and an imported `writeFileSync`; the round-1
+review pointed out the thunk kept every capability it was supposedly denied. The
+second moved the two called primitives but left the thunk — and therefore the
+operation — in the writer-capable module; the round-2 review pointed that out
+too. **`expected-red.mjs` still imports write capability and always will, because
+it applies the mutation.** What is established is narrower and checkable: the
+function that performs the observation is defined in a module where no write
+exists, and it is handed data rather than scope. The dynamic guard is control
+D2, which observes a suite that heals the subject and refuses it by digest. *The earlier arrangement claimed this because
 `withMutation` handed its measurer a narrow parameter object — while the
 measurer was a closure declared beside `path`, `originalSource` and an imported
 `writeFileSync`, and retained every capability it was supposedly denied. The

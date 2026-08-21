@@ -92,13 +92,16 @@ is refused); C2 a mutation the suite does not notice (`SURVIVOR`); C3 a red
 whose text is not the declared one; C4 a red that killed a different test than
 the one declared.
 
-**D — the subject repaired before it is measured.** The measurement lives in
-`test/helpers/expected-red-measure.mjs`, which imports **no** `writeFileSync` and
-**no** `rmSync`, so the separation is a fact about a six-line import list. *The
-earlier version claimed this while the measurer was a closure declared beside
-`path`, `originalSource` and an imported `writeFileSync` — it was handed a narrow
-parameter object and retained every capability it was supposedly denied. The
-round-1 review was right that the claim was false.* That is the structural half. The observed
+**D — the subject repaired before it is measured.** `observeMutatedRun` is
+**defined** in `test/helpers/expected-red-measure.mjs`, which imports no
+`writeFileSync` and no `rmSync`, and takes plain data rather than a closure.
+*Two weaker versions of this claim were refuted in successive rounds: first a
+narrow parameter object handed to a thunk that still closed over `path`,
+`originalSource` and `writeFileSync`; then the two primitives moved while the
+thunk — the operation — stayed in the writer-capable module.* `expected-red.mjs`
+still imports write capability and must, because it applies the mutation. The
+checkable claim is narrower: the observation is defined where no write exists.
+That is the structural half. The observed
 half is a digest read-back taken after the suite exits and before the restore,
 so a subject healed mid-run is refused by name. D1 additionally proves the
 runner refuses a dirty tracked tree — which is what makes `git checkout -- <file>`
@@ -241,7 +244,7 @@ are already stable. Routed to `current-plan.md`.
 
 - The five focused-integration entries: **12 seconds** for five mutations,
   including two baselines.
-- `--self-test`: **~5 seconds**, 14 controls.
+- `--self-test`: seconds, **21 controls**.
 - The four PostgreSQL entries: `test/postgres/composed-application.test.ts` takes
   **9m48s** solo for one run, so an entry naming that whole file costs about
   twenty minutes for its baseline plus its mutated run. One full nine-entry run
