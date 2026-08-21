@@ -9,9 +9,11 @@ Status: active; candidates `318c0dd719a7d759d313ee45ca080017e5e36b44`,
 `4f0d19e475977956f26e3e5238ef90bcc90936a5`, and
 `358ba5fe7a66d530b1388979953a12bea81e2aae` returned REVISE; candidate
 `e02c15c9dc772cb772ceb3c851c606a95eb209c6` received a fresh Codex PASS and
-then a Fable REVISE on a newly found production false green. The round-5
-production correction has all declared pre-review gates green for a fresh
-Critical arm; the full matrix remains deferred until review converges
+then a Fable REVISE on a newly found production false green. Candidate
+`d82350103b362ae20448822c122057c53d5ef41e` returned REVISE on an unknown-left
+boundary production defect and a plural partial-run control gap. The round-6
+correction has all declared pre-review gates green for a fresh Critical arm;
+the full matrix remains deferred until review converges
 
 ## Packet definition
 
@@ -78,12 +80,15 @@ Yes, for statically observable JavaScript/TypeScript string constructions. The
 guard parses production source and evaluates string literals,
 parentheses/type wrappers, template expressions, and `+` expressions. It
 observes a completed construction as one value. Inside an otherwise dynamic
-ordinary construction it also observes maximal statically known runs when the
-identity's right boundary is fixed by static text or by the end of the
-construction; a match ending immediately before an unknown runtime continuation
-is not inferred. Every observed value is checked by the same
-`moduleIdentityMatches` authority as a contiguous spelling. The guard therefore
-reports `PRESS006`, rather than introducing a parallel rule or an allowlist.
+ordinary construction it also observes maximal statically known runs while
+preserving whether either adjacent construction edge borders an unknown runtime
+value. Unknown adjacency is conservatively represented by a character that is
+both a word character and a namespace-continuation character before calling the
+same `moduleIdentityMatches` authority as a contiguous spelling. Thus the
+matcher may report only when static text or the real construction edge proves
+the boundaries its identity family requires; it never invents a string boundary
+at the edge of an isolated run. The guard therefore reports `PRESS006`, rather
+than introducing a parallel rule or an allowlist.
 
 The observer measures each completed ordinary construction once. Direct source
 matches and independently completed constructed matches are additive, so an
@@ -95,18 +100,21 @@ occurrence.
 
 Within an incomplete ordinary template or `+` construction, direct construction
 operands remain incomplete values. Their statically known runs are considered
-only when the identity and its right boundary are both fixed; an unbounded
-`northstar.widget` prefix before a runtime suffix remains admitted. Traversal
-also continues through non-construction semantic boundaries, so a complete
-concatenation passed to a call is still observed. A tagged template's aggregate
-result is not inferred, but each substitution expression is evaluated before
-the tag receives it and is therefore visited. These boundaries avoid the three
-failures found by review: round 1 recursed through every AST child and falsely
-treated nested prefixes as values; round 2 returned beneath whole subtrees and
-missed independently completed call arguments and tagged substitutions; the
-round-4 Fable confirmation found that treating every incomplete construction as
-opaque also missed an identity followed by a statically fixed `:` before a
-runtime tail.
+only when the identity's family-specific boundaries are fixed. An unbounded
+`northstar.widget` prefix before a runtime suffix remains admitted, as does a
+word-bounded `widget_list` immediately after an unknown prefix; a static `:` on
+the relevant side fixes the boundary and makes the corresponding identity
+reportable. Traversal also continues through non-construction semantic
+boundaries, so a complete concatenation passed to a call is still observed. A
+tagged template's aggregate result is not inferred, but each substitution
+expression is evaluated before the tag receives it and is therefore visited.
+These boundaries avoid the review failures: round 1 recursed through every AST
+child and falsely treated nested prefixes as values; round 2 returned beneath
+whole subtrees and missed independently completed call arguments and tagged
+substitutions; the round-4 Fable confirmation found that treating every
+incomplete construction as opaque missed a statically right-bounded identity;
+and the round-6 review found that isolating a run after an unknown prefix
+invented a left word boundary for local IDs and `*_IDS` symbols.
 
 This remains deliberately narrower than symbolic execution. Unknown runtime
 values and identifier indirection are not resolved, and a tag's return value is
@@ -146,6 +154,8 @@ not rely on the routed Inventory debt:
 | dynamic-boundary admission | static `northstar.widget` prefix plus an identifier-held legal suffix | zero violations; an unevaluable outer value is not partially observed |
 | dynamic-boundary refusal | interpolation and concatenation fix `northstar.widget:` before an identifier-held tail, and a second interpolation ends with a spliced `northstar.widget` after an unknown prefix | three exact violations; a dynamic outer construction cannot hide an identity whose right boundary is fixed by static text or construction end |
 | dynamic-tail admission | the same interpolated and concatenated static prefixes end immediately before an identifier-held suffix | zero violations; the observer does not invent a right boundary before an unknown continuation |
+| unknown-left admission/refusal | local ID `widget_list` and symbol `WIDGET_IDS` each follow an unknown prefix either directly or after a static `:` | the directly adjacent identities admit because the runtime prefix may erase `\b`; the colon-bounded twins refuse exactly at their construction lines |
+| partial-run multiplicity | one incomplete outer concatenation contains two independently colon-bounded spliced namespaces separated by an unknown value | two exact observations at the two static-run positions; first-partial-run-only compression fails |
 | tagged-boundary admission | a tag receives the spliced template body | zero violations; the tag controls the runtime result |
 | tagged-substitution refusal/admission | a tag receives a completed concatenation spelling either `northstar.widget` or `northstar.widget-contract/v1` | the module identity refuses; the longer contract namespace admits |
 | call-boundary refusal/admission | a completed concatenation is a call argument beneath a dynamic outer `+`, spelling either module or longer contract namespace | the module identity refuses; the longer contract namespace admits |
@@ -171,6 +181,16 @@ the `:` boundary before a runtime tail, a spliced identity at the known end of a
 construction also refuses, and the otherwise equivalent prefixes admit when the
 runtime value begins immediately after `widget` and no right boundary can be
 inferred.
+
+The round-6 focused run passes 29/29. Before the production correction, the new
+unknown-left twin emitted four observations instead of the expected two: both
+`widget_list` and `WIDGET_IDS` falsely reported immediately after an unknown
+prefix, as well as correctly after a static colon. After preserving both
+adjacencies through the shared matcher, only the colon-bounded lines report.
+The second new fixture requires two exact partial-run observations in one
+incomplete construction. The reviewer-selected `return runs.slice(0, 1)`
+mutation fails that control by omitting the second line, and the explicit
+inverse patch restores the production source and the focused green.
 
 ## Gate evidence
 
@@ -262,6 +282,27 @@ byte-identical to the 203/203 run above, and the PostgreSQL command does not
 discover architecture tests. The full matrix remains the integrated-tree
 authority after review convergence.
 
+Round 6 corrects the unknown-left-boundary production defect and the plural
+partial-run control gap found in the review of `d823501`:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` | PASS — 29/29; before the implementation change the unknown-left twin returned four observations instead of two, while the plural partial-run control already passed |
+| reviewer-selected `return runs.slice(0, 1)` mutation | EXPECTED RED — the exact plural partial-run control lost its required second observation; the inverse patch restored the two focused controls green |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 160/160, including 29/29 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 1,113,668.6 ms |
+
+Both exclusive suites acquired the repository's serialized lease. The focused
+pre-fix red failed only because the two unknown-left admissions falsely emitted
+PRESS006; both statically colon-bounded refusal twins were already present. The
+mutation replay selected only the newly committed plural partial-run control.
+No mutation runner is committed, so these discarded local replays are
+corroboration; the exact committed fixtures are the reproducible load-bearing
+evidence.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -338,6 +379,24 @@ the next arm is fresh Critical review, not a narrow confirmation. The prompt-pat
 error is also corrected: the ratified ADR-0023 is
 `ADR-0023-storageless-platform-capability-tier.md`.
 
+The fresh review of candidate
+`d82350103b362ae20448822c122057c53d5ef41e` returned **REVISE** with one
+production defect and one control defect. A partial run beginning immediately
+after an unknown runtime prefix was matched as a standalone string, inventing a
+left `\b` for generated local IDs and `*_IDS` symbols. Separately, no committed
+fixture required two reportable partial runs inside one incomplete construction,
+so `return runs.slice(0, 1)` preserved every reported gate. Round 6 records both
+left and right construction-edge knowledge and carries unknown adjacency into
+the existing shared matcher with a conservative word/namespace-continuation
+neighbor. It adds the requested local-ID and symbol admission/refusal twins plus
+an exact two-partial-run control. No identity-family matcher, module allowlist,
+or compiler change is introduced.
+
+Continuation remains licensed because the first finding is a new in-scope
+production defect and the second is its bounded evidence companion. Production
+changed, so the next review must again be a fresh full Critical arm; nothing from
+the prior arm is treated as a narrow confirmation fence.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -356,4 +415,8 @@ A second reusable rule follows from the confirmed Fable finding: **partial
 evaluation must preserve known semantic boundaries rather than classifying an
 entire expression as either static or dynamic.** Unknown values block inference
 across their edge; they do not erase independently fixed text and delimiters on
-the same side.
+the same side. That rule applies on both sides: an isolated partial run is not a
+standalone runtime string, so an unknown neighbor must not be replaced by an
+invented start or end boundary. And plural evidence must be channel-specific:
+two completed constructions do not prove that two partial runs inside one
+incomplete construction are both retained.
