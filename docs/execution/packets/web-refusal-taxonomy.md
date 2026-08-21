@@ -513,3 +513,32 @@ existing timing cases rather than subsuming promise ordering. Under
 `review-tiers`, no convergence criterion licenses another adjacent case. The one
 narrowing round therefore writes the claim from the measurements, records the
 ad-hoc survivor, routes same-turn staggered precedence to its own row, and stops.
+
+### Orchestrator narrowing ruling — `c86dede458ea8199d4056719937e7fcadb5059b4`
+
+The orchestrator ruled `runtime-refusal-same-turn-precedence` non-gating for
+this packet because no production `CurrentPolicyGateway` is deny-capable. The
+composed request path uses `AllowAllLocalPolicy`; release verification and demo
+wiring are also allow-only. The same-turn survivor is real but unreachable while
+only one join input can reject.
+
+This correction gives the routed row a hard firing trigger: row 7's
+policy/identity-kernel packet, or any earlier packet that adds a deny-capable
+production gateway, must ship the subsuming same-turn exact-identity control
+before admitting that gateway. It also narrows
+`joinRuntimeDefinitionAndPolicy`'s source comment to the five committed timing
+classes and names the unproved routed case. Runtime behavior is unchanged from
+`fa4139e96fec14602bdafa1e7aa0dab043e50273`; the only runtime-source difference
+is that comment. The trigger is a plan-level admission obligation, not an
+executable detector of new gateway implementations.
+
+The correction tree passed:
+
+- `pnpm format`: green;
+- `pnpm typecheck`: green;
+- `pnpm lint`: green; and
+- `pnpm --filter @north-star/web test:contracts`: 29/29 green.
+
+No browser, integration, architecture or full-matrix suite was rerun for this
+comment-and-record-only correction. The full matrix remains deferred until the
+fresh Critical arms converge.
