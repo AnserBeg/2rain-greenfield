@@ -10,11 +10,16 @@
       "replacement": "surfaceHref(context.surface)",
       "expected": "rendered POST action must retain the selected operand",
       "test": {
-        "files": ["test/integration/surface-data-binding.test.ts"],
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
         "namePattern": "scoped create carries each URL operand"
       },
       "kills": [
-        "scoped create carries each URL operand under its declared system-input key"
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "scoped create carries each URL operand under its declared system-input key"
+        }
       ]
     },
     {
@@ -25,11 +30,16 @@
       "replacement": "return Object.freeze({ [argumentKey]: 'ac000000-0000-4000-8000-00000000000c' });",
       "expected": "a second URL value must move the effective operand",
       "test": {
-        "files": ["test/integration/surface-data-binding.test.ts"],
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
         "namePattern": "scoped create carries each URL operand"
       },
       "kills": [
-        "scoped create carries each URL operand under its declared system-input key"
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "scoped create carries each URL operand under its declared system-input key"
+        }
       ]
     },
     {
@@ -40,11 +50,16 @@
       "replacement": "",
       "expected": "200 !== 422|3 !== 2",
       "test": {
-        "files": ["test/integration/surface-data-binding.test.ts"],
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
         "namePattern": "scoped create carries each URL operand"
       },
       "kills": [
-        "scoped create carries each URL operand under its declared system-input key"
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "scoped create carries each URL operand under its declared system-input key"
+        }
       ]
     },
     {
@@ -55,11 +70,16 @@
       "replacement": "",
       "expected": "200 !== 403",
       "test": {
-        "files": ["test/integration/surface-data-binding.test.ts"],
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
         "namePattern": "scoped create carries each URL operand"
       },
       "kills": [
-        "scoped create carries each URL operand under its declared system-input key"
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "scoped create carries each URL operand under its declared system-input key"
+        }
       ]
     },
     {
@@ -70,11 +90,16 @@
       "replacement": "    return {\n      code: 'OPERATION_UNAVAILABLE',\n    };",
       "expected": "OPERATION_LEGAL_ENTITY_INACTIVE",
       "test": {
-        "files": ["test/integration/surface-data-binding.test.ts"],
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
         "namePattern": "inactive legal-entity refusal keeps its provider subject"
       },
       "kills": [
-        "an inactive legal-entity refusal keeps its provider subject at the web boundary"
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "an inactive legal-entity refusal keeps its provider subject at the web boundary"
+        }
       ]
     }
   ]

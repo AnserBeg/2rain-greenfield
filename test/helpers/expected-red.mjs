@@ -1,20 +1,29 @@
 #!/usr/bin/env node
 /**
  * The expected-red runner: apply one named, one-property mutation to production,
- * run the focused suite, require the exact expected red, restore.
+ * run the focused suite, require the exact expected red from the exact test that
+ * must produce it, restore.
  *
  * This is `test/integration/scoped-create-operand-mutations.mjs` lifted out of
  * one packet. That file converged its packet in two rounds while its neighbours
  * took four to seven, and it was the only committed mutation runner in the tree;
  * every other packet's reds live in review-log prose and are executable never
- * again. The 2026-08-20 program review's R2 asked for exactly this generalization.
+ * again. The 2026-08-20 program review's R2 asked for this generalization.
  *
  * WHAT THIS PROVES. For each manifest entry: the named production text was
  * present and unique; the focused suite passed with at least one executed test
  * before the mutation; the mutation changed the file on disk and the file was
  * still mutated when the run ended; the suite then failed; the set of tests that
- * stopped passing is EXACTLY the declared `kills`; and the failure text matches
- * `expected`, a pattern that does not match the same suite's green output.
+ * stopped passing is EXACTLY the declared `kills`, compared file-qualified; each
+ * declared kill is present in the mutated run as an explicit FAILURE rather than
+ * merely absent; and `expected` matches the failure message of those killed
+ * tests — not the transcript at large.
+ *
+ * THE LAST TWO CLAUSES ARE THE 2026-08-21 REVIEW'S FIRST FINDING. Comparing a
+ * pass-set difference and separately grepping the whole transcript is a
+ * Cartesian conjunction: a declared victim can vanish without failing while an
+ * unrelated failure supplies the expected text, and both checks pass. Binding
+ * the message to the failing identity is what makes the pair one observation.
  *
  * WHAT THIS DOES NOT PROVE. Nothing here chooses the mutations. A manifest
  * measures the seams its author thought to name, which `review-tiers` says is
@@ -25,7 +34,6 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import {
   existsSync,
   globSync,
@@ -39,9 +47,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 
+import {
+  digestOf,
+  digestOfFile,
+  measureSuiteRun,
+} from './expected-red-measure.mjs';
+
 export const MANIFEST_GLOB = 'test/evidence/*.expected-red.json';
 export const REPOSITORY_ROOT = resolve(import.meta.dirname, '../..');
-const REPORTER = './test/helpers/expected-red-reporter.mjs';
 const JOURNAL = 'test-results/expected-red/in-flight.json';
 
 /**
@@ -86,6 +99,13 @@ export function manifestGlob() {
  * report the live mutation as drift — a FAIL naming a real absence for an unreal
  * reason. That is the `gate-reads-a-different-thing-than-its-name` class, so it
  * is refused with "cannot determine" rather than answered wrongly.
+ *
+ * READ BEFORE THE MANIFESTS, not after. The 2026-08-21 review found the earlier
+ * ordering unreachable in practice: a real in-flight mutation REMOVES the
+ * `original` text a manifest names, so validation reported
+ * EXPECTED_RED_VICTIM_ABSENT before it ever consulted the journal, and the
+ * control that claimed to cover the race only ever exercised a journal with no
+ * mutation behind it.
  */
 export function inFlightMutation(root = REPOSITORY_ROOT) {
   const journalPath = resolve(root, JOURNAL);
@@ -265,6 +285,7 @@ function validateEntry(entry, where, root) {
   }
 
   const test = entry.test;
+  const declaredFiles = new Set();
   if (test === null || typeof test !== 'object' || Array.isArray(test)) {
     fail(
       'EXPECTED_RED_ENTRY_SHAPE',
@@ -280,7 +301,7 @@ function validateEntry(entry, where, root) {
             'EXPECTED_RED_TEST_MISSING',
             `test file ${String(file)} does not exist`,
           );
-        }
+        } else declaredFiles.add(file);
       }
     }
     if (test.namePattern !== undefined && !isNonEmptyString(test.namePattern)) {
@@ -291,20 +312,42 @@ function validateEntry(entry, where, root) {
     }
   }
 
-  // A red count is not attribution. The declared kill set is what makes two
-  // entries sharing one `expected` string tell themselves apart.
+  // A red count is not attribution, and a bare test NAME is not attribution
+  // either: two files may legitimately carry the same test name, so killing
+  // either one would satisfy a name-only declaration. Kills are file-qualified.
   if (!Array.isArray(entry.kills) || entry.kills.length === 0) {
     fail(
       'EXPECTED_RED_KILLS_MISSING',
-      'kills must name the tests this mutation must break',
+      'kills must name the tests this mutation must break, as {file, name}',
     );
-  } else if (!entry.kills.every((name) => isNonEmptyString(name))) {
-    fail(
-      'EXPECTED_RED_ENTRY_SHAPE',
-      'every kills entry must be a non-empty test name',
-    );
-  } else if (new Set(entry.kills).size !== entry.kills.length) {
-    fail('EXPECTED_RED_ENTRY_SHAPE', 'kills must not repeat a test name');
+  } else {
+    const seen = new Set();
+    for (const kill of entry.kills) {
+      if (
+        kill === null ||
+        typeof kill !== 'object' ||
+        Array.isArray(kill) ||
+        !isNonEmptyString(kill.file) ||
+        !isNonEmptyString(kill.name)
+      ) {
+        fail(
+          'EXPECTED_RED_ENTRY_SHAPE',
+          'every kills entry must be {file, name} with non-empty strings',
+        );
+        continue;
+      }
+      if (declaredFiles.size > 0 && !declaredFiles.has(kill.file)) {
+        fail(
+          'EXPECTED_RED_KILL_FILE_UNRUN',
+          `kills names ${kill.file}, which test.files does not run`,
+        );
+      }
+      const key = `${kill.file}::${kill.name}`;
+      if (seen.has(key)) {
+        fail('EXPECTED_RED_ENTRY_SHAPE', `kills repeats ${key}`);
+      }
+      seen.add(key);
+    }
   }
   return problems;
 }
@@ -321,91 +364,90 @@ export function runEntries(
   entries,
   { root = REPOSITORY_ROOT, log = process.stdout } = {},
 ) {
-  assertCleanTrackedTree(root);
-  // The tree is clean, so any surviving journal is a crashed run's litter whose
-  // subject has already been recovered. Clearing it keeps validate answerable.
+  // The ENTRY precondition. It carries its own code because the review found
+  // that sharing one message with the exit postcondition made the control for
+  // this check pass after the check itself was deleted: the run proceeded on
+  // dirty bytes, restored them, and the exit assertion produced the same words.
+  assertFrozenTree(root, 'EXPECTED_RED_TREE_NOT_FROZEN');
+  // The tree matches HEAD, so any surviving journal is a crashed run's litter
+  // whose subject has already been recovered. Clearing it keeps validate
+  // answerable.
   rmSync(resolve(root, JOURNAL), { force: true });
   const baselines = new Map();
   const scratch = mkdtempSync(join(tmpdir(), 'expected-red-'));
+  let run = 0;
   try {
     for (const entry of entries) {
       const key = commandKey(entry.test);
       if (!baselines.has(key)) {
-        baselines.set(key, measureBaseline(entry, { root, scratch, log }));
+        baselines.set(
+          key,
+          measureBaseline(entry, { root, scratch, log, run: (run += 1) }),
+        );
       }
-      runOneEntry(entry, baselines.get(key), { root, scratch, log });
+      runOneEntry(entry, baselines.get(key), {
+        root,
+        scratch,
+        log,
+        run: (run += 1),
+      });
     }
   } finally {
     rmSync(scratch, { force: true, recursive: true });
   }
-  // The subject-repaired-before-measured vector, closed at the tree level: a
-  // run that leaves any tracked byte changed did not restore what it mutated.
-  assertCleanTrackedTree(root);
+  // The EXIT postcondition, with its own code: a run that leaves any tracked
+  // byte changed did not restore what it mutated.
+  assertFrozenTree(root, 'EXPECTED_RED_TREE_NOT_RESTORED');
   return entries.length;
 }
 
-function measureBaseline(entry, { root, scratch, log }) {
-  const run = runSuite(entry.test, {
+function measureBaseline(entry, { root, scratch, log, run }) {
+  const measured = measureSuiteRun(entry.test, {
     root,
     scratch,
-    label: `${entry.name}:baseline`,
+    label: `${run}-${entry.name}-baseline`,
   });
   assert.equal(
-    run.spawnFailure,
+    measured.spawnFailure,
     undefined,
-    `${entry.name}: the baseline suite could not be started (${run.spawnFailure})`,
+    `${entry.name}: the baseline suite could not be started (${measured.spawnFailure})`,
   );
   assert.equal(
-    run.status,
+    measured.status,
     0,
-    `${entry.name}: the suite is not green before the mutation, so no red it produces can be attributed to the mutation\n${tail(run.output)}`,
+    `${entry.name}: the suite is not green before the mutation, so no red it produces can be attributed to the mutation\n${tail(measured.output)}`,
   );
   // The check reading zero input. A --test-name-pattern that matches nothing
   // exits 0, and without this the mutated run's non-zero exit would be the only
   // thing distinguishing "nothing ran" from "the seam held".
   assert.ok(
-    run.results.length > 0,
+    measured.results.length > 0,
     `${entry.name}: the baseline executed no test — the pattern or file selects nothing`,
   );
-  const passing = passingIdentities(run.results);
-  const failing = run.results.filter((result) => result.status !== 'pass');
-  assert.deepEqual(
-    failing,
-    [],
-    `${entry.name}: the baseline is not wholly green`,
-  );
-  // Two tests sharing one name in one file collapse into one identity, so the
-  // regressed set could never equal a kills list that names it once.
+  const passing = identitiesOf(measured.results, 'pass', root);
   assert.equal(
     passing.size,
-    run.results.length,
-    `${entry.name}: the baseline reports ${run.results.length} results under ${passing.size} distinct names, so a kill cannot be attributed to one of them`,
+    measured.results.length,
+    `${entry.name}: the baseline is not wholly green, or reports two results under one file-qualified identity`,
   );
   log.write(`EXPECTED_RED_BASELINE ${entry.name} ${passing.size} passing\n`);
-  return { passing, output: run.output };
+  return { passing };
 }
 
-function runOneEntry(entry, baseline, { root, scratch, log }) {
+function runOneEntry(entry, baseline, { root, scratch, log, run }) {
   const expected = new RegExp(entry.expected, 'u');
   const path = resolve(root, entry.file);
+  const declared = entry.kills
+    .map((kill) => identityOf(resolve(root, kill.file), kill.name))
+    .sort();
 
   // Declared kills must be tests that actually pass at baseline. A kill naming
   // a test that never ran would be satisfied by its permanent absence.
-  const missing = entry.kills.filter(
-    (name) => !identitiesNamed(baseline.passing, name),
-  );
+  const missing = declared.filter((identity) => !baseline.passing.has(identity));
   assert.deepEqual(
     missing,
     [],
-    `${entry.name}: kills names ${JSON.stringify(missing)}, which did not pass at baseline`,
-  );
-
-  // Discrimination, measured rather than asserted: a pattern that already
-  // matches this suite's GREEN output cannot be the identity of its red.
-  assert.doesNotMatch(
-    baseline.output,
-    expected,
-    `${entry.name}: expected matches the suite's own passing output, so it cannot identify a red`,
+    `${entry.name}: kills names ${JSON.stringify(missing.map(readableIdentity))}, which did not pass at baseline`,
   );
 
   const originalSource = readFileSync(path, 'utf8');
@@ -414,25 +456,28 @@ function runOneEntry(entry, baseline, { root, scratch, log }) {
     1,
     `${entry.name}: production victim must be present exactly once in ${entry.file}`,
   );
-  const mutatedSource = originalSource.replace(
-    entry.original,
-    entry.replacement,
-  );
+  const mutatedSource = originalSource.replace(entry.original, entry.replacement);
   assert.notEqual(
     mutatedSource,
     originalSource,
     `${entry.name}: the mutation produced an identical file`,
   );
-  const mutatedDigest = digest(mutatedSource);
+  const mutatedDigest = digestOf(mutatedSource);
 
   const observation = withMutation(
     { path, originalSource, mutatedSource, root },
-    (subject) => {
-      const run = runSuite(entry.test, { root, scratch, label: entry.name });
+    () => {
+      const measured = measureSuiteRun(entry.test, {
+        root,
+        scratch,
+        label: `${run}-${entry.name}`,
+      });
       // Read the subject back BEFORE the restore in withMutation's finally. If
-      // anything had healed the file while the suite ran, the digests diverge
-      // here and the run is refused rather than credited.
-      return { ...run, observedDigest: subject.readBackDigest() };
+      // anything healed the file while the suite ran, the digests diverge here
+      // and the run is refused rather than credited. measureSuiteRun and
+      // digestOfFile both come from a module that imports no write capability,
+      // so this measurement genuinely cannot be the thing that healed it.
+      return { ...measured, observedDigest: digestOfFile(path) };
     },
   );
 
@@ -456,39 +501,57 @@ function runOneEntry(entry, baseline, { root, scratch, log }) {
     `${entry.name}: SURVIVOR — the mutation stayed green`,
   );
 
-  const stillPassing = passingIdentities(observation.results);
+  const stillPassing = identitiesOf(observation.results, 'pass', root);
   const regressed = [...baseline.passing]
     .filter((identity) => !stillPassing.has(identity))
-    .map((identity) => identity.split('::').slice(1).join('::'))
     .sort();
-  const declared = [...entry.kills].sort();
   assert.deepEqual(
-    regressed,
-    declared,
-    `${entry.name}: the red is not attributable — declared kills ${JSON.stringify(declared)} but the mutation stopped ${JSON.stringify(regressed)}`,
+    regressed.map(readableIdentity),
+    declared.map(readableIdentity),
+    `${entry.name}: the red is not attributable — declared kills ${JSON.stringify(declared.map(readableIdentity))} but the mutation stopped ${JSON.stringify(regressed.map(readableIdentity))}`,
   );
+
+  // THE JOIN. A test stops passing when it fails, and also when it is skipped,
+  // never registered, or dropped after a parent's failure. Only the first is a
+  // kill, and only the first carries a message that can be required to be the
+  // declared one. Both halves are asserted against the same identities.
+  const failuresByIdentity = new Map(
+    observation.results
+      .filter((result) => result.status === 'fail')
+      .map((result) => [identityOf(result.file, result.name), result.message]),
+  );
+  const notFailed = declared.filter(
+    (identity) => !failuresByIdentity.has(identity),
+  );
+  assert.deepEqual(
+    notFailed.map(readableIdentity),
+    [],
+    `${entry.name}: ${JSON.stringify(notFailed.map(readableIdentity))} stopped passing without failing — absent, skipped or never registered is not a kill`,
+  );
+  const declaredFailureText = declared
+    .map((identity) => failuresByIdentity.get(identity) ?? '')
+    .join('\n');
   assert.match(
-    observation.output,
+    declaredFailureText,
     expected,
-    `${entry.name}: the suite went red for a different reason than the one declared\n${tail(observation.output)}`,
+    `${entry.name}: the declared test failed for a different reason than the one declared\n${tail(declaredFailureText)}`,
   );
   log.write(`MUTATION_RED ${entry.name} ${declared.length} killed\n`);
 }
 
 /**
- * Applies the mutation, hands the measurer a read-only view of the subject, and
- * restores afterwards.
+ * Applies the mutation, runs the measurer, and restores afterwards.
  *
- * The measurer receives no way to restore: `originalSource` and the writing
- * call are captured here and never passed on. That is the structural half of
- * AGENTS.md section 6's rule that a verifier must never share a code path with
- * the thing that heals what it verifies; the digest read-back is the observed
- * half.
+ * The measurer is a thunk: it receives nothing, and everything it can reach
+ * comes from `expected-red-measure.mjs`, which imports no write capability. The
+ * earlier version passed a narrow parameter object while the callback's own
+ * closure still held `path`, `originalSource` and `writeFileSync` — a claimed
+ * separation that did not exist, as the 2026-08-21 review pointed out.
  *
  * The journal exists for the case `finally` cannot cover. A SIGKILL mid-run
  * leaves the mutated file on disk, and the journal names it. Recovery is
  * `git checkout -- <file>`, which is lossless precisely because the runner
- * refuses to start on a dirty tracked tree.
+ * refuses to start unless the tree matches HEAD.
  */
 function withMutation({ path, originalSource, mutatedSource, root }, measure) {
   const journalPath = resolve(root, JOURNAL);
@@ -509,9 +572,7 @@ function withMutation({ path, originalSource, mutatedSource, root }, measure) {
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
   try {
-    return measure({
-      readBackDigest: () => digest(readFileSync(path, 'utf8')),
-    });
+    return measure();
   } finally {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
@@ -519,98 +580,25 @@ function withMutation({ path, originalSource, mutatedSource, root }, measure) {
   }
 }
 
-/**
- * Builds the node argv itself rather than accepting one from the manifest. A
- * free-form argv is where a reporter gets dropped, a name pattern gets typoed
- * into matching nothing, or concurrency makes the kill set nondeterministic.
- */
-export function suiteArguments(test, evidencePath) {
-  return [
-    '--import',
-    'tsx',
-    '--test',
-    '--test-concurrency=1',
-    ...(test.namePattern === undefined
-      ? []
-      : [`--test-name-pattern=${test.namePattern}`]),
-    `--test-reporter=${REPORTER}`,
-    `--test-reporter-destination=${evidencePath}`,
-    '--test-reporter=tap',
-    '--test-reporter-destination=stdout',
-    ...test.files,
-  ];
-}
-
-function runSuite(test, { root, scratch, label }) {
-  const evidencePath = join(
-    scratch,
-    `${label.replaceAll(/[^a-z0-9-]/giu, '_')}.json`,
-  );
-  rmSync(evidencePath, { force: true });
-  const result = spawnSync(
-    process.execPath,
-    suiteArguments(test, evidencePath),
-    {
-      cwd: root,
-      encoding: 'utf8',
-      env: process.env,
-      maxBuffer: 64 * 1024 * 1024,
-    },
-  );
-  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
-  // A spawn that never started, or a process killed by a signal, reports
-  // status null — which `status !== 0` would happily read as a red.
-  const spawnFailure =
-    result.error !== undefined
-      ? String(result.error.message)
-      : result.status === null
-        ? `terminated by signal ${String(result.signal)}`
-        : undefined;
-  return {
-    output,
-    results: readEvidence(evidencePath),
-    signal: result.signal,
-    spawnFailure,
-    status: result.status,
-  };
-}
-
-/**
- * The execution counter. An absent or unparseable artifact means the run
- * produced no evidence it executed anything, which is reported as zero results
- * and refused by the callers rather than being silently tolerated.
- */
-function readEvidence(evidencePath) {
-  if (!existsSync(evidencePath)) return [];
-  try {
-    const parsed = JSON.parse(readFileSync(evidencePath, 'utf8'));
-    return Array.isArray(parsed?.results) ? parsed.results : [];
-  } catch {
-    return [];
-  }
-}
-
-function passingIdentities(results) {
+function identitiesOf(results, status, root) {
   return new Set(
     results
-      .filter((result) => result.status === 'pass')
-      .map((result) => `${result.file}::${result.name}`),
+      .filter((result) => result.status === status)
+      .map((result) => identityOf(resolve(root, result.file), result.name)),
   );
 }
 
-function identitiesNamed(identities, name) {
-  for (const identity of identities) {
-    if (identity.split('::').slice(1).join('::') === name) return true;
-  }
-  return false;
+function identityOf(file, name) {
+  return JSON.stringify([file, name]);
+}
+
+function readableIdentity(identity) {
+  const [file, name] = JSON.parse(identity);
+  return `${file}::${name}`;
 }
 
 function commandKey(test) {
   return JSON.stringify([test.files, test.namePattern ?? null]);
-}
-
-function digest(value) {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 function occurrences(value, needle) {
@@ -625,15 +613,24 @@ function isNonEmptyString(value) {
   return typeof value === 'string' && value.length > 0;
 }
 
-export function assertCleanTrackedTree(root = REPOSITORY_ROOT) {
-  const result = spawnSync('git', ['diff', '--quiet'], {
+/**
+ * Compares the tracked tree with HEAD, staged changes included.
+ *
+ * `git diff --quiet` alone compares the working tree with the INDEX, so a
+ * staged-only modification passed it. Evidence could then be produced against
+ * bytes that are not the frozen candidate's while the runner reported that it
+ * had required a clean tree. Found by the 2026-08-21 review and confirmed
+ * against git directly.
+ */
+export function assertFrozenTree(root = REPOSITORY_ROOT, code) {
+  const result = spawnSync('git', ['diff', '--quiet', 'HEAD', '--'], {
     cwd: root,
     encoding: 'utf8',
   });
   assert.equal(
     result.status,
     0,
-    'expected-red evidence requires a clean tracked tree: a crashed run is recovered with `git checkout -- <file>`, which would otherwise eat uncommitted work',
+    `${code}: expected-red evidence requires a tracked tree identical to HEAD, staged changes included. A crashed run is recovered with \`git checkout -- <file>\`, and the measurement must come from the committed candidate.`,
   );
 }
 
@@ -643,6 +640,22 @@ export function assertCleanTrackedTree(root = REPOSITORY_ROOT) {
 
 function main(argv) {
   const [mode, ...selected] = argv;
+
+  // Before the manifests, not after: a real in-flight mutation removes the
+  // `original` a manifest names, so loading first made this branch unreachable.
+  const inFlight = inFlightMutation();
+  if (inFlight !== undefined && mode !== 'run') {
+    process.stderr.write(
+      'expected-red: CANNOT VALIDATE\n\n' +
+        `  A mutation run is in flight and has deliberately changed:\n    ${inFlight.join('\n    ')}\n\n` +
+        '  Validation reads the working tree, so anything reported now would be that\n' +
+        '  mutation rather than drift. Re-run when it finishes.\n\n' +
+        '  If nothing is running, the run was killed. Recover the named file with\n' +
+        `    git checkout -- <file>\n  and delete ${JOURNAL}.\n`,
+    );
+    return 2;
+  }
+
   const { entries, paths, problems } = loadManifests();
 
   if (mode === 'list') {
@@ -669,18 +682,6 @@ function main(argv) {
   }
 
   if (mode === 'validate') {
-    const inFlight = inFlightMutation();
-    if (inFlight !== undefined) {
-      process.stderr.write(
-        'expected-red: CANNOT VALIDATE\n\n' +
-          `  A mutation run is in flight and has deliberately changed:\n    ${inFlight.join('\n    ')}\n\n` +
-          '  Validation reads the working tree, so drift reported now would be that\n' +
-          '  mutation rather than drift. Re-run when it finishes.\n\n' +
-          '  If nothing is running, the run was killed. Recover the named file with\n' +
-          `    git checkout -- <file>\n  and delete ${JOURNAL}.\n`,
-      );
-      return 2;
-    }
     process.stdout.write(
       `expected-red: OK (${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} in ${paths.length} manifest(s) still name live production text)\n`,
     );

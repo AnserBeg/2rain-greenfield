@@ -10,10 +10,17 @@
       "replacement": "",
       "expected": "Missing expected exception",
       "test": {
-        "files": ["test/fixtures/expected-red/subject.test.mjs"],
+        "files": [
+          "test/fixtures/expected-red/subject.test.mjs"
+        ],
         "namePattern": "no test anywhere carries this name"
       },
-      "kills": ["the fixture subject refuses a non-positive quantity"]
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/subject.test.mjs",
+          "name": "the fixture subject refuses a non-positive quantity"
+        }
+      ]
     }
   ]
 }

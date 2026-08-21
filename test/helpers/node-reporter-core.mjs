@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 
 /**
  * @param {{type: string, data: {name?: unknown, file?: unknown, skip?: unknown, todo?: unknown, details?: {type?: unknown}}}} event
@@ -95,16 +95,47 @@ export function assertUnfilteredNodeArguments(arguments_, context) {
   }
 }
 
-// Node reports `data.file` absolute and, for the synthetic pass, `data.name` as
-// the path exactly as it appeared on the command line — which is normally
-// RELATIVE. The earlier `isAbsolute` pair-guard returned false for that pair, so
-// the synthetic pass was credited as a real result whenever the command named
-// its files relatively. Measured 2026-08-21 by the expected-red gate's
-// zero-matching-name-pattern control, which observed one "passing" test in a
-// run that executed none. Latent for the reachability suites only because
-// assertUnfilteredNodeArguments refuses --test-name-pattern outright, so they
-// never reach the state that produces it.
+// Restored to the absolute-only pair after the 2026-08-21 review: resolving a
+// relative title against cwd made a REAL test whose title happens to equal its
+// own relative path indistinguishable from the synthetic pass, so a genuinely
+// executed file could be dropped. Title text cannot carry this rule at all —
+// createNodeResultLedger below decides it structurally instead.
 function sameFilesystemPath(left, right) {
   if (left === right) return true;
+  if (!isAbsolute(left) || !isAbsolute(right)) return false;
   return resolve(left) === resolve(right);
+}
+
+/**
+ * Stateful credit over a whole event stream.
+ *
+ * WHY THIS EXISTS RATHER THAN A TITLE TEST. When `--test-name-pattern` selects
+ * nothing in a file, Node emits a `test:summary` for that file reporting
+ * `counts.tests: 0` and THEN a synthetic `test:pass` naming the file. A real
+ * result always arrives BEFORE its file's summary. That ordering is the fact;
+ * the title's shape is a coincidence that a real test can reproduce.
+ *
+ * Measured 2026-08-21 against Node's own event stream, after a title-based
+ * guard was found to reject a real test named after its own path — and, before
+ * that, to credit the synthetic pass whenever the command named files
+ * relatively. Both defects came from asking the title a question only the
+ * stream can answer.
+ */
+export function createNodeResultLedger() {
+  const filesThatExecutedNothing = new Set();
+  return {
+    /** @returns {string | undefined} the creditable file path, if any */
+    observe(event) {
+      if (event.type === 'test:summary') {
+        const { counts, file } = event.data;
+        if (typeof file === 'string' && counts?.tests === 0) {
+          filesThatExecutedNothing.add(resolve(file));
+        }
+        return undefined;
+      }
+      const path = creditableNodeResultPath(event);
+      if (path === undefined) return undefined;
+      return filesThatExecutedNothing.has(resolve(path)) ? undefined : path;
+    },
+  };
 }
