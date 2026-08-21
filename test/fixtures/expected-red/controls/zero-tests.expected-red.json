@@ -8,7 +8,6 @@
       "file": "test/fixtures/expected-red/subject.mjs",
       "original": "  if (value <= 0) throw new Error('SUBJECT_NOT_POSITIVE');\n",
       "replacement": "",
-      "expected": "Missing expected exception",
       "test": {
         "files": ["test/fixtures/expected-red/subject.test.mjs"],
         "namePattern": "no test anywhere carries this name"
@@ -16,7 +15,8 @@
       "kills": [
         {
           "file": "test/fixtures/expected-red/subject.test.mjs",
-          "name": "the fixture subject refuses a non-positive quantity"
+          "name": "the fixture subject refuses a non-positive quantity",
+          "expected": "Missing expected exception"
         }
       ]
     }

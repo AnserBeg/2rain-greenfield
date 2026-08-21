@@ -258,30 +258,15 @@ function validateEntry(entry, where, root) {
     );
   }
 
-  let expected;
-  if (!isNonEmptyString(entry.expected)) {
+  // `expected` belongs to each KILL, not to the entry. One pattern applied to
+  // the concatenation of every declared failure's message is satisfied when any
+  // one of them carries it — the round-3 review's finding, and the same
+  // Cartesian conjunction this ADR exists to close, moved inside the kill set.
+  if (entry.expected !== undefined) {
     fail(
-      'EXPECTED_RED_ENTRY_SHAPE',
-      'expected must be a regular-expression source string',
+      'EXPECTED_RED_ENTRY_EXPECTED_MOVED',
+      'expected is declared per kill, not per entry: each declared kill states the reason it must die for',
     );
-  } else {
-    try {
-      expected = new RegExp(entry.expected, 'u');
-    } catch (error) {
-      fail(
-        'EXPECTED_RED_PATTERN_INVALID',
-        String(error instanceof Error ? error.message : error),
-      );
-    }
-  }
-  if (expected !== undefined) {
-    const matched = GREEN_CANARIES.filter((canary) => expected.test(canary));
-    if (matched.length > 0) {
-      fail(
-        'EXPECTED_RED_PATTERN_NOT_DISCRIMINATING',
-        `expected matches green transcript text ${JSON.stringify(matched[0])}; a pattern that matches a passing run is not the identity of a red`,
-      );
-    }
   }
 
   const test = entry.test;
@@ -342,6 +327,31 @@ function validateEntry(entry, where, root) {
           `kills names ${kill.file}, which test.files does not run`,
         );
       }
+      if (!isNonEmptyString(kill.expected)) {
+        fail(
+          'EXPECTED_RED_KILL_EXPECTED_MISSING',
+          `kills entry ${kill.name} states no expected failure reason`,
+        );
+      } else {
+        let pattern;
+        try {
+          pattern = new RegExp(kill.expected, 'u');
+        } catch (error) {
+          fail(
+            'EXPECTED_RED_PATTERN_INVALID',
+            String(error instanceof Error ? error.message : error),
+          );
+        }
+        if (pattern !== undefined) {
+          const matched = GREEN_CANARIES.filter((canary) => pattern.test(canary));
+          if (matched.length > 0) {
+            fail(
+              'EXPECTED_RED_PATTERN_NOT_DISCRIMINATING',
+              `the expected reason for ${kill.name} matches green transcript text ${JSON.stringify(matched[0])}; a pattern that matches a passing run is not the identity of a red`,
+            );
+          }
+        }
+      }
       const key = `${kill.file}::${kill.name}`;
       if (seen.has(key)) {
         fail('EXPECTED_RED_ENTRY_SHAPE', `kills repeats ${key}`);
@@ -373,24 +383,41 @@ export function runEntries(
   // whose subject has already been recovered. Clearing it keeps validate
   // answerable.
   rmSync(resolve(root, JOURNAL), { force: true });
-  const baselines = new Map();
   const scratch = mkdtempSync(join(tmpdir(), 'expected-red-'));
   let run = 0;
   try {
     for (const entry of entries) {
-      const key = commandKey(entry.test);
-      if (!baselines.has(key)) {
-        baselines.set(
-          key,
-          measureBaseline(entry, { root, scratch, log, run: (run += 1) }),
-        );
-      }
-      runOneEntry(entry, baselines.get(key), {
+      // A/B/A, per entry, with NO baseline reused across entries.
+      //
+      // The round-3 review's second finding: measuring green once, then red, and
+      // never measuring green again proves only that the red happened after the
+      // mutation. A suite that leaves state behind — a marker file, a row, a
+      // cache — makes its own earlier run a second sufficient cause, and every
+      // other check still passes. Memoizing one baseline across entries widened
+      // that to contamination between entries.
+      //
+      // Requiring the restored suite to return the SAME green pass set is what
+      // makes the mutation the only cause.
+      const before = measureBaseline(entry, {
         root,
         scratch,
         log,
         run: (run += 1),
+        phase: 'baseline',
       });
+      runOneEntry(entry, before, { root, scratch, log, run: (run += 1) });
+      const after = measureBaseline(entry, {
+        root,
+        scratch,
+        log,
+        run: (run += 1),
+        phase: 'restored',
+      });
+      assert.deepEqual(
+        [...after.passing].map(readableIdentity).sort(),
+        [...before.passing].map(readableIdentity).sort(),
+        `${entry.name}: the restored suite is not the green it started from, so the mutation is not the only cause of the red`,
+      );
     }
   } finally {
     rmSync(scratch, { force: true, recursive: true });
@@ -401,42 +428,43 @@ export function runEntries(
   return entries.length;
 }
 
-function measureBaseline(entry, { root, scratch, log, run }) {
+function measureBaseline(entry, { root, scratch, log, run, phase }) {
   const measured = measureSuiteRun(entry.test, {
     root,
     scratch,
-    label: `${run}-${entry.name}-baseline`,
+    label: `${run}-${entry.name}-${phase}`,
   });
   assert.equal(
     measured.spawnFailure,
     undefined,
-    `${entry.name}: the baseline suite could not be started (${measured.spawnFailure})`,
+    `${entry.name}: the ${phase} suite could not be started (${measured.spawnFailure})`,
   );
   assert.equal(
     measured.status,
     0,
-    `${entry.name}: the suite is not green before the mutation, so no red it produces can be attributed to the mutation\n${tail(measured.output)}`,
+    `${entry.name}: the ${phase} suite is not green, so no red it produces can be attributed to the mutation\n${tail(measured.output)}`,
   );
   // The check reading zero input. A --test-name-pattern that matches nothing
   // exits 0, and without this the mutated run's non-zero exit would be the only
   // thing distinguishing "nothing ran" from "the seam held".
   assert.ok(
     measured.results.length > 0,
-    `${entry.name}: the baseline executed no test — the pattern or file selects nothing`,
+    `${entry.name}: the ${phase} run executed no test — the pattern or file selects nothing`,
   );
-  assertEvidenceReconciles(entry, measured, root, 'baseline');
+  assertEvidenceReconciles(entry, measured, root, phase);
   const passing = identitiesOf(measured.results, 'pass', root);
   assert.equal(
     passing.size,
     measured.results.length,
-    `${entry.name}: the baseline is not wholly green, or reports two results under one file-qualified identity`,
+    `${entry.name}: the ${phase} run is not wholly green, or reports two results under one file-qualified identity`,
   );
-  log.write(`EXPECTED_RED_BASELINE ${entry.name} ${passing.size} passing\n`);
+  log.write(
+    `EXPECTED_RED_BASELINE ${entry.name} ${phase} ${passing.size} passing\n`,
+  );
   return { passing };
 }
 
 function runOneEntry(entry, baseline, { root, scratch, log, run }) {
-  const expected = new RegExp(entry.expected, 'u');
   const path = resolve(root, entry.file);
   const declared = entry.kills
     .map((kill) => identityOf(resolve(root, kill.file), kill.name))
@@ -540,14 +568,19 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
     [],
     `${entry.name}: ${JSON.stringify(notFailed.map(readableIdentity))} stopped passing without failing — absent, skipped or never registered is not a kill`,
   );
-  const declaredFailureText = declared
-    .map((identity) => failuresByIdentity.get(identity) ?? '')
-    .join('\n');
-  assert.match(
-    declaredFailureText,
-    expected,
-    `${entry.name}: the declared test failed for a different reason than the one declared\n${tail(declaredFailureText)}`,
-  );
+  // Each declared kill must fail for ITS OWN declared reason. One pattern over
+  // the concatenation of every declared failure is satisfied when any single one
+  // of them carries it, which lets a second declared kill die for anything at
+  // all — the round-3 review's finding, and the Cartesian conjunction this gate
+  // exists to refuse, moved inside the declared set.
+  for (const kill of entry.kills) {
+    const identity = identityOf(resolve(root, kill.file), kill.name);
+    assert.match(
+      failuresByIdentity.get(identity) ?? '',
+      new RegExp(kill.expected, 'u'),
+      `${entry.name}: ${kill.name} failed for a different reason than the one declared for it\n${tail(failuresByIdentity.get(identity) ?? '')}`,
+    );
+  }
   log.write(`MUTATION_RED ${entry.name} ${declared.length} killed\n`);
 }
 
@@ -653,9 +686,6 @@ function readableIdentity(identity) {
   return `${file}::${name}`;
 }
 
-function commandKey(test) {
-  return JSON.stringify([test.files, test.namePattern ?? null]);
-}
 
 function occurrences(value, needle) {
   return value.split(needle).length - 1;

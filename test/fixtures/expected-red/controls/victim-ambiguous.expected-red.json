@@ -8,14 +8,14 @@
       "file": "test/fixtures/expected-red/subject.mjs",
       "original": "'ambiguous'",
       "replacement": "'moved'",
-      "expected": "Missing expected exception",
       "test": {
         "files": ["test/fixtures/expected-red/subject.test.mjs"]
       },
       "kills": [
         {
           "file": "test/fixtures/expected-red/subject.test.mjs",
-          "name": "the fixture subject refuses a non-positive quantity"
+          "name": "the fixture subject refuses a non-positive quantity",
+          "expected": "Missing expected exception"
         }
       ]
     }

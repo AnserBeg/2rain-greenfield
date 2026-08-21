@@ -8,7 +8,6 @@
       "file": "test/fixtures/expected-red/subject.mjs",
       "original": "export const CONTROL_SENTINEL = 'pristine';",
       "replacement": "export const CONTROL_SENTINEL = 'moved';",
-      "expected": "moved",
       "test": {
         "files": [
           "test/fixtures/expected-red/same-name-a.test.mjs",
@@ -18,7 +17,8 @@
       "kills": [
         {
           "file": "test/fixtures/expected-red/same-name-b.test.mjs",
-          "name": "a name two files share"
+          "name": "a name two files share",
+          "expected": "moved"
         }
       ]
     }

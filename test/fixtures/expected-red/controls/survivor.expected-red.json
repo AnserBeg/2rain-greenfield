@@ -8,14 +8,14 @@
       "file": "test/fixtures/expected-red/subject.mjs",
       "original": "'nothing asserts this'",
       "replacement": "'mutated'",
-      "expected": "Missing expected exception",
       "test": {
         "files": ["test/fixtures/expected-red/subject.test.mjs"]
       },
       "kills": [
         {
           "file": "test/fixtures/expected-red/subject.test.mjs",
-          "name": "the fixture subject admits a positive integer"
+          "name": "the fixture subject admits a positive integer",
+          "expected": "Missing expected exception"
         }
       ]
     }

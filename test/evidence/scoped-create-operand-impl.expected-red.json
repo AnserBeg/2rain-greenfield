@@ -8,7 +8,6 @@
       "file": "apps/web/src/component-registry.ts",
       "original": "surfaceHref(context.surface, undefined, false, context)",
       "replacement": "surfaceHref(context.surface)",
-      "expected": "rendered POST action must retain the selected operand",
       "test": {
         "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "scoped create carries each URL operand"
@@ -16,7 +15,8 @@
       "kills": [
         {
           "file": "test/integration/surface-data-binding.test.ts",
-          "name": "scoped create carries each URL operand under its declared system-input key"
+          "name": "scoped create carries each URL operand under its declared system-input key",
+          "expected": "rendered POST action must retain the selected operand"
         }
       ]
     },
@@ -26,7 +26,6 @@
       "file": "apps/web/src/surface-runtime.ts",
       "original": "return Object.freeze({ [argumentKey]: legalEntitySelection[0]! });",
       "replacement": "return Object.freeze({ [argumentKey]: 'ac000000-0000-4000-8000-00000000000c' });",
-      "expected": "a second URL value must move the effective operand",
       "test": {
         "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "scoped create carries each URL operand"
@@ -34,7 +33,8 @@
       "kills": [
         {
           "file": "test/integration/surface-data-binding.test.ts",
-          "name": "scoped create carries each URL operand under its declared system-input key"
+          "name": "scoped create carries each URL operand under its declared system-input key",
+          "expected": "a second URL value must move the effective operand"
         }
       ]
     },
@@ -44,7 +44,6 @@
       "file": "apps/web/src/surface-runtime.ts",
       "original": "  if (legalEntitySelection.length !== 1) {\n    throw new InvalidSurfaceSubmissionError(\n      'a scoped create requires exactly one legal-entity operand',\n    );\n  }\n",
       "replacement": "",
-      "expected": "200 !== 422|3 !== 2",
       "test": {
         "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "scoped create carries each URL operand"
@@ -52,7 +51,8 @@
       "kills": [
         {
           "file": "test/integration/surface-data-binding.test.ts",
-          "name": "scoped create carries each URL operand under its declared system-input key"
+          "name": "scoped create carries each URL operand under its declared system-input key",
+          "expected": "200 !== 422|3 !== 2"
         }
       ]
     },
@@ -62,7 +62,6 @@
       "file": "packages/runtime/src/semantic-operation-gateway.ts",
       "original": "      if (operationDecision.decision === 'DENY') {\n        throw new SemanticOperationPolicyDeniedError(request.operationId, view);\n      }\n",
       "replacement": "",
-      "expected": "200 !== 403",
       "test": {
         "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "scoped create carries each URL operand"
@@ -70,7 +69,8 @@
       "kills": [
         {
           "file": "test/integration/surface-data-binding.test.ts",
-          "name": "scoped create carries each URL operand under its declared system-input key"
+          "name": "scoped create carries each URL operand under its declared system-input key",
+          "expected": "200 !== 403"
         }
       ]
     },
@@ -80,7 +80,6 @@
       "file": "apps/web/src/surface-runtime.ts",
       "original": "    return {\n      code: 'OPERATION_LEGAL_ENTITY_INACTIVE',\n      subject: error.subjectId,\n    };",
       "replacement": "    return {\n      code: 'OPERATION_UNAVAILABLE',\n    };",
-      "expected": "OPERATION_LEGAL_ENTITY_INACTIVE",
       "test": {
         "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "inactive legal-entity refusal keeps its provider subject"
@@ -88,7 +87,8 @@
       "kills": [
         {
           "file": "test/integration/surface-data-binding.test.ts",
-          "name": "an inactive legal-entity refusal keeps its provider subject at the web boundary"
+          "name": "an inactive legal-entity refusal keeps its provider subject at the web boundary",
+          "expected": "OPERATION_LEGAL_ENTITY_INACTIVE"
         }
       ]
     }

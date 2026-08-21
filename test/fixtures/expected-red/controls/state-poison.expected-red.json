@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "state-poison",
+      "claim": "The mutation must be the only cause of the red, so the restored suite must return the green it started from.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/state-poison.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/state-poison.test.mjs",
+          "name": "a victim poisoned by its own earlier run",
+          "expected": "STATE_OR_MUTATION_TOKEN"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "multi-kill-wrong-reason",
+      "claim": "Each declared kill must fail for its own declared reason, not for any reason its co-declarant happens to carry.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/multi-kill.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/multi-kill.test.mjs",
+          "name": "a declared kill that fails for its declared reason",
+          "expected": "DECLARED_TOKEN"
+        },
+        {
+          "file": "test/fixtures/expected-red/multi-kill.test.mjs",
+          "name": "a declared kill that fails for something else entirely",
+          "expected": "DECLARED_TOKEN"
+        }
+      ]
+    }
+  ]
+}

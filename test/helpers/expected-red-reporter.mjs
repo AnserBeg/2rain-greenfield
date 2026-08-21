@@ -1,17 +1,33 @@
 import { createNodeResultLedger } from './node-reporter-core.mjs';
 
 /**
+ * Failure types that mean a test ran and its body failed. Anything else — known
+ * cancellation, or a type a future Node adds — is not an executed failure and
+ * therefore cannot satisfy a declared kill.
+ */
+const EXECUTED_FAILURE_TYPES = new Set([
+  'testCodeFailure',
+  'uncaughtException',
+  'unhandledRejection',
+]);
+
+/**
  * Emits the executed test results of a run, each with its provenance, plus the
  * per-file counts Node itself reported — so the expected-red runner can bind
  * the red it requires to the test that produced it AND reconcile what it
  * credited against what Node counted.
  *
- * WHY STATUS IS THREE-VALUED. A `test:fail` is not necessarily an executed
- * assertion failure. A child left pending when its parent ends arrives as
- * `test:fail` with `failureType: "cancelledByParent"`, and Node counts it under
- * `counts.cancelled`. Treating it as a failure let a cancelled child stand in
- * for a declared kill — the 2026-08-21 round-2 review's finding. Cancellation
- * is recorded as itself and is never a kill.
+ * WHY STATUS IS AN ALLOWLIST, NOT A DENYLIST. A `test:fail` is not necessarily
+ * an executed assertion failure, and Node has at least three ways of saying so:
+ * a child left pending when its parent ends is `cancelledByParent`, a test that
+ * exceeds its deadline is `testTimeoutFailure`, and an aborted one is
+ * `testAborted`. **Node counts all of them under `counts.cancelled`, not
+ * `counts.failed`** — measured on 22.22.2, 2026-08-21.
+ *
+ * Denylisting the ones we know would fail open on the next one Node adds, so
+ * only failure types on the executed allowlist can be a kill; everything else is
+ * `cancelled`. That is `review-tiers`' prefer-unrepresentable rule: an unknown
+ * failure type cannot be misused because it cannot become a kill.
  */
 export default async function* expectedRedReporter(source) {
   const ledger = createNodeResultLedger();
@@ -26,9 +42,9 @@ export default async function* expectedRedReporter(source) {
       status:
         event.type === 'test:pass'
           ? 'pass'
-          : failureType === 'cancelledByParent'
-            ? 'cancelled'
-            : 'fail',
+          : EXECUTED_FAILURE_TYPES.has(String(failureType))
+            ? 'fail'
+            : 'cancelled',
     };
   });
 
