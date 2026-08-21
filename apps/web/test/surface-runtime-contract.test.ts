@@ -20,6 +20,7 @@ import {
   REQUEST_RUNTIME_VIEW_REFUSAL_CODES,
   RequestRuntimeViewRefusalError,
   type CurrentPolicyGateway,
+  type LoadedRequestRuntimeDefinition,
   type RequestRuntimeViewRefusalCode,
 } from '../../../packages/runtime/src/request-runtime-view.js';
 import * as resolveByName from '../../../packages/runtime/src/resolve-by-name.js';
@@ -270,7 +271,199 @@ test('every typed runtime-view refusal crosses the HTTP boundary with its code',
   }
 });
 
-test('runtime entry translates loader refusals and leaves unit-of-work failures untouched', async () => {
+test('a synchronous loader refusal is translated before current policy is called', async () => {
+  const loaderFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_POINTER_MISSING',
+    'synchronous loader refusal',
+  );
+  let policyCalls = 0;
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    runtimeRefusalRequestEntry(),
+    Object.freeze({
+      load(): Promise<never> {
+        throw loaderFailure;
+      },
+    }),
+    Object.freeze({
+      async authorize() {
+        return allowedCurrentPolicyDecision();
+      },
+      async readCurrentVersion() {
+        policyCalls += 1;
+        return currentPolicyVersionEvidence();
+      },
+    }),
+  );
+
+  await assert.rejects(
+    entry.run({}, () => undefined),
+    (error: unknown) => {
+      assert.ok(error instanceof RequestRuntimeViewRefusalError);
+      assert.equal(error.code, 'ACTIVE_POINTER_MISSING');
+      return true;
+    },
+  );
+  assert.equal(policyCalls, 0);
+});
+
+test('immediate loader and policy rejections retain loader-first Promise.all precedence', async () => {
+  const loaderFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_RELEASE_NOT_VISIBLE',
+    'immediately rejected loader refusal',
+  );
+  const policyFailure = new Error('immediately rejected current policy');
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    runtimeRefusalRequestEntry(),
+    Object.freeze({
+      load(): Promise<never> {
+        return Promise.reject(loaderFailure);
+      },
+    }),
+    Object.freeze({
+      async authorize() {
+        return allowedCurrentPolicyDecision();
+      },
+      readCurrentVersion(): Promise<never> {
+        return Promise.reject(policyFailure);
+      },
+    }),
+  );
+
+  await assert.rejects(
+    entry.run({}, () => undefined),
+    (error: unknown) => {
+      assert.ok(error instanceof RequestRuntimeViewRefusalError);
+      assert.equal(error.code, 'ACTIVE_RELEASE_NOT_VISIBLE');
+      return true;
+    },
+  );
+});
+
+test('runtime refusal recognition rejects every one-property structural near miss', async () => {
+  const validCode = 'ACTIVE_POINTER_MISSING';
+  const wrongName = Object.assign(new Error('wrong name'), {
+    code: validCode,
+  });
+  const missingCode = new Error('missing code');
+  missingCode.name = 'RequestRuntimeViewLoadError';
+  const numericCode = Object.assign(new Error('numeric code'), {
+    code: 7,
+  });
+  numericCode.name = 'RequestRuntimeViewLoadError';
+  const unknownCode = Object.assign(new Error('unknown string code'), {
+    code: 'RUNTIME_VIEW_CODE_ADDED_WITHOUT_A_RUNTIME_CONTRACT',
+  });
+  unknownCode.name = 'RequestRuntimeViewLoadError';
+  const specimens: ReadonlyArray<{
+    readonly failure: unknown;
+    readonly name: string;
+  }> = [
+    {
+      failure: Object.freeze({
+        code: validCode,
+        name: 'RequestRuntimeViewLoadError',
+      }),
+      name: 'plain object with exact name and valid code',
+    },
+    { failure: wrongName, name: 'Error with wrong name and valid code' },
+    { failure: missingCode, name: 'Error with exact name and missing code' },
+    { failure: numericCode, name: 'Error with exact name and numeric code' },
+    {
+      failure: unknownCode,
+      name: 'Error with exact name and unknown string code',
+    },
+  ];
+
+  for (const specimen of specimens) {
+    let policyCalls = 0;
+    const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+      runtimeRefusalRequestEntry(),
+      Object.freeze({
+        load(): Promise<never> {
+          throw specimen.failure;
+        },
+      }),
+      Object.freeze({
+        async authorize() {
+          return allowedCurrentPolicyDecision();
+        },
+        async readCurrentVersion() {
+          policyCalls += 1;
+          return currentPolicyVersionEvidence();
+        },
+      }),
+    );
+
+    await assert.rejects(
+      entry.run({}, () => undefined),
+      (error: unknown) => {
+        assert.equal(error, specimen.failure, specimen.name);
+        assert.equal(
+          error instanceof RequestRuntimeViewRefusalError,
+          false,
+          specimen.name,
+        );
+        return true;
+      },
+    );
+    assert.equal(policyCalls, 0, specimen.name);
+
+    const server = createSurfaceRuntimeServer(entry);
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(baseUrl);
+      assert.equal(response.status, 500, specimen.name);
+      assertRuntimeViewUnavailable(await response.text(), specimen.name);
+      assert.equal(policyCalls, 0, specimen.name);
+    } finally {
+      await close(server);
+    }
+  }
+});
+
+test('runtime entry translation is confined to loader failures', async () => {
+  const loadedDefinition = await loadedRuntimeDefinitionFixture();
+  const policyFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_RELEASE_NOT_ADMITTED',
+    'current-policy failure with the provider error shape',
+  );
+  const policyEntry = new AuthenticatedRequestRuntimeEntryAdapter(
+    runtimeRefusalRequestEntry(),
+    Object.freeze({
+      async load() {
+        return loadedDefinition;
+      },
+    }),
+    Object.freeze({
+      async authorize() {
+        return allowedCurrentPolicyDecision();
+      },
+      readCurrentVersion(): Promise<never> {
+        return Promise.reject(policyFailure);
+      },
+    }),
+  );
+  await assert.rejects(
+    policyEntry.run({}, () => undefined),
+    (error: unknown) => {
+      assert.equal(error, policyFailure);
+      assert.equal(error instanceof RequestRuntimeViewRefusalError, false);
+      return true;
+    },
+  );
+  const server = createSurfaceRuntimeServer(policyEntry);
+  const baseUrl = await listen(server);
+  try {
+    const response = await fetch(baseUrl);
+    assert.equal(response.status, 500);
+    assertRuntimeViewUnavailable(
+      await response.text(),
+      'provider-shaped current-policy failure',
+    );
+  } finally {
+    await close(server);
+  }
+
   const unitOfWorkFailure = new RequestRuntimeViewLoadError(
     'ACTIVE_RELEASE_NOT_VISIBLE',
     'unit-of-work failure with the provider error shape',
@@ -357,28 +550,43 @@ test('closed registry returns diagnostics for unknown and failing components', a
     assert.ok(failing?.slots[0]);
     assert.equal(surfaceHasUnsupportedComponent(unsupported), true);
     assert.equal(surfaceHasUnsupportedComponent(failing), false);
-    const formWithUnsupportedActivity = {
-      ...unsupported,
-      archetype: 'record' as const,
-      slots: [
-        { ...unsupported.slots[0], slot: 'sections' as const },
-        { ...unsupported.slots[0], slot: 'activity' as const },
-      ],
-      surfaceRole: 'form' as const,
-    };
-    assert.equal(
-      surfaceHasUnsupportedComponent(formWithUnsupportedActivity),
-      true,
-    );
-    assert.equal(
-      surfaceSupportsRuntimeIntent(
+    for (const unsupportedSlot of ['activity', 'childTables'] as const) {
+      const formWithUnsupportedNonMutationSlot: typeof unsupported = {
+        ...unsupported,
+        archetype: 'record' as const,
+        slots: [
+          { ...unsupported.slots[0], slot: 'sections' as const },
+          { ...unsupported.slots[0], slot: unsupportedSlot },
+        ],
+        surfaceRole: 'form' as const,
+      };
+      assert.equal(
+        surfaceHasUnsupportedComponent(formWithUnsupportedNonMutationSlot),
+        true,
+        unsupportedSlot,
+      );
+      assert.equal(
+        surfaceSupportsRuntimeIntent(
+          view,
+          formWithUnsupportedNonMutationSlot,
+          [],
+          'create',
+        ),
+        true,
+        unsupportedSlot,
+      );
+      const compiledUnsupportedSlot =
+        formWithUnsupportedNonMutationSlot.slots[1];
+      assert.ok(compiledUnsupportedSlot);
+      const result = renderRegisteredSurfaceComponent({
+        slot: compiledUnsupportedSlot,
+        surface: formWithUnsupportedNonMutationSlot,
         view,
-        formWithUnsupportedActivity,
-        [],
-        'create',
-      ),
-      true,
-    );
+      });
+      assert.equal(result.state, 'failed', unsupportedSlot);
+      assert.match(result.html, /data-slot-state="failed"/u, unsupportedSlot);
+      assert.match(result.html, /UNSUPPORTED_COMPONENT/u, unsupportedSlot);
+    }
     const unsupportedResult = renderRegisteredSurfaceComponent({
       slot: unsupported.slots[0],
       surface: unsupported,
@@ -866,6 +1074,65 @@ test('arity red: a permissive table and a re-imposed find are both observed', ()
     /const commands = record\s*\?\s*\(context\.operations \?\? \[\]\)\.filter\(/u,
   );
 });
+
+function runtimeRefusalRequestEntry(): AuthenticatedRequestEntryAdapter {
+  return new AuthenticatedRequestEntryAdapter(async () => ({
+    environmentId: '20000000-0000-4000-8000-000000000002',
+    principalId: '40000000-0000-4000-8000-000000000004',
+    tenantId: '10000000-0000-4000-8000-000000000001',
+  }));
+}
+
+function allowedCurrentPolicyDecision() {
+  return Object.freeze({
+    decision: 'ALLOW' as const,
+    decisionVersion: 'northstar.current-policy-decision/v1' as const,
+    policyVersion: 'runtime-view-refusal-gate-v1',
+  });
+}
+
+function currentPolicyVersionEvidence() {
+  return Object.freeze({
+    policyVersion: 'runtime-view-refusal-gate-v1',
+  });
+}
+
+async function loadedRuntimeDefinitionFixture(): Promise<LoadedRequestRuntimeDefinition> {
+  const view = await demoEntry().run({}, (issued) => issued);
+  return Object.freeze({
+    environmentId: view.environmentId,
+    pointer: view.pointer,
+    projections: view.projections,
+    release: view.release,
+    tenantId: view.tenantId,
+  });
+}
+
+function assertRuntimeViewUnavailable(html: string, specimen: string): void {
+  assert.match(
+    html,
+    /data-message="REQUEST_RUNTIME_VIEW_UNAVAILABLE"/u,
+    specimen,
+  );
+  assert.match(
+    html,
+    /data-diagnostic-code="REQUEST_RUNTIME_VIEW_UNAVAILABLE"/u,
+    specimen,
+  );
+  assert.match(html, /data-status-role="blocked"/u, specimen);
+  assert.match(
+    html,
+    /<h1 data-message-sentence>Application shell unavailable<\/h1>/u,
+    specimen,
+  );
+  assert.match(
+    html,
+    /<code data-message-code>REQUEST_RUNTIME_VIEW_UNAVAILABLE<\/code>/u,
+    specimen,
+  );
+  assert.doesNotMatch(html, /data-message-subject/u, specimen);
+  assert.doesNotMatch(html, /REQUEST_RUNTIME_VIEW_REFUSED/u, specimen);
+}
 
 function projectionRecord(
   fixture: Readonly<Record<string, unknown>>,

@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: active — runtime-translation re-scope after accepted Stop 2
+Status: active — correcting the first runtime-translation review
 
 ## Goal
 
@@ -75,8 +75,9 @@ The committed controls include:
   the HTTP mapping as `REQUEST_RUNTIME_VIEW_REFUSED` plus its code;
 - a browser journey that distinguishes the complete observable for invalid
   binding, unsupported query, and unavailable runtime view;
-- a browser create with an unregistered `activity` slot visibly failed while
-  registered `sections` and `commandBar` remain operable;
+- browser creates with each unregistered non-mutation slot, `activity` and
+  `childTables`, visibly failed while registered `sections` and `commandBar`
+  remain operable;
 - an actual provider parser refusal shown as `Operation refused` with
   `MODULE_REQUIRED_FIELD_MISSING`, rather than `Save unavailable`; and
 - the no-`commandBar` fixture showing that the removed compatibility Save does
@@ -94,11 +95,18 @@ reverted.
 | An identified provider refusal does not collapse to unavailable | Replaced the open-code residual return with `OPERATION_UNAVAILABLE` | `test:contracts` 17/18; expected `OPERATION_REFUSED` plus `MODULE_REQUIRED_FIELD_MISSING`, received `OPERATION_UNAVAILABLE` |
 | The mapper helper preserves its exact typed code | Replaced `subject: error.code` with one erased constant | `test:contracts` 17/18; first table member expected `ACTIVE_POINTER_MISSING`, received `ERASED_RUNTIME_VIEW_CODE`. Round 1 correctly ruled this a helper-level proxy, not HTTP-boundary evidence; it is retained as historical evidence but does not count for the boundary claim. |
 | The provider and runtime refusal vocabularies cannot drift | Deleted only `ACTIVE_POINTER_MISSING` from the runtime-owned 15-code record | `typecheck` exit 2, TS1360: `Readonly<{}>` does not satisfy `Record<"ACTIVE_POINTER_MISSING", never>` |
+| Runtime-only vocabulary drift cannot hide behind the provider-to-runtime check | Added only `RUNTIME_ONLY_REFUSAL_SENTINEL` to the runtime-owned record | `typecheck` exit 2, TS1360 at `RUNTIME_CODES_MISSING_FROM_PROVIDER`: `Readonly<{}>` does not satisfy `Record<"RUNTIME_ONLY_REFUSAL_SENTINEL", never>` (the executed HTTP loop also rejected the sentinel as not assignable to the provider union) |
 | Invalid binding remains distinct from unsupported query | Changed only the invalid-binding render code back to `QUERY_UNSUPPORTED` | focused browser control 0/1; complete observable expected `INVALID_SURFACE_BINDING`, received `QUERY_UNSUPPORTED` |
 | No fixture-only Save is synthesized | Restored only the conditional compatibility Save branch | focused browser control 0/1; expected zero Save buttons, received one |
 | Runtime entry preserves an identified loader refusal | Re-threw the recognized provider error instead of translating it to `RequestRuntimeViewRefusalError` | `test:contracts` 20/21; `ACTIVE_POINTER_MISSING` rendered `REQUEST_RUNTIME_VIEW_UNAVAILABLE` where the HTTP census required `REQUEST_RUNTIME_VIEW_REFUSED` |
 | Translation is confined to the loader call | Applied the same translation around `unitOfWork(view)` | `test:contracts` 20/21; the untouched-failure control received `RequestRuntimeViewRefusalError` instead of the exact original `RequestRuntimeViewLoadError` object |
+| Translation preserves synchronous evaluation and immediate rejection precedence | Made only `startRuntimeDefinitionLoad` `async` and awaited the loader | `test:contracts` 21/24; the synchronous-loader control observed one policy call instead of zero, the immediate dual rejection returned the policy error, and synchronous near-miss loaders also called policy |
+| A provider-shaped policy failure is outside loader translation | Sent only the policy rejection handler through `runtimeDefinitionFailure` | `test:contracts` 23/24; `runtime entry translation is confined to loader failures` received `RequestRuntimeViewRefusalError` instead of the exact policy error object; the unit-of-work arm remained green |
+| Only real `Error` instances can carry the provider refusal shape | Replaced only the `instanceof Error` predicate with a structural non-null-object predicate | `test:contracts` 23/24; the plain-object specimen was translated instead of remaining the exact original object and rendering the unavailable fallback |
+| The provider refusal name must be exact | Deleted only the exact-name predicate | `test:contracts` 23/24; the wrong-name `Error` specimen was translated instead of remaining the exact original object and rendering the unavailable fallback |
+| A string code must belong to the runtime-owned closed map | Deleted only the `Object.hasOwn` membership predicate | `test:contracts` 23/24; the unknown-string specimen was translated instead of remaining the exact original object and rendering the unavailable fallback. Missing and numeric code specimens are committed adjacent one-property controls. |
 | Every translated code traverses the HTTP catch-and-render boundary | Narrowed only the `RequestRuntimeViewRefusalError` catch to `UNSUPPORTED_RUNTIME_CAPABILITY`, the existing browser census member | `test:contracts` 20/21; the first other member, `ACTIVE_POINTER_MISSING`, rendered `REQUEST_RUNTIME_VIEW_UNAVAILABLE` where the HTTP census required `REQUEST_RUNTIME_VIEW_REFUSED` |
+| `childTables` cannot independently re-arm the slot veto | Added only a `childTables` early refusal to `surfaceSupportsRuntimeIntent` | `test:contracts` 23/24; the `activity` iteration passed and the same contract failed at `childTables`, receiving `false` where writable was required |
 | The exact runtime-owned error import is required | Removed only the exact runtime declaration from the actual `app-server.ts` source, leaving no provider reference for the residual predicate to reject | With the exact-occurrence predicate deleted, `test:contracts` 20/21; only `app-server runtime refusal boundary red: the required runtime-owned import cannot disappear` failed with `Missing expected exception`; the provider-import sibling stayed green |
 | No provider authority may cross the web boundary | Preserved the exact runtime declaration once and appended a separate `PostgresRequestRuntimeViewService` import to the actual source | With the residual-provider predicate deleted, `test:contracts` 20/21; only `app-server runtime refusal boundary red: a provider loader import is refused` failed with `Missing expected exception`; the required-import sibling stayed green |
 
@@ -185,7 +193,7 @@ The earlier Codex and Fable PASSes remain historical evidence about
 `03860aa`, but they do not apply to this redesign. Fresh Critical Codex and
 Fable arms are owed on the new frozen SHA.
 
-### Re-scoped candidate gates
+### First re-scoped candidate gates — `e8e2e014c7e3502f9bd2ae230fc2b151eb756959`
 
 The redesigned executable tree completed the charter's pre-review gates:
 
@@ -228,6 +236,16 @@ and, as chartered, left the Node listener on port 4174. `ss` resolved PID 19056;
 it was killed explicitly and the port was confirmed clear. The exact isolated
 container and its test-only volume were then removed with `dev:reset`; that
 ephemeral data is not recoverable and no shared dev container was touched.
+
+The corrected runtime-evaluation tree repeated this observation with `pnpm dev`
+on port 4174, the same isolated container name and database port, and 176 seeded
+records. A headless browser read the real Item form's `FormData`, supplied SKU
+and name, removed only the base-unit value, and posted through the live server.
+The response was HTTP 422 with role `blocked`, code `OPERATION_REFUSED`, subject
+`MODULE_REQUIRED_FIELD_MISSING`, and the complete code-bearing residual copy
+above. `dev:stop` again left the listener (PID 72119); it was explicitly killed,
+port 4174 was confirmed clear, and `dev:reset` removed only the isolated
+container and `dev-composed-app-postgres-refusal-data` volume.
 
 ## Checkpoint trigger evaluation
 
@@ -322,3 +340,41 @@ and `surfaceHasUnsupportedComponent` plus `operationMessageCode` now have no
 production callers. The valid out-of-scope finding that query-side interpreter
 refusals still collapse to `QUERY_UNAVAILABLE` is routed as
 `provider-query-refusal-taxonomy` in `current-plan.md`.
+
+### First runtime-translation review — `e8e2e014c7e3502f9bd2ae230fc2b151eb756959`
+
+Fresh Codex xhigh returned `REVISE`. The provider-neutral architecture passed:
+production web code imported only the runtime seam, the unchanged no-provider
+architecture boundary remained intact, and all 15 real provider refusals
+crossed runtime translation and HTTP with their code. Six corrections remained:
+
+1. the `async` loader helper turned a synchronous loader throw into a rejected
+   promise, so current policy was called when the base implementation would
+   have stopped before it; immediate rejection precedence could change too;
+2. the structural classifier had no one-property controls for a non-`Error`,
+   wrong name, absent code, non-string code, or unknown string code, and the
+   loader-only claim lacked an unaffected provider-shaped policy twin;
+3. only provider-minus-runtime union drift had a recorded red, although the
+   equality construction has two authored directions;
+4. the slot-local contract and browser journey exercised `activity` but not
+   the equally named `childTables` invariant;
+5. ADR-0054's new amendment inherited the accepted status of the original
+   decision before this packet was accepted; and
+6. the active current-plan row still classified the correction Behavioral
+   while this packet and its operator-truth consequence are Critical.
+
+The production correction keeps the original loader and policy promises rather
+than wrapping the loader with another async promise. A two-input join attaches
+handlers directly to those originals in `Promise.all` order and translates only
+the loader rejection handler. A synchronous loader throw is translated before
+policy is invoked; a synchronous policy throw still occurs before handlers are
+attached; and already-rejected loader and policy promises retain loader-first
+precedence. Committed controls cover those cases, all five classifier near
+misses through exact-object identity and the generic HTTP fallback, and
+provider-shaped policy and unit-of-work failures outside translation.
+
+The contract and real browser write journey now each enumerate `activity` and
+`childTables`. The inverse type-drift red is recorded separately above. The ADR
+amendment is explicitly proposed pending packet acceptance, and the active-plan
+row is Critical. No `packages/postgres-provider/**` byte changed and the runtime
+seam design remains unchanged.

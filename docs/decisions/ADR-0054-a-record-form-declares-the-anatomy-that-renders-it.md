@@ -2,6 +2,7 @@
 
 Date: 2026-08-17
 Status: accepted
+Amendment 6 status: proposed — pending acceptance of `web-refusal-taxonomy`
 Tier: Critical (review per `review-tiers`)
 
 ## Context

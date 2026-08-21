@@ -447,10 +447,12 @@ export class AuthenticatedRequestRuntimeEntryAdapter {
     const context = await this.requestEntry.enter(request);
     assertTrustedRequestContext(context);
     const subject = policySubject(context);
-    const [definition, policyEvidence] = await Promise.all([
-      loadRuntimeDefinition(this.loader, context),
-      this.currentPolicy.readCurrentVersion(subject),
-    ]);
+    const definitionLoad = startRuntimeDefinitionLoad(this.loader, context);
+    const policyRead = this.currentPolicy.readCurrentVersion(subject);
+    const [definition, policyEvidence] = await joinRuntimeDefinitionAndPolicy(
+      definitionLoad,
+      policyRead,
+    );
     const view = constructRequestRuntimeView(
       context,
       definition,
@@ -460,19 +462,65 @@ export class AuthenticatedRequestRuntimeEntryAdapter {
   }
 }
 
-async function loadRuntimeDefinition(
+function startRuntimeDefinitionLoad(
   loader: RequestRuntimeDefinitionLoader,
   context: TrustedRequestContext,
 ): Promise<LoadedRequestRuntimeDefinition> {
   try {
-    return await loader.load(context);
+    return loader.load(context);
   } catch (error) {
-    const code = requestRuntimeViewRefusalCode(error);
-    if (code !== null) {
-      throw new RequestRuntimeViewRefusalError(code);
-    }
-    throw error;
+    throw runtimeDefinitionFailure(error);
   }
+}
+
+/**
+ * A two-input Promise.all with one source-specific rejection translation.
+ * Handlers attach to the original promises in argument order, so an immediate
+ * loader rejection retains the same precedence it had before translation.
+ */
+function joinRuntimeDefinitionAndPolicy(
+  definitionLoad: Promise<LoadedRequestRuntimeDefinition>,
+  policyRead: Promise<CurrentPolicyVersionEvidence>,
+): Promise<
+  readonly [LoadedRequestRuntimeDefinition, CurrentPolicyVersionEvidence]
+> {
+  return new Promise((resolve, reject) => {
+    let definition!: LoadedRequestRuntimeDefinition;
+    let policyEvidence!: CurrentPolicyVersionEvidence;
+    let remaining = 2;
+    const resolveWhenComplete = (): void => {
+      remaining -= 1;
+      if (remaining === 0) {
+        resolve([definition, policyEvidence]);
+      }
+    };
+    void definitionLoad.then(
+      (loaded) => {
+        definition = loaded;
+        resolveWhenComplete();
+      },
+      (error: unknown) => {
+        reject(runtimeDefinitionFailure(error));
+      },
+    );
+    void policyRead.then(
+      (evidence) => {
+        policyEvidence = evidence;
+        resolveWhenComplete();
+      },
+      (error: unknown) => {
+        reject(error);
+      },
+    );
+  });
+}
+
+function runtimeDefinitionFailure(error: unknown): unknown {
+  const code = requestRuntimeViewRefusalCode(error);
+  if (code !== null) {
+    return new RequestRuntimeViewRefusalError(code);
+  }
+  return error;
 }
 
 function requestRuntimeViewRefusalCode(

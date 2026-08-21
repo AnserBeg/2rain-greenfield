@@ -602,3 +602,17 @@ Why: entity, field and surface locals all said `master`, so surface-ID-derived
 prefixes passed a test claiming query/record authority. How to apply: make every
 non-authoritative identifier opaque and divergent, then exercise each changed
 branch directly so the wrong authority produces a different observation.
+
+## Translate refusals at an owned seam
+Date: 2026-08-20
+Why: `web-refusal-taxonomy` first imported a PostgreSQL-provider error into web,
+breaching the existing provider-neutral transport boundary.
+How to apply: translate a provider refusal into an owner-neutral typed error at
+the provider port; downstream transports consume only the owning-layer seam.
+
+## Preserve concurrent evaluation when translating one source
+Date: 2026-08-20
+Why: an `async` loader wrapper converted a synchronous throw into rejection, so
+policy ran when the original `Promise.all` expression stopped before calling it.
+How to apply: preserve call order and original promise handlers; test synchronous
+throws, simultaneous rejections, and same-shaped failures from unaffected ports.

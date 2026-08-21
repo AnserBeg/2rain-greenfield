@@ -1656,68 +1656,76 @@ test('an empty data slot is observably distinct from a failed slot', async ({
   }
 });
 
-test('an unsupported non-mutation slot stays visible without vetoing a write', async ({
-  page,
-}) => {
-  const compiled = compileFixture(true, false, undefined, false, true);
-  const policy = allowPolicy();
-  const slotExecutor = new BrowserFixtureExecutor(null);
-  const operationMediation = new SemanticOperationMediationAuthority();
-  const slotServer = createSurfaceRuntimeServer(
-    runtimeEntry(compiled, policy),
-    {
-      operationGateway: new SemanticOperationGateway(
-        policy,
-        slotExecutor,
-        operationMediation,
-      ),
-      operationMediation,
-      queryGateway: new SemanticQueryGateway(policy, slotExecutor),
-    },
-  );
-  const slotBaseUrl = await listen(slotServer);
-
-  try {
-    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
-    await page.goto(
-      `${slotBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+for (const unsupportedSlot of ['activity', 'childTables'] as const) {
+  test(`an unsupported ${unsupportedSlot} slot stays visible without vetoing a write`, async ({
+    page,
+  }) => {
+    const compiled = compileFixture(
+      true,
+      false,
+      undefined,
+      false,
+      unsupportedSlot,
     );
-    const activity = page.locator(
-      '[data-platform-slot="record:activity"][data-slot-state="failed"]',
-    );
-    await expect(
-      activity.locator('[data-message="UNSUPPORTED_COMPONENT"]'),
-    ).toBeVisible();
-    await expect(
-      page.locator(
-        '[data-platform-slot="record:sections"][data-slot-state="ready"]',
-      ),
-    ).toBeVisible();
-    await expect(
-      page.locator(
-        '[data-platform-slot="record:commandBar"][data-slot-state="ready"]',
-      ),
-    ).toBeVisible();
-
-    await page.getByLabel('Name', { exact: true }).fill('Slot-local refusal');
-    await page.getByLabel('Number', { exact: true }).fill('SLOT-001');
-    const before = slotExecutor.providerVerdicts.length;
-    await page.getByRole('button', { name: 'Save' }).click();
-    expect(slotExecutor.providerVerdicts.slice(before)).toEqual([
+    const policy = allowPolicy();
+    const slotExecutor = new BrowserFixtureExecutor(null);
+    const operationMediation = new SemanticOperationMediationAuthority();
+    const slotServer = createSurfaceRuntimeServer(
+      runtimeEntry(compiled, policy),
       {
-        accepted: true,
-        code: null,
-        stage: 'operation-input',
-        subjectId: null,
+        operationGateway: new SemanticOperationGateway(
+          policy,
+          slotExecutor,
+          operationMediation,
+        ),
+        operationMediation,
+        queryGateway: new SemanticQueryGateway(policy, slotExecutor),
       },
-    ]);
-    await expect(page.getByRole('status')).toContainText('Create complete');
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      slotServer.close((error) => (error ? reject(error) : resolve()));
-    });
-  }
-});
+    );
+    const slotBaseUrl = await listen(slotServer);
+
+    try {
+      await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+      await page.goto(
+        `${slotBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+      );
+      const unsupported = page.locator(
+        `[data-platform-slot="record:${unsupportedSlot}"][data-slot-state="failed"]`,
+      );
+      await expect(
+        unsupported.locator('[data-message="UNSUPPORTED_COMPONENT"]'),
+      ).toBeVisible();
+      await expect(
+        page.locator(
+          '[data-platform-slot="record:sections"][data-slot-state="ready"]',
+        ),
+      ).toBeVisible();
+      await expect(
+        page.locator(
+          '[data-platform-slot="record:commandBar"][data-slot-state="ready"]',
+        ),
+      ).toBeVisible();
+
+      await page.getByLabel('Name', { exact: true }).fill('Slot-local refusal');
+      await page.getByLabel('Number', { exact: true }).fill('SLOT-001');
+      const before = slotExecutor.providerVerdicts.length;
+      await page.getByRole('button', { name: 'Save' }).click();
+      expect(slotExecutor.providerVerdicts.slice(before)).toEqual([
+        {
+          accepted: true,
+          code: null,
+          stage: 'operation-input',
+          subjectId: null,
+        },
+      ]);
+      await expect(page.getByRole('status')).toContainText('Create complete');
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        slotServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+}
 
 test('invalid binding, unsupported query, and unavailable runtime view remain distinct', async ({
   page,
@@ -2584,7 +2592,7 @@ function compileFixture(
   withInvalidFormBinding = false,
   amend?: (authored: Record<string, unknown>) => void,
   includeRecordSections = false,
-  includeUnsupportedActivity = false,
+  unsupportedNonMutationSlot: 'activity' | 'childTables' | null = null,
 ): CompileSuccess {
   const authored = ordinaryModuleV1();
   exposeRequiredMasterNumber(authored);
@@ -2615,7 +2623,7 @@ function compileFixture(
       }));
     }
   }
-  if (includeUnsupportedActivity) {
+  if (unsupportedNonMutationSlot !== null) {
     const form = surfaces.find(
       (surface) =>
         surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_form`,
@@ -2627,8 +2635,8 @@ function compileFixture(
     slots.push({
       ...exemplar,
       orderKey: 50,
-      slot: 'activity',
-      slotId: `${FIXTURE_IDS.namespace}:slot.master_form_activity`,
+      slot: unsupportedNonMutationSlot,
+      slotId: `${FIXTURE_IDS.namespace}:slot.master_form_${unsupportedNonMutationSlot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
     });
   }
   if (withInvalidFormBinding) {
