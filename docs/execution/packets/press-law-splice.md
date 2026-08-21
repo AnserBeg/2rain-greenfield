@@ -16,7 +16,10 @@ boundary production defect and a plural partial-run control gap. Candidate
 source observer still mistook literal-token punctuation for runtime adjacency.
 Candidate `ebbb65ecf8d93e4a3742e1c0eb7c0d2b3e950dc1` returned REVISE because
 construction ownership included type-literal descendants that do not contribute
-to the runtime value. The round-8 correction is gate-green and frozen for a
+to the runtime value. Candidate
+`a58d3e7356b32d1e9d839fcfbd00318e40d6c94a` returned REVISE with production
+correct and one shared transparent-wrapper-grammar control survivor. The
+round-9 test-only correction pins all five wrapper forms and is gate-green for a
 fresh Critical arm; the full matrix remains deferred until review converges.
 
 ## Packet definition
@@ -172,6 +175,7 @@ not rely on the routed Inventory debt:
 | contiguous/split static-boundary refusal | the same six forms receive a static `:` at the relevant edge | six exact observations at their construction lines; the construction observer retains fixed boundaries for both tokenizations |
 | type-literal ownership twin | one direct `satisfies` type literal is repeated beneath an empty runtime concatenation | both direct source occurrences report; adding a semantically neutral construction cannot transfer the type token to runtime ownership |
 | runtime/type provenance companion | one completed construction contains a runtime module identity and an independent module identity in its `satisfies` type | two observations at their distinct runtime-construction and raw type-literal lines |
+| transparent-wrapper grammar | the runtime namespace is split across a parenthesized, `as`, angle-bracket-asserted, `satisfies`, or non-null operand; the three typed forms also contain an independent type-literal identity | eight exact observations: one construction-derived result for every wrapper plus one raw type-literal result for each typed wrapper; deleting any shared unwrap predicate loses its construction observation |
 | unknown-left admission/refusal | local ID `widget_list` and symbol `WIDGET_IDS` each follow an unknown prefix either directly or after a static `:` | the directly adjacent identities admit because the runtime prefix may erase `\b`; the colon-bounded twins refuse exactly at their construction lines |
 | partial-run multiplicity | one incomplete outer concatenation contains two independently colon-bounded spliced namespaces separated by an unknown value | two exact observations at the two static-run positions; first-partial-run-only compression fails |
 | tagged-boundary admission | a tag receives the spliced template body | zero violations; the tag controls the runtime result |
@@ -233,6 +237,16 @@ observations. Stopping at a transparent type wrapper instead makes the stronger
 provenance companion report its runtime identity twice—once raw and once
 constructed—while retaining the independent type occurrence. Explicit inverse
 patches restored both mutations before the final focused run.
+
+The round-9 focused run passes 36/36 against production byte-identical to
+candidate `a58d3e7`. Before adding the new control, deleting only
+`ts.isSatisfiesExpression` from the shared `unwrapStaticStringExpression`
+grammar left all 35 controls green. The committed fixture splits
+`northstar.widget` through each of the five transparent wrapper forms and keeps
+independent type-literal companions for `as`, angle-bracket assertion, and
+`satisfies`. Replaying that exact predicate deletion now fails only the new
+wrapper control, leaving the other 35 green. The inverse patch restored the
+production source before the final focused run; no mutation runner is committed.
 
 ## Gate evidence
 
@@ -397,6 +411,28 @@ passed 203/203; the previously blocked tests 7, 8, and 9 completed in 76.7 s,
 122.8 s, and 147.8 s respectively. No timeout, PostgreSQL code, or out-of-scope
 behavior changed between the red and green runs.
 
+Round 9 changes only the architecture control above production byte-identical
+to candidate `a58d3e7`:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` before the new control, with only `ts.isSatisfiesExpression` deleted | SURVIVOR CONFIRMED — 35/35; the shared evaluator/range grammar consistently omitted the wrapper |
+| focused `module-press-law.test.ts` | PASS — 36/36, including one exact eight-observation fixture spanning all five transparent wrappers and three independent type-literal companions |
+| reviewer-selected `ts.isSatisfiesExpression` deletion after the control | EXPECTED RED — only the new wrapper control failed; the other 35 remained green; the inverse patch restored production before the final focused run |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 167/167, including 36/36 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 1,342,849.5 ms |
+
+Architecture queued behind another lane's full matrix and acquired the exclusive
+lease only after that holder released. Before PostgreSQL, no test runner or
+repository container remained; 5.1 GiB memory was available and the second
+five-second CPU sample was 81.6% idle. The three historically timeout-sensitive
+tests 7, 8, and 9 passed in 104.3 s, 149.4 s, and 221.7 s respectively. The
+discarded mutation replay is corroboration; the committed exact fixture is the
+reproducible evidence. No production source or mutation runner changed.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -531,6 +567,26 @@ regression introduced by the prior correction—an explicit always-continue case
 in `review-tiers`. Production changed, so the next review is again a fresh full
 Critical arm.
 
+The fresh review of candidate
+`a58d3e7356b32d1e9d839fcfbd00318e40d6c94a` returned **REVISE** with no
+surviving production defect, ADR conflict, ownership defect, or occurrence
+loss. It found one Critical control survivor: the evaluator and range collector
+could consistently lose any one transparent wrapper from their shared
+`unwrapStaticStringExpression` grammar while the existing final-observation
+twins fell back to raw observations and stayed green. Deleting only
+`ts.isSatisfiesExpression` preserved focused 35/35 but missed the split runtime
+identity in `('northstar' satisfies string) + '.' + 'widget'`.
+
+Round 9 adds the reviewer-selected construction-channel control for all five
+transparent wrappers and leaves production byte-identical to `a58d3e7`. The
+typed wrappers retain independent type-literal identities so the expected array
+also proves those type children remain raw. The exact `satisfies`-predicate
+deletion now fails only this control while the preceding 35 stay green.
+Continuation is the bounded test-only closure the review prescribed. If a new
+arm produces another adjacent wrapper-list specimen without identifying a
+production defect or a distinct authority/proxy class, the packet must stop or
+narrow its claim rather than enumerate syntax indefinitely.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -553,6 +609,13 @@ type literal, constraint, or other non-value source descendant can be textually
 inside a runtime expression's subtree without contributing a token to its value.
 When ownership suppresses another observer, every claimed range needs both an
 inside-runtime control and an independent-descendant control.
+
+The round-8 review adds the companion rule: **shared grammar is not proved by
+two consumers agreeing.** If evaluator and ownership routing call the same
+unwrap helper, they can agree on the same omission. Each explicitly supported
+entry needs a construction-channel specimen that raw source cannot satisfy,
+with type-child evidence kept orthogonal where the syntax carries both runtime
+and type positions.
 
 A second reusable rule follows from the confirmed Fable finding: **partial
 evaluation must preserve known semantic boundaries rather than classifying an
