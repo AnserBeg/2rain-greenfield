@@ -387,6 +387,7 @@ interface SourceRange {
 
 interface StaticStringConstruction {
   readonly index: number;
+  readonly leftBoundaryKnown: boolean;
   readonly literalRanges: readonly SourceRange[];
   readonly rightBoundaryKnown: boolean;
   readonly value: string;
@@ -425,6 +426,7 @@ function staticallyConstructedStrings(
       if (value !== undefined) {
         constructions.push({
           index: node.getStart(sourceFile),
+          leftBoundaryKnown: true,
           literalRanges: staticStringLiteralRanges(node, sourceFile),
           rightBoundaryKnown: true,
           value,
@@ -437,10 +439,10 @@ function staticallyConstructedStrings(
       constructions.push(...staticallyKnownStringRuns(node, sourceFile));
 
       // The direct operands of an incomplete construction are not completed
-      // values. Statically known runs above are observable only where their
-      // right boundary is also known. Continue through semantic boundaries
-      // within the operands, where an independently completed construction can
-      // exist.
+      // values. Statically known runs above are observable only where the
+      // shared matcher can establish the relevant boundaries from static text
+      // or the construction edges. Continue through semantic boundaries within
+      // the operands, where an independently completed construction can exist.
       if (ts.isTemplateExpression(node)) {
         for (const span of node.templateSpans) {
           visitIncompleteConstructionOperand(span.expression);
@@ -480,17 +482,24 @@ function staticallyKnownStringRuns(
   let current:
     | {
         index: number;
+        leftBoundaryKnown: boolean;
         literalRanges: SourceRange[];
         value: string;
       }
     | undefined;
+  let nextLeftBoundaryKnown = true;
 
   const appendStatic = (
     value: string,
     literalRanges: readonly SourceRange[],
     index: number,
   ): void => {
-    current ??= { index, literalRanges: [], value: '' };
+    current ??= {
+      index,
+      leftBoundaryKnown: nextLeftBoundaryKnown,
+      literalRanges: [],
+      value: '',
+    };
     current.value += value;
     current.literalRanges.push(...literalRanges);
   };
@@ -500,7 +509,10 @@ function staticallyKnownStringRuns(
     }
     current = undefined;
   };
-  const appendDynamic = (): void => finish(false);
+  const appendDynamic = (): void => {
+    finish(false);
+    nextLeftBoundaryKnown = false;
+  };
   const flatten = (expression: ts.Expression): void => {
     const unwrapped = unwrapStaticStringExpression(expression);
     if (ts.isStringLiteralLike(unwrapped)) {
@@ -544,17 +556,30 @@ interface ConstructedModuleIdentityMatch extends ModuleIdentityMatch {
   readonly literalRanges: readonly SourceRange[];
 }
 
+// A word character is also a namespace-continuation character. Padding an
+// unknown adjacent runtime value with one lets the shared identity matcher
+// make the conservative boundary decision without duplicating its patterns.
+const unknownIdentityNeighbor = '_';
+
 function constructedModuleIdentityMatches(
   constructions: readonly StaticStringConstruction[],
   module: ModuleDescriptor,
 ): readonly ConstructedModuleIdentityMatch[] {
   const matches: ConstructedModuleIdentityMatch[] = [];
   for (const construction of constructions) {
-    const match = moduleIdentityMatches(construction.value, module).find(
+    const leftPadding = construction.leftBoundaryKnown
+      ? ''
+      : unknownIdentityNeighbor;
+    const rightPadding = construction.rightBoundaryKnown
+      ? ''
+      : unknownIdentityNeighbor;
+    const observedValue = `${leftPadding}${construction.value}${rightPadding}`;
+    const constructionStart = leftPadding.length;
+    const constructionEnd = constructionStart + construction.value.length;
+    const match = moduleIdentityMatches(observedValue, module).find(
       (identityMatch) =>
-        construction.rightBoundaryKnown ||
-        identityMatch.index + identityMatch.value.length <
-          construction.value.length,
+        identityMatch.index >= constructionStart &&
+        identityMatch.index + identityMatch.value.length <= constructionEnd,
     );
     if (match) {
       matches.push({

@@ -541,6 +541,82 @@ test('consolidated guard admission: an unbounded static prefix may continue thro
   }
 });
 
+test('consolidated guard preserves unknown left adjacency for word-bounded identities', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const prefix: string;',
+      'export const localAdmitted =',
+      "  `${prefix}${'widget'}_${'list'}`;",
+      'export const localRefused =',
+      "  `${prefix}:${'widget'}_${'list'}`;",
+      'export const symbolAdmitted =',
+      "  `${prefix}${'WIDGET'}_${'IDS'}`;",
+      'export const symbolRefused =',
+      "  `${prefix}:${'WIDGET'}_${'IDS'}`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 5,
+        message: 'generic press references widget identity widget_list',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 9,
+        message: 'generic press references widget identity WIDGET_IDS',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard reports every bounded partial run in one incomplete construction', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const gap: string;',
+      'declare const tail: string;',
+      'export const message =',
+      "  'northstar.' + 'widget:first ' + gap +",
+      "  ' northstar.' + 'widget:second ' + tail;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 4,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 5,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard admission: a tagged template body is not an ordinary completed string', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [
