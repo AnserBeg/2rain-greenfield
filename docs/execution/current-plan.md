@@ -1,5 +1,22 @@
 # Current plan — active execution state
 
+## PROGRAM REVIEW — 2026-08-20, DONE. Read this before assuming one is due.
+
+**The first-office-worker-slice program review is COMPLETE**, two arms converged, recorded
+at [`program-reviews/2026-08-20-first-office-worker-slice.md`](program-reviews/2026-08-20-first-office-worker-slice.md)
+against `7e1c815`, with a ledger pointer row. **Do not treat the fan-out trigger as
+pending — it fired and was discharged.**
+
+**A DIFFERENT program review is still open and is not this one:** row `5g3-prog`, the
+major-correctness-domain review for the inventory ledger. **A lane reading only the queue
+mistook that row for the fan-out trigger on 2026-08-20**, which is exactly the failure
+this section now prevents.
+
+**Recorded as an orchestrator error:** the review was written, committed and pushed, and
+**the queue was never told.** That is finding **R1 of the review itself** — a record
+outliving its truth — committed two hours after writing the finding. **The instrument that
+would have caught it is R1's own `check-records.sh`, which is not built yet.**
+
 ## TRIAGE — 2026-08-13. Read this before the queue.
 
 **The queue holds 134 rows and they all looked equally live. They are not.** Every
