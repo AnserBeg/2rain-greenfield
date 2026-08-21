@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "admission-twin",
+      "claim": "The fixture subject refuses a quantity that is not a positive integer.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "  if (value <= 0) throw new Error('SUBJECT_NOT_POSITIVE');\n",
+      "replacement": "",
+      "expected": "Missing expected exception",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/subject.test.mjs"
+        ]
+      },
+      "kills": [
+        "the fixture subject refuses a non-positive quantity"
+      ]
+    }
+  ]
+}

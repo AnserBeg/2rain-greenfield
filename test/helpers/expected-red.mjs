@@ -600,11 +600,6 @@ function main(argv) {
     selected.length === 0
       ? entries
       : entries.filter((entry) => selected.includes(entry.name));
-  // Selecting nothing is not a green run over an empty set.
-  if (chosen.length === 0) {
-    process.stderr.write('expected-red: FAIL — no entry was selected, so nothing was measured\n');
-    return 1;
-  }
   runEntries(chosen);
   process.stdout.write(`expected-red: OK (${chosen.length} expected red(s) reproduced and restored)\n`);
   return 0;

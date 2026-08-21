@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "survivor",
+      "claim": "The fixture subject exports a label that no test asserts on.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "'nothing asserts this'",
+      "replacement": "'mutated'",
+      "expected": "Missing expected exception",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/subject.test.mjs"
+        ]
+      },
+      "kills": [
+        "the fixture subject admits a positive integer"
+      ]
+    }
+  ]
+}
