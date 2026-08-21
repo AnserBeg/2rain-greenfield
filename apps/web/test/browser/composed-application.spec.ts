@@ -22,6 +22,8 @@ import {
   type InventoryAdjustmentPostingCommandV1,
 } from '../../../../packages/postgres-provider/src/inventory-posting-service.js';
 import { TrustedActorEnvelopeIssuer } from '../../../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
+import { SHARED_LIST_QUERY_VERSION } from '../../../../packages/runtime/src/list-behavior/index.js';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-query-gateway.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 const applicationNamespace = 'northstar.app';
@@ -839,6 +841,7 @@ async function inventoryNavigationJourney(
     'Inventory transaction line',
     'Inventory transaction',
     'Legal entity',
+    'Posted stock',
     'Stock count line',
     'Stock count',
   ]);
@@ -867,6 +870,7 @@ async function inventoryNavigationJourney(
       'Inventory transaction line',
       'Inventory transaction',
       'Legal entity',
+      'Posted stock',
       'Stock count line',
       'Stock count',
     ],
@@ -951,6 +955,32 @@ async function inventoryNavigationJourney(
   ).toBeVisible();
   await expect(
     page.getByRole('cell', { name: 'Calgary warehouse', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
+  ).toHaveCount(0);
+  await inventoryNavigation.getByText('Inventory', { exact: true }).click();
+  await inventoryNavigation
+    .getByRole('link', { name: 'Posted stock', exact: true })
+    .click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Posted stock' }),
+  ).toBeVisible();
+  await page.getByRole('link', { name: 'DEFAULT', exact: true }).click();
+  await expect(
+    page.locator('[data-platform-slot="list:dataGrid"]'),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('cell', { name: demoItemId, exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('cell', { name: demoLocationId, exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('cell', { name: '5.000000000000000000', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('cell', { name: 'EA', exact: true }),
   ).toBeVisible();
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
@@ -2325,6 +2355,41 @@ async function seedPostedInventory(
         await runtimePool.end();
       }
     },
+  );
+
+  const postedStock = await application.runtime.entry.run(
+    { headers: { authorization: 'browser-inventory-balance-read' } },
+    (view) =>
+      application.runtime.queryGateway.invoke(view, {
+        arguments: {
+          [`${applicationNamespace}:parameter.posted_stock_balance_list_legal_entity_scope`]:
+            browserLegalEntityId,
+          includeArchived: false,
+          list: {
+            cursor: null,
+            matchMode: 'substring',
+            pageSize: 100,
+            relationLabels: [],
+            schemaVersion: SHARED_LIST_QUERY_VERSION,
+            search: '',
+            sort: [],
+          },
+        },
+        queryId: `${applicationNamespace}:query.posted_stock_balance_list`,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      }),
+  );
+  assert.equal(postedStock.outcome, 'exact');
+  assert.equal(postedStock.records.length, 1);
+  assert.match(
+    postedStock.records[0]!.recordId,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/u,
+  );
+  assert.equal(
+    postedStock.records[0]?.values[
+      `${applicationNamespace}:field.posted_stock_balance_posted_quantity`
+    ],
+    '5.000000000000000000',
   );
 }
 
