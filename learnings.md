@@ -638,3 +638,11 @@ How to apply: derive refusing-twin ownership over every authored lifecycle and
 tier the compiler emits, resolving indirect carriers such as state-machine
 transitions. Keep the narrower admissibility set separate; it answers a different
 question. Prove each carrier with a mutant that removes only its ownership arm.
+
+## Pin every storage-shaping property before omitting authored maintenance
+Date: 2026-08-20
+Why: scalar field checks admitted a provider-written balance carrying an authored
+business key whose physical unique index contradicted the provider's row identity.
+How to apply: qualify read models against every lowerer-affecting field property,
+return explicit validity, and make each malformed specimen prove the full
+maintenance/form requirement returns—not merely that some diagnostic exists.

@@ -196,8 +196,12 @@ and transition-owned operations, and the reserved family earned CRUD/Form
 omission without proving the PostgreSQL maintainer's four-field ABI. Both
 findings are accepted and corrected on `packet/stock-balance-read-model`; the
 replacement executable tree is green at `5b50168` (compiler 152/152,
-architecture 141/141, PostgreSQL 204/204, browser 91/91). A narrative freeze and
-fresh Codex arm are next. Fable max on the identical replacement SHA and the
+architecture 141/141, PostgreSQL 204/204, browser 91/91). Critical round 2 then
+closed operation attribution but found that canonical storage metadata could
+still contradict the provider ABI, malformed fields could retain the exemption,
+and an invalid movement companion still qualified internally. The subsuming
+exact-descriptor and explicit-validity correction is active. Replacement gates,
+a fresh Codex arm, Fable max on the identical replacement SHA, and the
 post-review full matrix remain owed.
 
 #### `stock-on-hand-is-not-browsable` — filed 2026-08-19, TIER 2

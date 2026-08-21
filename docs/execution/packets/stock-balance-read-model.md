@@ -1,6 +1,6 @@
 # stock-balance-read-model — honest posted-stock browsing
 
-Status: evidence_ready; replacement Critical review freeze pending
+Status: active; Critical round-2 corrections implemented, replacement gates pending
 
 Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b`
 
@@ -72,6 +72,18 @@ inside the authorized classification: operation ownership now spans every
 authored tier and lifecycle and resolves transition ownership through its state
 machine, while the pinned rule remains only a candidate until the exact
 provider field ABI and its movement companion validate.
+
+Critical review round 2 accepted the operation-attribution correction and found
+the qualification descriptor still narrower than the storage ABI it named. A
+one-property `businessKey` edit compiled a real unique index over legal entity ×
+item, contradicting the provider's legal entity × item × location row identity.
+It also found that field diagnostics could remain while the exemption survived,
+and that a malformed movement companion was counted as present without being
+valid. These are one production class and one control class, corrected
+subsumingly: qualification now compares every current field property that shapes
+storage, both validators return explicit validity rather than infer it from a
+mutable diagnostic count, and the balance requires its active companion's
+pinned ABI to be valid.
 
 ## Maintenance, rebuild, and reconciliation
 
@@ -153,13 +165,36 @@ also rejects the specimen.
 
 The provider rule earns CRUD/Form omission only after the active reserved
 family carries exactly these required fields and types: item text(80), location
-text(80), posted quantity exact decimal(38,18), and unit text(32), with exactly
-one active movement companion. Renaming only the unit field while updating its
-references records both the missing pinned slot and the unmaintained replacement
-as `INVENTORY_CONTRACT_INVALID`, and records the returned
-`$.conformance.operation.create` requirement. Awarding the exemption before ABI
-qualification makes that last assertion red. Four one-property type mutations
-independently cover each provider field.
+text(80), posted quantity exact decimal(38,18), and unit text(32). Its exact
+storage descriptor also pins no business key on all four fields, binary
+collation, no stored default, the reviewed item-only search mapping, and no
+storage evolution. Exactly one active movement companion must pass its own
+pinned ABI. Renaming only the unit field while updating its references records
+both the missing pinned slot and the unmaintained replacement as
+`INVENTORY_CONTRACT_INVALID`.
+
+Every incompatible specimen now subject-pins the complete loss of the exemption:
+
+```text
+$.conformance.operation.archive
+$.conformance.operation.create
+$.conformance.operation.restore
+$.conformance.operation.update
+$.conformance.surface.form
+```
+
+The table varies each field type, a non-none business key on each of the four
+fields, collation, default semantics, both directions of search mapping, storage
+evolution, presence, and lifecycle one property at a time. It also covers a
+renamed field, an absent active movement companion, and an active companion with
+one malformed movement field. The unmodified descriptor is the admission twin.
+
+Three author-chosen ad-hoc deletions establish branch attribution. Leaving the
+movement diagnostic but not marking its validator invalid loses the five
+companion-control paths. Leaving a posted field type diagnostic but not marking
+the balance invalid loses the same five paths. Removing business-key comparison
+makes the ordinary item specimen compile. Each mutation failed only the exact
+ABI test and was restored before the replacement gates.
 
 The committed contract controls also vary only the posted-stock entity label,
 family registration, or maintainer id and observe their exact diagnostic paths.
@@ -299,13 +334,17 @@ a draft does not create stock; a movement must be posted.
 
 ## Review state
 
-Critical round 1 returned REVISE on frozen SHA
-`c781aafa09d1841732d6307416051e0960f0f879`. Its two findings are accepted and
-the corrections and replacement pre-freeze gates are complete, but no
-independent review has read the replacement candidate. Freeze this evidence
-record and restart arm 1 with fresh-naive Codex at xhigh. Only after PASS may
-independent Fable max confirm the identical new SHA. The full CI matrix remains
-deliberately deferred until both arms converge.
+Critical round 1 returned REVISE on
+`c781aafa09d1841732d6307416051e0960f0f879`; round 2 returned REVISE on
+`ab345464be089edfa9445c4dfb56a32740ce7e66`. Round 2 closed operation
+attribution and found the storage-metadata, exemption-control, and companion-
+validity defects above. Continuing is licensed by `review-tiers`: the round
+found a reachable production collision, and the correction subsumes the class
+with an exact storage descriptor and explicit validity rather than adding a
+business-key exception beside the type checks. Replacement gates and a fresh
+Codex arm remain owed. Only after PASS may independent Fable max confirm the
+identical new SHA. The full CI matrix remains deliberately deferred until both
+arms converge.
 
 ## Program-review trigger assessment
 

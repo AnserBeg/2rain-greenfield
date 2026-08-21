@@ -240,6 +240,16 @@ interface InventoryMovementModuleFieldRule {
   presence: 'optional' | 'required';
   shape: InventoryMovementModuleFieldShape;
 }
+interface PostedStockBalanceModuleFieldRule extends InventoryMovementModuleFieldRule {
+  storage: {
+    businessKey: 'none';
+    collation: 'binary';
+    defaultSemantics: 'none';
+    defaultValue: null;
+    searchable: boolean;
+    storageEvolution: 'none';
+  };
+}
 const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
   {
     fieldLocalId: 'inventory_movement_stock_dimension_set_version',
@@ -358,23 +368,55 @@ const POSTED_STOCK_BALANCE_MODULE_FIELD_RULES = Object.freeze([
     fieldLocalId: 'posted_stock_balance_item_id',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: {
+      businessKey: 'none',
+      collation: 'binary',
+      defaultSemantics: 'none',
+      defaultValue: null,
+      searchable: true,
+      storageEvolution: 'none',
+    },
   },
   {
     fieldLocalId: 'posted_stock_balance_location_id',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: {
+      businessKey: 'none',
+      collation: 'binary',
+      defaultSemantics: 'none',
+      defaultValue: null,
+      searchable: false,
+      storageEvolution: 'none',
+    },
   },
   {
     fieldLocalId: 'posted_stock_balance_posted_quantity',
     presence: 'required',
     shape: { kind: 'decimal', precision: 38, scale: 18 },
+    storage: {
+      businessKey: 'none',
+      collation: 'binary',
+      defaultSemantics: 'none',
+      defaultValue: null,
+      searchable: false,
+      storageEvolution: 'none',
+    },
   },
   {
     fieldLocalId: 'posted_stock_balance_unit_id',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 32 },
+    storage: {
+      businessKey: 'none',
+      collation: 'binary',
+      defaultSemantics: 'none',
+      defaultValue: null,
+      searchable: false,
+      storageEvolution: 'none',
+    },
   },
-] as const satisfies readonly InventoryMovementModuleFieldRule[]);
+] as const satisfies readonly PostedStockBalanceModuleFieldRule[]);
 const STOCK_COUNT_MODULE_FIELD_RULES = Object.freeze([
   {
     fieldLocalId: 'stock_count_number',
@@ -864,7 +906,8 @@ function validatePinnedInventoryMovementEntity(
   packageRevision: NormalizedApplicationPackage,
   entityId: string,
   diagnostics: CompilerDiagnostic[],
-): void {
+): boolean {
+  let valid = true;
   const fields = packageRevision.fields.filter(
     (field) => field.entity.targetId === entityId,
   );
@@ -879,6 +922,7 @@ function validatePinnedInventoryMovementEntity(
     const localId = canonicalFieldLocalId(field.fieldId);
     const rule = localId ? rules.get(localId) : undefined;
     if (!rule) {
+      valid = false;
       diagnostics.push(
         inventoryModuleDiagnostic(
           MOVEMENT_MONEY_TOKEN.test(field.fieldId)
@@ -898,6 +942,7 @@ function validatePinnedInventoryMovementEntity(
         packageRevision.package.namespace,
       )
     ) {
+      valid = false;
       diagnostics.push(
         inventoryModuleDiagnostic(
           rule.fieldLocalId === 'inventory_movement_stock_dimension_set_version'
@@ -911,6 +956,7 @@ function validatePinnedInventoryMovementEntity(
   }
   for (const rule of INVENTORY_MOVEMENT_MODULE_FIELD_RULES) {
     if (observed.has(rule.fieldLocalId)) continue;
+    valid = false;
     const fieldId = `${packageRevision.package.namespace}:field.${rule.fieldLocalId}`;
     diagnostics.push(
       inventoryModuleDiagnostic(
@@ -922,6 +968,36 @@ function validatePinnedInventoryMovementEntity(
       ),
     );
   }
+  return valid;
+}
+
+function postedStockBalanceStorageMetadataViolations(
+  field: NormalizedApplicationPackage['fields'][number],
+  rule: PostedStockBalanceModuleFieldRule,
+): string[] {
+  const defaultSemantics =
+    field.defaultSemantics ??
+    (field.presence === 'optional' ? 'nullable' : 'none');
+  return [
+    ...((field.businessKey ?? 'none') === rule.storage.businessKey
+      ? []
+      : ['businessKey']),
+    ...((field.collation ?? 'binary') === rule.storage.collation
+      ? []
+      : ['collation']),
+    ...(defaultSemantics === rule.storage.defaultSemantics
+      ? []
+      : ['defaultSemantics']),
+    ...((field.defaultValue ?? null) === rule.storage.defaultValue
+      ? []
+      : ['defaultValue']),
+    ...(field.searchable === rule.storage.searchable ? [] : ['searchable']),
+    ...((field.storageEvolution === undefined
+      ? 'none'
+      : 'backfillEvolution') === rule.storage.storageEvolution
+      ? []
+      : ['storageEvolution']),
+  ];
 }
 
 /**
@@ -933,10 +1009,11 @@ function validatePinnedInventoryMovementEntity(
 function validatePinnedPostedStockBalanceEntity(
   packageRevision: NormalizedApplicationPackage,
   entityId: string,
+  movementEntityValidity: ReadonlyMap<string, boolean>,
   diagnostics: CompilerDiagnostic[],
 ): boolean {
-  const diagnosticCount = diagnostics.length;
-  const expected = new Map<string, InventoryMovementModuleFieldRule>(
+  let valid = true;
+  const expected = new Map<string, PostedStockBalanceModuleFieldRule>(
     POSTED_STOCK_BALANCE_MODULE_FIELD_RULES.map((rule) => [
       rule.fieldLocalId,
       rule,
@@ -949,6 +1026,7 @@ function validatePinnedPostedStockBalanceEntity(
     const localId = canonicalFieldLocalId(field.fieldId);
     const rule = localId ? expected.get(localId) : undefined;
     if (!rule) {
+      valid = false;
       diagnostics.push(
         inventoryModuleDiagnostic(
           'INVENTORY_CONTRACT_INVALID',
@@ -966,6 +1044,7 @@ function validatePinnedPostedStockBalanceEntity(
         packageRevision.package.namespace,
       )
     ) {
+      valid = false;
       diagnostics.push(
         inventoryModuleDiagnostic(
           'INVENTORY_CONTRACT_INVALID',
@@ -974,9 +1053,23 @@ function validatePinnedPostedStockBalanceEntity(
         ),
       );
     }
+    for (const property of postedStockBalanceStorageMetadataViolations(
+      field,
+      rule,
+    )) {
+      valid = false;
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.fields.${rule.fieldLocalId}.${property}`,
+          field.fieldId,
+        ),
+      );
+    }
   }
   for (const rule of POSTED_STOCK_BALANCE_MODULE_FIELD_RULES) {
     if (observed.has(rule.fieldLocalId)) continue;
+    valid = false;
     diagnostics.push(
       inventoryModuleDiagnostic(
         'INVENTORY_CONTRACT_INVALID',
@@ -991,6 +1084,7 @@ function validatePinnedPostedStockBalanceEntity(
       canonicalFamilyId(candidate.entityId) === 'inventory_movement',
   );
   if (movementEntities.length !== 1) {
+    valid = false;
     diagnostics.push(
       inventoryModuleDiagnostic(
         'INVENTORY_CONTRACT_INVALID',
@@ -998,8 +1092,12 @@ function validatePinnedPostedStockBalanceEntity(
         `${packageRevision.package.namespace}:entity.inventory_movement`,
       ),
     );
+  } else if (
+    movementEntityValidity.get(movementEntities[0]!.entityId) !== true
+  ) {
+    valid = false;
   }
-  return diagnostics.length === diagnosticCount;
+  return valid;
 }
 
 function operationTargetsEntity(
@@ -1285,6 +1383,26 @@ export function validateModuleConformance(
       mapping,
     ]),
   );
+  const movementEntityValidity = new Map<string, boolean>();
+  for (const entity of packageRevision.entities) {
+    const family = resolvePinnedLegalEntityFamily(
+      packageRevision.package.packageId,
+      entity.entityId,
+    );
+    if (
+      family.status === 'classified' &&
+      family.familyId === 'inventory_movement'
+    ) {
+      movementEntityValidity.set(
+        entity.entityId,
+        validatePinnedInventoryMovementEntity(
+          packageRevision,
+          entity.entityId,
+          diagnostics,
+        ),
+      );
+    }
+  }
   const qualifiedProviderWrittenReadModels = new Set<string>();
 
   for (const entity of packageRevision.entities) {
@@ -1315,18 +1433,13 @@ export function validateModuleConformance(
         ),
       );
     }
-    if (family.familyId === 'inventory_movement') {
-      validatePinnedInventoryMovementEntity(
-        packageRevision,
-        entity.entityId,
-        diagnostics,
-      );
-    } else if (family.familyId === 'posted_stock_balance') {
+    if (family.familyId === 'posted_stock_balance') {
       if (
         entity.lifecycle === 'active' &&
         validatePinnedPostedStockBalanceEntity(
           packageRevision,
           entity.entityId,
+          movementEntityValidity,
           diagnostics,
         )
       ) {

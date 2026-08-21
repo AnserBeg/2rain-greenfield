@@ -60,11 +60,13 @@ family against the pinned Inventory contract, as it already does for append-only
 fact storage, including after composition under the application package
 identity. The candidate earns generic CRUD and Form omission only after its
 active item, location, posted-quantity and unit fields match the named
-maintainer's exact IDs, required presence and storage types, and exactly one
-active movement companion is present. Its refusing twin examines every authored
-operation tier and lifecycle and resolves transition effects through their state
-machine, rather than reusing the narrower active-`o0` CRUD set. An unpinned or
-ABI-incompatible family earns nothing.
+maintainer's exact IDs, lifecycle, required presence, storage types, business-key
+absence, collation, default semantics and value, search mapping, and storage
+evolution. Exactly one active movement companion must also pass its own pinned
+movement ABI. Its refusing twin examines every authored operation tier and
+lifecycle and resolves transition effects through their state machine, rather
+than reusing the narrower active-`o0` CRUD set. An unpinned or ABI-incompatible
+family earns nothing.
 
 The PostgreSQL provider installs an `AFTER INSERT` movement trigger after the
 existing reservation/generation trigger. In the same posting transaction it
