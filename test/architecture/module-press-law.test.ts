@@ -561,6 +561,40 @@ test('consolidated guard red: runtime construction and independent type literal 
   }
 });
 
+test('consolidated guard red: every transparent wrapper retains a split runtime identity', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      "export const parenthesized = ('northstar') + '.' + 'widget';",
+      "export const asserted = ('northstar' as string | 'northstar.widget:capability.as-type') + '.' + 'widget';",
+      "export const angleAsserted = (<string | 'northstar.widget:capability.angle-type'>'northstar') + '.' + 'widget';",
+      "export const satisfied = ('northstar' satisfies string | 'northstar.widget:capability.satisfies-type') + '.' + 'widget';",
+      "export const nonNull = ('northstar'!) + '.' + 'widget';",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    const expectedViolation: ModulePressLawViolation = {
+      file: 'apps/api/src/generic.ts',
+      line: 1,
+      message: 'generic press references widget identity northstar.widget',
+      moduleDirectory: 'widget',
+      ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    };
+    assert.deepEqual(
+      checkModulePressLaw(root).violations,
+      [1, 2, 2, 3, 3, 4, 4, 5].map((line) => ({
+        ...expectedViolation,
+        line,
+      })),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard admission: a static prefix beneath a dynamic outer construction is not a completed value', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [
