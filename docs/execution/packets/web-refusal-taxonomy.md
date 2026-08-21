@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: evidence_ready — corrected executable candidate awaiting narrow Critical confirmation
+Status: evidence_ready — both Critical arms PASS; awaiting the integration matrix
 
 ## Goal
 
@@ -631,3 +631,27 @@ assertion rather than bypassing the shared lock. No browser, integration,
 architecture or full-matrix suite was rerun for this prose-and-source-comment
 correction. The full matrix remains deferred until the fresh Critical arms
 converge.
+
+### Final Critical review convergence — `a7f60a982edd85ff5991d041e63861e5c0cbd1f3`
+
+Fresh Codex xhigh returned `PASS` on the exact frozen candidate. It found no
+production or architecture defect and closed the last bounded question: the
+hard routed trigger follows any production-reachable fallible policy-side
+branch participating in `joinRuntimeDefinitionAndPolicy`, whether supplied by
+its caller or derived within the join. The arm independently verified the three
+current fixed-success policy-version wirings and found no ordinary survivor
+under the chartered threat model.
+
+Independent user-run Fable max then returned `PASS` on the identical SHA. It
+read the full packet and independently executed the gap the lane could not
+attach to that exact tree: `pnpm typecheck` passed and the web contract suite
+passed 29/29. It reproduced both vocabulary-drift typecheck reds, the slot-veto
+red and the operation-residual red, and confirmed the declared same-turn
+wrapper remains a 29/29 survivor. That last green is evidence for the routed
+limit, not evidence that exhaustive same-turn precedence is controlled.
+
+Both required Critical arms now converge on the same frozen candidate. The
+query-side refusal collapse, source-scan hardening and two production-dead
+exports remain valid routed or next-touch observations; none changes this
+packet's accepted scope. The deferred full matrix is now the remaining
+acceptance gate.
