@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: evidence_ready — integration-only boundary bridge awaiting narrow review
+Status: evidence_ready — reviews converged; full integration matrix owed
 
 ## Goal
 
@@ -696,3 +696,20 @@ Because a test source changed after both Critical PASSes, this bridge receives a
 fresh narrow review before the full matrix restarts. The earlier production
 review remains evidence for the unchanged runtime and web behavior, but it is
 not presented as review of this new SHA.
+
+### Boundary-import bridge review — `2c0843452645508d2b5309de31fd2b9e37d1c9d9`
+
+Fresh narrow review returned `PASS` on the exact remote branch tip. The reviewer
+confirmed that executable commit `023a242` changes only the erased local name of
+the canonical runtime `RequestRuntimeView` type in the asynchronous
+unit-of-work HTTP specimen. The imported module and exported member are
+unchanged, the single consuming annotation moved consistently, and no fixture,
+assertion, server path, thrown object or cleanup behavior changed.
+
+The review also inspected the unchanged canonical-authority scanner and found
+that the bridge removes only its import-spelling false positive: the genuine
+runtime interface, the `RequestRuntimeView` authority row, duplicate-rejection
+logic and generic duplicate negative control all remain. It accepted the
+recorded focused greens as local evidence and did not independently rerun them.
+No material finding survived. The complete serialized matrix on this staged
+tree is now the sole remaining acceptance gate.
