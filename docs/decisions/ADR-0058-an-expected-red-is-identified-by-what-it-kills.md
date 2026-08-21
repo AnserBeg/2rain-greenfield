@@ -22,11 +22,12 @@ for the red a control claims to have observed?**
 
 Three measurements say it is not, on its own.
 
-1. **It cannot attribute.** Three of that runner's nine entries share the exact
-   pattern `/Missing expected rejection/u`. Any one of those three mutations
-   satisfies the other two's expectation. `review-tiers` already names this:
-   *"a red count is not attribution"* — do the red names map to distinct
-   specimens?
+1. **It cannot say WHICH red it saw.** Three of that runner's nine entries share
+   the exact pattern `/Missing expected rejection/u`, and that pattern matches
+   any unmet `assert.rejects` anywhere in a 16-test PostgreSQL file. A mutation
+   that broke something else entirely — or a harness that died halfway — would
+   satisfy it. `review-tiers` already names this: *"a red count is not
+   attribution"*.
 2. **It reads a proxy, not the fact.** §6 is explicit that parsing a tool's
    output is a proxy while reading a produced artifact is observation. The fact
    a control asserts is *this seam's test stopped working*; the failure text is
@@ -45,6 +46,18 @@ under its mutation. The runner computes the actual set as *(tests passing at
 baseline) minus (tests passing under the mutation)*, read from a reporter
 artifact rather than from TAP prose, and requires set equality. A red that kills
 a different test, or more tests, or fewer, is refused as unattributable.
+
+**What the kill set does and does not settle — measured, 2026-08-21.** All three
+of those PostgreSQL entries turn out to kill the *identical* pair of tests, and
+they still share one `expected`. So the kill set does **not** make entries
+mutually distinguishable, and it should not: `assertAllowedKeys`, the effective
+input digest and `requireActiveCreateLegalEntity` are three independently
+necessary checks guarding the same journey, and removing any one of them
+legitimately breaks the same two tests. What the kill set settles is the other
+question, which is the one a control has to answer: **of everything this suite
+could have gone red about, is this the red the entry declared?** A crash, a
+flake, an unrelated regression, or a mutation with a wider blast radius all
+change the set and are refused.
 
 **The message pattern is retained and narrowed, not replaced.** It answers a
 question the kill set cannot: the right test can fail for the wrong reason.
@@ -120,6 +133,11 @@ that join.
   to seven for its neighbours (2026-08-20 program review, R2).
 - The nine ported entries reproduce their reds through the shared runner; the
   five focused-integration entries in 12 seconds, including two baselines.
+- The three whole-file PostgreSQL entries each kill exactly
+  `{composed product activates through the kernel and persists tenant-scoped
+  gateway data, entity-owned create takes its derived legal-entity input through
+  the real operation path}` out of 16 passing tests — which is what makes each
+  red the declared one rather than merely a red.
 - The gate's own negative controls: 14, one per vacuity vector, in
   `scripts/check-expected-red.sh --self-test`.
 - Two meta-controls prove the self-test can fail. Disabling the victim-absent

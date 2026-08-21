@@ -87,7 +87,10 @@
       "test": {
         "files": ["test/postgres/composed-application.test.ts"]
       },
-      "kills": ["PENDING"]
+      "kills": [
+        "composed product activates through the kernel and persists tenant-scoped gateway data",
+        "entity-owned create takes its derived legal-entity input through the real operation path"
+      ]
     },
     {
       "name": "unscoped-create-closed-key-fence-removed",
@@ -99,7 +102,10 @@
       "test": {
         "files": ["test/postgres/composed-application.test.ts"]
       },
-      "kills": ["PENDING"]
+      "kills": [
+        "composed product activates through the kernel and persists tenant-scoped gateway data",
+        "entity-owned create takes its derived legal-entity input through the real operation path"
+      ]
     },
     {
       "name": "active-legal-entity-enforcement-removed",
@@ -111,7 +117,10 @@
       "test": {
         "files": ["test/postgres/composed-application.test.ts"]
       },
-      "kills": ["PENDING"]
+      "kills": [
+        "composed product activates through the kernel and persists tenant-scoped gateway data",
+        "entity-owned create takes its derived legal-entity input through the real operation path"
+      ]
     },
     {
       "name": "archived-legal-entity-predicate-removed",
