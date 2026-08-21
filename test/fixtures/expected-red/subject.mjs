@@ -16,3 +16,7 @@ export const UNMEASURED_LABEL = 'nothing asserts this';
 // control A2: String.replace would silently mutate only the first.
 export const FIRST_MARKER = 'ambiguous';
 export const SECOND_MARKER = 'ambiguous';
+
+// A seam with no guard behind it, used by the controls that need a mutation
+// whose effect on the SHAPE of the result set is the thing under test.
+export const CONTROL_SENTINEL = 'pristine';

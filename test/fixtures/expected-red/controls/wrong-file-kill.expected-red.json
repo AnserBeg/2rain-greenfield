@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "wrong-file-kill",
+      "claim": "A kill names a file as well as a test, so two files sharing one name cannot stand in for each other.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "expected": "moved",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/same-name-a.test.mjs",
+          "test/fixtures/expected-red/same-name-b.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/same-name-b.test.mjs",
+          "name": "a name two files share"
+        }
+      ]
+    }
+  ]
+}
