@@ -6,7 +6,13 @@ export interface NodeResultEvent {
     readonly skip?: unknown;
     readonly todo?: unknown;
     readonly counts?: { readonly tests?: unknown };
-    readonly details?: { readonly type?: unknown };
+    readonly details?: {
+      readonly type?: unknown;
+      readonly error?: {
+        readonly failureType?: unknown;
+        readonly message?: unknown;
+      };
+    };
   };
 }
 

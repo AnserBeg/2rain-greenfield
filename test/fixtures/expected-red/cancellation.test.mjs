@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import { CONTROL_SENTINEL } from './subject.mjs';
 
@@ -20,7 +21,7 @@ test('a parent that abandons its child under the mutation', async (t) => {
     return;
   }
   void t.test('a child that finishes at baseline', async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await sleep(5000);
   });
   assert.fail('CANCELLATION_PARENT_TOKEN');
 });
