@@ -14,13 +14,17 @@ import {
 
 import * as listBehavior from '../../../packages/runtime/src/list-behavior/index.js';
 import { ModuleRuntimeInterpreterError } from '../../../packages/postgres-provider/src/module-runtime-interpreter.js';
-import { AuthenticatedRequestEntryAdapter } from '../../../packages/runtime/src/request-context.js';
+import {
+  AuthenticatedRequestEntryAdapter,
+  type UntrustedRequestInput,
+} from '../../../packages/runtime/src/request-context.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   REQUEST_RUNTIME_VIEW_REFUSAL_CODES,
   RequestRuntimeViewRefusalError,
   type CurrentPolicyGateway,
   type LoadedRequestRuntimeDefinition,
+  type RequestRuntimeView,
   type RequestRuntimeViewRefusalCode,
 } from '../../../packages/runtime/src/request-runtime-view.js';
 import * as resolveByName from '../../../packages/runtime/src/resolve-by-name.js';
@@ -339,6 +343,126 @@ test('immediate loader and policy rejections retain loader-first Promise.all pre
   );
 });
 
+test('a synchronous policy throw wins before an already-rejected loader is joined', async () => {
+  const loaderFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_RELEASE_NOT_VISIBLE',
+    'already-rejected loader refusal',
+  );
+  const policyFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_RELEASE_NOT_ADMITTED',
+    'synchronous current-policy failure',
+  );
+  const loaderRejection = Promise.reject(loaderFailure);
+  // Promise.all never receives this promise when policy throws synchronously.
+  // Observe it independently so the test does not manufacture an unhandled
+  // rejection while preserving its already-rejected state.
+  void loaderRejection.catch(() => undefined);
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    runtimeRefusalRequestEntry(),
+    Object.freeze({
+      load(): Promise<never> {
+        return loaderRejection;
+      },
+    }),
+    Object.freeze({
+      async authorize() {
+        return allowedCurrentPolicyDecision();
+      },
+      readCurrentVersion(): Promise<never> {
+        throw policyFailure;
+      },
+    }),
+  );
+
+  await assert.rejects(
+    entry.run({}, () => undefined),
+    (error: unknown) => {
+      assert.equal(error, policyFailure);
+      assert.equal(error instanceof RequestRuntimeViewRefusalError, false);
+      return true;
+    },
+  );
+});
+
+test('a pending policy rejection settles without waiting for the loader', async () => {
+  const loadedDefinition = await loadedRuntimeDefinitionFixture();
+  const definitionLoad = controlledPromise<LoadedRequestRuntimeDefinition>();
+  const policyRead =
+    controlledPromise<ReturnType<typeof currentPolicyVersionEvidence>>();
+  const policyFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_RELEASE_NOT_ADMITTED',
+    'pending current-policy failure',
+  );
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    runtimeRefusalRequestEntry(),
+    Object.freeze({
+      load() {
+        return definitionLoad.promise;
+      },
+    }),
+    Object.freeze({
+      async authorize() {
+        return allowedCurrentPolicyDecision();
+      },
+      readCurrentVersion() {
+        return policyRead.promise;
+      },
+    }),
+  );
+  const observation = observePromise(entry.run({}, () => undefined));
+
+  policyRead.reject(policyFailure);
+  await nextEventLoopTurn();
+  try {
+    assert.deepEqual(observation.current(), {
+      error: policyFailure,
+      status: 'rejected',
+    });
+  } finally {
+    definitionLoad.resolve(loadedDefinition);
+  }
+  await observation.complete;
+});
+
+test('a pending loader rejection settles without waiting for current policy', async () => {
+  const definitionLoad = controlledPromise<LoadedRequestRuntimeDefinition>();
+  const policyRead =
+    controlledPromise<ReturnType<typeof currentPolicyVersionEvidence>>();
+  const loaderFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_POINTER_MISSING',
+    'pending loader refusal',
+  );
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    runtimeRefusalRequestEntry(),
+    Object.freeze({
+      load() {
+        return definitionLoad.promise;
+      },
+    }),
+    Object.freeze({
+      async authorize() {
+        return allowedCurrentPolicyDecision();
+      },
+      readCurrentVersion() {
+        return policyRead.promise;
+      },
+    }),
+  );
+  const observation = observePromise(entry.run({}, () => undefined));
+
+  definitionLoad.reject(loaderFailure);
+  await nextEventLoopTurn();
+  try {
+    const outcome = observation.current();
+    assert.equal(outcome.status, 'rejected');
+    assert.ok(outcome.error instanceof RequestRuntimeViewRefusalError);
+    assert.equal(outcome.error.code, 'ACTIVE_POINTER_MISSING');
+  } finally {
+    policyRead.resolve(currentPolicyVersionEvidence());
+  }
+  await observation.complete;
+});
+
 test('runtime refusal recognition rejects every one-property structural near miss', async () => {
   const validCode = 'ACTIVE_POINTER_MISSING';
   const wrongName = Object.assign(new Error('wrong name'), {
@@ -478,6 +602,68 @@ test('runtime entry translation is confined to loader failures', async () => {
       return true;
     },
   );
+});
+
+test('an asynchronous unit-of-work rejection retains exact identity', async () => {
+  const unitOfWorkFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_RELEASE_NOT_VISIBLE',
+    'asynchronous unit-of-work failure with the provider error shape',
+  );
+  await assert.rejects(
+    demoEntry().run({}, () => Promise.reject(unitOfWorkFailure)),
+    (error: unknown) => {
+      assert.equal(error, unitOfWorkFailure);
+      assert.equal(error instanceof RequestRuntimeViewRefusalError, false);
+      return true;
+    },
+  );
+});
+
+test('an asynchronous unit-of-work rejection remains unavailable at HTTP', async () => {
+  const unitOfWorkFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_RELEASE_NOT_VISIBLE',
+    'asynchronous unit-of-work failure with the provider error shape',
+  );
+  const loadedDefinition = await loadedRuntimeDefinitionFixture();
+  class AsyncUnitOfWorkFailureEntry extends AuthenticatedRequestRuntimeEntryAdapter {
+    override run<T>(
+      request: UntrustedRequestInput,
+      unitOfWork: (view: RequestRuntimeView) => Promise<T> | T,
+    ): Promise<T> {
+      return super.run(request, async (view) => {
+        await unitOfWork(view);
+        throw unitOfWorkFailure;
+      });
+    }
+  }
+  const httpEntry = new AsyncUnitOfWorkFailureEntry(
+    runtimeRefusalRequestEntry(),
+    Object.freeze({
+      async load() {
+        return loadedDefinition;
+      },
+    }),
+    Object.freeze({
+      async authorize() {
+        return allowedCurrentPolicyDecision();
+      },
+      async readCurrentVersion() {
+        return currentPolicyVersionEvidence();
+      },
+    }),
+  );
+  const server = createSurfaceRuntimeServer(httpEntry);
+  const baseUrl = await listen(server);
+  try {
+    const response = await fetch(baseUrl);
+    assert.equal(response.status, 500);
+    assertRuntimeViewUnavailable(
+      await response.text(),
+      'provider-shaped asynchronous unit-of-work failure',
+    );
+  } finally {
+    await close(server);
+  }
 });
 
 test('provider refusals retain known copy and otherwise use an honest code-bearing residual', () => {
@@ -1094,6 +1280,53 @@ function allowedCurrentPolicyDecision() {
 function currentPolicyVersionEvidence() {
   return Object.freeze({
     policyVersion: 'runtime-view-refusal-gate-v1',
+  });
+}
+
+function controlledPromise<T>(): Readonly<{
+  promise: Promise<T>;
+  reject: (reason: unknown) => void;
+  resolve: (value: T) => void;
+}> {
+  let reject!: (reason: unknown) => void;
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle, refuse) => {
+    resolve = settle;
+    reject = refuse;
+  });
+  return Object.freeze({ promise, reject, resolve });
+}
+
+function observePromise<T>(promise: Promise<T>): Readonly<{
+  complete: Promise<void>;
+  current: () =>
+    | Readonly<{ status: 'pending' }>
+    | Readonly<{ error: unknown; status: 'rejected' }>
+    | Readonly<{ status: 'fulfilled'; value: T }>;
+}> {
+  let outcome:
+    | Readonly<{ status: 'pending' }>
+    | Readonly<{ error: unknown; status: 'rejected' }>
+    | Readonly<{ status: 'fulfilled'; value: T }> = Object.freeze({
+    status: 'pending',
+  });
+  const complete = promise.then(
+    (value) => {
+      outcome = Object.freeze({ status: 'fulfilled', value });
+    },
+    (error: unknown) => {
+      outcome = Object.freeze({ error, status: 'rejected' });
+    },
+  );
+  return Object.freeze({
+    complete,
+    current: () => outcome,
+  });
+}
+
+async function nextEventLoopTurn(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
   });
 }
 
