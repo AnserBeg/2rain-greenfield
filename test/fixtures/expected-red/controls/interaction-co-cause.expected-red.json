@@ -4,12 +4,14 @@
   "entries": [
     {
       "name": "interaction-co-cause",
-      "claim": "The mutation must produce the red from a clean start, not only alongside state an earlier run left behind.",
+      "claim": "The mutation is measured before the restored run, so this invocation cannot manufacture the co-cause its own baseline would have left.",
       "file": "test/fixtures/expected-red/subject.mjs",
       "original": "export const CONTROL_SENTINEL = 'pristine';",
       "replacement": "export const CONTROL_SENTINEL = 'moved';",
       "test": {
-        "files": ["test/fixtures/expected-red/interaction.test.mjs"]
+        "files": [
+          "test/fixtures/expected-red/interaction.test.mjs"
+        ]
       },
       "kills": [
         {

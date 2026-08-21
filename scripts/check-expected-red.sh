@@ -195,7 +195,27 @@ if [ "${1:-}" = '--self-test' ]; then
   # intact while the mutation alone is a survivor; mutation-first, the survivor
   # is what the gate sees.
   control interaction-co-cause run SURVIVOR \
-    'H3 a red that needed the baseline run as a co-cause'
+    'H3 a red that needed THIS invocation'"'"'s own baseline as a co-cause'
+  control undeclared-hook-failure run 'does not declare it' \
+    'H4 a sibling whose hook throws under the same mutation, undeclared'
+
+  # --- Vector K: the WITHDRAWN claim, pinned rather than asserted. ----------
+  # K1 is not a refusal. It reproduces, executably, a red the gate CERTIFIES and
+  # should not be read as proving: the interaction suite with its marker left by
+  # an EARLIER invocation. Mutation-first stops this invocation manufacturing a
+  # co-cause; it cannot stop a previous one. The sole-cause claim was withdrawn
+  # by orchestrator ruling on 2026-08-21 rather than chased for a sixth round,
+  # and this control exists so the limit is executable instead of prose — which
+  # is the whole thesis of the packet it belongs to. Closing it is
+  # \`expected-red-needs-an-initial-state-contract\` in current-plan.md.
+  controls=$((controls + 1))
+  mkdir -p "$(dirname "$POISON")"
+  printf 'seen' >"$POISON"
+  if ! node "$RUNNER" run --manifest "$CONTROLS/interaction-co-cause.expected-red.json" >/dev/null 2>&1; then
+    fail 'K1 the pinned limit changed — the gate no longer certifies a pre-seeded co-cause. That is an improvement; update this control and the routed row.'
+  fi
+  rm -f "$POISON"
+  assert_subject_restored 'K1'
 
   # --- Vector J: the gate reading something other than the candidate. -------
   # The manifest population and every file the runner touches belong to the

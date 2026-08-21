@@ -466,19 +466,18 @@ export function runEntries(
   let run = 0;
   try {
     for (const entry of entries) {
-      // MUTATED FIRST, then restored. Not baseline-first.
+      // Mutated first, then restored — an ORDERING, and nothing more.
       //
-      // The round-4 review's counterexample: a suite that fails only when its
-      // own marker is present AND the source is mutated passes A/B/A intact —
-      // baseline green (writes the marker), mutated red, restored green — while
-      // the mutation ALONE, from a clean start, is a survivor. Green-then-red
-      // cannot tell a cause from a co-cause, and neither can green-red-green.
+      // It stops this invocation from manufacturing its own co-cause: a suite
+      // that leaves state behind cannot have its baseline's leavings be the
+      // reason its mutated run reds, because there is no baseline before it.
       //
-      // Running the mutation first measures it against the freshest state this
-      // process can offer, so a red that needed the baseline's leavings does not
-      // appear at all. The restored run then supplies the green reference the
-      // kill set is computed against — measured AFTER the mutated run, so
-      // nothing the baseline left behind can be the reference either.
+      // IT DOES NOT ESTABLISH A CLEAN START, AND THE GATE DOES NOT CLAIM ONE.
+      // State left by a previous invocation, another suite, a database or a
+      // container is still ambient, and control K1 pins that the gate certifies
+      // exactly such a red. Closing it needs a per-entry isolation contract,
+      // which is routed rather than pretended — see
+      // `expected-red-needs-an-initial-state-contract` in current-plan.md.
       runOneEntry(entry, { root, scratch, log, run: (run += 1) });
     }
   } finally {
@@ -562,7 +561,7 @@ function runOneEntry(entry, { root, scratch, log, run }) {
   assert.notEqual(
     observation.status,
     0,
-    `${entry.name}: SURVIVOR — the mutation stayed green from a clean start`,
+    `${entry.name}: SURVIVOR — the mutation stayed green`,
   );
   assertEvidenceReconciles(entry, observation, root, 'mutated');
 
@@ -578,7 +577,7 @@ function runOneEntry(entry, { root, scratch, log, run }) {
   assert.equal(
     reference.size,
     restored.results.length,
-    `${entry.name}: the restored suite is not wholly green, so no red the mutation produced can be attributed to it`,
+    `${entry.name}: the restored suite is not wholly green, so it cannot serve as the reference the kill set is measured against`,
   );
   log.write(`EXPECTED_RED_RESTORED ${entry.name} ${reference.size} passing\n`);
 
