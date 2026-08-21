@@ -11,9 +11,11 @@ Status: active; candidates `318c0dd719a7d759d313ee45ca080017e5e36b44`,
 `e02c15c9dc772cb772ceb3c851c606a95eb209c6` received a fresh Codex PASS and
 then a Fable REVISE on a newly found production false green. Candidate
 `d82350103b362ae20448822c122057c53d5ef41e` returned REVISE on an unknown-left
-boundary production defect and a plural partial-run control gap. The round-6
-correction has all declared pre-review gates green for a fresh Critical arm;
-the full matrix remains deferred until review converges
+boundary production defect and a plural partial-run control gap. Candidate
+`c5fb4e14df0edaabfd26c014e17ffae7934de5fd` returned REVISE because the raw
+source observer still mistook literal-token punctuation for runtime adjacency.
+The round-7 correction has all declared pre-review gates green for a fresh
+Critical arm; the full matrix remains deferred until review converges
 
 ## Packet definition
 
@@ -90,11 +92,15 @@ the boundaries its identity family requires; it never invents a string boundary
 at the edge of an isolated run. The guard therefore reports `PRESS006`, rather
 than introducing a parallel rule or an allowlist.
 
-The observer measures each completed ordinary construction once. Direct source
-matches and independently completed constructed matches are additive, so an
-already-routed literal cannot mask a later splice in the same file. A direct
-match inside the literal token of the same static construction is deduplicated;
-unrelated occurrences are not. This occurrence-complete rule exposes every
+The observer measures each completed ordinary construction once and every
+bounded partial run inside an incomplete one. Raw and constructed observation
+are disjoint by AST ownership: raw matching owns source occurrences outside
+ordinary construction literal tokens, while the construction observer owns all
+matches inside those tokens and judges them with their runtime construction
+adjacency. This prevents quotes, backticks, or interpolation syntax from acting
+as invented runtime boundaries, while an already-routed literal still cannot
+mask a later splice in the same file. Multiple identities inside one completed
+construction are all retained. This occurrence-complete rule exposes every
 existing compiler contract literal under row `1e-2`, rather than only its first
 occurrence.
 
@@ -147,6 +153,7 @@ not rely on the routed Inventory debt:
 | attribution | an unrelated construction followed by a multiline interpolated identity | the PRESS006 line is the template's line 3, not index zero or the earlier construction |
 | additive occurrence | one direct routed identity followed by a later static splice for the same module and file | two exact PRESS006 observations at their respective lines |
 | constructed multiplicity | one interpolation and one concatenation independently complete banned identities in the same file | two exact PRESS006 observations; first-constructed-only compression fails |
+| within-construction multiplicity | one completed concatenation contains two bounded module identities | two exact PRESS006 observations at the construction line; first-value-match compression fails |
 | same-construction deduplication | one concatenation whose literal token already contains `northstar.widget` | one observation, not one per observer |
 | same-line independence | an unrelated direct identity and spliced identity occur on the same file/module/line | two observations; line-number coincidence is not construction provenance |
 | provider mutation | retain the honest line-37 Inventory literal and splice the real `validateRegistration` comparison | Inventory PRESS006 contains both line 37 and the later comparison line; the routed literal cannot mask the reintroduced defect |
@@ -154,6 +161,9 @@ not rely on the routed Inventory debt:
 | dynamic-boundary admission | static `northstar.widget` prefix plus an identifier-held legal suffix | zero violations; an unevaluable outer value is not partially observed |
 | dynamic-boundary refusal | interpolation and concatenation fix `northstar.widget:` before an identifier-held tail, and a second interpolation ends with a spliced `northstar.widget` after an unknown prefix | three exact violations; a dynamic outer construction cannot hide an identity whose right boundary is fixed by static text or construction end |
 | dynamic-tail admission | the same interpolated and concatenated static prefixes end immediately before an identifier-held suffix | zero violations; the observer does not invent a right boundary before an unknown continuation |
+| completed-continuation admission | contiguous `widget_list`, `WIDGET_IDS`, and `northstar.widget` literal tokens continue statically inside completed concatenations | zero violations; token quotes cannot override the completed runtime value's boundaries |
+| contiguous/split unknown-adjacency admission | local ID, symbol, and namespace families are each written once in one literal token and once across literal tokens beside an unknown runtime value | all six admit; tokenization does not change the runtime-adjacency ruling |
+| contiguous/split static-boundary refusal | the same six forms receive a static `:` at the relevant edge | six exact observations at their construction lines; the construction observer retains fixed boundaries for both tokenizations |
 | unknown-left admission/refusal | local ID `widget_list` and symbol `WIDGET_IDS` each follow an unknown prefix either directly or after a static `:` | the directly adjacent identities admit because the runtime prefix may erase `\b`; the colon-bounded twins refuse exactly at their construction lines |
 | partial-run multiplicity | one incomplete outer concatenation contains two independently colon-bounded spliced namespaces separated by an unknown value | two exact observations at the two static-run positions; first-partial-run-only compression fails |
 | tagged-boundary admission | a tag receives the spliced template body | zero violations; the tag controls the runtime result |
@@ -191,6 +201,20 @@ The second new fixture requires two exact partial-run observations in one
 incomplete construction. The reviewer-selected `return runs.slice(0, 1)`
 mutation fails that control by omitting the second line, and the explicit
 inverse patch restores the production source and the focused green.
+
+The round-7 focused run passes 33/33. Before the production correction, the
+contiguous/split unknown-adjacency admission emitted three false observations:
+only the contiguous literal-token forms of `widget_list`, `WIDGET_IDS`, and
+`northstar.widget` failed, while their split runtime-equivalent forms admitted.
+Routing every ordinary-construction literal token through the construction
+observer makes all six forms agree and retains all six static-colon refusals.
+The completed-continuation admission separately proves that source quotes do not
+override known runtime continuation. Temporarily restoring unconditional raw
+source observations makes both admission controls fail on exactly their three
+contiguous forms. Temporarily retaining only the first identity match within a
+completed construction makes the within-construction multiplicity control lose
+its second required observation. Explicit inverse patches restored both
+mutations before the final focused 33/33 run.
 
 ## Gate evidence
 
@@ -303,6 +327,27 @@ No mutation runner is committed, so these discarded local replays are
 corroboration; the exact committed fixtures are the reproducible load-bearing
 evidence.
 
+Round 7 corrects the raw-source runtime-adjacency defect found in the review of
+`c5fb4e1`:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` | PASS — 33/33, including contiguous/split equivalence across local-ID, symbol, and namespace families plus two identities in one completed construction |
+| unconditional raw-observer mutation | EXPECTED RED — both admission controls gained exactly the three prohibited contiguous-token observations; explicit restoration returned them green |
+| first-identity-in-construction mutation | EXPECTED RED — the exact within-construction multiplicity control lost its required second observation; explicit restoration returned it green |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 164/164, including 33/33 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 860,483.2 ms |
+
+The first Architecture attempt reached all 164 tests but failed one
+repository-hygiene control because another lane's fresh PostgreSQL container was
+present. The other lane's container was left untouched; after its owning process
+and container exited, the exclusive retry passed 164/164. The two discarded
+mutations are corroboration only; their committed controls are the reproducible
+evidence. PostgreSQL then acquired the exclusive lease and passed 203/203.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -397,6 +442,27 @@ production defect and the second is its bounded evidence companion. Production
 changed, so the next review must again be a fresh full Critical arm; nothing from
 the prior arm is treated as a narrow confirmation fence.
 
+The fresh review of candidate
+`c5fb4e14df0edaabfd26c014e17ffae7934de5fd` returned **REVISE** with one
+production defect and its missing control. Although the constructed observer
+preserved unknown adjacency, the independently additive raw observer still ran
+the shared matcher over the whole source file. A quote around contiguous
+`widget_list`, `WIDGET_IDS`, or `northstar.widget` text therefore acted as a
+favorable runtime boundary even when an adjacent unknown value could erase or
+continue that boundary. Split literal-token equivalents admitted, so source
+tokenization changed the verdict without changing runtime semantics.
+
+Round 7 partitions observation by AST construction ownership. Raw matching owns
+only occurrences outside ordinary construction literal tokens; all matches
+inside those tokens are evaluated by the construction observer with its known or
+unknown runtime edges. The paired contiguous/split admissions and static-colon
+refusals cover local-ID, symbol, and namespace families. A separate completed
+construction control requires every identity in one value, preventing the
+ownership change from collapsing to the first match. The continuation criterion
+is automatic under `review-tiers`: this is a new in-scope production defect, not
+an evidence-only checklist recurrence. Because production changed, the next
+review is a fresh full Critical arm.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -405,11 +471,13 @@ would hit the skill's unstable-tree anti-trigger.
 
 The reusable lesson is recorded here rather than in root `learnings.md`, which is
 outside this packet's granted paths: **an AST gate must observe every completed
-semantic value named by its claim, compose independent observation channels
-additively, and deduplicate only when two channels describe the same construction.**
-For evidence, plural behavior requires two subjects in the same channel, and
-provenance deduplication requires a same-location unrelated twin; otherwise
-first-only and location-coincidence proxies remain green.
+semantic value named by its claim, partition overlapping observation channels by
+semantic ownership, and never let a lexical-source proxy override the channel
+that knows runtime construction boundaries.** Source quotes and interpolation
+punctuation are not runtime adjacency. For evidence, plural behavior requires
+two subjects in the same channel, and provenance requires same-location and
+same-runtime-value twins; otherwise first-only, location-coincidence, and
+tokenization-sensitive proxies remain green.
 
 A second reusable rule follows from the confirmed Fable finding: **partial
 evaluation must preserve known semantic boundaries rather than classifying an
