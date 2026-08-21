@@ -128,9 +128,10 @@ export function checkModulePressLaw(
     const repoPath = normalizePath(relative(root, file));
     const constructedStrings = staticallyConstructedStrings(source, repoPath);
     for (const module of modules) {
-      // Literal tokens owned by an ordinary string construction are source
-      // syntax, not runtime adjacency. Route them through the construction
-      // observer; the raw observer owns only matches outside those ranges.
+      // Literal tokens owned by a static string construction are source syntax,
+      // not value adjacency. Route runtime constructions and literal-only
+      // template types through the construction observer; the raw observer owns
+      // only matches outside those ranges.
       const directMatches = moduleIdentityMatches(source, module).filter(
         (directMatch) =>
           !constructedStrings.some((construction) =>
@@ -418,6 +419,23 @@ function staticallyConstructedStrings(
   );
   const constructions: StaticStringConstruction[] = [];
   const visit = (node: ts.Node): void => {
+    if (ts.isTemplateLiteralTypeNode(node)) {
+      const construction = literalOnlyTemplateTypeConstruction(
+        node,
+        sourceFile,
+      );
+      if (construction) {
+        constructions.push(construction);
+        // The complete template type is one exact static value. Its literal
+        // fragments are not independent source observations.
+        return;
+      }
+      // Alias, generic, identifier, and other non-literal spans remain outside
+      // this bounded observer. Continue so a nested literal-only template type
+      // can still be observed as its own completed type expression.
+      ts.forEachChild(node, visit);
+      return;
+    }
     if (ts.isTaggedTemplateExpression(node)) {
       // The tag controls the aggregate result, so do not infer a value for the
       // tagged template. Substitution expressions are completed before the tag
@@ -481,6 +499,36 @@ function staticallyConstructedStrings(
   };
   visit(sourceFile);
   return constructions;
+}
+
+function literalOnlyTemplateTypeConstruction(
+  node: ts.TemplateLiteralTypeNode,
+  sourceFile: ts.SourceFile,
+): StaticStringConstruction | undefined {
+  let value = node.head.text;
+  const literalRanges: SourceRange[] = [sourceRange(node.head, sourceFile)];
+
+  for (const span of node.templateSpans) {
+    if (
+      !ts.isLiteralTypeNode(span.type) ||
+      !ts.isStringLiteralLike(span.type.literal)
+    ) {
+      return undefined;
+    }
+    value += span.type.literal.text + span.literal.text;
+    literalRanges.push(
+      sourceRange(span.type.literal, sourceFile),
+      sourceRange(span.literal, sourceFile),
+    );
+  }
+
+  return {
+    index: node.getStart(sourceFile),
+    leftBoundaryKnown: true,
+    literalRanges,
+    rightBoundaryKnown: true,
+    value,
+  };
 }
 
 function staticallyKnownStringRuns(

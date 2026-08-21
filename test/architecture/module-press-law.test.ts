@@ -595,6 +595,35 @@ test('consolidated guard red: every transparent wrapper retains a split runtime 
   }
 });
 
+test('consolidated guard observes literal-only template types without refusing longer contract types', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      "export type DirectCapability = 'northstar.widget:capability.direct';",
+      "export type SplicedCapability = `${'northstar'}.${'widget'}:capability.spliced`;",
+      "export type ContractNamespace = `${'northstar'}.${'widget'}-contract/v1`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    const expectedViolation: ModulePressLawViolation = {
+      file: 'apps/api/src/generic.ts',
+      line: 1,
+      message: 'generic press references widget identity northstar.widget',
+      moduleDirectory: 'widget',
+      ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    };
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      expectedViolation,
+      { ...expectedViolation, line: 2 },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard admission: a static prefix beneath a dynamic outer construction is not a completed value', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [
