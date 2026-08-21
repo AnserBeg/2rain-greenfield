@@ -483,6 +483,8 @@ test('consolidated guard red: a statically bounded identity cannot hide inside a
       "  `${'northstar'}.${'widget'}:capability.posting denied for ${tenantId}`;",
       'export const route =',
       "  'northstar.' + 'widget:capability.posting/' + version;",
+      'export const suffix =',
+      "  `${tenantId}: ${'northstar'}.${'widget'}`;",
     ].join('\n'),
     'packages/domain/src/widget/definition.ts': [
       "export const WIDGET_NAMESPACE = 'northstar.widget';",
@@ -501,6 +503,13 @@ test('consolidated guard red: a statically bounded identity cannot hide inside a
       {
         file: 'apps/api/src/generic.ts',
         line: 6,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 8,
         message: 'generic press references widget identity northstar.widget',
         moduleDirectory: 'widget',
         ruleId: 'PRESS006_MODULE_ID_IN_PRESS',

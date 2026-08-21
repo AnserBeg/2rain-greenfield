@@ -144,7 +144,7 @@ not rely on the routed Inventory debt:
 | provider mutation | retain the honest line-37 Inventory literal and splice the real `validateRegistration` comparison | Inventory PRESS006 contains both line 37 and the later comparison line; the routed literal cannot mask the reintroduced defect |
 | constructed admission | concatenated and interpolated `northstar.widget-contract/v1` values in generic production source | zero violations; the completed legal values are measured without refusing nested prefixes |
 | dynamic-boundary admission | static `northstar.widget` prefix plus an identifier-held legal suffix | zero violations; an unevaluable outer value is not partially observed |
-| dynamic-tail refusal | interpolated and concatenated splices fix `northstar.widget:` before an identifier-held tail | two exact violations; a dynamic outer construction cannot hide an already bounded identity |
+| dynamic-boundary refusal | interpolation and concatenation fix `northstar.widget:` before an identifier-held tail, and a second interpolation ends with a spliced `northstar.widget` after an unknown prefix | three exact violations; a dynamic outer construction cannot hide an identity whose right boundary is fixed by static text or construction end |
 | dynamic-tail admission | the same interpolated and concatenated static prefixes end immediately before an identifier-held suffix | zero violations; the observer does not invent a right boundary before an unknown continuation |
 | tagged-boundary admission | a tag receives the spliced template body | zero violations; the tag controls the runtime result |
 | tagged-substitution refusal/admission | a tag receives a completed concatenation spelling either `northstar.widget` or `northstar.widget-contract/v1` | the module identity refuses; the longer contract namespace admits |
@@ -166,10 +166,11 @@ restored with explicit inverse patches; the production file is byte-identical to
 candidate `358ba5f`.
 
 The round-5 focused run passes 27/27. Its new paired fixtures hold the Fable
-finding directly: interpolation and concatenation each refuse when static text
-fixes the `:` boundary before a runtime tail, while the otherwise equivalent
-prefixes admit when the runtime value begins immediately after `widget` and no
-right boundary can be inferred.
+finding directly: interpolation and concatenation refuse when static text fixes
+the `:` boundary before a runtime tail, a spliced identity at the known end of a
+construction also refuses, and the otherwise equivalent prefixes admit when the
+runtime value begins immediately after `widget` and no right boundary can be
+inferred.
 
 ## Gate evidence
 
@@ -249,6 +250,17 @@ Both exclusive suites acquired the repository's serialized lease. The focused
 expected red was run before the implementation change and failed specifically
 because both required PRESS006 observations were absent; its admission twin was
 already green.
+
+A per-check deletion audit after the first round-5 freeze added one expected
+observation to the same refusal fixture: a spliced identity after an unknown
+prefix at the known end of the construction. This evidence-only descendant
+reran focused 27/27, typecheck, lint, format, and Architecture 158/158 green.
+Four earlier focused attempts executed zero tests and refused honestly with
+`TEST_GATE_LOCK_BUSY` behind another lane's live PostgreSQL holder. PostgreSQL
+was not rerun for the evidence-only test edit; the production blobs are
+byte-identical to the 203/203 run above, and the PostgreSQL command does not
+discover architecture tests. The full matrix remains the integrated-tree
+authority after review convergence.
 
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
