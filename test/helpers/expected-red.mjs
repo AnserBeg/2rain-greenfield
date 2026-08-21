@@ -828,7 +828,6 @@ function main(argv) {
   // gate answer OK while the committed candidate was still stale. Asserting the
   // tree equals HEAD first is what makes a filesystem read a read of the
   // candidate. Found by the round-5 review.
-  assertFrozenTree(REPOSITORY_ROOT, 'EXPECTED_RED_TREE_NOT_FROZEN');
   let override;
   const rest = [];
   for (let index = 0; index < argv.length; index += 1) {
@@ -855,6 +854,14 @@ function main(argv) {
     );
     return 2;
   }
+
+  // EVERY mode, not only `run`. `validate` and `list` read manifests, subjects
+  // and test files from the filesystem, so an uncommitted repair could make the
+  // gate answer OK while the committed candidate was still stale. Asserting the
+  // tree equals HEAD first is what makes a filesystem read a read of the
+  // candidate. Found by the round-5 review. It runs AFTER the in-flight check so
+  // a live mutation still reports the message that names the held file.
+  assertFrozenTree(REPOSITORY_ROOT, 'EXPECTED_RED_TREE_NOT_FROZEN');
 
   const { entries, paths, problems } = loadManifests(REPOSITORY_ROOT, override);
 

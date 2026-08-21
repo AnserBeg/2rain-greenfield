@@ -145,16 +145,16 @@ if [ "${1:-}" = '--self-test' ]; then
     'C2 a mutation the suite does not notice'
   control wrong-red run 'failed for a different reason' \
     'C3 a red whose text is not the declared one'
-  control wrong-kills run 'not attributable' \
+  control wrong-kills run 'kept passing under the mutation' \
     'C4 a red that killed a different test than the one declared'
   # C5 is the 2026-08-21 review's own specimen, and it is the reason `expected`
   # is bound to the failing identity rather than grepped from the transcript.
   # Every separate check passes: the kill set is exact, the process is red, and
   # the declared token is present — supplied by a test that exists only under
   # the mutation, while the declared victim vanished without ever failing.
-  control attribution-join run 'stopped passing without its body failing' \
-    'C5 a declared victim that vanished while another failure carried the token'
-  control wrong-file-kill run 'not attributable' \
+  control attribution-join run 'exists only under the mutation and is not accounted for' \
+    'C5 a failure that exists only under the mutation and is not declared'
+  control wrong-file-kill run 'kept passing under the mutation' \
     'C6 a kill declared against the wrong one of two files sharing a test name'
   # C7 and C8 are the round-2 review's specimens, and both are about PROVENANCE:
   # a `test:fail` is not necessarily an executed test. C7's file throws at
