@@ -92,7 +92,7 @@ if [ "${1:-}" = '--self-test' ]; then
   expect_refusal() {
     local output status
     controls=$((controls + 1))
-    output="$(EXPECTED_RED_MANIFEST_GLOB="$1" node "$RUNNER" "$2" 2>&1)"
+    output="$(node "$RUNNER" "$2" --manifest "$1" 2>&1)"
     status=$?
     if [ "$status" -eq 0 ]; then
       fail "$4 — the gate reported OK"
@@ -203,8 +203,7 @@ if [ "${1:-}" = '--self-test' ]; then
   RESTORE_FROM="$(mktemp)"
   cp "$SUBJECT" "$RESTORE_FROM"
   printf '\n// self-test: a deliberately dirty tracked tree\n' >>"$SUBJECT"
-  dirty_output="$(EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/admission-twin.expected-red.json" \
-    node "$RUNNER" run 2>&1)"
+  dirty_output="$(node "$RUNNER" run --manifest "$CONTROLS/admission-twin.expected-red.json" 2>&1)"
   dirty_status=$?
   restore_subject
   if [ "$dirty_status" -eq 0 ]; then
@@ -236,8 +235,7 @@ if [ "${1:-}" = '--self-test' ]; then
   cp "$SUBJECT" "$RESTORE_FROM"
   printf '\n// self-test: staged, not written to the working tree afterwards\n' >>"$SUBJECT"
   git add -- "$SUBJECT"
-  staged_output="$(EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/admission-twin.expected-red.json" \
-    node "$RUNNER" run 2>&1)"
+  staged_output="$(node "$RUNNER" run --manifest "$CONTROLS/admission-twin.expected-red.json" 2>&1)"
   staged_status=$?
   restore_subject
   if [ "$staged_status" -eq 0 ]; then
@@ -268,8 +266,7 @@ if [ "${1:-}" = '--self-test' ]; then
     mkdirSync(dirname(journal), { recursive: true });
     writeFileSync(journal, JSON.stringify({ mutated: [subject] }) + "\n");
   ' "$SUBJECT" "$JOURNAL"
-  journal_output="$(EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/heal-after-run.expected-red.json" \
-    node "$RUNNER" validate 2>&1)"
+  journal_output="$(node "$RUNNER" validate --manifest "$CONTROLS/heal-after-run.expected-red.json" 2>&1)"
   journal_status=$?
   restore_subject
   if [ "$journal_status" -eq 0 ]; then
@@ -285,8 +282,7 @@ if [ "${1:-}" = '--self-test' ]; then
   # --- The admission twin. -------------------------------------------------
   # A gate that only ever refuses is as useless as one that only ever passes.
   controls=$((controls + 1))
-  admission="$(EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/admission-twin.expected-red.json" \
-    node "$RUNNER" run 2>&1)"
+  admission="$(node "$RUNNER" run --manifest "$CONTROLS/admission-twin.expected-red.json" 2>&1)"
   admission_status=$?
   if [ "$admission_status" -ne 0 ]; then
     fail 'E1 a correct manifest against correct production was refused'

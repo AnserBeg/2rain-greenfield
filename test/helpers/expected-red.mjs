@@ -37,6 +37,7 @@ import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   globSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -44,7 +45,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 
 import {
@@ -79,17 +80,67 @@ const GREEN_CANARIES = Object.freeze([
 // ---------------------------------------------------------------------------
 
 /**
- * `EXPECTED_RED_MANIFEST_GLOB` is injectable for the same reason
- * `check-review-record.sh` lets its branch be injected: the negative controls
- * need to point the real code at a deliberately broken manifest. It overrides
- * only WHICH manifests are read — entry paths still resolve against the
- * repository root — and nothing else should set it in normal use.
+ * The manifest glob. Overridable ONLY by an explicit `--manifest` argument, which
+ * the self-test passes; there is no environment override.
+ *
+ * There used to be one, and it was honoured in every mode. An inherited
+ * `EXPECTED_RED_MANIFEST_GLOB` could therefore redirect the real
+ * `check:expected-red` away from the whole committed evidence population and
+ * report OK over a single fixture — the 2026-08-21 round-4 review's first
+ * finding. An env var is inherited silently; an argument is visible at the call
+ * site. The variable is now refused outright rather than ignored, so a stale one
+ * fails loudly instead of quietly redirecting the gate.
  */
-export function manifestGlob() {
-  const override = process.env.EXPECTED_RED_MANIFEST_GLOB;
-  return override !== undefined && override.length > 0
-    ? override
-    : MANIFEST_GLOB;
+function manifestGlobFrom(override) {
+  return override !== undefined && override.length > 0 ? override : MANIFEST_GLOB;
+}
+
+export function assertNoInheritedOverride() {
+  assert.equal(
+    process.env.EXPECTED_RED_MANIFEST_GLOB,
+    undefined,
+    'EXPECTED_RED_OVERRIDE_REFUSED: EXPECTED_RED_MANIFEST_GLOB is set. The manifest population is a property of the frozen candidate, not of the environment; pass --manifest explicitly if you mean to point the self-test at a fixture.',
+  );
+}
+
+/**
+ * Every path the gate reads or mutates must belong to the frozen candidate.
+ *
+ * `existsSync` admitted absolute paths, `../` escapes, untracked files and
+ * symlinks, while `git diff --quiet HEAD --` ignores untracked files entirely —
+ * so the runner could mutate and certify bytes that are in no commit. Round 4
+ * found it. Membership is checked against `git ls-files`, and a symlink is
+ * refused because its target is not what the tracked entry names.
+ */
+function trackedFiles(root) {
+  const listed = spawnSync('git', ['ls-files', '-z'], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  assert.equal(listed.status, 0, 'EXPECTED_RED_TRACKED_LIST_FAILED: git ls-files did not run');
+  return new Set(
+    listed.stdout.split('\0').filter(Boolean).map((path) => resolve(root, path)),
+  );
+}
+
+function pathProblem(candidate, root, tracked) {
+  if (typeof candidate !== 'string' || candidate.length === 0) {
+    return 'must be a non-empty repository-relative path';
+  }
+  if (isAbsolute(candidate)) return 'must be repository-relative, not absolute';
+  const resolved = resolve(root, candidate);
+  if (resolved !== join(root, candidate) || relative(root, resolved).startsWith('..')) {
+    return 'resolves outside the repository';
+  }
+  if (!existsSync(resolved)) return 'does not exist';
+  const stats = lstatSync(resolved);
+  if (stats.isSymbolicLink()) return 'is a symlink, so its bytes are not the tracked entry';
+  if (!stats.isFile()) return 'is not a regular file';
+  if (!tracked.has(resolved)) {
+    return 'is not tracked by git, so it is not part of the frozen candidate';
+  }
+  return undefined;
 }
 
 /**
@@ -120,21 +171,22 @@ export function inFlightMutation(root = REPOSITORY_ROOT) {
   }
 }
 
-export function discoverManifestPaths(root = REPOSITORY_ROOT) {
-  return globSync(manifestGlob(), { cwd: root }).sort();
+export function discoverManifestPaths(root = REPOSITORY_ROOT, override) {
+  return globSync(manifestGlobFrom(override), { cwd: root }).sort();
 }
 
-export function loadManifests(root = REPOSITORY_ROOT) {
+export function loadManifests(root = REPOSITORY_ROOT, override) {
   const problems = [];
   const entries = [];
-  const paths = discoverManifestPaths(root);
+  const tracked = trackedFiles(root);
+  const paths = discoverManifestPaths(root, override);
 
   // The check reading zero input is a vacuity vector in its own right: a glob
   // that matches nothing must fail, never report OK over an empty set.
   if (paths.length === 0) {
     problems.push({
       code: 'EXPECTED_RED_NO_MANIFESTS',
-      where: manifestGlob(),
+      where: manifestGlobFrom(override),
       detail: 'no manifest was discovered, so the gate would pass over nothing',
     });
     return { entries, paths, problems };
@@ -142,6 +194,15 @@ export function loadManifests(root = REPOSITORY_ROOT) {
 
   const seenNames = new Map();
   for (const path of paths) {
+    const manifestProblem = pathProblem(path, root, tracked);
+    if (manifestProblem !== undefined) {
+      problems.push({
+        code: 'EXPECTED_RED_PATH_NOT_IN_CANDIDATE',
+        where: path,
+        detail: `the manifest ${manifestProblem}`,
+      });
+      continue;
+    }
     let manifest;
     try {
       manifest = JSON.parse(readFileSync(resolve(root, path), 'utf8'));
@@ -160,7 +221,7 @@ export function loadManifests(root = REPOSITORY_ROOT) {
     for (const [index, entry] of manifest.entries.entries()) {
       const where = `${path}#${entry?.name ?? index}`;
       const before = problems.length;
-      for (const problem of validateEntry(entry, where, root)) {
+      for (const problem of validateEntry(entry, where, root, tracked)) {
         problems.push(problem);
       }
       if (typeof entry?.name === 'string') {
@@ -203,7 +264,7 @@ function validateManifestShape(manifest, where) {
   return problems;
 }
 
-function validateEntry(entry, where, root) {
+function validateEntry(entry, where, root, tracked) {
   const problems = [];
   const fail = (code, detail) => problems.push({ code, where, detail });
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -223,10 +284,12 @@ function validateEntry(entry, where, root) {
     );
   }
 
-  if (!isNonEmptyString(entry.file)) {
-    fail('EXPECTED_RED_ENTRY_SHAPE', 'file must be a repository-relative path');
-  } else if (!existsSync(resolve(root, entry.file))) {
-    fail('EXPECTED_RED_FILE_MISSING', `${entry.file} does not exist`);
+  const subjectProblem = pathProblem(entry.file, root, tracked);
+  if (subjectProblem !== undefined) {
+    fail(
+      'EXPECTED_RED_PATH_NOT_IN_CANDIDATE',
+      `the mutation subject ${String(entry.file)} ${subjectProblem}`,
+    );
   } else if (!isNonEmptyString(entry.original)) {
     fail('EXPECTED_RED_ENTRY_SHAPE', 'original must be non-empty source text');
   } else {
@@ -281,10 +344,11 @@ function validateEntry(entry, where, root) {
       fail('EXPECTED_RED_ENTRY_SHAPE', 'test.files must be a non-empty array');
     } else {
       for (const file of test.files) {
-        if (!isNonEmptyString(file) || !existsSync(resolve(root, file))) {
+        const problem = pathProblem(file, root, tracked);
+        if (problem !== undefined) {
           fail(
-            'EXPECTED_RED_TEST_MISSING',
-            `test file ${String(file)} does not exist`,
+            'EXPECTED_RED_PATH_NOT_IN_CANDIDATE',
+            `test file ${String(file)} ${problem}`,
           );
         } else declaredFiles.add(file);
       }
@@ -389,37 +453,20 @@ export function runEntries(
   let run = 0;
   try {
     for (const entry of entries) {
-      // A/B/A, per entry, with NO baseline reused across entries.
+      // MUTATED FIRST, then restored. Not baseline-first.
       //
-      // The round-3 review's second finding: measuring green once, then red, and
-      // never measuring green again proves only that the red happened after the
-      // mutation. A suite that leaves state behind — a marker file, a row, a
-      // cache — makes its own earlier run a second sufficient cause, and every
-      // other check still passes. Memoizing one baseline across entries widened
-      // that to contamination between entries.
+      // The round-4 review's counterexample: a suite that fails only when its
+      // own marker is present AND the source is mutated passes A/B/A intact —
+      // baseline green (writes the marker), mutated red, restored green — while
+      // the mutation ALONE, from a clean start, is a survivor. Green-then-red
+      // cannot tell a cause from a co-cause, and neither can green-red-green.
       //
-      // Requiring the restored suite to return the SAME green pass set is what
-      // makes the mutation the only cause.
-      const before = measureBaseline(entry, {
-        root,
-        scratch,
-        log,
-        run: (run += 1),
-        phase: 'baseline',
-      });
-      runOneEntry(entry, before, { root, scratch, log, run: (run += 1) });
-      const after = measureBaseline(entry, {
-        root,
-        scratch,
-        log,
-        run: (run += 1),
-        phase: 'restored',
-      });
-      assert.deepEqual(
-        [...after.passing].map(readableIdentity).sort(),
-        [...before.passing].map(readableIdentity).sort(),
-        `${entry.name}: the restored suite is not the green it started from, so the mutation is not the only cause of the red`,
-      );
+      // Running the mutation first measures it against the freshest state this
+      // process can offer, so a red that needed the baseline's leavings does not
+      // appear at all. The restored run then supplies the green reference the
+      // kill set is computed against — measured AFTER the mutated run, so
+      // nothing the baseline left behind can be the reference either.
+      runOneEntry(entry, { root, scratch, log, run: (run += 1) });
     }
   } finally {
     rmSync(scratch, { force: true, recursive: true });
@@ -430,7 +477,7 @@ export function runEntries(
   return entries.length;
 }
 
-function measureBaseline(entry, { root, scratch, log, run, phase }) {
+function measurePhase(entry, { root, scratch, log, run, phase }) {
   const measured = measureSuiteRun(entry.test, {
     root,
     scratch,
@@ -441,47 +488,19 @@ function measureBaseline(entry, { root, scratch, log, run, phase }) {
     undefined,
     `${entry.name}: the ${phase} suite could not be started (${measured.spawnFailure})`,
   );
-  assert.equal(
-    measured.status,
-    0,
-    `${entry.name}: the ${phase} suite is not green, so no red it produces can be attributed to the mutation\n${tail(measured.output)}`,
-  );
-  // The check reading zero input. A --test-name-pattern that matches nothing
-  // exits 0, and without this the mutated run's non-zero exit would be the only
-  // thing distinguishing "nothing ran" from "the seam held".
   assert.ok(
     measured.results.length > 0,
     `${entry.name}: the ${phase} run executed no test — the pattern or file selects nothing`,
   );
   assertEvidenceReconciles(entry, measured, root, phase);
-  const passing = identitiesOf(measured.results, 'pass', root);
-  assert.equal(
-    passing.size,
-    measured.results.length,
-    `${entry.name}: the ${phase} run is not wholly green, or reports two results under one file-qualified identity`,
-  );
-  log.write(
-    `EXPECTED_RED_BASELINE ${entry.name} ${phase} ${passing.size} passing\n`,
-  );
-  return { passing };
+  return measured;
 }
 
-function runOneEntry(entry, baseline, { root, scratch, log, run }) {
+function runOneEntry(entry, { root, scratch, log, run }) {
   const path = resolve(root, entry.file);
   const declared = entry.kills
     .map((kill) => identityOf(resolve(root, kill.file), kill.name))
     .sort();
-
-  // Declared kills must be tests that actually pass at baseline. A kill naming
-  // a test that never ran would be satisfied by its permanent absence.
-  const missing = declared.filter(
-    (identity) => !baseline.passing.has(identity),
-  );
-  assert.deepEqual(
-    missing,
-    [],
-    `${entry.name}: kills names ${JSON.stringify(missing.map(readableIdentity))}, which did not pass at baseline`,
-  );
 
   const originalSource = readFileSync(path, 'utf8');
   assert.equal(
@@ -500,15 +519,12 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
   );
   const mutatedDigest = digestOf(mutatedSource);
 
-  // The observation function is DEFINED in expected-red-measure.mjs and is
-  // handed plain data — not a closure declared here, which would carry
-  // `originalSource` and this module's `writeFileSync` whatever its parameter
-  // list said. That was the round-2 review's finding 3.
+  // PHASE B — the mutation, measured before anything else has run.
   const observation = withMutation(
     { path, originalSource, mutatedSource, root },
     observeMutatedRun,
     {
-      label: `${run}-${entry.name}`,
+      label: `${run}-${entry.name}-mutated`,
       root,
       scratch,
       subjectPath: path,
@@ -533,12 +549,38 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
   assert.notEqual(
     observation.status,
     0,
-    `${entry.name}: SURVIVOR — the mutation stayed green`,
+    `${entry.name}: SURVIVOR — the mutation stayed green from a clean start`,
+  );
+  assertEvidenceReconciles(entry, observation, root, 'mutated');
+
+  // PHASE A — the restored suite. It must be wholly green, and it is the
+  // reference the kill set is computed against.
+  const restored = measurePhase(entry, {
+    root,
+    scratch,
+    log,
+    run,
+    phase: 'restored',
+  });
+  const reference = identitiesOf(restored.results, 'pass', root);
+  assert.equal(
+    reference.size,
+    restored.results.length,
+    `${entry.name}: the restored suite is not wholly green, so no red the mutation produced can be attributed to it`,
+  );
+  log.write(
+    `EXPECTED_RED_RESTORED ${entry.name} ${reference.size} passing\n`,
   );
 
-  assertEvidenceReconciles(entry, observation, root, 'mutated');
+  const missing = declared.filter((identity) => !reference.has(identity));
+  assert.deepEqual(
+    missing.map(readableIdentity),
+    [],
+    `${entry.name}: kills names ${JSON.stringify(missing.map(readableIdentity))}, which does not pass with production restored`,
+  );
+
   const stillPassing = identitiesOf(observation.results, 'pass', root);
-  const regressed = [...baseline.passing]
+  const regressed = [...reference]
     .filter((identity) => !stillPassing.has(identity))
     .sort();
   assert.deepEqual(
@@ -547,13 +589,9 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
     `${entry.name}: the red is not attributable — declared kills ${JSON.stringify(declared.map(readableIdentity))} but the mutation stopped ${JSON.stringify(regressed.map(readableIdentity))}`,
   );
 
-  // THE JOIN. A test stops passing when it fails, and also when it is skipped,
-  // never registered, or dropped after a parent's failure. Only the first is a
-  // kill, and only the first carries a message that can be required to be the
-  // declared one. Both halves are asserted against the same identities.
-  // `status === 'fail'` only. A cancelled child arrives as `test:fail` but is
-  // not an executed assertion failure, and Node counts it separately; letting it
-  // stand in for a declared kill was the round-2 review's second specimen.
+  // Only `status === 'fail'` — a body that ran and failed. A cancelled child, a
+  // timeout, an abort, a parent reported `subtestsFailed` and a child reported
+  // `hookFailed` all arrive as `test:fail` and none of them is that.
   const failuresByIdentity = new Map(
     observation.results
       .filter((result) => result.status === 'fail')
@@ -568,13 +606,10 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
   assert.deepEqual(
     notFailed.map(readableIdentity),
     [],
-    `${entry.name}: ${JSON.stringify(notFailed.map(readableIdentity))} stopped passing without failing — absent, skipped or never registered is not a kill`,
+    `${entry.name}: ${JSON.stringify(notFailed.map(readableIdentity))} stopped passing without its body failing — absent, skipped, cancelled, timed out or failed in a hook is not a kill`,
   );
-  // Each declared kill must fail for ITS OWN declared reason. One pattern over
-  // the concatenation of every declared failure is satisfied when any single one
-  // of them carries it, which lets a second declared kill die for anything at
-  // all — the round-3 review's finding, and the Cartesian conjunction this gate
-  // exists to refuse, moved inside the declared set.
+
+  // Each declared kill must fail for ITS OWN declared reason.
   for (const kill of entry.kills) {
     const identity = identityOf(resolve(root, kill.file), kill.name);
     assert.match(
@@ -657,10 +692,13 @@ function assertEvidenceReconciles(entry, measured, root, phase) {
     );
     const tally = (status) =>
       credited.filter((result) => result.status === status).length;
+    // `fail` and `aggregate` are both counted by Node under `failed`; only
+    // `fail` may ever satisfy a kill. Collapsing them made a parent whose
+    // subtest fails reconcile as cancelled against a Node count of failed.
     assert.deepEqual(
       {
         cancelled: tally('cancelled'),
-        failed: tally('fail'),
+        failed: tally('fail') + tally('aggregate'),
         passed: tally('pass'),
       },
       {
@@ -728,7 +766,20 @@ export function assertFrozenTree(root = REPOSITORY_ROOT, code) {
 // ---------------------------------------------------------------------------
 
 function main(argv) {
-  const [mode, ...selected] = argv;
+  // The manifest population belongs to the frozen candidate. An inherited
+  // environment override could silently redirect the real gate; it is refused.
+  assertNoInheritedOverride();
+  let override;
+  const rest = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === '--manifest') {
+      override = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    rest.push(argv[index]);
+  }
+  const [mode, ...selected] = rest;
 
   // Before the manifests, not after: a real in-flight mutation removes the
   // `original` a manifest names, so loading first made this branch unreachable.
@@ -745,7 +796,7 @@ function main(argv) {
     return 2;
   }
 
-  const { entries, paths, problems } = loadManifests();
+  const { entries, paths, problems } = loadManifests(REPOSITORY_ROOT, override);
 
   if (mode === 'list') {
     for (const entry of entries) {
@@ -779,7 +830,7 @@ function main(argv) {
 
   if (mode !== 'run') {
     process.stderr.write(
-      'Usage: expected-red.mjs <validate|run|list> [entry-name...]\n',
+      'Usage: expected-red.mjs <validate|run|list> [--manifest <glob>] [entry-name...]\n',
     );
     return 2;
   }
