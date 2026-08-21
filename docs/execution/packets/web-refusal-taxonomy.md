@@ -289,15 +289,18 @@ not infer the disposition. The narrowing depends on the current reachability
 fact: the composed production request path uses `AllowAllLocalPolicy`, release
 verification and demo wiring are also allow-only, and all three
 `readCurrentVersion()` implementations return fixed successful evidence without
-a fallible read, adapter, validator, normalizer, or wrapper. No
-production-reachable policy-side promise supplied to the join can therefore
-reject, so same-turn precedence is not contested. The routing is a hard trigger
-rather than an indefinite deferral: before any production-reachable policy-side
-promise supplied to `joinRuntimeDefinitionAndPolicy` can reject — including
-through a deny-capable gateway, version-read failure, validator, normalizer,
-adapter, or post-invocation wrapper — the owning packet must ship the subsuming
+a fallible read, adapter, validator, normalizer, or wrapper, and the current join
+derives no fallible policy branch from them. No production-reachable policy-side
+branch participating in the join can therefore fail, so same-turn precedence is
+not contested. The routing is a hard trigger rather than an indefinite deferral:
+before any production-reachable policy-side branch participating in
+`joinRuntimeDefinitionAndPolicy` can fail — whether that branch is supplied by
+its caller or derived within the join, and whether fallibility comes from a
+deny-capable gateway, version-read failure, validator, normalizer, adapter,
+promise wrapper, or another source — the owning packet must ship the subsuming
 two-pending, policy-then-loader, exact-identity control first. The row fires on
-policy-side rejectability, not only on authorization denial.
+policy-side fallibility wherever introduced, not on a particular promise
+boundary.
 
 The source comment on `joinRuntimeDefinitionAndPolicy` is narrowed to the same
 five measured classes and names the unproved routed case. Its prior statement
@@ -562,15 +565,14 @@ ship before any production-reachable policy-side promise supplied to the join
 can reject, regardless of which layer introduces that rejectability. Production
 logic and the routed-control scope remain unchanged.
 
-### Trigger-predicate correction — `de4a3eef78b75dc4a661b5ef040c6d0b3fcba514`
+### Superseded call-boundary trigger — `de4a3eef78b75dc4a661b5ef040c6d0b3fcba514`
 
-The three governing statements now fire on the fact the join actually consumes:
-whether a production-reachable policy-side promise supplied to
-`joinRuntimeDefinitionAndPolicy` can reject. Authorization denial, a fallible
-version read, validation, normalization, an adapter and a post-invocation wrapper
-are examples of ways that predicate can become true; none is treated as the sole
-trigger. The current non-gating ruling rests only on the three present production
-wirings returning fixed successful policy-version evidence.
+The three governing statements moved from authorization denial to policy-side
+promise rejection, but still keyed the trigger to the promise supplied at the
+join's function boundary. Review of `2f472e9` found that qualifier one layer too
+narrow: the current input can remain fixed-success while a validator or wrapper
+derived inside the join creates the rejecting policy branch. The participating-
+branch trigger below supersedes this call-boundary wording.
 
 Production logic and tests are unchanged. The correction tree passed:
 
@@ -586,3 +588,21 @@ exclusive gates cleared, the third invocation executed all 29 cases and passed.
 No browser, integration, architecture or full-matrix suite was rerun for this
 prose-and-source-comment correction. The full matrix remains deferred until the
 fresh Critical arms converge.
+
+### Fifth narrow review — `2f472e936a8c15571016b20a1f63d01fbcffb63f`
+
+Fresh Codex xhigh returned `REVISE` with no present production or architecture
+finding. It confirmed the three current production wirings return fixed
+successful policy-version evidence, that an ordinary call-site wrapper fires the
+prior trigger, and that the prior correction accurately recorded its gates and
+plan-level limitation.
+
+One material claim defect remained: “promise supplied to the join” was still a
+call-boundary proxy. A validator or wrapper derived inside
+`joinRuntimeDefinitionAndPolicy` can create a fallible policy branch while its
+caller-supplied `policyRead` remains fixed-success, making the same-turn survivor
+reachable without firing that wording. The correction therefore follows the
+invariant across the function boundary: the routed control must ship before any
+production-reachable policy-side branch participating in the join can fail,
+whether caller-supplied or derived within the join. Production logic and the
+routed-control scope remain unchanged.
