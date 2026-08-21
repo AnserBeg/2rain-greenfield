@@ -128,7 +128,7 @@ if [ "${1:-}" = '--self-test' ]; then
   # --- Vector B: the check read zero input. --------------------------------
   expect_refusal "$CONTROLS/no-such-manifest-*.expected-red.json" validate \
     EXPECTED_RED_NO_MANIFESTS 'B1 a glob that discovers no manifest'
-  control zero-tests run 'the baseline executed no test' \
+  control zero-tests run 'baseline run executed no test' \
     'B2 a name pattern selecting no test'
   controls=$((controls + 1))
   if node "$RUNNER" run no-such-entry-name >/dev/null 2>&1; then
