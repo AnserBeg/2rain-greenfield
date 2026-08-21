@@ -262,6 +262,54 @@ justification. **An orchestrator who cannot name the criterion is chasing.**
   pair — the defect is in the lane's process, not the code.** Route it to
   doctrine and stop spending arms on it.
 
+## Arm instruments — pick the narrowest that can carry the verdict (2026-08-21)
+
+**A packet cannot be accepted without a PASS, because a REVISE accepts nothing.**
+That much is fixed. **What is NOT fixed is how much the arm must re-derive**, and
+choosing a fresh-naive re-read where a narrow confirm suffices is the
+over-reviewing this skill already warns costs more than under-reviewing.
+
+**Three instruments. Choose by what the correction changed, not by round number.**
+
+| the correction changed | instrument | the arm re-derives |
+|---|---|---|
+| production behaviour | **fresh-naive arm** | everything; nothing is settled |
+| controls or evidence | **narrow confirm** | only the changed control and its survivors |
+| records, prose, or comments | **narrow confirm** | only whether it now says what is true |
+
+**A narrow confirm is a real arm with a real verdict.** It differs from a
+fresh-naive one in what it is TOLD: that production is byte-identical to a SHA a
+prior arm endorsed, which decisive questions already closed, and that it should
+not reopen them without concrete evidence from this candidate. **Prove the
+byte-identity and quote the command** — the reviewer must not take it on trust.
+
+**The confirm arm follows the identical-tree rule too.** If Fable already passed a
+production tree and the only later change is records, prose or a control, **a fresh
+Fable confirm re-reads bytes it has already cleared.** Re-run it when executable
+behaviour moved; scope it to the delta otherwise. This mirrors `git-workflow`'s
+matrix rule and rests on the same reasoning: a second pass over the same bytes
+observes nothing.
+
+### Pre-arm verification — the orchestrator checks what is mechanical
+
+**Before an arm goes out, the orchestrator verifies by execution or by command
+every claim in the prompt that a machine can settle** — SHA presence on `origin`,
+byte-identity of production across the correction, whether a named survivor
+actually survives, whether a cited symbol exists.
+
+**Then it hands the results to the arm as established**, so the review spends
+itself on judgement rather than re-derivation.
+
+**Measured value:** every time this was done it either pre-answered a decisive
+question or caught a defect before the round. On one packet the orchestrator ran
+the reviewer's proposed survivor directly and found the control green under it,
+turning a disputed claim into a settled one in two minutes. **On another it found
+the survivor did NOT reproduce, which would otherwise have cost a full round.**
+
+**It is not a substitute for the arm.** A `local-confirm` never upgrades a packet
+past `evidence_ready` on its own, and pre-arm verification is weaker than that —
+it is mechanical checking, not review.
+
 ## Fresh-naive mechanics (still binding)
 
 - Every review and re-review is a NEW spawn with zero planning context: only
