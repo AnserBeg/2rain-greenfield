@@ -561,3 +561,28 @@ keys the obligation to the load-bearing predicate: the subsuming control must
 ship before any production-reachable policy-side promise supplied to the join
 can reject, regardless of which layer introduces that rejectability. Production
 logic and the routed-control scope remain unchanged.
+
+### Trigger-predicate correction — `de4a3eef78b75dc4a661b5ef040c6d0b3fcba514`
+
+The three governing statements now fire on the fact the join actually consumes:
+whether a production-reachable policy-side promise supplied to
+`joinRuntimeDefinitionAndPolicy` can reject. Authorization denial, a fallible
+version read, validation, normalization, an adapter and a post-invocation wrapper
+are examples of ways that predicate can become true; none is treated as the sole
+trigger. The current non-gating ruling rests only on the three present production
+wirings returning fixed successful policy-version evidence.
+
+Production logic and tests are unchanged. The correction tree passed:
+
+- `pnpm format`: green;
+- `pnpm typecheck`: green;
+- `pnpm lint`: green; and
+- `pnpm --filter @north-star/web test:contracts`: 29/29 green.
+
+The first two contract invocations exited 75 with `TEST_GATE_LOCK_BUSY` before
+executing any assertion: the first waited behind another lane's PostgreSQL and
+expected-red gates, and the second behind a new PostgreSQL holder. After those
+exclusive gates cleared, the third invocation executed all 29 cases and passed.
+No browser, integration, architecture or full-matrix suite was rerun for this
+prose-and-source-comment correction. The full matrix remains deferred until the
+fresh Critical arms converge.
