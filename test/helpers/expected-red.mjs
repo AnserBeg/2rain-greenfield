@@ -579,9 +579,16 @@ function runOneEntry(entry, { root, scratch, log, run }) {
     `${entry.name}: kills names ${JSON.stringify(missing.map(readableIdentity))}, which does not pass with production restored`,
   );
 
+  // A parent reported `subtestsFailed` stops passing only because a descendant
+  // did, and a child reported `hookFailed` never entered its body. Neither is an
+  // independent regression, and neither may be a kill — so requiring them to be
+  // declared would make a mutation that breaks a NESTED test inexpressible.
+  // They are excluded from the regression set; the descendant that actually
+  // failed is still in it, so nothing hides behind them.
   const stillPassing = identitiesOf(observation.results, 'pass', root);
+  const derived = identitiesOf(observation.results, 'aggregate', root);
   const regressed = [...reference]
-    .filter((identity) => !stillPassing.has(identity))
+    .filter((identity) => !stillPassing.has(identity) && !derived.has(identity))
     .sort();
   assert.deepEqual(
     regressed.map(readableIdentity),

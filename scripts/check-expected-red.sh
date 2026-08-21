@@ -305,6 +305,17 @@ if [ "${1:-}" = '--self-test' ]; then
   fi
   assert_subject_restored 'G1'
 
+  # E2: the admission twin for the aggregate bucket. An ordinary nested suite —
+  # child fails, parent reported subtestsFailed — must PASS. Collapsing aggregate
+  # into cancelled makes it fail reconciliation, which is a false refusal.
+  controls=$((controls + 1))
+  nested="$(node "$RUNNER" run --manifest "$CONTROLS/nested-kill.expected-red.json" 2>&1)"
+  if [ $? -ne 0 ]; then
+    fail 'E2 an ordinary nested-kill entry was refused'
+    printf '%s\n' "$nested" | sed -n '1,6p' >&2
+  fi
+  assert_subject_restored 'E2'
+
   # --- The admission twin. -------------------------------------------------
   # A gate that only ever refuses is as useless as one that only ever passes.
   controls=$((controls + 1))
