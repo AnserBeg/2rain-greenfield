@@ -301,6 +301,39 @@ test('consolidated guard red: direct and later constructed identities are additi
   }
 });
 
+test('consolidated guard red: every completed constructed identity in one file is observed', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      "export const first = `${'northstar'}.${'widget'}:capability.first`;",
+      "export const second = 'northstar' + '.' + 'widget' + ':capability.second';",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 1,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 2,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard records one observation when direct and constructed matches describe the same construction', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts':
@@ -319,6 +352,32 @@ test('consolidated guard records one observation when direct and constructed mat
         moduleDirectory: 'widget',
         ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
       },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard keeps unrelated direct and constructed identities on one line', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts':
+      "export const values = ['northstar.widget:capability.direct', `${'northstar'}.${'widget'}:capability.constructed`];\n",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    const expectedViolation: ModulePressLawViolation = {
+      file: 'apps/api/src/generic.ts',
+      line: 1,
+      message: 'generic press references widget identity northstar.widget',
+      moduleDirectory: 'widget',
+      ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    };
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      expectedViolation,
+      { ...expectedViolation },
     ]);
   } finally {
     removeArchitectureFixture(root);

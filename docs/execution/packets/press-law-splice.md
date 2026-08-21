@@ -5,11 +5,12 @@ Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b` (`origin/main`, fetched and
 verified before cut)
 Branch: `packet/press-law-splice`
 Tier: Critical — the diff changes what an architecture gate proves
-Status: active; candidates `318c0dd719a7d759d313ee45ca080017e5e36b44`
-and `4f0d19e475977956f26e3e5238ef90bcc90936a5` returned REVISE from
-user-run online reviews; the round-3 production correction has all declared
-pre-review gates green and awaits a fresh full Critical arm; the full matrix
-remains deferred until review converges
+Status: active; candidates `318c0dd719a7d759d313ee45ca080017e5e36b44`,
+`4f0d19e475977956f26e3e5238ef90bcc90936a5`, and
+`358ba5fe7a66d530b1388979953a12bea81e2aae` returned REVISE from user-run
+online reviews; round 3 found production correct, and its bounded test-only
+correction has all declared pre-review gates green for the next Critical arm;
+the full matrix remains deferred until review converges
 
 ## Packet definition
 
@@ -117,8 +118,8 @@ than creating a competing architecture authority.
 
 ## Committed controls
 
-The controls vary one property and use a Widget fixture so they do not rely on
-the routed Inventory debt:
+The controls isolate the named properties and use a Widget fixture so they do
+not rely on the routed Inventory debt:
 
 | Direction | Specimen | Observed contract |
 |---|---|---|
@@ -126,7 +127,9 @@ the routed Inventory debt:
 | refusal | `'northstar' + '.' + 'widget' + ':capability.posting'` | one `PRESS006_MODULE_ID_IN_PRESS`, naming `northstar.widget` |
 | attribution | an unrelated construction followed by a multiline interpolated identity | the PRESS006 line is the template's line 3, not index zero or the earlier construction |
 | additive occurrence | one direct routed identity followed by a later static splice for the same module and file | two exact PRESS006 observations at their respective lines |
+| constructed multiplicity | one interpolation and one concatenation independently complete banned identities in the same file | two exact PRESS006 observations; first-constructed-only compression fails |
 | same-construction deduplication | one concatenation whose literal token already contains `northstar.widget` | one observation, not one per observer |
+| same-line independence | an unrelated direct identity and spliced identity occur on the same file/module/line | two observations; line-number coincidence is not construction provenance |
 | provider mutation | retain the honest line-37 Inventory literal and splice the real `validateRegistration` comparison | Inventory PRESS006 contains both line 37 and the later comparison line; the routed literal cannot mask the reintroduced defect |
 | constructed admission | concatenated and interpolated `northstar.widget-contract/v1` values in generic production source | zero violations; the completed legal values are measured without refusing nested prefixes |
 | dynamic-boundary admission | static `northstar.widget` prefix plus an identifier-held legal suffix | zero violations; an unevaluable outer value is not partially observed |
@@ -141,6 +144,13 @@ The first candidate's focused run passed 13/13. The corrected focused run passes
 23/23 and reports eleven exact live violations: eight pre-existing compiler
 contract literals owned by row `1e-2`, the Inventory posting provider debt owned
 by `press-law-evasion`, and the two unchanged Platform provider debts.
+The round-4 development run passes 25/25 against byte-identical production.
+The reviewer-selected `.slice(0, 1)` mutation fails the plural constructed
+control by omitting line 2, and same-line deduplication fails the same-line
+independence control by omitting its second observation. Both focused mutation
+runs selected their corresponding committed control. Both mutations were
+restored with explicit inverse patches; the production file is byte-identical to
+candidate `358ba5f`.
 
 ## Gate evidence
 
@@ -188,6 +198,22 @@ Both exclusive suites acquired the repository's serialized lease after a
 transient wait. The evidence-only documentation update after those executable
 runs changes no executable path.
 
+Round 4 changes only committed architecture controls and reran the declared
+sequence against production byte-identical to candidate `358ba5f`:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` | PASS — 25/25; the two reviewer-selected mutations also produced the intended focused reds before explicit restoration |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 156/156, including 25/25 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 1,243,360.4 ms |
+
+Both exclusive suites acquired the repository's serialized lease after a
+transient wait. The evidence-only documentation update after those executable
+runs changes no executable path.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -229,6 +255,22 @@ full Critical arm with no surviving in-scope production or control defect. Any
 code change requires another fresh SHA and arm. Only after that convergence does
 the one full matrix run.
 
+The fresh full review of candidate
+`358ba5fe7a66d530b1388979953a12bea81e2aae` returned **REVISE** with no
+surviving production defect or ADR conflict. It found two Critical control
+survivors: the suite admitted first-constructed-only compression because no file
+contained two matching constructed values, and it admitted line-number
+deduplication because the independent direct/constructed pair used different
+lines. Round 4 adds exactly those two reviewer-selected specimens and changes no
+production source.
+
+Continuation is licensed as the first control-only round against the round-3
+occurrence implementation: the two independently selected vacuity vectors are
+new, material, in-scope, and the user returned REVISE with bounded test-only
+closures. If another arm finds the same occurrence/deduplication evidence class
+outrunning these specimens while production remains unchanged, the packet must
+narrow or stop rather than enumerate another adjacent fixture.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -239,3 +281,6 @@ The reusable lesson is recorded here rather than in root `learnings.md`, which i
 outside this packet's granted paths: **an AST gate must observe every completed
 semantic value named by its claim, compose independent observation channels
 additively, and deduplicate only when two channels describe the same construction.**
+For evidence, plural behavior requires two subjects in the same channel, and
+provenance deduplication requires a same-location unrelated twin; otherwise
+first-only and location-coincidence proxies remain green.
