@@ -64,9 +64,12 @@ if [ "${1:-}" = '--self-test' ]; then
   RESTORE_FROM=''
   restore_subject() {
     if [ -n "$RESTORE_FROM" ] && [ -f "$RESTORE_FROM" ]; then
+      git restore --staged -- "$SUBJECT" 2>/dev/null || true
       cp "$RESTORE_FROM" "$SUBJECT"
       rm -f "$RESTORE_FROM"
+      RESTORE_FROM=''
     fi
+    rm -f "$JOURNAL"
     return 0
   }
   trap restore_subject EXIT
@@ -80,8 +83,8 @@ if [ "${1:-}" = '--self-test' ]; then
   # leaves it changed has not restored what it measured, which is section 6's
   # subject-repaired-before-measured vector read from the other side.
   assert_subject_restored() {
-    git diff --quiet -- "$SUBJECT" ||
-      fail "$1 — the fixture subject was left mutated"
+    git diff --quiet HEAD -- "$SUBJECT" ||
+      fail "$1 — the fixture subject was left changed"
   }
 
   # $1 glob, $2 mode, $3 expected token in the refusal, $4 description
@@ -132,10 +135,19 @@ if [ "${1:-}" = '--self-test' ]; then
     'C1 an expected pattern that also matches a green transcript'
   control survivor run SURVIVOR \
     'C2 a mutation the suite does not notice'
-  control wrong-red run 'went red for a different reason' \
+  control wrong-red run 'failed for a different reason' \
     'C3 a red whose text is not the declared one'
   control wrong-kills run 'not attributable' \
     'C4 a red that killed a different test than the one declared'
+  # C5 is the 2026-08-21 review's own specimen, and it is the reason `expected`
+  # is bound to the failing identity rather than grepped from the transcript.
+  # Every separate check passes: the kill set is exact, the process is red, and
+  # the declared token is present — supplied by a test that exists only under
+  # the mutation, while the declared victim vanished without ever failing.
+  control attribution-join run 'stopped passing without failing' \
+    'C5 a declared victim that vanished while another failure carried the token'
+  control wrong-file-kill run 'not attributable' \
+    'C6 a kill declared against the wrong one of two files sharing a test name'
 
   # --- The manifest format's own load-bearing fields. ----------------------
   control claim-missing validate EXPECTED_RED_CLAIM_MISSING \
@@ -144,38 +156,84 @@ if [ "${1:-}" = '--self-test' ]; then
     'F2 an entry naming no test its mutation must break'
 
   # --- Vector D: the subject repaired before it is measured. ---------------
-  # The runner refuses a dirty tracked tree so that recovering a crashed run
-  # with `git checkout -- <file>` is lossless. commit-before-negative-controls
-  # is doctrine here: without this refusal that recovery eats uncommitted work.
+  # D1 must prove the ENTRY precondition fired, not merely that some clean-tree
+  # assertion did. The two used to share one message, and with the entry check
+  # deleted the run proceeded on dirty bytes, restored them, and the EXIT
+  # assertion produced the same words — so this control passed while the check
+  # it holds was gone. Distinct codes, plus the absence of any execution marker.
   controls=$((controls + 1))
   RESTORE_FROM="$(mktemp)"
   cp "$SUBJECT" "$RESTORE_FROM"
   printf '\n// self-test: a deliberately dirty tracked tree\n' >>"$SUBJECT"
   dirty_output="$(EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/admission-twin.expected-red.json" \
     node "$RUNNER" run 2>&1)"
-  if [ $? -eq 0 ]; then
-    fail 'D1 the runner started against a dirty tracked tree'
+  dirty_status=$?
+  restore_subject
+  if [ "$dirty_status" -eq 0 ]; then
+    fail 'D1 the runner started against a tree that differs from HEAD'
   else
     case "$dirty_output" in
-    *'clean tracked tree'*) ;;
-    *) fail 'D1 refused a dirty tree, but not for the stated reason' ;;
+    *EXPECTED_RED_TREE_NOT_FROZEN*) ;;
+    *) fail 'D1 refused, but not by the entry precondition' ;;
+    esac
+    case "$dirty_output" in
+    *EXPECTED_RED_BASELINE*|*MUTATION_RED*)
+      fail 'D1 the runner executed a baseline or a mutation before refusing'
+      ;;
     esac
   fi
-  restore_subject
-  RESTORE_FROM=''
   assert_subject_restored 'D1'
 
-  # --- Vector G: validating a tree that is deliberately mutated. -----------
-  # Validation reads the working tree. Racing a --run run, it would report the
-  # live mutation as drift — the right FAIL for the wrong reason. It must say it
-  # cannot determine instead.
+  # D2 is the recurring control for the digest read-back. Its suite restores the
+  # subject from HEAD in an `after` hook — an ordinary tidy-up, and exactly the
+  # hazard section 6 names. Without the read-back this control goes green.
+  control heal-after-run run 'repaired before it was measured' \
+    'D2 a suite that heals the subject before the runner reads it back'
+
+  # D3: `git diff --quiet` alone compares the working tree with the INDEX, so a
+  # staged-only edit passed it and evidence could be produced against bytes that
+  # are not the frozen candidate's.
   controls=$((controls + 1))
-  mkdir -p "$(dirname "$JOURNAL")"
-  printf '{ "mutated": ["%s"] }\n' "$SUBJECT" >"$JOURNAL"
-  journal_output="$(EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/admission-twin.expected-red.json" \
+  RESTORE_FROM="$(mktemp)"
+  cp "$SUBJECT" "$RESTORE_FROM"
+  printf '\n// self-test: staged, not written to the working tree afterwards\n' >>"$SUBJECT"
+  git add -- "$SUBJECT"
+  staged_output="$(EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/admission-twin.expected-red.json" \
+    node "$RUNNER" run 2>&1)"
+  staged_status=$?
+  restore_subject
+  if [ "$staged_status" -eq 0 ]; then
+    fail 'D3 the runner started against a staged-only modification'
+  else
+    case "$staged_output" in
+    *EXPECTED_RED_TREE_NOT_FROZEN*) ;;
+    *) fail 'D3 refused a staged tree, but not by the entry precondition' ;;
+    esac
+  fi
+  assert_subject_restored 'D3'
+
+  # --- Vector G: validating a tree a mutation run is holding. --------------
+  # The specimen is the REAL state, both halves: the journal AND the mutation
+  # applied. The earlier control wrote only the journal, and validation never
+  # reached the journal check because the applied mutation removes the very text
+  # the manifest names — so it reported EXPECTED_RED_VICTIM_ABSENT instead.
+  controls=$((controls + 1))
+  RESTORE_FROM="$(mktemp)"
+  cp "$SUBJECT" "$RESTORE_FROM"
+  node -e '
+    const { readFileSync, writeFileSync, mkdirSync } = require("node:fs");
+    const { dirname } = require("node:path");
+    const subject = process.argv[1];
+    const journal = process.argv[2];
+    const source = readFileSync(subject, "utf8");
+    writeFileSync(subject, source.replace("export const CONTROL_SENTINEL = \x27pristine\x27;", "export const CONTROL_SENTINEL = \x27moved\x27;"));
+    mkdirSync(dirname(journal), { recursive: true });
+    writeFileSync(journal, JSON.stringify({ mutated: [subject] }) + "\n");
+  ' "$SUBJECT" "$JOURNAL"
+  journal_output="$(EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/heal-after-run.expected-red.json" \
     node "$RUNNER" validate 2>&1)"
   journal_status=$?
-  rm -f "$JOURNAL"
+  restore_subject
   if [ "$journal_status" -eq 0 ]; then
     fail 'G1 validate answered while a mutation run was in flight'
   else
@@ -184,6 +242,7 @@ if [ "${1:-}" = '--self-test' ]; then
     *) fail 'G1 refused an in-flight tree, but not as an undeterminable one' ;;
     esac
   fi
+  assert_subject_restored 'G1'
 
   # --- The admission twin. -------------------------------------------------
   # A gate that only ever refuses is as useless as one that only ever passes.
@@ -203,6 +262,7 @@ if [ "${1:-}" = '--self-test' ]; then
   assert_subject_restored 'E1'
 
   trap - EXIT
+  restore_subject
   if [ "$fails" -eq 0 ]; then
     echo "check-expected-red self-test: OK ($controls controls)"
   fi
