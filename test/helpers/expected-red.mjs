@@ -118,18 +118,25 @@ function trackedFiles(root) {
   // `git ls-files` describes the INDEX, so a staged-but-uncommitted file counts
   // as tracked. The candidate is the commit, so membership is read from the
   // HEAD tree. Found by the round-5 review.
-  const listed = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', 'HEAD'], {
-    cwd: root,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const listed = spawnSync(
+    'git',
+    ['ls-tree', '-r', '-z', '--name-only', 'HEAD'],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
   assert.equal(
     listed.status,
     0,
     'EXPECTED_RED_TRACKED_LIST_FAILED: git ls-tree HEAD did not run',
   );
   return new Set(
-    listed.stdout.split('\0').filter(Boolean).map((path) => resolve(root, path)),
+    listed.stdout
+      .split('\0')
+      .filter(Boolean)
+      .map((path) => resolve(root, path)),
   );
 }
 

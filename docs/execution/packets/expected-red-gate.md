@@ -53,7 +53,7 @@ matrix; reproducing the reds costs minutes and belongs at acceptance.
 ## The three ways this gate could have betrayed itself
 
 Each has its own recorded red in `--self-test`, varying one property of an
-otherwise-correct manifest entry. **31 controls**, and the self-test is itself a
+otherwise-correct manifest entry. **33 controls**, and the self-test is itself a
 gate — `check:expected-red-controls` runs in CI and the matrix, so the proof
 that this instrument can fail is re-taken on every run rather than once at
 freeze time.
@@ -117,6 +117,30 @@ file, and says how to recover a killed run.
 **E — the admission twin.** A correct manifest against correct production
 passes. A gate that only ever refuses is as useless as one that only ever
 passes.
+
+**Rounds 4 and 5 ended in a RE-SCOPE, not another correction.** Five REVISE
+verdicts, every one of them a false certification the previous round's fix did
+not cover. `review-tiers` says what to do when a claim keeps outrunning its
+specimens — **narrow the claim rather than grow the table** — and the
+orchestrator ruled that on 2026-08-21.
+
+**Withdrawn:** that the gate shows the mutation is the SOLE CAUSE of the red,
+measured from a CLEAN START. It does not, and for arbitrary suites it cannot; the
+interaction fixture is certified when its marker was left by an earlier
+invocation. **Control K1 pins that behaviour executably** rather than leaving the
+limit in prose, and closing it is
+`expected-red-needs-an-initial-state-contract` in `current-plan.md`.
+
+**Kept, and structurally fixed in the same ruling:** every mode binds to `HEAD`
+rather than to the index or the working tree, and every outcome the mutation
+produces must be declared — an undeclared `hookFailed` sibling or a test the
+suite registers only under the mutation now refuses. Controls H4 and C5.
+
+**The claim the gate makes is now exactly what it observes:** with production
+restored the suite is wholly green; with this one named one-property mutation
+applied, exactly these declared tests stopped passing, each failing in its own
+body for its own declared reason, with no undeclared outcome, and the subject was
+still mutated when that was measured.
 
 **Round 2 added four checks and a specimen for each — plus one gap, stated
 because it is the same gap this packet exists to close.**
@@ -264,7 +288,7 @@ are already stable. Routed to `current-plan.md`.
 
 - The five focused-integration entries: **12 seconds** for five mutations,
   measured mutation-first and then restored.
-- `--self-test`: seconds, **31 controls**.
+- `--self-test`: seconds, **33 controls**.
 - The four PostgreSQL entries: `test/postgres/composed-application.test.ts` takes
   **9m48s** solo for one run, so an entry naming that whole file costs about
   twenty minutes for its baseline plus its mutated run. One full nine-entry run

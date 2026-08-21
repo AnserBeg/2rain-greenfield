@@ -84,19 +84,33 @@ reconciliation against Node's own counts is the backstop when the allowlist is
 wrong: admit `testTimeoutFailure` and reconciliation refuses C10; delete
 reconciliation as well and C10 is certified.
 
-**The mutation is measured FIRST, before anything else in the process has run,
-and the restored suite supplies the green reference.**
+**The mutation is measured before the restored run, and that is an ORDERING
+claim only.** It stops an invocation manufacturing its own co-cause: a suite that
+leaves state behind cannot have its baseline's leavings be the reason its mutated
+run reds, because there is no baseline before it. Control H3 holds it, and H3 is
+certified the moment a pre-mutation baseline is reintroduced.
 
-*This replaces an A/B/A protocol — pristine, mutated, pristine — that round 4
-refuted.* A suite failing only when its own marker is present **and** the source
-is mutated passes green-red-green intact, with identical pass sets on both green
-runs, while the mutation **alone** from a clean start is a survivor. The marker
-its own baseline wrote is a necessary co-cause. **Green-then-red cannot tell a
-cause from a co-cause, and neither can green-red-green.** Measuring the mutation
-against the freshest state the process can offer means a red that needed the
-baseline's leavings never appears. There is no baseline to reuse across entries,
-because there is no baseline. Controls H1, H2 and H3 hold it, and H3 is certified
-the moment a pre-mutation baseline is reintroduced.
+**WHAT THIS ADR DOES NOT CLAIM, withdrawn by orchestrator ruling 2026-08-21.**
+Earlier drafts said the gate establishes that the mutation is the SOLE CAUSE of
+the red, measured from a CLEAN START. **It does not, and for arbitrary suites it
+cannot.** State left by a previous invocation, another suite, a database or a
+container is ambient, and the gate certifies a red that needed it — reproduced,
+and pinned as control K1 so the limit is executable rather than prose.
+
+Rounds 4 and 5 each found a false certification produced by chasing that claim,
+and `review-tiers` says what to do about a claim that keeps outrunning its
+specimens: **narrow the claim rather than grow the table.** So the claim is now
+exactly what the gate observes:
+
+> With production restored the suite is wholly green. With this one named
+> one-property mutation applied, exactly these declared tests stopped passing,
+> each failing in its own body for its own declared reason, with no undeclared
+> outcome — and the subject was still mutated when that was measured.
+
+Nothing about isolation. Nothing about a clean start. Nothing about sufficiency.
+Closing that gap needs a per-entry isolation contract covering files, databases
+and containers, which may not be expressible for arbitrary suites at all; it is
+filed as `expected-red-needs-an-initial-state-contract` rather than pretended.
 
 **What the kill set does and does not settle — measured, 2026-08-21.** In one run all three
 of those PostgreSQL entries killed the *identical* pair of tests, and
