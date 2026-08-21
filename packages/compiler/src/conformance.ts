@@ -240,14 +240,33 @@ interface InventoryMovementModuleFieldRule {
   presence: 'optional' | 'required';
   shape: InventoryMovementModuleFieldShape;
 }
+interface InventoryModuleFieldStorageRule {
+  businessKey: 'none';
+  collation: 'binary';
+  defaultSemantics: 'none' | 'nullable';
+  defaultValue: null;
+  searchable: boolean;
+  storageEvolution: 'none';
+}
+interface InventoryMovementStorageModuleFieldRule extends InventoryMovementModuleFieldRule {
+  storage: InventoryModuleFieldStorageRule;
+}
 interface PostedStockBalanceModuleFieldRule extends InventoryMovementModuleFieldRule {
-  storage: {
-    businessKey: 'none';
-    collation: 'binary';
-    defaultSemantics: 'none';
-    defaultValue: null;
-    searchable: boolean;
-    storageEvolution: 'none';
+  storage: InventoryModuleFieldStorageRule;
+}
+function inventoryMovementStorageRule(
+  options: {
+    defaultSemantics?: 'none' | 'nullable';
+    searchable?: boolean;
+  } = {},
+): InventoryModuleFieldStorageRule {
+  return {
+    businessKey: 'none',
+    collation: 'binary',
+    defaultSemantics: options.defaultSemantics ?? 'none',
+    defaultValue: null,
+    searchable: options.searchable ?? false,
+    storageEvolution: 'none',
   };
 }
 const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
@@ -260,26 +279,31 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
         { label: 'v1', optionLocalId: 'stock_dimension_set_version_v1' },
       ],
     },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_item_id',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_location_id',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_quantity_delta',
     presence: 'required',
     shape: { kind: 'decimal', precision: 38, scale: 18 },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_unit_id',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 32 },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_effective_at',
@@ -289,6 +313,7 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
       precision: 'millisecond',
       timezone: 'utcInstant',
     },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_recorded_at',
@@ -298,26 +323,31 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
       precision: 'millisecond',
       timezone: 'utcInstant',
     },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_source_type',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_source_id',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: inventoryMovementStorageRule({ searchable: true }),
   },
   {
     fieldLocalId: 'inventory_movement_source_line',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_source_revision',
     presence: 'required',
     shape: { kind: 'integer' },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_posting_role',
@@ -341,28 +371,33 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
         },
       ],
     },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_reason_code',
     presence: 'optional',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: inventoryMovementStorageRule({ defaultSemantics: 'nullable' }),
   },
   {
     fieldLocalId: 'inventory_movement_reason_narrative',
     presence: 'optional',
     shape: { kind: 'text', maximumLength: 1000 },
+    storage: inventoryMovementStorageRule({ defaultSemantics: 'nullable' }),
   },
   {
     fieldLocalId: 'inventory_movement_actor_id',
     presence: 'required',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: inventoryMovementStorageRule(),
   },
   {
     fieldLocalId: 'inventory_movement_reversal_of_movement_id',
     presence: 'optional',
     shape: { kind: 'text', maximumLength: 80 },
+    storage: inventoryMovementStorageRule({ defaultSemantics: 'nullable' }),
   },
-] as const satisfies readonly InventoryMovementModuleFieldRule[]);
+] as const satisfies readonly InventoryMovementStorageModuleFieldRule[]);
 const POSTED_STOCK_BALANCE_MODULE_FIELD_RULES = Object.freeze([
   {
     fieldLocalId: 'posted_stock_balance_item_id',
@@ -911,7 +946,7 @@ function validatePinnedInventoryMovementEntity(
   const fields = packageRevision.fields.filter(
     (field) => field.entity.targetId === entityId,
   );
-  const rules = new Map<string, InventoryMovementModuleFieldRule>(
+  const rules = new Map<string, InventoryMovementStorageModuleFieldRule>(
     INVENTORY_MOVEMENT_MODULE_FIELD_RULES.map((rule) => [
       rule.fieldLocalId,
       rule,
@@ -953,6 +988,19 @@ function validatePinnedInventoryMovementEntity(
         ),
       );
     }
+    for (const property of inventoryFieldStorageMetadataViolations(
+      field,
+      rule.storage,
+    )) {
+      valid = false;
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.fields.${rule.fieldLocalId}.${property}`,
+          field.fieldId,
+        ),
+      );
+    }
   }
   for (const rule of INVENTORY_MOVEMENT_MODULE_FIELD_RULES) {
     if (observed.has(rule.fieldLocalId)) continue;
@@ -971,30 +1019,30 @@ function validatePinnedInventoryMovementEntity(
   return valid;
 }
 
-function postedStockBalanceStorageMetadataViolations(
+function inventoryFieldStorageMetadataViolations(
   field: NormalizedApplicationPackage['fields'][number],
-  rule: PostedStockBalanceModuleFieldRule,
+  storage: InventoryModuleFieldStorageRule,
 ): string[] {
   const defaultSemantics =
     field.defaultSemantics ??
     (field.presence === 'optional' ? 'nullable' : 'none');
   return [
-    ...((field.businessKey ?? 'none') === rule.storage.businessKey
+    ...((field.businessKey ?? 'none') === storage.businessKey
       ? []
       : ['businessKey']),
-    ...((field.collation ?? 'binary') === rule.storage.collation
+    ...((field.collation ?? 'binary') === storage.collation
       ? []
       : ['collation']),
-    ...(defaultSemantics === rule.storage.defaultSemantics
+    ...(defaultSemantics === storage.defaultSemantics
       ? []
       : ['defaultSemantics']),
-    ...((field.defaultValue ?? null) === rule.storage.defaultValue
+    ...((field.defaultValue ?? null) === storage.defaultValue
       ? []
       : ['defaultValue']),
-    ...(field.searchable === rule.storage.searchable ? [] : ['searchable']),
+    ...(field.searchable === storage.searchable ? [] : ['searchable']),
     ...((field.storageEvolution === undefined
       ? 'none'
-      : 'backfillEvolution') === rule.storage.storageEvolution
+      : 'backfillEvolution') === storage.storageEvolution
       ? []
       : ['storageEvolution']),
   ];
@@ -1053,9 +1101,9 @@ function validatePinnedPostedStockBalanceEntity(
         ),
       );
     }
-    for (const property of postedStockBalanceStorageMetadataViolations(
+    for (const property of inventoryFieldStorageMetadataViolations(
       field,
-      rule,
+      rule.storage,
     )) {
       valid = false;
       diagnostics.push(

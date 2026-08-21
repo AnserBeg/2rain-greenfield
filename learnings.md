@@ -646,3 +646,12 @@ business key whose physical unique index contradicted the provider's row identit
 How to apply: qualify read models against every lowerer-affecting field property,
 return explicit validity, and make each malformed specimen prove the full
 maintenance/form requirement returns—not merely that some diagnostic exists.
+
+## Carry exact ABI qualification through every required companion
+Date: 2026-08-21
+Why: posted stock required a “valid” movement companion, but that boolean proved
+only logical field shape and admitted a business key that PostgreSQL could not
+materialize on the partitioned movement fact table.
+How to apply: when admission depends on a companion, validate every downstream
+storage-shaping property on both subjects and test the companion’s exact red plus
+the dependent subject’s complete returned requirements.
