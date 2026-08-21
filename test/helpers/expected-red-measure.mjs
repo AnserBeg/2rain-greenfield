@@ -93,9 +93,11 @@ export function measureSuiteRun(test, { root, scratch, label }) {
       : result.status === null
         ? `terminated by signal ${String(result.signal)}`
         : undefined;
+  const evidence = readEvidence(evidencePath);
   return {
+    files: evidence.files,
     output: `${result.stdout ?? ''}\n${result.stderr ?? ''}`,
-    results: readEvidence(evidencePath),
+    results: evidence.results,
     spawnFailure,
     status: result.status,
   };
@@ -107,11 +109,15 @@ export function measureSuiteRun(test, { root, scratch, label }) {
  * results and refused by the caller rather than silently tolerated.
  */
 function readEvidence(evidencePath) {
-  if (!existsSync(evidencePath)) return [];
+  const empty = { files: [], results: [] };
+  if (!existsSync(evidencePath)) return empty;
   try {
     const parsed = JSON.parse(readFileSync(evidencePath, 'utf8'));
-    return Array.isArray(parsed?.results) ? parsed.results : [];
+    return {
+      files: Array.isArray(parsed?.files) ? parsed.files : [],
+      results: Array.isArray(parsed?.results) ? parsed.results : [],
+    };
   } catch {
-    return [];
+    return empty;
   }
 }
