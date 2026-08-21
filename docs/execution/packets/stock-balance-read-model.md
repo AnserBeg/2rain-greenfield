@@ -1,6 +1,6 @@
 # stock-balance-read-model — honest posted-stock browsing
 
-Status: active; Critical round-1 corrections implemented, replacement freeze pending
+Status: evidence_ready; replacement Critical review freeze pending
 
 Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b`
 
@@ -229,18 +229,33 @@ activated one-by-one through the new head before the schema snapshot is written.
 
 ## Gate record
 
-Green before final freeze:
+The original round-1 gates below remain historical evidence only. The complete
+replacement pre-freeze set is green on executable commit
+`5b5016839228400b38d8b5dd01f54453f2fc9fcc`:
 
 - `pnpm typecheck`
 - `pnpm lint`
 - `pnpm format`
 - `pnpm check:app-release`
 - `pnpm check:demo-release`
-- `pnpm test:compiler` — 151/151
+- `pnpm test:compiler` — 152/152
 - `pnpm test:architecture` — 141/141 with successful executed-file evidence
 - focused stock-count, reconciliation, and complete module-storage-transition
   controls
 - `pnpm test:browser` — 91/91, including the posted-stock List journey
+- `pnpm test:postgres` — 204/204, zero failures, in 1,418,545 ms
+
+The correction controls ran before that freeze. Restoring the old direct,
+active-`o0` operation filter failed the focused compiler suite because the
+`o1` specimen compiled. Removing transition ownership failed because the exact
+provider-written refusal disappeared. Restoring the active-only lifecycle
+filter failed because the retired operation compiled. Awarding CRUD/Form
+omission from the family rule before exact ABI qualification failed because the
+renamed-unit specimen retained the exemption. Each mutation changed only the
+named arm and was restored before the replacement gates. The first replacement
+architecture run also caught its own exact source-line ratchet moving from 2068
+to 2086; correcting that test-only coordinate returned the full 141/141 suite
+to green.
 
 The first full `test:postgres` run reached 196/197. Its only failure was a stale
 historical test assumption and then the deliberately generated full-replay
@@ -256,8 +271,9 @@ then passed
 `4b265c913bcda103c74f1320e249d20d810df1af`: 204/204, zero failures, in
 742046 ms. Round 1 changed executable conformance and tests after that run, so
 the SHA is retained as history but carries no evidence forward to the
-replacement candidate. Replacement focused and required gate evidence follows
-after the correction converges.
+replacement candidate. The replacement PostgreSQL run above re-observed real
+arithmetic, rebuild, correction, non-healing reconciliation, and the shared
+generation guard on the corrected executable tree.
 
 ## User-observable checkpoint
 
@@ -285,11 +301,11 @@ a draft does not create stock; a movement must be posted.
 
 Critical round 1 returned REVISE on frozen SHA
 `c781aafa09d1841732d6307416051e0960f0f879`. Its two findings are accepted and
-the corrections are implemented, but no independent review has read the
-replacement candidate. After its required gates are green, freeze a new SHA and
-restart arm 1 with fresh-naive Codex at xhigh. Only after PASS may independent
-Fable max confirm the identical new SHA. The full CI matrix remains deliberately
-deferred until both arms converge.
+the corrections and replacement pre-freeze gates are complete, but no
+independent review has read the replacement candidate. Freeze this evidence
+record and restart arm 1 with fresh-naive Codex at xhigh. Only after PASS may
+independent Fable max confirm the identical new SHA. The full CI matrix remains
+deliberately deferred until both arms converge.
 
 ## Program-review trigger assessment
 
