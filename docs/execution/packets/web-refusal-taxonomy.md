@@ -606,3 +606,28 @@ invariant across the function boundary: the routed control must ship before any
 production-reachable policy-side branch participating in the join can fail,
 whether caller-supplied or derived within the join. Production logic and the
 routed-control scope remain unchanged.
+
+### Participating-branch correction — `3988e1cbbd5fcba616bf0e73f604f461d01bcc79`
+
+The three governing statements now follow the invariant rather than either
+promise boundary: the routed control must ship before any production-reachable
+policy-side branch participating in `joinRuntimeDefinitionAndPolicy` can fail,
+whether the branch is caller-supplied or derived within the join and wherever
+its fallibility originates. The current non-gating ruling additionally records
+that the present join derives no fallible branch from the three fixed-success
+policy-version reads.
+
+Production logic and tests are unchanged. The exact correction tree passed:
+
+- `pnpm format`: green;
+- `pnpm typecheck`: green; and
+- `pnpm lint`: green.
+
+`pnpm --filter @north-star/web test:contracts` passed 29/29 immediately before a
+final comment-only wording refinement that separated branch origin from the
+non-exhaustive examples of fallibility. The exact final replay was queued behind
+another lane's exclusive full matrix and was cancelled before executing any
+assertion rather than bypassing the shared lock. No browser, integration,
+architecture or full-matrix suite was rerun for this prose-and-source-comment
+correction. The full matrix remains deferred until the fresh Critical arms
+converge.
