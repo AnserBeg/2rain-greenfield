@@ -74,7 +74,30 @@ const GREEN_CANARIES = Object.freeze([
  */
 export function manifestGlob() {
   const override = process.env.EXPECTED_RED_MANIFEST_GLOB;
-  return override !== undefined && override.length > 0 ? override : MANIFEST_GLOB;
+  return override !== undefined && override.length > 0
+    ? override
+    : MANIFEST_GLOB;
+}
+
+/**
+ * The files a mutation run has deliberately changed and not yet restored.
+ *
+ * Validation reads the WORKING TREE, so a validate run racing a --run run would
+ * report the live mutation as drift — a FAIL naming a real absence for an unreal
+ * reason. That is the `gate-reads-a-different-thing-than-its-name` class, so it
+ * is refused with "cannot determine" rather than answered wrongly.
+ */
+export function inFlightMutation(root = REPOSITORY_ROOT) {
+  const journalPath = resolve(root, JOURNAL);
+  if (!existsSync(journalPath)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(journalPath, 'utf8'));
+    return Array.isArray(parsed?.mutated) && parsed.mutated.length > 0
+      ? parsed.mutated
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function discoverManifestPaths(root = REPOSITORY_ROOT) {
@@ -142,7 +165,11 @@ function validateManifestShape(manifest, where) {
   const problems = [];
   const fail = (detail) =>
     problems.push({ code: 'EXPECTED_RED_MANIFEST_SHAPE', where, detail });
-  if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) {
+  if (
+    manifest === null ||
+    typeof manifest !== 'object' ||
+    Array.isArray(manifest)
+  ) {
     fail('a manifest must be a JSON object');
     return problems;
   }
@@ -200,14 +227,23 @@ function validateEntry(entry, where, root) {
     }
   }
   if (typeof entry.replacement !== 'string') {
-    fail('EXPECTED_RED_ENTRY_SHAPE', 'replacement must be a string (empty deletes)');
+    fail(
+      'EXPECTED_RED_ENTRY_SHAPE',
+      'replacement must be a string (empty deletes)',
+    );
   } else if (entry.replacement === entry.original) {
-    fail('EXPECTED_RED_NO_MUTATION', 'replacement equals original, so nothing changes');
+    fail(
+      'EXPECTED_RED_NO_MUTATION',
+      'replacement equals original, so nothing changes',
+    );
   }
 
   let expected;
   if (!isNonEmptyString(entry.expected)) {
-    fail('EXPECTED_RED_ENTRY_SHAPE', 'expected must be a regular-expression source string');
+    fail(
+      'EXPECTED_RED_ENTRY_SHAPE',
+      'expected must be a regular-expression source string',
+    );
   } else {
     try {
       expected = new RegExp(entry.expected, 'u');
@@ -230,28 +266,43 @@ function validateEntry(entry, where, root) {
 
   const test = entry.test;
   if (test === null || typeof test !== 'object' || Array.isArray(test)) {
-    fail('EXPECTED_RED_ENTRY_SHAPE', 'test must be an object naming files and an optional namePattern');
+    fail(
+      'EXPECTED_RED_ENTRY_SHAPE',
+      'test must be an object naming files and an optional namePattern',
+    );
   } else {
     if (!Array.isArray(test.files) || test.files.length === 0) {
       fail('EXPECTED_RED_ENTRY_SHAPE', 'test.files must be a non-empty array');
     } else {
       for (const file of test.files) {
         if (!isNonEmptyString(file) || !existsSync(resolve(root, file))) {
-          fail('EXPECTED_RED_TEST_MISSING', `test file ${String(file)} does not exist`);
+          fail(
+            'EXPECTED_RED_TEST_MISSING',
+            `test file ${String(file)} does not exist`,
+          );
         }
       }
     }
     if (test.namePattern !== undefined && !isNonEmptyString(test.namePattern)) {
-      fail('EXPECTED_RED_ENTRY_SHAPE', 'test.namePattern must be a non-empty string when present');
+      fail(
+        'EXPECTED_RED_ENTRY_SHAPE',
+        'test.namePattern must be a non-empty string when present',
+      );
     }
   }
 
   // A red count is not attribution. The declared kill set is what makes two
   // entries sharing one `expected` string tell themselves apart.
   if (!Array.isArray(entry.kills) || entry.kills.length === 0) {
-    fail('EXPECTED_RED_KILLS_MISSING', 'kills must name the tests this mutation must break');
+    fail(
+      'EXPECTED_RED_KILLS_MISSING',
+      'kills must name the tests this mutation must break',
+    );
   } else if (!entry.kills.every((name) => isNonEmptyString(name))) {
-    fail('EXPECTED_RED_ENTRY_SHAPE', 'every kills entry must be a non-empty test name');
+    fail(
+      'EXPECTED_RED_ENTRY_SHAPE',
+      'every kills entry must be a non-empty test name',
+    );
   } else if (new Set(entry.kills).size !== entry.kills.length) {
     fail('EXPECTED_RED_ENTRY_SHAPE', 'kills must not repeat a test name');
   }
@@ -266,8 +317,14 @@ function validateEntry(entry, where, root) {
  * Runs the selected entries. Throws on the first entry that fails to produce
  * its expected red; the tree is restored either way.
  */
-export function runEntries(entries, { root = REPOSITORY_ROOT, log = process.stdout } = {}) {
+export function runEntries(
+  entries,
+  { root = REPOSITORY_ROOT, log = process.stdout } = {},
+) {
   assertCleanTrackedTree(root);
+  // The tree is clean, so any surviving journal is a crashed run's litter whose
+  // subject has already been recovered. Clearing it keeps validate answerable.
+  rmSync(resolve(root, JOURNAL), { force: true });
   const baselines = new Map();
   const scratch = mkdtempSync(join(tmpdir(), 'expected-red-'));
   try {
@@ -288,7 +345,11 @@ export function runEntries(entries, { root = REPOSITORY_ROOT, log = process.stdo
 }
 
 function measureBaseline(entry, { root, scratch, log }) {
-  const run = runSuite(entry.test, { root, scratch, label: `${entry.name}:baseline` });
+  const run = runSuite(entry.test, {
+    root,
+    scratch,
+    label: `${entry.name}:baseline`,
+  });
   assert.equal(
     run.spawnFailure,
     undefined,
@@ -322,7 +383,9 @@ function runOneEntry(entry, baseline, { root, scratch, log }) {
 
   // Declared kills must be tests that actually pass at baseline. A kill naming
   // a test that never ran would be satisfied by its permanent absence.
-  const missing = entry.kills.filter((name) => !identitiesNamed(baseline.passing, name));
+  const missing = entry.kills.filter(
+    (name) => !identitiesNamed(baseline.passing, name),
+  );
   assert.deepEqual(
     missing,
     [],
@@ -343,7 +406,10 @@ function runOneEntry(entry, baseline, { root, scratch, log }) {
     1,
     `${entry.name}: production victim must be present exactly once in ${entry.file}`,
   );
-  const mutatedSource = originalSource.replace(entry.original, entry.replacement);
+  const mutatedSource = originalSource.replace(
+    entry.original,
+    entry.replacement,
+  );
   assert.notEqual(
     mutatedSource,
     originalSource,
@@ -419,7 +485,10 @@ function runOneEntry(entry, baseline, { root, scratch, log }) {
 function withMutation({ path, originalSource, mutatedSource, root }, measure) {
   const journalPath = resolve(root, JOURNAL);
   mkdirSync(dirname(journalPath), { recursive: true });
-  writeFileSync(journalPath, `${JSON.stringify({ mutated: [path] }, undefined, 2)}\n`);
+  writeFileSync(
+    journalPath,
+    `${JSON.stringify({ mutated: [path] }, undefined, 2)}\n`,
+  );
   writeFileSync(path, mutatedSource);
   const restore = () => {
     writeFileSync(path, originalSource);
@@ -465,14 +534,21 @@ export function suiteArguments(test, evidencePath) {
 }
 
 function runSuite(test, { root, scratch, label }) {
-  const evidencePath = join(scratch, `${label.replaceAll(/[^a-z0-9-]/giu, '_')}.json`);
+  const evidencePath = join(
+    scratch,
+    `${label.replaceAll(/[^a-z0-9-]/giu, '_')}.json`,
+  );
   rmSync(evidencePath, { force: true });
-  const result = spawnSync(process.execPath, suiteArguments(test, evidencePath), {
-    cwd: root,
-    encoding: 'utf8',
-    env: process.env,
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const result = spawnSync(
+    process.execPath,
+    suiteArguments(test, evidencePath),
+    {
+      cwd: root,
+      encoding: 'utf8',
+      env: process.env,
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
   // A spawn that never started, or a process killed by a signal, reports
   // status null — which `status !== 0` would happily read as a red.
@@ -542,7 +618,10 @@ function isNonEmptyString(value) {
 }
 
 export function assertCleanTrackedTree(root = REPOSITORY_ROOT) {
-  const result = spawnSync('git', ['diff', '--quiet'], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync('git', ['diff', '--quiet'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
   assert.equal(
     result.status,
     0,
@@ -568,7 +647,9 @@ function main(argv) {
   if (problems.length > 0) {
     process.stderr.write('expected-red: FAIL\n\n');
     for (const problem of problems) {
-      process.stderr.write(`  ${problem.code}\n    at ${problem.where}\n    ${problem.detail}\n\n`);
+      process.stderr.write(
+        `  ${problem.code}\n    at ${problem.where}\n    ${problem.detail}\n\n`,
+      );
     }
     process.stderr.write(
       '  A manifest entry whose production text has drifted measures nothing, and a\n' +
@@ -580,6 +661,18 @@ function main(argv) {
   }
 
   if (mode === 'validate') {
+    const inFlight = inFlightMutation();
+    if (inFlight !== undefined) {
+      process.stderr.write(
+        'expected-red: CANNOT VALIDATE\n\n' +
+          `  A mutation run is in flight and has deliberately changed:\n    ${inFlight.join('\n    ')}\n\n` +
+          '  Validation reads the working tree, so drift reported now would be that\n' +
+          '  mutation rather than drift. Re-run when it finishes.\n\n' +
+          '  If nothing is running, the run was killed. Recover the named file with\n' +
+          `    git checkout -- <file>\n  and delete ${JOURNAL}.\n`,
+      );
+      return 2;
+    }
     process.stdout.write(
       `expected-red: OK (${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} in ${paths.length} manifest(s) still name live production text)\n`,
     );
@@ -587,13 +680,19 @@ function main(argv) {
   }
 
   if (mode !== 'run') {
-    process.stderr.write('Usage: expected-red.mjs <validate|run|list> [entry-name...]\n');
+    process.stderr.write(
+      'Usage: expected-red.mjs <validate|run|list> [entry-name...]\n',
+    );
     return 2;
   }
 
-  const unknown = selected.filter((name) => !entries.some((entry) => entry.name === name));
+  const unknown = selected.filter(
+    (name) => !entries.some((entry) => entry.name === name),
+  );
   if (unknown.length > 0) {
-    process.stderr.write(`expected-red: unknown entr(ies): ${unknown.join(', ')}\n`);
+    process.stderr.write(
+      `expected-red: unknown entr(ies): ${unknown.join(', ')}\n`,
+    );
     return 2;
   }
   const chosen =
@@ -601,16 +700,23 @@ function main(argv) {
       ? entries
       : entries.filter((entry) => selected.includes(entry.name));
   runEntries(chosen);
-  process.stdout.write(`expected-red: OK (${chosen.length} expected red(s) reproduced and restored)\n`);
+  process.stdout.write(
+    `expected-red: OK (${chosen.length} expected red(s) reproduced and restored)\n`,
+  );
   return 0;
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === resolve(import.meta.filename)) {
+if (
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === resolve(import.meta.filename)
+) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
     process.stderr.write('expected-red: FAIL\n\n');
-    process.stderr.write(`  ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `  ${error instanceof Error ? error.message : String(error)}\n`,
+    );
     process.exitCode = 1;
   }
 }

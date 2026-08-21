@@ -45,6 +45,7 @@ cd "$(git rev-parse --show-toplevel)" || exit 2
 RUNNER='test/helpers/expected-red.mjs'
 CONTROLS='test/fixtures/expected-red/controls'
 SUBJECT='test/fixtures/expected-red/subject.mjs'
+JOURNAL='test-results/expected-red/in-flight.json'
 
 if [ ! -f "$RUNNER" ]; then
   echo "check-expected-red: $RUNNER is missing" >&2
@@ -163,6 +164,26 @@ if [ "${1:-}" = '--self-test' ]; then
   restore_subject
   RESTORE_FROM=''
   assert_subject_restored 'D1'
+
+  # --- Vector G: validating a tree that is deliberately mutated. -----------
+  # Validation reads the working tree. Racing a --run run, it would report the
+  # live mutation as drift — the right FAIL for the wrong reason. It must say it
+  # cannot determine instead.
+  controls=$((controls + 1))
+  mkdir -p "$(dirname "$JOURNAL")"
+  printf '{ "mutated": ["%s"] }\n' "$SUBJECT" >"$JOURNAL"
+  journal_output="$(EXPECTED_RED_MANIFEST_GLOB="$CONTROLS/admission-twin.expected-red.json" \
+    node "$RUNNER" validate 2>&1)"
+  journal_status=$?
+  rm -f "$JOURNAL"
+  if [ "$journal_status" -eq 0 ]; then
+    fail 'G1 validate answered while a mutation run was in flight'
+  else
+    case "$journal_output" in
+    *'CANNOT VALIDATE'*) ;;
+    *) fail 'G1 refused an in-flight tree, but not as an undeterminable one' ;;
+    esac
+  fi
 
   # --- The admission twin. -------------------------------------------------
   # A gate that only ever refuses is as useless as one that only ever passes.

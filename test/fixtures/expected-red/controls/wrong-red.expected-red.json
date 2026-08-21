@@ -10,13 +10,9 @@
       "replacement": "",
       "expected": "SUBJECT_QUANTITY_LEDGER_DESYNC",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/subject.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/subject.test.mjs"]
       },
-      "kills": [
-        "the fixture subject refuses a non-positive quantity"
-      ]
+      "kills": ["the fixture subject refuses a non-positive quantity"]
     }
   ]
 }

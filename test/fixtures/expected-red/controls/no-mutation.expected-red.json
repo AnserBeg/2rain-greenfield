@@ -10,13 +10,9 @@
       "replacement": "  if (value <= 0) throw new Error('SUBJECT_NOT_POSITIVE');\n",
       "expected": "Missing expected exception",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/subject.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/subject.test.mjs"]
       },
-      "kills": [
-        "the fixture subject refuses a non-positive quantity"
-      ]
+      "kills": ["the fixture subject refuses a non-positive quantity"]
     }
   ]
 }

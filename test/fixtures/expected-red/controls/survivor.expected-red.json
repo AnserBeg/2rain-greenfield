@@ -10,13 +10,9 @@
       "replacement": "'mutated'",
       "expected": "Missing expected exception",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/subject.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/subject.test.mjs"]
       },
-      "kills": [
-        "the fixture subject admits a positive integer"
-      ]
+      "kills": ["the fixture subject admits a positive integer"]
     }
   ]
 }

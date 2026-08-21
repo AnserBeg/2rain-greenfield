@@ -10,9 +10,7 @@
       "replacement": "surfaceHref(context.surface)",
       "expected": "rendered POST action must retain the selected operand",
       "test": {
-        "files": [
-          "test/integration/surface-data-binding.test.ts"
-        ],
+        "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "scoped create carries each URL operand"
       },
       "kills": [
@@ -27,9 +25,7 @@
       "replacement": "return Object.freeze({ [argumentKey]: 'ac000000-0000-4000-8000-00000000000c' });",
       "expected": "a second URL value must move the effective operand",
       "test": {
-        "files": [
-          "test/integration/surface-data-binding.test.ts"
-        ],
+        "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "scoped create carries each URL operand"
       },
       "kills": [
@@ -44,9 +40,7 @@
       "replacement": "",
       "expected": "200 !== 422|3 !== 2",
       "test": {
-        "files": [
-          "test/integration/surface-data-binding.test.ts"
-        ],
+        "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "scoped create carries each URL operand"
       },
       "kills": [
@@ -61,9 +55,7 @@
       "replacement": "",
       "expected": "200 !== 403",
       "test": {
-        "files": [
-          "test/integration/surface-data-binding.test.ts"
-        ],
+        "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "scoped create carries each URL operand"
       },
       "kills": [
@@ -78,9 +70,7 @@
       "replacement": "    return {\n      code: 'OPERATION_UNAVAILABLE',\n    };",
       "expected": "OPERATION_LEGAL_ENTITY_INACTIVE",
       "test": {
-        "files": [
-          "test/integration/surface-data-binding.test.ts"
-        ],
+        "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "inactive legal-entity refusal keeps its provider subject"
       },
       "kills": [
@@ -95,13 +85,9 @@
       "replacement": "        inputDigest: '0'.repeat(64),",
       "expected": "Missing expected rejection",
       "test": {
-        "files": [
-          "test/postgres/composed-application.test.ts"
-        ]
+        "files": ["test/postgres/composed-application.test.ts"]
       },
-      "kills": [
-        "PENDING"
-      ]
+      "kills": ["PENDING"]
     },
     {
       "name": "unscoped-create-closed-key-fence-removed",
@@ -111,13 +97,9 @@
       "replacement": "    case 'createRecordEffect':\n      return validateMutationInput(contract, {",
       "expected": "Missing expected rejection",
       "test": {
-        "files": [
-          "test/postgres/composed-application.test.ts"
-        ]
+        "files": ["test/postgres/composed-application.test.ts"]
       },
-      "kills": [
-        "PENDING"
-      ]
+      "kills": ["PENDING"]
     },
     {
       "name": "active-legal-entity-enforcement-removed",
@@ -127,13 +109,9 @@
       "replacement": "",
       "expected": "Missing expected rejection",
       "test": {
-        "files": [
-          "test/postgres/composed-application.test.ts"
-        ]
+        "files": ["test/postgres/composed-application.test.ts"]
       },
-      "kills": [
-        "PENDING"
-      ]
+      "kills": ["PENDING"]
     },
     {
       "name": "archived-legal-entity-predicate-removed",
@@ -143,9 +121,7 @@
       "replacement": "    selected.rows[0]?.status !== descriptor.activeStatusValue",
       "expected": "Missing expected rejection",
       "test": {
-        "files": [
-          "test/postgres/composed-application.test.ts"
-        ],
+        "files": ["test/postgres/composed-application.test.ts"],
         "namePattern": "composed product activates through the kernel"
       },
       "kills": [
