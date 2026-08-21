@@ -85,7 +85,8 @@
       "replacement": "        inputDigest: '0'.repeat(64),",
       "expected": "Missing expected rejection",
       "test": {
-        "files": ["test/postgres/composed-application.test.ts"]
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "composed product activates through the kernel"
       },
       "kills": [
         "composed product activates through the kernel and persists tenant-scoped gateway data",
@@ -100,7 +101,8 @@
       "replacement": "    case 'createRecordEffect':\n      return validateMutationInput(contract, {",
       "expected": "Missing expected rejection",
       "test": {
-        "files": ["test/postgres/composed-application.test.ts"]
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "composed product activates through the kernel"
       },
       "kills": [
         "composed product activates through the kernel and persists tenant-scoped gateway data",
@@ -115,7 +117,8 @@
       "replacement": "",
       "expected": "Missing expected rejection",
       "test": {
-        "files": ["test/postgres/composed-application.test.ts"]
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "composed product activates through the kernel"
       },
       "kills": [
         "composed product activates through the kernel and persists tenant-scoped gateway data",

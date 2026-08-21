@@ -191,6 +191,7 @@ echo "PERFORMANCE_GATE_PASS_SHA=$SHA" | tee -a "$LOG"
   corepack pnpm build &&
   corepack pnpm check:boundaries &&
   corepack pnpm check:expected-red &&
+  corepack pnpm check:expected-red-controls &&
   corepack pnpm check:schema &&
   corepack pnpm check:demo-release &&
   corepack pnpm check:app-release &&

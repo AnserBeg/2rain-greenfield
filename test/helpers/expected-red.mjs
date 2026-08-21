@@ -368,10 +368,18 @@ function measureBaseline(entry, { root, scratch, log }) {
     `${entry.name}: the baseline executed no test — the pattern or file selects nothing`,
   );
   const passing = passingIdentities(run.results);
+  const failing = run.results.filter((result) => result.status !== 'pass');
+  assert.deepEqual(
+    failing,
+    [],
+    `${entry.name}: the baseline is not wholly green`,
+  );
+  // Two tests sharing one name in one file collapse into one identity, so the
+  // regressed set could never equal a kills list that names it once.
   assert.equal(
     passing.size,
     run.results.length,
-    `${entry.name}: the baseline is not wholly green`,
+    `${entry.name}: the baseline reports ${run.results.length} results under ${passing.size} distinct names, so a kill cannot be attributed to one of them`,
   );
   log.write(`EXPECTED_RED_BASELINE ${entry.name} ${passing.size} passing\n`);
   return { passing, output: run.output };

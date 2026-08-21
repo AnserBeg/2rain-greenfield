@@ -14,6 +14,7 @@
     "check:language-coverage": "node --import tsx test/helpers/check-language-coverage.ts",
     "check:demo-release": "corepack pnpm --filter @north-star/web check:demo-release",
     "check:expected-red": "bash scripts/check-expected-red.sh",
+    "check:expected-red-controls": "bash scripts/check-expected-red.sh --self-test",
     "check:reachability": "node --import tsx test/helpers/check-reachability.ts",
     "check:schema": "node scripts/run-with-test-lock.mjs exclusive -- node --import tsx test/helpers/check-schema.ts",
     "clean": "node scripts/clean.mjs",
