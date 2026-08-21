@@ -41,7 +41,7 @@ pattern alone is not a sufficient identity and what was added beside it.
 |---|---|---|---|
 | default | every entry still names source text present exactly once in the file it claims, and no entry's shape can pass vacuously | milliseconds | `check:expected-red`, in CI and `run-matrix.sh` |
 | `--run` | every selected mutation reproduces its exact declared red and the tree is restored | seconds to tens of minutes | `evidence:expected-red`, under the exclusive test lock |
-| `--self-test` | the gate can fail, one recorded red per vacuity vector | ~5s | run before freezing |
+| `--self-test` | the gate can fail, one recorded red per vacuity vector | ~5s | `check:expected-red-controls`, in CI and `run-matrix.sh` |
 
 **What the default mode cannot prove**, stated because §6 requires it: it does
 not execute anything, so it cannot prove any mutation still reds. The split is
@@ -53,7 +53,10 @@ matrix; reproducing the reds costs minutes and belongs at acceptance.
 ## The three ways this gate could have betrayed itself
 
 Each has its own recorded red in `--self-test`, varying one property of an
-otherwise-correct manifest entry. 14 controls in total.
+otherwise-correct manifest entry. 15 controls in total, and the self-test is
+itself a gate — `check:expected-red-controls` runs in CI and the matrix, so the
+proof that this instrument can fail is re-taken on every run rather than once at
+freeze time.
 
 **A — the mutation did not apply.** A1 an `original` absent from its file
 (`EXPECTED_RED_VICTIM_ABSENT`); A2 an `original` matching more than once, where
@@ -82,6 +85,11 @@ runner refuses a dirty tracked tree — which is what makes `git checkout -- <fi
 a lossless recovery for a crashed run, per `commit-before-negative-controls`.
 Every executing control also asserts the fixture subject is byte-identical
 afterwards.
+
+**G — validating a tree that is deliberately mutated.** Validation reads the
+working tree, so a validate run racing a `--run` run would report the live
+mutation as drift. It reports that it cannot determine instead, names the held
+file, and says how to recover a killed run.
 
 **E — the admission twin.** A correct manifest against correct production
 passes. A gate that only ever refuses is as useless as one that only ever
@@ -112,12 +120,51 @@ previously covered only the case that already worked.
 
 ## Backfill — converted, and left
 
-**Converted: 9 of 9 entries that already existed as an executable table.** The
-nine scoped-create mutations are
-`test/evidence/scoped-create-operand-impl.expected-red.json`. Each gained a
-`claim` sentence and a `kills` set; neither was recorded by the inline table, and
-three of the nine share the pattern `/Missing expected rejection/u`, so before
-`kills` any one of the three satisfied the other two's expectation.
+**Converted and reproduced through the gate: 5 of 9.** The five focused
+integration entries are `test/evidence/scoped-create-operand-impl.expected-red.json`
+and all five reproduce their exact declared reds in 12 seconds. Each gained a
+`claim` sentence and a `kills` set; the inline table recorded neither.
+
+**Routed, not converted: the 4 PostgreSQL entries — and the reason is a finding
+about evidence this program already accepted.** Their manifest form is preserved
+in commit `e94441b`; restoring them is a revert of one file, not a re-derivation.
+
+Two measurements, both taken with the gate:
+
+1. **A whole-file entry's blast radius is not stable.**
+   `unscoped-create-closed-key-fence-removed` stopped **two** tests in one run and
+   **four** in another — same mutation, same argv, same suite. The two extra are
+   `composed product advances an existing deployment to an exact compiled
+   successor` and the ADR-0047 rollback edge: 300-second-timeout-bounded
+   release-lineage tests that run *after* the create the claim is about and are
+   disturbed by the row an unfenced create now writes. **The red this packet
+   originally recorded — the file went red matching `/Missing expected
+   rejection/u` — is satisfied by both outcomes and cannot tell them apart.**
+   That is precisely what ADR-0058 says a message-only identity cannot do, found
+   in the packet that motivated the ADR.
+2. **Bounding the entry to the test that holds the claim does not currently
+   work, for an infrastructure reason.** With
+   `--test-name-pattern=composed product activates through the kernel`, the
+   **baseline** fails on unmutated production: `waitUntilReady` at
+   `test/helpers/postgres.ts:273`, an ephemeral-container readiness timeout at
+   `composed-application.test.ts:407`. Reproduced twice, on a machine with no
+   orphaned containers and 936GB free. In the whole-file run the same test passes
+   as the seventh container of the process; in isolation it is the first, and the
+   readiness deadline does not survive the cold start. **This is the open TIER 3
+   row `container-pressure-forges-outcomes`, met head-on.**
+
+**The runner refused rather than measuring.** It reported *"the suite is not green
+before the mutation, so no red it produces can be attributed to the mutation"* and
+stopped. Had it only checked for a non-zero exit — which is what the original
+inline runner did — it would have recorded a red for a suite that was already
+red, which is the admission-side vacuity this packet exists to close.
+
+**Which claims lose executable evidence, stated because `review-tiers` requires
+it:** the effective-input digest identity, the closed-argument-key fence on
+create, active-legal-entity enforcement, and the archived-entity predicate. All
+four remain covered by `test:postgres` in the full matrix; what they lose is a
+one-property mutation proving each is load-bearing. **They were not silently
+dropped and they were not kept as a red gate.**
 
 `test/integration/scoped-create-operand-mutations.mjs` is deleted, not disabled.
 Per `review-tiers`, a packet removing a harness owes a sentence naming which
@@ -168,9 +215,11 @@ are already stable. Routed to `current-plan.md`.
 - `--self-test`: **~5 seconds**, 14 controls.
 - The four PostgreSQL entries: `test/postgres/composed-application.test.ts` takes
   **9m48s** solo for one run, so an entry naming that whole file costs about
-  twenty minutes for its baseline plus its mutated run. **Manifest authors should
-  focus the test with a `namePattern`.** This is why `--run` is an
-  acceptance-time entry point and not a matrix step.
+  twenty minutes for its baseline plus its mutated run. One full nine-entry run
+  took **41 minutes**. **Manifest authors should focus the test with a
+  `namePattern`** — and see the backfill section for what happened when this
+  packet tried to. This is why `--run` is an acceptance-time entry point and not
+  a matrix step.
 
 ## Owned paths
 

@@ -47,8 +47,8 @@ baseline) minus (tests passing under the mutation)*, read from a reporter
 artifact rather than from TAP prose, and requires set equality. A red that kills
 a different test, or more tests, or fewer, is refused as unattributable.
 
-**What the kill set does and does not settle — measured, 2026-08-21.** All three
-of those PostgreSQL entries turn out to kill the *identical* pair of tests, and
+**What the kill set does and does not settle — measured, 2026-08-21.** In one run all three
+of those PostgreSQL entries killed the *identical* pair of tests, and
 they still share one `expected`. So the kill set does **not** make entries
 mutually distinguishable, and it should not: `assertAllowedKeys`, the effective
 input digest and `requireActiveCreateLegalEntity` are three independently
@@ -103,6 +103,11 @@ ratios. R2 was explicit that this adds only the helpers the real journey needs,
 and `review-tiers` is explicit that a self-chosen table measures its author's
 model. Mutation choice and fixture self-correlation stay with a human.
 
+**And the gate proves it can fail on every run, not once.** `--self-test` is
+wired as its own gate, `check:expected-red-controls`, in CI and the matrix. A
+gate whose negative controls are executed only when someone remembers to ask
+decays into the same prose this ADR exists to replace.
+
 ## What this ADR deliberately does NOT decide
 
 R2 also asked for **"an architecture check that every fenced claim names ≥1
@@ -133,11 +138,13 @@ that join.
   to seven for its neighbours (2026-08-20 program review, R2).
 - The nine ported entries reproduce their reds through the shared runner; the
   five focused-integration entries in 12 seconds, including two baselines.
-- The three whole-file PostgreSQL entries each kill exactly
-  `{composed product activates through the kernel and persists tenant-scoped
-  gateway data, entity-owned create takes its derived legal-entity input through
-  the real operation path}` out of 16 passing tests — which is what makes each
-  red the declared one rather than merely a red.
+- **The decision paid for itself on its own backfill.** A whole-file PostgreSQL
+  entry — `unscoped-create-closed-key-fence-removed` — was observed stopping
+  **two** tests in one run and **four** in another, same mutation and same argv.
+  Its original recorded red, _the file went red matching
+  `/Missing expected rejection/u`_, is satisfied by both. The kill set made the
+  difference visible; the message pattern could not have. The four PostgreSQL
+  entries are routed rather than shipped, for the reason in the packet record.
 - The gate's own negative controls: 14, one per vacuity vector, in
   `scripts/check-expected-red.sh --self-test`.
 - Two meta-controls prove the self-test can fail. Disabling the victim-absent

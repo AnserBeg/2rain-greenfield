@@ -76,69 +76,6 @@
       "kills": [
         "an inactive legal-entity refusal keeps its provider subject at the web boundary"
       ]
-    },
-    {
-      "name": "effective-input-digest-collapsed",
-      "claim": "The gateway records the digest of the effective operation input, so two different inputs cannot share one recorded operation identity.",
-      "file": "packages/runtime/src/semantic-operation-gateway.ts",
-      "original": "        inputDigest: digestOperationInput(request.input),",
-      "replacement": "        inputDigest: '0'.repeat(64),",
-      "expected": "Missing expected rejection",
-      "test": {
-        "files": ["test/postgres/composed-application.test.ts"],
-        "namePattern": "composed product activates through the kernel"
-      },
-      "kills": [
-        "composed product activates through the kernel and persists tenant-scoped gateway data",
-        "entity-owned create takes its derived legal-entity input through the real operation path"
-      ]
-    },
-    {
-      "name": "unscoped-create-closed-key-fence-removed",
-      "claim": "A create effect admits only the argument keys its pinned contract closes over, so an unscoped create cannot smuggle an extra key past the contract.",
-      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "    case 'createRecordEffect':\n      assertAllowedKeys(input, contract.closedArgumentKeys);\n      return validateMutationInput(contract, {",
-      "replacement": "    case 'createRecordEffect':\n      return validateMutationInput(contract, {",
-      "expected": "Missing expected rejection",
-      "test": {
-        "files": ["test/postgres/composed-application.test.ts"],
-        "namePattern": "composed product activates through the kernel"
-      },
-      "kills": [
-        "composed product activates through the kernel and persists tenant-scoped gateway data",
-        "entity-owned create takes its derived legal-entity input through the real operation path"
-      ]
-    },
-    {
-      "name": "active-legal-entity-enforcement-removed",
-      "claim": "A scoped create refuses to write against a legal entity that is not active at the moment of the write.",
-      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "            await requireActiveCreateLegalEntity(\n              client,\n              currentStorage,\n              currentEntity,\n              request.definition,\n              input,\n            );\n",
-      "replacement": "",
-      "expected": "Missing expected rejection",
-      "test": {
-        "files": ["test/postgres/composed-application.test.ts"],
-        "namePattern": "composed product activates through the kernel"
-      },
-      "kills": [
-        "composed product activates through the kernel and persists tenant-scoped gateway data",
-        "entity-owned create takes its derived legal-entity input through the real operation path"
-      ]
-    },
-    {
-      "name": "archived-legal-entity-predicate-removed",
-      "claim": "The active-legal-entity predicate refuses an archived entity as well as a non-active status, so archiving alone stops new writes.",
-      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "    selected.rows[0]?.status !== descriptor.activeStatusValue ||\n    selected.rows[0]?.archivedAt !== null",
-      "replacement": "    selected.rows[0]?.status !== descriptor.activeStatusValue",
-      "expected": "Missing expected rejection",
-      "test": {
-        "files": ["test/postgres/composed-application.test.ts"],
-        "namePattern": "composed product activates through the kernel"
-      },
-      "kills": [
-        "composed product activates through the kernel and persists tenant-scoped gateway data"
-      ]
     }
   ]
 }
