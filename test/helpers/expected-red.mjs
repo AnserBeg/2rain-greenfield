@@ -343,7 +343,9 @@ function validateEntry(entry, where, root) {
           );
         }
         if (pattern !== undefined) {
-          const matched = GREEN_CANARIES.filter((canary) => pattern.test(canary));
+          const matched = GREEN_CANARIES.filter((canary) =>
+            pattern.test(canary),
+          );
           if (matched.length > 0) {
             fail(
               'EXPECTED_RED_PATTERN_NOT_DISCRIMINATING',
@@ -587,11 +589,13 @@ function runOneEntry(entry, baseline, { root, scratch, log, run }) {
 /**
  * Applies the mutation, runs the measurer, and restores afterwards.
  *
- * The measurer is a thunk: it receives nothing, and everything it can reach
- * comes from `expected-red-measure.mjs`, which imports no write capability. The
- * earlier version passed a narrow parameter object while the callback's own
- * closure still held `path`, `originalSource` and `writeFileSync` — a claimed
- * separation that did not exist, as the 2026-08-21 review pointed out.
+ * `observe` is a FUNCTION DEFINED ELSEWHERE — `observeMutatedRun`, in
+ * `expected-red-measure.mjs`, which imports no write capability — and it is
+ * called with plain data. It is not a closure declared here, which would carry
+ * `path`, `originalSource` and this module's `writeFileSync` whatever its
+ * parameter list said. Two weaker arrangements were refuted in review: a narrow
+ * parameter object handed to exactly such a closure, and then moving the two
+ * called primitives while the operation stayed here.
  *
  * The journal exists for the case `finally` cannot cover. A SIGKILL mid-run
  * leaves the mutated file on disk, and the journal names it. Recovery is
@@ -685,7 +689,6 @@ function readableIdentity(identity) {
   const [file, name] = JSON.parse(identity);
   return `${file}::${name}`;
 }
-
 
 function occurrences(value, needle) {
   return value.split(needle).length - 1;

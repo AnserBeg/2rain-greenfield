@@ -53,7 +53,7 @@ matrix; reproducing the reds costs minutes and belongs at acceptance.
 ## The three ways this gate could have betrayed itself
 
 Each has its own recorded red in `--self-test`, varying one property of an
-otherwise-correct manifest entry. **19 controls**, and the self-test is itself a
+otherwise-correct manifest entry. **25 controls**, and the self-test is itself a
 gate — `check:expected-red-controls` runs in CI and the matrix, so the proof
 that this instrument can fail is re-taken on every run rather than once at
 freeze time.
@@ -128,13 +128,15 @@ because it is the same gap this packet exists to close.**
 | `notFailed` | **C8** — deleting it alone makes C8 report OK, which is what round 1 said no control did |
 | the observation's definition site | **D2**, unchanged, plus the narrowed claim |
 
-**The gap: reconciliation against Node's per-file counts has no specimen that
-dies when it alone is deleted.** Deleting it leaves all 21 controls green. It has
-been *observed firing* — when the ledger's no-summary rule is removed, it is what
-catches C7's impostor — but nothing committed requires it. It is a backstop
-against a reporter that invents or omits a record, which is the class round 1
-asked for and which no suite shape produces naturally. **It stays, and it is
-recorded here as belt-and-braces rather than as covered.**
+**Reconciliation against Node's per-file counts earns its place, and round 3
+supplied the specimen the previous round said did not exist.** A mutation-induced
+**timeout** is reported as `test:fail` while Node counts it under
+`counts.cancelled` — so a classifier that admits it produces exactly the
+credited-versus-counted mismatch reconciliation exists to refuse. Measured: admit
+`testTimeoutFailure` as executed and C10 is refused *by reconciliation*; admit it
+**and** delete reconciliation and C10 reports **OK**. *The earlier record said no
+suite shape produces this mismatch naturally. That was wrong, and the timeout
+shape produces it under any classifier that gets one type wrong.*
 
 **And the gate's own controls are not vacuous.** Two meta-controls, each run on
 a committed tree and reverted:
@@ -262,7 +264,7 @@ are already stable. Routed to `current-plan.md`.
 
 - The five focused-integration entries: **12 seconds** for five mutations,
   including two baselines.
-- `--self-test`: seconds, **21 controls**.
+- `--self-test`: seconds, **25 controls**.
 - The four PostgreSQL entries: `test/postgres/composed-application.test.ts` takes
   **9m48s** solo for one run, so an entry naming that whole file costs about
   twenty minutes for its baseline plus its mutated run. One full nine-entry run

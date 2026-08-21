@@ -67,6 +67,31 @@ now control C5, and it is refused.
 carry the same test name, so a name-only declaration is satisfied by killing
 either. Control C6 holds it.
 
+**And the reason belongs to each kill, not to the entry — corrected 2026-08-21,
+round 3.** One pattern applied to the concatenation of every declared failure's
+message is satisfied when any single one of them carries it, so a second declared
+kill could die for anything at all. That is the same Cartesian conjunction, moved
+inside the kill set. Each kill declares `expected`, and each must fail for its
+own stated reason. Control C9 holds it.
+
+**A `test:fail` is not necessarily an executed failure, so the classifier is an
+allowlist.** Node reports a cancelled child, a timed-out test and an aborted one
+all as `test:fail`, and counts all of them under `counts.cancelled` rather than
+`counts.failed`. Only failure types on the executed allowlist can be a kill;
+anything else — including a type a future Node adds — cannot. That is
+`review-tiers`' prefer-unrepresentable rule. Controls C8 and C10 hold it, and
+reconciliation against Node's own counts is the backstop when the allowlist is
+wrong: admit `testTimeoutFailure` and reconciliation refuses C10; delete
+reconciliation as well and C10 is certified.
+
+**The mutation must be the only cause of the red, which green-then-red cannot
+show.** Every entry is measured A/B/A: the pristine suite, the mutated suite,
+then the pristine suite again, which must return the same green pass set. **No
+baseline is reused across entries.** A suite that leaves state behind otherwise
+makes its own earlier run a second sufficient cause while every other check
+passes; memoizing a baseline widened that to contamination between entries.
+Controls H1 and H2 hold it.
+
 **What the kill set does and does not settle — measured, 2026-08-21.** In one run all three
 of those PostgreSQL entries killed the *identical* pair of tests, and
 they still share one `expected`. So the kill set does **not** make entries
@@ -194,7 +219,7 @@ that join.
   `/Missing expected rejection/u`_, is satisfied by both. The kill set made the
   difference visible; the message pattern could not have. The four PostgreSQL
   entries are routed rather than shipped, for the reason in the packet record.
-- The gate's own negative controls: **19**, in
+- The gate's own negative controls: **25**, in
   `scripts/check-expected-red.sh --self-test`, wired as its own gate so the
   proof is re-taken on every CI and matrix run rather than once at freeze.
 - **Six meta-controls, each deleting one check and requiring the control that
