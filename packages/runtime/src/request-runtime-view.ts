@@ -262,6 +262,42 @@ export interface RequestRuntimeDefinitionLoader {
   load(context: TrustedRequestContext): Promise<LoadedRequestRuntimeDefinition>;
 }
 
+/**
+ * Provider load refusals that the runtime entry boundary can preserve for its
+ * transport consumers. The runtime owns this vocabulary: consumers must not
+ * import a concrete persistence provider merely to distinguish an identified
+ * refusal from an unavailable loader.
+ */
+export const REQUEST_RUNTIME_VIEW_REFUSAL_CODES = Object.freeze({
+  ACTIVE_POINTER_MISSING: true,
+  ACTIVE_RELEASE_NOT_ADMITTED: true,
+  ACTIVE_RELEASE_NOT_VISIBLE: true,
+  INVALIDATION_AHEAD_OF_AUTHORITY: true,
+  INVALIDATION_CONTEXT_MISMATCH: true,
+  MALFORMED_RELEASE: true,
+  MALFORMED_REQUIRED_PROJECTION: true,
+  NULL_ACTIVE_RELEASE: true,
+  PIN_CONTEXT_MISMATCH: true,
+  POINTER_CHANGED_DURING_LOAD: true,
+  POINTER_IDENTITY_CHANGED: true,
+  REQUEST_CONTEXT_MISMATCH: true,
+  REQUIRED_PROJECTION_DUPLICATE: true,
+  REQUIRED_PROJECTION_MISSING: true,
+  UNSUPPORTED_RUNTIME_CAPABILITY: true,
+} as const);
+
+export type RequestRuntimeViewRefusalCode =
+  keyof typeof REQUEST_RUNTIME_VIEW_REFUSAL_CODES;
+
+/** The provider-neutral refusal exposed by authenticated runtime entry. */
+export class RequestRuntimeViewRefusalError extends Error {
+  override readonly name = 'RequestRuntimeViewRefusalError';
+
+  constructor(readonly code: RequestRuntimeViewRefusalCode) {
+    super(`request runtime view load refused: ${code}`);
+  }
+}
+
 export interface CurrentPolicySubject {
   readonly environmentId: string;
   readonly principalId: string;
@@ -412,7 +448,7 @@ export class AuthenticatedRequestRuntimeEntryAdapter {
     assertTrustedRequestContext(context);
     const subject = policySubject(context);
     const [definition, policyEvidence] = await Promise.all([
-      this.loader.load(context),
+      loadRuntimeDefinition(this.loader, context),
       this.currentPolicy.readCurrentVersion(subject),
     ]);
     const view = constructRequestRuntimeView(
@@ -422,6 +458,36 @@ export class AuthenticatedRequestRuntimeEntryAdapter {
     );
     return unitOfWork(view);
   }
+}
+
+async function loadRuntimeDefinition(
+  loader: RequestRuntimeDefinitionLoader,
+  context: TrustedRequestContext,
+): Promise<LoadedRequestRuntimeDefinition> {
+  try {
+    return await loader.load(context);
+  } catch (error) {
+    const code = requestRuntimeViewRefusalCode(error);
+    if (code !== null) {
+      throw new RequestRuntimeViewRefusalError(code);
+    }
+    throw error;
+  }
+}
+
+function requestRuntimeViewRefusalCode(
+  error: unknown,
+): RequestRuntimeViewRefusalCode | null {
+  if (
+    !(error instanceof Error) ||
+    error.name !== 'RequestRuntimeViewLoadError' ||
+    !('code' in error) ||
+    typeof error.code !== 'string' ||
+    !Object.hasOwn(REQUEST_RUNTIME_VIEW_REFUSAL_CODES, error.code)
+  ) {
+    return null;
+  }
+  return error.code as RequestRuntimeViewRefusalCode;
 }
 
 /** Every call reaches the live gateway again; no ALLOW is stored in the view. */

@@ -8,14 +8,15 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: Stop 2 — full matrix requires an architecture-test bridge
+Status: active — runtime-translation re-scope after accepted Stop 2
 
 ## Goal
 
 Remove two traps before Purchasing and Sales fan out:
 
-1. preserve the typed runtime-view refusal reason at the HTTP boundary and stop
-   presenting an identified provider refusal as generic unavailability; and
+1. translate the provider's typed runtime-view load refusal into a runtime-owned
+   refusal before the web boundary, preserve its reason at HTTP, and stop
+   presenting an identified refusal as generic unavailability; and
 2. keep an unsupported non-mutation slot visibly failed without allowing it to
    veto a write rendered by a registered mutation-bearing slot.
 
@@ -68,8 +69,9 @@ halves. Stop count: 1.
 
 The committed controls include:
 
-- a compile-time exhaustive table over all 15
-  `RequestRuntimeViewLoadErrorCode` members, with every member observed crossing
+- a runtime-owned closed 15-code refusal contract plus a compile-time
+  bidirectional equality check against `RequestRuntimeViewLoadErrorCode`, with
+  every real provider error member observed crossing runtime translation and
   the HTTP mapping as `REQUEST_RUNTIME_VIEW_REFUSED` plus its code;
 - a browser journey that distinguishes the complete observable for invalid
   binding, unsupported query, and unavailable runtime view;
@@ -91,19 +93,21 @@ reverted.
 | A non-mutation slot cannot veto writes | Restored `surfaceHasUnsupportedComponent(surface) ||` in `surfaceSupportsRuntimeIntent` | `test:contracts` 17/18; `closed registry returns diagnostics for unknown and failing components` received `false` where writable was required |
 | An identified provider refusal does not collapse to unavailable | Replaced the open-code residual return with `OPERATION_UNAVAILABLE` | `test:contracts` 17/18; expected `OPERATION_REFUSED` plus `MODULE_REQUIRED_FIELD_MISSING`, received `OPERATION_UNAVAILABLE` |
 | The mapper helper preserves its exact typed code | Replaced `subject: error.code` with one erased constant | `test:contracts` 17/18; first table member expected `ACTIVE_POINTER_MISSING`, received `ERASED_RUNTIME_VIEW_CODE`. Round 1 correctly ruled this a helper-level proxy, not HTTP-boundary evidence; it is retained as historical evidence but does not count for the boundary claim. |
-| The typed runtime-view table is exhaustive | Deleted only `ACTIVE_POINTER_MISSING` from the 15-code record | `typecheck` exit 2, TS1360: required property `ACTIVE_POINTER_MISSING` is missing |
+| The provider and runtime refusal vocabularies cannot drift | Deleted only `ACTIVE_POINTER_MISSING` from the runtime-owned 15-code record | `typecheck` exit 2, TS1360: `Readonly<{}>` does not satisfy `Record<"ACTIVE_POINTER_MISSING", never>` |
 | Invalid binding remains distinct from unsupported query | Changed only the invalid-binding render code back to `QUERY_UNSUPPORTED` | focused browser control 0/1; complete observable expected `INVALID_SURFACE_BINDING`, received `QUERY_UNSUPPORTED` |
 | No fixture-only Save is synthesized | Restored only the conditional compatibility Save branch | focused browser control 0/1; expected zero Save buttons, received one |
-| Every typed code traverses the HTTP catch-and-render boundary | Narrowed only the `RequestRuntimeViewLoadError` catch to `UNSUPPORTED_RUNTIME_CAPABILITY`, the one existing browser census member | `test:contracts` 18/19; the first non-browser member, `ACTIVE_POINTER_MISSING`, rendered `REQUEST_RUNTIME_VIEW_UNAVAILABLE` where the HTTP census required `REQUEST_RUNTIME_VIEW_REFUSED` |
-| The exact error-class exception is required | Removed only the exact allowed declaration from the actual `app-server.ts` source, leaving no provider reference for the residual predicate to reject | With the exact-occurrence predicate deleted, `test:contracts` 19/20; only `app-server provider boundary red: the required error-class import cannot disappear` failed with `Missing expected exception` |
-| No second provider authority may cross the boundary | Preserved the exact allowed declaration once and appended a separate `PostgresRequestRuntimeViewService` import to the actual source | With the residual-provider predicate deleted, `test:contracts` 19/20; only `app-server provider boundary red: a separate provider loader import is refused` failed with `Missing expected exception` |
+| Runtime entry preserves an identified loader refusal | Re-threw the recognized provider error instead of translating it to `RequestRuntimeViewRefusalError` | `test:contracts` 20/21; `ACTIVE_POINTER_MISSING` rendered `REQUEST_RUNTIME_VIEW_UNAVAILABLE` where the HTTP census required `REQUEST_RUNTIME_VIEW_REFUSED` |
+| Translation is confined to the loader call | Applied the same translation around `unitOfWork(view)` | `test:contracts` 20/21; the untouched-failure control received `RequestRuntimeViewRefusalError` instead of the exact original `RequestRuntimeViewLoadError` object |
+| Every translated code traverses the HTTP catch-and-render boundary | Narrowed only the `RequestRuntimeViewRefusalError` catch to `UNSUPPORTED_RUNTIME_CAPABILITY`, the existing browser census member | `test:contracts` 20/21; the first other member, `ACTIVE_POINTER_MISSING`, rendered `REQUEST_RUNTIME_VIEW_UNAVAILABLE` where the HTTP census required `REQUEST_RUNTIME_VIEW_REFUSED` |
+| The exact runtime-owned error import is required | Removed only the exact runtime declaration from the actual `app-server.ts` source, leaving no provider reference for the residual predicate to reject | With the exact-occurrence predicate deleted, `test:contracts` 20/21; only `app-server runtime refusal boundary red: the required runtime-owned import cannot disappear` failed with `Missing expected exception`; the provider-import sibling stayed green |
+| No provider authority may cross the web boundary | Preserved the exact runtime declaration once and appended a separate `PostgresRequestRuntimeViewService` import to the actual source | With the residual-provider predicate deleted, `test:contracts` 20/21; only `app-server runtime refusal boundary red: a provider loader import is refused` failed with `Missing expected exception`; the required-import sibling stayed green |
 
 The focused Playwright mutant invocations intentionally carry a name filter;
 the repository's unfiltered reporter therefore also reports the filter as an
 unrecognized argument. The attributable red above is the named test's own
 failed assertion, not the reporter's filter refusal.
 
-### Candidate gates
+### Superseded candidate gates — provider-import design
 
 All gates below ran against the candidate tree after every production and test
 change was complete:
@@ -140,35 +144,90 @@ rejects the reviewed exact `RequestRuntimeViewLoadError` import in
 contracts, PostgreSQL, locale, browser, reachability and security did not run in
 this matrix attempt.
 
-## Stop 2 — architecture-test bridge required
+## Stop 2 — accepted; the requested architecture bridge was refused
 
 The packet was explicitly granted `apps/web/src/app-server.ts`, but its owned
-paths do not include `test/architecture/surface-data-binding.test.ts`. No
-production or admission change can honestly satisfy both the granted typed
-error-class boundary and that stale blanket assertion. The smallest bridge is
-to keep the existing SQL/direct-database prohibitions, allow exactly the one
-literal `RequestRuntimeViewLoadError` declaration in `app-server.ts`, remove it
-before applying the provider prohibition to the remainder, and retain the
-already committed missing-import, additional-provider and valid-source controls.
-That gate change is outside this lane's lease and changes executable evidence,
-so this lane stopped without editing it or merging. Stop count: 2.
+paths did not include `test/architecture/surface-data-binding.test.ts`. The
+matrix proved the conflict and the lane stopped rather than weaken an
+out-of-lease gate. The user accepted the stop and refused the proposed bridge:
+the blanket rule is a real architecture boundary, `apps/web` imports no provider
+on main, and admitting the packet's own first provider import would have made
+the gate ratify the defect it was meant to detect. Stop count belonged to the
+superseded charter and reset to zero on the re-scope.
+
+## Architecture ruling and runtime-translation re-scope
+
+The provider's `RequestRuntimeViewLoadError` is now translated inside
+`AuthenticatedRequestRuntimeEntryAdapter`, at the runtime-owned loader port,
+into `RequestRuntimeViewRefusalError`. Translation is deliberately confined to
+`loader.load(context)`: authentication, current-policy, view construction and
+unit-of-work errors retain their existing identities. Unknown loader failures
+also retain their identity and therefore remain the web's honest
+`REQUEST_RUNTIME_VIEW_UNAVAILABLE` fallback.
+
+`apps/web/src/app-server.ts` imports only the runtime error. The unchanged
+architecture suite is green 141/141 and independently observes that no web
+production source imports PostgreSQL or a provider. The contract suite retains
+the two separately attributable source predicates from the prior correction,
+but their positive declaration is now the exact runtime-owned error import and
+their residual predicate forbids every provider reference rather than admitting
+one exception.
+
+Production cannot import the provider merely to compare its union, so the
+compile-time equality check lives in the contract test, which is allowed to
+import both sides. `Exclude` in each direction makes a member present in only
+one union require a property in an otherwise empty record and fail typecheck.
+The runtime record is the executed census: each of its 15 keys constructs the
+real provider error, crosses the entry translation, reaches the HTTP catch and
+renders the exact subject. No `packages/postgres-provider/**` byte changes.
+
+The earlier Codex and Fable PASSes remain historical evidence about
+`03860aa`, but they do not apply to this redesign. Fresh Critical Codex and
+Fable arms are owed on the new frozen SHA.
+
+### Re-scoped candidate gates
+
+The redesigned executable tree completed the charter's pre-review gates:
+
+- `pnpm typecheck`: green, including the provider/runtime union-equality gate;
+- `pnpm lint`: green;
+- `pnpm format`: green;
+- `pnpm test:contracts`: 21/21 green;
+- `pnpm test:integration`: 149/149 green;
+- `pnpm test:browser`: 92/92 green; and
+- `pnpm test:architecture`: 141/141 green, including the unchanged
+  `apps/web has no PostgreSQL, SQL, provider, or direct database access` rule
+  and the existing provider-neutral runtime-package rule.
+
+The full matrix remains deferred until the fresh Critical review arms converge,
+per `git-workflow` and the packet charter.
 
 ### Live composed-application observation
 
-`pnpm dev` served the composed application on port 4174. A real Item create
-was posted with SKU and name present but its required base unit omitted. The
-provider refused the write and the returned complete diagnostic was HTTP 422,
-`OPERATION_REFUSED`, sentence `Operation refused`, detail `The provider refused
-this operation for a reason this application cannot yet present in plain
-language.`, next action `Give the refusal code to an administrator before
-trying this operation again.`, and subject
+The re-scoped candidate was exercised with `pnpm dev` on application port 4174.
+The default dev container held another lineage, so its first invocation refused
+before listening with `the active pointer names a release outside this composed
+application lineage`. Because other lanes were live, the shared default was not
+reset. The replay used the resolver's supported isolated identity
+`dev-composed-app-postgres-refusal` and database port 55434 while retaining the
+chartered application port 4174. Its first cold-container connection reset is
+the already-routed published-endpoint readiness class; a retry against the same
+isolated container started successfully with 176 seeded records.
+
+A real Item create was posted with the complete form contract except for its
+required base unit. The provider refused the write and the returned complete
+diagnostic was HTTP 422, `OPERATION_REFUSED`, sentence `Operation refused`,
+detail `The provider refused this operation for a reason this application
+cannot yet present in plain language.`, next action `Give the refusal code to an
+administrator before trying this operation again.`, and subject
 `MODULE_REQUIRED_FIELD_MISSING`. This is the same path that previously told the
 operator only `Save unavailable`.
 
-After `pnpm --filter @north-star/api dev:stop` stopped the database container,
-the Node listener remained. PID 10066 was resolved as
-`node --import tsx src/main.ts`, killed explicitly, and port 4174 was confirmed
-clear.
+`pnpm --filter @north-star/api dev:stop` stopped the isolated database container
+and, as chartered, left the Node listener on port 4174. `ss` resolved PID 19056;
+it was killed explicitly and the port was confirmed clear. The exact isolated
+container and its test-only volume were then removed with `dev:reset`; that
+ephemeral data is not recoverable and no shared dev container was touched.
 
 ## Checkpoint trigger evaluation
 

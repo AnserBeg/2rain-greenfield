@@ -17,7 +17,10 @@ import { ModuleRuntimeInterpreterError } from '../../../packages/postgres-provid
 import { AuthenticatedRequestEntryAdapter } from '../../../packages/runtime/src/request-context.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
+  REQUEST_RUNTIME_VIEW_REFUSAL_CODES,
+  RequestRuntimeViewRefusalError,
   type CurrentPolicyGateway,
+  type RequestRuntimeViewRefusalCode,
 } from '../../../packages/runtime/src/request-runtime-view.js';
 import * as resolveByName from '../../../packages/runtime/src/resolve-by-name.js';
 import * as operationGateway from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -52,27 +55,37 @@ import {
 } from '../src/surface-contract.js';
 import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
 
-const APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT =
-  "import { RequestRuntimeViewLoadError } from '@north-star/postgres-provider/request-runtime-view-service';\n";
+const APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT =
+  "import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';\n";
 
-function assertAppServerProviderBoundary(source: string): void {
+function assertAppServerRuntimeRefusalBoundary(source: string): void {
   const occurrences =
-    source.split(APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT).length - 1;
+    source.split(APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT).length - 1;
   if (occurrences !== 1) {
     throw new Error(
-      'app-server must import exactly one RequestRuntimeViewLoadError provider boundary declaration',
+      'app-server must import exactly one runtime-owned refusal declaration',
     );
   }
-  const withoutAllowedImport = source.replace(
-    APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT,
-    '',
-  );
-  if (/postgres-provider/u.test(withoutAllowedImport)) {
-    throw new Error(
-      'app-server may not import any other postgres-provider authority',
-    );
+  if (/postgres-provider/u.test(source)) {
+    throw new Error('app-server may not import a postgres-provider authority');
   }
 }
+
+type ProviderCodesMissingFromRuntime = Exclude<
+  RequestRuntimeViewLoadErrorCode,
+  RequestRuntimeViewRefusalCode
+>;
+type RuntimeCodesMissingFromProvider = Exclude<
+  RequestRuntimeViewRefusalCode,
+  RequestRuntimeViewLoadErrorCode
+>;
+
+const PROVIDER_CODES_MISSING_FROM_RUNTIME = Object.freeze(
+  {},
+) satisfies Readonly<Record<ProviderCodesMissingFromRuntime, never>>;
+const RUNTIME_CODES_MISSING_FROM_PROVIDER = Object.freeze(
+  {},
+) satisfies Readonly<Record<RuntimeCodesMissingFromProvider, never>>;
 
 test('checked-in shell artifact is parse-normalized deterministic compiler output', () => {
   execFileSync(
@@ -150,60 +163,41 @@ test('renderer accepts one issued view and has no ambient release access', async
     serverSource,
     /ActiveReleasePointer|releaseRepository|global[A-Z][A-Za-z]*Release|process\.env|node:fs/,
   );
-  assertAppServerProviderBoundary(serverSource);
+  assertAppServerRuntimeRefusalBoundary(serverSource);
 });
 
-test('app-server provider boundary red: the required error-class import cannot disappear', () => {
+test('app-server runtime refusal boundary red: the required runtime-owned import cannot disappear', () => {
   const serverSource = readFileSync(`${webRoot}/src/app-server.ts`, 'utf8');
-  const withoutErrorClassImport = serverSource.replace(
-    APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT,
+  const withoutRuntimeRefusalImport = serverSource.replace(
+    APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT,
     '',
   );
-  assert.notEqual(withoutErrorClassImport, serverSource);
-  assert.doesNotMatch(withoutErrorClassImport, /postgres-provider/u);
+  assert.notEqual(withoutRuntimeRefusalImport, serverSource);
+  assert.doesNotMatch(withoutRuntimeRefusalImport, /postgres-provider/u);
   assert.throws(
-    () => assertAppServerProviderBoundary(withoutErrorClassImport),
-    /app-server must import exactly one RequestRuntimeViewLoadError provider boundary declaration/u,
+    () => assertAppServerRuntimeRefusalBoundary(withoutRuntimeRefusalImport),
+    /app-server must import exactly one runtime-owned refusal declaration/u,
   );
 });
 
-test('app-server provider boundary red: a separate provider loader import is refused', () => {
+test('app-server runtime refusal boundary red: a provider loader import is refused', () => {
   const serverSource = readFileSync(`${webRoot}/src/app-server.ts`, 'utf8');
-  const withAmbientLoader = serverSource.replace(
-    APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT,
-    `${APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT}import { PostgresRequestRuntimeViewService } from '@north-star/postgres-provider/request-runtime-view-service';\n`,
-  );
+  const withAmbientLoader = `${serverSource}\nimport { PostgresRequestRuntimeViewService } from '@north-star/postgres-provider/request-runtime-view-service';\n`;
   assert.notEqual(withAmbientLoader, serverSource);
   assert.equal(
-    withAmbientLoader.split(APP_SERVER_RUNTIME_VIEW_ERROR_IMPORT).length - 1,
+    withAmbientLoader.split(APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT).length - 1,
     1,
   );
   assert.throws(
-    () => assertAppServerProviderBoundary(withAmbientLoader),
-    /app-server may not import any other postgres-provider authority/u,
+    () => assertAppServerRuntimeRefusalBoundary(withAmbientLoader),
+    /app-server may not import a postgres-provider authority/u,
   );
 });
 
-const REQUEST_RUNTIME_VIEW_LOAD_CODES = Object.freeze({
-  ACTIVE_POINTER_MISSING: true,
-  ACTIVE_RELEASE_NOT_ADMITTED: true,
-  ACTIVE_RELEASE_NOT_VISIBLE: true,
-  INVALIDATION_AHEAD_OF_AUTHORITY: true,
-  INVALIDATION_CONTEXT_MISMATCH: true,
-  MALFORMED_RELEASE: true,
-  MALFORMED_REQUIRED_PROJECTION: true,
-  NULL_ACTIVE_RELEASE: true,
-  PIN_CONTEXT_MISMATCH: true,
-  POINTER_CHANGED_DURING_LOAD: true,
-  POINTER_IDENTITY_CHANGED: true,
-  REQUEST_CONTEXT_MISMATCH: true,
-  REQUIRED_PROJECTION_DUPLICATE: true,
-  REQUIRED_PROJECTION_MISSING: true,
-  UNSUPPORTED_RUNTIME_CAPABILITY: true,
-} as const satisfies Readonly<Record<RequestRuntimeViewLoadErrorCode, true>>);
-
 test('every typed runtime-view refusal crosses the HTTP boundary with its code', async () => {
-  assert.equal(Object.keys(REQUEST_RUNTIME_VIEW_LOAD_CODES).length, 15);
+  assert.deepEqual(PROVIDER_CODES_MISSING_FROM_RUNTIME, {});
+  assert.deepEqual(RUNTIME_CODES_MISSING_FROM_PROVIDER, {});
+  assert.equal(Object.keys(REQUEST_RUNTIME_VIEW_REFUSAL_CODES).length, 15);
   let refusalCode: RequestRuntimeViewLoadErrorCode = 'ACTIVE_POINTER_MISSING';
   const currentPolicy: CurrentPolicyGateway = Object.freeze({
     async authorize() {
@@ -241,8 +235,8 @@ test('every typed runtime-view refusal crosses the HTTP boundary with its code',
 
   try {
     for (const code of Object.keys(
-      REQUEST_RUNTIME_VIEW_LOAD_CODES,
-    ) as RequestRuntimeViewLoadErrorCode[]) {
+      REQUEST_RUNTIME_VIEW_REFUSAL_CODES,
+    ) as RequestRuntimeViewRefusalCode[]) {
       refusalCode = code;
       const response = await fetch(baseUrl);
       assert.equal(response.status, 500, code);
@@ -274,6 +268,23 @@ test('every typed runtime-view refusal crosses the HTTP boundary with its code',
   } finally {
     await close(server);
   }
+});
+
+test('runtime entry translates loader refusals and leaves unit-of-work failures untouched', async () => {
+  const unitOfWorkFailure = new RequestRuntimeViewLoadError(
+    'ACTIVE_RELEASE_NOT_VISIBLE',
+    'unit-of-work failure with the provider error shape',
+  );
+  await assert.rejects(
+    demoEntry().run({}, () => {
+      throw unitOfWorkFailure;
+    }),
+    (error: unknown) => {
+      assert.equal(error, unitOfWorkFailure);
+      assert.equal(error instanceof RequestRuntimeViewRefusalError, false);
+      return true;
+    },
+  );
 });
 
 test('provider refusals retain known copy and otherwise use an honest code-bearing residual', () => {
@@ -613,7 +624,7 @@ test('no user-facing sentence is written outside the catalog', () => {
  * does not close. A code with no raise site is an entry the user can never see,
  * and it would sit in the catalog looking exactly like a working one.
  *
- * A source-literal scan is a proxy for reachability; the browser gate's 13
+ * A source-literal scan is a proxy for reachability; the browser gate's 15
  * real-path drivers are the observation. The two are reported separately rather
  * than as one number.
  */
@@ -646,11 +657,9 @@ test('raise-site red: a code named only in a comment does not count as raised', 
 /**
  * **What this scan cannot prove, stated rather than implied** (AGENTS.md §6).
  * Stripping comments closes the commented-out hole outright. It does **not**
- * close the dead-branch hole: a code named in unreachable code still counts as
- * raised. `INVALID_SURFACE_BINDING` is the live proof — it satisfies this scan
- * and no request can produce it, which is why it is declared in the browser
- * gate's shortfall rather than left to this check. The 13 executed real-path
- * drivers are the observation; this is the proxy that covers the rest.
+ * close the dead-branch hole: a code named in unreachable code would still
+ * count as raised. The 15 executed real-path drivers are the observation; this
+ * is the proxy that covers the rest.
  */
 function stripComments(source: string): string {
   return source
