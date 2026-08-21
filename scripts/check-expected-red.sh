@@ -154,7 +154,11 @@ if [ "${1:-}" = '--self-test' ]; then
   # relative path — the same identity as the real test the admission rule
   # credits. C8's child is cancelled because its parent ended, which Node counts
   # under `counts.cancelled` and which never ran at all.
-  control import-failure-impersonates run 'reported no summary' \
+  # Held by the ledger's no-summary rule: the crashed file's lone wrapper result
+  # earns no credit, so the mutated run has nothing executed to report. The
+  # reconciliation check below would catch the same impostor if the ledger let it
+  # through — see the meta-control record — but the ledger refuses it first.
+  control import-failure-impersonates run 'the mutated run executed no test' \
     "C7 Node's file-level failure impersonating the real test that shares its name"
   control cancelled-child-is-not-a-kill run 'stopped passing without failing' \
     'C8 a cancelled child declared as one of two kills'
