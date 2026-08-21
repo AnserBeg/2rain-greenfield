@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 /**
  * @param {{type: string, data: {name?: unknown, file?: unknown, skip?: unknown, todo?: unknown, details?: {type?: unknown}}}} event
@@ -95,8 +95,16 @@ export function assertUnfilteredNodeArguments(arguments_, context) {
   }
 }
 
+// Node reports `data.file` absolute and, for the synthetic pass, `data.name` as
+// the path exactly as it appeared on the command line — which is normally
+// RELATIVE. The earlier `isAbsolute` pair-guard returned false for that pair, so
+// the synthetic pass was credited as a real result whenever the command named
+// its files relatively. Measured 2026-08-21 by the expected-red gate's
+// zero-matching-name-pattern control, which observed one "passing" test in a
+// run that executed none. Latent for the reachability suites only because
+// assertUnfilteredNodeArguments refuses --test-name-pattern outright, so they
+// never reach the state that produces it.
 function sameFilesystemPath(left, right) {
   if (left === right) return true;
-  if (!isAbsolute(left) || !isAbsolute(right)) return false;
   return resolve(left) === resolve(right);
 }

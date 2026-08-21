@@ -6,7 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 
@@ -47,6 +47,15 @@ test('node reporter credits only real non-skip non-todo results', () => {
     creditableNodeResultPath(nodeResult(file, file)),
     undefined,
     'a synthetic file-level pass must not receive credit',
+  );
+  // The shape Node actually emits: an absolute `file` and a RELATIVE `name`
+  // naming the same path. Only the absolute/absolute pair was pinned here, and
+  // the guard returned false for this one, so the synthetic pass was credited
+  // as a real result under --test-name-pattern.
+  assert.equal(
+    creditableNodeResultPath(nodeResult(relative(process.cwd(), file), file)),
+    undefined,
+    'a synthetic file-level pass named relatively must not receive credit',
   );
   assert.equal(
     creditableNodeResultPath(nodeResult('real test', file, { skip: true })),
