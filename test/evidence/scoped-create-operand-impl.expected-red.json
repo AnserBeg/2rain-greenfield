@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "packet": "scoped-create-operand-impl",
+  "entries": [
+    {
+      "name": "rendered-form-action-drops-url-scope",
+      "claim": "The POST action rendered for a scoped create retains the legal-entity operand selected in the URL, so submitting the form cannot silently drop the scope the operator chose.",
+      "file": "apps/web/src/component-registry.ts",
+      "original": "surfaceHref(context.surface, undefined, false, context)",
+      "replacement": "surfaceHref(context.surface)",
+      "expected": "rendered POST action must retain the selected operand",
+      "test": {
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
+        "namePattern": "scoped create carries each URL operand"
+      },
+      "kills": [
+        "scoped create carries each URL operand under its declared system-input key"
+      ]
+    },
+    {
+      "name": "web-handoff-hardcodes-one-legal-entity",
+      "claim": "The web handoff carries the legal-entity operand read from the request rather than a fixed identifier, so a second URL value moves the effective operand.",
+      "file": "apps/web/src/surface-runtime.ts",
+      "original": "return Object.freeze({ [argumentKey]: legalEntitySelection[0]! });",
+      "replacement": "return Object.freeze({ [argumentKey]: 'ac000000-0000-4000-8000-00000000000c' });",
+      "expected": "a second URL value must move the effective operand",
+      "test": {
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
+        "namePattern": "scoped create carries each URL operand"
+      },
+      "kills": [
+        "scoped create carries each URL operand under its declared system-input key"
+      ]
+    },
+    {
+      "name": "scoped-cardinality-refusal-removed",
+      "claim": "A scoped create refuses a request carrying anything other than exactly one legal-entity operand, instead of choosing one for the operator.",
+      "file": "apps/web/src/surface-runtime.ts",
+      "original": "  if (legalEntitySelection.length !== 1) {\n    throw new InvalidSurfaceSubmissionError(\n      'a scoped create requires exactly one legal-entity operand',\n    );\n  }\n",
+      "replacement": "",
+      "expected": "200 !== 422|3 !== 2",
+      "test": {
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
+        "namePattern": "scoped create carries each URL operand"
+      },
+      "kills": [
+        "scoped create carries each URL operand under its declared system-input key"
+      ]
+    },
+    {
+      "name": "registered-operation-permission-refusal-removed",
+      "claim": "The semantic operation gateway refuses a registered operation whose policy decision is DENY, before any provider effect runs.",
+      "file": "packages/runtime/src/semantic-operation-gateway.ts",
+      "original": "      if (operationDecision.decision === 'DENY') {\n        throw new SemanticOperationPolicyDeniedError(request.operationId, view);\n      }\n",
+      "replacement": "",
+      "expected": "200 !== 403",
+      "test": {
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
+        "namePattern": "scoped create carries each URL operand"
+      },
+      "kills": [
+        "scoped create carries each URL operand under its declared system-input key"
+      ]
+    },
+    {
+      "name": "provider-refusal-subject-erased",
+      "claim": "A provider refusal for an inactive legal entity reaches the web boundary carrying its own code and its subject, not a generic unavailable.",
+      "file": "apps/web/src/surface-runtime.ts",
+      "original": "    return {\n      code: 'OPERATION_LEGAL_ENTITY_INACTIVE',\n      subject: error.subjectId,\n    };",
+      "replacement": "    return {\n      code: 'OPERATION_UNAVAILABLE',\n    };",
+      "expected": "OPERATION_LEGAL_ENTITY_INACTIVE",
+      "test": {
+        "files": [
+          "test/integration/surface-data-binding.test.ts"
+        ],
+        "namePattern": "inactive legal-entity refusal keeps its provider subject"
+      },
+      "kills": [
+        "an inactive legal-entity refusal keeps its provider subject at the web boundary"
+      ]
+    },
+    {
+      "name": "effective-input-digest-collapsed",
+      "claim": "The gateway records the digest of the effective operation input, so two different inputs cannot share one recorded operation identity.",
+      "file": "packages/runtime/src/semantic-operation-gateway.ts",
+      "original": "        inputDigest: digestOperationInput(request.input),",
+      "replacement": "        inputDigest: '0'.repeat(64),",
+      "expected": "Missing expected rejection",
+      "test": {
+        "files": [
+          "test/postgres/composed-application.test.ts"
+        ]
+      },
+      "kills": [
+        "PENDING"
+      ]
+    },
+    {
+      "name": "unscoped-create-closed-key-fence-removed",
+      "claim": "A create effect admits only the argument keys its pinned contract closes over, so an unscoped create cannot smuggle an extra key past the contract.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    case 'createRecordEffect':\n      assertAllowedKeys(input, contract.closedArgumentKeys);\n      return validateMutationInput(contract, {",
+      "replacement": "    case 'createRecordEffect':\n      return validateMutationInput(contract, {",
+      "expected": "Missing expected rejection",
+      "test": {
+        "files": [
+          "test/postgres/composed-application.test.ts"
+        ]
+      },
+      "kills": [
+        "PENDING"
+      ]
+    },
+    {
+      "name": "active-legal-entity-enforcement-removed",
+      "claim": "A scoped create refuses to write against a legal entity that is not active at the moment of the write.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "            await requireActiveCreateLegalEntity(\n              client,\n              currentStorage,\n              currentEntity,\n              request.definition,\n              input,\n            );\n",
+      "replacement": "",
+      "expected": "Missing expected rejection",
+      "test": {
+        "files": [
+          "test/postgres/composed-application.test.ts"
+        ]
+      },
+      "kills": [
+        "PENDING"
+      ]
+    },
+    {
+      "name": "archived-legal-entity-predicate-removed",
+      "claim": "The active-legal-entity predicate refuses an archived entity as well as a non-active status, so archiving alone stops new writes.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    selected.rows[0]?.status !== descriptor.activeStatusValue ||\n    selected.rows[0]?.archivedAt !== null",
+      "replacement": "    selected.rows[0]?.status !== descriptor.activeStatusValue",
+      "expected": "Missing expected rejection",
+      "test": {
+        "files": [
+          "test/postgres/composed-application.test.ts"
+        ],
+        "namePattern": "composed product activates through the kernel"
+      },
+      "kills": [
+        "composed product activates through the kernel and persists tenant-scoped gateway data"
+      ]
+    }
+  ]
+}
