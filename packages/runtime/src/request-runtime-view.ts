@@ -474,9 +474,19 @@ function startRuntimeDefinitionLoad(
 }
 
 /**
- * A two-input Promise.all with one source-specific rejection translation.
- * Handlers attach to the original promises in argument order, so an immediate
- * loader rejection retains the same precedence it had before translation.
+ * A two-input join with loader-only rejection translation.
+ *
+ * Contract controls observe five timing classes: a synchronous loader throw
+ * before policy; a synchronous policy throw after loader return but before the
+ * join; loader-first handling when both original promises are already rejected;
+ * no-wait settlement when either pending promise rejects while its sibling stays
+ * pending; and synchronous or asynchronous unit-of-work failure after this join
+ * remaining outside loader translation.
+ *
+ * They do not establish policy-first identity when two pending promises reject
+ * in one turn through a post-invocation policy-promise wrapper. That same-turn
+ * case is routed as `runtime-refusal-same-turn-precedence` and becomes required
+ * before any deny-capable production policy gateway lands.
  */
 function joinRuntimeDefinitionAndPolicy(
   definitionLoad: Promise<LoadedRequestRuntimeDefinition>,

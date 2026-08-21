@@ -277,12 +277,29 @@ order during one resumed turn. The wrapper delays only the join's policy handler
 so the loader can overtake it even though policy rejected first. The lane applied
 that exact mutation and observed `test:contracts` remain 29/29.
 
-Production is correct and remains unchanged. After repeated evidence-only rounds,
-`review-tiers` requires the claim to narrow rather than grow another adjacent
-timing table. Same-turn staggered precedence through a post-invocation policy
-wrapper is therefore explicitly unproved here and routed as
-`runtime-refusal-same-turn-precedence` in `current-plan.md`. This packet makes no
-claim of exhaustive original-promise settlement evidence.
+Production behavior is correct and remains unchanged. After repeated
+evidence-only rounds, `review-tiers` requires the claim to narrow rather than grow
+another adjacent timing table. Same-turn staggered precedence through a
+post-invocation policy wrapper is therefore explicitly unproved here and routed
+as `runtime-refusal-same-turn-precedence` in `current-plan.md`. This packet makes
+no claim of exhaustive original-promise settlement evidence.
+
+The orchestrator ruled that routed case non-gating for this packet; the lane did
+not infer the disposition. The narrowing depends on the current reachability
+fact: the composed production request path uses `AllowAllLocalPolicy`, release
+verification and demo wiring are also allow-only, and no production
+`CurrentPolicyGateway` can reject. Exactly one join input can therefore fail in
+production, so same-turn precedence is not contested. The routing is a hard
+trigger rather than an indefinite deferral: row 7's policy/identity-kernel
+packet, or any earlier packet that introduces a deny-capable production gateway,
+must ship the subsuming two-pending, policy-then-loader, exact-identity control
+before admitting that gateway. The row fires as soon as the production gateway
+set stops being allow-only.
+
+The source comment on `joinRuntimeDefinitionAndPolicy` is narrowed to the same
+five measured classes and names the unproved routed case. Its prior statement
+that an immediate loader rejection retained its original precedence claimed
+more than the committed controls observed.
 
 ### Live composed-application observation
 
