@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: evidence_ready — both Critical arms PASS; awaiting the integration matrix
+Status: evidence_ready — integration-only boundary bridge awaiting narrow review
 
 ## Goal
 
@@ -655,3 +655,44 @@ query-side refusal collapse, source-scan hardening and two production-dead
 exports remain valid routed or next-touch observations; none changes this
 packet's accepted scope. The deferred full matrix is now the remaining
 acceptance gate.
+
+### Integration matrix attempt — RED at `6a653f673643ad61d68f0f1234f09bfa222a2f62`
+
+Current `main` had moved with accepted stock-balance work, so it was composed
+into the packet before the acceptance matrix. The reviewed packet remains an
+ancestor, and the staged tree has current main as the merge's other parent.
+The only manual merge resolution retained both branches' appended
+`learnings.md` entries.
+
+The matrix acquired the exclusive slot and pinned `6a653f6`. Performance passed
+5/5 at 96.2% CPU idle with a 2875.2 ms best-of-five sample against the 5000 ms
+budget. Format, lint, typecheck and build then passed. `check:boundaries` stopped
+the run with one `AUTH007_DUPLICATE_TRUST` violation naming the real
+`RequestRuntimeView` interface; no later matrix gate ran. The failure is
+recorded as a red matrix, not as partial acceptance evidence.
+
+Attribution was an integration interaction rather than a production authority
+duplicate. Current main passed the same boundary command. The packet's contract
+test imported `type RequestRuntimeView` inside a named value import, and the
+plain-source authority scanner counted that import as a declaration before it
+counted the real interface. Production contains exactly one declaration.
+
+### Boundary-import bridge — `023a242`
+
+The owned contract test now follows the repository's existing import form: a
+separate type-only import aliases `RequestRuntimeView` as
+`IssuedRequestRuntimeView`. Runtime behavior, the contract specimen and the
+boundary checker are unchanged; only the scanner-confounding spelling moved.
+
+Focused gates on the corrected staged tree passed:
+
+- `pnpm format`;
+- `pnpm lint`;
+- `pnpm typecheck`;
+- `pnpm check:boundaries`: 160 files scanned, zero violations; and
+- `pnpm --filter @north-star/web test:contracts`: 29/29.
+
+Because a test source changed after both Critical PASSes, this bridge receives a
+fresh narrow review before the full matrix restarts. The earlier production
+review remains evidence for the unchanged runtime and web behavior, but it is
+not presented as review of this new SHA.
