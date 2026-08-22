@@ -34,7 +34,7 @@ import { assertTrustedActorEnvelope } from './trust/trusted-actor-envelope.js';
 
 export const INVENTORY_POSTING_CAPABILITY_VERSION = 1 as const;
 export const INVENTORY_POSTING_CAPABILITY_ID =
-  `${'northstar'}.${'inventory'}:capability.posting` as const;
+  'northstar.inventory:capability.posting' as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
   'ffd4e9f6103b5c6053c39b62fe64e69dd255cb0c86cfd349ae465ab25179b3d3' as const;
 // Finite hang-prevention bound, not a posting-latency budget or SLA. Fifteen
