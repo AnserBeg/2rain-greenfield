@@ -6,6 +6,29 @@ Branch: `packet/expected-red-gate`
 Tier: Critical
 Status: frozen for review
 
+## Evidence band — A (SILENT), declared
+
+Per `review-tiers`' evidence-observability bands (2026-08-21, landed on `main`
+during this packet's round-5 freeze): **this packet is Band A, and it is not a
+borderline call.**
+
+The subject is the instrument every future packet's §6 evidence rests on, and its
+failure mode is a **false green in a packet that has not been written yet**.
+Nobody meets that failure on use and nobody reads it off the artifact; it is
+discovered, if ever, when something else reconciles it — which for evidence means
+a later reviewer replaying a mutation by hand, exactly the practice this gate
+exists to replace. **A gate that certifies a red it did not observe is not
+discovered by looking at it.**
+
+So full §6 applies with no relaxation: one recorded red per vacuity vector, each
+varying exactly one property, plus the admission twins. That is what the 33
+controls are. **The band is declared here so the reviewer checks it rather than
+infers it**, and nothing in this packet is self-assigned downward.
+
+The band rule that did the most work here is the one that does not relax at any
+band: *the claim must never exceed the evidence, and narrowing the claim is
+always an acceptable correction.* That is the ruling recorded below.
+
 ## Packet definition
 
 Goal: give `AGENTS.md` §6's demanded reds a reusable way to be constructed and a
