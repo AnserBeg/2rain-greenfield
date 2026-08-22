@@ -353,6 +353,16 @@ the fix is reverted. Measured: making the matcher strict again fails exactly
 `a GFM table with inconsistent outer pipes is still read correctly`, and nothing
 else.
 
+**That twin then caught round 4's own change, which is the best thing it has
+done.** Binding ownership to `{path, header}` made the suite red at
+`70dc99c`: the twin's loose-delimiter specimen sat at `docs/execution/loose.md`,
+an undeclared path, so it stopped conferring ownership for a reason that had
+nothing to do with separators. **The twin was right and the twin was wrong at
+once** — right that something had changed under it, wrong that it was still
+isolating the property it names. The specimen moved to a declared owning path so
+the missing outer pipe is again the only variable, and the strict-matcher
+revert still fails it and nothing else.
+
 
 ## Round 3 findings and their disposition
 

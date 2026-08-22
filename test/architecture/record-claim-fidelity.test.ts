@@ -182,15 +182,19 @@ test('a GFM table with inconsistent outer pipes is still read correctly', () => 
   // failure that causes is not a false green but a false RED — an owning table
   // goes unrecognised and its real rows stop resolving — so the control is a
   // positive one.
+  // The specimen sits at a DECLARED OWNING PATH, so the delimiter's missing
+  // outer pipe is the only property under test. It was at an undeclared path
+  // until round 4 bound ownership to `{path, header}`, at which point this twin
+  // failed — correctly, because it had been asserting separator tolerance
+  // through a table that no longer confers ownership for an unrelated reason.
   const world = buildSyntheticWorld(root);
   const loose = {
-    path: 'docs/execution/loose.md',
+    path: 'docs/execution/ledger.md',
     text: '| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---\n| loose-row | x | — | X | planned | — | — |\n',
   };
-  const green = greenInput(world);
   const report = verifyRecordClaims({
-    ...green,
-    rowIdSources: [...green.rowIdSources, loose],
+    ...greenInput(world),
+    rowIdSources: [loose],
     routingSources: [
       { path: 'docs/execution/q.md', text: 'routed to `loose-row`.\n' },
     ],
