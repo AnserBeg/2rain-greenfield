@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "nested-kill",
+      "claim": "A mutation that breaks a nested test is expressible, and the parent Node reports as subtestsFailed is neither a kill nor an independent regression.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": ["test/fixtures/expected-red/nested-kill.test.mjs"]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/nested-kill.test.mjs",
+          "name": "the child the mutation breaks",
+          "expected": "NESTED_TOKEN"
+        }
+      ]
+    }
+  ]
+}

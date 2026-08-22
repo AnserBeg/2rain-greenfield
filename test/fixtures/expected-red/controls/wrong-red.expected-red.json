@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "wrong-red",
+      "claim": "The fixture subject refuses a quantity that is not a positive integer.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "  if (value <= 0) throw new Error('SUBJECT_NOT_POSITIVE');\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/fixtures/expected-red/subject.test.mjs"]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/subject.test.mjs",
+          "name": "the fixture subject refuses a non-positive quantity",
+          "expected": "SUBJECT_QUANTITY_LEDGER_DESYNC"
+        }
+      ]
+    }
+  ]
+}

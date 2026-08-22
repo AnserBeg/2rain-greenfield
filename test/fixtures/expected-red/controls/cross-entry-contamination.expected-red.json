@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "cross-entry-contaminator",
+      "claim": "An entry whose suite leaves state behind passes its own A/B/A while poisoning a later entry.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": ["test/fixtures/expected-red/contaminator.test.mjs"]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/contaminator.test.mjs",
+          "name": "a suite that leaves state behind for a later entry",
+          "expected": "CONTAMINATOR_TOKEN"
+        }
+      ]
+    },
+    {
+      "name": "cross-entry-contaminated",
+      "claim": "A later entry measures its own fresh baseline, so contamination from an earlier entry is refused rather than certified.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": ["test/fixtures/expected-red/contaminated.test.mjs"]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/contaminated.test.mjs",
+          "name": "a victim of the earlier entry",
+          "expected": "CONTAMINATED_TOKEN"
+        }
+      ]
+    }
+  ]
+}

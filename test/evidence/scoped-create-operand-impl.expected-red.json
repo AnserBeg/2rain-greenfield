@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "packet": "scoped-create-operand-impl",
+  "entries": [
+    {
+      "name": "rendered-form-action-drops-url-scope",
+      "claim": "The POST action rendered for a scoped create retains the legal-entity operand selected in the URL, so submitting the form cannot silently drop the scope the operator chose.",
+      "file": "apps/web/src/component-registry.ts",
+      "original": "surfaceHref(context.surface, undefined, false, context)",
+      "replacement": "surfaceHref(context.surface)",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "scoped create carries each URL operand"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "scoped create carries each URL operand under its declared system-input key",
+          "expected": "rendered POST action must retain the selected operand"
+        }
+      ]
+    },
+    {
+      "name": "web-handoff-hardcodes-one-legal-entity",
+      "claim": "The web handoff carries the legal-entity operand read from the request rather than a fixed identifier, so a second URL value moves the effective operand.",
+      "file": "apps/web/src/surface-runtime.ts",
+      "original": "return Object.freeze({ [argumentKey]: legalEntitySelection[0]! });",
+      "replacement": "return Object.freeze({ [argumentKey]: 'ac000000-0000-4000-8000-00000000000c' });",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "scoped create carries each URL operand"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "scoped create carries each URL operand under its declared system-input key",
+          "expected": "a second URL value must move the effective operand"
+        }
+      ]
+    },
+    {
+      "name": "scoped-cardinality-refusal-removed",
+      "claim": "A scoped create refuses a request carrying anything other than exactly one legal-entity operand, instead of choosing one for the operator.",
+      "file": "apps/web/src/surface-runtime.ts",
+      "original": "  if (legalEntitySelection.length !== 1) {\n    throw new InvalidSurfaceSubmissionError(\n      'a scoped create requires exactly one legal-entity operand',\n    );\n  }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "scoped create carries each URL operand"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "scoped create carries each URL operand under its declared system-input key",
+          "expected": "200 !== 422|3 !== 2"
+        }
+      ]
+    },
+    {
+      "name": "registered-operation-permission-refusal-removed",
+      "claim": "The semantic operation gateway refuses a registered operation whose policy decision is DENY, before any provider effect runs.",
+      "file": "packages/runtime/src/semantic-operation-gateway.ts",
+      "original": "      if (operationDecision.decision === 'DENY') {\n        throw new SemanticOperationPolicyDeniedError(request.operationId, view);\n      }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "scoped create carries each URL operand"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "scoped create carries each URL operand under its declared system-input key",
+          "expected": "200 !== 403"
+        }
+      ]
+    },
+    {
+      "name": "provider-refusal-subject-erased",
+      "claim": "A provider refusal for an inactive legal entity reaches the web boundary carrying its own code and its subject, not a generic unavailable. (The seam moved from surface-runtime.ts to gateway-error-codes.ts when web-refusal-taxonomy was accepted; the gate caught the drift on the merge.)",
+      "file": "apps/web/src/gateway-error-codes.ts",
+      "original": "      return {\n        code: 'OPERATION_LEGAL_ENTITY_INACTIVE',\n        subject: error.subjectId,\n      };",
+      "replacement": "      return {\n        code: 'OPERATION_UNAVAILABLE',\n      };",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "inactive legal-entity refusal keeps its provider subject"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "an inactive legal-entity refusal keeps its provider subject at the web boundary",
+          "expected": "OPERATION_LEGAL_ENTITY_INACTIVE"
+        }
+      ]
+    }
+  ]
+}

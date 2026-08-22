@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "untracked-subject",
+      "claim": "A mutation subject that git does not track is not part of the frozen candidate.",
+      "file": "test-results/expected-red/untracked-subject.mjs",
+      "original": "export const UNTRACKED_SUBJECT = 'pristine';",
+      "replacement": "export const UNTRACKED_SUBJECT = 'moved';",
+      "test": {
+        "files": ["test/fixtures/expected-red/subject.test.mjs"]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/subject.test.mjs",
+          "name": "the fixture subject refuses a non-positive quantity",
+          "expected": "Missing expected exception"
+        }
+      ]
+    }
+  ]
+}

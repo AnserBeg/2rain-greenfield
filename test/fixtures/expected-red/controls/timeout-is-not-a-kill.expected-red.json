@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "timeout-is-not-a-kill",
+      "claim": "A test that exceeded its deadline never reached an assertion, so it cannot satisfy a declared kill.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": ["test/fixtures/expected-red/timeout.test.mjs"]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/timeout.test.mjs",
+          "name": "a test that times out under the mutation",
+          "expected": "test timed out"
+        }
+      ]
+    }
+  ]
+}

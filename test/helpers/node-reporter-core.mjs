@@ -1,9 +1,30 @@
-import { isAbsolute, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 /**
  * @param {{type: string, data: {name?: unknown, file?: unknown, skip?: unknown, todo?: unknown, details?: {type?: unknown}}}} event
  * @returns {string | undefined}
  */
+/**
+ * Every test result Node SELECTED for this run, skipped and todo included.
+ *
+ * Credit and selection are different questions. Reachability asks which files
+ * earned credit, and a skipped test earns none. Identity uniqueness asks what
+ * the run reported at all — and a skipped occurrence still occupies its
+ * `{file, name}`. Dropping skip/todo before the uniqueness check let a mutation
+ * add a skipped duplicate of a passing test and go uncounted, which is the same
+ * ambiguity class one population narrower.
+ */
+export function selectedNodeResultPath(event) {
+  const { data } = event;
+  if (event.type !== 'test:pass' && event.type !== 'test:fail')
+    return undefined;
+  if (data.details?.type !== 'test') return undefined;
+  if (typeof data.file !== 'string' || typeof data.name !== 'string') {
+    return undefined;
+  }
+  return data.file;
+}
+
 export function creditableNodeResultPath(event) {
   const { data } = event;
   if (event.type !== 'test:pass' && event.type !== 'test:fail')
@@ -13,9 +34,12 @@ export function creditableNodeResultPath(event) {
   if (typeof data.file !== 'string' || typeof data.name !== 'string') {
     return undefined;
   }
-  // Under --test-name-pattern Node emits a synthetic pass whose name is the
-  // file path even though no test in that file ran. It must never earn credit.
-  if (sameFilesystemPath(data.name, data.file)) return undefined;
+  // NOTHING HERE ASKS THE TITLE WHETHER A RESULT IS SYNTHETIC. Two successive
+  // title guards each got one case wrong: comparing the pair only when both
+  // paths were absolute credited Node's synthetic pass whenever a command named
+  // its files relatively, and resolving relative titles against cwd then
+  // discarded a REAL test named after its own path. createNodeResultLedger
+  // decides it from the event stream instead.
   return data.file;
 }
 
@@ -95,8 +119,69 @@ export function assertUnfilteredNodeArguments(arguments_, context) {
   }
 }
 
-function sameFilesystemPath(left, right) {
-  if (left === right) return true;
-  if (!isAbsolute(left) || !isAbsolute(right)) return false;
-  return resolve(left) === resolve(right);
+/**
+ * Credit decided over a WHOLE event stream, in two phases, from provenance
+ * rather than from any test's title.
+ *
+ * Three shapes Node emits that are not executed tests, all measured against
+ * Node 22.22.2 on 2026-08-21:
+ *
+ *  - **The synthetic pass.** A file whose `--test-name-pattern` matched nothing
+ *    emits its `test:summary` with `counts.tests: 0` and THEN a `test:pass`
+ *    naming the file. A real result always arrives BEFORE its file's summary.
+ *  - **The file wrapper.** A file that throws at import emits a single
+ *    `test:fail` named by the file's relative path, with `details.type: "test"`,
+ *    `failureType: "testCodeFailure"` and the message `"test failed"` — and NO
+ *    file summary at all. It is otherwise indistinguishable from a real test
+ *    named after its own path, which is exactly why the title cannot decide it.
+ *  - **Cancellation.** A child left pending when its parent ends is reported as
+ *    `test:fail` with `failureType: "cancelledByParent"`, and Node counts it
+ *    under `counts.cancelled` rather than `counts.failed`.
+ *
+ * So: a result is credited only when its file reported a summary and the result
+ * arrived before it. `summaries()` exposes the per-file counts so a consumer can
+ * reconcile what it credited against what Node counted — the check that catches
+ * an omitted or invented record without reference to any name.
+ */
+export function createNodeResultLedger() {
+  const pending = [];
+  const summaries = new Map();
+  let sequence = 0;
+  return {
+    observe(event) {
+      sequence += 1;
+      if (event.type === 'test:summary') {
+        const { counts, file } = event.data;
+        if (typeof file === 'string') {
+          summaries.set(resolve(file), { counts: counts ?? {}, sequence });
+        }
+        return;
+      }
+      const path = selectedNodeResultPath(event);
+      if (path === undefined) return;
+      pending.push({ event, file: resolve(path), sequence });
+    },
+    /** Everything the run selected, skipped and todo included. */
+    selected() {
+      return pending.filter((record) => {
+        const summary = summaries.get(record.file);
+        // A file that never reported a summary did not complete its run, so its
+        // only result is Node's own wrapper rather than anything that executed.
+        if (summary === undefined) return false;
+        // A result after its file's summary is the synthetic pass.
+        return record.sequence < summary.sequence;
+      });
+    },
+    /** Selected minus skip/todo — what earns reachability credit. */
+    credited() {
+      return this.selected().filter(
+        (record) => !record.event.data.skip && !record.event.data.todo,
+      );
+    },
+    summaries() {
+      return new Map(
+        [...summaries].map(([file, entry]) => [file, entry.counts]),
+      );
+    },
+  };
 }

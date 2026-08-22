@@ -6,7 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 
@@ -17,6 +17,7 @@ import {
 } from '../helpers/reachability-evidence.js';
 import {
   assertUnfilteredNodeArguments,
+  createNodeResultLedger,
   creditableNodeResultPath,
 } from '../helpers/node-reporter-core.mjs';
 import {
@@ -44,11 +45,6 @@ const playwrightSelectionArguments =
 test('node reporter credits only real non-skip non-todo results', () => {
   const file = resolve('test/example.test.ts');
   assert.equal(
-    creditableNodeResultPath(nodeResult(file, file)),
-    undefined,
-    'a synthetic file-level pass must not receive credit',
-  );
-  assert.equal(
     creditableNodeResultPath(nodeResult('real test', file, { skip: true })),
     undefined,
   );
@@ -57,6 +53,80 @@ test('node reporter credits only real non-skip non-todo results', () => {
     undefined,
   );
   assert.equal(creditableNodeResultPath(nodeResult('real test', file)), file);
+
+  // BOTH ADMISSION TWINS, and they are why this predicate no longer looks at
+  // the title at all. A real test may be named after its own file in either
+  // form, and two successive title guards each discarded one of them while
+  // admitting an impostor. Synthetic results are refused by the ledger below,
+  // from stream position, and by reconciliation against Node's own counts.
+  assert.equal(
+    creditableNodeResultPath(nodeResult(file, file)),
+    file,
+    'a real test named by its absolute file path must receive credit',
+  );
+  assert.equal(
+    creditableNodeResultPath(nodeResult(relative(process.cwd(), file), file)),
+    file,
+    'a real test named by its relative file path must receive credit',
+  );
+});
+
+test('the result ledger refuses synthetic results by provenance, not by name', () => {
+  // Measured against Node 22.22.2 on 2026-08-21. Three shapes are not executed
+  // tests, and none of them is distinguishable by title:
+  //   - the synthetic pass: file summary with counts.tests 0, THEN a pass
+  //     naming the file;
+  //   - the file wrapper: a lone test:fail named by the file's relative path,
+  //     with NO file summary, emitted when the file throws at import;
+  //   - cancellation: a child left pending when its parent ends.
+  const file = resolve('test/example.test.ts');
+  const named = relative(process.cwd(), file);
+  const summary = (counts: Record<string, number>) => ({
+    type: 'test:summary' as const,
+    data: { file, counts },
+  });
+
+  const executed = createNodeResultLedger();
+  executed.observe(nodeResult(named, file));
+  executed.observe(summary({ tests: 1, passed: 1, failed: 0, cancelled: 0 }));
+  assert.deepEqual(
+    executed.credited().map((record) => record.file),
+    [file],
+    'a real path-named result arriving before the file summary is credited',
+  );
+  assert.deepEqual(executed.summaries().get(file), {
+    tests: 1,
+    passed: 1,
+    failed: 0,
+    cancelled: 0,
+  });
+
+  const selectedNothing = createNodeResultLedger();
+  selectedNothing.observe(summary({ tests: 0, passed: 0, failed: 0 }));
+  selectedNothing.observe(nodeResult(named, file));
+  selectedNothing.observe(nodeResult(file, file));
+  assert.deepEqual(
+    selectedNothing.credited(),
+    [],
+    'results after their file reported zero executed tests are synthetic',
+  );
+
+  // The file wrapper. No summary is emitted at all, so nothing it reports can
+  // be reconciled, and it must earn no credit.
+  const crashedAtImport = createNodeResultLedger();
+  crashedAtImport.observe({
+    type: 'test:fail' as const,
+    data: {
+      name: named,
+      file,
+      details: { type: 'test', error: { failureType: 'testCodeFailure' } },
+    },
+  });
+  assert.deepEqual(
+    crashedAtImport.credited(),
+    [],
+    "a file that reported no summary did not complete, so its lone result is Node's wrapper",
+  );
 });
 
 test('filtered commands cannot produce evidence', () => {
