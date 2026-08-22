@@ -22,9 +22,13 @@ correct and one shared transparent-wrapper-grammar control survivor. The
 round-9 test-only correction pinned all five wrapper forms. Candidate
 `93a0f37715378bf227dcdee17e5558afd1301456` returned REVISE because a
 literal-only TypeScript template-literal type fell outside the runtime-expression
-observer. The round-10 production correction adds that bounded type-space form
-and is gate-green for a fresh Critical arm; the full matrix remains deferred
-until review converges.
+observer. Candidate `0bba84397f190ba7c3d8e09022dfa22c006d0ce3` returned REVISE
+because that first type-space channel was skipped beneath completed runtime
+constructions and left unresolved outer template types to the raw source
+observer's punctuation boundaries. The round-11 production correction separates
+runtime and type populations, preserves partial type-run adjacency, and is
+gate-green for a fresh Critical arm; the full matrix remains deferred until
+review converges.
 
 ## Packet definition
 
@@ -89,10 +93,11 @@ capability-local adapter distinction, would need its own ruling.
 
 Yes, for statically observable JavaScript/TypeScript string constructions. The
 guard parses production source and evaluates runtime string literals,
-parentheses/type wrappers, template expressions, and `+` expressions. It also
-evaluates TypeScript `TemplateLiteralTypeNode` values when every span is itself
-a string-literal type. It observes a completed construction as one value. Inside
-an otherwise dynamic ordinary runtime construction it also observes maximal
+parentheses/type wrappers, template expressions, and `+` expressions. In a
+separate population pass, it evaluates TypeScript `TemplateLiteralTypeNode`
+values whose spans are exact primitive literal types, parenthesized exact types,
+or nested exact template types. It observes a completed construction as one
+value. Inside an otherwise dynamic ordinary runtime construction it also observes maximal
 statically known runs while preserving whether either adjacent construction
 edge borders an unknown runtime value. Unknown adjacency is conservatively
 represented by a character that is both a word character and a
@@ -104,19 +109,26 @@ the edge of an isolated run. The guard therefore reports `PRESS006`, rather
 than introducing a parallel rule or an allowlist.
 
 The observer measures each completed ordinary runtime construction once, every
-bounded partial run inside an incomplete runtime construction, and each
-literal-only template-literal type once. Raw and constructed observation are
+bounded partial run inside an incomplete runtime construction, each exact
+template-literal type once, and every independently bounded partial run in an
+unresolved outer template type. Runtime and type construction discovery are
+independent, so completing a runtime value cannot suppress an exact type child.
+Raw and constructed observation are
 disjoint by AST ownership: raw matching owns source occurrences outside static
 construction literal tokens, while the construction observer owns matches
 inside those tokens and judges them with the construction's semantic value and
 adjacency. Runtime ownership follows only the same runtime expression positions
 the static evaluator understands: wrapper expressions, `+` operands, and
 template segments/substitutions. Type children of `as`, angle-bracket
-assertions, and `satisfies` remain raw source occurrences because they do not
-contribute tokens to the runtime string. Literal-only template-literal types are
-a separate completed static value: ownership includes their head/tail tokens
-and string-literal type spans, but does not resolve aliases, generics,
-identifiers, or type-checker state. This prevents quotes, backticks,
+assertions, and `satisfies` remain outside runtime ownership because they do not
+contribute tokens to the runtime string; the independent type pass still
+observes exact template types within them. An exact template-literal type is a
+separate completed static value: ownership includes its head/tail tokens and
+exact value-contributing primitive or nested type spans. Unresolved outer types
+use the same conservative left/right adjacency model as incomplete runtime
+constructions, while independently exact nested template types remain visible.
+The bounded evaluator does not resolve aliases, generics, identifiers, unions,
+or type-checker state. This prevents quotes, backticks,
 interpolation syntax, or unrelated type syntax from proxying ownership, while
 an already-routed literal still cannot mask a later splice in the same file.
 Multiple identities inside one completed construction are all retained. This
@@ -142,14 +154,14 @@ and the round-6 review found that isolating a run after an unknown prefix
 invented a left word boundary for local IDs and `*_IDS` symbols.
 
 This remains deliberately narrower than symbolic execution. Unknown runtime
-values, runtime identifier indirection, nonliteral type-template spans, type
-aliases, generic type parameters, and identifier-held types are not resolved;
+values, runtime identifier indirection, aliases, generic parameters,
+identifier-held types, unions, and other non-exact type spans are not resolved;
 the TypeScript type checker is not consulted; and a tag's return value is not
-inferred. Static runtime text on either side of unknown runtime values is still
-observed when it independently fixes the identity boundary. That is an explicit
-limit: the current threat is an honest developer or AI writer reaching for the
-cheap literal-interpolation or literal-concatenation dodge in ordinary runtime
-or literal-only type syntax, not active obfuscation.
+inferred. Statically known text on either side of an unknown runtime or type
+value is still observed when it independently fixes the identity boundary. That
+is an explicit limit: the current threat is an honest developer or AI writer
+reaching for the cheap literal-interpolation or literal-concatenation dodge in
+ordinary runtime or statically exact type syntax, not active obfuscation.
 Banning all interpolation or all concatenation in production would reject
 ordinary application code and would be a broader language-policy packet, not a
 proportionate correction here.
@@ -189,6 +201,11 @@ not rely on the routed Inventory debt:
 | runtime/type provenance companion | one completed construction contains a runtime module identity and an independent module identity in its `satisfies` type | two observations at their distinct runtime-construction and raw type-literal lines |
 | transparent-wrapper grammar | the runtime namespace is split across a parenthesized, `as`, angle-bracket-asserted, `satisfies`, or non-null operand; the three typed forms also contain an independent type-literal identity | eight exact observations: one construction-derived result for every wrapper plus one raw type-literal result for each typed wrapper; deleting any shared unwrap predicate loses its construction observation |
 | literal-only template type | a direct string-literal type, an equivalent spliced `TemplateLiteralTypeNode`, and a spliced longer contract type share one generic production fixture | the direct and spliced module identities each report at their own source line; the longer contract type admits; deleting the type-template construction branch loses only the spliced observation |
+| independent type population | the same spliced template type appears directly beneath `satisfies` and beneath `satisfies` inside a completed runtime `+ ''` construction | both type values report; runtime completion cannot suppress a type child, and stopping the independent type pass beneath runtime constructions loses only the second observation |
+| template-type right adjacency | contiguous and split namespaces precede an unresolved generic span either directly or after a static `:` | both unbounded forms admit and both colon-bounded forms refuse; raw template punctuation cannot invent the right boundary |
+| template-type left adjacency | local ID `widget_list` and symbol `WIDGET_IDS` follow an unresolved generic span in head, tail, and substitution positions, with and without a static `:` | unknown-adjacent forms admit and colon-bounded forms refuse; tail and substitution ownership plus left-boundary state are both observed |
+| exact type grammar and ranges | numeric, bigint, boolean, null, undefined, parenthesized, and nested exact spans compose definition-derived identities; complete identities placed only in head, substitution, or tail tokens continue into legal longer values | all exact identities report once, all three continuation forms admit, and removing head/substitution/tail ownership independently creates an extra raw observation |
+| rejected outer type recursion | an unresolved union span contains an independently exact nested spliced template type | the nested exact type still reports; rejecting the outer type does not erase an independently completed type value |
 | unknown-left admission/refusal | local ID `widget_list` and symbol `WIDGET_IDS` each follow an unknown prefix either directly or after a static `:` | the directly adjacent identities admit because the runtime prefix may erase `\b`; the colon-bounded twins refuse exactly at their construction lines |
 | partial-run multiplicity | one incomplete outer concatenation contains two independently colon-bounded spliced namespaces separated by an unknown value | two exact observations at the two static-run positions; first-partial-run-only compression fails |
 | tagged-boundary admission | a tag receives the spliced template body | zero violations; the tag controls the runtime result |
@@ -272,6 +289,24 @@ direct type literal remains reported, the spliced type disappears, and the
 longer contract type remains admitted. The explicit inverse patch restored the
 production source before the final focused 37/37 run; no mutation runner is
 committed.
+
+The round-11 focused run passes 42/42. Before the production correction, the
+five new controls produced 38/42: the type template beneath a completed runtime
+construction disappeared, the contiguous unknown-right type form falsely
+reported through the raw observer, all unknown-left local-ID and symbol forms
+falsely reported, and only the independently nested exact type was observed
+from the exact-span table. The correction runs type-template discovery as an
+independent AST population, evaluates exact primitive and nested spans, and
+routes unresolved outer types through the same bilateral partial-run boundary
+collector used by runtime constructions. Targeted discarded mutations then
+proved the new properties separately: stopping type descent beneath runtime
+construction lost only the wrapper-composition observation; deleting type
+partial runs failed both adjacency tables; deleting numeric exact-span support
+failed only the exact-grammar control; deleting rejected-span recursion failed
+only the nested control; and deleting head, substitution, or tail ownership
+made the corresponding legal continuation report raw. Every mutation was
+restored by an explicit inverse patch before the final focused run; no mutation
+runner is committed.
 
 ## Gate evidence
 
@@ -480,6 +515,33 @@ long tests 7, 8, and 9 passed in 96.5 s, 146.9 s, and 213.3 s. The discarded
 branch deletion is corroboration only; the committed direct/spliced/admission
 fixture is the reproducible evidence. No mutation runner is committed.
 
+Round 11 corrects the independent-type-population and unresolved-outer-type
+ownership defects found in the review of `0bba843`:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` before the production correction | EXPECTED RED — 38/42; wrapper composition, right-adjacency, left-adjacency, and exact-span controls failed while the independently nested type still reported |
+| focused `module-press-law.test.ts` | PASS — 42/42, including independent runtime/type population, bilateral type adjacency, exact primitive/nested spans, head/substitution/tail ownership, and rejected-outer recursion |
+| stop type descent beneath runtime construction | EXPECTED RED — 41/42; only the completed-runtime-wrapper composition control failed |
+| delete type partial-run collection | EXPECTED RED — 40/42; only the right- and left-adjacency tables failed |
+| delete numeric exact-span support | EXPECTED RED — 41/42; only the exact primitive/nested control failed |
+| delete rejected-span recursion | EXPECTED RED — 41/42; only the independently nested exact-type control failed |
+| delete head, substitution, or tail ownership | EXPECTED RED on each replay — 41/42; each mutation added exactly the raw observation its matching legal-continuation specimen prohibits |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 173/173 in 54,859.4 ms, including 42/42 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 1,061,613.2 ms |
+
+The executable correction is commit
+`390ceb5180ba7d251905397c925e2efebeecf9fe`. Architecture queued behind an
+existing PostgreSQL holder and its earlier expected-red waiter; PostgreSQL then
+queued behind another lane's shared unit/integration work and earlier
+Architecture request. Both commands acquired the repository lock normally and
+completed green. The discarded mutations are corroboration; the committed
+fixtures are the reproducible evidence, every mutation was restored with an
+explicit inverse patch, and no mutation runner is committed.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -654,6 +716,33 @@ because this is a new in-scope production false green in the gate. Production
 changed, so the next review is a fresh full Critical arm; nothing from round 9
 is fenced as settled.
 
+The fresh review of candidate
+`0bba84397f190ba7c3d8e09022dfa22c006d0ce3` closed the basic standalone
+template-type observation and all retained runtime properties, then returned
+**REVISE** on two composed type-space production defects and the controls that
+missed them. First, the unified visitor returned after a completed runtime
+construction and therefore skipped an independently exact template type in an
+`as`, angle-bracket, or `satisfies` type child. Second, an unresolved outer
+template type retained raw ownership of its head/tail tokens, so source `${`
+punctuation invented a favorable boundary for a contiguous spelling while the
+split runtime-equivalent spelling admitted. The review also required the bounded
+exact grammar and ownership evidence to cover primitive and nested exact spans,
+partial-run boundaries, nested recursion, source attribution, and the individual
+head/substitution/tail ranges.
+
+Round 11 separates runtime and type-template discovery into independent AST
+populations. Exact primitive, parenthesized, and nested spans form one complete
+type value; unresolved outer types yield maximal known runs with conservative
+unknown adjacency, then retain independently exact nested template types. Both
+runtime and type partial runs use the same boundary collector, while their
+syntax flatteners remain separate. The five committed controls and targeted
+mutation reds hold reachability, adjacency, exact grammar, recursion,
+attribution, and range ownership without introducing aliases, generic
+resolution, identifier lookup, unions, or checker state. Continuation remains
+licensed because both review findings were in-scope production false greens.
+Production changed, so the next review is a fresh full Critical arm; nothing
+from round 10 is treated as a narrow confirmation boundary.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -692,6 +781,15 @@ with separate ownership grammars, even though both produce an exact string for
 the same shared identity matcher. Adding type syntax does not license symbolic
 type evaluation: every admitted node must carry its own complete literal value
 and value-contributing token ranges.
+
+The round-10 review adds the composition rule: **independent syntax populations
+need independent discovery passes, and rejected syntax still owns its known
+semantic runs.** An early return that is correct for one completed runtime value
+cannot decide whether a type child exists, while falling back to raw source for
+an unresolved outer template lets `${` and `}` punctuation masquerade as value
+boundaries. Exact literal grammar therefore needs discriminator identities for
+its primitive and nested forms, and ownership needs legal continuation controls
+for every value-contributing token class rather than one aggregate happy path.
 
 A second reusable rule follows from the confirmed Fable finding: **partial
 evaluation must preserve known semantic boundaries rather than classifying an
