@@ -449,6 +449,22 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
       },
       {
         ...greenInput(world),
+        // AN INSERTED COLUMN. The header still opens `| ID | Packet |`, so the
+        // table is still recognised, but Status has moved to index 5. A reader
+        // with a hardcoded index lands on Tier and passes.
+        ledger: document(
+          'docs/execution/ledger.md',
+          '# Execution ledger\n\n| ID | Packet | Stage | Phase | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|---|\n| probe-packet | probe | — | G3 | Mechanical | accepted | — | — |\n',
+        ),
+        adrs: [
+          document(
+            'docs/decisions/ADR-9008-probe.md',
+            '# ADR-9008\n\nStatus: proposed by packet `probe-packet`; ratified when that\npacket is accepted\n\nTier: Critical\n',
+          ),
+        ],
+      },
+      {
+        ...greenInput(world),
         // ESCAPED PIPE. A literal `|` inside an earlier cell shifts every later
         // column, so a status read at a fixed index lands on Tier and passes.
         ledger: document(
