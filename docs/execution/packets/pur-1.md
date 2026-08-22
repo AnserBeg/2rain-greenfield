@@ -254,15 +254,41 @@ resolving a plan conflict on its own authority — exactly what `AGENTS.md` §1
 forbids. ADR-0059 cannot supply it either: it is `proposed`, and it decides
 lifecycle width rather than packet ownership of the amend.
 
-**What is owed, from the user or the orchestrator, before this packet can be
-accepted under its own identity:** an explicit ruling that `PUR-1` is accepted
-without post-draft quantity amendment, that the carrier and the amend operation
-move to `PUR-2`, and that §7.17, the queue row and this record are amended to
-say so. Until that exists, this is a partial implementation carrying the
-original packet identity as though the obligation were complete.
+### RULED 2026-08-22 by the user — `PUR-1` is accepted without amend
 
-Stop count for this packet: **2**. Stop 2 is settled by user ruling. Stop 1 is
-NOT settled — it is measured, reported, and awaiting the ruling above.
+Asked as a blocking decision at review round 2, with the three measurements and
+the cost of each alternative stated. **The ruling:**
+
+- **`PUR-1` is accepted without post-draft quantity amendment.**
+- **The carrier and the amend operation move to `PUR-2`**, which is where the
+  received-quantity read model and the over-receipt floor land anyway — §7.12
+  already put the stored-versus-derived choice there, and the amend's
+  refuse-below-received precondition cannot be written until that choice is
+  made. The two decisions belong to one packet.
+- **Plan §7.17 is to be corrected**, both for the reassignment and for its
+  `writableFieldIds` premise, which is measurably false: `operationDefinition`
+  is a `z.strictObject` with no `fields` member, and `operationInputContract`
+  receives the ENTITY's active field set. The plan is outside this packet's
+  owned paths, so the correction is the orchestrator's to apply; the lane
+  offered to draft it.
+
+**The alternatives, and why they were not taken.** Keeping the obligation here
+would have required granting a platform lease for one of three language or
+runtime events — a canonical per-operation writable-field subset, a way for a
+child operation's precondition to read the parent image, or an exemption from
+the parent-aggregate rule. Each is well beyond registry entries and would
+likely be a packet of its own. Splitting `PUR-1` was available under
+`mission-cadence`'s stop-convergence rule and was not needed, because the
+obligation moves rather than the packet.
+
+**What this forfeits, recorded as a product limitation rather than left
+implicit:** once a purchase order leaves `draft`, its ordered quantities cannot
+be changed at all. The reopen returns a closed order to `released`, but
+`released` is guarded and `released → draft` is refused by ruling. `PUR-2`
+closes this.
+
+Stop count for this packet: **2**, both settled by user ruling — Stop 2 on
+`draft → cancelled`, Stop 1 on the amend.
 
 ## Review round 2 — REVISE, and the authority gap it named
 
