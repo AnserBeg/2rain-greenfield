@@ -240,7 +240,7 @@ that join.
   `/Missing expected rejection/u`_, is satisfied by both. The kill set made the
   difference visible; the message pattern could not have. The four PostgreSQL
   entries are routed rather than shipped, for the reason in the packet record.
-- The gate's own negative controls: **35**, in
+- The gate's own negative controls: **37**, in
   `scripts/check-expected-red.sh --self-test`, wired as its own gate so the
   proof is re-taken on every CI and matrix run rather than once at freeze.
 - **Six meta-controls, each deleting one check and requiring the control that
@@ -272,6 +272,15 @@ that join.
   arrives **before** its file's summary. `createNodeResultLedger` reads that
   ordering; both reporters use it; and the rule now carries an admission twin —
   a real path-named result must still be credited.
+
+**The scope limit, declared.** The gate certifies only manifests whose
+identities it can prove unique and provenanced, and refuses everything else. Six
+review rounds found the same root seven ways; the seventh and eighth — a skipped
+duplicate and a `./`-aliased path — were answered by widening the rule's
+population rather than by adding predicates, and the limit is now the product
+rather than an implication. A suite reporting two results under one
+`{file, name}`, in any status, cannot be an expected-red subject until its names
+are distinct.
 
 ## Enforcement
 

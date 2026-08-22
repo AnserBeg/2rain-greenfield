@@ -17,6 +17,33 @@ addition cannot exist without the assertion firing first, so index membership an
 reading the commit is the more obviously-correct source; no control holds it, and
 none is owed. *Round 6 asked for this ruling explicitly rather than a control.*
 
+## The declared scope limit — taken, not avoided
+
+**The gate certifies only manifests whose identities it can prove unique and
+provenanced. Everything else it refuses.** That is the product, stated as a
+limit rather than implied by a list of patches.
+
+The charter for the final round declared this fallback in advance: *if a seventh
+way identity leaks is found, take the scope limit and say so; another predicate
+is not acceptable.* Round 6 found two more — a **skipped** duplicate, which held
+its `{file, name}` while earning no reachability credit and so was dropped before
+uniqueness ran; and a **`./`-aliased** manifest path, checked as a raw string and
+adjudicated as a resolved one, so two declarations were satisfied by one
+regression.
+
+**Neither was answered with a new outcome predicate.** Both were the existing
+rule applied to the population it should always have covered: every result the
+run selected, and every path in its canonical spelling. The ledger now separates
+SELECTED from CREDITED — reachability still credits neither skip nor todo, while
+identity uniqueness and reconciliation see everything the run reported — and a
+noncanonical path spelling is refused so the static and runtime equivalence
+relations are one relation.
+
+**What this means for a manifest author.** A suite that reports two results under
+one `{file, name}`, in any status, cannot be used as an expected-red subject
+until the names are made distinct. The gate will not guess which occurrence a
+declaration meant, and it says so by refusing rather than by choosing.
+
 ## Evidence band — A (SILENT), declared
 
 Per `review-tiers`' evidence-observability bands (2026-08-21, landed on `main`
@@ -88,7 +115,7 @@ matrix; reproducing the reds costs minutes and belongs at acceptance.
 ## The three ways this gate could have betrayed itself
 
 Each has its own recorded red in `--self-test`, varying one property of an
-otherwise-correct manifest entry. **35 controls**, and the self-test is itself a
+otherwise-correct manifest entry. **37 controls**, and the self-test is itself a
 gate — `check:expected-red-controls` runs in CI and the matrix, so the proof
 that this instrument can fail is re-taken on every run rather than once at
 freeze time.
@@ -323,7 +350,7 @@ are already stable. Routed to `current-plan.md`.
 
 - The five focused-integration entries: **12 seconds** for five mutations,
   measured mutation-first and then restored.
-- `--self-test`: seconds, **35 controls**.
+- `--self-test`: seconds, **37 controls**.
 - The four PostgreSQL entries: `test/postgres/composed-application.test.ts` takes
   **9m48s** solo for one run, so an entry naming that whole file costs about
   twenty minutes for its baseline plus its mutated run. One full nine-entry run
