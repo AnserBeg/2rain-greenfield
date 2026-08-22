@@ -5,8 +5,9 @@ Base: `ba4304d0477784142442093c6783b20ae2f09424`
 Branch: `packet/record-claim-fidelity`
 Tier: Behavioral — the diff adds a gate over narrative records and changes no
 product logic.
-Status: **frozen for review**; see "Gate results" below for what is green and
-what is blocked.
+Status: **frozen for review.** All gates green at the frozen tip; the packet's
+last executable commit is `7e2fc88c6ff383d5743d521e451e7030a89eaff5` and every
+commit above it is narrative.
 
 ## Why this exists
 
@@ -261,7 +262,13 @@ happened."*
 - `node --import tsx test/architecture/record-claim-fidelity-negative-control.ts`
   — reds by design with `RECORD_CLAIM_PATH_UNCHANGED`, exit 1.
 - Die-alone deletion matrix — **16/16**.
-- `pnpm test:architecture` — see the blocking finding below.
+- `pnpm test:architecture` — **149/149** on the corrected tree. On the tree
+  before the ADR correction below it was 148/149, failing on exactly one
+  assertion — `the record layer is clean at this tree` — and nothing else, which
+  is the gate reporting a real defect rather than a suite regression.
+- `scripts/check-records.sh` — `records: OK (126 record(s), 1 declaring: 7
+  claimed path(s) and 10 claimed symbol(s) observed in their frozen trees; 57
+  ADR(s) against 148 ledger row(s); 23 routing(s) resolved)`.
 
 ## The gate's first run found five stale ratifications the sweep missed
 
@@ -283,16 +290,28 @@ ADRs phrased *"ratified when that packet is accepted"* (0026, 0027, 0028, 0029,
 0030, 0033); these five are phrased *"pending packet acceptance"* or plain
 *"proposed (packet ...)"* and are the same fact in different words.
 
-**The lane did not correct them.** `docs/decisions/**` is on `lanes.md`'s
+Each was verified against the ledger row's own evidence column: every one of
+those five packets cites the ADR it implements.
+
+**The lane did not take this unasked.** `docs/decisions/**` is on `lanes.md`'s
 high-conflict shared list except a packet's own new ADR, and R1's disposition
 assigns the sweep to the orchestrator explicitly — *"The orchestrator performs
-the one-time sweep so the gate lands green; the lane builds the gate."* This is
-a **stop-and-bridge-request** for five one-line status corrections, not a lease
-violation, and it is the honest outcome: the gate found on its first run what a
-careful manual sweep missed, which is the best available evidence that it works.
-`check-review-record.sh` was found the same way, firing on the very commit that
-introduced it.
+the one-time sweep so the gate lands green; the lane builds the gate."* The lane
+stopped and issued a **bridge request**, and the orchestrator **granted it on
+2026-08-21, scoped to status lines only.** The five were then corrected in that
+scope, in the same wording the sweep used for the six it caught, each naming the
+packet's reviewed and integrated SHAs from the ledger.
 
-Until those five lines are corrected, `pnpm test:architecture` is **red on this
-branch** at `record-claim-fidelity.test.ts`, by design — the suite asserts the
-record layer is clean and it is not.
+That the gate found on its first run what a careful manual sweep missed is the
+best available evidence that it works. `check-review-record.sh` was found the
+same way, firing on the very commit that introduced it.
+
+**One thing was flagged and deliberately NOT corrected**, because the bridge
+covers status lines only: ADR-0034's §*"What this ADR does not yet implement"*
+still defers the enforcement half behind `G3-P5`, which the ledger also records
+as accepted, and `inventory-form-anatomy`'s row records building on *"ADR-0034's
+existing predicate carrier"*. That section reads stale, but confirming it is a
+measurement against `module-runtime-interpreter.ts` rather than a status
+correction. It is named in the ADR itself so it cannot rot quietly, and it is
+**not** something this gate detects — the gate reads the governing status, not
+the body.

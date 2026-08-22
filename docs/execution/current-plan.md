@@ -28,15 +28,23 @@ diagnostics, sixteen committed controls, die-alone measured 16/16. See the
 [packet record](packets/record-claim-fidelity.md) and the
 [ledger row](ledger.md).
 
-**One thing is owed back to the orchestrator and it is five lines.** The gate's first run
-found five stale ratifications that survived the one-time sweep at `ba4304d`: **ADR-0021**
-(`Q1-P0`), **-0022** (`Q1-P3a`), **-0023** (`1c-a`), **-0024** (`1g2`) and **-0034**
-(`G3-Pterm`) — all accepted packets. The sweep corrected the six ADRs phrased *"ratified
-when that packet is accepted"*; these five say *"pending packet acceptance"* or plain
-*"proposed (packet ...)"* and are the same fact in other words. `docs/decisions/**` is
-outside that lane's lease and R1 assigns the sweep to the orchestrator, so it is a
-stop-and-bridge-request. **`pnpm test:architecture` stays red on the branch until those
-five lines land**, which is the gate doing its job on the first tree it ever read.
+**The gate found five more stale ratifications on its first run, and they are now
+corrected.** ADR-**0021** (`Q1-P0`), **-0022** (`Q1-P3a`), **-0023** (`1c-a`), **-0024**
+(`1g2`) and **-0034** (`G3-Pterm`) all named accepted packets and survived the one-time
+sweep at `ba4304d`. The sweep corrected the six phrased *"ratified when that packet is
+accepted"*; these five say *"pending packet acceptance"* or plain *"proposed (packet ...)"*
+and are the same fact in other words. The lane stopped rather than taking
+`docs/decisions/**`; **the orchestrator granted a bridge scoped to status lines only** and
+the five were corrected against each packet's reviewed and integrated SHAs.
+`test:architecture` was **148/149 before, failing on exactly that one assertion**, and is
+**149/149** after — the gate doing its job on the first tree it ever read.
+
+**One thing is flagged and not corrected**, because the bridge covers status lines only:
+ADR-0034's *"What this ADR does not yet implement"* still defers the enforcement half
+behind `G3-P5`, which the ledger also records as accepted, and `inventory-form-anatomy`
+records building on *"ADR-0034's existing predicate carrier"*. Confirming that is a
+measurement against `module-runtime-interpreter.ts`, and this gate reads the governing
+status rather than the body.
 
 **Still not built, and named so it does not rot:** the declaration block is **optional**.
 Making it mandatory is a `mission-cadence` edit that belongs to the orchestrator and lands

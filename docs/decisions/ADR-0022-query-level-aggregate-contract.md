@@ -1,7 +1,13 @@
 # ADR-0022: Query-level aggregate contract
 
 Date: 2026-07-28
-Status: proposed by Q1-P3a; pending packet acceptance
+Status: **ratified** 2026-08-21 — Q1-P3a is accepted (ledger; reviewed
+`98dce892afab7d549fdeacc993bfbcc368f32c42`, integrated `581ce99`, matrix green there on
+the first attempt), completing the condition this ADR set for itself. (Status corrected
+by the orchestrator's bridge to `record-claim-fidelity`, 2026-08-21. The 2026-08-21
+record sweep corrected the six ADRs phrased *"ratified when that packet is accepted"*
+and missed the five phrased *"pending packet acceptance"*; R1's own gate found them on
+its first run.)
 Tier: Critical (review per `review-tiers`)
 
 ## Context

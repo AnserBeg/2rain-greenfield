@@ -1,8 +1,18 @@
 # ADR-0034: Terminal-state operation preconditions
 
 Date: 2026-07-30
-Status: proposed (packet `G3-Pterm`, queue row `5g3-term`; the enforcement half is
-deferred behind `G3-P5` — see "What this ADR does not yet implement")
+Status: **ratified** 2026-08-21 — packet `G3-Pterm` (queue row `5g3-term`) is accepted
+(ledger; matrix-green `10b96c8b`, integrated `db3035e`), completing the condition this ADR
+set for itself. (Status corrected by the orchestrator's bridge to
+`record-claim-fidelity`, 2026-08-21. This one was phrased as a bare *"proposed"* rather
+than as a conditional and was missed by the 2026-08-21 record sweep alongside the four
+*"pending packet acceptance"* lines; R1's own gate found all five on its first run.)
+**Not corrected here, and flagged rather than claimed:** §"What this ADR does not yet
+implement" still defers the enforcement half behind `G3-P5`, which the ledger also
+records as accepted, and `inventory-form-anatomy` records building on *"ADR-0034's
+existing predicate carrier"*. That section reads stale, but confirming it is a
+measurement against the interpreter rather than a status correction, and the bridge that
+authorized this edit covers status lines only.
 Tier: Critical (review per `review-tiers`)
 
 ## Context
