@@ -593,8 +593,13 @@ function transitionOperation(
   precondition: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
+    // Only the terminal move asks for a human confirmation. `close` and
+    // `reopen` are each other's inverse and `release` is the primary forward
+    // action; `cancel` cannot be undone from `cancelled`, so it is the one that
+    // gets the extra step.
     // Only a move into the TERMINAL state asks for a human confirmation, and
-    // both cancels do. `release` is the primary forward action and takes none.
+    // both cancels do. `close` and `reopen` are each other's inverse and
+    // `release` is the primary forward action.
     confirmation: permission === 'cancel' ? 'humanRequired' : 'none',
     effect: {
       kind: 'transitionStateEffect',

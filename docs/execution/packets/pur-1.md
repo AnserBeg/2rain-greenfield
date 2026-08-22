@@ -778,6 +778,19 @@ mounting a guarded document is what makes it operator-visible.
 
 ## Owed at acceptance, and deliberately not taken here
 
+**A duplicated comment block in `purchasing/definition.ts` stays.** The Fable arm
+listed it as cosmetic and it was removed, then RESTORED — because removing it put
+`packages/` into the delta and cost the identical-tree property that lets a
+records-only correction stand on that same confirm. **Fable's ruling is that a
+records-only correction does not invalidate its logic confirm; a comment-only
+source edit is not records-only under the mechanical exclusion diff, and the
+rule is mechanical for a reason.** Two duplicated sentences are worth less than
+an independent Critical-logic confirm. Routed to whichever packet next touches
+the file.
+
+## Owed at acceptance, and deliberately not taken here
+
+
 **`review-log.md` needs four rows** — R1 REVISE, R2 REVISE, R3 REVISE, R4 Fable
 confirm — and this lane did not add them. Two reasons, both measured:
 `scripts/check-review-record.sh` requires only that the SHA on `main` appears,
