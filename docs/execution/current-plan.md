@@ -17,66 +17,46 @@ this section now prevents.
 outliving its truth — committed two hours after writing the finding. **The instrument that
 would have caught it is R1's own `check-records.sh`, which is not built yet.**
 
-**R1's gate is now built — `record-claim-fidelity`, round 4 frozen at last executable
-commit `0b343d2b9e0a0c81bfaba014b3fbbc8f8b420b41`.** `scripts/check-records.sh` plus
+**R1's gate is built and SPLIT — `record-claim-fidelity`, round 5 frozen at last executable
+commit `0f8b39308e276079b606d6bf2f715cd598f8dd15`.** `scripts/check-records.sh` plus
 `test/architecture/record-claim-fidelity.test.ts` observe a packet record's claims against
-its frozen tree (Band A: every claimed path really differs between base and head, every
-claimed symbol is really declared there, no executable path changed that the record does
-not declare) and check record staleness against the ledger (Band C: a `proposed` ADR whose
-packet is accepted, a duplicate ledger id, a routing that resolves to nothing). Twenty-two
-diagnostics, twenty-two committed controls; evidence is 23/23 per report site, 12/12 over
-the behavioural guards, and two admission twins.
+its frozen tree — the declared head owned by that packet's own `Packet:` commit trailer,
+every claimed path really different between base and head, every claimed symbol really
+declared there, no undeclared executable path — plus ledger id uniqueness. Fifteen
+diagnostics, fifteen controls, 16/16 per report site. See the
+[packet record](packets/record-claim-fidelity.md) and the [ledger row](ledger.md).
 
-**Rounds 1, 2 and 3 all returned REVISE, and every finding in all three reproduced.** Six,
-then five, then three — **the rounds converged rather than spiralled**, and every round-4
-correction is fail-closed or structural rather than a widened pattern, which is why this was
-a fourth round and not the re-scope the third-stop rule would otherwise call for. A reader
-that fails closed has a terminal state; one that learns another spelling each round does
-not. **Neither round's green matrices were
-completeness evidence, and that is the transferable lesson** — every round-2 finding was a
-branch nobody had written a case for: a copy-and-EDIT rather than a verbatim copy, an
-escaped backslash rather than an escaped pipe, an UNRESOLVED explicit ratification rather
-than a resolved one, and an ordinary data table rather than a header row. A mutation matrix
-proves the sites that exist are load-bearing; it cannot reveal a path with no input.
+**Rounds 1-5 all returned REVISE, and the fifth ruled the split.** ADR ratification
+staleness, routing resolution and owning-table identity are **retired, not shipped**. Each
+tried to observe facts that live in prose, and across four rounds each produced the same
+finding shape: a reader walking past a spelling nobody had written a case for. Measured in
+round 5 — `will be ratified after X is accepted` bound the wrong packet silently, and a
+soft-wrapped `routed to` never entered the scanner at all. **A gate whose terminal state is
+reached only by matching another finite list of English is not terminal**, which is round
+4's convergence argument withdrawn under measurement.
 
-**`pnpm test:architecture` is 151/151 at `4fe6c7d`** — 141 baseline plus this packet's 10
-— run in this lane's own worktree with the SHA re-read after the run. **It was OWED for one
-round, and the hazard is worth the whole program knowing:** a run in the shared working
-directory returned 141/141 green on `packet/pur-1-v2`, because another session checked out
-its branch mid-run and this packet's test file was absent from the measured tree entirely.
-A suite resolves its files from the working directory at read time and names no SHA in its
-output. **Re-read `git rev-parse HEAD` after every long run before trusting the number.** See the
-[packet record](packets/record-claim-fidelity.md) and the
-[ledger row](ledger.md).
-
-**The gate found five more stale ratifications on its first run, and they are now
-corrected.** ADR-**0021** (`Q1-P0`), **-0022** (`Q1-P3a`), **-0023** (`1c-a`), **-0024**
-(`1g2`) and **-0034** (`G3-Pterm`) all named accepted packets and survived the one-time
-sweep at `ba4304d`. The sweep corrected the six phrased *"ratified when that packet is
-accepted"*; these five say *"pending packet acceptance"* or plain *"proposed (packet ...)"*
-and are the same fact in other words. The lane stopped rather than taking
-`docs/decisions/**`; **the orchestrator granted a bridge scoped to status lines only** and
-the five were corrected against each packet's reviewed and integrated SHAs.
-`test:architecture` was **148/149 before, failing on exactly that one assertion**, and is
-**149/149** after — the gate doing its job on the first tree it ever read.
-
+**NEW ROW — `record-marker-schema`. Tier 1 for the record layer, and it owns what was
+retired.** Give ADRs a machine-readable governing status and ratification packet
+(frontmatter), and owning tables an explicit marker; then re-express the three retired
+assertions against that schema rather than against English. Needs `docs/decisions/**`
+across 58 files plus the inventories, so it is its own lease and its own packet.
+**Filed here because R1's own lesson is that a recorded finding with no owning row is a
+disposition with no executing gate** — and the cost of not doing it is explicit: **R1's
+headline stale-ratification finding is ungated again.** The eleven live instances were
+corrected under the orchestrator's bridge, so the tree is clean today; nothing stops the
+twelfth.
 
 **OWED TO THE ORCHESTRATOR, and neither is a lane decision.**
 
-1. **`docs/**` is now an executed gate input while `git-workflow` still excludes it as
-   never executed.** Measured: a docs-only commit repointing the declared head to forty
-   zeroes leaves the identical-tree command EMPTY while `test:architecture` REDS. This
-   packet's own five docs-only ADR corrections moved architecture 148/149 to 149/149. The
-   lane removed the false claim from its source and committed to re-running
-   `test:architecture` at this packet's integrated SHA rather than claiming the
-   carry-forward — but *when may a reviewed matrix be carried forward past a narrative
-   commit?* is doctrine, `.agents/skills/**` is fenced out of the charter, and the general
-   rule outlives this packet. **The narrowest correct split, offered as input:** the
-   exclusion list is right about *which paths a packet must declare*, and may no longer
-   imply that a suite reading those paths need not re-run. Two claims, one command.
-2. **Tier.** Chartered Behavioral; the round-1 reviewer rules it Critical because the
-   packet introduces an acceptance gate whose own Family A is declared silent. If Critical
-   stands, a Fable max confirm on the identical SHA is owed after the Codex arm passes.
+1. **`docs/**` is an executed gate input while `git-workflow` still excludes it as never
+   executed.** Measured: a docs-only commit repointing the declared head to forty zeroes
+   leaves the identical-tree command EMPTY while `test:architecture` REDS. The lane removed
+   the false claim from its source and re-runs `test:architecture` rather than claiming
+   carry-forward, but the general rule is doctrine and `.agents/skills/**` is fenced out of
+   the charter. **Round 5 ruled that acceptance must not precede this correction.**
+2. **Tier.** Chartered Behavioral; all four review arms rule Critical. Round 5 also ruled
+   the out-of-sequence Fable arm the wrong process call — it counts as additional review,
+   and a fresh Codex arm is owed before any confirm.
 
 **One thing is flagged and not corrected**, because the bridge covers status lines only:
 ADR-0034's *"What this ADR does not yet implement"* still defers the enforcement half

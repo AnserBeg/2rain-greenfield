@@ -5,33 +5,27 @@ Base: `ba4304d0477784142442093c6783b20ae2f09424`
 Branch: `packet/record-claim-fidelity`
 Tier: Behavioral — the diff adds a gate over narrative records and changes no
 product logic.
-Status: **round 4, frozen for review.** Rounds 1, 2 and 3 each returned
-**REVISE**;
-every finding in all three was reproduced against the frozen candidate before
-anything was changed. Round 3's three open findings and its new narrative defect
-are closed below. The packet's last executable commit is
-`0b343d2b9e0a0c81bfaba014b3fbbc8f8b420b41`.
+Status: **round 5, frozen for review — and the packet is SPLIT.** Rounds 1-4
+each returned REVISE. Round 5's disposition was *recharter Family B rather than
+a fifth vocabulary expansion*, the orchestrator ruled the split, and **Family B's
+prose readers are deleted here rather than widened.** What ships is Family A plus
+ledger id uniqueness. The last executable commit is
+`0f8b39308e276079b606d6bf2f715cd598f8dd15`.
 
-**Round 4 argued that the rounds were converging because its corrections were
-fail-closed rather than pattern-widening. Round 5 refuted that by measurement,
-and the refutation is correct.** The fail-closed branch is entered only after an
-open-ended spelling detector recognises that a ratification clause exists, so
-`will be ratified after X is accepted` never reaches it and binds the planned
-provenance packet instead. **A gate whose terminal state is reached only by
-matching another finite list of English is not terminal.** The argument is
-withdrawn; it was the lane defending its own instrument, and the prompt that
-carried it was steering, which the round-5 reviewer said plainly.
+**Round 4's convergence argument is withdrawn, refuted by measurement.** It held
+that fail-closed corrections had a terminal state. They do not: the fail-closed
+branch was entered only after an open-ended spelling detector recognised that a
+ratification clause existed, so `will be ratified after X is accepted` never
+reached it and bound the planned provenance packet instead. `ratification is
+contingent on X` and `becomes accepted when X is accepted` do the same. **A gate
+whose terminal state is reached only by matching another finite list of English
+is not terminal**, and the prompt that carried that argument was steering, which
+the round-5 reviewer said plainly and correctly.
 
-**`pnpm test:architecture` is 151/151 green**, measured in this lane's own
-worktree with the SHA re-read after the run. It was OWED for one round; see
-"Gate results" for why, because the reason is a live hazard rather than a
-footnote.
-
-**Tier is under an owed orchestrator ruling.** The charter set Behavioral; the
-round-1 reviewer rules it Critical, because the packet introduces an acceptance
-gate whose own Family A is declared silent. The lane does not rule its own tier.
-If Critical stands, a Fable max confirm on the identical SHA is owed after this
-arm reaches PASS.
+**Tier: all four reviewers rule Critical against the chartered Behavioral, and
+the orchestrator's ruling is still owed.** Round 5 also ruled the out-of-sequence
+Fable arm the wrong process call: it counts as additional review, and a fresh
+Codex arm is owed before any confirm.
 
 ## Why this exists
 
@@ -96,13 +90,12 @@ those declarations against the git tree. Concretely:
 | `test/architecture/record-claim-fidelity.ts` | new — the checker and its CLI |
 | `test/architecture/record-claim-fidelity-controls.ts` | new — the committed controls, one per diagnostic (22) |
 | `test/architecture/record-claim-fidelity.test.ts` | new — CI wiring, via the `test:architecture` glob |
-| `test/architecture/record-claim-fidelity.manifest.json` | new — the pinned known-absence set |
 | `test/architecture/record-claim-fidelity-negative-control.ts` | new — the `ux-picker` r3 reproduction, runnable |
 | `test/architecture/repository-hygiene.test.ts` | one line — the add-only shared test inventory that `lanes.md` names |
 
 Verified free before starting, by measurement rather than from the partition
 table. `lanes.md` mandates `git diff --name-only main...<branch>` over every
-`packet/*` branch; run at `0b343d2` across all 22, **none touches
+`packet/*` branch; run at `0f8b393` across all 22, **none touches
 `scripts/check-records.sh` or any `record-claim-fidelity*` file**.
 `packet/expected-red-gate` touches `scripts/check-expected-red.sh` — a different
 script, and R2's disposition rather than R1's. `packet/ps-2` and `packet/pur-1`
@@ -135,27 +128,56 @@ because it is a real limit, not an oversight.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "record-claim-fidelity",
   "base": "ba4304d0477784142442093c6783b20ae2f09424",
-  "head": "0b343d2b9e0a0c81bfaba014b3fbbc8f8b420b41",
+  "head": "0f8b39308e276079b606d6bf2f715cd598f8dd15",
   "changedPaths": [
     "scripts/check-records.sh",
     "test/architecture/record-claim-fidelity.ts",
     "test/architecture/record-claim-fidelity-controls.ts",
     "test/architecture/record-claim-fidelity.test.ts",
-    "test/architecture/record-claim-fidelity.manifest.json",
     "test/architecture/record-claim-fidelity-negative-control.ts",
     "test/architecture/repository-hygiene.test.ts"
   ],
   "symbols": [
-    { "path": "test/architecture/record-claim-fidelity.ts", "name": "verifyRecordClaims" },
-    { "path": "test/architecture/record-claim-fidelity.ts", "name": "declaredNames" },
-    { "path": "test/architecture/record-claim-fidelity.ts", "name": "RECORD_CLAIM_CODES" },
-    { "path": "test/architecture/record-claim-fidelity.ts", "name": "NON_EXECUTABLE_PATHSPEC" },
-    { "path": "test/architecture/record-claim-fidelity.ts", "name": "createGitReader" },
-    { "path": "test/architecture/record-claim-fidelity.ts", "name": "collectRepositoryInput" },
-    { "path": "test/architecture/record-claim-fidelity-controls.ts", "name": "RECORD_CLAIM_CONTROLS" },
-    { "path": "test/architecture/record-claim-fidelity-controls.ts", "name": "runRecordClaimControls" },
-    { "path": "test/architecture/record-claim-fidelity-controls.ts", "name": "buildSyntheticWorld" },
-    { "path": "test/architecture/record-claim-fidelity-controls.ts", "name": "greenInput" }
+    {
+      "path": "test/architecture/record-claim-fidelity.ts",
+      "name": "verifyRecordClaims"
+    },
+    {
+      "path": "test/architecture/record-claim-fidelity.ts",
+      "name": "declaredNames"
+    },
+    {
+      "path": "test/architecture/record-claim-fidelity.ts",
+      "name": "RECORD_CLAIM_CODES"
+    },
+    {
+      "path": "test/architecture/record-claim-fidelity.ts",
+      "name": "NON_EXECUTABLE_PATHSPEC"
+    },
+    {
+      "path": "test/architecture/record-claim-fidelity.ts",
+      "name": "createGitReader"
+    },
+    {
+      "path": "test/architecture/record-claim-fidelity.ts",
+      "name": "collectRepositoryInput"
+    },
+    {
+      "path": "test/architecture/record-claim-fidelity-controls.ts",
+      "name": "RECORD_CLAIM_CONTROLS"
+    },
+    {
+      "path": "test/architecture/record-claim-fidelity-controls.ts",
+      "name": "runRecordClaimControls"
+    },
+    {
+      "path": "test/architecture/record-claim-fidelity-controls.ts",
+      "name": "buildSyntheticWorld"
+    },
+    {
+      "path": "test/architecture/record-claim-fidelity-controls.ts",
+      "name": "greenInput"
+    }
   ]
 }
 ```
@@ -188,26 +210,48 @@ per vacuity vector, each varying exactly one property.
    exists to close. Deleting the flag reds the undeclared-path control and
    nothing else.
 
-### Family B — record staleness. **Band C.**
+### Family B — what survives, and what was retired. **Band C.**
 
-Declared Band C. Docs and inventories; `review-tiers` is explicit that Band C
-owes *"the deterministic gate plus a stated limit. No mutation control is
-owed."* The gate is the check here. Controls ship anyway, because they were
-cheap and because a gate never observed failing is not evidence.
+**Only one assertion survives: ledger id uniqueness.** It reads a table's first
+column and compares strings; it infers nothing from English.
 
-4. **A conditional ratification whose packet is `accepted` fails.** An ADR whose
-   *governing* status is `proposed` and which names a packet the ledger records
-   as accepted is stale. Governing matters: ADR-0050 and ADR-0055 **quote** the
-   stale wording they corrected, so a check keyed to the phrase rather than to
-   the state would flag both.
-5. **Duplicate ledger ids fail**, read from the packet table's ID column.
-6. **Every routing target resolves** to a tracked row or to a document that
-   exists. The scanner reads the backticked target of a routing phrase; note
-   that it cannot tell a real routing from prose *describing* the pattern, so a
-   document that spells the phrase out as an example fails loudly. Loud is the
-   right failure here, and it is why this record does not spell it out.
+4. **Duplicate ledger ids fail**, read from the packet table — which is
+   identified **structurally**, by the normalized signature of its header, so
+   `| **ID** |` and `` | `ID` | `` and `| ID |` are one table rather than three
+   different tables to three different readers.
 
-## Twenty-two diagnostics, twenty-two controls, and each dies alone
+**Three assertions were RETIRED, and this is the packet's most important
+outcome.** ADR ratification staleness, routing resolution, and owning-table
+identity all tried to observe facts that live in **prose**. Across four review
+rounds each one produced the same finding shape: a reader walked past a spelling
+nobody had written a case for.
+
+| Retired | The tree that defeated it, measured |
+|---|---|
+| `RECORD_ADR_RATIFICATION_STALE`, `RECORD_ADR_PACKET_UNRESOLVED`, `RECORD_ADR_NONE_SCANNED`, `RECORD_MANIFEST_PIN_STALE` | `will be ratified after X is accepted` — the fail-closed branch is entered only after an open-ended clause detector fires, so this bound the planned provenance packet and reported nothing. Same for `ratification is contingent on X` and `becomes accepted when X is accepted`. |
+| `RECORD_ROUTING_UNRESOLVED` | A soft-wrapped `routed to` / newline / backticked target never enters the scanner. Two spaces do the same. An editor rewrapping a paragraph is an accidental change, squarely inside the stated threat model. |
+| `RECORD_MANIFEST_OWNING_TABLE_STALE` | Ownership was identified by declared `{path, header}`, which was the right direction but is machinery that exists only to serve the routing reader. |
+
+**The correct instrument for those three is a machine-readable marker**, not a
+better parser: an ADR declaring its governing status and ratification packet in
+frontmatter, and owning tables carrying an explicit marker. That is an edit
+across 58 ADRs and several inventories — a different lease and a different
+packet. **`mission-cadence`'s third-stop rule says split rather than write a
+fourth continuation, and that is what happened.**
+
+**What is lost by retiring them, stated plainly:** program review R1's headline
+finding — stale ADR ratification lines — goes ungated again. The eleven live
+instances were corrected under the orchestrator's bridge, so today's tree is
+clean, but nothing stops the twelfth. That is the cost of the split and it
+belongs in the queue, not hidden here.
+
+**The distinction that decided what stayed:** a *closed* grammar can be widened
+until it terminates; an *open* one cannot. Fence syntax is closed, so widening
+the declaration fence to GFM's three-space indent and any run of three or more
+backticks is a fix. English is open, so widening a ratification-clause detector
+is not.
+
+## Fifteen diagnostics, fifteen controls, and each dies alone
 
 `AGENTS.md` §6 requires one recorded red per vacuity vector, not one red
 overall; the packet charter adds that *deleting each assertion must red exactly
@@ -239,70 +283,51 @@ diagnostic with its own control, and the matrix is per-site.
 | 7 | `RECORD_CLAIM_COMMIT_UNRESOLVABLE` | An absent base SHA, and a head that does not descend from the declared base | measure a rotten or wrong range and report success |
 | 8 | `RECORD_CLAIM_NO_RECORDS` | Zero packet records discovered | let a glob that matches nothing report every claim upheld |
 | 9 | `RECORD_CLAIM_NO_DECLARATIONS` | Records present, not one carrying a block | let deletion of the last block disable the family in silence |
-| 10 | `RECORD_ADR_RATIFICATION_STALE` | Five sub-cases: a proposed ADR whose packet the ledger records as accepted; the ratification packet named **second** behind a planned provenance packet; an **escaped pipe** shifting the Status column; an **inserted column** moving Status to a different index; and an **escaped backslash** (`\\|`), which is an escaped backslash followed by a *real* delimiter | keep a status line the ledger has contradicted; bind to the first anchor tried and never test the condition the ADR states; read Status at a fixed index; or treat every `\|` pair as a literal pipe and merge two cells |
-| 11 | `RECORD_ADR_PACKET_UNRESOLVED` | Two sub-cases: a proposed ADR naming no resolvable packet, unpinned; and an explicit ratification target that does not resolve — a **typo** — behind valid provenance | skip an unparseable status; or fall through to provenance and substitute a different packet for the condition the ADR states |
-| 12 | `RECORD_ADR_NONE_SCANNED` | Zero decision records discovered | let a glob that matches nothing report every ratification current |
-| 13 | `RECORD_MANIFEST_PIN_STALE` | A pin no longer observed unresolvable | let the pin become a permanent exemption nobody re-derives |
 | 14 | `RECORD_LEDGER_ID_DUPLICATE` | One id on two rows | let two rows disagree about one packet |
 | 15 | `RECORD_LEDGER_TABLE_ABSENT` | A ledger with no packet table, and a recognised table carrying no rows | let a renamed table make uniqueness and every ratification lookup read zero rows |
-| 13b | `RECORD_MANIFEST_OWNING_TABLE_STALE` | A declared owning-table signature matching no table in the tree | let the declared set rot into a permanent allowlist nobody re-derives |
-| 15b | `RECORD_LEDGER_COLUMN_ABSENT` | A packet table whose header carries no Status column | read some other cell as the status and report every ratification current |
-| 16 | `RECORD_ROUTING_UNRESOLVED` | Four sub-cases: an unknown id; the ledger's own table **header** (`ID`); a **directory**; and a row in an **ordinary non-owning data table** (a colour swatch list supplying `blue`) | leave a recorded finding with no owning row, which is a disposition with no executing gate |
 
 Every control is one property away from a synthetic world in which **every**
 assertion holds, and that green world is itself asserted green — otherwise a
 control could red for a reason it does not name.
 
-**Attribution is measured, not argued, and it is measured twice.** Both matrices
-run in a detached worktree.
+**Attribution is measured, not argued, and it is measured three ways.** All of
+it runs in a detached worktree.
 
-**Per report site.** Each of the twenty-three individual `findings.push` sites is
-deleted in turn — not each code, which is the granularity that hid the symbol
-branch:
+**Per report site — 16/16.** Each individual `findings.push` site is deleted in
+turn, not each code, which is the granularity that once hid a symbol branch.
 
-```
-OK    site 11  RECORD_CLAIM_SYMBOL_FILE_ABSENT      -> ['RECORD_CLAIM_SYMBOL_FILE_ABSENT']
-OK    site 12  RECORD_CLAIM_SYMBOL_ABSENT           -> ['RECORD_CLAIM_SYMBOL_ABSENT']
-...
-per-branch die-alone: OK (23/23 push sites red exactly their own control)
-```
-
-**Per behavioural guard.** A report site is not the only thing that can be
-deleted. Twelve guards decide what the gate *sees* rather than what it *says*,
-and each is mutated separately:
+**Per behavioural guard — 5/6 against a negative control.** A report site is not
+the only thing that can be deleted; guards decide what the gate *sees* rather
+than what it *says*:
 
 ```
-OK    --no-renames flag                   -> ['RECORD_CLAIM_PATH_UNDECLARED']
-OK    escaped-pipe handling               -> ['RECORD_ADR_RATIFICATION_STALE']
-OK    backslash parity                    -> ['RECORD_ADR_RATIFICATION_STALE']
-OK    Status index located in header      -> ['RECORD_ADR_RATIFICATION_STALE']
-OK    header row is not a tracked row     -> ['RECORD_ROUTING_UNRESOLVED']
-OK    directory is not a document         -> ['RECORD_ROUTING_UNRESOLVED']
-OK    owning-table gating                 -> ['RECORD_ROUTING_UNRESOLVED']
-OK    ratification clause detected at all -> ['RECORD_ADR_PACKET_UNRESOLVED', 'RECORD_ADR_RATIFICATION_STALE']
-OK    unrecognised clause fails closed    -> ['RECORD_ADR_PACKET_UNRESOLVED']
-OK    back-reference defers to provenance -> ['RECORD_ADR_RATIFICATION_STALE']
-OK    exactly one Packet: trailer         -> ['RECORD_CLAIM_RANGE_UNOWNED']
-OK    Packet: trailer ownership           -> ['RECORD_CLAIM_RANGE_UNOWNED']
-
-behavioural guards: OK (12/12 red at least one control)
+OK    --no-renames flag                -> ['RECORD_CLAIM_PATH_UNDECLARED']
+OK    exactly one Packet: trailer      -> ['RECORD_CLAIM_RANGE_UNOWNED']
+OK    Packet: trailer ownership        -> ['RECORD_CLAIM_RANGE_UNOWNED']
+OK    structural packet-table identity -> ['RECORD_LEDGER_ID_DUPLICATE']
+OK    GFM fence width and indent       -> ['RECORD_CLAIM_BLOCK_DUPLICATED', 'RECORD_CLAIM_BLOCK_UNPARSABLE']
 ```
 
-**The guard matrix earned its place immediately.** Its first run found the
-Status-index derivation uncontrolled — reverting it to a hardcoded index reded
-nothing, because Status sat at index 4 in every control ledger. The
-inserted-column sub-case closes it. A gate's readers need controls as much as
-its reporters do.
+**Two admission twins, measured separately**, because their failure mode is a
+false RED and a negative control tests the opposite direction. Reverting each
+subject fails exactly its own test and nothing else: the GFM-separator twin, and
+the recursive-record-discovery twin — which drives the **real**
+`collectRepositoryInput` adapter against a scratch root, closing for that guard
+the evidence gap round 3 raised about injected predicates.
 
-**Neither matrix is completeness evidence, and round 2 was right to say so.**
-Both prove that the sites and guards *that exist* are load-bearing. Neither can
-reveal a semantic path for which no input was supplied — which is exactly how
-round 2's five findings survived round 1's green matrices. Every one of them was
-a branch nobody had written a case for: a copy-and-*edit* rather than a verbatim
-copy, an escaped backslash rather than an escaped pipe, an *unresolved* explicit
-ratification rather than a resolved one, and an ordinary data table rather than
-a header row. **The claim these matrices support is "the selected sites and
-guards are load-bearing", and nothing wider.**
+**Neither matrix is completeness evidence.** They prove the sites and guards
+*that exist* are load-bearing. Every finding in rounds 2 through 5 was a branch
+nobody had written a case for, which is precisely what a matrix over existing
+sites cannot reveal. **That limit is why Family B was retired rather than
+patched again:** for a prose reader the space of unwritten cases is unbounded.
+
+**The guard matrix earned its place twice more this round.** Immediately after
+the deletion it flagged three guards left uncontrolled. Two got controls — the
+reviewer's own `**ID**` decoy table, and the adapter test. The third,
+backslash-parity escape handling, turned out to be **unreachable** once the ADR
+reader was gone, and the twin written for it did not discriminate. The branch was
+deleted rather than the control kept: a control that cannot die is decorative,
+and an unreachable branch cannot be controlled at all.
 
 **One diagnostic was drafted and removed rather than shipped.**
 `RECORD_ADR_PACKET_AMBIGUOUS` was going to fire when two anchors resolved to
@@ -535,22 +560,12 @@ the prose-parsing the charter forbids. Recorded as a limit rather than chased.
 - `pnpm typecheck` — green.
 - `pnpm lint` — green.
 - `pnpm format` — green.
-- `scripts/check-records.sh --self-test` — **OK, 22 controls, one per
+- `scripts/check-records.sh --self-test` — **OK, 15 controls, one per
   assertion.**
-- `node --import tsx test/architecture/record-claim-fidelity-negative-control.ts`
-  — reds by design with `RECORD_CLAIM_PATH_UNCHANGED`, exit 1.
-- Per-report-site die-alone matrix — **23/23**.
-- Behavioural-guard matrix — **12/12**.
-- Two admission twins, each measured by reverting its subject. The
-  GFM-separator twin fails when the delimiter matcher is made strict again.
-  **The working-tree twin is narrower than an earlier draft of this line
-  claimed:** it constructs a synthetic `RecordClaimInput` and calls
-  `verifyRecordClaims` directly, over a REAL git reader and real dangling
-  commits — so it does prove the frozen tree beats a disagreeing working tree,
-  but it does **not** drive the production `collectRepositoryInput` adapter. A
-  separate test drives that adapter and asserts the repository is unwritten; it
-  never constructs the frozen-versus-working disagreement. Neither test is an
-  end-to-end adapter twin, and the earlier line said one was.
+- Per-report-site die-alone matrix — **16/16**.
+- Behavioural-guard matrix — **5/6 against a negative control**; the sixth is
+  measured against its admission twin, which dies when reverted.
+- Two admission twins, each measured by reverting its subject.
 - `pnpm test:architecture` — **151/151 green at `4fe6c7d`**, which is 141
   baseline plus this packet's 10. Run in `/home/rvham/2rain-greenfield-rcf`,
   this lane's own worktree with its own install, and **`git rev-parse HEAD` was
@@ -570,7 +585,7 @@ the prose-parsing the charter forbids. Recorded as a limit rather than chased.
   convention this program already uses for every other lane: a sibling worktree
   with a real install.
 - `node --import tsx --test test/architecture/record-claim-fidelity.test.ts` —
-  **10/10** at `0b343d2`, run in an isolated worktree. This file needs no pnpm
+  **10/10** at `0f8b393`, run in an isolated worktree. This file needs no pnpm
   workspace resolution, so the worktree result is sound for it alone.
 - `scripts/check-records.sh` — `records: OK (126 record(s), 1 declaring: 7
   claimed path(s) and 10 claimed symbol(s) observed in their frozen trees; 57
