@@ -931,10 +931,18 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    assert.equal(surfaces.length, 34);
+    // 34 + PUR-1's six Purchasing surfaces.
+    assert.equal(surfaces.length, 40);
     assert.ok(surfaces.includes(APPLICATION_IDS.party.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.catalog.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.location.listSurfaceId));
+    // Purchasing reaches a mounted runtime in full: it is the first module to
+    // declare a state machine, so a mounted purchase order form is also the
+    // first place `transitionStateEffect` binds to a real surface.
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.listSurfaceId));
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.lineListSurfaceId));
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.detailSurfaceId));
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.formSurfaceId));
     // Inventory only reaches a mounted runtime once its emitted-but-
     // unarrangeable verification scenarios are recorded as derivations.
     for (const inventorySurfaceId of [
