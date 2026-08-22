@@ -450,6 +450,19 @@ raised its `ReleaseVerificationIntegrityError` from the same `createRuntime`
 call before reaching the rollback it was written to observe, so it is the same
 cause seen from a third site.
 
+### 3. The bounded-fresh-tenant-install evidence count, which is a pin rather than a defect
+
+`assertBoundedFreshTenantInstallEvidence` pins the serving release's scenario
+count. 174 → 198, and the 24 were enumerated from the compiled plan rather than
+inferred: 12 `declaredEvidence`, 6 `searchableExclusion`, 2 `resolverAuthority`,
+2 `typedErrorSurface`, 1 `uniquenessFold`, 1 `archiveRestrict`.
+
+**The materialized state field contributes ZERO, and that absence is the
+interesting half.** It is an enum on a searchable entity, so it would otherwise
+mint an `enumReject` and a `searchableExclusion` — but both probe a field
+THROUGH the create operation, and a machine's state field is structurally
+excluded from that contract. This is ADR-0050 §6 item 2 visible in a number.
+
 ### 2. Purchasing is `entityOwned`, so a release carrying it must carry Inventory
 
 ```
