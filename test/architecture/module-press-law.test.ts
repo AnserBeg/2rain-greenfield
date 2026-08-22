@@ -22,7 +22,10 @@ const routedPressLawDebt: readonly ModulePressLawViolation[] = [
   // replaces the hard-coded contract pattern.
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 2364,
+    // 2364 -> 2371. `PUR-1` declared two family rows and one relation-semantics
+    // row above this line; the routed debt itself is unchanged and only its
+    // offset moved.
+    line: 2371,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
@@ -112,8 +115,9 @@ test('one auto-discovered guard covers every definition-backed product module', 
     'location',
     'party',
     'platform',
+    'purchasing',
   ]);
-  assert.equal(result.modulesRead, 5);
+  assert.equal(result.modulesRead, 6);
   assert.ok(
     result.productionFilesRead > 0,
     'press-law guard read zero production files',
