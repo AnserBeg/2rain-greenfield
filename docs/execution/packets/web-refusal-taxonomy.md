@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: evidence_ready — reviews converged; full integration matrix owed
+Status: evidence_ready — reviews converged; full integration matrix green
 
 ## Goal
 
@@ -790,3 +790,29 @@ class-and-code claim.
 
 No material finding survived. The complete serialized matrix is now the sole
 remaining acceptance gate.
+
+### Full integration matrix — GREEN at `512a051391a66b94ff82c94310185f39d532dc8f`
+
+The complete serialized matrix ran from the clean packet worktree after the
+downstream bridge review converged. It acquired the ordinary matrix lock and
+reported:
+
+```text
+PERFORMANCE_GATE_PASS_SHA=512a051391a66b94ff82c94310185f39d532dc8f
+FULL_MATRIX_PASS_SHA=512a051391a66b94ff82c94310185f39d532dc8f
+```
+
+Performance passed 5/5 at 91.2% CPU idle with a 1539.2 ms best-of-five sample
+against the 5000 ms budget. Format, lint, typecheck, build, boundaries (160
+files), schema and both release-freshness checks passed. The executed suites
+then passed unit 120/120, compiler 152/152, integration 149/149, agent 3/3,
+architecture 141/141, contracts 29/29, PostgreSQL 204/204, locale 1/1,
+browser 93/93 and observability 11/11. Language coverage passed, reachability
+observed 104/104 test files and 10 producer artifacts, and the security scan
+reported no repository leaks.
+
+The corrected downstream boundary is included in that run: the G1-P5
+PostgreSQL block passed 13/13, including the three runtime-entry refusals that
+stopped the prior matrix. No retry, mutation or source edit occurred during
+this green run. Integration and the final accepted identities remain to be
+recorded; the matrix itself is the acceptance run for these executable bytes.
