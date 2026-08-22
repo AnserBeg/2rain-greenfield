@@ -35,12 +35,13 @@ escaped backslash rather than an escaped pipe, an UNRESOLVED explicit ratificati
 than a resolved one, and an ordinary data table rather than a header row. A mutation matrix
 proves the sites that exist are load-bearing; it cannot reveal a path with no input.
 
-**`pnpm test:architecture` is OWED at `f6bdccd` and is not claimed.** A run in the shared
-working directory returned 141/141 green — on `packet/pur-1-v2`, because another session
-checked out its branch mid-run, and this packet's test file was absent from that tree
-entirely. A detached worktree cannot substitute: pnpm workspace resolution fails through a
-symlinked `node_modules`. **The suite needs the real working directory, which another lane
-holds.** See the
+**`pnpm test:architecture` is 151/151 at `4fe6c7d`** — 141 baseline plus this packet's 10
+— run in this lane's own worktree with the SHA re-read after the run. **It was OWED for one
+round, and the hazard is worth the whole program knowing:** a run in the shared working
+directory returned 141/141 green on `packet/pur-1-v2`, because another session checked out
+its branch mid-run and this packet's test file was absent from the measured tree entirely.
+A suite resolves its files from the working directory at read time and names no SHA in its
+output. **Re-read `git rev-parse HEAD` after every long run before trusting the number.** See the
 [packet record](packets/record-claim-fidelity.md) and the
 [ledger row](ledger.md).
 

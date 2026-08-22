@@ -11,8 +11,10 @@ anything was changed. Round 2's five open findings are closed below. The
 packet's last executable commit is
 `f6bdccd541130ef43d78c305c095b3d46b4f934b`.
 
-**`pnpm test:architecture` is OWED at this SHA, not claimed.** See "Gate
-results".
+**`pnpm test:architecture` is 151/151 green**, measured in this lane's own
+worktree with the SHA re-read after the run. It was OWED for one round; see
+"Gate results" for why, because the reason is a live hazard rather than a
+footnote.
 
 **Tier is under an owed orchestrator ruling.** The charter set Behavioral; the
 round-1 reviewer rules it Critical, because the packet introduces an acceptance
@@ -481,21 +483,24 @@ the prose-parsing the charter forbids. Recorded as a limit rather than chased.
   twin fails when the delimiter matcher is made strict again, and the
   working-tree twin drives the REAL `collectRepositoryInput` adapter rather than
   an injected predicate.
-- `pnpm test:architecture` — **OWED at `f6bdccd`, and not claimed.** The reason
-  is worth recording because it is a live hazard rather than an excuse. A run
+- `pnpm test:architecture` — **151/151 green at `4fe6c7d`**, which is 141
+  baseline plus this packet's 10. Run in `/home/rvham/2rain-greenfield-rcf`,
+  this lane's own worktree with its own install, and **`git rev-parse HEAD` was
+  re-read after the run** and matched.
+
+  **It was OWED for one round, and the reason belongs in the record.** A run
   launched in the shared working directory returned **141/141 green** — on
   `packet/pur-1-v2`, because another session checked out its branch while the
   suite was running. This packet's test file was not in that tree at all, so its
   absence read as a clean pass. **A suite resolves its files from the working
   directory at read time, not from the SHA it started on, and nothing in its
-  output names the tree it measured.** The substitute — a detached worktree —
-  cannot run this suite either: pnpm workspace resolution fails through a
-  symlinked `node_modules`, and `test-lock-observability` shells out to
-  `pnpm install`, which aborts without a TTY. Four of its 146 tests failed for
-  exactly those environmental reasons and none of them touches this packet's
-  subject. **The suite must run in the real working directory, which another
-  lane currently holds.** It was **149/149 at round 1's `5576118`**; that is the
-  last valid measurement and it predates every round-2 fix.
+  output names the tree it measured.** A green number is not evidence until the
+  tree it measured is confirmed. The first substitute tried — a detached
+  worktree with a symlinked `node_modules` — cannot run this suite either: pnpm
+  workspace resolution fails and `test-lock-observability` shells out to
+  `pnpm install`, which aborts without a TTY. The fix was to adopt the house
+  convention this program already uses for every other lane: a sibling worktree
+  with a real install.
 - `node --import tsx --test test/architecture/record-claim-fidelity.test.ts` —
   **10/10** at `f6bdccd`, run in an isolated worktree. This file needs no pnpm
   workspace resolution, so the worktree result is sound for it alone.
