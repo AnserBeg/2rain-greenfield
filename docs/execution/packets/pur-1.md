@@ -41,6 +41,21 @@ The parked branch was read and never merged or rebased. Per
 | `closed` as a fourth enum value with nothing producing it | **REJECT, then RE-ADMITTED as a state** | See the lifecycle ruling. |
 | the parked unit test | **RE-EXPRESS** | Its assertions are a specification; every one either survives or is consciously retired here. Two are retired: `stateMachines` is no longer empty, and `storageTransition` is not in the release manifest of a compile with no prior release (the parked assertion was wrong on current `main` — measured). |
 
+## ADR
+
+[ADR-0059](../../decisions/ADR-0059-a-document-declares-its-whole-lifecycle-at-adoption.md)
+— proposed. It records the measured cost of adopting a machine (a lineage entry
+per state or transition added later, refused by name as
+`COMPILER_STORAGE_RETYPE_UNSUPPORTED`), rules that a module declares its whole
+lifecycle in the release that adopts one, distinguishes that from plan §7.12's
+`received_quantity` ruling rather than overturning it, and fixes the purchase
+order's four states and four transitions with the four that are refused. `SAL-1`
+and `PUR-2` both inherit it.
+
+`0059` was chosen after enumerating ADR numbers across every branch, not just
+`main`: `0058` is taken on `packet/expected-red-gate`. That is `lanes.md`'s
+ADR-number-collision row applied.
+
 ## Rulings
 
 ### 1. The lifecycle is declared in full, including the parts this packet cannot drive
