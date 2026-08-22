@@ -34,8 +34,12 @@ returned REVISE with production correct and two control survivors: count-preserv
 first-value reuse at one node, and whole-node ownership of unresolved type spans.
 The round-13 test-only correction requires a distinct third identity in the
 same-node plural control and retains a raw identity inside an unresolved union.
-It is gate-green for a fresh Critical arm; the full matrix remains deferred
-until review converges.
+Candidate `a6b922998c17b6c41d3c3975adf6436025f01add` was accepted as the
+last broad review round. The final test-only correction makes untagged
+no-substitution template literals load-bearing in incomplete runtime
+concatenations and declares the observer's closed grammar. It is gate-green for
+the user-scoped narrow confirmation; the full matrix remains deferred until
+that confirmation passes.
 
 ## Packet definition
 
@@ -213,6 +217,7 @@ not rely on the routed Inventory debt:
 | dynamic-boundary admission | static `northstar.widget` prefix plus an identifier-held legal suffix | zero violations; an unevaluable outer value is not partially observed |
 | dynamic-boundary refusal | interpolation and concatenation fix `northstar.widget:` before an identifier-held tail, and a second interpolation ends with a spliced `northstar.widget` after an unknown prefix | three exact violations; a dynamic outer construction cannot hide an identity whose right boundary is fixed by static text or construction end |
 | dynamic-tail admission | the same interpolated and concatenated static prefixes end immediately before an identifier-held suffix | zero violations; the observer does not invent a right boundary before an unknown continuation |
+| no-substitution template runtime grammar | one incomplete `+` construction assembles a namespace from two untagged no-substitution template literals and fixes its right boundary with `:`, while its twin ends immediately before an unknown suffix | only the bounded form reports; narrowing the partial-run grammar from `ts.isStringLiteralLike` to `ts.isStringLiteral` loses that observation while completed constructions remain green |
 | completed-continuation admission | contiguous `widget_list`, `WIDGET_IDS`, and `northstar.widget` literal tokens continue statically inside completed concatenations | zero violations; token quotes cannot override the completed runtime value's boundaries |
 | contiguous/split unknown-adjacency admission | local ID, symbol, and namespace families are each written once in one literal token and once across literal tokens beside an unknown runtime value | all six admit; tokenization does not change the runtime-adjacency ruling |
 | contiguous/split static-boundary refusal | the same six forms receive a static `:` at the relevant edge | six exact observations at their construction lines; the construction observer retains fixed boundaries for both tokenizations |
@@ -638,6 +643,29 @@ the repository lock normally and completed green. Production, including
 are the reproducible evidence, both mutations were restored with explicit
 inverse patches, and no mutation runner is committed.
 
+The final accepted-scope correction changes one fixture pair and this packet
+record; production remains byte-identical to the accepted round-13 candidate:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` | PASS — 46/46; the fixed-`:` no-substitution-template construction reports and its unknown-continuation twin admits |
+| narrow `ts.isStringLiteralLike` → `ts.isStringLiteral` mutation in `staticallyKnownStringRuns` | EXPECTED RED — 45/46; only the new bounded refusal changed from one exact PRESS006 observation to `[]`; the admission twin and every completed-construction control remained green |
+| focused after explicit inverse restoration | PASS — 46/46 |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 177/177 in 42,082.6 ms, including 46/46 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 838,058.2 ms |
+
+The executable correction is test-and-record commit
+`fc07163dc60b9920fead6d856f0b8f9fbc8dc490`. The production blob
+`packages/dev-tooling/src/module-press-law.ts` remains
+`83f9d84ff08a94c92563311fe8d5157dfd9517e7`; the provider is also unchanged.
+The mutation was restored by an explicit inverse patch, the final focused run
+passed, and no mutation runner is committed. Three preliminary focused or
+mutation attempts honestly returned `TEST_GATE_LOCK_BUSY` behind other lanes'
+serialized gates and executed no test; they are not counted as evidence above.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -877,9 +905,25 @@ plural fixture now requires both repetition and a distinct later local ID at
 the same node and line. The raw-ownership fixture puts a direct identity inside
 an unresolved union beside a nonempty partial run. The reviewer-selected cache
 and whole-node-range mutations each fail only the intended exact assertion.
-Production is byte-identical to `2a8f19e`. The next review is fresh Critical
-because any executable test change invalidates the prior verdict; the full
-matrix remains downstream of convergence.
+Production is byte-identical to `2a8f19e`. The user accepted candidate
+`a6b922998c17b6c41d3c3975adf6436025f01add` and ruled round 13 the final broad
+round.
+
+The remaining correction is deliberately narrow and test-only. It adds one
+fixed-boundary refusal and its unknown-continuation admission twin for untagged
+no-substitution template literals inside incomplete `+` constructions. The
+single deletion probe removes only that syntax from the partial-run grammar;
+the new refusal dies while the completed-construction path stays green. The
+packet now states the grammar as a closed positive set and states its safety
+property: anything else is appended as dynamic and conservatively padded, so
+an unrecognized form creates an unknown boundary rather than a silent absence.
+The next review is the user-scoped narrow confirmation of only the paired
+control and the record's grammar accuracy. Production correctness and rounds
+1–13 are settled rather than reopened. If that confirmation names another
+uncontrolled syntax form, it is recorded as a known limitation under the
+declared grammar and does not start another correction round. On PASS, the one
+deferred full matrix runs on the integration tree before the required packet-
+into-main `--no-ff` merge.
 
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
