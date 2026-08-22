@@ -46,6 +46,7 @@ import {
   platformModuleDefinition,
 } from '../../packages/domain/src/index.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
+import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/index.js';
 import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from './surface-grammar-conformance.baseline.js';
 import {
   compiledSurfaceGrammarSurfaces,
@@ -73,6 +74,7 @@ const productModuleDefinitions = [
   { create: locationModuleDefinition, sourceDirectory: 'location' },
   { create: partyModuleDefinition, sourceDirectory: 'party' },
   { create: platformModuleDefinition, sourceDirectory: 'platform' },
+  { create: purchasingModuleDefinition, sourceDirectory: 'purchasing' },
 ] as const;
 
 test('compiled production modules match the reviewed surface-grammar debt baseline', () => {
@@ -89,7 +91,7 @@ test('compiled production modules match the reviewed surface-grammar debt baseli
   );
 
   console.log(formatProductSurfaceGrammarRatchet(result));
-  assert.equal(result.modulesRead, 5);
+  assert.equal(result.modulesRead, 6);
   assert.deepEqual(
     result.observations.map((observation) => ({
       moduleId: observation.moduleId,
@@ -210,7 +212,7 @@ test('compiler-produced fixtures cover all five archetypes, required slots, focu
 
 test('compiled navigation stays flat within budget and groups mounted modules beyond it', () => {
   const flatManifest = compiledSurfaceManifest(
-    compileDefinition(composedApplicationWithoutInventory()),
+    compileDefinition(composedApplicationBelowNavigationBudget()),
   );
   const flatCompact = projectCompactSurfaces(
     flatManifest.surfaces,
@@ -258,7 +260,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const grouped = groupedManifest.navigation;
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
-  assert.equal(groupedManifest.surfaces.length, 34);
+  // 34 + PUR-1's six Purchasing surfaces.
+  assert.equal(groupedManifest.surfaces.length, 40);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -274,16 +277,22 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
   assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 3);
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 13);
+  // 13 + Purchasing's two lists.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 15);
+  // FIVE groups, which is exactly `MAX_PRIMARY_NAVIGATION_ENTRIES`, so
+  // Purchasing renders as a peer of Inventory rather than as the first occupant
+  // of an overflow `More`. A sixth module group is the one that collapses the
+  // tail, and the overflow arm below still observes that.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
-    ['Party', 'Catalog', 'Location', 'Inventory'],
+    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing'],
   );
   assert.deepEqual(compact.navigationEntryIds, [
     'northstar.app:module.party',
     'northstar.app:module.catalog',
     'northstar.app:module.location',
     'northstar.app:module.inventory',
+    'northstar.app:module.purchasing',
   ]);
   assert.deepEqual(
     navigationRuleIds(
@@ -843,9 +852,37 @@ function composedApplicationWithInventory(): Record<string, unknown> {
   return composed;
 }
 
-function composedApplicationWithoutInventory(): Record<string, unknown> {
-  const composed = composedApplicationWithInventory();
-  const inventory = inventoryModuleDefinition('northstar.app');
+/**
+ * The composed application BELOW the flat navigation budget.
+ *
+ * `MAX_PRIMARY_NAVIGATION_ENTRIES` is 5 and it counts navigation SURFACES, not
+ * modules. Party contributes two lists, so Party + Catalog + Location is four
+ * and stays flat. `PUR-1` mounted Purchasing with two more lists, which takes
+ * the without-Inventory composition to six and groups it -- so this fixture now
+ * strips Purchasing as well, or the flat arm of the test below has no flat
+ * manifest to observe. The GROUPED arm is unchanged and still reads the real
+ * composed application.
+ */
+function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
+  let composed = composedApplicationWithInventory();
+  composed = withoutModule(
+    composed,
+    inventoryModuleDefinition('northstar.app'),
+    'inventory',
+  );
+  composed = withoutModule(
+    composed,
+    purchasingModuleDefinition('northstar.app'),
+    'purchasing',
+  );
+  return composed;
+}
+
+function withoutModule(
+  composed: Record<string, unknown>,
+  module: Record<string, unknown>,
+  label: string,
+): Record<string, unknown> {
   for (const collectionName of [
     'assertions',
     'entities',
@@ -859,7 +896,7 @@ function composedApplicationWithoutInventory(): Record<string, unknown> {
     'surfaces',
   ] as const) {
     const target = composed[collectionName];
-    const source = inventory[collectionName];
+    const source = module[collectionName];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
     composed[collectionName] = target.filter(
@@ -872,27 +909,27 @@ function composedApplicationWithoutInventory(): Record<string, unknown> {
     assert.equal(
       target.length - (composed[collectionName] as unknown[]).length,
       source.length,
-      `flat fixture must remove every inventory ${collectionName} entry exactly once`,
+      `flat fixture must remove every ${label} ${collectionName} entry exactly once`,
     );
   }
   const modules = composed.modules;
-  const inventoryModules = inventory.modules;
+  const sourceModules = module.modules;
   assert.ok(Array.isArray(modules));
-  assert.ok(Array.isArray(inventoryModules));
-  const inventoryModule = inventoryModules[0];
-  assert.ok(inventoryModule && typeof inventoryModule === 'object');
-  assert.ok('moduleId' in inventoryModule);
+  assert.ok(Array.isArray(sourceModules));
+  const sourceModule = sourceModules[0];
+  assert.ok(sourceModule && typeof sourceModule === 'object');
+  assert.ok('moduleId' in sourceModule);
   composed.modules = modules.filter(
     (candidate) =>
       candidate === null ||
       typeof candidate !== 'object' ||
       !('moduleId' in candidate) ||
-      candidate.moduleId !== inventoryModule.moduleId,
+      candidate.moduleId !== sourceModule.moduleId,
   );
   assert.equal(
     modules.length - (composed.modules as unknown[]).length,
     1,
-    'flat fixture must remove the inventory module exactly once',
+    `flat fixture must remove the ${label} module exactly once`,
   );
   return composed;
 }
