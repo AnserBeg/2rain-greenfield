@@ -11,7 +11,20 @@ and was read as REFERENCE only.
 
 Tier: Critical
 
-Status: **evidence ready** — frozen `404c9a09aba0be1de761b1c7f4620569e935edcb`, pushed.
+Status: **evidence ready.**
+
+**Gate SHA: `404c9a09aba0be1de761b1c7f4620569e935edcb`.** The freeze SHA is the
+branch tip, which is this record plus later narrative only. **Every commit after
+the gate SHA touches `docs/` alone**, so the tip's executable content is
+identical to the gated tree — verify rather than take it:
+
+```
+git diff --name-only 404c9a0 <tip> -- . \
+  ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
+```
+
+Empty output is the evidence, and it is `git-workflow`'s own rule applied one
+step earlier than integration.
 
 Gates at that exact SHA, all green, zero reds: `typecheck` · `lint` · `format` ·
 `check:app-release` · `check:demo-release` · `check:boundaries`, then
