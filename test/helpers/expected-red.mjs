@@ -512,6 +512,7 @@ function measurePhase(entry, { root, scratch, run, phase }) {
     `${entry.name}: the ${phase} run executed no test — the pattern or file selects nothing`,
   );
   assertEvidenceReconciles(entry, measured, root, phase);
+  assertIdentitiesUnique(entry, measured, root, phase);
   return measured;
 }
 
@@ -571,6 +572,7 @@ function runOneEntry(entry, { root, scratch, log, run }) {
     `${entry.name}: SURVIVOR — the mutation stayed green`,
   );
   assertEvidenceReconciles(entry, observation, root, 'mutated');
+  assertIdentitiesUnique(entry, observation, root, 'mutated');
 
   // PHASE A — the restored suite. It must be wholly green, and it is the
   // reference the kill set is computed against.
@@ -580,12 +582,13 @@ function runOneEntry(entry, { root, scratch, log, run }) {
     run,
     phase: 'restored',
   });
-  const reference = identitiesOf(restored.results, 'pass', root);
-  assert.equal(
-    reference.size,
-    restored.results.length,
+  const notGreen = restored.results.filter((result) => result.status !== 'pass');
+  assert.deepEqual(
+    notGreen.map((result) => `${result.file}::${result.name}`),
+    [],
     `${entry.name}: the restored suite is not wholly green, so it cannot serve as the reference the kill set is measured against`,
   );
+  const reference = identitiesOf(restored.results, 'pass', root);
   log.write(`EXPECTED_RED_RESTORED ${entry.name} ${reference.size} passing\n`);
 
   const missing = declared.filter((identity) => !reference.has(identity));
@@ -769,6 +772,41 @@ function assertEvidenceReconciles(entry, measured, root, phase) {
       `${entry.name}: the ${phase} evidence for ${file} does not reconcile with Node's own counts`,
     );
   }
+}
+
+/**
+ * Every credited identity in a run must be unique, in EVERY phase, before any
+ * Set or Map is built over the results.
+ *
+ * A manifest can only name `{file, name}`. When a run reports two results under
+ * one such identity, there is no honest way to decide which occurrence a
+ * declaration meant — so the gate refuses to decide rather than deciding badly.
+ *
+ * THIS REPLACES THREE SEPARATE PATCHES. Six rounds found the same root three
+ * ways: Node's file wrapper impersonating a test that never registered, a
+ * cancelled child credited as an executed failure, and two tests sharing one
+ * name. Each was patched as its own predicate. The asymmetry that let the third
+ * through was that the restored run effectively required uniqueness while the
+ * mutated run did not — so a mutation could register a failing duplicate of a
+ * still-passing test, keep it out of the regression set because one occurrence
+ * still passed, and satisfy the undeclared-outcome check because the identity
+ * was in the reference. Refusing ambiguity closes the class instead of the
+ * instance; adjudicating it would put us back here.
+ */
+function assertIdentitiesUnique(entry, measured, root, phase) {
+  const seen = new Map();
+  const ambiguous = [];
+  for (const result of measured.results) {
+    const identity = identityOf(resolve(root, result.file), result.name);
+    const count = (seen.get(identity) ?? 0) + 1;
+    seen.set(identity, count);
+    if (count === 2) ambiguous.push(identity);
+  }
+  assert.deepEqual(
+    ambiguous.map(readableIdentity),
+    [],
+    `${entry.name}: the ${phase} run reports more than one result under ${JSON.stringify(ambiguous.map(readableIdentity))}. A manifest names only {file, name}, so this gate refuses to guess which occurrence a declaration meant.`,
+  );
 }
 
 function identitiesOf(results, status, root) {
