@@ -10,5 +10,20 @@
       "adr": "ADR-0049-document-transition-and-inventory-effect-seam.md",
       "reason": "Names packet `PS-0`, a design packet that ends in a preserved probe and never integrates, so mission-cadence gives it no ledger row to carry a status."
     }
-  ]
+  ],
+  "owningTables": [
+    {
+      "header": ["ID", "Packet", "Stage", "Tier", "Status", "SHA", "Evidence"],
+      "reason": "The ledger packet table. One row per packet; the accepted SHA is immutable once recorded."
+    },
+    {
+      "header": ["#", "Packet", "Tier", "Why here"],
+      "reason": "current-plan.md's active queue. Carries every ordered row that owns discovered work."
+    },
+    {
+      "header": ["Row", "What it adds", "Size"],
+      "reason": "ui-ux-remaining.md's inventory. Owns the UX rows that the queue routes to by id."
+    }
+  ],
+  "owningTableDefinition": "A routing may resolve against a row in one of these tables and nothing else. Admitting every id-shaped first cell let an ordinary data table -- a colour swatch list -- own a finding. The set was MEASURED against the live routings rather than guessed: every resolving target today sits under one of these three headers. It is a two-way ratchet: a routing resolving nowhere fails, and a declared header matching no table in the tree fails too."
 }

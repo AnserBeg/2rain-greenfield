@@ -49,6 +49,10 @@ const PROBE_HEAD_SOURCE = `${PROBE_BASE_SOURCE}export function probeSymbol(): nu
 // a difference and pass — which is exactly the ux-picker r3 failure.
 const HEALED_PATH = 'test/architecture/record-claim-fidelity.ts';
 const RENAMED_SOURCE = 'export const renamed = 1;\n';
+const PROBE_OWNING_TABLE = {
+  header: ['ID', 'Packet', 'Stage', 'Tier', 'Status', 'SHA', 'Evidence'],
+  reason: 'the synthetic ledger every control varies one property of',
+} as const;
 
 export interface SyntheticWorld {
   readonly root: string;
@@ -114,7 +118,11 @@ export function greenInput(world: SyntheticWorld): RecordClaimInput {
     ],
     git: createGitReader(world.root),
     ledger: ledgerDocument([['probe-packet', 'accepted']]),
-    manifest: { schemaVersion: 'probe', unresolvableRatifications: [] },
+    manifest: {
+      owningTables: [PROBE_OWNING_TABLE],
+      schemaVersion: 'probe',
+      unresolvableRatifications: [],
+    },
     pathKind: () => 'absent',
     records: [recordDocument(declaration(world.base, world.head))],
     routingSources: [
@@ -300,6 +308,59 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
       'a renamed or reordered column makes every ratification lookup read some other cell',
   },
   {
+    code: 'RECORD_CLAIM_RANGE_UNOWNED',
+    run: (world) => {
+      const base = commitTree(
+        world.root,
+        { 'probe/impl.ts': PROBE_BASE_SOURCE },
+        undefined,
+        'another-packet',
+      );
+      const head = commitTree(
+        world.root,
+        { 'probe/impl.ts': PROBE_HEAD_SOURCE },
+        base,
+        'another-packet',
+      );
+      return [
+        {
+          ...greenInput(world),
+          // COPY AND EDIT, which is the ordinary failure rather than the exotic
+          // one. The block is another packet's, the label was changed to match
+          // this record's filename, and every claim resolves — against commits
+          // this packet never made.
+          records: [recordDocument(declaration(base, head))],
+        },
+      ];
+    },
+    title:
+      "a block whose declared head is owned by another packet's commits reds",
+    vacuity:
+      'filename equality proves only that a record agrees with itself, and one edit moves both halves',
+  },
+  {
+    code: 'RECORD_MANIFEST_OWNING_TABLE_STALE',
+    run: (world) => [
+      {
+        ...greenInput(world),
+        manifest: {
+          owningTables: [
+            PROBE_OWNING_TABLE,
+            {
+              header: ['Gone', 'Away'],
+              reason: 'matches no table in the tree',
+            },
+          ],
+          schemaVersion: 'probe',
+          unresolvableRatifications: [],
+        } satisfies RecordClaimManifest,
+      },
+    ],
+    title: 'an owning-table signature matching no table in the tree reds',
+    vacuity:
+      'the declared set rots into a permanent allowlist nobody re-derives against the records',
+  },
+  {
     code: 'RECORD_CLAIM_BLOCK_UNPARSABLE',
     run: (world) => [
       {
@@ -465,6 +526,22 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
       },
       {
         ...greenInput(world),
+        // ESCAPED BACKSLASH. `\\\\|` is an escaped backslash followed by a REAL
+        // delimiter. A splitter that inspects only the previous character
+        // swallows it, merges two cells, and moves Status off its index.
+        ledger: document(
+          'docs/execution/ledger.md',
+          '# Execution ledger\n\n| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| probe-packet | name ending \\\\| — | Mechanical | accepted | — | — |\n',
+        ),
+        adrs: [
+          document(
+            'docs/decisions/ADR-9009-probe.md',
+            '# ADR-9009\n\nStatus: proposed by packet `probe-packet`; ratified when that\npacket is accepted\n\nTier: Critical\n',
+          ),
+        ],
+      },
+      {
+        ...greenInput(world),
         // ESCAPED PIPE. A literal `|` inside an earlier cell shifts every later
         // column, so a status read at a fixed index lands on Tier and passes.
         ledger: document(
@@ -496,9 +573,37 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
           ),
         ],
       },
+      {
+        ...greenInput(world),
+        // A TYPO in the explicit target. Falling back to the provenance packet
+        // substitutes a different packet for the condition the ADR states, and
+        // that packet is `planned`, so nothing reds at all.
+        adrs: [
+          document(
+            'docs/decisions/ADR-9010-probe.md',
+            '# ADR-9010\n\nStatus: proposed by packet author-packet;\nratified when implementation-pakcet is accepted\n\nTier: Critical\n',
+          ),
+        ],
+        ledger: ledgerDocument([
+          ['author-packet', 'planned'],
+          ['implementation-packet', 'accepted'],
+        ]),
+        rowIdSources: [
+          ledgerDocument([
+            ['author-packet', 'planned'],
+            ['implementation-packet', 'accepted'],
+          ]),
+        ],
+        routingSources: [
+          document(
+            'docs/execution/probe-queue.md',
+            'The finding is routed to `author-packet`.\n',
+          ),
+        ],
+      },
     ],
     title:
-      'a proposed ADR naming no resolvable packet reds unless it is pinned',
+      'a proposed ADR naming no resolvable packet reds unless it is pinned — including an explicit ratification target that does not resolve',
     vacuity:
       'an unparseable status is skipped, so the check quietly stops applying',
   },
@@ -515,6 +620,7 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
       {
         ...greenInput(world),
         manifest: {
+          owningTables: [PROBE_OWNING_TABLE],
           schemaVersion: 'probe',
           unresolvableRatifications: [
             {
@@ -576,6 +682,27 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
         // column name, and it resolved until the header was excluded.
         routingSources: [
           document('docs/execution/probe-queue.md', 'routed to `ID`.\n'),
+        ],
+      },
+      {
+        ...greenInput(world),
+        // AN ORDINARY DATA TABLE is not an owning table. A colour swatch list
+        // supplied `blue` as a tracked row id until row collection was gated on
+        // the declared owning-table headers.
+        // The owning ledger stays in place, so exactly one property varies:
+        // an ADDITIONAL, non-owning table is present.
+        rowIdSources: [
+          ledgerDocument([['probe-packet', 'accepted']]),
+          document(
+            'docs/execution/palette.md',
+            '| Colour | Value |\n|---|---|\n| blue | #0066cc |\n',
+          ),
+        ],
+        routingSources: [
+          document(
+            'docs/execution/probe-queue.md',
+            'The finding is routed to `blue`.\n',
+          ),
         ],
       },
       {
@@ -709,6 +836,9 @@ function commitTree(
   root: string,
   files: Readonly<Record<string, string>>,
   parent?: string,
+  // The declared head must be OWNED by the packet declaring it, so the
+  // synthetic commits carry the same `Packet:` trailer real ones do.
+  owner = 'probe-packet',
 ): string {
   const indexFile = join(mkdtempSync(join(tmpdir(), 'record-claim-')), 'index');
   for (const [path, content] of Object.entries(files)) {
@@ -742,7 +872,7 @@ function commitTree(
       tree,
       ...(parent ? ['-p', parent] : []),
       '-m',
-      'record-claim control',
+      `record-claim control\n\nPacket: ${owner}`,
     ],
     {
       GIT_AUTHOR_DATE: stamp,

@@ -175,3 +175,43 @@ test('the operator-facing gate and this suite run the same checker', () => {
     );
   }
 });
+
+test('a GFM table with inconsistent outer pipes is still read correctly', () => {
+  // The ADMISSION TWIN for the separator fix. Round 2 noted the delimiter
+  // matcher required both outer pipes while GFM makes them optional. The
+  // failure that causes is not a false green but a false RED — an owning table
+  // goes unrecognised and its real rows stop resolving — so the control is a
+  // positive one.
+  const world = buildSyntheticWorld(root);
+  const loose = {
+    path: 'docs/execution/loose.md',
+    text: '| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---\n| loose-row | x | — | X | planned | — | — |\n',
+  };
+  const green = greenInput(world);
+  const report = verifyRecordClaims({
+    ...green,
+    rowIdSources: [...green.rowIdSources, loose],
+    routingSources: [
+      { path: 'docs/execution/q.md', text: 'routed to `loose-row`.\n' },
+    ],
+  });
+  assert.deepEqual(report.findings, []);
+  assert.equal(report.routingsResolved, 1);
+});
+
+test('the checker never writes to the repository', () => {
+  // The real adapter, not an injected predicate: `collectRepositoryInput` is
+  // what production runs, and this exercises it end to end.
+  const before = execFileSync('git', ['status', '--porcelain'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  verifyRecordClaims(collectRepositoryInput(root));
+  assert.equal(
+    execFileSync('git', ['status', '--porcelain'], {
+      cwd: root,
+      encoding: 'utf8',
+    }),
+    before,
+  );
+});

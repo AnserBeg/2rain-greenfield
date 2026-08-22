@@ -43,6 +43,7 @@ import ts from 'typescript';
 
 /** Every way this gate can fail. One code, one assertion, one committed control. */
 export const RECORD_CLAIM_CODES = [
+  'RECORD_CLAIM_RANGE_UNOWNED',
   'RECORD_CLAIM_PATH_UNCHANGED',
   'RECORD_CLAIM_SYMBOL_ABSENT',
   'RECORD_CLAIM_SYMBOL_FILE_ABSENT',
@@ -59,6 +60,7 @@ export const RECORD_CLAIM_CODES = [
   'RECORD_ADR_PACKET_UNRESOLVED',
   'RECORD_ADR_NONE_SCANNED',
   'RECORD_MANIFEST_PIN_STALE',
+  'RECORD_MANIFEST_OWNING_TABLE_STALE',
   'RECORD_LEDGER_ID_DUPLICATE',
   'RECORD_LEDGER_TABLE_ABSENT',
   'RECORD_LEDGER_COLUMN_ABSENT',
@@ -102,6 +104,8 @@ export interface GitReader {
   executablePathsChanged(base: string, head: string): readonly string[];
   /** File content at a commit, or undefined when the commit has no such blob. */
   readBlob(commit: string, path: string): string | undefined;
+  /** A commit's full message, for the `Packet:` trailer that owns its range. */
+  readCommitMessage(commit: string): string | undefined;
 }
 
 /**
@@ -115,6 +119,17 @@ export interface RecordClaimManifest {
   readonly schemaVersion: string;
   readonly unresolvableRatifications: readonly {
     readonly adr: string;
+    readonly reason: string;
+  }[];
+  /**
+   * The tables whose rows OWN work, by exact header signature. A routing may
+   * resolve against these and nothing else: admitting every id-shaped first
+   * cell let a colour table's `blue` own a finding. Declared rather than
+   * inferred, and ratcheted both ways — a signature matching no table in the
+   * tree fails, so the list cannot rot into a permanent allowlist.
+   */
+  readonly owningTables: readonly {
+    readonly header: readonly string[];
     readonly reason: string;
   }[];
 }
@@ -172,6 +187,22 @@ const BLOCK_KEYS = [
   'symbols',
 ] as const;
 const BLOCK_SCHEMA_VERSION = 'northstar.record-claim/v1';
+
+/**
+ * A GFM table delimiter row. Outer pipes are OPTIONAL in GFM, so a header whose
+ * delimiter omits one was not recognised and the header's own first cell was
+ * harvested as a tracked row id.
+ */
+function isSeparatorRow(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.includes('-') || !trimmed.includes('|')) {
+    return false;
+  }
+  const cells = trimmed.replace(/^\|/u, '').replace(/\|$/u, '').split('|');
+  return (
+    cells.length > 0 && cells.every((cell) => /^\s*:?-+:?\s*$/u.test(cell))
+  );
+}
 
 interface DeclarationBlock {
   readonly packet: string;
@@ -245,7 +276,20 @@ export function verifyRecordClaims(input: RecordClaimInput): RecordClaimReport {
   }
 
   const ledgerRows = readLedgerIds(input.ledger, findings);
-  const rowIds = collectRowIds(input.rowIdSources);
+  const { ids: rowIds, matched } = collectRowIds(
+    input.rowIdSources,
+    input.manifest.owningTables,
+  );
+  for (const { header, reason } of input.manifest.owningTables) {
+    if (matched.has(signature(header))) {
+      continue;
+    }
+    findings.push({
+      code: 'RECORD_MANIFEST_OWNING_TABLE_STALE',
+      subject: `| ${header.join(' | ')} |`,
+      message: `is declared an owning table (${reason}) and matches no table in the tree; re-derive it rather than keeping a list that has stopped describing the records`,
+    });
+  }
   checkRatifications(input, ledgerRows, findings);
   const routingsResolved = checkRoutings(input, rowIds, findings);
 
@@ -423,6 +467,24 @@ function observeClaims(
     return { paths: 0, symbols: 0 };
   }
 
+  // PROVENANCE. Filename equality proves only that a record and a block agree
+  // with each other; both are in the same file and a copy-and-edit changes both
+  // at once. The `Packet:` trailer on the declared head is written at commit
+  // time, lives in the object database, and cannot be altered without moving
+  // the SHA the block names — so it is an authority independent of the record.
+  // `check-review-record.sh` already reads this same trailer.
+  const trailer = packetTrailer(git.readCommitMessage(head) ?? '');
+  if (trailer !== block.packet) {
+    findings.push({
+      code: 'RECORD_CLAIM_RANGE_UNOWNED',
+      subject: `${block.packet}:${block.head.slice(0, 7)}`,
+      message: trailer
+        ? `is claimed by \`${block.packet}\` but its declared head carries \`Packet: ${trailer}\`, so the range belongs to another packet`
+        : `is claimed by \`${block.packet}\` but its declared head carries no \`Packet:\` trailer, so nothing outside the record says which packet owns the range`,
+    });
+    return { paths: 0, symbols: 0 };
+  }
+
   let paths = 0;
   for (const path of block.changedPaths) {
     if (git.pathDiffers(base, head, path)) {
@@ -476,6 +538,11 @@ function observeClaims(
   }
 
   return { paths, symbols };
+}
+
+/** The packet a commit message claims, from its `Packet:` trailer. */
+function packetTrailer(message: string): string | undefined {
+  return /^Packet:[ \t]*(\S+)[ \t]*$/mu.exec(message)?.[1];
 }
 
 /**
@@ -583,7 +650,7 @@ function readLedgerIds(
       inPacketTable = false;
       continue;
     }
-    if (!inPacketTable || statusIndex === -1 || /^\|[\s|:-]*\|$/u.test(line)) {
+    if (!inPacketTable || statusIndex === -1 || isSeparatorRow(line)) {
       continue;
     }
     const cells = splitRow(line);
@@ -718,18 +785,35 @@ function checkRoutings(
 
 function collectRowIds(
   sources: readonly MarkdownDocument[],
-): ReadonlySet<string> {
+  owningTables: readonly { readonly header: readonly string[] }[],
+): { ids: ReadonlySet<string>; matched: ReadonlySet<string> } {
   const rowStart = new RegExp(`^\\|\\s*\\**\`?(${ROW_ID})\`?\\**\\s*\\|`, 'u');
-  const separator = /^\|[\s|:-]*\|$/u;
+  const wanted = new Map(
+    owningTables.map(({ header }) => [signature(header), signature(header)]),
+  );
   const ids = new Set<string>();
+  const matched = new Set<string>();
+
   for (const source of sources) {
     const lines = source.text.split('\n');
+    // Only rows UNDER a declared owning header count. A header row is itself
+    // never a tracked row: its first cell is a column name, and `ID` resolved a
+    // routing against the ledger's own header until this excluded it.
+    let inOwningTable = false;
     for (const [index, line] of lines.entries()) {
-      // A HEADER row is not a tracked row, and its first cell is a column name.
-      // Review measured a routing to `ID` resolving against the ledger's own
-      // `| ID | Packet | ... |` header. Markdown makes the header exact: it is
-      // the row immediately above the separator.
-      if (separator.test(lines[index + 1] ?? '')) {
+      if (!line.startsWith('|')) {
+        inOwningTable = false;
+        continue;
+      }
+      if (isSeparatorRow(lines[index + 1] ?? '')) {
+        const key = signature(splitRow(line).map(stripMarkdown));
+        inOwningTable = wanted.has(key);
+        if (inOwningTable) {
+          matched.add(key);
+        }
+        continue;
+      }
+      if (!inOwningTable || isSeparatorRow(line)) {
         continue;
       }
       const id = rowStart.exec(line)?.[1];
@@ -738,7 +822,11 @@ function collectRowIds(
       }
     }
   }
-  return ids;
+  return { ids, matched };
+}
+
+function signature(header: readonly string[]): string {
+  return header.map((cell) => stripMarkdown(cell).toLowerCase()).join('|');
 }
 
 /**
@@ -782,8 +870,12 @@ function namedPacket(
     `ratified when (${ROW_ID}) is accepted`,
     'iu',
   ).exec(status)?.[1];
-  if (ratification && ledgerRows.has(ratification)) {
-    return ratification;
+  if (ratification) {
+    // Present but unresolved stays UNRESOLVED. Falling through to provenance
+    // let a typo in the explicit target silently substitute a different packet
+    // for the condition the ADR actually states — measured, with the
+    // provenance packet `planned` and the real one `accepted`.
+    return ledgerRows.has(ratification) ? ratification : undefined;
   }
   const provenance = [
     new RegExp(`proposed by packet (${ROW_ID})`, 'iu'),
@@ -854,6 +946,10 @@ export function createGitReader(root: string): GitReader {
     },
     readBlob(commit, path) {
       const result = run(['show', `${commit}:${path}`]);
+      return result.status === 0 ? result.stdout : undefined;
+    },
+    readCommitMessage(commit) {
+      const result = run(['log', '-1', '--format=%B', commit]);
       return result.status === 0 ? result.stdout : undefined;
     },
     resolveCommit(revision) {
@@ -966,13 +1062,22 @@ function isRepositoryPath(candidate: string): boolean {
 function splitRow(line: string): string[] {
   const cells: string[] = [];
   let current = '';
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
-    if (character === '\\' && line[index + 1] === '|') {
-      current += '|';
-      index += 1;
+  let backslashes = 0;
+  for (const character of line) {
+    if (character === '\\') {
+      backslashes += 1;
+      current += character;
       continue;
     }
+    // PARITY. `\\|` is an escaped pipe; `\\\\|` is an escaped BACKSLASH followed
+    // by a real delimiter. Counting only the immediately preceding character
+    // merged two cells and moved the Status column, which review measured.
+    if (character === '|' && backslashes % 2 === 1) {
+      current = `${current.slice(0, -1)}|`;
+      backslashes = 0;
+      continue;
+    }
+    backslashes = 0;
     if (character === '|') {
       cells.push(current);
       current = '';
