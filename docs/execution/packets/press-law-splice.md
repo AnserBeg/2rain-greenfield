@@ -944,6 +944,28 @@ That command exited zero with no output; the production blobs remain
 1–13 are settled. The one deferred full matrix now runs on the integration tree
 before the required packet-into-main `--no-ff` merge.
 
+## Integration-matrix construction
+
+The packet was merged with current `origin/main` at `4780efc3` to form staged
+integration SHA `1ea514f642d672daafc25c577cd4c15664bd5200`, with the reviewed
+packet as first parent and current main as second parent. Both reviewed
+production blobs remained byte-identical. The first matrix attempt refused at
+the performance gate with
+`FULL_MATRIX_FAILED rc=1 sha=1ea514f642d672daafc25c577cd4c15664bd5200`:
+CPU idle was 67.2%, below the required 90%, so no semantic suite ran. Four
+subsequent one-second samples measured 94–95% idle.
+
+The identical-SHA rerun passed the performance gate, then reached Architecture.
+It reported the same exact eleven routed violations, but current main's accepted
+compiler additions had moved seven existing Inventory observations from lines
+`2338`–`2693` to lines `2927`–`3282`. The exact debt ratchet therefore failed on
+stale pre-integration coordinates and the runner emitted
+`FULL_MATRIX_FAILED rc=1 sha=1ea514f642d672daafc25c577cd4c15664bd5200`.
+Only those seven expected line coordinates were refreshed; the focused
+module-press-law suite then passed 46/46 against the merged production tree.
+Neither the observer nor the provider production blob changed. A new committed
+integration SHA is required for the complete matrix rerun.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
