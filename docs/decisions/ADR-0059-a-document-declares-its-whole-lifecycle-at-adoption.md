@@ -1,4 +1,4 @@
-# ADR-0059: A document declares its whole lifecycle at adoption, and the purchase order's is ruled
+# ADR-0059: A document declares its whole STATE VOCABULARY at adoption, and the purchase order's lifecycle is ruled
 
 Date: 2026-08-22
 
@@ -48,12 +48,12 @@ field is an ordinary enum column, and widening an enum is a retype like any
 other. The premature entry was discarded, the lineage was rebuilt from the
 accepted 13-entry head, and the packet minted exactly one.
 
-### Ruled: a module adopting a state machine declares its WHOLE lifecycle in the release that adopts it
+### Ruled: a module adopting a state machine declares its whole STATE VOCABULARY in the release that adopts it
 
-Including the states and transitions that release cannot drive. The alternative
-— adding them as each becomes reachable — pays a normalization event and a
-lineage entry per addition, and each one is a release the whole application must
-reproduce forever.
+Including the states that release cannot reach. The alternative — adding each as
+it becomes reachable — pays a normalization event and a lineage entry per
+addition, and each one is a release the whole application must reproduce
+forever.
 
 **This is not "author speculatively".** A state is admitted when the document's
 lifecycle genuinely reaches it and some later packet is chartered to drive it.
@@ -67,6 +67,39 @@ lock — that a later packet must choose. A state is not that: `closed` commits
 nothing about what closes an order, only that closing is where it lands. The
 test is **whether the declaration pre-commits a mechanism or only names a
 destination.**
+
+### NOT ruled: that every transition must be declared, and CERTAINLY not that every transition gets an operation
+
+**An earlier version of this ADR said "whole lifecycle" and was corrected by
+review.** The retype measurement in §1 prices a STATE. It says nothing about a
+transition, and measurement confirms the difference:
+
+| change to an already-materialized machine | result |
+|---|---|
+| add a **state** | `COMPILER_STORAGE_RETYPE_UNSUPPORTED` — the enum widens |
+| add a **transition** | **compiles, no retype** — states define the options, transitions do not |
+| declare a transition **no operation references** | **compiles** |
+
+So declaring the edges early is *convenient* — `PUR-2` binds an operation
+without touching the machine — but it is a product choice, not a consequence of
+the evidence. Presenting it as one would license speculative edges under cover
+of a measurement that does not reach them.
+
+**And emitting an OPERATION for a transition is a different act again, with a
+different cost.** A state names a destination; **an active transition operation
+grants a present behaviour.** `PUR-1`'s first implementation emitted one per
+declared transition, which made `released → closed` executable through the
+gateway with no receipt rule behind it — an arbitrary manual close becoming a
+stored business fact, on a document then uneditable with no amend path. That is
+the defect this section exists to prevent.
+
+**The rule, stated at the width the evidence supports:**
+
+1. **States** — declare the whole vocabulary at adoption. Forced by the retype.
+2. **Transitions** — declare the edges you are confident of; cheap either way,
+   and no measurement compels it.
+3. **Operations** — emit one only for a transition **this packet can give
+   semantics to.** Deferring costs a lineage entry and nothing else.
 
 ## 2. The purchase order lifecycle
 
@@ -84,8 +117,8 @@ destination.**
 | From | To | Ruled |
 |---|---|---|
 | `draft` | `released` | the release |
-| `released` | `closed` | the close. **What triggers it is `PUR-2`'s to decide** — the transition exists now so that decision costs no lineage entry |
-| `closed` | `released` | the reopen. A closed order needing a further receipt or an amended quantity returns to `released` |
+| `released` | `closed` | the close. **Declared as an edge; NO operation in `PUR-1`.** What triggers a close is `PUR-2`'s to decide, and it needs receipts to decide it |
+| `closed` | `released` | the reopen. **Declared as an edge; NO operation in `PUR-1`**, for the same reason |
 | `released` | `cancelled` | the cancel of a committed order |
 | `draft` | `cancelled` | the cancel of an uncommitted one. **Abandoning an order is ordinary** |
 | `released` | `draft` | **refused.** `draft` asserts no commitments exist, and once released, receipts may |
@@ -186,19 +219,20 @@ state to return to.
 
 ## Consequences
 
-- The second document module (`sales_order`, `SAL-1`) declares its whole
-  lifecycle at adoption and pays one lineage entry, not one per confirm/cancel/
-  close it discovers.
+- The second document module (`sales_order`, `SAL-1`) declares its whole state
+  vocabulary at adoption and pays one lineage entry, not one per state it
+  discovers. It emits operations only for the transitions it can drive.
 - `PUR-2` may implement close and reopen without a language event, because their
   transitions are already in the release.
 - A state added to any shipped machine costs a normalization event and a lineage
   entry, and fails loudly with `COMPILER_STORAGE_RETYPE_UNSUPPORTED` rather than
   silently. That refusal is the trigger to revisit this ADR, not a bug report.
-- **What this forfeits:** a lifecycle declared before its drivers exist is a
-  lifecycle whose states can be reached only by the packets that add them, so a
-  reader of the compiled release sees four states where only three are
-  presently producible. That is visible in the machine and stated here, rather
-  than being discovered from an empty column.
+- **What this forfeits:** a vocabulary declared before its drivers exist is one
+  whose states are reached only by the packets that add them. A reader of the
+  compiled release sees four states and **three producible ones** — `closed` has
+  no operation that can put a record into it. That is visible in the machine, in
+  the operation catalog, and in a committed control, rather than being
+  discovered from an empty column.
 
 ## Boundaries
 

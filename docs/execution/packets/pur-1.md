@@ -399,8 +399,9 @@ than deep-equalling an empty list.
 The guard and the command matrix are **observed, not asserted**: the COMPILED
 precondition is evaluated through `evaluateRegisteredOperationPrecondition`, the
 same kernel entry point the gateway and `prepareMutation` call, over images
-built from the compiled enum option ids. Four transitions by four states is a
-full truth table.
+built from the compiled enum option ids. The command matrix is the three DRIVEN transitions against all four states,
+plus a separate control proving the two declared-only edges are invocable by
+nothing.
 
 ADR-0050 §7's two owed controls ship together — a permission mismatch is refused
 by name (`COMPILER_TRANSITION_PERMISSION_MISMATCH`) and the matched case still
@@ -433,6 +434,70 @@ is observed by `apps/web/test/browser/**`, not by the definition layer. This
 packet controls the declaration each of those reads. A Band B failure here is
 visible the first time an operator opens the form, which is the standard
 `review-tiers` sets for that band.
+
+## Review round 1 — REVISE, three blocking findings, all correct
+
+Reviewed at `a052965`. **Every finding was upheld and none was argued down.**
+
+### Finding 1 (Critical) — `close` and `reopen` were ACTIVE operations
+
+The transition table mapped every row into an operation, so `released → closed`
+and `closed → released` were executable through the semantic operation gateway
+with no receipt rule, no open-to-receive calculation and no `PUR-2` mechanism
+behind them. **ADR-0059 said three of four states were presently producible;
+the code made all four producible.** The ADR contradicted its own
+implementation, which is precisely the defect class this programme keeps filing.
+
+The reviewer's distinction is the right one: **a state names a DESTINATION; an
+active transition operation grants a PRESENT BEHAVIOUR**, and the retype
+measurement prices only the first. Measured in response:
+
+| change to an already-materialized machine | result |
+|---|---|
+| add a **state** | `COMPILER_STORAGE_RETYPE_UNSUPPORTED` |
+| add a **transition** | compiles, **no retype** |
+| declare a transition no operation references | **compiles** |
+
+Fixed: both edges stay declared, neither gets an operation, and two committed
+controls prove the edges exist while nothing can invoke them — one of which
+binds an operation to `close` and requires the check to notice.
+
+ADR-0059 narrowed accordingly: states forced by measurement, transitions a
+product choice, operations only where this packet can supply semantics.
+
+### Finding 2 (Critical evidence gap) — the parent-aggregate rule was a proxy
+
+Upheld. The lane had flagged it itself, and the reviewer correctly said that is
+not sufficient for a Band A claim about a stored-value boundary.
+
+Fixed with a real PostgreSQL vertical, and it carries the admission twin the
+reviewer asked for. **Its discriminating mutation was run:** changing the
+relation to `ownership: 'reference'` makes the post-release line update
+**succeed**, and the control reds with *"Missing expected rejection"* — alone,
+no other test moved. The guard is therefore observed rather than replicated.
+
+### Finding 3 (Major) — the builder registry refactor was not performed
+
+Upheld, and the miss is the lane's. Plan §7.2 assigns the refactor to *"the
+first packet that mounts anything"* and §7.5's `PUR-1` row repeats it. **The
+charter told the lane to update the tuple, the guard, the error string, the map
+array and the capability loop — i.e. to do exactly what the plan says to stop
+doing — and the lane followed the charter without checking it against the plan.**
+`AGENTS.md` §1 puts the plan first.
+
+Fixed: one ordered `MODULE_REGISTRY`; instantiation, ordering, capability
+consistency and count all derive from it. Verified a pure refactor — the
+regenerated artifact differs from the reviewed one **only** by the two removed
+operations, member-by-member across every collection.
+
+### On the prompt-steering finding
+
+Also upheld. The lane's reading list cited plan §§7.3, 7.7, 7.12 and 7.17 —
+the sections it had read — and omitted §7.2 and the `PUR-1` row that carry the
+builder obligation. **A reading list assembled from what the author consulted
+reproduces the author's blind spot**, which is a sharper failure than the
+disclaimer can offset. The round-2 prompt cites the plan generally and names
+§7.2 explicitly.
 
 ## What `test:postgres` found, which nothing else could
 
@@ -550,18 +615,20 @@ third will appear.**
 
 ## Lease
 
-Six files outside the declared lease were edited, named here so they can be
-revoked rather than discovered:
+SEVEN files outside the declared lease were edited, named here so they can be
+revoked rather than discovered. **They are not all "additive" and the earlier
+version of this section wrongly said they were** — the classification column
+says what each actually is:
 
-| File | Why forced | Held on branch by |
-|---|---|---|
-| `package.json` | `test:unit` names its files explicitly; a new `test/unit` file is unreachable until listed, and AGENTS.md §6 requires every `*.test.ts` be proven reachable | `packet/expected-red-gate` |
-| `test/architecture/repository-hygiene.test.ts` | the reviewed suite inventory, same rule | `packet/record-claim-fidelity` |
-| `test/architecture/module-press-law.test.ts` | `checkModulePressLaw` AUTO-DISCOVERS module directories, so a new module moves `moduleDirectories` and `modulesRead` with no edit possible to avoid it; and the routed `conformance.ts` debt shifted 2364 → 2371 because the family rows land above it | `packet/press-law-splice` |
-| `test/helpers/reachability-producers.ts` | the THIRD suite inventory, which `check:reachability` reads. Missed on the first pass and caught by re-reading the `dev-environment` row, which records registering its own test file "in all three inventories". Measured unheld | none |
-| `packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts` | the tripwire flags any file mentioning three or more distinct predicate kinds. A definition file CONSTRUCTS predicates rather than dispatching on them, and the heuristic cannot tell the two apart — `inventory/definition.ts` is registered for the same reason. Authoring the editing guard at all trips it | none |
-| `test/postgres/module-storage-transition.test.ts` | its ABI fixture builds "the composed application without Inventory", which after this packet still carries Purchasing and therefore fails `LEGAL_ENTITY_MASTER_TARGET_INVALID`. See the `test:postgres` findings above | none |
-| `test/postgres/fresh-tenant-full-replay-schema.snapshot.json` | **regenerated, not edited** — a generated full-replay oracle whose own generator was run. Same category as `apps/web/release/**`, which the lease already grants as regenerated | none |
+| File | Kind | Why forced | Held on branch by |
+|---|---|---|---|
+| `package.json` | additive pin | `test:unit` names its files explicitly; a new `test/unit` file is unreachable until listed, and AGENTS.md §6 requires every `*.test.ts` be proven reachable | `packet/expected-red-gate` |
+| `test/architecture/repository-hygiene.test.ts` | additive pin | the reviewed suite inventory, same rule | `packet/record-claim-fidelity` |
+| `test/architecture/module-press-law.test.ts` | **moved expectations** — a count and eight line numbers | `checkModulePressLaw` AUTO-DISCOVERS module directories, so a new module moves `moduleDirectories` and `modulesRead` with no edit possible to avoid it; and the routed `conformance.ts` debt shifted 2364 → 2371 because the family rows land above it | `packet/press-law-splice` |
+| `test/helpers/reachability-producers.ts` | additive pin | the THIRD suite inventory, which `check:reachability` reads. Missed on the first pass and caught by re-reading the `dev-environment` row, which records registering its own test file "in all three inventories". Measured unheld | none |
+| `packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts` | additive registration | the tripwire flags any file mentioning three or more distinct predicate kinds. A definition file CONSTRUCTS predicates rather than dispatching on them, and the heuristic cannot tell the two apart — `inventory/definition.ts` is registered for the same reason. Authoring the editing guard at all trips it | none |
+| `test/postgres/module-storage-transition.test.ts` | **scope-preserving fixture correction** — adds a removal helper and strips Purchasing from the prior release; not a one-entry edit | its ABI fixture builds "the composed application without Inventory", which after this packet still carries Purchasing and therefore fails `LEGAL_ENTITY_MASTER_TARGET_INVALID`. See the `test:postgres` findings above | none |
+| `test/postgres/fresh-tenant-full-replay-schema.snapshot.json` | **regenerated oracle** — logically additive member-wise across all twenty collections; its TEXTUAL diff is not | **regenerated, not edited** — a generated full-replay oracle whose own generator was run. Same category as `apps/web/release/**`, which the lease already grants as regenerated | none |
 
 **Seven, not three, and every one after the first three was found by a gate
 rather than by reading the charter.** Four are hand-written registries a new
@@ -571,8 +638,11 @@ tripwire is a fourth of the same shape. The seventh is a GENERATED oracle
 re-produced by its own generator, which is the `apps/web/release/**` category
 the lease already grants.
 
-Each is additive and mechanical — one array entry, one list entry, one line
-number, one count — and none changes what those gates ASSERT. They were taken
+**Four are additive pins.** One moves expectations (a count and eight line
+numbers, all read from the tool rather than computed). One is a fixture
+correction that adds a helper. One is a regenerated oracle. **None changes what
+its gate ASSERTS**, and that is the property that matters — but calling all
+seven "additive" was wrong and review caught it. They were taken
 rather than stopped on because the lease grants `test/unit/**` and a test file
 that cannot be run is not a test. **The orchestrator's call, not the lane's.**
 
@@ -605,27 +675,28 @@ mounting a guarded document is what makes it operator-visible.
 
 ## What this lane did NOT verify
 
-- **Anything requiring a running database or browser at the time of writing.**
-  Another lane held the machine with a full `run-matrix.sh redgate` in a
-  detached worktree throughout this packet's development; the gate results below
-  are whatever the queued run reports.
-- **That the parent-aggregate rule actually refuses a line mutation at runtime.**
-  The unit test asserts both halves of the mechanism — the relation is
-  `parentScopedChild`/`required`/`restrict`, and exactly one active
-  `updateRecordEffect` targets `purchase_order` carrying the header guard — but
-  it REPLICATES `parentGuardsFromCatalog`'s derivation rather than calling it.
-  That is a proxy. The runtime fact belongs to `test:postgres`.
+**Corrected after review round 1, which found this section contradicting the
+evidence section.** It previously said purchasing's release verification against
+real PostgreSQL was unverified, while the evidence section reported that same
+verification discovering the short-text defect and moving the ADR-0033 partition.
+Both could not stand. **Release verification IS executed** — that is where the
+currency defect surfaced. The unverified fact was the parent-line mutation
+refusal, and **it is no longer unverified either**: round 2 added the runtime
+vertical.
+
+- **The rendered browser surface.** `test:browser` was not run by this lane at
+  any point.
 - **That the command bar renders Release before Cancel, or renders them at all.**
   ADR-0056's precedence and `operationLabel`'s derivation both live in
   `apps/web`, which this packet does not touch. Only the operation-id suffixes
   they read are controlled here.
-- **Whether `close` and `reopen` land in a sensible position in the command
-  bar.** ADR-0056 ranks `release` 0, `cancel` 2 and everything else 1, so they
-  fall between — asserted nowhere.
-- **The `humanRequired` confirmation on cancel end to end.** Only the declaration
-  is controlled.
-- **Purchasing's release verification against real PostgreSQL**, which is where
-  ADR-0050 §6 item 2 is finally settled rather than merely structurally closed.
+- **Nothing about `close` and `reopen` at runtime**, because neither has an
+  operation. They are declared edges; a committed control proves nothing can
+  invoke them.
+- **The `humanRequired` confirmation on either cancel, end to end.** Only the
+  declaration is controlled. The PostgreSQL vertical does exercise a
+  confirmation grant, but on `purchase_order_line_archive` rather than a
+  cancel.
 - **Whether `supplier_party_id` and `item_id` should be relations rather than
   text.** They are text, as the parked lane had them, because a cross-module
   relation would not resolve in the standalone purchasing package. Stated as a
