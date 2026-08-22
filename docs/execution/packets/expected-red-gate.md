@@ -25,7 +25,7 @@ limit rather than implied by a list of patches.
 
 The charter for the final round declared this fallback in advance: *if a seventh
 way identity leaks is found, take the scope limit and say so; another predicate
-is not acceptable.* **Arm 7 found two more** — a **skipped** duplicate, which held
+is not acceptable.* *(That charter was written in the round-numbering the records have since abandoned; in `review-log.md`'s arm numbering it was the sixth arm speaking.)* **Arm 7 found two more** — a **skipped** duplicate, which held
 its `{file, name}` while earning no reachability credit and so was dropped before
 uniqueness ran; and a **`./`-aliased** manifest path, checked as a raw string and
 adjudicated as a resolved one, so two declarations were satisfied by one
@@ -115,7 +115,7 @@ matrix; reproducing the reds costs minutes and belongs at acceptance.
 ## The three ways this gate could have betrayed itself
 
 Each has its own recorded red in `--self-test`, varying one property of an
-otherwise-correct manifest entry. **37 controls**, and the self-test is itself a
+otherwise-correct manifest entry. **38 controls**, and the self-test is itself a
 gate — `check:expected-red-controls` runs in CI and the matrix, so the proof
 that this instrument can fail is re-taken on every run rather than once at
 freeze time.
@@ -148,6 +148,7 @@ journal ordering (G1).
 | skip/todo dropped from the uniqueness population | **C12** stops refusing for its stated reason |
 | noncanonical path spellings accepted | **J6** reports OK |
 | only `main()`'s frozen-tree assertion (`runEntries` keeps its own) | **J5** reports OK |
+| the `status === 'pass'` exemption in the only-under-mutation loop | **C13** reports OK — verified twice, by this lane and independently by the confirm arm, which observed exactly one failure line under the restored exemption |
 
 **A — the mutation did not apply.** A1 an `original` absent from its file
 (`EXPECTED_RED_VICTIM_ABSENT`); A2 an `original` matching more than once, where
@@ -370,7 +371,7 @@ are already stable. Routed to `current-plan.md`.
 
 - The five focused-integration entries: **12 seconds** for five mutations,
   measured mutation-first and then restored.
-- `--self-test`: seconds, **37 controls**.
+- `--self-test`: seconds, **38 controls**.
 - The four PostgreSQL entries: `test/postgres/composed-application.test.ts` takes
   **9m48s** solo for one run, so an entry naming that whole file costs about
   twenty minutes for its baseline plus its mutated run. One full nine-entry run
