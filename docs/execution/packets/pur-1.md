@@ -335,6 +335,12 @@ revoked rather than discovered:
 | `package.json` | `test:unit` names its files explicitly; a new `test/unit` file is unreachable until listed, and AGENTS.md §6 requires every `*.test.ts` be proven reachable | `packet/expected-red-gate` |
 | `test/architecture/repository-hygiene.test.ts` | the reviewed suite inventory, same rule | `packet/record-claim-fidelity` |
 | `test/architecture/module-press-law.test.ts` | `checkModulePressLaw` AUTO-DISCOVERS module directories, so a new module moves `moduleDirectories` and `modulesRead` with no edit possible to avoid it; and the routed `conformance.ts` debt shifted 2364 → 2371 because the family rows land above it | `packet/press-law-splice` |
+| `test/helpers/reachability-producers.ts` | the THIRD suite inventory, which `check:reachability` reads. Missed on the first pass and caught by re-reading the `dev-environment` row, which records registering its own test file "in all three inventories". Measured unheld by the empirical disjointness check | none |
+
+**Four, not three, and the fourth is the point of the open `suite-inventory-copies`
+row:** a suite's file list is written by hand in three places and
+`repository-hygiene` compares only two, so the third is caught by reading a
+ledger row rather than by any gate.
 
 Each is additive and mechanical — one array entry, one list entry, one line
 number, one count — and none changes what those gates ASSERT. They were taken

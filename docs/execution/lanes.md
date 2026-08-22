@@ -566,6 +566,7 @@ conflict.**
 | `package.json` | `packet/expected-red-gate` | one filename added to `test:unit`'s explicit file list |
 | `test/architecture/repository-hygiene.test.ts` | `packet/record-claim-fidelity` | the same filename added to the reviewed suite inventory |
 | `test/architecture/module-press-law.test.ts` | `packet/press-law-splice` | `'purchasing'` added to `moduleDirectories`, `modulesRead` 5 -> 6, routed `conformance.ts` debt offset 2364 -> 2371 |
+| `test/helpers/reachability-producers.ts` | **nobody** — measured unheld | the same filename added to the THIRD suite inventory, the one `repository-hygiene` does not compare against |
 
 **None of these was avoidable by staying inside the lease.** `checkModulePressLaw`
 AUTO-DISCOVERS module directories under `packages/domain/src`, so a new module
