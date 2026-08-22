@@ -1,7 +1,11 @@
 # ADR-0029: Inventory stock-count correction posting
 
 Date: 2026-07-30
-Status: proposed by packet G3-P4b; ratified when that packet is accepted
+Status: **ratified** 2026-08-21 — G3-P4b is accepted (ledger; reviewed
+`f6b7463b8f8a2ed4b6c5fa4d23f4605cf5b86faa`, integrated `fa94633`), completing the
+condition this ADR set for itself. (Status corrected by the orchestrator's 2026-08-21
+record sweep, disposing program review R1, which found the condition met and the text
+stale.)
 Tier: Critical (review per `review-tiers`)
 Supersedes: ADR-0026 only where it withholds stock-count correction
 

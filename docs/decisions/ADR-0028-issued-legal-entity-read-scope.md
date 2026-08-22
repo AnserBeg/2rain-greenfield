@@ -1,7 +1,10 @@
 # ADR-0028: Issued legal-entity read scope
 
 Date: 2026-07-30
-Status: proposed by packet Q1-P4; ratified when that packet is accepted
+Status: **ratified** 2026-08-21 — Q1-P4 is accepted (ledger; reviewed `29ba2aef`,
+integrated `bf098a90`), completing the condition this ADR set for itself. (Status
+corrected by the orchestrator's 2026-08-21 record sweep, disposing program review R1,
+which found the condition met and the text stale.)
 Tier: Critical security-scope decision (review per `review-tiers`)
 
 ## Context
