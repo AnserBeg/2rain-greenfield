@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "skipped-duplicate",
+      "claim": "A skipped occurrence still holds its {file, name}, so it belongs to the population identity uniqueness is checked over.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/skipped-duplicate.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/skipped-duplicate.test.mjs",
+          "name": "the declared victim beside the skipped duplicate",
+          "expected": "SKIPPED_VICTIM_TOKEN"
+        }
+      ]
+    }
+  ]
+}
