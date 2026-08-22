@@ -1,7 +1,10 @@
 # ADR-0027: Inventory transfer as a posting command family
 
 Date: 2026-07-30
-Status: proposed by packet G3-P4a; ratified when that packet is accepted
+Status: **ratified** 2026-08-21 — G3-P4a is accepted (ledger; reviewed and integrated
+`7711570c8eabc710a8a8eb2f0d4a597610377d0b`), completing the condition this ADR set for
+itself. (Status corrected by the orchestrator's 2026-08-21 record sweep, disposing program
+review R1, which found the condition met and the text stale.)
 Tier: Critical (review per `review-tiers`)
 Supersedes: ADR-0026 only where it withholds transfer authorization
 

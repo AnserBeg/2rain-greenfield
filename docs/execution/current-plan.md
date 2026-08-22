@@ -332,7 +332,14 @@ narrative companion to `ledger.md`: the ledger records what each packet *was*, t
 records what we are doing *next* and *why*. Update it whenever the queue changes;
 delete rows once they are accepted and recorded in the ledger.
 
-Last updated: 2026-07-30. Most recent change: the **UX strategy is parked** with a
+Last updated: 2026-08-21. Most recent change: the orchestrator's record sweep disposing
+**program review R1** — six ADR status lines that still read *"ratified when that packet
+is accepted"* after their packets reached `accepted` (ADR-0026, -0027, -0028, -0029,
+-0030, -0033) were corrected against ledger evidence, and the duplicated `G2-P5d-b`
+ledger row was consolidated with both accounts preserved. **The gate that makes this
+sweep unnecessary next time — `scripts/check-records.sh` — is R1's disposition and is
+queued as `record-claim-fidelity`, not yet built.** Prior change: the **UX strategy is
+parked** with a
 named trigger (G3 complete) and owning rows U0–U8, plus the U0 hex-literal ratchet
 recommended before `G3-P6a` — see the parking ruling under the queue. Prior change: the
 **competitive architecture review**
