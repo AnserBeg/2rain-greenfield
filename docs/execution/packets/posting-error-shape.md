@@ -141,10 +141,9 @@ and one against a real database:
   rejection`): `'23503'` must still produce the full
   `INVENTORY_POSTING_STORAGE_REJECTED` contract (code, exact message,
   `details.sqlstate`). A guard that refuses everything is the cheapest
-  vacuous pass, and a guard admitting only the replay branch's own `'23505'`
-  is the next cheapest; this control refutes both, one through
-  `shape-guard-refuses-everything` and one through
-  `admission-narrowed-to-the-replay-code`.
+  vacuous pass; `shape-guard-refuses-everything` refutes it, and
+  `admission-excludes-only-the-twin-sqlstate` shows this control dying alone
+  over the whole file when only its own SQLSTATE is withdrawn.
 - **Replay — genuine duplicate key** (`posting error replay: a genuine
   duplicate-key error reaches the 23505 replay branch`): holds an
   uncommitted natural-effect claim on a module-role transaction, starts a
@@ -160,50 +159,74 @@ and one against a real database:
 
 ## Expected-red manifest — the recorded reds
 
-`test/evidence/posting-error-shape.expected-red.json`, four entries through
+`test/evidence/posting-error-shape.expected-red.json`, **six** entries through
 `scripts/check-expected-red.sh` (ADR-0058), each measured mutation-first and
-restored, kill sets exact. Observed on this tree (2026-08-22):
+restored. **The "population" column is load-bearing and is stated for every
+row**, because the runner computes a kill set only over the tests its own
+command runs: a `namePattern` narrows that command without narrowing anything
+the entry claims.
 
-| entry | mutation (one property) | kills | restored |
-|---|---|---|---|
-| `shape-guard-removed` | guard deleted (`return code;`) — the exact pre-fix defect | A, B | 3 passing |
-| `shape-guard-refuses-everything` | guard walls (`return undefined;`) | Twin, Replay (raw `duplicate key value violates unique constraint` surfaces) | 4 passing |
-| `admission-narrowed-to-the-replay-code` | guard admits only `'23505'` | **Twin alone** | 4 passing |
-| `replay-branch-stops-recognizing-23505` | the catch compares against `'23506'` | **Replay alone** | 4 passing |
-| `shape-guard-length-only` | `/^.{5}$/u` | B alone | 3 passing |
-| `shape-guard-charset-only` | `/^[0-9A-Z]+$/u` | A alone | 3 passing |
+| entry | mutation (one property) | population run | kills | survivors |
+|---|---|---|---|---|
+| `shape-guard-removed` | guard deleted (`return code;`) — the exact pre-fix defect | 3 translator tests | A, B | Twin |
+| `shape-guard-refuses-everything` | guard walls (`return undefined;`) | 4 (translator + replay) | Twin, Replay (raw `duplicate key value violates unique constraint` surfaces) | A, B |
+| `admission-excludes-only-the-twin-sqlstate` | `23503` withdrawn from the admitted set; every other SQLSTATE still admitted | **the whole file, 6 tests** | **Twin alone** | the other 5, including one-way-doors |
+| `replay-branch-stops-recognizing-23505` | the catch compares against `'23506'` | 4 (translator + replay) | Replay alone *within that command* | A, B, Twin |
+| `shape-guard-length-only` | `/^.{5}$/u` | 3 translator tests | B alone | A, Twin |
+| `shape-guard-charset-only` | `/^[0-9A-Z]+$/u` | 3 translator tests | A alone | B, Twin |
 
-**Die-alone attribution, written from the measurement.** Each of the four
-controls has a mutation that kills it and nothing else: A by
-`shape-guard-charset-only`, B by `shape-guard-length-only`, the Twin by
-`admission-narrowed-to-the-replay-code`, and the Replay control by
-`replay-branch-stops-recognizing-23505`. The length-only and charset-only
-entries also prove neither half of the predicate is decorative.
+**Die-alone attribution, written from the measurement and no further.**
 
-*Entries 3 and 4 were added in review round 1, and the correction is worth
-recording rather than smoothing over.* The first four entries killed the Twin
-and the Replay control **only as a pair**, under the walling mutation, and the
-record nevertheless claimed each control dies alone — a claim exceeding its
-evidence, which the round-1 arm caught. Exact per-kill attribution under
-ADR-0058 identifies both failures in the walled run, but attribution is not
-the same as a singleton red. The two added entries are the singletons, each
-measured before its manifest text was written.
+- **A** and **B** each die alone within the three-test translator command
+  (`shape-guard-charset-only`, `shape-guard-length-only`), which also proves
+  neither half of the predicate is decorative.
+- **The Twin dies alone over the file's entire population** — 6 tests run, 1
+  killed, 5 green. That run carries a second fact the focused runs cannot:
+  the surviving one-way-doors test exercises `P0001` (base-unit immutability)
+  and `55P03` (lock timeout) through this same guard on a real posting path,
+  so it proves the guard still admits real SQLSTATEs in production use, not
+  merely in a constructed translator call.
+- **The Replay control's singleton is measured within its four-test command
+  only.** The round-2 arm separately read the file for another victim of that
+  mutation and found none; that is a reviewer's reading, not a run, and it is
+  recorded as such rather than promoted to a measurement.
 
-Two of them carry a second fact beyond dying alone. The
-`admission-narrowed-to-the-replay-code` run keeps the **Replay control green**
-while the Twin dies, so it also refutes "the guard admits only the one code
-the catch needs." And the Replay kill in
-`shape-guard-refuses-everything` remains the charter's fourth vector: a
-genuine duplicate-key error, produced by a real constraint in a real
-database, mis-read by a walled guard and surfacing raw.
+*Both singleton entries came out of review, and the second round of the same
+finding is the part worth recording.* The original four entries killed the
+Twin and the Replay control **only as a pair**, while the record claimed each
+control dies alone. Round 1 caught that. The first repair added a mutation
+admitting only `'23505'` — which produced a singleton **only because its
+`namePattern` excluded the one-way-doors test**, whose `P0001` and `55P03`
+expectations that mutation also breaks. Round 2 caught *that*: the kill set
+was exact within the command, and the command had been chosen so the other
+victim could not appear. **The fix was to change the mutation, not the
+population** — withdrawing admission from the twin's own `23503` alone, then
+measuring over the whole file, where the excluded victim would have shown up
+had one existed.
+
+**The general lesson, since this class survived one correction:** an entry's
+kill set is only as strong as the population it was computed over, so the
+population belongs in the claim. A singleton over a hand-picked command is not
+a singleton.
 
 The mutation set is self-chosen (`review-tiers`: worth strictly less than an
-independent replay), and **two of its six entries were specified by the
-round-1 reviewer rather than by the lane** — recorded here because who chose a
-mutation is part of what the table is worth. The manifest is committed, so an
-independent replay re-derives every red with `bash
-scripts/check-expected-red.sh --run` (all 11 entries across both manifests) or
-by naming this packet's six.
+independent replay), except that **two of its six entries were specified by
+review rather than by the lane, and one of those was then re-specified by
+review a second time** — recorded because who chose a mutation is part of what
+the table is worth, and because the lane's own first attempt at the Twin's
+singleton was the weaker one. The manifest is committed, so an independent
+replay re-derives every red with `bash scripts/check-expected-red.sh --run`
+(all 11 entries across both manifests) or by naming this packet's six.
+
+**A gate limitation this packet works within rather than around, recorded at
+the orchestrator's instruction.** `scripts/check-expected-red.sh` computes a
+kill set over the command it runs, and an entry's `namePattern` narrows that
+command without constraining what the entry claims — so a focused entry's
+exactness is exactness *within its own selection*. The orchestrator is filing
+this against ADR-0058. This packet's obligation is only that its claims match
+what its runs prove, which is why the table above states every entry's
+population and why the Twin's entry runs the whole file. **No machinery was
+added here to compensate for the gate.**
 
 ## What this packet does NOT claim
 
