@@ -129,6 +129,7 @@ export interface RecordClaimManifest {
    * tree fails, so the list cannot rot into a permanent allowlist.
    */
   readonly owningTables: readonly {
+    readonly path: string;
     readonly header: readonly string[];
     readonly reason: string;
   }[];
@@ -187,6 +188,13 @@ const BLOCK_KEYS = [
   'symbols',
 ] as const;
 const BLOCK_SCHEMA_VERSION = 'northstar.record-claim/v1';
+const RATIFICATION_CLAUSE = /\bratif\w*\s+(?:when|once|if|upon|on)\b/iu;
+const RATIFICATION_BACKREFERENCE =
+  /\bratif\w*\s+(?:when|once|if)\s+(?:that|this)\s+packet\s+is\s+accepted/iu;
+const RATIFICATION_TARGET = new RegExp(
+  `ratified when (${ROW_ID}) is accepted`,
+  'iu',
+);
 
 /**
  * A GFM table delimiter row. Outer pipes are OPTIONAL in GFM, so a header whose
@@ -280,14 +288,14 @@ export function verifyRecordClaims(input: RecordClaimInput): RecordClaimReport {
     input.rowIdSources,
     input.manifest.owningTables,
   );
-  for (const { header, reason } of input.manifest.owningTables) {
-    if (matched.has(signature(header))) {
+  for (const { header, path, reason } of input.manifest.owningTables) {
+    if (matched.has(`${path}::${signature(header)}`)) {
       continue;
     }
     findings.push({
       code: 'RECORD_MANIFEST_OWNING_TABLE_STALE',
-      subject: `| ${header.join(' | ')} |`,
-      message: `is declared an owning table (${reason}) and matches no table in the tree; re-derive it rather than keeping a list that has stopped describing the records`,
+      subject: `${path}: | ${header.join(' | ')} |`,
+      message: `is declared an owning table (${reason}) and matches no table at that path; re-derive it rather than keeping a list that has stopped describing the records`,
     });
   }
   checkRatifications(input, ledgerRows, findings);
@@ -467,20 +475,22 @@ function observeClaims(
     return { paths: 0, symbols: 0 };
   }
 
-  // PROVENANCE. Filename equality proves only that a record and a block agree
-  // with each other; both are in the same file and a copy-and-edit changes both
-  // at once. The `Packet:` trailer on the declared head is written at commit
-  // time, lives in the object database, and cannot be altered without moving
-  // the SHA the block names — so it is an authority independent of the record.
-  // `check-review-record.sh` already reads this same trailer.
+  // PROVENANCE, and the claim is exactly as wide as the observation. Filename
+  // equality proves only that a record and a block agree with each other; both
+  // are in the same file and a copy-and-edit changes both at once. The `Packet:`
+  // trailer on the declared head is written at commit time and cannot be altered
+  // without moving the SHA the block names, so it is an authority independent of
+  // the record. What it establishes is that THE HEAD attests the range under one
+  // name and that the head fixes the ancestry — NOT that every commit in the
+  // range was authored under it. Review round 3 narrowed this correctly.
   const trailer = packetTrailer(git.readCommitMessage(head) ?? '');
   if (trailer !== block.packet) {
     findings.push({
       code: 'RECORD_CLAIM_RANGE_UNOWNED',
       subject: `${block.packet}:${block.head.slice(0, 7)}`,
       message: trailer
-        ? `is claimed by \`${block.packet}\` but its declared head carries \`Packet: ${trailer}\`, so the range belongs to another packet`
-        : `is claimed by \`${block.packet}\` but its declared head carries no \`Packet:\` trailer, so nothing outside the record says which packet owns the range`,
+        ? `is claimed by \`${block.packet}\` but its declared head attests \`Packet: ${trailer}\`, so the range is attested to another packet`
+        : `is claimed by \`${block.packet}\` but its declared head carries no single \`Packet:\` trailer — zero or contradictory attestations are an authority for no packet`,
     });
     return { paths: 0, symbols: 0 };
   }
@@ -540,9 +550,16 @@ function observeClaims(
   return { paths, symbols };
 }
 
-/** The packet a commit message claims, from its `Packet:` trailer. */
+/**
+ * The packet a commit message attests, from its `Packet:` trailer — and only
+ * when it attests exactly one. First-match extraction accepted a commit
+ * carrying two contradictory trailers, which is an authority for neither.
+ */
 function packetTrailer(message: string): string | undefined {
-  return /^Packet:[ \t]*(\S+)[ \t]*$/mu.exec(message)?.[1];
+  const trailers = [...message.matchAll(/^Packet:[ \t]*(\S+)[ \t]*$/gmu)].map(
+    (match) => match[1],
+  );
+  return new Set(trailers).size === 1 ? trailers[0] : undefined;
 }
 
 /**
@@ -785,11 +802,17 @@ function checkRoutings(
 
 function collectRowIds(
   sources: readonly MarkdownDocument[],
-  owningTables: readonly { readonly header: readonly string[] }[],
+  owningTables: readonly {
+    readonly path: string;
+    readonly header: readonly string[];
+  }[],
 ): { ids: ReadonlySet<string>; matched: ReadonlySet<string> } {
   const rowStart = new RegExp(`^\\|\\s*\\**\`?(${ROW_ID})\`?\\**\\s*\\|`, 'u');
-  const wanted = new Map(
-    owningTables.map(({ header }) => [signature(header), signature(header)]),
+  // Ownership is identified by PATH AND HEADER, not by header text alone. A
+  // header signature is copyable: a queue snapshot pasted into any packet
+  // record conferred ownership on whatever ids it happened to contain.
+  const wanted = new Set(
+    owningTables.map(({ header, path }) => `${path}::${signature(header)}`),
   );
   const ids = new Set<string>();
   const matched = new Set<string>();
@@ -806,7 +829,7 @@ function collectRowIds(
         continue;
       }
       if (isSeparatorRow(lines[index + 1] ?? '')) {
-        const key = signature(splitRow(line).map(stripMarkdown));
+        const key = `${source.path}::${signature(splitRow(line).map(stripMarkdown))}`;
         inOwningTable = wanted.has(key);
         if (inOwningTable) {
           matched.add(key);
@@ -866,16 +889,23 @@ function namedPacket(
   // way round until review measured a status reading "proposed by packet A;
   // ratified when B is accepted" with A planned and B accepted: the reader
   // bound to A, and the condition the ADR actually states was never tested.
-  const ratification = new RegExp(
-    `ratified when (${ROW_ID}) is accepted`,
-    'iu',
-  ).exec(status)?.[1];
-  if (ratification) {
-    // Present but unresolved stays UNRESOLVED. Falling through to provenance
-    // let a typo in the explicit target silently substitute a different packet
-    // for the condition the ADR actually states — measured, with the
-    // provenance packet `planned` and the real one `accepted`.
-    return ledgerRows.has(ratification) ? ratification : undefined;
+  // The EXISTENCE of a ratification clause is detected separately from the
+  // extraction of its target, and an unrecognised clause fails CLOSED. Matching
+  // only one spelling meant any natural variation — "ratified when PACKET x is
+  // accepted", "ratified once x is accepted", "ratified when x has been
+  // accepted" — fell through to provenance and bound a different packet.
+  //
+  // The one clause that legitimately defers to provenance is the BACK-REFERENCE
+  // "ratified when that packet is accepted", where "that packet" is the packet
+  // the same sentence already named. That is a reading of English and it is
+  // stated as a limit in the packet record; every other wording is unresolved,
+  // which is visible in the pinned set rather than silent.
+  if (
+    RATIFICATION_CLAUSE.test(status) &&
+    !RATIFICATION_BACKREFERENCE.test(status)
+  ) {
+    const target = RATIFICATION_TARGET.exec(status)?.[1];
+    return target && ledgerRows.has(target) ? target : undefined;
   }
   const provenance = [
     new RegExp(`proposed by packet (${ROW_ID})`, 'iu'),

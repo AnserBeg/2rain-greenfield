@@ -51,6 +51,7 @@ const HEALED_PATH = 'test/architecture/record-claim-fidelity.ts';
 const RENAMED_SOURCE = 'export const renamed = 1;\n';
 const PROBE_OWNING_TABLE = {
   header: ['ID', 'Packet', 'Stage', 'Tier', 'Status', 'SHA', 'Evidence'],
+  path: 'docs/execution/ledger.md',
   reason: 'the synthetic ledger every control varies one property of',
 } as const;
 
@@ -331,10 +332,28 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
           // this packet never made.
           records: [recordDocument(declaration(base, head))],
         },
+        {
+          ...greenInput(world),
+          // TWO CONTRADICTORY trailers. First-match extraction accepted this;
+          // a commit attesting two packets is an authority for neither.
+          records: [
+            recordDocument(
+              declaration(
+                world.base,
+                commitTree(
+                  world.root,
+                  { 'probe/impl.ts': PROBE_HEAD_SOURCE },
+                  world.base,
+                  'probe-packet\n\nPacket: another-packet',
+                ),
+              ),
+            ),
+          ],
+        },
       ];
     },
     title:
-      "a block whose declared head is owned by another packet's commits reds",
+      "a block whose declared head does not attest exactly one owner reds — another packet's name, or two contradictory names",
     vacuity:
       'filename equality proves only that a record agrees with itself, and one edit moves both halves',
   },
@@ -348,7 +367,8 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
             PROBE_OWNING_TABLE,
             {
               header: ['Gone', 'Away'],
-              reason: 'matches no table in the tree',
+              path: 'docs/execution/ledger.md',
+              reason: 'matches no table at that path',
             },
           ],
           schemaVersion: 'probe',
@@ -682,6 +702,25 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
         // column name, and it resolved until the header was excluded.
         routingSources: [
           document('docs/execution/probe-queue.md', 'routed to `ID`.\n'),
+        ],
+      },
+      {
+        ...greenInput(world),
+        // A LOOKALIKE table at another path. Its header signature matches an
+        // owning table exactly; a queue snapshot pasted into a packet record
+        // conferred ownership on whatever ids it happened to contain.
+        rowIdSources: [
+          ledgerDocument([['probe-packet', 'accepted']]),
+          document(
+            'docs/execution/packets/old-packet.md',
+            '# old-packet\n\n| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| ghost-owner | historical example | — | — | — | — | — |\n',
+          ),
+        ],
+        routingSources: [
+          document(
+            'docs/execution/probe-queue.md',
+            'The finding is routed to `ghost-owner`.\n',
+          ),
         ],
       },
       {
