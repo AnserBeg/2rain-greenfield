@@ -304,7 +304,11 @@ test(
           error instanceof InventoryPostingError,
           `a genuine duplicate-key error must resolve through the 23505 replay branch, not surface raw: ${String(error)}`,
         );
-        assert.equal(error.code, 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT');
+        assert.equal(
+          error.code,
+          'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+          'a genuine 23505 must be resolved by the replay branch, not relabelled as a storage rejection',
+        );
         assert.equal(
           error.message,
           'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT: existing natural effects have no accepted posting receipt',

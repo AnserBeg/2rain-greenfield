@@ -49,6 +49,42 @@
       ]
     },
     {
+      "name": "admission-narrowed-to-the-replay-code",
+      "claim": "The SQLSTATE admission twin dies alone: a guard admitting only the replay branch's own 23505 still keeps the duplicate-key replay control green, so the twin is what holds the claim that every SQLSTATE-shaped code is still classified as a storage rejection.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined;",
+      "replacement": "  return code === '23505' ? code : undefined;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "posting error (translation|replay)"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error translation: a SQLSTATE-shaped code is relabelled as a storage rejection",
+          "expected": "a real SQLSTATE must still be classified as a storage rejection"
+        }
+      ]
+    },
+    {
+      "name": "replay-branch-stops-recognizing-23505",
+      "claim": "The duplicate-key replay control dies alone: defeating only the catch's 23505 recognition, with the shape guard and ordinary SQLSTATE translation intact, relabels a genuine PostgreSQL duplicate-key error as a storage rejection instead of resolving it through the replay branch.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "        if (postgresCode(error) !== '23505') throw error;",
+      "replacement": "        if (postgresCode(error) !== '23506') throw error;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "posting error (translation|replay)"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error replay: a genuine duplicate-key error reaches the 23505 replay branch",
+          "expected": "a genuine 23505 must be resolved by the replay branch, not relabelled as a storage rejection"
+        }
+      ]
+    },
+    {
       "name": "shape-guard-length-only",
       "claim": "The charset half of the shape check is load-bearing on its own: a guard that checks only for five characters admits a five-character value outside [0-9A-Z] into the storage-rejection relabelling.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
