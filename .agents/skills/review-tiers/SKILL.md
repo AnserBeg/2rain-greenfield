@@ -113,6 +113,62 @@ perform one.
 - If the confirm arm cannot be obtained, a Critical-logic result stays
   `evidence_ready`. **Waiting is the correct outcome; self-review is not.**
 
+## Evidence depth follows FAILURE OBSERVABILITY, not file location (binding, 2026-08-21)
+
+**`AGENTS.md` §6 requires "a negative control for each way it could pass vacuously
+— one recorded red per vacuity vector, not one red overall", and lists five
+vectors.** That is a safety-critical standard. **It is correct for a posting
+engine and wrong for a label renderer**, and applying it uniformly has been taxing
+this program without buying safety where safety is absent.
+
+**The calibrating question is not what tier the packet is, nor where the file
+lives. It is: if this control were vacuous, when would anyone find out?**
+
+### Band A — SILENT. The failure is invisible until something else reconciles it.
+
+Stored values, balances, postings, lineage, tenancy and privilege boundaries,
+idempotency, anything a later reader would take as true.
+
+**Full §6 applies: one recorded red per vacuity vector, each varying exactly one
+property, plus the admission twin.** No relaxation. **A wrong balance is not
+discovered by looking at it.**
+
+### Band B — VISIBLE ON USE. The failure appears to whoever next exercises the path.
+
+Refusal messages, rendered controls, command order, labels, list behaviour,
+diagnostics — anything an operator meets the first time they use it.
+
+**One discriminating recorded red per CLAIM, not per vacuity vector.** The control
+must still die when its subject dies, and the claim must still not exceed what the
+control proves. **What is no longer owed is enumerating five vacuity vectors for a
+label.** Name the vectors you did not individually control and why.
+
+### Band C — VISIBLE ON READ. The failure is apparent from reading the artifact.
+
+Docs, records, comments, narrative, inventories.
+
+**The deterministic gate plus a stated limit. No mutation control is owed.**
+
+### The rules that do NOT relax at any band
+
+- **A committed control must die alone.** If you ship it, deleting its subject must
+  red it. This is cheap and it is where most of this program's defects have lived.
+- **The claim must never exceed the evidence.** Narrowing the claim is always an
+  acceptable correction and is usually the cheaper one.
+- **Band is declared by the packet and checked by the reviewer.** An undeclared band
+  is Band A by default. **A packet may not quietly self-assign downward.**
+
+### Why this exists
+
+**Measured across 2026-08: every packet applied Band-A rigour.** A presentation
+packet spent three review rounds on control attribution for a heading census and a
+Save button — failures an operator meets on first sight. **The same month, Band-A
+work found a posted-to-draft-to-re-post double-post and a guard that admitted its
+own defect at a different line.** Those are the failures the standard exists for.
+
+**Spending Band-A evidence everywhere spends it nowhere in particular** — the same
+argument this skill already makes about Critical carrying 66% of tiered work.
+
 ## Proportionality — is a review even the right instrument?
 
 Match the check to what the deterministic gates already cover:
