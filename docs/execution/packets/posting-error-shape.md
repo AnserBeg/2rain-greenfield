@@ -247,9 +247,18 @@ added here to compensate for the gate.**
 ## What this packet does NOT claim
 
 - No test observes a **production** `ECONNREFUSED` mid-posting (that would
-  need a database dying mid-transaction on cue); the misdiagnosis shapes are
-  constructed errors. The genuine-PG-error half of the evidence is the
-  Replay control's real 23505.
+  need a database dying mid-transaction on cue). **The three misdiagnosis
+  specimens — `ECONNREFUSED`, `ERR_STREAM_DESTROYED`,
+  `PS0_RECEIPT_OPEN_QUANTITY_EXCEEDED` — are constructed `Error` objects, and
+  that is the packet's one constructed half.** The genuine-PostgreSQL half is
+  larger than an earlier draft of this bullet said, and is now stated in
+  full: the Replay control's real `23505`, plus the one-way-doors survivor's
+  three genuine errors — a base-unit `P0001` handed to the exported
+  translator by the test, and a forced-rollback `P0001` and held-lock
+  `55P03` translated by the posting service's own outer catch. *(Corrected in
+  round 4; the earlier wording called the Replay `23505` "the
+  genuine-PG-error half", which contradicted the corrected route section
+  above once the whole-file run was recorded.)*
 - The `racedReplay !== null` (replay-resolved) arm of the catch and the
   `claimed by a different posting` refusal are **not exercised** by any test,
   before or after this packet — see the structural finding.
@@ -263,12 +272,25 @@ added here to compensate for the gate.**
 
 ## Gates and SHAs
 
-**Round 3** (current). Executable candidate
-`cca8d02f8403d4423d4855bafaab639a915e2bf3`: the Twin's singleton mutation
-replaced — `admission-excludes-only-the-twin-sqlstate` withdraws admission
-from `23503` alone and is measured over the whole file — plus the record
-corrections round 2 required. **Production has been byte-identical since the
-first candidate**, through all three rounds:
+**A record cannot name its own commit**, so this section names only SHAs that
+already exist when it is written. The **executable candidate is
+`cca8d02f8403d4423d4855bafaab639a915e2bf3`** — the last commit to move
+production, a test, or a manifest's executable fields. Every commit above it
+is records-only, and the **freeze is the branch tip**, retrievable with
+`git ls-remote origin packet/posting-error-shape` and reported in the
+checkpoint block.
+
+Round history, every candidate fetchable and tagged:
+
+| round | candidate reviewed | verdict | what it found |
+|---|---|---|---|
+| 1 | `8c41712` (executable `7b525b3`), tag `…-reviewed-r1` | REVISE | two controls had no singleton red; C1, C2, C4 closed |
+| 2 | `7bad8d4` (executable `c36e0c6`), tag `…-reviewed-r2` | REVISE | the admission singleton was produced by a `namePattern`, not by its mutation; Q2 closed |
+| 3 | `28be329` (executable `cca8d02`), tag `…-reviewed-r3` | REVISE | the base-unit `P0001` was described as a posting path; Q1 closed |
+| 4 | `2f97b9c`, tag `…-reviewed-r4` | REVISE | a stale scope sentence, and a **fabricated SHA** in a review-log row |
+
+**Production has been byte-identical since the first candidate**, through
+every round:
 
     $ git diff --stat 7b525b3 cca8d02 -- packages/
     (empty)
@@ -313,9 +335,17 @@ Gates in the packet worktree `/home/rvham/2rain-greenfield-pes`:
   PRESS006 line-37 pin over this file is unaffected (the edit sits at line
   ~3877 and shifts nothing above it).
 
-Stops: none. Review rounds: 2, both REVISE, both on evidence rather than
-production, and the second found the same class one layer in — a singleton
-manufactured by test selection instead of by the mutation.
+Stops: none. **Review rounds: 4, every one REVISE, and not one of them found
+a production or control defect** — the guard and the four controls have been
+unchanged since round 1 closed C1, C2 and C4. What the rounds found, in order:
+a missing singleton red; a singleton manufactured by test selection rather
+than by its mutation; one specimen's route described as a posting path when
+the test calls the translator itself; and a scope sentence left stale by the
+previous correction together with a SHA in a review-log row that resolved to
+no object. **The lane wrote that SHA before the commit existed**, which is
+recorded here rather than quietly repaired, because a record naming an
+unfetchable artifact is the failure the whole `ls-remote` discipline exists to
+prevent.
 `review-tiers`' convergence questions place the round-1 finding in the
 control rather than in production, and the correction is the narrowest one
 available — two singleton mutations plus a claim rewritten from the
