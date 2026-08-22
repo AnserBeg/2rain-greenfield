@@ -718,16 +718,74 @@ test('consolidated guard preserves unknown left adjacency across template type t
   }
 });
 
+test('consolidated guard attributes a multiline partial template type to the template node', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'type Multiline<T extends string> =',
+      '  `',
+      '${T}',
+      ':widget_list`;',
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+      'const listQueryId = `${WIDGET_NAMESPACE}:query.widget_list`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 2,
+        message: 'generic press references widget identity widget_list',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard reports every bounded partial run in one unresolved template type', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'type Two<A extends string, B extends string> =',
+      "  `${'northstar'}.${'widget'}:${A} ${'northstar'}.${'widget'}:${B}`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    const expectedViolation: ModulePressLawViolation = {
+      file: 'apps/api/src/generic.ts',
+      line: 2,
+      message: 'generic press references widget identity northstar.widget',
+      moduleDirectory: 'widget',
+      ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    };
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      expectedViolation,
+      expectedViolation,
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard observes exact primitive and nested template type spans', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [
       "export type Numeric = `${'northstar.widget'}${1}`;",
       "export type BigInt = `${'widget_phase'}${3n}`;",
-      "export type Boolean = `${'widget_flag'}${true}`;",
+      "export type BooleanTrue = `${'widget_flag'}${true}`;",
+      "export type BooleanFalse = `${'widget_flag'}${false}`;",
       "export type Null = `${'widget_null'}${null}`;",
       "export type Undefined = `${'widget_undefined'}${undefined}`;",
       "export type Parenthesized = `${('widget')}_${('parenthesized')}`;",
-      "export type Nested = `${`${'widget'}_${'nested'}`}`;",
+      "export type Nested = `${`${'widget'}_`}nested`;",
       "export type Contract = `${'northstar.widget'}${1}-contract/v1`;",
       "export type SubstitutionContinuation = `${'widget_phase3'}_extension`;",
       "export type TailContinuation = `${'prefix_'}widget_phase3`;",
@@ -739,6 +797,7 @@ test('consolidated guard observes exact primitive and nested template type spans
       'const primitiveIds = [',
       '  `${WIDGET_NAMESPACE}:query.widget_phase3`,',
       '  `${WIDGET_NAMESPACE}:query.widget_flagtrue`,',
+      '  `${WIDGET_NAMESPACE}:query.widget_flagfalse`,',
       '  `${WIDGET_NAMESPACE}:query.widget_nullnull`,',
       '  `${WIDGET_NAMESPACE}:query.widget_undefinedundefined`,',
       '  `${WIDGET_NAMESPACE}:query.widget_parenthesized`,',
@@ -751,6 +810,7 @@ test('consolidated guard observes exact primitive and nested template type spans
       'northstar.widget1',
       'widget_phase3',
       'widget_flagtrue',
+      'widget_flagfalse',
       'widget_nullnull',
       'widget_undefinedundefined',
       'widget_parenthesized',

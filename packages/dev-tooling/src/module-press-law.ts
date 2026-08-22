@@ -613,27 +613,24 @@ function staticallyKnownTemplateTypeRuns(
   node: ts.TemplateLiteralTypeNode,
   sourceFile: ts.SourceFile,
 ): readonly StaticStringConstruction[] {
+  const constructionIndex = node.getStart(sourceFile);
   return collectStaticStringRuns((appendStatic, appendDynamic) => {
     appendStatic(
       node.head.text,
       [sourceRange(node.head, sourceFile)],
-      node.getStart(sourceFile),
+      constructionIndex,
     );
     for (const span of node.templateSpans) {
       const exact = exactStaticTypeString(span.type, sourceFile);
       if (exact) {
-        appendStatic(
-          exact.value,
-          exact.literalRanges,
-          span.type.getStart(sourceFile),
-        );
+        appendStatic(exact.value, exact.literalRanges, constructionIndex);
       } else {
         appendDynamic();
       }
       appendStatic(
         span.literal.text,
         [sourceRange(span.literal, sourceFile)],
-        span.literal.getStart(sourceFile),
+        constructionIndex,
       );
     }
   });
