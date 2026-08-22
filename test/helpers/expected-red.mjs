@@ -650,10 +650,14 @@ function runOneEntry(entry, { root, scratch, log, run }) {
     );
   }
 
-  // A non-passing result the restored run never produced is a consequence too:
-  // a suite may register a test only under the mutation.
+  // A result the restored run never produced is a consequence of the mutation
+  // whatever its status. The exemption for passing ones was a real gap: a
+  // mutation that kills its declared victim AND registers a passenger test that
+  // passes was certified, and the Fable arm built the specimen. It could not
+  // fake or hide a kill — but the claim says every outcome is accounted for, and
+  // one clause of it measurably was not. Widened rather than narrowed, because
+  // for a Band A instrument the stronger reading is the useful one.
   for (const result of observation.results) {
-    if (result.status === 'pass') continue;
     const identity = identityOf(resolve(root, result.file), result.name);
     assert.ok(
       reference.has(identity),

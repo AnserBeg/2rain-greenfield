@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "passenger",
+      "claim": "A test the mutation brings into existence is an outcome the entry must declare, even when it passes.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/passenger.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/passenger.test.mjs",
+          "name": "the declared victim beside a passenger",
+          "expected": "PASSENGER_VICTIM_TOKEN"
+        }
+      ]
+    }
+  ]
+}
