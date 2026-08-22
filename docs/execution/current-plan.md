@@ -17,6 +17,35 @@ this section now prevents.
 outliving its truth — committed two hours after writing the finding. **The instrument that
 would have caught it is R1's own `check-records.sh`, which is not built yet.**
 
+## R-ROW SEQUENCING — ruled 2026-08-22. The R rows ARE the work before purchasing.
+
+**The TRIAGE below is dated 2026-08-13 and predates the program review by a week.** It is
+still correct about Tier 1 (all eight rows accepted) but it is NOT the current work list.
+**The 2026-08-20 review's R1–R13 are.** Seven of them had no queue row at all until this
+section existed — which is R1's own failure class, and the review predicted it: *"The
+lesson recurred as an instance of itself."*
+
+**Kept deliberately compact per R12.** Detail lives in the review; this is the sequencing
+ruling and the status, nothing else.
+
+| R | what | ruling | status 2026-08-22 |
+|---|---|---|---|
+| R1 | Record layer ungated (R12 folded in) | **running, not a PUR gate** | `record-claim-fidelity` round 2 at `b8d1c31`; orchestrator sweep done `ba4304d` |
+| R2 | Control verification missing | **running, not a PUR gate** — but PUR-1's charter must REQUIRE the gate; the measured convergence is 2 rounds with it vs 4–7 without | `expected-red-gate` at `b4c2767` |
+| R3 | Two armed traps the template copies | — | **DONE**, `web-refusal-taxonomy` merge `0c08412` |
+| R4 | Gate-invisible scope evaporates | **BEFORE `PUR-2` IS CHARTERED.** PUR-2's derived read models (received quantity, open-to-receive) are the same class of scope that evaporated in G3. A decision, not a packet | **OWED FROM THE USER** — two legitimate options, neither chosen |
+| R5 | Press-law gate makes a false claim | **BEFORE `PUR-2`.** §7.16 requires PUR-2 to prove the catalog is the exact active-release artifact; a fail-open press-law gate cannot hold that | `press-law-splice` at **round 12** — needs re-scope to fail-closed, not a round 13 |
+| R6 | Browsable balance mispriced | — | **DONE**, `stock-balance-read-model` accepted |
+| R7 | Every production policy gateway returns ALLOW | **smalls BEFORE `SAL-1`** (the review's own trigger, upheld). Noted: PUR-1 WILL declare purchasing permissions born unbound, so small (a) gets cheaper the earlier it lands | not started |
+| R8 | Posting-error classification sniffs any `code` | **HARD PREREQUISITE OF `PUR-2`.** PUR-2 posts through this engine; its correction path and the `23505` replay branch both ride on the sniff | not started — **verified still live** at `inventory-posting-service.ts:3881` |
+| R9 | Container pressure forges outcomes | **cheap half before any acceptance matrix we intend to trust.** Wrong outcomes, not slow ones. Currently moot — Docker does not start on this machine | not started |
+| R10 | Version-cut hygiene + false comments | **comments: opportunistic, zero byte risk. Predicates: before a v6 cut, which PUR does not make** — delay | not started — **verified still live** at `protocol.ts:15`, `compiler.ts:1232`, `normalize.ts:2236` |
+| R11 | Trust substrate is write-only | **delay to G4 chartering** (review's own ruling) | deferred |
+| R13 | Batched smalls | **delay.** The lifecycle-precondition item is archive/restore-only (`component-registry.ts:1142` hardcodes the intent); PUR-1's release/cancel take the operation path ADR-0051 already settled. **Name it in PUR-1's charter as a trap not to copy** | not started |
+
+**Net: nothing hard-gates `PUR-1`.** `R8` and `R5` gate `PUR-2`; `R4` gates PUR-2's
+chartering; `R7` gates `SAL-1`. Everything else delays with a reason stated above.
+
 ## TRIAGE — 2026-08-13. Read this before the queue.
 
 **The queue holds 134 rows and they all looked equally live. They are not.** Every
@@ -311,7 +340,12 @@ narrative companion to `ledger.md`: the ledger records what each packet *was*, t
 records what we are doing *next* and *why*. Update it whenever the queue changes;
 delete rows once they are accepted and recorded in the ledger.
 
-Last updated: 2026-08-21. Most recent change: the orchestrator's record sweep disposing
+Last updated: 2026-08-22. Most recent change: **the R-row sequencing ruling** at the top
+of this file — R1–R13 from the 2026-08-20 program review now carry queue rows, statuses,
+and an explicit before-PUR / delayed ruling each. **Seven of them had no row anywhere in
+the queue until now.** `R8` and `R5` are ruled hard prerequisites of `PUR-2`, `R4` gates
+PUR-2's chartering and is owed from the user, `R7` gates `SAL-1`, and nothing hard-gates
+`PUR-1`. Prior change: the orchestrator's record sweep disposing
 **program review R1** — six ADR status lines that still read *"ratified when that packet
 is accepted"* after their packets reached `accepted` (ADR-0026, -0027, -0028, -0029,
 -0030, -0033) were corrected against ledger evidence, and the duplicated `G2-P5d-b`
