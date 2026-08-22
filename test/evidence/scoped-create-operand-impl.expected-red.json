@@ -76,10 +76,10 @@
     },
     {
       "name": "provider-refusal-subject-erased",
-      "claim": "A provider refusal for an inactive legal entity reaches the web boundary carrying its own code and its subject, not a generic unavailable.",
-      "file": "apps/web/src/surface-runtime.ts",
-      "original": "    return {\n      code: 'OPERATION_LEGAL_ENTITY_INACTIVE',\n      subject: error.subjectId,\n    };",
-      "replacement": "    return {\n      code: 'OPERATION_UNAVAILABLE',\n    };",
+      "claim": "A provider refusal for an inactive legal entity reaches the web boundary carrying its own code and its subject, not a generic unavailable. (The seam moved from surface-runtime.ts to gateway-error-codes.ts when web-refusal-taxonomy was accepted; the gate caught the drift on the merge.)",
+      "file": "apps/web/src/gateway-error-codes.ts",
+      "original": "      return {\n        code: 'OPERATION_LEGAL_ENTITY_INACTIVE',\n        subject: error.subjectId,\n      };",
+      "replacement": "      return {\n        code: 'OPERATION_UNAVAILABLE',\n      };",
       "test": {
         "files": ["test/integration/surface-data-binding.test.ts"],
         "namePattern": "inactive legal-entity refusal keeps its provider subject"
