@@ -54,6 +54,7 @@ import {
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
@@ -465,6 +466,15 @@ test(
               assertConstrainedDomainVerificationCompleted(
                 pool,
                 connection,
+                tenantA,
+                compiledApplication,
+              ),
+          );
+          await context.test(
+            'a released purchase order refuses every line mutation, and a draft one admits them',
+            () =>
+              assertPurchaseOrderParentGuard(
+                pool,
                 tenantA,
                 compiledApplication,
               ),
@@ -3339,6 +3349,215 @@ async function assertConstrainedDomainVerificationCompleted(
     compiled,
     plan: releaseVerificationBinding(compiled).plan,
   });
+}
+
+/**
+ * THE PARENT-AGGREGATE RULE, OBSERVED AGAINST REAL POSTGRESQL.
+ *
+ * `PUR-1` declares the guard once, on the header's four generic operations, and
+ * relies on the platform to carry it down to `purchase_order_line` with zero
+ * line-level declarations: `parentGuardsFromCatalog` derives a guard from every
+ * active parent `updateRecordEffect`, and `requireRelationTarget` evaluates it
+ * against the parent's PERSISTED values under `FOR SHARE` whenever a child is
+ * created through its relation or mutated.
+ *
+ * The unit suite can only assert both halves of that mechanism and then
+ * REPLICATE the derivation, which is a proxy. AGENTS.md §6 wants the fact
+ * observed, and a stored-value boundary is exactly where a proxy is not enough:
+ * a line silently editable after release is wrong in the database long before
+ * anyone notices.
+ *
+ * So this runs the real gateway against the real interpreter:
+ *
+ *  1. create a DRAFT order and a line under it;
+ *  2. the ADMISSION TWIN -- update the line successfully while the parent is
+ *     draft, so the refusals below are known to be about state and not about a
+ *     line that could never be mutated at all;
+ *  3. release the order through its transition operation;
+ *  4. attempt line create, update and archive; require typed
+ *     `MODULE_OPERATION_PRECONDITION_REFUSED` on each;
+ *  5. read the row back and require revision, values and archive state
+ *     unchanged.
+ */
+async function assertPurchaseOrderParentGuard(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled =
+    parseCompiledApplication(compiledApplication).application.compiled;
+  const storage = storageTarget(compiled);
+  const master = storage.entities.find(
+    (candidate) => candidate.legalEntityMaster !== undefined,
+  );
+  assert.ok(master?.legalEntityMaster);
+  const defaultEntity = await pool.query<{ legal_entity_id: string }>(
+    `SELECT "${master.recordIdentity.column}"::text AS legal_entity_id
+       FROM north_star_module.${master.physicalTableName}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND "${master.legalEntityMaster.fieldColumns.isDefault}" IS TRUE
+        AND "${master.archive.archivedAtColumn}" IS NULL`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  const legalEntityId = defaultEntity.rows[0]?.legal_entity_id;
+  assert.ok(legalEntityId);
+
+  const purchasing = APPLICATION_IDS.purchasing;
+  // `confirmed` matters for `archive`, which declares `humanRequired`: the
+  // gateway checks the confirmation grant BEFORE the interpreter evaluates any
+  // precondition, so without a grant the archive arm would observe
+  // `SemanticOperationConfirmationRequiredError` and prove nothing about the
+  // parent guard.
+  const invoke = (
+    operationId: string,
+    input: Readonly<Record<string, unknown>>,
+    confirmed = false,
+  ) =>
+    runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+      runtime.operationGateway.invoke(
+        view,
+        {
+          confirmationGrant: confirmed
+            ? runtime.operationMediation.issueConfirmationGrant(
+                view,
+                operationId,
+                input as ImmutableJsonValue,
+              )
+            : null,
+          idempotencyKey: randomUUID(),
+          input,
+          operationId,
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+        },
+        runtime.operationMediation.issueInvocation(view, 'UI'),
+      ),
+    );
+
+  const orderId = randomUUID();
+  await invoke(purchasing.createOperationId, {
+    legalEntityId,
+    recordId: orderId,
+    relations: {},
+    values: {
+      [purchasing.fieldIds.currency]: 'CAD',
+      [purchasing.fieldIds.expectedDate]: '2026-09-01T00:00:00.000Z',
+      [purchasing.fieldIds.notes]: 'parent guard vertical',
+      [purchasing.fieldIds.number]: 'PO-GUARD-001',
+      [purchasing.fieldIds.orderDate]: '2026-08-22T00:00:00.000Z',
+      [purchasing.fieldIds.supplierPartyId]: 'SUP-GUARD-001',
+    },
+  });
+
+  const lineId = randomUUID();
+  const lineValues = {
+    [purchasing.fieldIds.itemId]: 'ITEM-GUARD-001',
+    [purchasing.fieldIds.lineNumber]: '1',
+    [purchasing.fieldIds.orderedQuantity]: '10',
+    // Canonical decimal: no trailing zero. `2.50` is refused by the compiled
+    // value contract, `2.5` is the same number written canonically.
+    [purchasing.fieldIds.unitPrice]: '2.5',
+  } as const;
+  await invoke(purchasing.lineCreateOperationId, {
+    legalEntityId,
+    recordId: lineId,
+    relations: { [purchasing.lineRelationId]: orderId },
+    values: lineValues,
+  });
+
+  // THE ADMISSION TWIN. Without it, every refusal below is satisfiable by a
+  // line that could never be mutated in any state.
+  await invoke(purchasing.lineUpdateOperationId, {
+    expectedRevision: 1,
+    patch: { [purchasing.fieldIds.orderedQuantity]: '11' },
+    recordId: lineId,
+  });
+
+  const lineEntity = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === purchasing.entityIds.purchaseOrderLine,
+  );
+  assert.ok(lineEntity);
+  const quantityColumn = lineEntity.columns.find(
+    (column) => column.canonicalFieldId === purchasing.fieldIds.orderedQuantity,
+  );
+  assert.ok(quantityColumn);
+  const readLine = async () => {
+    const result = await pool.query<{
+      archived: boolean;
+      quantity: string;
+      revision: string;
+    }>(
+      `SELECT "${lineEntity.archive.archivedAtColumn}" IS NOT NULL AS archived,
+              "${quantityColumn.physicalName}"::text AS quantity,
+              "${lineEntity.optimisticRevision.column}"::text AS revision
+         FROM north_star_module.${lineEntity.physicalTableName}
+        WHERE "${lineEntity.recordIdentity.column}" = $1`,
+      [lineId],
+    );
+    assert.equal(result.rowCount, 1);
+    return result.rows[0]!;
+  };
+  const admitted = await readLine();
+  assert.equal(admitted.revision, '2', 'the admission twin must have written');
+  assert.equal(admitted.archived, false);
+
+  await invoke(purchasing.releaseOperationId, {
+    expectedRevision: 1,
+    recordId: orderId,
+  });
+
+  const refused = async (
+    label: string,
+    operationId: string,
+    input: Readonly<Record<string, unknown>>,
+    confirmed = false,
+  ) => {
+    await assert.rejects(
+      invoke(operationId, input, confirmed),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof ModuleRuntimeInterpreterError,
+          `${label}: ${String(error)}`,
+        );
+        assert.equal(
+          error.code,
+          'MODULE_OPERATION_PRECONDITION_REFUSED',
+          `${label} was refused for the wrong reason: ${error.code}`,
+        );
+        return true;
+      },
+    );
+  };
+
+  await refused('line update after release', purchasing.lineUpdateOperationId, {
+    expectedRevision: 2,
+    patch: { [purchasing.fieldIds.orderedQuantity]: '99' },
+    recordId: lineId,
+  });
+  await refused(
+    'line archive after release',
+    `${APPLICATION_IDS.namespace}:operation.purchase_order_line_archive`,
+    { expectedRevision: 2, recordId: lineId },
+    true,
+  );
+  await refused('line create after release', purchasing.lineCreateOperationId, {
+    legalEntityId,
+    recordId: randomUUID(),
+    relations: { [purchasing.lineRelationId]: orderId },
+    values: lineValues,
+  });
+  // The header itself is closed by the same predicate, evaluated on its own
+  // prior image rather than through the relation.
+  await refused('header update after release', purchasing.updateOperationId, {
+    expectedRevision: 2,
+    patch: { [purchasing.fieldIds.notes]: 'edited after release' },
+    recordId: orderId,
+  });
+
+  // Nothing moved. Revision, value and archive state are all as the admission
+  // twin left them.
+  const after = await readLine();
+  assert.deepEqual(after, admitted, 'a refused mutation still changed the row');
 }
 
 async function assertEntityOwnedCreateInput(

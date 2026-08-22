@@ -19,7 +19,10 @@ import {
   type StorageTargetPayloadV1,
   type StorageTransitionEnvelope,
 } from '../../packages/compiler/src/index.js';
-import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
+import {
+  COMPOSED_MODULE_NAMES,
+  composedApplicationDefinition,
+} from '../../packages/domain/src/app/builder.js';
 import {
   LEGAL_ENTITY_FAMILY_MAP_V1,
   LEGAL_ENTITY_RELATION_SEMANTICS_V1,
@@ -57,6 +60,15 @@ const LIFECYCLE = {
     ['cancel', 'released', 'cancelled'],
   ],
 } as const;
+
+/**
+ * The transitions `PUR-1` binds an operation to. `close` and `reopen` are
+ * DECLARED EDGES ONLY -- plan section 7.17 says what closes an order is `PUR-2`'s to
+ * decide, so emitting an operation for either would let a caller persist an
+ * arbitrary manual close today with no receipt rule behind it.
+ */
+const DRIVEN = ['release', 'draft_cancel', 'cancel'] as const;
+const DECLARED_ONLY = ['close', 'reopen'] as const;
 
 /**
  * Five transitions, four permissions: both cancels authorize on one
@@ -486,7 +498,9 @@ test('control: an added move is seen by the same check that asserts absence', ()
 
 test('every transition compiles to a resolved effect with a closed, patchless contract', () => {
   const operations = operationCatalog(compile());
-  for (const [action, from, to] of LIFECYCLE.transitions) {
+  for (const [action, from, to] of LIFECYCLE.transitions.filter(([local]) =>
+    (DRIVEN as readonly string[]).includes(local),
+  )) {
     const operation = operations.find(
       (candidate) =>
         candidate.operationId ===
@@ -578,7 +592,7 @@ test('a transition permission that disagrees with its operation is refused, and 
   // honours ONE: the gateway authorizes the operation's `permissionId`, and the
   // compiled effect carries no permission at all.
   assert.equal(compile().status, 'compiled');
-  for (const [action] of LIFECYCLE.transitions) {
+  for (const action of DRIVEN) {
     const permissionId = `${namespace}:permission.purchase_order_${TRANSITION_PERMISSIONS[action]!}`;
     const transition = normalized().stateMachines[0]!.transitions.find(
       (candidate) =>
@@ -783,12 +797,10 @@ test('each transition is offered only where it can move the record', () => {
   const operations = operationCatalog(compile());
   const expected: Record<string, readonly string[]> = {
     cancel: ['released'],
-    close: ['released'],
     draft_cancel: ['draft'],
     release: ['draft'],
-    reopen: ['closed'],
   };
-  for (const [action] of LIFECYCLE.transitions) {
+  for (const action of DRIVEN) {
     const guard = precondition(
       operations,
       `${namespace}:operation.purchase_order_${action}`,
@@ -809,6 +821,148 @@ test('each transition is offered only where it can move the record', () => {
     // not arise here.
     assert.equal(evaluate(guard, {}), 'refused');
   }
+});
+
+test('close and reopen are DECLARED edges that nothing can invoke', () => {
+  // THE FINDING THIS EXISTS FOR. An earlier version of this module emitted an
+  // operation for every transition in the table, which made `released -> closed`
+  // and `closed -> released` executable through the semantic operation gateway
+  // TODAY -- with no receipt-derived closure rule, no open-to-receive
+  // calculation, and no `PUR-2` mechanism of any kind behind them. An arbitrary
+  // manual close would have become a stored business fact every later reader
+  // takes as true, on a document that is then uneditable with no amend path.
+  //
+  // A state names a DESTINATION; an active transition operation grants a
+  // PRESENT BEHAVIOUR. The measured one-way-door cost licenses the first and not
+  // the second -- see the control below.
+  const machine = normalized().stateMachines[0]!;
+  const operations = operationCatalog(compile());
+
+  for (const action of DECLARED_ONLY) {
+    // The EDGE is declared, so `PUR-2` binds an operation without touching the
+    // machine -- and without a lineage entry for a state.
+    assert.equal(
+      machine.transitions.some(
+        (transition) =>
+          transition.transitionId === PURCHASING_IDS.transitionIds[action],
+      ),
+      true,
+      `${action} must remain a declared edge`,
+    );
+    // And NOTHING can invoke it. Asserted against the compiled catalog rather
+    // than the authored operations, because the catalog is what the gateway
+    // reads.
+    assert.equal(
+      operations.some(
+        (operation) =>
+          operation.effect.transition?.targetId ===
+          PURCHASING_IDS.transitionIds[action],
+      ),
+      false,
+      `${action} is invocable, so a caller can persist that move today`,
+    );
+    assert.equal(
+      operations.some(
+        (operation) =>
+          operation.operationId ===
+          `${namespace}:operation.purchase_order_${action}`,
+      ),
+      false,
+    );
+  }
+
+  // The check is not passing over an empty catalog: the three driven
+  // transitions ARE invocable, by the same reader.
+  assert.deepEqual(
+    operations
+      .filter((operation) => operation.effect.kind === 'transitionStateEffect')
+      .map((operation) => operation.operationId)
+      .toSorted(),
+    DRIVEN.map(
+      (action) => `${namespace}:operation.purchase_order_${action}`,
+    ).toSorted(),
+  );
+});
+
+test('control: binding an operation to a declared-only edge is visible to that check', () => {
+  // VACUITY VECTOR -- a proxy satisfied while the fact does not hold. Varying
+  // exactly one property: `close` gains the operation this packet declines to
+  // emit. The check above must see it.
+  const bound = compile(
+    mutated((definition) => {
+      definition.operations.push({
+        confirmation: 'none',
+        effect: {
+          kind: 'transitionStateEffect',
+          schemaVersion: ADOPTED_LANGUAGE_VERSION,
+          transition: canonicalReference(
+            'transitionReference',
+            PURCHASING_IDS.transitionIds.close,
+          ),
+        },
+        kind: 'operationDefinition',
+        module: canonicalReference('moduleReference', PURCHASING_IDS.moduleId),
+        operationId: `${namespace}:operation.purchase_order_close`,
+        permission: canonicalReference(
+          'permissionReference',
+          `${namespace}:permission.purchase_order_close`,
+        ),
+        readBack: canonicalReference(
+          'queryReference',
+          `${namespace}:query.purchase_order_get`,
+        ),
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
+        tier: 'o0',
+      } as unknown as AuthoredShape['operations'][number]);
+    }),
+  );
+  assert.equal(
+    operationCatalog(bound).some(
+      (operation) =>
+        operation.effect.transition?.targetId ===
+        PURCHASING_IDS.transitionIds.close,
+    ),
+    true,
+  );
+});
+
+test('a declared edge costs no state, and adding one later would', () => {
+  // The measurement that separates the two halves of ADR-0059, and the reason
+  // deferring `close`/`reopen` to `PUR-2` is cheap while deferring the `closed`
+  // STATE would not have been.
+  //
+  // A transition declared with no operation referencing it COMPILES...
+  assert.equal(compile().status, 'compiled');
+
+  // ...and adding a transition to an already-materialized machine compiles
+  // against it with NO retype, because states define the enum options and
+  // transitions do not.
+  const withoutReopen = mutated((definition) => {
+    definition.stateMachines[0]!.transitions =
+      definition.stateMachines[0]!.transitions.filter(
+        (transition) =>
+          transition.transitionId !== PURCHASING_IDS.transitionIds.reopen,
+      );
+  });
+  const prior = mustCompile(
+    compilerInput(
+      withoutReopen,
+      expectedActiveReleaseFrom(
+        mustCompile(compilerInput(emptied(withoutReopen))),
+      ),
+    ),
+  );
+  const readded = compileApplication(
+    compilerInput(
+      purchasingModuleDefinition(),
+      expectedActiveReleaseFrom(prior),
+    ),
+  );
+  assert.equal(
+    readded.status,
+    'compiled',
+    'adding a transition to a shipped machine must not retype the state column',
+  );
 });
 
 // ===========================================================================
@@ -872,10 +1026,17 @@ test('the command verbs are the ones the renderer reads', () => {
   const operationIds = authored().operations.map(
     (operation) => operation.operationId,
   );
-  for (const [action] of LIFECYCLE.transitions) {
+  for (const action of DRIVEN) {
     assert.equal(
       operationIds.includes(`${namespace}:operation.purchase_order_${action}`),
       true,
+    );
+  }
+  for (const action of DECLARED_ONLY) {
+    assert.equal(
+      operationIds.includes(`${namespace}:operation.purchase_order_${action}`),
+      false,
+      `${action} must not be an operation in this packet`,
     );
   }
   // BOTH cancels end in `_cancel`, deliberately: ADR-0056 ranks on the final
@@ -891,6 +1052,43 @@ test('the command verbs are the ones the renderer reads', () => {
       `${namespace}:operation.purchase_order_draft_cancel`,
       `${namespace}:operation.purchase_order_release`,
     ],
+  );
+});
+
+test('the composed application derives its modules from an ordered registry', () => {
+  // Plan §7.2 assigned this refactor to "the first packet that mounts anything"
+  // and §7.5's `PUR-1` row repeats it. Before it, `builder.ts` named every
+  // module SIX times -- factory list, destructured tuple, truthiness guard,
+  // hard-coded count in an error string, a re-listed array for module ordering,
+  // and a second re-listed array for the capability comparison.
+  //
+  // What this control can prove is DERIVATION rather than enumeration: the
+  // composed module list, its length, and its ordering all follow the registry
+  // rather than any separately maintained literal.
+  const composed = composedApplicationDefinition() as unknown as AuthoredShape;
+  assert.deepEqual(COMPOSED_MODULE_NAMES, [
+    'party',
+    'catalog',
+    'location',
+    'inventory',
+    'purchasing',
+  ]);
+  assert.equal(composed.modules.length, COMPOSED_MODULE_NAMES.length);
+  assert.deepEqual(
+    composed.modules.map((module) => module.label),
+    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing'],
+  );
+  // `orderKey` is derived from registry POSITION, which is what makes order the
+  // only thing the registry has to declare.
+  assert.deepEqual(
+    composed.modules.map((module) => module.orderKey),
+    COMPOSED_MODULE_NAMES.map((_, index) => (index + 1) * 10),
+  );
+  // Every mounted module contributes exactly one moduleDefinition, so nothing
+  // downstream needs a count of its own.
+  assert.equal(
+    new Set(composed.modules.map((module) => module.moduleId)).size,
+    COMPOSED_MODULE_NAMES.length,
   );
 });
 
@@ -1044,7 +1242,7 @@ test('the module rides the adopted language version and compiles deterministical
   );
   assert.equal(definition.entities.length, 2);
   assert.equal(definition.queries.length, 8);
-  assert.equal(definition.operations.length, 13);
+  assert.equal(definition.operations.length, 11);
   assert.equal(definition.permissions.length, 14);
   assert.equal(definition.assertions.length, 2);
 
@@ -1126,7 +1324,7 @@ interface AuthoredShape {
     presence: string;
   }>;
   languageVersion: string;
-  modules: Array<{ label: string }>;
+  modules: Array<{ label: string; moduleId: string; orderKey: number }>;
   normalizationProfileVersion: string;
   operations: Array<{
     effect: {

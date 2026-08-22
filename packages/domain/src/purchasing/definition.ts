@@ -67,45 +67,49 @@ type StateLocalId = (typeof STATES)[number][0];
 /**
  * The four transitions, and the four that are deliberately absent.
  *
- * | transition | ruled |
- * |---|---|
- * | `draft -> released` | the release |
- * | `draft -> cancelled` | the cancel of an uncommitted order -- abandoning one is ordinary |
- * | `released -> closed` | the close; what triggers it is `PUR-2`'s |
- * | `closed -> released` | the reopen |
- * | `released -> cancelled` | the cancel of a committed order |
- * | `released -> draft` | **no** -- `draft` asserts no commitments exist, and once released, receipts may |
- * | `closed -> cancelled` | **no** -- reopen first |
- * | `cancelled -> anything` | **no** -- terminal; reissue instead |
+ * | transition | ruled | operation in `PUR-1`? |
+ * |---|---|---|
+ * | `draft -> released` | the release | **yes** |
+ * | `draft -> cancelled` | the cancel of an uncommitted order | **yes** |
+ * | `released -> cancelled` | the cancel of a committed order | **yes** |
+ * | `released -> closed` | the close | **NO -- `PUR-2`'s** |
+ * | `closed -> released` | the reopen | **NO -- `PUR-2`'s** |
+ * | `released -> draft` | **refused** -- `draft` asserts no commitments exist, and once released, receipts may |  |
+ * | `closed -> cancelled` | **refused** -- reopen first |  |
+ * | `cancelled -> anything` | **refused** -- terminal; reissue instead |  |
  *
- * CANCEL DEPARTS FROM TWO STATES, SO IT IS TWO TRANSITIONS AND TWO OPERATIONS.
- * `transitionStateEffect` carries exactly ONE `transition` reference
- * (`schemas.ts`), so one operation drives one transition and there is no
- * spelling in which a single cancel reaches both.
+ * THE LAST COLUMN IS THE POINT, and it corrects an earlier version of this file
+ * that emitted an operation for every row.
  *
- * An earlier draft of this file shipped only the released-side cancel, on the
- * argument that a draft's exit is the generic ARCHIVE. That was wrong and the
- * plan's ruling is right: ARCHIVE is a LIFECYCLE fact -- `archived_at`, hidden
- * from read-backs -- while `cancelled` is a BUSINESS state that stays reportable.
- * They are not substitutes, and an operator who abandons a draft order has made
- * a business decision rather than a filing one.
+ * **A state names a DESTINATION; an active transition operation grants a
+ * PRESENT BEHAVIOUR.** Declaring `closed` now is forced -- adding a state to a
+ * materialized machine widens the enum and raises
+ * `COMPILER_STORAGE_RETYPE_UNSUPPORTED`, measured. Declaring the close and
+ * reopen EDGES now is free and useful, because `PUR-2` can then bind operations
+ * to them without touching the machine. But EMITTING those operations here
+ * would let any caller persist `released -> closed` today, with no receipt rule,
+ * no open-to-receive calculation and no `PUR-2` mechanism of any kind -- an
+ * arbitrary manual close becoming a stored business fact every later reader
+ * takes as true, on a document that is then uneditable with no amend path.
  *
- * BOTH OPERATION IDS END IN `_cancel`, DELIBERATELY. ADR-0056 ranks the command
- * bar on the final underscore-delimited verb and `operationLabel` derives the
- * button text from the same suffix, so both present as "Cancel" -- which is the
- * word for what each does. They can never be offered together, because their
- * preconditions are disjoint (`draft` versus `released`), so the ambiguity
- * ADR-0056 guards against cannot arise; and ADR-0051 made the write path
- * address an operation BY ID, so two commands sharing a label post different
- * operations correctly. That is the exact collision ADR-0051 fixed.
+ * **The one-way-door measurement does not license it.** Measured on this
+ * module: adding a TRANSITION to an already-materialized machine compiles with
+ * no retype, and a transition declared with no operation referencing it
+ * compiles too. So the cost the retype evidence establishes is the cost of a
+ * STATE, and deferring these two operations to the packet that can give them
+ * semantics is cheap. Plan section 7.17 says what closes an order is `PUR-2`'s to
+ * decide, and this file now says the same thing.
  */
 const TRANSITIONS = [
-  ['release', 'Release order', 10, 'draft', 'released', 'release'],
-  ['draft_cancel', 'Cancel order', 20, 'draft', 'cancelled', 'cancel'],
-  ['close', 'Close order', 30, 'released', 'closed', 'close'],
-  ['reopen', 'Reopen order', 40, 'closed', 'released', 'reopen'],
-  ['cancel', 'Cancel order', 50, 'released', 'cancelled', 'cancel'],
+  ['release', 'Release order', 10, 'draft', 'released', 'release', true],
+  ['draft_cancel', 'Cancel order', 20, 'draft', 'cancelled', 'cancel', true],
+  ['close', 'Close order', 30, 'released', 'closed', 'close', false],
+  ['reopen', 'Reopen order', 40, 'closed', 'released', 'reopen', false],
+  ['cancel', 'Cancel order', 50, 'released', 'cancelled', 'cancel', true],
 ] as const;
+
+/** The transitions `PUR-1` binds an operation to. The rest are declared only. */
+const DRIVEN_TRANSITIONS = TRANSITIONS.filter(([, , , , , , driven]) => driven);
 
 type TransitionLocalId = (typeof TRANSITIONS)[number][0];
 type TransitionPermissionLocalId = (typeof TRANSITIONS)[number][5];
@@ -414,7 +418,10 @@ export function purchasingModuleDefinition(
         'purchase_order_line',
         entityIds.purchaseOrderLine,
       ),
-      ...TRANSITIONS.map(([local, , , fromState, , permission]) =>
+      // DRIVEN_TRANSITIONS, not TRANSITIONS. `close` and `reopen` are declared
+      // edges with no operation, so nothing can invoke them until `PUR-2` binds
+      // one. See the table above the transition list.
+      ...DRIVEN_TRANSITIONS.map(([local, , , fromState, , permission]) =>
         transitionOperation(
           definitionIds,
           local,
