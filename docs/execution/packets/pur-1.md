@@ -362,6 +362,33 @@ number, one count — and none changes what those gates ASSERT. They were taken
 rather than stopped on because the lease grants `test/unit/**` and a test file
 that cannot be run is not a test. **The orchestrator's call, not the lane's.**
 
+## R13 becomes visible on a new surface, and this packet does not fix it
+
+The charter says *"do not fix R13 here; do not inherit it either."* The pattern
+is not inherited — release, close, reopen and cancel take the operation path
+ADR-0051 settled, and `renderCommandBar` evaluates each command's compiled
+precondition against the record before offering it. **But mounting Purchasing
+makes the open finding visible on a surface that did not exist before**, and
+that is worth stating rather than leaving for an operator to find.
+
+`renderLifecycleForm` (`apps/web/src/component-registry.ts`, re-locate by
+symbol) picks its intent as `record.archived ? 'restore' : 'archive'` and never
+consults the operation's precondition. So on a `released`, `closed` or
+`cancelled` purchase order, **"More actions → Archive" renders and the press
+fails** with `MODULE_OPERATION_PRECONDITION_REFUSED` — the archive operation
+carries the same three-term guard as the other three generic operations, and the
+interpreter enforces it correctly.
+
+**Edit is not affected**: the command bar's Edit link is gated by
+`operationAvailableForRecord(update, record)`, which does evaluate the
+precondition, so it correctly disappears once an order leaves `draft`. The
+defect is confined to the archive/restore overflow.
+
+This is a **new instance of an existing open row**, not a new defect and not a
+regression introduced here — every module with a terminal-state guard already
+has it, `stock_count` included. It is named so the R13 row can record that
+mounting a guarded document is what makes it operator-visible.
+
 ## What this lane did NOT verify
 
 - **Anything requiring a running database or browser at the time of writing.**
