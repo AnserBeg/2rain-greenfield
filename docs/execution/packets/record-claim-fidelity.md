@@ -12,11 +12,15 @@ anything was changed. Round 3's three open findings and its new narrative defect
 are closed below. The packet's last executable commit is
 `0b343d2b9e0a0c81bfaba014b3fbbc8f8b420b41`.
 
-**The three rounds converged rather than spiralled: 6 findings, then 5, then 3,
-and every round-4 correction is FAIL-CLOSED or STRUCTURAL rather than a widened
-pattern.** That distinction is the reason this is a fourth round rather than a
-re-scope. A reader that fails closed has a terminal state; a reader that learns
-one more spelling per round does not.
+**Round 4 argued that the rounds were converging because its corrections were
+fail-closed rather than pattern-widening. Round 5 refuted that by measurement,
+and the refutation is correct.** The fail-closed branch is entered only after an
+open-ended spelling detector recognises that a ratification clause exists, so
+`will be ratified after X is accepted` never reaches it and binds the planned
+provenance packet instead. **A gate whose terminal state is reached only by
+matching another finite list of English is not terminal.** The argument is
+withdrawn; it was the lane defending its own instrument, and the prompt that
+carried it was steering, which the round-5 reviewer said plainly.
 
 **`pnpm test:architecture` is 151/151 green**, measured in this lane's own
 worktree with the SHA re-read after the run. It was OWED for one round; see
@@ -90,7 +94,7 @@ those declarations against the git tree. Concretely:
 |---|---|
 | `scripts/check-records.sh` | new — the operator-facing gate |
 | `test/architecture/record-claim-fidelity.ts` | new — the checker and its CLI |
-| `test/architecture/record-claim-fidelity-controls.ts` | new — the sixteen committed controls |
+| `test/architecture/record-claim-fidelity-controls.ts` | new — the committed controls, one per diagnostic (22) |
 | `test/architecture/record-claim-fidelity.test.ts` | new — CI wiring, via the `test:architecture` glob |
 | `test/architecture/record-claim-fidelity.manifest.json` | new — the pinned known-absence set |
 | `test/architecture/record-claim-fidelity-negative-control.ts` | new — the `ux-picker` r3 reproduction, runnable |
@@ -335,8 +339,13 @@ record and the block inside it are one file: a single edit moves both, which is
 why filename equality proved nothing. The trailer is written into the commit
 object at commit time and **cannot be changed without moving the SHA the block
 names**. `check-review-record.sh` already reads this same trailer for the same
-reason. What it proves is bounded and stated: the range was authored under that
-packet's name. It does not prove the packet was entitled to that range.
+reason. **What it proves is exactly this and no more: the declared HEAD attests
+one packet name, and that head fixes the ancestry.** It does not observe who
+authored the intermediate commits, and it does not prove the packet was entitled
+to the range. An earlier draft of this paragraph said "the range was authored
+under that packet's name" — round 4 corrected that wording in the disposition
+table below and left it standing here, which is the same stale-record class this
+packet exists to catch, occurring for the third time inside the packet itself.
 
 **The owning-table set was measured, not chosen.** Every routing target that
 resolves in the tree today sits under one of exactly three headers — the ledger
@@ -532,10 +541,16 @@ the prose-parsing the charter forbids. Recorded as a limit rather than chased.
   — reds by design with `RECORD_CLAIM_PATH_UNCHANGED`, exit 1.
 - Per-report-site die-alone matrix — **23/23**.
 - Behavioural-guard matrix — **12/12**.
-- Two admission twins, each measured by reverting its subject: the GFM-separator
-  twin fails when the delimiter matcher is made strict again, and the
-  working-tree twin drives the REAL `collectRepositoryInput` adapter rather than
-  an injected predicate.
+- Two admission twins, each measured by reverting its subject. The
+  GFM-separator twin fails when the delimiter matcher is made strict again.
+  **The working-tree twin is narrower than an earlier draft of this line
+  claimed:** it constructs a synthetic `RecordClaimInput` and calls
+  `verifyRecordClaims` directly, over a REAL git reader and real dangling
+  commits — so it does prove the frozen tree beats a disagreeing working tree,
+  but it does **not** drive the production `collectRepositoryInput` adapter. A
+  separate test drives that adapter and asserts the repository is unwritten; it
+  never constructs the frozen-versus-working disagreement. Neither test is an
+  end-to-end adapter twin, and the earlier line said one was.
 - `pnpm test:architecture` — **151/151 green at `4fe6c7d`**, which is 141
   baseline plus this packet's 10. Run in `/home/rvham/2rain-greenfield-rcf`,
   this lane's own worktree with its own install, and **`git rev-parse HEAD` was
