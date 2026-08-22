@@ -221,7 +221,7 @@ export const REGISTERED_SURFACE_COMPONENT_IDS = Object.freeze(
   Object.keys(componentRegistry).sort(),
 );
 
-/** One registry-resolution authority backs both visible diagnostics and writes. */
+/** One registry-resolution authority backs visible slot diagnostics. */
 export function surfaceHasUnsupportedComponent(
   surface: CompiledSurfaceDefinition,
 ): boolean {
@@ -232,8 +232,10 @@ export function surfaceHasUnsupportedComponent(
 
 /**
  * The registry entries that render mutation controls also authorize their
- * submissions. Record lifecycle controls additionally require a writable form
- * for the same entity, so a visibly inert entity cannot be mutated by posting
+ * submissions. An unsupported non-mutation slot fails visibly in its own
+ * position but cannot veto a registered mutation control elsewhere on the
+ * surface. Record lifecycle controls additionally require a writable form for
+ * the same entity, so a visibly inert entity cannot be mutated by posting
  * around its release-defined UI.
  */
 export function surfaceSupportsRuntimeIntent(
@@ -243,7 +245,6 @@ export function surfaceSupportsRuntimeIntent(
   intent: SurfaceOperationIntent,
 ): boolean {
   if (
-    surfaceHasUnsupportedComponent(surface) ||
     !surface.slots.some((slot) =>
       slotRegistrationSupportsIntent(surface, slot, intent),
     )
@@ -785,12 +786,9 @@ function renderSections(context: SurfaceComponentContext): string {
   const compatibilityFeedback = hasSurfaceSlot(context, 'titleStatus')
     ? ''
     : feedbackHtml(context.feedback);
-  const compatibilityCommand = hasSurfaceSlot(context, 'commandBar')
-    ? ''
-    : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context, operation, record)}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context, operation, record)}</div></form></section>`,
     'sections-slot',
   );
 }

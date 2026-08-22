@@ -37,9 +37,12 @@ same-node plural control and retains a raw identity inside an unresolved union.
 Candidate `a6b922998c17b6c41d3c3975adf6436025f01add` was accepted as the
 last broad review round. The final test-only correction makes untagged
 no-substitution template literals load-bearing in incomplete runtime
-concatenations and declares the observer's closed grammar. It is gate-green for
-the user-scoped narrow confirmation; the full matrix remains deferred until
-that confirmation passes.
+concatenations and declares the observer's closed grammar. Candidate
+`d4d40339df78c82d36bc68da5b3ba65dcf47f815` received the prescribed narrow
+confirmation PASS: the reviewer closed both the deletion causality and declared-
+grammar questions, independently verified the branch/ranges and byte-identical
+production, and found no in-scope material defect. Review has converged; the one
+deferred full matrix is next on the constructed integration tree.
 
 ## Packet definition
 
@@ -917,13 +920,29 @@ the new refusal dies while the completed-construction path stays green. The
 packet now states the grammar as a closed positive set and states its safety
 property: anything else is appended as dynamic and conservatively padded, so
 an unrecognized form creates an unknown boundary rather than a silent absence.
-The next review is the user-scoped narrow confirmation of only the paired
-control and the record's grammar accuracy. Production correctness and rounds
-1–13 are settled rather than reopened. If that confirmation names another
-uncontrolled syntax form, it is recorded as a known limitation under the
-declared grammar and does not start another correction round. On PASS, the one
-deferred full matrix runs on the integration tree before the required packet-
-into-main `--no-ff` merge.
+The user-scoped narrow confirmation passed at
+`d4d40339df78c82d36bc68da5b3ba65dcf47f815`. It verified that narrowing only
+`ts.isStringLiteralLike` to `ts.isStringLiteral` in
+`staticallyKnownStringRuns` removes the new bounded refusal while leaving the
+completed-construction path green; it also verified that the declared grammar
+matches the observer and that unsupported construction children become
+conservatively padded unknown boundaries rather than silent absences. The
+reviewer independently proved byte identity with:
+
+```bash
+git diff --exit-code \
+  a6b922998c17b6c41d3c3975adf6436025f01add \
+  d4d40339df78c82d36bc68da5b3ba65dcf47f815 \
+  -- \
+  packages/dev-tooling/src/module-press-law.ts \
+  packages/postgres-provider/src/inventory-posting-service.ts
+```
+
+That command exited zero with no output; the production blobs remain
+`83f9d84ff08a94c92563311fe8d5157dfd9517e7` and
+`1e141baa20004141321d4da1a7c95723bddf334c`. Production correctness and rounds
+1–13 are settled. The one deferred full matrix now runs on the integration tree
+before the required packet-into-main `--no-ff` merge.
 
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program

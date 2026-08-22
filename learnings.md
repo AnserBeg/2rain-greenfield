@@ -602,3 +602,83 @@ Why: entity, field and surface locals all said `master`, so surface-ID-derived
 prefixes passed a test claiming query/record authority. How to apply: make every
 non-authoritative identifier opaque and divergent, then exercise each changed
 branch directly so the wrong authority produces a different observation.
+
+## Translate refusals at an owned seam
+Date: 2026-08-20
+Why: `web-refusal-taxonomy` first imported a PostgreSQL-provider error into web,
+breaching the existing provider-neutral transport boundary.
+How to apply: translate a provider refusal into an owner-neutral typed error at
+the provider port; downstream transports consume only the owning-layer seam.
+
+## Preserve concurrent evaluation when translating one source
+Date: 2026-08-20
+Why: an `async` loader wrapper converted a synchronous throw into rejection, so
+policy ran when the original `Promise.all` expression stopped before calling it.
+How to apply: preserve call order and original handlers; name each timing class
+the controls directly observe instead of claiming promise precedence in general.
+
+## Hold sibling promises pending when testing a join
+Date: 2026-08-21
+Why: an already-rejected pair did not prove first-rejection settlement.
+How to apply: reject each input first, hold its sibling, and observe settlement
+before release. Limit: this proves no-wait, not same-turn order through wrappers.
+## Measure dependency fences before chartering paths
+Date: 2026-08-20
+Why: two correct stock-balance stops were caused by charters that fenced the
+family-registration files before checking the already-pinned legal-entity map.
+How to apply: trace every required registration and generated-contract dependency
+before assigning owned paths; fence by measured intent, then name the bounded files.
+
+## Make conformance exemptions earned and two-sided
+Date: 2026-08-20
+Why: ADR-0007 sanctioned provider-written read models, but generic conformance
+could not admit one without an explicit exemption category.
+How to apply: resolve every exemption from a pinned contract, name its maintainer,
+and ship the refusing twin that rejects authored behavior in the exempted category.
+
+## A database type is not the platform's canonical value contract
+Date: 2026-08-20
+Why: PostgreSQL accepted a raw MD5 digest as `uuid`, and privileged arithmetic
+controls read the projection green, but the generic record runtime refused that
+identifier because it was not UUIDv4. Only the ordinary gateway/browser path
+observed the mismatch.
+How to apply: provider-generated values must satisfy the canonical runtime
+contract, not merely the database type. Read a generated row back through the
+ordinary gateway and assert the exact canonical shape; rebuild must reproduce
+the same value.
+
+## A refusing twin must inspect the full emitted catalog
+Date: 2026-08-20
+Why: the provider-written refusal reused the narrower set built to prove required
+active `o0` CRUD. An `o1` record effect and a transition effect whose entity was
+resolved only during lowering therefore entered the operation catalog without
+the promised compile-time refusal.
+How to apply: derive refusing-twin ownership over every authored lifecycle and
+tier the compiler emits, resolving indirect carriers such as state-machine
+transitions. Keep the narrower admissibility set separate; it answers a different
+question. Prove each carrier with a mutant that removes only its ownership arm.
+
+## Pin every storage-shaping property before omitting authored maintenance
+Date: 2026-08-20
+Why: scalar field checks admitted a provider-written balance carrying an authored
+business key whose physical unique index contradicted the provider's row identity.
+How to apply: qualify read models against every lowerer-affecting field property,
+return explicit validity, and make each malformed specimen prove the full
+maintenance/form requirement returns—not merely that some diagnostic exists.
+
+## Carry exact ABI qualification through every required companion
+Date: 2026-08-21
+Why: posted stock required a “valid” movement companion, but that boolean proved
+only logical field shape and admitted a business key that PostgreSQL could not
+materialize on the partitioned movement fact table.
+How to apply: when admission depends on a companion, validate every downstream
+storage-shaping property on both subjects and test the companion’s exact red plus
+the dependent subject’s complete returned requirements.
+
+## Qualify every authored construct that shapes a provider ABI
+Date: 2026-08-21
+Why: exact movement fields still admitted an extra declared relation whose
+column, foreign key and index made the posting provider reject the storage target.
+How to apply: enumerate fields, declared relations and every other authored
+construct family consumed by lowering; qualify every provider-maintained input
+exactly, and explicitly prove that each unpinned construct is benign.

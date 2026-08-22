@@ -265,6 +265,30 @@
       "schemaVersion": "v5"
     },
     {
+      "assertionId": "northstar.app:assertion.posted_stock_balance_walking_slice",
+      "evidenceKinds": [
+        "structure",
+        "provider",
+        "userInterface",
+        "agent",
+        "migration",
+        "recovery"
+      ],
+      "expectedDiagnosticCode": null,
+      "expectedOutcome": "succeeds",
+      "invocation": {
+        "kind": "queryInvocation",
+        "query": {
+          "kind": "queryReference",
+          "schemaVersion": "v5",
+          "targetId": "northstar.app:query.posted_stock_balance_get"
+        },
+        "schemaVersion": "v5"
+      },
+      "kind": "assertionDefinition",
+      "schemaVersion": "v5"
+    },
+    {
       "assertionId": "northstar.app:assertion.inventory_movement_on_hand_scope",
       "evidenceKinds": ["structure", "provider"],
       "expectedDiagnosticCode": null,
@@ -514,6 +538,23 @@
         "kind": "storageMappingReference",
         "schemaVersion": "v5",
         "targetId": "northstar.app:storage.inventory_movement"
+      }
+    },
+    {
+      "entityId": "northstar.app:entity.posted_stock_balance",
+      "kind": "entityDefinition",
+      "label": "Posted stock balance",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "orderKey": 80,
+      "schemaVersion": "v5",
+      "storage": {
+        "kind": "storageMappingReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:storage.posted_stock_balance"
       }
     }
   ],
@@ -2241,6 +2282,100 @@
       "label": "Reversal movement id",
       "orderKey": 160,
       "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v5",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "fieldId": "northstar.app:field.posted_stock_balance_item_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v5"
+      },
+      "kind": "fieldDefinition",
+      "label": "Item id",
+      "orderKey": 10,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v5",
+      "searchable": true
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "fieldId": "northstar.app:field.posted_stock_balance_location_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v5"
+      },
+      "kind": "fieldDefinition",
+      "label": "Location id",
+      "orderKey": 20,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v5",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "fieldId": "northstar.app:field.posted_stock_balance_posted_quantity",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v5"
+      },
+      "kind": "fieldDefinition",
+      "label": "Posted quantity",
+      "orderKey": 30,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v5",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "fieldId": "northstar.app:field.posted_stock_balance_unit_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 32,
+        "schemaVersion": "v5"
+      },
+      "kind": "fieldDefinition",
+      "label": "Unit id",
+      "orderKey": 40,
+      "presence": "required",
       "reportable": true,
       "schemaVersion": "v5",
       "searchable": false
@@ -4231,6 +4366,18 @@
         "kind": "entityReference",
         "schemaVersion": "v5",
         "targetId": "northstar.app:entity.inventory_movement"
+      },
+      "schemaVersion": "v5"
+    },
+    {
+      "action": "read",
+      "kind": "permissionDefinition",
+      "label": "posted_stock_balance read",
+      "permissionId": "northstar.app:permission.posted_stock_balance_read",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
       },
       "schemaVersion": "v5"
     },
@@ -8709,6 +8856,368 @@
       "tier": "q0"
     },
     {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.posted_stock_balance_get_legal_entity_scope",
+          "schemaVersion": "v5"
+        },
+        "schemaVersion": "v5"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.posted_stock_balance_get_legal_entity_scope",
+          "schemaVersion": "v5"
+        }
+      ],
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:permission.posted_stock_balance_read"
+      },
+      "queryId": "northstar.app:query.posted_stock_balance_get",
+      "queryType": "get",
+      "schemaVersion": "v5",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_get_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_get_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_posted_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_get_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_get_4"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.posted_stock_balance_list_legal_entity_scope",
+          "schemaVersion": "v5"
+        },
+        "schemaVersion": "v5"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.posted_stock_balance_list_legal_entity_scope",
+          "schemaVersion": "v5"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:permission.posted_stock_balance_read"
+      },
+      "queryId": "northstar.app:query.posted_stock_balance_list",
+      "queryType": "list",
+      "schemaVersion": "v5",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_list_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_list_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_posted_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_list_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_list_4"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.posted_stock_balance_search_legal_entity_scope",
+          "schemaVersion": "v5"
+        },
+        "schemaVersion": "v5"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.posted_stock_balance_search_legal_entity_scope",
+          "schemaVersion": "v5"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:permission.posted_stock_balance_read"
+      },
+      "queryId": "northstar.app:query.posted_stock_balance_search",
+      "queryType": "search",
+      "schemaVersion": "v5",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_search_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_search_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_posted_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_search_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_search_4"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.posted_stock_balance_resolve_legal_entity_scope",
+          "schemaVersion": "v5"
+        },
+        "schemaVersion": "v5"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.posted_stock_balance_resolve_legal_entity_scope",
+          "schemaVersion": "v5"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:permission.posted_stock_balance_read"
+      },
+      "queryId": "northstar.app:query.posted_stock_balance_resolve",
+      "queryType": "resolve",
+      "resolveMatchKeys": [
+        {
+          "authority": "identifier",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_item_id"
+          },
+          "kind": "resolveMatchKey",
+          "matchKeyId": "northstar.app:resolve-key.posted_stock_balance",
+          "orderKey": 10,
+          "schemaVersion": "v5"
+        }
+      ],
+      "schemaVersion": "v5",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_resolve_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_resolve_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_posted_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_resolve_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:field.posted_stock_balance_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v5",
+          "selectionId": "northstar.app:selection.posted_stock_balance_resolve_4"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "tier": "q0"
+    },
+    {
       "aggregate": {
         "field": {
           "kind": "fieldReference",
@@ -9184,6 +9693,17 @@
       "schemaVersion": "v5",
       "storageClass": "dedicatedTable",
       "storageMappingId": "northstar.app:storage.inventory_movement"
+    },
+    {
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "kind": "storageMappingDefinition",
+      "schemaVersion": "v5",
+      "storageClass": "dedicatedTable",
+      "storageMappingId": "northstar.app:storage.posted_stock_balance"
     }
   ],
   "surfaces": [
@@ -11193,6 +11713,108 @@
       ],
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_movement_detail",
+      "surfaceRole": "record"
+    },
+    {
+      "archetype": "list",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:query.posted_stock_balance_list"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Posted stock list",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "schemaVersion": "v5",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v5",
+          "slot": "title",
+          "slotId": "northstar.app:slot.posted_stock_balance_list_title"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v5",
+          "slot": "dataGrid",
+          "slotId": "northstar.app:slot.posted_stock_balance_list_data_grid"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.posted_stock_balance_list",
+      "surfaceRole": "list"
+    },
+    {
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:query.posted_stock_balance_get"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Posted stock detail",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "schemaVersion": "v5",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v5",
+          "slot": "breadcrumb",
+          "slotId": "northstar.app:slot.posted_stock_balance_detail_breadcrumb"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v5",
+          "slot": "titleStatus",
+          "slotId": "northstar.app:slot.posted_stock_balance_detail_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v5",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.posted_stock_balance_detail_key_facts"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.posted_stock_balance_detail",
       "surfaceRole": "record"
     },
     {

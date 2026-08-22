@@ -69,6 +69,8 @@ const itemId = '45000000-0000-4000-8000-000000000004';
 const locationId = '56000000-0000-4000-8000-000000000005';
 const recordedAt = '2026-07-30T13:00:00.000Z';
 const effectiveAt = '2026-07-30T12:00:00.000Z';
+const postedStockNegativeControl =
+  process.env.POSTED_STOCK_BALANCE_NEGATIVE_CONTROL ?? null;
 
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
 
@@ -86,6 +88,7 @@ interface StorageBinding {
   legalEntity: EntityBinding;
   location: EntityBinding;
   movement: EntityBinding;
+  postedStockBalance: EntityBinding;
   schemaName: string;
   stockCount: EntityBinding;
   stockCountLine: EntityBinding;
@@ -109,6 +112,15 @@ interface TraceEntry {
 }
 
 test('stock-count posting preserves three-value evidence and appends correction and exact reversal through the shared protocol', async () => {
+  assert.ok(
+    postedStockNegativeControl === null ||
+      [
+        'initial-maintenance',
+        'correction-maintenance',
+        'rebuild-arithmetic',
+      ].includes(postedStockNegativeControl),
+    `unknown posted-stock negative control ${String(postedStockNegativeControl)}`,
+  );
   const fixture = await compiledFixture();
   const binding = storageBinding(fixture.storage);
   await withEphemeralPostgres('inventory-stock-count', async (database) => {
@@ -137,10 +149,11 @@ test('stock-count posting preserves three-value evidence and appends correction 
       ]);
       await setPointer(database.pool, releases[0]!);
       await grantExecutorAuthority(database.pool);
-      const prepared = await new PostgresModuleStorageMaterializer(
+      const materializer = new PostgresModuleStorageMaterializer(
         materializerPool,
         moduleRuntimePool,
-      ).prepare({
+      );
+      const prepared = await materializer.prepare({
         context,
         expiresAt: '2099-01-01T00:00:00.000Z',
         generationId: randomUUID(),
@@ -191,6 +204,9 @@ test('stock-count posting preserves three-value evidence and appends correction 
         varianceQuantity: '5',
       });
       await seedReviewedCount(runtimePool, context, binding, initial);
+      if (postedStockNegativeControl === 'initial-maintenance') {
+        await disablePostedStockTrigger(database.pool, binding);
+      }
       const initialResult = await service.postStockCount(
         context,
         actor,
@@ -203,6 +219,37 @@ test('stock-count posting preserves three-value evidence and appends correction 
         'count',
         "hardcoding the initial stock-count role to 'correction' must fail here",
       );
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '5.000000000000000000',
+        'the browsable row must observe real posted movement arithmetic',
+      );
+      const initialBalanceRecordId = await readPostedStockRecordId(
+        runtimePool,
+        context,
+        binding,
+      );
+      assert.match(
+        initialBalanceRecordId,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/u,
+        'the deterministic projection identity must be a canonical UUIDv4',
+      );
+      const directUpdate = await withModuleRole(
+        runtimePool,
+        context,
+        (client) =>
+          client.query(
+            `UPDATE ${table(binding, binding.postedStockBalance)}
+                SET ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_posted_quantity').physicalName)} = '999'
+              WHERE tenant_id = $1 AND environment_id = $2`,
+            [context.tenantId, context.environmentId],
+          ),
+      );
+      assert.equal(
+        directUpdate.rowCount,
+        0,
+        'ordinary runtime writes must not reach the provider-owned projection',
+      );
       assertProtocolTrace(trace.splice(0), binding);
 
       const correction = countCommand({
@@ -214,6 +261,9 @@ test('stock-count posting preserves three-value evidence and appends correction 
         varianceQuantity: '2',
       });
       await seedReviewedCount(runtimePool, context, binding, correction);
+      if (postedStockNegativeControl === 'correction-maintenance') {
+        await disablePostedStockTrigger(database.pool, binding);
+      }
       const correctionResult = await service.postStockCount(
         context,
         actor,
@@ -225,7 +275,44 @@ test('stock-count posting preserves three-value evidence and appends correction 
         correctionResult.stockCountEvidence?.supersedesStockCountId,
         initial.stockCountId,
       );
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '7.000000000000000000',
+        'a posted correction must move the same browsable row',
+      );
       assertProtocolTrace(trace.splice(0), binding);
+
+      const destroyed = await database.pool.query(
+        `DELETE FROM ${table(binding, binding.postedStockBalance)}
+          WHERE tenant_id = $1 AND environment_id = $2`,
+        [context.tenantId, context.environmentId],
+      );
+      assert.equal(destroyed.rowCount, 1);
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        null,
+        'the rebuild control must actually destroy the derived row first',
+      );
+      const rebuilt = await materializer.rebuildPostedStockBalances(context);
+      assert.deepEqual(rebuilt, { movementCount: 2, rowCount: 1 });
+      if (postedStockNegativeControl === 'rebuild-arithmetic') {
+        await database.pool.query(
+          `UPDATE ${table(binding, binding.postedStockBalance)}
+              SET ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_posted_quantity').physicalName)} = '8'
+            WHERE tenant_id = $1 AND environment_id = $2`,
+          [context.tenantId, context.environmentId],
+        );
+      }
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '7.000000000000000000',
+        'rebuild must recover the posted ledger sum after projection loss',
+      );
+      assert.equal(
+        await readPostedStockRecordId(runtimePool, context, binding),
+        initialBalanceRecordId,
+        'rebuild must reproduce the posting-maintained row identity',
+      );
 
       const reversal = countCommand({
         countedQuantity: '5',
@@ -1396,6 +1483,7 @@ function storageBinding(target: StorageTargetPayloadV1): StorageBinding {
     legalEntity: bind('legal_entity'),
     location: bind('location'),
     movement: bind('inventory_movement'),
+    postedStockBalance: bind('posted_stock_balance'),
     schemaName: target.providerAbi.managedSchema,
     stockCount: bind('stock_count'),
     stockCountLine: bind('stock_count_line'),
@@ -1403,6 +1491,72 @@ function storageBinding(target: StorageTargetPayloadV1): StorageBinding {
     transaction: bind('inventory_transaction'),
     transactionLine: bind('inventory_transaction_line'),
   };
+}
+
+async function readPostedStockQuantity(
+  pool: Pool,
+  context: TrustedRequestContext,
+  binding: StorageBinding,
+): Promise<string | null> {
+  return withModuleRole(pool, context, async (client) => {
+    const result = await client.query<{ quantity: string }>(
+      `SELECT ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_posted_quantity').physicalName)}::text AS quantity
+         FROM ${table(binding, binding.postedStockBalance)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(binding.postedStockBalance.legalEntityColumn!)} = $3
+          AND ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_item_id').physicalName)} = $4
+          AND ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_location_id').physicalName)} = $5`,
+      [
+        context.tenantId,
+        context.environmentId,
+        legalEntityId,
+        itemId,
+        locationId,
+      ],
+    );
+    assert.ok(result.rowCount === 0 || result.rowCount === 1);
+    return result.rows[0]?.quantity ?? null;
+  });
+}
+
+async function readPostedStockRecordId(
+  pool: Pool,
+  context: TrustedRequestContext,
+  binding: StorageBinding,
+): Promise<string> {
+  return withModuleRole(pool, context, async (client) => {
+    const result = await client.query<{ recordId: string }>(
+      `SELECT ${quoted(binding.postedStockBalance.recordIdColumn)}::text AS "recordId"
+         FROM ${table(binding, binding.postedStockBalance)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(binding.postedStockBalance.legalEntityColumn!)} = $3
+          AND ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_item_id').physicalName)} = $4
+          AND ${quoted(field(binding.postedStockBalance, 'posted_stock_balance_location_id').physicalName)} = $5`,
+      [
+        context.tenantId,
+        context.environmentId,
+        legalEntityId,
+        itemId,
+        locationId,
+      ],
+    );
+    assert.equal(result.rowCount, 1);
+    return result.rows[0]!.recordId;
+  });
+}
+
+async function disablePostedStockTrigger(
+  pool: Pool,
+  binding: StorageBinding,
+): Promise<void> {
+  const suffix = /^nsm_t_([a-z2-7]{52})$/u.exec(
+    binding.postedStockBalance.tableName,
+  )?.[1];
+  assert.ok(suffix);
+  await pool.query(
+    `ALTER TABLE ${table(binding, binding.movement)}
+       DISABLE TRIGGER ${quoted(`nsm_z_${suffix}`)}`,
+  );
 }
 
 function field(

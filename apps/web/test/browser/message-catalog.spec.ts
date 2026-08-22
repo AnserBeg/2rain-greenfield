@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
+import { RequestRuntimeViewLoadError } from '@north-star/postgres-provider/request-runtime-view-service';
 
 import {
   AuthenticatedRequestEntryAdapter,
@@ -56,9 +57,13 @@ import { compiledFixturePath, demoEntry } from '../helpers.js';
 const CENSUS_SUBJECT = 'northstar.shell:component.absent';
 const CENSUS_LEGAL_ENTITY_SUBJECT = '74000000-0000-4000-8000-000000000099';
 const CENSUS_RELATION_SUBJECT = 'northstar.inventory:relation.line_transaction';
+const CENSUS_OPERATION_REFUSAL_SUBJECT = 'MODULE_REQUIRED_FIELD_MISSING';
+const CENSUS_RUNTIME_VIEW_REFUSAL_SUBJECT = 'UNSUPPORTED_RUNTIME_CAPABILITY';
 const CENSUS_SUBJECTS = Object.freeze({
   OPERATION_LEGAL_ENTITY_INACTIVE: CENSUS_LEGAL_ENTITY_SUBJECT,
+  OPERATION_REFUSED: CENSUS_OPERATION_REFUSAL_SUBJECT,
   RELATION_ENUMERATION_UNAVAILABLE: CENSUS_RELATION_SUBJECT,
+  REQUEST_RUNTIME_VIEW_REFUSED: CENSUS_RUNTIME_VIEW_REFUSAL_SUBJECT,
   UNSUPPORTED_COMPONENT: CENSUS_SUBJECT,
 });
 
@@ -66,8 +71,12 @@ function censusMessageRef(code: SurfaceMessageCode): SurfaceMessageRef {
   switch (code) {
     case 'OPERATION_LEGAL_ENTITY_INACTIVE':
       return { code, subject: CENSUS_LEGAL_ENTITY_SUBJECT };
+    case 'OPERATION_REFUSED':
+      return { code, subject: CENSUS_OPERATION_REFUSAL_SUBJECT };
     case 'RELATION_ENUMERATION_UNAVAILABLE':
       return { code, subject: CENSUS_RELATION_SUBJECT };
+    case 'REQUEST_RUNTIME_VIEW_REFUSED':
+      return { code, subject: CENSUS_RUNTIME_VIEW_REFUSAL_SUBJECT };
     case 'UNSUPPORTED_COMPONENT':
       return { code, subject: CENSUS_SUBJECT };
     default:
@@ -482,6 +491,18 @@ test.beforeAll(async () => {
     ),
   );
   realPathUrls.set(
+    'REQUEST_RUNTIME_VIEW_REFUSED',
+    await refusingEntryUrl(
+      async () => identity,
+      async () => {
+        throw new RequestRuntimeViewLoadError(
+          'UNSUPPORTED_RUNTIME_CAPABILITY',
+          'gate: pinned runtime capability is unsupported',
+        );
+      },
+    ),
+  );
+  realPathUrls.set(
     'REQUEST_RUNTIME_VIEW_UNAVAILABLE',
     await refusingEntryUrl(
       async () => identity,
@@ -536,6 +557,8 @@ const REAL_PATH_DRIVERS: Readonly<
     page.goto(realPathUrls.get('NO_ACTIVE_SURFACE')!),
   REQUEST_RUNTIME_VIEW_UNAVAILABLE: (page) =>
     page.goto(realPathUrls.get('REQUEST_RUNTIME_VIEW_UNAVAILABLE')!),
+  REQUEST_RUNTIME_VIEW_REFUSED: (page) =>
+    page.goto(realPathUrls.get('REQUEST_RUNTIME_VIEW_REFUSED')!),
   ROUTE_NOT_FOUND: (page) => page.goto(`${shellUrl}/not-a-route`),
   UNKNOWN_SURFACE: (page) => page.goto(`${shellUrl}/?surface=not-in-release`),
   UNSUPPORTED_COMPONENT: (page) =>
@@ -557,18 +580,18 @@ const REAL_PATH_DRIVERS: Readonly<
  * missing is an executed request, so reachability for these rests on the
  * source-literal scan in `surface-runtime-contract.test.ts`.
  *
- * The 17 are **three different things, and calling them all "structural" was
+ * The remaining codes are **two different things, and calling them all
+ * "structural" was
  * wrong**:
  *
- * - **1 is intrinsically unreachable** — `INVALID_SURFACE_BINDING`. No request
- *   can produce it. That is a defect, not a coverage decision.
- * - **6 are already driven by a real request in another spec** —
- *   `INVALID_SURFACE_NAVIGATION`, `QUERY_LEGAL_ENTITY_SCOPE_REQUIRED`,
- *   `QUERY_NOT_FOUND`, `QUERY_UNAVAILABLE`, `QUERY_UNSUPPORTED`, and
+ * - Some are already driven by a real request in another spec —
+ *   `INVALID_SURFACE_BINDING`, `INVALID_SURFACE_NAVIGATION`,
+ *   `OPERATION_REFUSED`, `QUERY_LEGAL_ENTITY_SCOPE_REQUIRED`, `QUERY_NOT_FOUND`,
+ *   `QUERY_UNAVAILABLE`, `QUERY_UNSUPPORTED`, and
  *   `RELATION_ENUMERATION_UNAVAILABLE`. Their
  *   reachability is observed; only the text assertion lives elsewhere.
- * - **10 are engineering calls about fixture cost and ownership** — the seven
- *   `OPERATION_*` codes plus `QUERY_AMBIGUOUS`, `QUERY_PARAMETER_REQUIRED` and
+ * - The rest are engineering calls about fixture cost and ownership — the
+ *   remaining `OPERATION_*` codes plus `QUERY_AMBIGUOUS`, `QUERY_PARAMETER_REQUIRED` and
  *   `QUERY_PERMISSION_DENIED`. Each needs the compile-and-serve gateway fixture
  *   another spec owns. Judgements, defensible, and not structural facts.
  */
@@ -576,13 +599,9 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
   Partial<Record<SurfaceMessageCode, string>>
 > = {
   INVALID_SURFACE_BINDING:
-    'Not reachable under its own name at all. readCompiledSurfaceDataBinding ' +
-    'throws SurfaceProjectionError(INVALID_SURFACE_BINDING) and ' +
-    'surface-runtime.ts:113 catches it and renders QUERY_UNSUPPORTED, so no ' +
-    'request can produce this code. That is a code-accuracy defect reported as ' +
-    'a finding, not a copy defect; correcting it moves a data-diagnostic-code ' +
-    'that surface-data-binding.spec.ts:364 asserts, which this packet is ' +
-    'fenced from moving. Text is still observed by the census pass.',
+    'Reachable, and driven by a real request in surface-data-binding.spec.ts ' +
+    'beside unsupported-query and unavailable-runtime-view controls. That ' +
+    'test owns the compiled binding fixture needed to vary only the binding.',
   INVALID_SURFACE_NAVIGATION:
     'Reachable, and already driven by a real request in ' +
     'surface-grammar.spec.ts:230, which owns the over-budget grouped-navigation ' +
@@ -613,6 +632,11 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'Write path, same gateway fixture, plus a denying CurrentPolicyGateway. ' +
     'Every server in this file composes an allow-policy because the codes it ' +
     'drives arise before policy is consulted.',
+  OPERATION_REFUSED:
+    'Write path, and driven by a real provider-parser refusal in ' +
+    'surface-data-binding.spec.ts. That file owns the compiled form and ' +
+    'stateful executor needed to submit one invalid field while preserving ' +
+    'every other write precondition.',
   OPERATION_UNAVAILABLE:
     'Write path, same gateway fixture, plus an executor that fails the ' +
     'operation after it is accepted. Reached through the residual branch of ' +
@@ -791,6 +815,7 @@ test('real request paths render the sentence the catalog registers', async ({
     await drive(page);
     violations.push(
       ...observeCatalogMessages(await readMessageSamples(page), [code], {
+        REQUEST_RUNTIME_VIEW_REFUSED: CENSUS_RUNTIME_VIEW_REFUSAL_SUBJECT,
         // Derived from the compiled fixture the shell actually served, so a
         // renderer that substituted a different component identifier is caught
         // rather than merely counted.

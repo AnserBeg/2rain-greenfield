@@ -22,7 +22,7 @@ const routedPressLawDebt: readonly ModulePressLawViolation[] = [
   // replaces the hard-coded contract pattern.
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 1888,
+    line: 2364,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',

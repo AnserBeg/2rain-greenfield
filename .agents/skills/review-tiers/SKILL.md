@@ -113,6 +113,62 @@ perform one.
 - If the confirm arm cannot be obtained, a Critical-logic result stays
   `evidence_ready`. **Waiting is the correct outcome; self-review is not.**
 
+## Evidence depth follows FAILURE OBSERVABILITY, not file location (binding, 2026-08-21)
+
+**`AGENTS.md` §6 requires "a negative control for each way it could pass vacuously
+— one recorded red per vacuity vector, not one red overall", and lists five
+vectors.** That is a safety-critical standard. **It is correct for a posting
+engine and wrong for a label renderer**, and applying it uniformly has been taxing
+this program without buying safety where safety is absent.
+
+**The calibrating question is not what tier the packet is, nor where the file
+lives. It is: if this control were vacuous, when would anyone find out?**
+
+### Band A — SILENT. The failure is invisible until something else reconciles it.
+
+Stored values, balances, postings, lineage, tenancy and privilege boundaries,
+idempotency, anything a later reader would take as true.
+
+**Full §6 applies: one recorded red per vacuity vector, each varying exactly one
+property, plus the admission twin.** No relaxation. **A wrong balance is not
+discovered by looking at it.**
+
+### Band B — VISIBLE ON USE. The failure appears to whoever next exercises the path.
+
+Refusal messages, rendered controls, command order, labels, list behaviour,
+diagnostics — anything an operator meets the first time they use it.
+
+**One discriminating recorded red per CLAIM, not per vacuity vector.** The control
+must still die when its subject dies, and the claim must still not exceed what the
+control proves. **What is no longer owed is enumerating five vacuity vectors for a
+label.** Name the vectors you did not individually control and why.
+
+### Band C — VISIBLE ON READ. The failure is apparent from reading the artifact.
+
+Docs, records, comments, narrative, inventories.
+
+**The deterministic gate plus a stated limit. No mutation control is owed.**
+
+### The rules that do NOT relax at any band
+
+- **A committed control must die alone.** If you ship it, deleting its subject must
+  red it. This is cheap and it is where most of this program's defects have lived.
+- **The claim must never exceed the evidence.** Narrowing the claim is always an
+  acceptable correction and is usually the cheaper one.
+- **Band is declared by the packet and checked by the reviewer.** An undeclared band
+  is Band A by default. **A packet may not quietly self-assign downward.**
+
+### Why this exists
+
+**Measured across 2026-08: every packet applied Band-A rigour.** A presentation
+packet spent three review rounds on control attribution for a heading census and a
+Save button — failures an operator meets on first sight. **The same month, Band-A
+work found a posted-to-draft-to-re-post double-post and a guard that admitted its
+own defect at a different line.** Those are the failures the standard exists for.
+
+**Spending Band-A evidence everywhere spends it nowhere in particular** — the same
+argument this skill already makes about Critical carrying 66% of tiered work.
+
 ## Proportionality — is a review even the right instrument?
 
 Match the check to what the deterministic gates already cover:
@@ -261,6 +317,54 @@ justification. **An orchestrator who cannot name the criterion is chasing.**
   caught — the deletion question, a one-property mutation, a presence/absence
   pair — the defect is in the lane's process, not the code.** Route it to
   doctrine and stop spending arms on it.
+
+## Arm instruments — pick the narrowest that can carry the verdict (2026-08-21)
+
+**A packet cannot be accepted without a PASS, because a REVISE accepts nothing.**
+That much is fixed. **What is NOT fixed is how much the arm must re-derive**, and
+choosing a fresh-naive re-read where a narrow confirm suffices is the
+over-reviewing this skill already warns costs more than under-reviewing.
+
+**Three instruments. Choose by what the correction changed, not by round number.**
+
+| the correction changed | instrument | the arm re-derives |
+|---|---|---|
+| production behaviour | **fresh-naive arm** | everything; nothing is settled |
+| controls or evidence | **narrow confirm** | only the changed control and its survivors |
+| records, prose, or comments | **narrow confirm** | only whether it now says what is true |
+
+**A narrow confirm is a real arm with a real verdict.** It differs from a
+fresh-naive one in what it is TOLD: that production is byte-identical to a SHA a
+prior arm endorsed, which decisive questions already closed, and that it should
+not reopen them without concrete evidence from this candidate. **Prove the
+byte-identity and quote the command** — the reviewer must not take it on trust.
+
+**The confirm arm follows the identical-tree rule too.** If Fable already passed a
+production tree and the only later change is records, prose or a control, **a fresh
+Fable confirm re-reads bytes it has already cleared.** Re-run it when executable
+behaviour moved; scope it to the delta otherwise. This mirrors `git-workflow`'s
+matrix rule and rests on the same reasoning: a second pass over the same bytes
+observes nothing.
+
+### Pre-arm verification — the orchestrator checks what is mechanical
+
+**Before an arm goes out, the orchestrator verifies by execution or by command
+every claim in the prompt that a machine can settle** — SHA presence on `origin`,
+byte-identity of production across the correction, whether a named survivor
+actually survives, whether a cited symbol exists.
+
+**Then it hands the results to the arm as established**, so the review spends
+itself on judgement rather than re-derivation.
+
+**Measured value:** every time this was done it either pre-answered a decisive
+question or caught a defect before the round. On one packet the orchestrator ran
+the reviewer's proposed survivor directly and found the control green under it,
+turning a disputed claim into a settled one in two minutes. **On another it found
+the survivor did NOT reproduce, which would otherwise have cost a full round.**
+
+**It is not a substitute for the arm.** A `local-confirm` never upgrades a packet
+past `evidence_ready` on its own, and pre-arm verification is weaker than that —
+it is mechanical checking, not review.
 
 ## Fresh-naive mechanics (still binding)
 

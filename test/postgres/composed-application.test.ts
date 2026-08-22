@@ -567,7 +567,7 @@ test(
             'composed-tenant-b',
           );
           await context.test(
-            'materializer seeding survives a second tenant without a blanket insert',
+            'materializer seeding and the provider-written projection stay narrowly scoped across tenants',
             () =>
               assertMaterializerSeedingIsNarrowlyScoped(
                 pool,
@@ -931,7 +931,7 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    assert.equal(surfaces.length, 32);
+    assert.equal(surfaces.length, 34);
     assert.ok(surfaces.includes(APPLICATION_IDS.party.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.catalog.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.location.listSurfaceId));
@@ -939,6 +939,7 @@ async function assertRealProductDefinition(
     // unarrangeable verification scenarios are recorded as derivations.
     for (const inventorySurfaceId of [
       'northstar.app:surface.inventory_movement_list',
+      'northstar.app:surface.posted_stock_balance_list',
       'northstar.app:surface.inventory_on_hand_lookup',
       'northstar.app:surface.inventory_period_lock_list',
       'northstar.app:surface.inventory_transaction_list',
@@ -2279,8 +2280,10 @@ async function setLatestForwardTransitionRecoveryMode(
  * Row-level security is a table property, so the tenant that first materializes
  * a seeded table seeds it before RLS is enabled and every later tenant does not.
  * The materializer therefore needs a real INSERT policy, and that policy must
- * stay as narrow as the SELECT policy it mirrors: only the two seeded table
- * classes, only the trusted tenant and environment.
+ * stay as narrow as the SELECT policy it mirrors: the two seeded table classes,
+ * only the trusted tenant and environment. The provider-written posted-stock
+ * projection is the one other materializer INSERT authority and is named
+ * independently so it cannot be mistaken for blanket seed access.
  */
 async function assertMaterializerSeedingIsNarrowlyScoped(
   pool: pg.Pool,
@@ -2301,9 +2304,14 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
   const ordinary = storage.entities.find(
     (candidate) => candidate.entityId === 'northstar.app:entity.party',
   );
+  const postedStockBalance = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === 'northstar.app:entity.posted_stock_balance',
+  );
   assert.ok(master?.legalEntityMaster);
   assert.ok(periodLock?.periodLock);
   assert.ok(ordinary);
+  assert.ok(postedStockBalance);
 
   // The second tenant reached the same seeded state as the first.
   const periodLockScope = periodLock.legalEntity;
@@ -2345,7 +2353,8 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
     );
   }
 
-  // The insert policy exists for exactly the two seeded table classes.
+  // The insert policy exists for exactly the two seeded table classes and the
+  // one pinned provider-written projection.
   const insertPolicies = await pool.query<{ tablename: string }>(
     `SELECT tablename
        FROM pg_catalog.pg_policies
@@ -2356,8 +2365,12 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
   );
   assert.deepEqual(
     insertPolicies.rows.map((row) => row.tablename),
-    [master.physicalTableName, periodLock.physicalTableName].toSorted(),
-    'only the seeded table classes carry a materializer insert policy',
+    [
+      master.physicalTableName,
+      periodLock.physicalTableName,
+      postedStockBalance.physicalTableName,
+    ].toSorted(),
+    'only the seeded table classes and named provider-written projection carry a materializer insert policy',
   );
 
   const materializerPool = new pg.Pool({
@@ -2615,8 +2628,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   await assertAttributedSearchCapabilityScenarioDelta(compiledApplication);
   assert.equal(
     servingScenarioCount,
-    163,
-    'the posting route adds one executed scenario and search capability removes three executable and two derived exclusions',
+    174,
+    'posted stock adds six declared-evidence scenarios, one resolver, one typed-error scenario, and three searchable exclusions',
   );
 
   const intermediate = await pool.query<{
@@ -4230,8 +4243,8 @@ async function assertExactPartitionEvidence(
   );
   assert.equal(
     derivations.length,
-    36,
-    'the searchable movement field and impossible period-lock search exclusion ceased to exist rather than becoming derivations',
+    47,
+    'the 11 operationless posted-stock scenarios are derived while the historical search exclusions remain absent',
   );
   assert.equal(
     binding.plan.scenarios.some(
@@ -4256,7 +4269,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    36,
+    47,
   );
   assert.deepEqual(
     [...executedScenarioIds, ...derivedScenarioIds].toSorted(),
@@ -4442,6 +4455,12 @@ async function assertAttributedSearchCapabilityScenarioDelta(
   // release root differs.
   const PROFILE_ONLY_SUCCESSOR_ROOT =
     'b0177bf482a73235eb1308eaf17bde3b0a3f4b23d2a9c9c59f7af23d1c9a2bbb';
+  // The source-changing language-v5 successor whose scenario identity delta is
+  // the historical fact this control measures. Later authored releases may add
+  // scenarios, so using the lineage head here would silently re-point the
+  // comparison exactly as the old position-addressed search-capability read did.
+  const LANGUAGE_ADOPTION_ROOT =
+    '3ef281274f753f3504a170b2308ef85c5099da7cd3a5f78c41310f9ad76215d1';
   const releaseByRoot = (releaseRoot: string) => {
     const release = compiled.applications.find(
       (candidate) => candidate.compiled.releaseRoot === releaseRoot,
@@ -4472,18 +4491,20 @@ async function assertAttributedSearchCapabilityScenarioDelta(
     rootOrder.indexOf(SEARCH_CAPABILITY_SOURCE_ROOT) + 1,
   );
 
-  // And the head is checked separately, which is what the position-addressed
-  // version was conflating. Nothing after the pinned pair changed an entity, a
-  // query or an operation, so no LATER entry may change what the plan verifies.
+  // The language-adoption entry is checked separately by identity, which is
+  // what the position-addressed version was conflating with the lineage head.
   //
   // WRITTEN FROM THE MEASUREMENT, and the first attempt at this assertion was
-  // wrong. Asserting the head's scenario IDs equal the pinned target's failed:
+  // wrong. Asserting the adoption entry's scenario IDs equal the pinned
+  // target's failed:
   // adoption holds the count at 163 and holds the verified content identical,
   // while RE-IDENTIFYING a large fraction of the scenarios, because a scenario
   // id is a fingerprint over version-stamped nodes. So the content is compared
   // by what each scenario verifies, and the identity churn is asserted as the
   // separate fact it is.
-  const headBinding = releaseVerificationBinding(compiled.application.compiled);
+  const languageAdoptionBinding = releaseVerificationBinding(
+    releaseByRoot(LANGUAGE_ADOPTION_ROOT).compiled,
+  );
   const verifiedContent = (
     scenarios: readonly { entityId: string; kind: string; subjectId: string }[],
   ) =>
@@ -4494,9 +4515,9 @@ async function assertAttributedSearchCapabilityScenarioDelta(
       )
       .toSorted();
   assert.deepEqual(
-    verifiedContent(headBinding.plan.scenarios),
+    verifiedContent(languageAdoptionBinding.plan.scenarios),
     verifiedContent(current.plan.scenarios),
-    'no entry after the pinned pair changes what the release verifies',
+    'the language adoption changes scenario identities without changing what the release verifies',
   );
 
   // A language adoption changes recorded scenario IDENTITIES; a
@@ -4526,22 +4547,22 @@ async function assertAttributedSearchCapabilityScenarioDelta(
       )
       .toSorted();
 
-  const headScenarios = headBinding.plan.scenarios;
+  const languageAdoptionScenarios = languageAdoptionBinding.plan.scenarios;
   const profileEdgeScenarios = releaseVerificationBinding(
     releaseByRoot(PROFILE_ONLY_SUCCESSOR_ROOT).compiled,
   ).plan.scenarios;
 
   assert.equal(current.plan.scenarios.length, 163);
-  assert.equal(headScenarios.length, 163);
+  assert.equal(languageAdoptionScenarios.length, 163);
   assert.equal(profileEdgeScenarios.length, 163);
 
   // WHAT is verified does not move -- compared as a MULTISET, because the
   // signature is not unique and a set comparison would silently tolerate a
   // scenario being dropped while a duplicate signature covered for it.
   assert.deepEqual(
-    verifiedContentOf(headScenarios),
+    verifiedContentOf(languageAdoptionScenarios),
     verifiedContentOf(current.plan.scenarios),
-    'no entry after the pinned pair changes what the release verifies',
+    'the language adoption preserves what the release verifies',
   );
 
   // THE SEMANTIC KEY, DERIVED FROM THE PRODUCTION SCENARIO OBJECT.
@@ -4594,20 +4615,20 @@ async function assertAttributedSearchCapabilityScenarioDelta(
       scenario.scenarioId,
     ]),
   );
-  const headBySemantic = new Map(
-    headScenarios.map((scenario) => [
+  const adoptionBySemantic = new Map(
+    languageAdoptionScenarios.map((scenario) => [
       semanticKey(scenario),
       scenario.scenarioId,
     ]),
   );
   assert.equal(targetBySemantic.size, 163);
-  assert.equal(headBySemantic.size, 163);
+  assert.equal(adoptionBySemantic.size, 163);
 
   // A TOTAL BIJECTION across the language adoption: every scenario in one plan
   // has exactly one counterpart in the other under a version-normalized reading
   // of its whole payload. Evidence CAN be re-keyed by meaning.
   assert.deepEqual(
-    [...headBySemantic.keys()].toSorted(),
+    [...adoptionBySemantic.keys()].toSorted(),
     [...targetBySemantic.keys()].toSorted(),
     'the language adoption preserves every scenario semantically; only identities move',
   );
@@ -4617,7 +4638,7 @@ async function assertAttributedSearchCapabilityScenarioDelta(
   // whose nested canonical references carry the version stamps the fingerprint
   // covers. That is the mechanism, measured rather than inferred.
   const reidentified = [...targetBySemantic].filter(
-    ([key, scenarioId]) => headBySemantic.get(key) !== scenarioId,
+    ([key, scenarioId]) => adoptionBySemantic.get(key) !== scenarioId,
   );
   assert.equal(reidentified.length, 69);
   assert.deepEqual(
@@ -4660,9 +4681,10 @@ async function assertAttributedSearchCapabilityScenarioDelta(
   // EXACTLY 69 recorded ids do not appear in the other plan, which is the
   // number ADR-0047 §8 publishes.
   const targetIdSet = new Set(scenarioIds(current.plan.scenarios));
-  const headIdSet = new Set(scenarioIds(headScenarios));
+  const adoptionIdSet = new Set(scenarioIds(languageAdoptionScenarios));
   assert.equal(
-    [...targetIdSet].filter((scenarioId) => !headIdSet.has(scenarioId)).length,
+    [...targetIdSet].filter((scenarioId) => !adoptionIdSet.has(scenarioId))
+      .length,
     69,
     'a language adoption changes exactly the ids whose fingerprint covers a version-stamped node',
   );

@@ -1,7 +1,10 @@
 # ADR-0033: Exact-partition verification derivations
 
 Date: 2026-07-30
-Status: proposed by packet G3-P7a; ratified when that packet is accepted
+Status: **ratified** 2026-08-21 — G3-P7a is accepted (ledger; reviewed and matrix-green
+`d66fba38`, integrated `5a6d637`), completing the condition this ADR set for itself.
+(Status corrected by the orchestrator's 2026-08-21 record sweep, disposing program review
+R1, which found the condition met and the text stale.)
 Tier: Critical (review per `review-tiers`)
 
 ## Context
