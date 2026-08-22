@@ -205,6 +205,10 @@ if [ "${1:-}" = '--self-test' ]; then
   # while still occupying its {file, name}.
   control skipped-duplicate run 'refuses to guess which occurrence' \
     'C12 a mutation registering a SKIPPED duplicate of a still-passing test'
+  # C13 is the Fable arm's specimen. A passenger cannot fake or hide a kill, but
+  # it is an outcome the mutation produced and the entry did not declare.
+  control passenger run 'exists only under the mutation and is not accounted for' \
+    'C13 a passing test the mutation brings into existence, undeclared'
   # J6: static uniqueness compared raw strings while execution resolved them, so
   # a ./ alias satisfied two declarations with one regression.
   control aliased-path validate EXPECTED_RED_PATH_NOT_IN_CANDIDATE \
