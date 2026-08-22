@@ -141,7 +141,10 @@ and one against a real database:
   rejection`): `'23503'` must still produce the full
   `INVENTORY_POSTING_STORAGE_REJECTED` contract (code, exact message,
   `details.sqlstate`). A guard that refuses everything is the cheapest
-  vacuous pass; this is its refutation.
+  vacuous pass, and a guard admitting only the replay branch's own `'23505'`
+  is the next cheapest; this control refutes both, one through
+  `shape-guard-refuses-everything` and one through
+  `admission-narrowed-to-the-replay-code`.
 - **Replay — genuine duplicate key** (`posting error replay: a genuine
   duplicate-key error reaches the 23505 replay branch`): holds an
   uncommitted natural-effect claim on a module-role transaction, starts a
@@ -165,23 +168,42 @@ restored, kill sets exact. Observed on this tree (2026-08-22):
 |---|---|---|---|
 | `shape-guard-removed` | guard deleted (`return code;`) — the exact pre-fix defect | A, B | 3 passing |
 | `shape-guard-refuses-everything` | guard walls (`return undefined;`) | Twin, Replay (raw `duplicate key value violates unique constraint` surfaces) | 4 passing |
+| `admission-narrowed-to-the-replay-code` | guard admits only `'23505'` | **Twin alone** | 4 passing |
+| `replay-branch-stops-recognizing-23505` | the catch compares against `'23506'` | **Replay alone** | 4 passing |
 | `shape-guard-length-only` | `/^.{5}$/u` | B alone | 3 passing |
 | `shape-guard-charset-only` | `/^[0-9A-Z]+$/u` | A alone | 3 passing |
 
-Per-check attribution: entries 3 and 4 delete one half of the predicate each
-and exactly one control dies, so neither half is decorative and each control
-dies alone. Entry 1's run keeps the twin green (a survivor demonstrating the
-mutation is discriminating); entry 2's run keeps A and B green. The kill of
-Replay in entry 2 is the charter's fourth vector: a genuine duplicate-key
-error, produced by a real constraint in a real database, mis-read by a walled
-guard, surfacing raw — the exact failure the exact-equality argument says
-cannot happen while `'23505'` is admitted.
+**Die-alone attribution, written from the measurement.** Each of the four
+controls has a mutation that kills it and nothing else: A by
+`shape-guard-charset-only`, B by `shape-guard-length-only`, the Twin by
+`admission-narrowed-to-the-replay-code`, and the Replay control by
+`replay-branch-stops-recognizing-23505`. The length-only and charset-only
+entries also prove neither half of the predicate is decorative.
+
+*Entries 3 and 4 were added in review round 1, and the correction is worth
+recording rather than smoothing over.* The first four entries killed the Twin
+and the Replay control **only as a pair**, under the walling mutation, and the
+record nevertheless claimed each control dies alone — a claim exceeding its
+evidence, which the round-1 arm caught. Exact per-kill attribution under
+ADR-0058 identifies both failures in the walled run, but attribution is not
+the same as a singleton red. The two added entries are the singletons, each
+measured before its manifest text was written.
+
+Two of them carry a second fact beyond dying alone. The
+`admission-narrowed-to-the-replay-code` run keeps the **Replay control green**
+while the Twin dies, so it also refutes "the guard admits only the one code
+the catch needs." And the Replay kill in
+`shape-guard-refuses-everything` remains the charter's fourth vector: a
+genuine duplicate-key error, produced by a real constraint in a real
+database, mis-read by a walled guard and surfacing raw.
 
 The mutation set is self-chosen (`review-tiers`: worth strictly less than an
-independent replay); the manifest is committed, so an independent replay can
-re-derive every red with `bash scripts/check-expected-red.sh --run
-shape-guard-removed shape-guard-refuses-everything shape-guard-length-only
-shape-guard-charset-only`.
+independent replay), and **two of its six entries were specified by the
+round-1 reviewer rather than by the lane** — recorded here because who chose a
+mutation is part of what the table is worth. The manifest is committed, so an
+independent replay re-derives every red with `bash
+scripts/check-expected-red.sh --run` (all 11 entries across both manifests) or
+by naming this packet's six.
 
 ## What this packet does NOT claim
 
@@ -202,26 +224,49 @@ shape-guard-charset-only`.
 
 ## Gates and SHAs
 
-Executable candidate: `7b525b38a504592b37c6378cb5b59ce99bc82013` (fix +
-controls + manifest, one commit). Measured at that SHA in the packet worktree
-`/home/rvham/2rain-greenfield-pes`:
+**Round 2** (current). Executable candidate
+`c36e0c6f8190d02a6c88cb574538f5af2946ece9`: the two singleton manifest entries
+the round-1 arm specified, plus an explicit message on the replay control's
+code assertion so its red states its own reason. **Production is byte-identical
+to the reviewed round-1 candidate**, proven by
+
+    $ git diff --stat 7b525b3 c36e0c6 -- packages/
+    (empty)
+
+Round 1: executable candidate `7b525b38a504592b37c6378cb5b59ce99bc82013`,
+frozen at `8c41712`, REVISE on evidence only (finding F1 — see
+`review-log.md`); no production defect found, and claims C1, C2 and C4 closed.
+
+All gates below were re-measured at the round-2 candidate in the packet
+worktree `/home/rvham/2rain-greenfield-pes`, because the test file changed:
 
 - `typecheck` PASS, `lint` PASS, `format` PASS.
-- `check-expected-red.sh` static: OK (9 entries, 2 manifests).
-- `evidence:expected-red` (four packet entries): all four reds reproduced
-  and restored — table above.
-- `test:postgres`: **208/208 pass, 0 fail, 0 cancelled** (`suiteSucceeded:
-  true` in `test-results/reachability/postgres.json`; duration 738s). The
+- `check-expected-red.sh` static: OK (11 entries, 2 manifests).
+- `evidence:expected-red`, full run over both manifests: **all 11 reds
+  reproduced and restored**, including this packet's six — the two new
+  singletons each killed exactly 1 of the 4 tests their run executed
+  (`MUTATION_RED admission-narrowed-to-the-replay-code 1 killed`,
+  `MUTATION_RED replay-branch-stops-recognizing-23505 1 killed`, each with
+  `4 passing` restored).
+- `test:postgres`: **208/208 pass, 0 fail, 0 cancelled** at the round-2
+  candidate (`suiteSucceeded: true` in
+  `test-results/reachability/postgres.json`), matching the round-1 run
+  exactly; round 1 measured the same 208/208 at `7b525b3` in 738s. The
   suite counted 204 before this packet; the four new controls account for the
   growth, and the posting file's executed real-result count moved 2 → 6.
   Notably the two pre-existing `INVENTORY_POSTING_STORAGE_REJECTED`
   assertions (both paired with `sqlstate === 'P0001'`) and the `55P03`
   lock-timeout assertion stayed green — the guard reds nothing that existed.
-- `test:architecture`: **178/178 pass, 0 fail**, exit code 0 captured
-  without pipe masking. The PRESS006 line-37 pin over this file is
-  unaffected (the edit sits at line ~3877 and shifts nothing above it).
+- `test:architecture`: **178/178 pass, 0 fail** at the round-2 candidate,
+  exit code 0 captured without pipe masking; identical to round 1. The
+  PRESS006 line-37 pin over this file is unaffected (the edit sits at line
+  ~3877 and shifts nothing above it).
+
+Stops: none. Review rounds: 1 (REVISE, evidence only), corrected here.
+`review-tiers`' convergence questions place the round-1 finding in the
+control rather than in production, and the correction is the narrowest one
+available — two singleton mutations plus a claim rewritten from the
+measurement, with no production byte moved.
 - Full matrix: **deliberately not run** — it runs once, after review
   converges, at the SHA that will integrate (`git-workflow`, 2026-08-14
   sequence). Integration is a `--no-ff` merge of the packet into `main`.
-
-Stops: none.
