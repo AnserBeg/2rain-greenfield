@@ -161,7 +161,13 @@ test('the operator-facing gate and this suite run the same checker', () => {
       encoding: 'utf8',
     },
   );
-  assert.match(output, /check-records self-test: OK \(16 controls/u);
+  assert.match(
+    output,
+    new RegExp(
+      `check-records self-test: OK \\(${RECORD_CLAIM_CODES.length} controls`,
+      'u',
+    ),
+  );
   for (const code of RECORD_CLAIM_CODES satisfies readonly RecordClaimCode[]) {
     assert.ok(
       output.includes(code),

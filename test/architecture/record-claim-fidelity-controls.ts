@@ -115,7 +115,7 @@ export function greenInput(world: SyntheticWorld): RecordClaimInput {
     git: createGitReader(world.root),
     ledger: ledgerDocument([['probe-packet', 'accepted']]),
     manifest: { schemaVersion: 'probe', unresolvableRatifications: [] },
-    pathExists: () => false,
+    pathKind: () => 'absent',
     records: [recordDocument(declaration(world.base, world.head))],
     routingSources: [
       document(
@@ -217,6 +217,89 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
       'an exclusion list that swallows scripts/, or default rename detection reporting only the destination, lets a lease violation land silently',
   },
   {
+    code: 'RECORD_CLAIM_SYMBOL_FILE_ABSENT',
+    run: (world) => {
+      const base = commitTree(world.root, {
+        'probe/impl.ts': PROBE_HEAD_SOURCE,
+      });
+      // Head DELETES the claimed file. Deletion is a real change, so the path
+      // assertion passes and the undeclared-path assertion passes; only the
+      // missing-blob branch catches it. Review measured that deleting that
+      // branch alone reded nothing, because the comment-and-string control
+      // exercises the other branch entirely.
+      const head = commitTree(
+        world.root,
+        { 'probe/other.ts': 'export const other = 1;\n' },
+        base,
+      );
+      return [
+        {
+          ...greenInput(world),
+          records: [
+            recordDocument(
+              declaration(base, head, {
+                changedPaths: ['probe/impl.ts', 'probe/other.ts'],
+                symbols: [{ name: 'probeSymbol', path: 'probe/impl.ts' }],
+              }),
+            ),
+          ],
+        },
+      ];
+    },
+    title: 'a symbol claimed in a file the head DELETED reds',
+    vacuity:
+      'deletion is a real change, so every other Family A assertion passes and the claim survives',
+  },
+  {
+    code: 'RECORD_CLAIM_PACKET_MISMATCH',
+    run: (world) => [
+      {
+        ...greenInput(world),
+        // The block is valid and its claims all hold — against ANOTHER packet's
+        // commits. Copied verbatim into a different record, it certified work
+        // this record did not do.
+        records: [
+          recordDocument(
+            declaration(world.base, world.head),
+            'docs/execution/packets/some-other-packet.md',
+          ),
+        ],
+      },
+    ],
+    title: 'a valid block copied into a different packet record reds',
+    vacuity:
+      'the packet field is decorative, so a copy/paste certifies the original packet twice',
+  },
+  {
+    code: 'RECORD_CLAIM_PACKET_DUPLICATED',
+    run: (world) => [
+      {
+        ...greenInput(world),
+        records: [
+          recordDocument(declaration(world.base, world.head)),
+          recordDocument(declaration(world.base, world.head)),
+        ],
+      },
+    ],
+    title: 'one packet declared by two records reds',
+    vacuity: 'two records certify one packet and each reads as the authority',
+  },
+  {
+    code: 'RECORD_LEDGER_COLUMN_ABSENT',
+    run: (world) => [
+      {
+        ...greenInput(world),
+        ledger: document(
+          'docs/execution/ledger.md',
+          '# Execution ledger\n\n| ID | Packet | Stage | Tier | State | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| probe-packet | probe | — | Mechanical | accepted | — | — |\n',
+        ),
+      },
+    ],
+    title: 'a packet table whose header carries no Status column reds',
+    vacuity:
+      'a renamed or reordered column makes every ratification lookup read some other cell',
+  },
+  {
     code: 'RECORD_CLAIM_BLOCK_UNPARSABLE',
     run: (world) => [
       {
@@ -272,7 +355,7 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
         ...greenInput(world),
         records: [
           document(
-            'docs/execution/packets/probe.md',
+            'docs/execution/packets/probe-packet.md',
             `${fence(declaration(world.base, world.head))}\n\n${fence(
               declaration(world.base, world.head),
             )}\n`,
@@ -314,8 +397,8 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
         ...greenInput(world),
         records: [
           document(
-            'docs/execution/packets/probe.md',
-            '# probe\n\nNo block here.\n',
+            'docs/execution/packets/probe-packet.md',
+            '# probe-packet\n\nNo block here.\n',
           ),
         ],
       },
@@ -336,8 +419,52 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
           ),
         ],
       },
+      {
+        ...greenInput(world),
+        // PRECEDENCE. The provenance packet is planned and the RATIFICATION
+        // packet is accepted. A reader that binds to the first anchor it tries
+        // reports success and never tests the condition the ADR states.
+        adrs: [
+          document(
+            'docs/decisions/ADR-9006-probe.md',
+            '# ADR-9006\n\nStatus: proposed by packet author-packet;\nratified when implementation-packet is accepted\n\nTier: Critical\n',
+          ),
+        ],
+        ledger: ledgerDocument([
+          ['author-packet', 'planned'],
+          ['implementation-packet', 'accepted'],
+        ]),
+        rowIdSources: [
+          ledgerDocument([
+            ['author-packet', 'planned'],
+            ['implementation-packet', 'accepted'],
+          ]),
+        ],
+        routingSources: [
+          document(
+            'docs/execution/probe-queue.md',
+            'The finding is routed to `author-packet`.\n',
+          ),
+        ],
+      },
+      {
+        ...greenInput(world),
+        // ESCAPED PIPE. A literal `|` inside an earlier cell shifts every later
+        // column, so a status read at a fixed index lands on Tier and passes.
+        ledger: document(
+          'docs/execution/ledger.md',
+          '# Execution ledger\n\n| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| probe-packet | name with \\| detail | — | Mechanical | accepted | — | — |\n',
+        ),
+        adrs: [
+          document(
+            'docs/decisions/ADR-9007-probe.md',
+            '# ADR-9007\n\nStatus: proposed by packet `probe-packet`; ratified when that\npacket is accepted\n\nTier: Critical\n',
+          ),
+        ],
+      },
     ],
-    title: 'a proposed ADR whose packet the ledger records as accepted reds',
+    title:
+      'a proposed ADR whose packet the ledger records as accepted reds — including when the ratification packet is named second, and when an escaped pipe shifts the Status column',
     vacuity:
       'the record layer keeps a status line the ledger has already contradicted',
   },
@@ -427,8 +554,30 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
           ),
         ],
       },
+      {
+        ...greenInput(world),
+        // A TABLE HEADER is not a tracked row. `ID` is the ledger's own first
+        // column name, and it resolved until the header was excluded.
+        routingSources: [
+          document('docs/execution/probe-queue.md', 'routed to `ID`.\n'),
+        ],
+      },
+      {
+        ...greenInput(world),
+        // A DIRECTORY is not a document. `docs/execution` exists and resolved
+        // nothing about who owns the finding.
+        pathKind: (candidate) =>
+          candidate === 'docs/execution' ? 'directory' : 'absent',
+        routingSources: [
+          document(
+            'docs/execution/probe-queue.md',
+            'routed to `docs/execution`.\n',
+          ),
+        ],
+      },
     ],
-    title: 'a routing naming neither a tracked row nor a document reds',
+    title:
+      'a routing naming neither a tracked row nor a document reds — including a table header and a directory',
     vacuity:
       'a recorded finding with no owning row is a disposition with no executing gate',
   },
@@ -469,11 +618,11 @@ function document(path: string, text: string): MarkdownDocument {
   return { path, text };
 }
 
-function recordDocument(body: string): MarkdownDocument {
-  return document(
-    'docs/execution/packets/probe.md',
-    `# probe\n\n${fence(body)}\n`,
-  );
+function recordDocument(
+  body: string,
+  path = 'docs/execution/packets/probe-packet.md',
+): MarkdownDocument {
+  return document(path, `# probe-packet\n\n${fence(body)}\n`);
 }
 
 function fence(body: string): string {

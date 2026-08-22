@@ -16,20 +16,26 @@
 //     process rules three times — check-review-record.sh, check-origin-sync.sh,
 //     check-parked-work.sh — and the record layer zero times.
 //
-// WHAT IT OBSERVES, AND WHAT IT CANNOT. Every claim-fidelity assertion reads the
-// FROZEN TREE through git plumbing (`git diff`, `git show`), never the working
-// tree, because the failure being closed is precisely a working tree that
-// disagrees with the commit. Symbol presence is decided by parsing the blob at
-// the declared head into a TypeScript AST and reading its declarations, not by
-// matching a string: a name that appears only in a comment or a string literal
-// declares nothing and must not satisfy a claim.
+// WHAT IT OBSERVES, AND WHAT IT CANNOT. Every CLAIM-FIDELITY assertion — the
+// declared paths and symbols — reads the FROZEN TREE through git plumbing
+// (`git diff`, `git show`), because the failure being closed is precisely a
+// working tree that disagrees with the commit. Symbol presence is decided by
+// parsing the blob at the declared head into a TypeScript AST and reading its
+// declarations, not by matching a string: a name that appears only in a comment
+// or a string literal declares nothing and must not satisfy a claim.
+//
+// The DECLARATIONS THEMSELVES, and every record-staleness input, are read from
+// the checkout. That is deliberate — the subject is the current record layer —
+// but it means this gate is a live reader of `docs/**`, which the exclusion
+// list below calls non-executable. See the packet record: that contradiction is
+// real, was measured, and is the orchestrator's to settle.
 //
 // It cannot prove that the record claims ENOUGH. The declaration block is
 // written by the packet author, so a packet that declares nothing is checked
 // against nothing. This gate closes "the commit does not contain what the record
 // claims"; it does not close "the record claims too little". See the packet
 // record for the full statement of limits.
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, relative, resolve, sep } from 'node:path';
 
@@ -39,7 +45,10 @@ import ts from 'typescript';
 export const RECORD_CLAIM_CODES = [
   'RECORD_CLAIM_PATH_UNCHANGED',
   'RECORD_CLAIM_SYMBOL_ABSENT',
+  'RECORD_CLAIM_SYMBOL_FILE_ABSENT',
   'RECORD_CLAIM_PATH_UNDECLARED',
+  'RECORD_CLAIM_PACKET_MISMATCH',
+  'RECORD_CLAIM_PACKET_DUPLICATED',
   'RECORD_CLAIM_BLOCK_UNPARSABLE',
   'RECORD_CLAIM_BLOCK_INVALID',
   'RECORD_CLAIM_BLOCK_DUPLICATED',
@@ -52,6 +61,7 @@ export const RECORD_CLAIM_CODES = [
   'RECORD_MANIFEST_PIN_STALE',
   'RECORD_LEDGER_ID_DUPLICATE',
   'RECORD_LEDGER_TABLE_ABSENT',
+  'RECORD_LEDGER_COLUMN_ABSENT',
   'RECORD_ROUTING_UNRESOLVED',
 ] as const;
 
@@ -118,14 +128,25 @@ export interface RecordClaimInput {
   /** Documents scanned for `routed to \`<id>\`` references. */
   readonly routingSources: readonly MarkdownDocument[];
   readonly manifest: RecordClaimManifest;
-  /** Whether a repository-relative path exists; a routing may name a document. */
-  readonly pathExists: (candidate: string) => boolean;
+  /**
+   * What a repository-relative path IS. A routing may name a document; a
+   * DIRECTORY is not one, and answering with a bare boolean put that
+   * distinction in the wiring where no control could reach it.
+   */
+  readonly pathKind: (candidate: string) => 'file' | 'directory' | 'absent';
   readonly git: GitReader;
 }
 
 /**
- * git-workflow's identical-tree exclusion list, verbatim. These paths are never
- * executed, so a commit touching only them changes no executable content.
+ * git-workflow's identical-tree exclusion list, verbatim, used here for exactly
+ * one purpose: deciding which changed paths a declaration block must declare.
+ *
+ * Its stated premise — that these paths "are never executed" — is FALSE of this
+ * gate, and this gate is what made it false. Measured: a docs-only commit that
+ * repoints a declared head to forty zeroes leaves `git diff --name-only` under
+ * this pathspec empty while `test:architecture` reds. The premise is not
+ * repaired here; it is recorded in the packet record as a scope finding, and
+ * changing `git-workflow` is the orchestrator's edit.
  */
 export const NON_EXECUTABLE_PATHSPEC = [
   ':!docs',
@@ -179,12 +200,36 @@ export function verifyRecordClaims(input: RecordClaimInput): RecordClaimReport {
   // "a declaration was present and rejected" are different facts, and folding
   // them together would make every malformed-block control red twice.
   let blocksPresent = 0;
+  const declaringRecord = new Map<string, string>();
   for (const record of input.records) {
     blocksPresent += countDeclarationFences(record.text);
     const block = parseDeclarationBlock(record, findings);
     if (!block) {
       continue;
     }
+    // The `packet` field must IDENTIFY the record, or it is decorative: a block
+    // copied verbatim into another record resolves against the original's
+    // commits and reports success for a packet that did no work. Found by
+    // review, reproduced by copying this packet's own block into a second file.
+    const stem = basename(record.path).replace(/\.md$/u, '');
+    if (block.packet !== stem) {
+      findings.push({
+        code: 'RECORD_CLAIM_PACKET_MISMATCH',
+        subject: record.path,
+        message: `declares packet \`${block.packet}\` but the record is \`${stem}\`; a block copied from another record certifies that record's commits, not this one's`,
+      });
+      continue;
+    }
+    const alreadyDeclaredBy = declaringRecord.get(block.packet);
+    if (alreadyDeclaredBy !== undefined) {
+      findings.push({
+        code: 'RECORD_CLAIM_PACKET_DUPLICATED',
+        subject: block.packet,
+        message: `is declared by both ${alreadyDeclaredBy} and ${record.path}; one packet, one declaration`,
+      });
+      continue;
+    }
+    declaringRecord.set(block.packet, record.path);
     declaredPackets.push(block.packet);
     const observed = observeClaims(record.path, block, input.git, findings);
     pathsObserved += observed.paths;
@@ -406,9 +451,14 @@ function observeClaims(
   let symbols = 0;
   for (const symbol of block.symbols) {
     const source = git.readBlob(head, symbol.path);
+    // Two independent ways a symbol claim can be false, so two diagnostics and
+    // two controls. They were one code until review measured that deleting the
+    // missing-blob branch alone reded nothing: a claim over a file the head
+    // DELETED passed every other assertion, because deletion is a real change
+    // and the path was declared.
     if (source === undefined) {
       findings.push({
-        code: 'RECORD_CLAIM_SYMBOL_ABSENT',
+        code: 'RECORD_CLAIM_SYMBOL_FILE_ABSENT',
         subject: `${block.packet}:${symbol.path}#${symbol.name}`,
         message: `is claimed but ${symbol.path} does not exist at ${block.head.slice(0, 7)}`,
       });
@@ -505,22 +555,40 @@ function readLedgerIds(
   const duplicates = new Set<string>();
   const lines = ledger.text.split('\n');
   let inPacketTable = false;
+  let headerSeen = false;
+  let statusIndex = -1;
 
   for (const line of lines) {
     if (LEDGER_HEADER.test(line)) {
       inPacketTable = true;
+      headerSeen = true;
+      // The Status column is LOCATED, never assumed at a fixed index. It was a
+      // hardcoded 4 until review measured that an escaped pipe in an earlier
+      // cell shifts every later column, so a stale ratification read the Tier
+      // cell, found no `accepted`, and passed.
+      statusIndex = splitRow(line).findIndex(
+        (cell) => stripMarkdown(cell).toLowerCase() === 'status',
+      );
+      if (statusIndex === -1) {
+        findings.push({
+          code: 'RECORD_LEDGER_COLUMN_ABSENT',
+          subject: ledger.path,
+          message:
+            'the packet table header carries no Status column, so every ratification lookup would read some other cell',
+        });
+      }
       continue;
     }
     if (!line.startsWith('|')) {
       inPacketTable = false;
       continue;
     }
-    if (!inPacketTable || /^\|[\s|:-]*\|$/u.test(line)) {
+    if (!inPacketTable || statusIndex === -1 || /^\|[\s|:-]*\|$/u.test(line)) {
       continue;
     }
-    const cells = line.split('|').slice(1, -1);
+    const cells = splitRow(line);
     const id = stripMarkdown(cells[0] ?? '');
-    const status = stripMarkdown(cells[4] ?? '');
+    const status = stripMarkdown(cells[statusIndex] ?? '');
     if (id.length === 0) {
       continue;
     }
@@ -538,12 +606,16 @@ function readLedgerIds(
     }
   }
 
-  if (rows.size === 0) {
+  // Guarded on `statusIndex` so this never co-fires with COLUMN_ABSENT: a table
+  // whose Status column is missing already has its own diagnostic, and two
+  // codes for one broken tree destroys attribution.
+  if (!headerSeen || (statusIndex !== -1 && rows.size === 0)) {
     findings.push({
       code: 'RECORD_LEDGER_TABLE_ABSENT',
       subject: ledger.path,
-      message:
-        'no packet table was found, so ledger-id uniqueness and every ratification lookup read zero input',
+      message: headerSeen
+        ? 'the packet table carries no rows, so ledger-id uniqueness and every ratification lookup read zero input'
+        : 'no packet table was found, so ledger-id uniqueness and every ratification lookup read zero input',
     });
   }
   return rows;
@@ -622,12 +694,14 @@ function checkRoutings(
       if (target.length === 0) {
         continue;
       }
-      if (
-        rowIds.has(target) ||
-        input.pathExists(target) ||
-        input.pathExists(join('docs/execution', target)) ||
-        input.pathExists(join('docs/decisions', target))
-      ) {
+      // A directory is not a document. `routed to `docs/execution`` resolved
+      // until this compared the KIND rather than mere existence.
+      const namesDocument = [
+        target,
+        join('docs/execution', target),
+        join('docs/decisions', target),
+      ].some((candidate) => input.pathKind(candidate) === 'file');
+      if (rowIds.has(target) || namesDocument) {
         resolved += 1;
         continue;
       }
@@ -646,9 +720,18 @@ function collectRowIds(
   sources: readonly MarkdownDocument[],
 ): ReadonlySet<string> {
   const rowStart = new RegExp(`^\\|\\s*\\**\`?(${ROW_ID})\`?\\**\\s*\\|`, 'u');
+  const separator = /^\|[\s|:-]*\|$/u;
   const ids = new Set<string>();
   for (const source of sources) {
-    for (const line of source.text.split('\n')) {
+    const lines = source.text.split('\n');
+    for (const [index, line] of lines.entries()) {
+      // A HEADER row is not a tracked row, and its first cell is a column name.
+      // Review measured a routing to `ID` resolving against the ledger's own
+      // `| ID | Packet | ... |` header. Markdown makes the header exact: it is
+      // the row immediately above the separator.
+      if (separator.test(lines[index + 1] ?? '')) {
+        continue;
+      }
       const id = rowStart.exec(line)?.[1];
       if (id) {
         ids.add(id);
@@ -691,20 +774,30 @@ function namedPacket(
   status: string,
   ledgerRows: ReadonlyMap<string, string>,
 ): string | undefined {
-  const anchors = [
+  // The EXPLICIT ratification condition outranks provenance. It was the other
+  // way round until review measured a status reading "proposed by packet A;
+  // ratified when B is accepted" with A planned and B accepted: the reader
+  // bound to A, and the condition the ADR actually states was never tested.
+  const ratification = new RegExp(
+    `ratified when (${ROW_ID}) is accepted`,
+    'iu',
+  ).exec(status)?.[1];
+  if (ratification && ledgerRows.has(ratification)) {
+    return ratification;
+  }
+  const provenance = [
     new RegExp(`proposed by packet (${ROW_ID})`, 'iu'),
     new RegExp(`proposed \\(packet (${ROW_ID})`, 'iu'),
     new RegExp(`proposed by (${ROW_ID})`, 'iu'),
-    new RegExp(`ratified when (${ROW_ID}) is accepted`, 'iu'),
-    new RegExp(`packet (${ROW_ID})`, 'iu'),
   ];
-  for (const anchor of anchors) {
+  const resolved = new Set<string>();
+  for (const anchor of provenance) {
     const candidate = anchor.exec(status)?.[1];
     if (candidate && ledgerRows.has(candidate)) {
-      return candidate;
+      resolved.add(candidate);
     }
   }
-  return undefined;
+  return [...resolved][0];
 }
 
 // ---------------------------------------------------------------------------
@@ -812,8 +905,15 @@ export function collectRepositoryInput(root: string): RecordClaimInput {
     manifest: JSON.parse(
       readFileSync(resolve(root, MANIFEST_PATH), 'utf8'),
     ) as RecordClaimManifest,
-    pathExists: (candidate) =>
-      isRepositoryPath(candidate) && existsSync(resolve(root, candidate)),
+    pathKind: (candidate) => {
+      if (
+        !isRepositoryPath(candidate) ||
+        !existsSync(resolve(root, candidate))
+      ) {
+        return 'absent';
+      }
+      return statSync(resolve(root, candidate)).isFile() ? 'file' : 'directory';
+    },
     records,
     // Every narrative document, recursively: routings are recorded in program
     // reviews, rulings and debates as readily as in the queue.
@@ -855,6 +955,33 @@ function isRepositoryPath(candidate: string): boolean {
     !candidate.split('/').includes('..') &&
     !candidate.split('/').includes('.')
   );
+}
+
+/**
+ * Markdown table cells, split on UNESCAPED pipes only. `\\|` is a literal pipe
+ * inside a cell and does not open the next column; splitting on every `|`
+ * shifts every later column by one, which is how a stale ratification read the
+ * Tier cell and passed.
+ */
+function splitRow(line: string): string[] {
+  const cells: string[] = [];
+  let current = '';
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '\\' && line[index + 1] === '|') {
+      current += '|';
+      index += 1;
+      continue;
+    }
+    if (character === '|') {
+      cells.push(current);
+      current = '';
+      continue;
+    }
+    current += character;
+  }
+  cells.push(current);
+  return cells.slice(1, -1);
 }
 
 function stripMarkdown(cell: string): string {
