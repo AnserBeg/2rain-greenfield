@@ -17,6 +17,32 @@ this section now prevents.
 outliving its truth — committed two hours after writing the finding. **The instrument that
 would have caught it is R1's own `check-records.sh`, which is not built yet.**
 
+**R1's gate is now built — `record-claim-fidelity`, 2026-08-21, frozen for review at last
+executable commit `7e2fc88`.** `scripts/check-records.sh` plus
+`test/architecture/record-claim-fidelity.test.ts` observe a packet record's claims against
+its frozen tree (Band A: every claimed path really differs between base and head, every
+claimed symbol is really declared there, no executable path changed that the record does
+not declare) and check record staleness against the ledger (Band C: a `proposed` ADR whose
+packet is accepted, a duplicate ledger id, a routing that resolves to nothing). Sixteen
+diagnostics, sixteen committed controls, die-alone measured 16/16. See the
+[packet record](packets/record-claim-fidelity.md) and the
+[ledger row](ledger.md).
+
+**One thing is owed back to the orchestrator and it is five lines.** The gate's first run
+found five stale ratifications that survived the one-time sweep at `ba4304d`: **ADR-0021**
+(`Q1-P0`), **-0022** (`Q1-P3a`), **-0023** (`1c-a`), **-0024** (`1g2`) and **-0034**
+(`G3-Pterm`) — all accepted packets. The sweep corrected the six ADRs phrased *"ratified
+when that packet is accepted"*; these five say *"pending packet acceptance"* or plain
+*"proposed (packet ...)"* and are the same fact in other words. `docs/decisions/**` is
+outside that lane's lease and R1 assigns the sweep to the orchestrator, so it is a
+stop-and-bridge-request. **`pnpm test:architecture` stays red on the branch until those
+five lines land**, which is the gate doing its job on the first tree it ever read.
+
+**Still not built, and named so it does not rot:** the declaration block is **optional**.
+Making it mandatory is a `mission-cadence` edit that belongs to the orchestrator and lands
+after this gate, and until it does, a packet that declares nothing is checked against
+nothing.
+
 ## TRIAGE — 2026-08-13. Read this before the queue.
 
 **The queue holds 134 rows and they all looked equally live. They are not.** Every
