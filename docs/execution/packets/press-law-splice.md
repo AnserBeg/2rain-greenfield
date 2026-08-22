@@ -29,10 +29,13 @@ observer's punctuation boundaries. Candidate
 `76d328d417201dfd355fb4c0dcbf650a4f3b95f4` returned REVISE because partial
 template-type diagnostics used interpolation-token positions, while nested exact
 composition, `false`, and plural partial type runs were not load-bearing under
-the controls. The round-12 correction attributes every run to its owning
-template-type node and adds the three requested discriminators. It is gate-green
-for a fresh Critical arm; the full matrix remains deferred until review
-converges.
+the controls. Candidate `2a8f19e7f1432e941ace733a7d4d68313abbb73b`
+returned REVISE with production correct and two control survivors: count-preserving
+first-value reuse at one node, and whole-node ownership of unresolved type spans.
+The round-13 test-only correction requires a distinct third identity in the
+same-node plural control and retains a raw identity inside an unresolved union.
+It is gate-green for a fresh Critical arm; the full matrix remains deferred
+until review converges.
 
 ## Packet definition
 
@@ -212,7 +215,8 @@ not rely on the routed Inventory debt:
 | template-type right adjacency | contiguous and split namespaces precede an unresolved generic span either directly or after a static `:` | both unbounded forms admit and both colon-bounded forms refuse; raw template punctuation cannot invent the right boundary |
 | template-type left adjacency | local ID `widget_list` and symbol `WIDGET_IDS` follow an unresolved generic span in head, tail, and substitution positions, with and without a static `:` | unknown-adjacent forms admit and colon-bounded forms refuse; tail and substitution ownership plus left-boundary state are both observed |
 | partial template-type attribution | a multiline unresolved template type begins on one line, its unknown substitution closes on another, and a bounded local ID begins in the tail on a third | the PRESS006 line is the template-type node start, not the closing `}` or tail token |
-| partial template-type multiplicity | one unresolved template type contains two independently colon-bounded spliced namespaces separated by unknown type spans | two exact observations at the owning template-type line; first-partial-type-run compression fails |
+| partial template-type multiplicity and identity | one unresolved template type contains two independently colon-bounded spliced namespaces followed by a colon-bounded split `widget_list`, with unknown type spans between them | the exact same-node sequence is `northstar.widget`, `northstar.widget`, `widget_list`; first-run truncation, identity deduplication, and count-preserving first-value reuse fail |
+| unresolved-span raw ownership | a nonempty partial run surrounds an unresolved union containing a direct contiguous module identity | the direct identity remains raw-owned and reports; replacing contributing-token ranges with the whole template node suppresses it and fails |
 | exact type grammar and ranges | numeric, bigint, both boolean values, null, undefined, parenthesized, and nested exact spans compose definition-derived identities; the nested specimen requires the outer tail to complete its identity; complete identities placed only in head, substitution, or tail tokens continue into legal longer values | all exact identities report once, deleting `false` or nested exact support loses only its matching observation, all three continuation forms admit, and removing head/substitution/tail ownership independently creates an extra raw observation |
 | rejected outer type recursion | an unresolved union span contains an independently exact nested spliced template type | the nested exact type still reports; rejecting the outer type does not erase an independently completed type value |
 | unknown-left admission/refusal | local ID `widget_list` and symbol `WIDGET_IDS` each follow an unknown prefix either directly or after a static `:` | the directly adjacent identities admit because the runtime prefix may erase `\b`; the colon-bounded twins refuse exactly at their construction lines |
@@ -331,6 +335,18 @@ each property independently: deleting nested exact support lost only
 and truncating template-type runs to one lost the second required observation.
 Every mutation was restored by an explicit inverse patch before the final
 focused run; no mutation runner is committed.
+
+The round-13 focused run passes 45/45 against production byte-identical to
+round 12. The same-node unresolved-type control now retains its two repeated
+namespace observations and adds a distinct `widget_list` observation, so
+cardinality alone cannot substitute for independent classification. A new
+unresolved-union fixture requires the raw observer to retain a direct module
+identity outside the partial run's contributing literal tokens. The
+reviewer-selected node-index first-value cache kept all three outputs but
+changed the third identity from `widget_list` to `northstar.widget`, failing the
+exact array. The whole-node range mutation changed the raw-ownership fixture
+from one observation to `[]`. Both mutations were restored by explicit inverse
+patches before the final focused run; no mutation runner is committed.
 
 ## Gate evidence
 
@@ -591,6 +607,28 @@ corroboration; the committed controls are the reproducible evidence, every
 mutation was restored with an explicit inverse patch, and no mutation runner is
 committed.
 
+Round 13 closes the two control survivors found in the review of `2a8f19e` and
+changes no production source:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` | PASS — 45/45; the same unresolved node requires two repeated namespace observations plus distinct `widget_list`, and a direct identity inside an unresolved union remains raw-owned |
+| node-index first-value-cache mutation | EXPECTED RED — all three same-node outputs remained, but the required third identity changed from `widget_list` to cached `northstar.widget` |
+| whole-node partial-type ownership mutation | EXPECTED RED — the unresolved-union raw observation changed from one exact PRESS006 entry to `[]` |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 176/176 in 43,339.0 ms, including 45/45 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 802,970.9 ms |
+
+The executable correction is test-only commit
+`f4680b6363864b82c144d3e312bdfdea188a329e`. Both exclusive suites acquired
+the repository lock normally and completed green. Production, including
+`module-press-law.ts` and the provider, is byte-identical to candidate
+`2a8f19e`. The discarded mutations are corroboration; the committed controls
+are the reproducible evidence, both mutations were restored with explicit
+inverse patches, and no mutation runner is committed.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -815,6 +853,25 @@ its bounded type-channel evidence companions. Production changed, so the next
 review is a fresh full Critical arm; nothing from round 11 is treated as a
 narrow confirmation boundary.
 
+The fresh review of candidate
+`2a8f19e7f1432e941ace733a7d4d68313abbb73b` found no production defect and
+closed exact grammar, provider/debt/ADR agreement, and frozen-record integrity.
+It returned **REVISE** on two Critical control survivors. The two partial runs
+inside one unresolved node had identical identity and diagnostic objects, so a
+count-preserving cache could reuse the first classification for every later
+run. Separately, no fixture required a raw identity inside an unresolved span
+to remain outside the partial construction's contributing-token ownership, so
+replacing those ranges with the whole template node stayed green.
+
+Round 13 is the bounded test-only correction prescribed by that review. The
+plural fixture now requires both repetition and a distinct later local ID at
+the same node and line. The raw-ownership fixture puts a direct identity inside
+an unresolved union beside a nonempty partial run. The reviewer-selected cache
+and whole-node-range mutations each fail only the intended exact assertion.
+Production is byte-identical to `2a8f19e`. The next review is fresh Critical
+because any executable test change invalidates the prior verdict; the full
+matrix remains downstream of convergence.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -871,6 +928,13 @@ evidence must also make each claimed arm causally necessary: a nested specimen
 must require outer composition, both boolean values need distinct outcomes, and
 plurality must be proved inside the specific partial-run channel rather than by
 another construction population.
+
+The round-12 review adds the proxy-pair rule: **shared diagnostic provenance
+must not stand in for independent classification or semantic ownership.** A
+plural control needs at least one later distinct value as well as repetition,
+or count-preserving first-value reuse remains invisible. A construction-range
+control also needs raw text inside an unresolved semantic child, or the owning
+node's full extent can replace its contributing-token ranges without a red.
 
 A second reusable rule follows from the confirmed Fable finding: **partial
 evaluation must preserve known semantic boundaries rather than classifying an
