@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "northstar.record-claim-manifest/v1",
+  "pinDefinition": "An ADR whose governing status is `proposed` but whose named packet cannot be resolved to a ledger row is not checkable by RECORD_ADR_RATIFICATION_STALE. Each such ADR is pinned here with the reason it is unresolvable, rather than skipped silently. The pin is a two-way ratchet: a new unresolvable ADR fails as RECORD_ADR_PACKET_UNRESOLVED, and a pin that has become resolvable fails as RECORD_MANIFEST_PIN_STALE.",
+  "unresolvableRatifications": [
+    {
+      "adr": "ADR-0038-capability-backed-surface-operations.md",
+      "reason": "Conditional on \"its first implementing packet\", which names no packet at all; there is nothing to look up until one is named."
+    },
+    {
+      "adr": "ADR-0049-document-transition-and-inventory-effect-seam.md",
+      "reason": "Names packet `PS-0`, a design packet that ends in a preserved probe and never integrates, so mission-cadence gives it no ledger row to carry a status."
+    }
+  ]
+}
