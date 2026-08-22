@@ -198,6 +198,32 @@ if [ "${1:-}" = '--self-test' ]; then
     'H3 a red that needed THIS invocation'"'"'s own baseline as a co-cause'
   control undeclared-hook-failure run 'does not declare it' \
     'H4 a sibling whose hook throws under the same mutation, undeclared'
+  control ambiguous-identity run 'refuses to guess which occurrence' \
+    'C11 a mutation registering a failing duplicate of a still-passing test'
+
+  # J5 holds the ALL-MODE frozen-tree assertion, and nothing else did. D1 and D3
+  # both invoke `run`, where runEntries has its own pre-existing assertion, so
+  # they red on the same token with the main() one deleted; G1 invokes `validate`
+  # but returns on the journal branch before reaching it. This dirties a tracked
+  # candidate file and calls `validate`, which must refuse BEFORE loading any
+  # manifest — otherwise an uncommitted repair makes the gate answer OK while the
+  # committed candidate is still stale.
+  controls=$((controls + 1))
+  RESTORE_FROM="$(mktemp)"
+  cp "$SUBJECT" "$RESTORE_FROM"
+  printf '\n// self-test: a harmlessly dirty tracked candidate file\n' >>"$SUBJECT"
+  validate_output="$(node "$RUNNER" validate 2>&1)"
+  validate_status=$?
+  restore_subject
+  if [ "$validate_status" -eq 0 ]; then
+    fail 'J5 validate answered from a working tree that differs from HEAD'
+  else
+    case "$validate_output" in
+    *EXPECTED_RED_TREE_NOT_FROZEN*) ;;
+    *) fail 'J5 validate refused a dirty tree, but not by the frozen-tree assertion' ;;
+    esac
+  fi
+  assert_subject_restored 'J5'
 
   # --- Vector K: the WITHDRAWN claim, pinned rather than asserted. ----------
   # K1 is not a refusal. It reproduces, executably, a red the gate CERTIFIES and
