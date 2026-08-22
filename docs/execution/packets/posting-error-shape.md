@@ -247,45 +247,59 @@ added here to compensate for the gate.**
 
 ## Gates and SHAs
 
-**Round 2** (current). Executable candidate
-`c36e0c6f8190d02a6c88cb574538f5af2946ece9`: the two singleton manifest entries
-the round-1 arm specified, plus an explicit message on the replay control's
-code assertion so its red states its own reason. **Production is byte-identical
-to the reviewed round-1 candidate**, proven by
+**Round 3** (current). Executable candidate
+`cca8d02f8403d4423d4855bafaab639a915e2bf3`: the Twin's singleton mutation
+replaced — `admission-excludes-only-the-twin-sqlstate` withdraws admission
+from `23503` alone and is measured over the whole file — plus the record
+corrections round 2 required. **Production has been byte-identical since the
+first candidate**, through all three rounds:
 
-    $ git diff --stat 7b525b3 c36e0c6 -- packages/
+    $ git diff --stat 7b525b3 cca8d02 -- packages/
     (empty)
 
-Round 1: executable candidate `7b525b38a504592b37c6378cb5b59ce99bc82013`,
-frozen at `8c41712`, REVISE on evidence only (finding F1 — see
-`review-log.md`); no production defect found, and claims C1, C2 and C4 closed.
+Round 2: candidate `7bad8d4` (executable `c36e0c6`) — REVISE. The arm found
+the admission singleton was produced by its `namePattern` rather than by its
+mutation, and named the excluded victim. Q2 closed.
+Round 1: candidate `8c41712` (executable `7b525b3`) — REVISE on evidence only;
+C1, C2 and C4 closed, no production defect.
+Both reviewed candidates are preserved as tags
+`posting-error-shape-reviewed-r1` and `-r2`.
 
-All gates below were re-measured at the round-2 candidate in the packet
-worktree `/home/rvham/2rain-greenfield-pes`, because the test file changed:
+Gates in the packet worktree `/home/rvham/2rain-greenfield-pes`:
 
 - `typecheck` PASS, `lint` PASS, `format` PASS.
 - `check-expected-red.sh` static: OK (11 entries, 2 manifests).
-- `evidence:expected-red`, full run over both manifests: **all 11 reds
-  reproduced and restored**, including this packet's six — the two new
-  singletons each killed exactly 1 of the 4 tests their run executed
-  (`MUTATION_RED admission-narrowed-to-the-replay-code 1 killed`,
-  `MUTATION_RED replay-branch-stops-recognizing-23505 1 killed`, each with
-  `4 passing` restored).
-- `test:postgres`: **208/208 pass, 0 fail, 0 cancelled** at the round-2
-  candidate (`suiteSucceeded: true` in
-  `test-results/reachability/postgres.json`), matching the round-1 run
-  exactly; round 1 measured the same 208/208 at `7b525b3` in 738s. The
+- `evidence:expected-red` over this packet's six entries at `cca8d02`: **all
+  six reproduced and restored.** The Twin's entry is the one that moved —
+  `EXPECTED_RED_RESTORED admission-excludes-only-the-twin-sqlstate 6 passing`
+  then `MUTATION_RED ... 1 killed`, so the gate itself now measures the
+  singleton across the file's whole population rather than a selection. The
+  other five are unchanged from the round-2 run (`shape-guard-removed` 2
+  killed of 3; `shape-guard-refuses-everything` 2 of 4;
+  `replay-branch-stops-recognizing-23505` 1 of 4; `shape-guard-length-only`
+  1 of 3; `shape-guard-charset-only` 1 of 3). At round 2 a full run over both
+  manifests reproduced all 11 reds including the five `scoped-create-operand-impl`
+  entries.
+- `test:postgres`: **208/208 pass, 0 fail, 0 cancelled** (`suiteSucceeded:
+  true` in `test-results/reachability/postgres.json`), measured at `c36e0c6`
+  and carried to `cca8d02` because **the suite's inputs are byte-identical** —
+  `git diff --name-only c36e0c6 cca8d02 -- test/postgres packages/ test/helpers db/`
+  is empty, and the only non-doc change is the manifest JSON, which no suite
+  reads. Round 1 measured the same 208/208 at `7b525b3` in 738s. The
   suite counted 204 before this packet; the four new controls account for the
   growth, and the posting file's executed real-result count moved 2 → 6.
   Notably the two pre-existing `INVENTORY_POSTING_STORAGE_REJECTED`
   assertions (both paired with `sqlstate === 'P0001'`) and the `55P03`
   lock-timeout assertion stayed green — the guard reds nothing that existed.
-- `test:architecture`: **178/178 pass, 0 fail** at the round-2 candidate,
-  exit code 0 captured without pipe masking; identical to round 1. The
+- `test:architecture`: **178/178 pass, 0 fail** re-measured at `cca8d02`,
+  exit code 0 captured without pipe masking; identical at all three
+  candidates. The
   PRESS006 line-37 pin over this file is unaffected (the edit sits at line
   ~3877 and shifts nothing above it).
 
-Stops: none. Review rounds: 1 (REVISE, evidence only), corrected here.
+Stops: none. Review rounds: 2, both REVISE, both on evidence rather than
+production, and the second found the same class one layer in — a singleton
+manufactured by test selection instead of by the mutation.
 `review-tiers`' convergence questions place the round-1 finding in the
 control rather than in production, and the correction is the narrowest one
 available — two singleton mutations plus a claim rewritten from the
