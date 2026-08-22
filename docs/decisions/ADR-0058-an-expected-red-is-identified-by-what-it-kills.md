@@ -243,17 +243,23 @@ that join.
 - The gate's own negative controls: **37**, in
   `scripts/check-expected-red.sh --self-test`, wired as its own gate so the
   proof is re-taken on every CI and matrix run rather than once at freeze.
-- **Six meta-controls, each deleting one check and requiring the control that
-  holds it to die.** This is the deletion question asked of the CHECK rather
-  than of the control, which is what the first round failed. Deleting the entry
-  frozen-tree precondition makes D1 report both *"refused, but not by the entry
-  precondition"* and *"the runner executed a baseline or a mutation before
-  refusing"*; deleting the digest read-back makes D2 report *"the gate reported
-  OK"*; deleting the failure-join makes C5 stop refusing for its stated reason;
-  comparing the tree with the index instead of `HEAD` makes D3 report *"the
-  runner started against a staged-only modification"*; dropping the file from
-  kill identities makes C6 fail; checking the journal after loading manifests
-  makes G1 fail.
+- **All deletion evidence in this packet is HAND-RUN and was never committed as
+  a mutation harness.** `review-tiers` calls an uncommitted harness weaker
+  evidence, and that applies here. Each was performed the same way — apply the
+  sabotage, commit it, run `--self-test`, `git reset --hard` — and observed
+  directly. **The complete table lives in the packet record**
+  (`docs/execution/packets/expected-red-gate.md`); this ADR does not duplicate
+  it, so that one list cannot drift from another.
+
+  The early set covered the checks of its day — the entry frozen-tree
+  precondition (D1), the digest read-back (D2), the failure-join (C5),
+  file-qualified identity (C6), index-versus-`HEAD` (D3) and journal ordering
+  (G1). **The set that matters for what ships covers the identity rule**:
+  deleting the uniqueness refusal, or applying it to the restored phase only,
+  makes **C11** report OK; dropping skip/todo from the uniqueness population
+  makes **C12** stop refusing for its stated reason; accepting noncanonical path
+  spellings makes **J6** report OK; and deleting only `main()`'s frozen-tree
+  assertion makes **J5** report OK.
 - **The round-1 review found four checks whose controls survived their
   deletion**, and each is recorded above with the control that now holds it. The
   worst was D1: the entry precondition and the exit postcondition shared one

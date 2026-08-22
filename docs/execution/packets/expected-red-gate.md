@@ -238,7 +238,7 @@ because it is the same gap this packet exists to close.**
 supplied the specimen the previous round said did not exist.** A mutation-induced
 **timeout** is reported as `test:fail` while Node counts it under
 `counts.cancelled` — so a classifier that admits it produces exactly the
-credited-versus-counted mismatch reconciliation exists to refuse. Measured: admit
+reported-versus-counted mismatch reconciliation exists to refuse. Measured: admit
 `testTimeoutFailure` as executed and C10 is refused *by reconciliation*; admit it
 **and** delete reconciliation and C10 reports **OK**. *The earlier record said no
 suite shape produces this mismatch naturally. That was wrong, and the timeout

@@ -741,7 +741,12 @@ function withMutation(
 }
 
 /**
- * What the runner credited must equal what Node counted, per file.
+ * What the runner REPORTED must equal what Node counted, per file.
+ *
+ * `reported`, not `credited`: the population compared here includes skipped and
+ * todo occupants, which earn no reachability credit but do hold their
+ * `{file, name}` and are counted by Node. `credited` is the narrower population
+ * and is reserved for reachability.
  *
  * This is the round-1 correction the lane skipped and round 2 required: without
  * it, a record the reporter invented or omitted is invisible. It is also what
@@ -759,11 +764,11 @@ function assertEvidenceReconciles(entry, measured, root, phase) {
       summary !== undefined,
       `${entry.name}: ${file} reported no summary in the ${phase} run — the file did not complete, so any result attributed to it is Node's own wrapper rather than an executed test`,
     );
-    const credited = measured.results.filter(
+    const reportedForFile = measured.results.filter(
       (result) => resolve(root, result.file) === resolved,
     );
     const tally = (status) =>
-      credited.filter((result) => result.status === status).length;
+      reportedForFile.filter((result) => result.status === status).length;
     // `fail` and `aggregate` are both counted by Node under `failed`; only
     // `fail` may ever satisfy a kill. Collapsing them made a parent whose
     // subtest fails reconcile as cancelled against a Node count of failed.
