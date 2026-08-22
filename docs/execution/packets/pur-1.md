@@ -49,7 +49,7 @@ per state or transition added later, refused by name as
 `COMPILER_STORAGE_RETYPE_UNSUPPORTED`), rules that a module declares its whole
 lifecycle in the release that adopts one, distinguishes that from plan §7.12's
 `received_quantity` ruling rather than overturning it, and fixes the purchase
-order's four states and four transitions with the four that are refused. `SAL-1`
+order's four states and five transitions with the three that are refused. `SAL-1`
 and `PUR-2` both inherit it.
 
 `0059` was chosen after enumerating ADR numbers across every branch, not just
@@ -333,10 +333,10 @@ entries" was corrected separately at `4780efc`.
 
 `app.authored.json` is verified PURELY ADDITIVE against the base: comparing both
 sides member-by-member on identity keys reports 0 removed and 0 changed across
-every collection, with exactly 2 assertions, 2 entities, 10 fields, 10
-operations, 12 permissions, 8 queries, 1 relation, 1 state machine, 2 storage
-mappings, 6 surfaces and 1 module added. The 975 "deleted" lines in the raw diff
-are alignment artifacts.
+every collection, with exactly 2 assertions, 2 entities, 10 fields, 13
+operations, 14 permissions, 8 queries, 1 state machine, 1 relation, 2 storage
+mappings, 6 surfaces and 1 module added. The "deleted" lines in the raw diff
+are alignment artifacts; the member-by-member comparison is the measurement.
 
 ## Surface-grammar baseline — measured, never hand-merged
 
@@ -488,7 +488,7 @@ third will appear.**
 
 ## Lease
 
-Three files outside the declared lease were edited, named here so they can be
+Six files outside the declared lease were edited, named here so they can be
 revoked rather than discovered:
 
 | File | Why forced | Held on branch by |
