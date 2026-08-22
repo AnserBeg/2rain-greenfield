@@ -3374,10 +3374,15 @@ async function assertConstrainedDomainVerificationCompleted(
  *     draft, so the refusals below are known to be about state and not about a
  *     line that could never be mutated at all;
  *  3. release the order through its transition operation;
- *  4. attempt line create, update and archive; require typed
+ *  4. attempt line create, update, archive AND RESTORE; require typed
  *     `MODULE_OPERATION_PRECONDITION_REFUSED` on each;
- *  5. read the row back and require revision, values and archive state
+ *  5. read both rows back and require revision, values and archive state
  *     unchanged.
+ *
+ * Restore needs its own arm and its own archived line, because it is a distinct
+ * generic operation reaching a distinct interpreter branch. Round 2 of review
+ * found this vertical claiming "every line mutation" while never invoking it --
+ * a claim wider than its evidence, and a reachable one-property survivor.
  */
 async function assertPurchaseOrderParentGuard(
   pool: pg.Pool,
@@ -3472,6 +3477,26 @@ async function assertPurchaseOrderParentGuard(
     recordId: lineId,
   });
 
+  // A SECOND line, archived while the parent is still draft, so the release
+  // below can be followed by a RESTORE attempt. Restore is its own generic
+  // operation and its own interpreter branch, and an earlier version of this
+  // vertical claimed "every line mutation" while never invoking it -- a claim
+  // wider than its evidence, and a one-property survivor: deleting only the
+  // `requireExistingParentGuards` call from the `restoreRecordEffect` branch
+  // would have left this test green.
+  const archivedLineId = randomUUID();
+  await invoke(purchasing.lineCreateOperationId, {
+    legalEntityId,
+    recordId: archivedLineId,
+    relations: { [purchasing.lineRelationId]: orderId },
+    values: { ...lineValues, [purchasing.fieldIds.lineNumber]: '2' },
+  });
+  await invoke(
+    `${APPLICATION_IDS.namespace}:operation.purchase_order_line_archive`,
+    { expectedRevision: 1, recordId: archivedLineId },
+    true,
+  );
+
   const lineEntity = storage.entities.find(
     (candidate) =>
       candidate.entityId === purchasing.entityIds.purchaseOrderLine,
@@ -3481,7 +3506,7 @@ async function assertPurchaseOrderParentGuard(
     (column) => column.canonicalFieldId === purchasing.fieldIds.orderedQuantity,
   );
   assert.ok(quantityColumn);
-  const readLine = async () => {
+  const readLine = async (recordId: string = lineId) => {
     const result = await pool.query<{
       archived: boolean;
       quantity: string;
@@ -3492,12 +3517,18 @@ async function assertPurchaseOrderParentGuard(
               "${lineEntity.optimisticRevision.column}"::text AS revision
          FROM north_star_module.${lineEntity.physicalTableName}
         WHERE "${lineEntity.recordIdentity.column}" = $1`,
-      [lineId],
+      [recordId],
     );
     assert.equal(result.rowCount, 1);
     return result.rows[0]!;
   };
   const admitted = await readLine();
+  const archivedAdmitted = await readLine(archivedLineId);
+  assert.equal(
+    archivedAdmitted.archived,
+    true,
+    'the archive admission twin must have written',
+  );
   assert.equal(admitted.revision, '2', 'the admission twin must have written');
   assert.equal(admitted.archived, false);
 
@@ -3546,6 +3577,11 @@ async function assertPurchaseOrderParentGuard(
     relations: { [purchasing.lineRelationId]: orderId },
     values: lineValues,
   });
+  await refused(
+    'line restore after release',
+    `${APPLICATION_IDS.namespace}:operation.purchase_order_line_restore`,
+    { expectedRevision: 2, recordId: archivedLineId },
+  );
   // The header itself is closed by the same predicate, evaluated on its own
   // prior image rather than through the relation.
   await refused('header update after release', purchasing.updateOperationId, {
@@ -3554,10 +3590,19 @@ async function assertPurchaseOrderParentGuard(
     recordId: orderId,
   });
 
-  // Nothing moved. Revision, value and archive state are all as the admission
-  // twin left them.
-  const after = await readLine();
-  assert.deepEqual(after, admitted, 'a refused mutation still changed the row');
+  // Nothing moved, on EITHER line. Revision, value and archive state are all as
+  // the two admission twins left them -- so the archived line is still archived
+  // and the active one still active.
+  assert.deepEqual(
+    await readLine(),
+    admitted,
+    'a refused mutation still changed the active line',
+  );
+  assert.deepEqual(
+    await readLine(archivedLineId),
+    archivedAdmitted,
+    'the refused restore still changed the archived line',
+  );
 }
 
 async function assertEntityOwnedCreateInput(
