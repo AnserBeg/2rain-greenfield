@@ -17,14 +17,21 @@ this section now prevents.
 outliving its truth — committed two hours after writing the finding. **The instrument that
 would have caught it is R1's own `check-records.sh`, which is not built yet.**
 
-**R1's gate is now built — `record-claim-fidelity`, 2026-08-21, frozen for review at last
-executable commit `cf21981`.** `scripts/check-records.sh` plus
+**R1's gate is now built — `record-claim-fidelity`, 2026-08-21, round 2 frozen at last
+executable commit `2cf93c3b434a6ff474e05522f9fbba1ddbb46286`.** `scripts/check-records.sh` plus
 `test/architecture/record-claim-fidelity.test.ts` observe a packet record's claims against
 its frozen tree (Band A: every claimed path really differs between base and head, every
 claimed symbol is really declared there, no executable path changed that the record does
 not declare) and check record staleness against the ledger (Band C: a `proposed` ADR whose
-packet is accepted, a duplicate ledger id, a routing that resolves to nothing). Sixteen
-diagnostics, sixteen committed controls, die-alone measured 16/16. See the
+packet is accepted, a duplicate ledger id, a routing that resolves to nothing). Twenty
+diagnostics, twenty committed controls; die-alone measured per report site (21/21) and
+again over the behavioural guards (6/6).
+
+**Round 1 returned REVISE on six findings and every one reproduced.** Five were closed in
+the lane: decorative packet identity, an uncontrolled symbol-absence branch, and three
+Family-B fail-open trees (an escaped pipe shifting the Status column, provenance outranking
+the explicit ratification condition, and routings resolving to a table header or a
+directory). Two are the orchestrator's. See the
 [packet record](packets/record-claim-fidelity.md) and the
 [ledger row](ledger.md).
 
@@ -38,6 +45,24 @@ and are the same fact in other words. The lane stopped rather than taking
 the five were corrected against each packet's reviewed and integrated SHAs.
 `test:architecture` was **148/149 before, failing on exactly that one assertion**, and is
 **149/149** after — the gate doing its job on the first tree it ever read.
+
+
+**OWED TO THE ORCHESTRATOR, and neither is a lane decision.**
+
+1. **`docs/**` is now an executed gate input while `git-workflow` still excludes it as
+   never executed.** Measured: a docs-only commit repointing the declared head to forty
+   zeroes leaves the identical-tree command EMPTY while `test:architecture` REDS. This
+   packet's own five docs-only ADR corrections moved architecture 148/149 to 149/149. The
+   lane removed the false claim from its source and committed to re-running
+   `test:architecture` at this packet's integrated SHA rather than claiming the
+   carry-forward — but *when may a reviewed matrix be carried forward past a narrative
+   commit?* is doctrine, `.agents/skills/**` is fenced out of the charter, and the general
+   rule outlives this packet. **The narrowest correct split, offered as input:** the
+   exclusion list is right about *which paths a packet must declare*, and may no longer
+   imply that a suite reading those paths need not re-run. Two claims, one command.
+2. **Tier.** Chartered Behavioral; the round-1 reviewer rules it Critical because the
+   packet introduces an acceptance gate whose own Family A is declared silent. If Critical
+   stands, a Fable max confirm on the identical SHA is owed after the Codex arm passes.
 
 **One thing is flagged and not corrected**, because the bridge covers status lines only:
 ADR-0034's *"What this ADR does not yet implement"* still defers the enforcement half
