@@ -152,7 +152,14 @@ silently.
   absent entirely, the check reading zero input, a proxy satisfied while the fact
   does not hold, output shapes the parser does not recognize, and **the subject
   repaired before it is measured** — a verifier must never share a code path with
-  the thing that heals what it verifies.
+  the thing that heals what it verifies. **Calibrated 2026-08-21 — this is the
+  BAND A standard and it is not universal.** `review-tiers`, "Evidence depth
+  follows FAILURE OBSERVABILITY", sets what a packet actually owes: full
+  per-vacuity-vector control where a failure is SILENT until something reconciles
+  it; **one discriminating red per CLAIM** where the failure is visible the first
+  time an operator uses the path; the deterministic gate plus a stated limit where
+  it is visible on reading. **A committed control must die alone at every band, and
+  the claim must never exceed the evidence.** An undeclared band is Band A.
 - Deadline, expiry, and elapsed-time logic never compares raw wall-clock
   samples. Production elapsed-time decisions use a monotonic source; timing
   tests inject a controlled clock and never sleep-and-measure.
