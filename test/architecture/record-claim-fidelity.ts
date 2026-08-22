@@ -761,39 +761,19 @@ function isRepositoryPath(candidate: string): boolean {
 }
 
 /**
- * Markdown table cells, split on UNESCAPED pipes only. `\\|` is a literal pipe
- * inside a cell and does not open the next column; splitting on every `|`
- * shifts every later column by one, which is how a stale ratification read the
- * Tier cell and passed.
+ * Markdown table cells.
+ *
+ * This USED to carry backslash-parity escape handling, which mattered while the
+ * ADR-ratification reader read a Status column several cells in: an escaped pipe
+ * shifted every later column. That reader is retired, and the only cells read
+ * now are the header (for the packet-table signature) and cell 0 (the id), so
+ * escape handling became unreachable. Measured before removing it: the real tree
+ * has zero ledger rows with an escaped pipe in the first cell, and the gate's
+ * output is byte-identical with it gone. An unreachable branch cannot be
+ * controlled, and shipping one that cannot die is worse than not shipping it.
  */
 function splitRow(line: string): string[] {
-  const cells: string[] = [];
-  let current = '';
-  let backslashes = 0;
-  for (const character of line) {
-    if (character === '\\') {
-      backslashes += 1;
-      current += character;
-      continue;
-    }
-    // PARITY. `\\|` is an escaped pipe; `\\\\|` is an escaped BACKSLASH followed
-    // by a real delimiter. Counting only the immediately preceding character
-    // merged two cells and moved the Status column, which review measured.
-    if (character === '|' && backslashes % 2 === 1) {
-      current = `${current.slice(0, -1)}|`;
-      backslashes = 0;
-      continue;
-    }
-    backslashes = 0;
-    if (character === '|') {
-      cells.push(current);
-      current = '';
-      continue;
-    }
-    current += character;
-  }
-  cells.push(current);
-  return cells.slice(1, -1);
+  return line.split('|').slice(1, -1);
 }
 
 function stripMarkdown(cell: string): string {

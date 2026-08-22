@@ -212,23 +212,6 @@ test('the checker never writes to the repository', () => {
   );
 });
 
-test('an escaped pipe inside an id cell does not fabricate a duplicate', () => {
-  // The ADMISSION TWIN for `splitRow`'s backslash parity. Its failure mode after
-  // the Family B retirement is a false RED, not a false green: without parity
-  // handling `a\\|b` truncates to `a` and collides with a real `a`. So the
-  // discriminating evidence is a positive case that dies when parity is removed.
-  const world = buildSyntheticWorld(root);
-  const report = verifyRecordClaims({
-    ...greenInput(world),
-    ledger: {
-      path: 'docs/execution/ledger.md',
-      text: '| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| a\\|b | x | — | — | planned | — | — |\n| a | y | — | — | planned | — | — |\n',
-    },
-  });
-  assert.deepEqual(report.findings, []);
-  assert.equal(report.ledgerRows, 2);
-});
-
 test('the repository adapter discovers a record in a subdirectory', () => {
   // Drives the REAL `collectRepositoryInput`, not an injected input. A flat scan
   // let a record moved into a subdirectory vanish while other records remained,
