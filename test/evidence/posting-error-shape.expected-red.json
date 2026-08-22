@@ -50,7 +50,7 @@
     },
     {
       "name": "admission-excludes-only-the-twin-sqlstate",
-      "claim": "The SQLSTATE admission twin dies alone over the whole inventory-posting file: withdrawing admission from 23503 and nothing else kills the twin and leaves every other test in the file green — including the one-way-doors test, whose P0001 base-unit and 55P03 lock-timeout expectations run through this same guard on a real posting path. Measured over the file's full population rather than a name pattern, because a pattern narrows the command without narrowing the claim.",
+      "claim": "The SQLSTATE admission twin dies alone over the whole inventory-posting file: withdrawing admission from 23503 and nothing else kills the twin and leaves every other test in the file green — including the one-way-doors test, which reaches this same guard with three genuine PostgreSQL errors by two different routes: a base-unit P0001 trigger error handed to the exported translator by the test itself, and a forced-rollback P0001 plus a held-lock 55P03 that both arrive through the posting service's own outer catch. Measured over the file's full population rather than a name pattern, because a pattern narrows the command without narrowing the claim.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined;",
       "replacement": "  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) && code !== '23503'\n    ? code\n    : undefined;",

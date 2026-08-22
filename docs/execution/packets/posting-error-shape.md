@@ -182,10 +182,26 @@ the entry claims.
   neither half of the predicate is decorative.
 - **The Twin dies alone over the file's entire population** — 6 tests run, 1
   killed, 5 green. That run carries a second fact the focused runs cannot:
-  the surviving one-way-doors test exercises `P0001` (base-unit immutability)
-  and `55P03` (lock timeout) through this same guard on a real posting path,
-  so it proves the guard still admits real SQLSTATEs in production use, not
-  merely in a constructed translator call.
+  the surviving one-way-doors test reaches this same guard with **three
+  genuine PostgreSQL errors**, and the two routes are different, so the
+  record states them separately:
+  - **Base-unit `P0001`** (`assertBaseUnitBound`) — a real trigger error
+    from a direct module-role `UPDATE`, which **the test then hands to the
+    exported `translateInventoryPostingError` itself**. It proves the guard
+    admits a real SQLSTATE arriving from the database; it does **not**
+    traverse `PostgresInventoryPostingService.#post`.
+  - **Forced-rollback `P0001`** and **held-lock `55P03`** — both raised
+    inside `postAdjustment` and translated by the **service's own outer
+    catch**, asserted as `INVENTORY_POSTING_STORAGE_REJECTED` with
+    `details.sqlstate === 'P0001'` and as `INVENTORY_POSTING_LOCK_TIMEOUT`
+    with `details.sqlstate === '55P03'`. These two are the production-path
+    admissions.
+
+  *Corrected in round 3: the earlier wording put the base-unit specimen on
+  "a real posting path" alongside `55P03`, which overstated its route. The
+  arm was right, and the distinction survives because a genuine error
+  reaching the translator by an explicit test call proves less about the
+  service than one the service catches itself.*
 - **The Replay control's singleton is measured within its four-test command
   only.** The round-2 arm separately read the file for another victim of that
   mutation and found none; that is a reviewer's reading, not a run, and it is
