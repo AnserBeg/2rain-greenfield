@@ -64,4 +64,17 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     sourceDirectory: 'platform',
     violationCount: 33,
   }),
+  Object.freeze({
+    moduleId: 'northstar.purchasing:module.purchasing',
+    packageId: 'northstar.purchasing:package.purchasing',
+    sourceDirectory: 'purchasing',
+    // MEASURED by compiling the module, not derived: `purchasing=23/0` on the
+    // first run of this ratchet against the new entry. It is Party's 23
+    // exactly, and for the same reason -- six surfaces in the same five-slot
+    // anatomy, carrying the identical platform-wide residual that catalog,
+    // location and party all carry. Nothing here is a new violation KIND and no
+    // renderer exemption is introduced; closing the residual is the platform's
+    // work, not this module's.
+    violationCount: 23,
+  }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);
