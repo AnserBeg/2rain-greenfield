@@ -5,7 +5,8 @@ Base: `8136cfaa8caf23a73221cfa2b0feb5c90987556b` (`origin/main`, fetched and
 verified before cut)
 Branch: `packet/press-law-splice`
 Tier: Critical — the diff changes what an architecture gate proves
-Status: active; candidates `318c0dd719a7d759d313ee45ca080017e5e36b44`,
+Status: accepted on main at `c6418b6d24e1d90c84b4a19b14aee7810c76ff77`;
+candidates `318c0dd719a7d759d313ee45ca080017e5e36b44`,
 `4f0d19e475977956f26e3e5238ef90bcc90936a5`, and
 `358ba5fe7a66d530b1388979953a12bea81e2aae` returned REVISE; candidate
 `e02c15c9dc772cb772ceb3c851c606a95eb209c6` received a fresh Codex PASS and
@@ -43,8 +44,8 @@ confirmation PASS: the reviewer closed both the deletion causality and declared-
 grammar questions, independently verified the branch/ranges and byte-identical
 production, and found no in-scope material defect. Review converged, and the
 complete matrix passed on integrated SHA
-`1ef547ca1206a5e5992f7839cd3d9b7d6b57498f`; packet-into-main integration is
-next.
+`1ef547ca1206a5e5992f7839cd3d9b7d6b57498f`. Required packet-into-main
+`--no-ff` merge `c6418b6d24e1d90c84b4a19b14aee7810c76ff77` accepted the packet.
 
 ## Packet definition
 
@@ -996,6 +997,11 @@ The worktree remained clean. The production observer and provider blobs are
 still `83f9d84ff08a94c92563311fe8d5157dfd9517e7` and
 `1e141baa20004141321d4da1a7c95723bddf334c`; only execution records will differ
 between the matrix SHA and the packet tip used for the required `--no-ff` merge.
+
+Integration merge `c6418b6d24e1d90c84b4a19b14aee7810c76ff77` has first parent prior
+main `4780efc3dd65e0bae5bdcc0088b041ec8c68e2c4` and second parent frozen packet
+tip `bdaef4041c2f31013e2e85e67ee78f7abc7bf9f5`. Its non-narrative diff from
+matrix SHA `1ef547ca1206a5e5992f7839cd3d9b7d6b57498f` is empty.
 
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
