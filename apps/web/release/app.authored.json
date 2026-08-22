@@ -2578,7 +2578,7 @@
       "presence": "required",
       "reportable": true,
       "schemaVersion": "v5",
-      "searchable": false
+      "searchable": true
     },
     {
       "classification": "internal",
@@ -4650,6 +4650,52 @@
       "tier": "o0"
     },
     {
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "transitionStateEffect",
+        "schemaVersion": "v5",
+        "transition": {
+          "kind": "transitionReference",
+          "schemaVersion": "v5",
+          "targetId": "northstar.app:transition.purchase_order_draft_cancel"
+        }
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.purchase_order_draft_cancel",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:permission.purchase_order_cancel"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v5",
+          "targetId": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v5",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v5",
+          "value": "northstar.app:state.purchase_order_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:query.purchase_order_get"
+      },
+      "schemaVersion": "v5",
+      "tier": "o0"
+    },
+    {
       "confirmation": "none",
       "effect": {
         "kind": "transitionStateEffect",
@@ -5544,6 +5590,18 @@
     {
       "action": "transition",
       "kind": "permissionDefinition",
+      "label": "purchase_order cancel",
+      "permissionId": "northstar.app:permission.purchase_order_cancel",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v5",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "schemaVersion": "v5"
+    },
+    {
+      "action": "transition",
+      "kind": "permissionDefinition",
       "label": "purchase_order close",
       "permissionId": "northstar.app:permission.purchase_order_close",
       "resource": {
@@ -5558,18 +5616,6 @@
       "kind": "permissionDefinition",
       "label": "purchase_order reopen",
       "permissionId": "northstar.app:permission.purchase_order_reopen",
-      "resource": {
-        "kind": "entityReference",
-        "schemaVersion": "v5",
-        "targetId": "northstar.app:entity.purchase_order"
-      },
-      "schemaVersion": "v5"
-    },
-    {
-      "action": "transition",
-      "kind": "permissionDefinition",
-      "label": "purchase_order cancel",
-      "permissionId": "northstar.app:permission.purchase_order_cancel",
       "resource": {
         "kind": "entityReference",
         "schemaVersion": "v5",
@@ -11713,11 +11759,33 @@
           "fromState": {
             "kind": "stateReference",
             "schemaVersion": "v5",
+            "targetId": "northstar.app:state.purchase_order_draft"
+          },
+          "kind": "transitionDefinition",
+          "label": "Cancel order",
+          "orderKey": 20,
+          "permission": {
+            "kind": "permissionReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:permission.purchase_order_cancel"
+          },
+          "schemaVersion": "v5",
+          "toState": {
+            "kind": "stateReference",
+            "schemaVersion": "v5",
+            "targetId": "northstar.app:state.purchase_order_cancelled"
+          },
+          "transitionId": "northstar.app:transition.purchase_order_draft_cancel"
+        },
+        {
+          "fromState": {
+            "kind": "stateReference",
+            "schemaVersion": "v5",
             "targetId": "northstar.app:state.purchase_order_released"
           },
           "kind": "transitionDefinition",
           "label": "Close order",
-          "orderKey": 20,
+          "orderKey": 30,
           "permission": {
             "kind": "permissionReference",
             "schemaVersion": "v5",
@@ -11739,7 +11807,7 @@
           },
           "kind": "transitionDefinition",
           "label": "Reopen order",
-          "orderKey": 30,
+          "orderKey": 40,
           "permission": {
             "kind": "permissionReference",
             "schemaVersion": "v5",
@@ -11761,7 +11829,7 @@
           },
           "kind": "transitionDefinition",
           "label": "Cancel order",
-          "orderKey": 40,
+          "orderKey": 50,
           "permission": {
             "kind": "permissionReference",
             "schemaVersion": "v5",

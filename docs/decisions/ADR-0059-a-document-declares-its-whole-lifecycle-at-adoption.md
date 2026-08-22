@@ -71,11 +71,14 @@ destination.**
 ## 2. The purchase order lifecycle
 
 ```
-draft --release--> released --cancel--> cancelled
-                       |  ^
-                  close|  |reopen
-                       v  |
-                     closed
+                    release                cancel
+          draft ---------------> released ---------------> cancelled
+            |                     |    ^                       ^
+            |               close |    | reopen                 |
+            |                     v    |                        |
+            |                     closed                        |
+            |                                                   |
+            +---------------------- cancel ---------------------+
 ```
 
 | From | To | Ruled |
@@ -83,20 +86,44 @@ draft --release--> released --cancel--> cancelled
 | `draft` | `released` | the release |
 | `released` | `closed` | the close. **What triggers it is `PUR-2`'s to decide** — the transition exists now so that decision costs no lineage entry |
 | `closed` | `released` | the reopen. A closed order needing a further receipt or an amended quantity returns to `released` |
-| `released` | `cancelled` | the cancel |
+| `released` | `cancelled` | the cancel of a committed order |
+| `draft` | `cancelled` | the cancel of an uncommitted one. **Abandoning an order is ordinary** |
 | `released` | `draft` | **refused.** `draft` asserts no commitments exist, and once released, receipts may |
-| `draft` | `cancelled` | **refused.** A draft's exit is the generic ARCHIVE the four standard operations already provide |
-| `closed` | `cancelled` | **refused.** Reopen first, so cancel departs from one state and needs one transition |
+| `closed` | `cancelled` | **refused.** Reopen first |
 | `cancelled` | anything | **refused.** Terminal; reissue instead |
 
 `cancelled` is `terminal: true`. `closed` is not.
 
-**Cancel departs from `released`, not from `draft`, and the reason is
-structural rather than editorial.** A released order is refused by every one of
-the four generic operations, so cancel is its only exit; a draft order still has
-archive. And `transitionStateEffect` carries exactly one `transition` reference,
-so one operation drives one transition — a cancel reachable from two states
-would need two transitions and two operations.
+### Cancel departs from two states, so it is two transitions and two operations
+
+`transitionStateEffect` carries exactly one `transition` reference, so there is
+no spelling in which one operation reaches both.
+
+**An earlier draft of this ADR ruled `draft → cancelled` refused**, on the
+argument that a draft's exit is the generic ARCHIVE the four standard operations
+already provide. **That was wrong.** ARCHIVE is a LIFECYCLE fact — `archived_at`,
+excluded from read-backs that require `archived_at IS NULL` — while `cancelled`
+is a BUSINESS state that stays reportable. They are not substitutes, and an
+operator who abandons a draft order has made a business decision rather than a
+filing one. The plan's table had it right.
+
+**Both operation ids end in `_cancel`, deliberately.** ADR-0056 ranks the
+command bar on the final underscore-delimited verb and `operationLabel` derives
+the button text from the same suffix, so each presents as "Cancel" — the word
+for what each does. **The ambiguity ADR-0056 guards against cannot arise here**,
+because the two preconditions are disjoint (`draft` versus `released`) and the
+pair is therefore never offered together; and
+[ADR-0051](ADR-0051-the-write-path-addresses-an-operation.md) made the write path
+address an operation BY ID, so two commands sharing a label post different
+operations correctly. That is precisely the collision ADR-0051 fixed.
+
+**Four permissions for five transitions.** Both cancels authorize on one
+`purchase_order_cancel` permission. ADR-0050 §7's equality rule is per
+operation/transition PAIR, so sharing one id across two pairs satisfies it, and
+§7 warns specifically against buying a second authorization decision in advance
+of a shape that needs one. Splitting them later is an ordinary additive
+permission, not a lineage event — permissions are not the materialized state
+column.
 
 ## 3. The editing guard is `not(released) and not(closed) and not(cancelled)`
 

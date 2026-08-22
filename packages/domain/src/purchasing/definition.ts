@@ -70,28 +70,61 @@ type StateLocalId = (typeof STATES)[number][0];
  * | transition | ruled |
  * |---|---|
  * | `draft -> released` | the release |
+ * | `draft -> cancelled` | the cancel of an uncommitted order -- abandoning one is ordinary |
  * | `released -> closed` | the close; what triggers it is `PUR-2`'s |
  * | `closed -> released` | the reopen |
- * | `released -> cancelled` | the cancel |
+ * | `released -> cancelled` | the cancel of a committed order |
  * | `released -> draft` | **no** -- `draft` asserts no commitments exist, and once released, receipts may |
- * | `draft -> cancelled` | **no** -- a draft's exit is the generic ARCHIVE the four standard operations already provide |
- * | `closed -> cancelled` | **no** -- reopen first, so the cancel departs from one state and needs one transition |
+ * | `closed -> cancelled` | **no** -- reopen first |
  * | `cancelled -> anything` | **no** -- terminal; reissue instead |
  *
- * Cancel departs from `released` rather than from `draft` because a released
- * order is guarded against every generic operation, so cancel is its only exit,
- * while a draft order still has archive. `transitionStateEffect` carries
- * exactly ONE `transition` reference (`schemas.ts`), so one operation drives one
- * transition and a cancel reachable from two states would need two of each.
+ * CANCEL DEPARTS FROM TWO STATES, SO IT IS TWO TRANSITIONS AND TWO OPERATIONS.
+ * `transitionStateEffect` carries exactly ONE `transition` reference
+ * (`schemas.ts`), so one operation drives one transition and there is no
+ * spelling in which a single cancel reaches both.
+ *
+ * An earlier draft of this file shipped only the released-side cancel, on the
+ * argument that a draft's exit is the generic ARCHIVE. That was wrong and the
+ * plan's ruling is right: ARCHIVE is a LIFECYCLE fact -- `archived_at`, hidden
+ * from read-backs -- while `cancelled` is a BUSINESS state that stays reportable.
+ * They are not substitutes, and an operator who abandons a draft order has made
+ * a business decision rather than a filing one.
+ *
+ * BOTH OPERATION IDS END IN `_cancel`, DELIBERATELY. ADR-0056 ranks the command
+ * bar on the final underscore-delimited verb and `operationLabel` derives the
+ * button text from the same suffix, so both present as "Cancel" -- which is the
+ * word for what each does. They can never be offered together, because their
+ * preconditions are disjoint (`draft` versus `released`), so the ambiguity
+ * ADR-0056 guards against cannot arise; and ADR-0051 made the write path
+ * address an operation BY ID, so two commands sharing a label post different
+ * operations correctly. That is the exact collision ADR-0051 fixed.
  */
 const TRANSITIONS = [
-  ['release', 'Release order', 10, 'draft', 'released'],
-  ['close', 'Close order', 20, 'released', 'closed'],
-  ['reopen', 'Reopen order', 30, 'closed', 'released'],
-  ['cancel', 'Cancel order', 40, 'released', 'cancelled'],
+  ['release', 'Release order', 10, 'draft', 'released', 'release'],
+  ['draft_cancel', 'Cancel order', 20, 'draft', 'cancelled', 'cancel'],
+  ['close', 'Close order', 30, 'released', 'closed', 'close'],
+  ['reopen', 'Reopen order', 40, 'closed', 'released', 'reopen'],
+  ['cancel', 'Cancel order', 50, 'released', 'cancelled', 'cancel'],
 ] as const;
 
 type TransitionLocalId = (typeof TRANSITIONS)[number][0];
+type TransitionPermissionLocalId = (typeof TRANSITIONS)[number][5];
+
+/**
+ * FOUR permissions for five transitions: both cancels authorize on one
+ * `purchase_order_cancel` permission.
+ *
+ * The permission names the business ACT -- may this principal cancel a purchase
+ * order -- and the state it departs from is the transition's business, not the
+ * permission's. ADR-0050 section 7 warns specifically against buying a second
+ * authorization decision in advance of a shape that needs one, and nothing here
+ * needs to distinguish abandoning a draft from cancelling a released order at
+ * the policy layer. Splitting them later is an ordinary additive permission,
+ * not a lineage event: permissions are not the materialized state column.
+ */
+const TRANSITION_PERMISSIONS = [
+  ...new Set(TRANSITIONS.map(([, , , , , permission]) => permission)),
+] as readonly TransitionPermissionLocalId[];
 
 /**
  * Both purchasing families are `entityOwned` (ADR-0015), so every query is
@@ -267,6 +300,25 @@ export function purchasingModuleDefinition(
       // carries are retained. The program plan's own catalog (:1275, :1276)
       // places currency on the HEADER and optional unit price on the LINE, and
       // that is what is authored.
+      //
+      // SEARCHABLE, and the reason is the field's own nature rather than the
+      // defect that surfaced it. A currency code is a short, human-typed,
+      // controlled identifier -- the same class as `party_number`, `item_sku`,
+      // `location_code` and `inventory_transaction_line_unit_id`, every one of
+      // which is searchable here. "Show me the orders in EUR" is a thing an
+      // operator types, unlike a note or a timestamp.
+      //
+      // It ALSO removes a `searchableExclusion` verification scenario that this
+      // field could not pass, and that is worth stating rather than hiding.
+      // `verificationFieldValue` seeds every text field with `V-` plus a hash
+      // TRUNCATED TO `maximumLength`, and the search predicate is a SUBSTRING
+      // match -- so at length 3 the generated value is `V-<one hex char>`,
+      // which is a prefix of every sibling text value on the same record and
+      // matches roughly one run in eight. **That is a platform weakness, not a
+      // property of currency**: it makes any text field shorter than about
+      // eight characters non-deterministic under the prober, and this is the
+      // application's first such field -- the next shortest is 32. It is filed
+      // rather than worked around, and `searchable` here is not the fix for it.
       field(
         definitionIds,
         entityIds.purchaseOrder,
@@ -274,6 +326,7 @@ export function purchasingModuleDefinition(
         'Currency',
         50,
         text(3),
+        { searchable: true },
       ),
       field(
         definitionIds,
@@ -361,10 +414,11 @@ export function purchasingModuleDefinition(
         'purchase_order_line',
         entityIds.purchaseOrderLine,
       ),
-      ...TRANSITIONS.map(([local, , , fromState]) =>
+      ...TRANSITIONS.map(([local, , , fromState, , permission]) =>
         transitionOperation(
           definitionIds,
           local,
+          permission,
           inState(stateFieldId, definitionIds.stateIds[fromState]),
         ),
       ),
@@ -396,7 +450,7 @@ export function purchasingModuleDefinition(
       // `transitionPermissionId` is the single source for both, and
       // `COMPILER_TRANSITION_PERMISSION_MISMATCH` refuses any divergence by
       // name at compile time.
-      ...TRANSITIONS.map(([local]) =>
+      ...TRANSITION_PERMISSIONS.map((local) =>
         transitionPermission(definitionIds, local),
       ),
     ],
@@ -467,7 +521,7 @@ function stateMachine(ids: PurchasingIds): Record<string, unknown> {
       terminal,
     })),
     transitions: TRANSITIONS.map(
-      ([local, label, orderKey, fromState, toState]) => ({
+      ([local, label, orderKey, fromState, toState, permission]) => ({
         fromState: reference('stateReference', ids.stateIds[fromState]),
         kind: 'transitionDefinition',
         label,
@@ -475,7 +529,7 @@ function stateMachine(ids: PurchasingIds): Record<string, unknown> {
         // The SAME id the operation declares. See the permissions block.
         permission: reference(
           'permissionReference',
-          transitionPermissionId(ids, local),
+          transitionPermissionId(ids, permission),
         ),
         schemaVersion: version,
         toState: reference('stateReference', ids.stateIds[toState]),
@@ -487,14 +541,14 @@ function stateMachine(ids: PurchasingIds): Record<string, unknown> {
 
 function transitionPermissionId(
   ids: PurchasingIds,
-  action: TransitionLocalId,
+  action: TransitionPermissionLocalId,
 ): string {
   return `${ids.namespace}:permission.purchase_order_${action}`;
 }
 
 function transitionPermission(
   ids: PurchasingIds,
-  action: TransitionLocalId,
+  action: TransitionPermissionLocalId,
 ): Record<string, unknown> {
   return {
     action: 'transition',
@@ -528,6 +582,7 @@ function transitionPermission(
 function transitionOperation(
   ids: PurchasingIds,
   action: TransitionLocalId,
+  permission: TransitionPermissionLocalId,
   precondition: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
@@ -535,7 +590,10 @@ function transitionOperation(
     // `reopen` are each other's inverse and `release` is the primary forward
     // action; `cancel` cannot be undone from `cancelled`, so it is the one that
     // gets the extra step.
-    confirmation: action === 'cancel' ? 'humanRequired' : 'none',
+    // Only a move into the TERMINAL state asks for a human confirmation, and
+    // both cancels do. `close` and `reopen` are each other's inverse and
+    // `release` is the primary forward action.
+    confirmation: permission === 'cancel' ? 'humanRequired' : 'none',
     effect: {
       kind: 'transitionStateEffect',
       schemaVersion: version,
@@ -546,7 +604,7 @@ function transitionOperation(
     operationId: `${ids.namespace}:operation.purchase_order_${action}`,
     permission: reference(
       'permissionReference',
-      transitionPermissionId(ids, action),
+      transitionPermissionId(ids, permission),
     ),
     precondition,
     readBack: reference(
