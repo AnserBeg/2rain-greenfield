@@ -788,9 +788,6 @@ rule is mechanical for a reason.** Two duplicated sentences are worth less than
 an independent Critical-logic confirm. Routed to whichever packet next touches
 the file.
 
-## Owed at acceptance, and deliberately not taken here
-
-
 **`review-log.md` needs four rows** — R1 REVISE, R2 REVISE, R3 REVISE, R4 Fable
 confirm — and this lane did not add them. Two reasons, both measured:
 `scripts/check-review-record.sh` requires only that the SHA on `main` appears,
