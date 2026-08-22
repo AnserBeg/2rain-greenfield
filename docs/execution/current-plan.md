@@ -17,21 +17,30 @@ this section now prevents.
 outliving its truth — committed two hours after writing the finding. **The instrument that
 would have caught it is R1's own `check-records.sh`, which is not built yet.**
 
-**R1's gate is now built — `record-claim-fidelity`, 2026-08-21, round 2 frozen at last
-executable commit `2cf93c3b434a6ff474e05522f9fbba1ddbb46286`.** `scripts/check-records.sh` plus
+**R1's gate is now built — `record-claim-fidelity`, round 3 frozen at last executable
+commit `f6bdccd541130ef43d78c305c095b3d46b4f934b`.** `scripts/check-records.sh` plus
 `test/architecture/record-claim-fidelity.test.ts` observe a packet record's claims against
 its frozen tree (Band A: every claimed path really differs between base and head, every
 claimed symbol is really declared there, no executable path changed that the record does
 not declare) and check record staleness against the ledger (Band C: a `proposed` ADR whose
-packet is accepted, a duplicate ledger id, a routing that resolves to nothing). Twenty
-diagnostics, twenty committed controls; die-alone measured per report site (21/21) and
-again over the behavioural guards (6/6).
+packet is accepted, a duplicate ledger id, a routing that resolves to nothing). Twenty-two
+diagnostics, twenty-two committed controls; evidence is 23/23 per report site, 10/10 over
+the behavioural guards, and two admission twins.
 
-**Round 1 returned REVISE on six findings and every one reproduced.** Five were closed in
-the lane: decorative packet identity, an uncontrolled symbol-absence branch, and three
-Family-B fail-open trees (an escaped pipe shifting the Status column, provenance outranking
-the explicit ratification condition, and routings resolving to a table header or a
-directory). Two are the orchestrator's. See the
+**Rounds 1 and 2 both returned REVISE, and every finding in both reproduced.** Round 1
+found six; round 2 found five still open. **Neither round's green matrices were
+completeness evidence, and that is the transferable lesson** — every round-2 finding was a
+branch nobody had written a case for: a copy-and-EDIT rather than a verbatim copy, an
+escaped backslash rather than an escaped pipe, an UNRESOLVED explicit ratification rather
+than a resolved one, and an ordinary data table rather than a header row. A mutation matrix
+proves the sites that exist are load-bearing; it cannot reveal a path with no input.
+
+**`pnpm test:architecture` is OWED at `f6bdccd` and is not claimed.** A run in the shared
+working directory returned 141/141 green — on `packet/pur-1-v2`, because another session
+checked out its branch mid-run, and this packet's test file was absent from that tree
+entirely. A detached worktree cannot substitute: pnpm workspace resolution fails through a
+symlinked `node_modules`. **The suite needs the real working directory, which another lane
+holds.** See the
 [packet record](packets/record-claim-fidelity.md) and the
 [ledger row](ledger.md).
 
