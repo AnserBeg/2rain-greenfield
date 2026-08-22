@@ -98,22 +98,31 @@ capability-local adapter distinction, would need its own ruling.
 
 ### Refuse literal splicing of module identities in production press source
 
-Yes, for statically observable JavaScript/TypeScript string constructions. The
-guard parses production source and evaluates runtime string literals,
-parentheses/type wrappers, template expressions, and `+` expressions. In a
-separate population pass, it evaluates TypeScript `TemplateLiteralTypeNode`
-values whose spans are exact primitive literal types, parenthesized exact types,
-or nested exact template types. It observes a completed construction as one
-value. Inside an otherwise dynamic ordinary runtime construction it also observes maximal
-statically known runs while preserving whether either adjacent construction
-edge borders an unknown runtime value. Unknown adjacency is conservatively
-represented by a character that is both a word character and a
-namespace-continuation character before calling the same
-`moduleIdentityMatches` authority as a contiguous spelling. Thus the matcher
-may report only when static text or the real construction edge proves the
-boundaries its identity family requires; it never invents a string boundary at
-the edge of an isolated run. The guard therefore reports `PRESS006`, rather
-than introducing a parallel rule or an allowlist.
+Yes, for the observer's declared static grammar. The runtime population
+recognizes quoted string literals, untagged no-substitution template literals,
+ordinary untagged template expressions, binary `+` constructions, and the
+transparent parentheses, `as`, angle-bracket assertion, `satisfies`, and
+non-null wrappers around those expressions. Tagged-template aggregate results
+are not evaluated, while their independently evaluated substitutions remain
+observable. In a separate population pass, the observer recognizes TypeScript
+`TemplateLiteralTypeNode` values whose spans are exact primitive literal types,
+parenthesized exact types, or nested exact template types. **Any expression or
+type span outside that grammar is appended as dynamic and conservatively
+padded, so an unrecognized form becomes an unknown boundary rather than a
+silent absence.** This is the safety property that closes the grammar; the
+observer does not need another syntax arm for every expression TypeScript can
+represent.
+
+The observer records a completed construction as one value. Inside an otherwise
+dynamic ordinary runtime construction it also observes maximal statically known
+runs while preserving whether either adjacent construction edge borders an
+unknown runtime value. Unknown adjacency is conservatively represented by a
+character that is both a word character and a namespace-continuation character
+before calling the same `moduleIdentityMatches` authority as a contiguous
+spelling. Thus the matcher may report only when static text or the real
+construction edge proves the boundaries its identity family requires; it never
+invents a string boundary at the edge of an isolated run. The guard therefore
+reports `PRESS006`, rather than introducing a parallel rule or an allowlist.
 
 The observer measures each completed ordinary runtime construction once, every
 bounded partial run inside an incomplete runtime construction, each exact

@@ -971,6 +971,35 @@ test('consolidated guard admission: an unbounded static prefix may continue thro
   }
 });
 
+test('consolidated guard preserves no-substitution template literal boundaries in incomplete concatenations', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'declare const suffix: string;',
+      'export const bounded =',
+      '  `northstar.` + `widget:` + suffix;',
+      'export const admitted =',
+      '  `northstar.` + `widget` + suffix;',
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 3,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('consolidated guard admission: contiguous and split literal segments preserve unknown adjacency', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [
