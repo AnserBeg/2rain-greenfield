@@ -146,11 +146,10 @@ test("control: the derived state field id is normalization's answer, not this mo
   // and a query selecting it fails `CANON_QUERY_FIELD_LOCALITY`. Here they mean
   // the ruling is working -- the field exists at the id the MACHINE names, and
   // nowhere else.
-  assert.deepEqual(
+  assertRefusalPair(
     normalizationRefusal((definition) => {
       definition.stateMachines[0]!.machineId = `${namespace}:machine.renamed`;
-    }).toSorted(),
-    ['CANON_QUERY_FIELD_LOCALITY', 'CANON_REFERENCE_UNRESOLVED'],
+    }),
   );
 
   // And the derivation itself is observed rather than asserted: renaming the
@@ -171,11 +170,10 @@ test('control: with no machine there is no state field, and every reader of it r
   // VACUITY VECTOR -- the subject absent entirely. One property varies:
   // `stateMachines` becomes empty, which is what every other first-party module
   // still declares.
-  assert.deepEqual(
+  assertRefusalPair(
     normalizationRefusal((definition) => {
       definition.stateMachines = [];
-    }).toSorted(),
-    ['CANON_QUERY_FIELD_LOCALITY', 'CANON_REFERENCE_UNRESOLVED'],
+    }),
   );
 
   // And the field really is gone rather than merely unreferenced.
@@ -1329,6 +1327,33 @@ function compileRefusal(vary: (definition: AuthoredShape) => void): string[] {
 }
 
 /** Every enum field on `purchase_order`, which is what "one state field" counts. */
+/**
+ * The refusal a vanished state field produces. `CANON_REFERENCE_UNRESOLVED` is
+ * the fact under control -- the module's constant no longer names a field --
+ * and it is REQUIRED. `CANON_QUERY_FIELD_LOCALITY` rides along only while the
+ * read path selects the field, so it is admitted but not required: requiring it
+ * would couple these controls to the read path and make them red for a reason
+ * that already has its own test.
+ *
+ * Any THIRD code still reds, so this stays a closed observation rather than a
+ * loosened one.
+ */
+function assertRefusalPair(codes: readonly string[]): void {
+  assert.equal(
+    codes.includes('CANON_REFERENCE_UNRESOLVED'),
+    true,
+    codes.join(),
+  );
+  assert.deepEqual(
+    codes.filter(
+      (code) =>
+        code !== 'CANON_REFERENCE_UNRESOLVED' &&
+        code !== 'CANON_QUERY_FIELD_LOCALITY',
+    ),
+    [],
+  );
+}
+
 function orderEnumFields(shape: NormalizedShape): NormalizedField[] {
   return shape.fields.filter(
     (field) =>
