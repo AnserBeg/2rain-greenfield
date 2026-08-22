@@ -83,8 +83,26 @@ export const MAPPED_OPERATION_ERROR_NAMES = Object.freeze([
 export type MappedOperationErrorName =
   (typeof MAPPED_OPERATION_ERROR_NAMES)[number];
 
+export type OperationMessageRef =
+  | {
+      readonly code: Exclude<
+        OperationDiagnosticCode,
+        'OPERATION_LEGAL_ENTITY_INACTIVE' | 'OPERATION_REFUSED'
+      >;
+      readonly subject?: undefined;
+    }
+  | {
+      readonly code: 'OPERATION_LEGAL_ENTITY_INACTIVE' | 'OPERATION_REFUSED';
+      readonly subject: string;
+    };
+
+type SubjectlessOperationDiagnosticCode = Exclude<
+  OperationDiagnosticCode,
+  'OPERATION_LEGAL_ENTITY_INACTIVE' | 'OPERATION_REFUSED'
+>;
+
 const OPERATION_ERROR_MESSAGE_CODES: Readonly<
-  Record<MappedOperationErrorName, OperationDiagnosticCode>
+  Record<MappedOperationErrorName, SubjectlessOperationDiagnosticCode>
 > = Object.freeze({
   // INACCURATE: an unreadable pinned catalog is a release fault. Should be
   // OPERATION_UNSUPPORTED.
@@ -121,10 +139,41 @@ export function queryMessageCode(error: unknown): QueryDiagnosticCode {
 }
 
 export function operationMessageCode(error: unknown): OperationDiagnosticCode {
+  return operationMessageRef(error).code;
+}
+
+/**
+ * Provider refusal codes are intentionally open to module extensions. Unknown
+ * provider refusals therefore stay refusals and carry their stable code to the
+ * operator; only failures with no provider refusal identity use unavailable.
+ */
+export function operationMessageRef(error: unknown): OperationMessageRef {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    error.name === 'ModuleRuntimeInterpreterError' &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    error.code.length > 0
+  ) {
+    if (
+      error.code === 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE' &&
+      'subjectId' in error &&
+      typeof error.subjectId === 'string'
+    ) {
+      return {
+        code: 'OPERATION_LEGAL_ENTITY_INACTIVE',
+        subject: error.subjectId,
+      };
+    }
+    return { code: 'OPERATION_REFUSED', subject: error.code };
+  }
   const name = errorName(error);
-  return isMappedOperationErrorName(name)
+  const code = isMappedOperationErrorName(name)
     ? OPERATION_ERROR_MESSAGE_CODES[name]
     : 'OPERATION_UNAVAILABLE';
+  return { code };
 }
 
 function isMappedQueryErrorName(value: string): value is MappedQueryErrorName {

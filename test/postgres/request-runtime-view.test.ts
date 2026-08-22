@@ -72,6 +72,7 @@ import {
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
   type CurrentPolicyVersionEvidence,
+  RequestRuntimeViewRefusalError,
   SUPPORTED_RUNTIME_CAPABILITIES,
   unsupportedRuntimeCapability,
   type PinnedRuntimeContextEnvelope,
@@ -413,7 +414,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         await t.test(
           'missing, null, and invisible release authority fail closed',
           async () => {
-            await assertLoadError(
+            await assertRuntimeViewRefusalError(
               () =>
                 requestEntry.run(
                   { headers: { authorization: 'Bearer tenant-a' } },
@@ -421,7 +422,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'NULL_ACTIVE_RELEASE',
             );
-            await assertLoadError(
+            await assertRuntimeViewRefusalError(
               () =>
                 requestEntry.run(
                   { headers: { authorization: 'Bearer missing' } },
@@ -429,7 +430,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                 ),
               'ACTIVE_POINTER_MISSING',
             );
-            await assertLoadError(
+            await assertRuntimeViewRefusalError(
               () =>
                 requestEntry.run(
                   { headers: { authorization: 'Bearer broken' } },
@@ -1524,6 +1525,17 @@ async function assertLoadError(
     assert.ok(error instanceof RequestRuntimeViewLoadError);
     assert.equal(error.code, code);
     if (message) assert.match(error.message, message);
+    return true;
+  });
+}
+
+async function assertRuntimeViewRefusalError(
+  run: () => Promise<unknown>,
+  code: RequestRuntimeViewRefusalError['code'],
+): Promise<void> {
+  await assert.rejects(run, (error: unknown) => {
+    assert.ok(error instanceof RequestRuntimeViewRefusalError);
+    assert.equal(error.code, code);
     return true;
   });
 }
