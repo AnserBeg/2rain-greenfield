@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: evidence_ready — reviews converged; full integration matrix green
+Status: accepted — integrated `0c0841247ca0ce71caf42b2168eec144295e04f2`
 
 ## Goal
 
@@ -814,5 +814,26 @@ reported no repository leaks.
 The corrected downstream boundary is included in that run: the G1-P5
 PostgreSQL block passed 13/13, including the three runtime-entry refusals that
 stopped the prior matrix. No retry, mutation or source edit occurred during
-this green run. Integration and the final accepted identities remain to be
-recorded; the matrix itself is the acceptance run for these executable bytes.
+this green run. At that point integration and the final accepted identities
+remained to be recorded; the matrix itself is the acceptance run for these
+executable bytes.
+
+### Acceptance integration — `0c0841247ca0ce71caf42b2168eec144295e04f2`
+
+While the matrix ran, `origin/main` advanced from `597ad0c` to `ba4304d` only
+in `docs/**`. Required packet-to-main `--no-ff` merge `0c08412` therefore has
+prior main `ba4304d` as first parent and packet tip `0f4ab07` as second parent.
+The fixed `git-workflow` executable comparison from matrix SHA `512a051` to
+the merge is empty:
+
+```text
+git diff --name-only 512a051391a66b94ff82c94310185f39d532dc8f \
+  0c0841247ca0ce71caf42b2168eec144295e04f2 -- . \
+  ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
+# no output
+```
+
+The reviewed matrix is therefore the acceptance matrix for the integrated
+executable tree. ADR-0054 amendment 6 is accepted, the originating current-plan
+row is closed, and the three deliberately routed refusal rows remain open under
+their recorded scopes and triggers.
