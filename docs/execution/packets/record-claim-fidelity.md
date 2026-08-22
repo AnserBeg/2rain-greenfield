@@ -10,7 +10,7 @@ Status: **round 4, frozen for review.** Rounds 1, 2 and 3 each returned
 every finding in all three was reproduced against the frozen candidate before
 anything was changed. Round 3's three open findings and its new narrative defect
 are closed below. The packet's last executable commit is
-`6eb049e24367ad36ad13c98529e353df054f84cf`.
+`0b343d2b9e0a0c81bfaba014b3fbbc8f8b420b41`.
 
 **The three rounds converged rather than spiralled: 6 findings, then 5, then 3,
 and every round-4 correction is FAIL-CLOSED or STRUCTURAL rather than a widened
@@ -98,7 +98,7 @@ those declarations against the git tree. Concretely:
 
 Verified free before starting, by measurement rather than from the partition
 table. `lanes.md` mandates `git diff --name-only main...<branch>` over every
-`packet/*` branch; run at `6eb049e` across all 22, **none touches
+`packet/*` branch; run at `0b343d2` across all 22, **none touches
 `scripts/check-records.sh` or any `record-claim-fidelity*` file**.
 `packet/expected-red-gate` touches `scripts/check-expected-red.sh` — a different
 script, and R2's disposition rather than R1's. `packet/ps-2` and `packet/pur-1`
@@ -131,7 +131,7 @@ because it is a real limit, not an oversight.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "record-claim-fidelity",
   "base": "ba4304d0477784142442093c6783b20ae2f09424",
-  "head": "6eb049e24367ad36ad13c98529e353df054f84cf",
+  "head": "0b343d2b9e0a0c81bfaba014b3fbbc8f8b420b41",
   "changedPaths": [
     "scripts/check-records.sh",
     "test/architecture/record-claim-fidelity.ts",
@@ -555,7 +555,7 @@ the prose-parsing the charter forbids. Recorded as a limit rather than chased.
   convention this program already uses for every other lane: a sibling worktree
   with a real install.
 - `node --import tsx --test test/architecture/record-claim-fidelity.test.ts` —
-  **10/10** at `6eb049e`, run in an isolated worktree. This file needs no pnpm
+  **10/10** at `0b343d2`, run in an isolated worktree. This file needs no pnpm
   workspace resolution, so the worktree result is sound for it alone.
 - `scripts/check-records.sh` — `records: OK (126 record(s), 1 declaring: 7
   claimed path(s) and 10 claimed symbol(s) observed in their frozen trees; 57
