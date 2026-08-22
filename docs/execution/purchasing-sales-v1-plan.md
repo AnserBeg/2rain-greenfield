@@ -745,6 +745,52 @@ decides received quantity — CAS stored column or lock-and-sum derived. **`PUR-
 the over-receipt case explicitly:** amending ordered below received is either refused, or
 admitted and disclosed as over-received. It is not left to fall out of the arithmetic.
 
+#### The hard case, and it is NOT the ordered-quantity one — corrected 2026-08-22
+
+**Raised by the user against the paragraph above, which addressed the easy case.** The
+ordered quantity is commercial intent and never touches the ledger. **The hard case is
+amending RECEIVED downward after a sales order has already consumed that quantity:**
+receive 100, ship 80, then discover only 60 arrived.
+
+**What happens today, measured rather than reasoned:** the correction is **refused** with
+`INVENTORY_STOCK_NEGATIVE`, naming item, location, movement and projected balance.
+
+**And the check is stronger than its name suggests.** `enforceNegativeStock`
+(`inventory-posting-service.ts:2050-2085`) does not test the final balance. It merges every
+persisted movement with the new ones, sorts by `compareInventoryMovementOrderEntries` —
+`effectiveAt`, then `recordedAt`, then deterministic tiebreakers (`:1640-1656`) — and walks
+that sequence accumulating a running total, throwing the moment it goes below zero.
+**The invariant is "on-hand was never negative at any point in effective time," not
+"on-hand is not negative now."** So backdating the correction to the receipt date does not
+evade it: the replay still passes through the later shipment.
+
+**That refusal is correct and must not be relaxed to make the case work.** Posting it
+asserts a physical impossibility — that −20 units sat on a shelf — and the shipment of 80
+is itself evidence the units existed.
+
+**`PUR-2` owes the two resolution paths, because they mean different things:**
+
+1. **The shipment was the error.** Reverse the shipment first, then correct the receipt.
+   Order matters; `reversalOfMovementId` carries the lineage.
+2. **The shipment was right and the receipt was wrong.** Then goods left the building that
+   were never received: the document says 100 and the shelf disagrees. **That is a COUNT
+   problem, not a receipt problem.** The receipt stands as recorded and the variance posts
+   through `stock_count`, whose `InventoryStockCountKindV1` already carries
+   `'initial' | 'correction' | 'reversal'`.
+
+**The general rule, and it is the honest one:** goods that have already been consumed
+cannot be retroactively un-received. Forcing the operator to say WHICH of the two stories
+is true is the feature, not the friction.
+
+**What is actually owed is guidance, not mechanism.** Today the operator meets
+`INVENTORY_STOCK_NEGATIVE` with no route to either path. `PUR-2` names both.
+
+**And one policy question `PUR-2` must rule rather than inherit:** whether receipt
+corrections specifically run under `allowWithFlag` instead of the default `reject`, letting
+the negative stand as a flagged must-resolve exception. **Recommended: no.** A negative
+on-hand that nobody is obliged to clear is worse than a refusal that forces the operator to
+choose a story. Reversing this needs a named owner for the flagged exception queue.
+
 **Also `PUR-2`'s:** what closes an order, and what a purchasing operator sees when the
 negative-stock dial refuses a reversal.
 
