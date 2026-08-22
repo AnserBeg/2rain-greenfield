@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: evidence_ready — downstream expectation bridge awaiting narrow review
+Status: evidence_ready — reviews converged; full integration matrix owed
 
 ## Goal
 
@@ -768,3 +768,25 @@ Because a PostgreSQL test changed after review convergence, this exact
 executable correction receives a narrow review before the full matrix is
 restarted. The review scope is boundary attribution in this one specimen; it
 does not reopen the already reviewed runtime implementation or web behavior.
+
+### Downstream bridge narrow review — `588f0e0601f9ec899403cda8add8951a06159fd1`
+
+Fresh Codex xhigh narrow review returned `PASS` on the exact remote tip. The
+reviewer confirmed that exactly three calls crossing
+`AuthenticatedRequestRuntimeEntryAdapter` now require the canonical
+runtime-owned error and exact codes, while all seven provider-direct load calls
+retain the provider-owned error helper, exact codes and existing message checks.
+Both helpers discriminate by nominal class and code; no request, fixture,
+provider raise site, production behavior or unrelated assertion changed.
+
+**Evidence band: Band B — visible on use.** The claim is boundary attribution
+for an operator-visible refusal. The prior stale provider-class expectation is
+the observed discriminating red; the corrected exact-class and exact-code
+assertions are the admission of the runtime-owned boundary. Per `review-tiers`,
+one discriminating red per claim is proportionate and a five-vector Band-A
+mutation table is not owed. The reviewer named message-text changes as the
+cheapest surviving green tree and correctly ruled them outside this narrow
+class-and-code claim.
+
+No material finding survived. The complete serialized matrix is now the sole
+remaining acceptance gate.
