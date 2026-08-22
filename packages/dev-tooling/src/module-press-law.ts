@@ -420,20 +420,8 @@ function staticallyConstructedStrings(
   const constructions: StaticStringConstruction[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isTemplateLiteralTypeNode(node)) {
-      const construction = literalOnlyTemplateTypeConstruction(
-        node,
-        sourceFile,
-      );
-      if (construction) {
-        constructions.push(construction);
-        // The complete template type is one exact static value. Its literal
-        // fragments are not independent source observations.
-        return;
-      }
-      // Alias, generic, identifier, and other non-literal spans remain outside
-      // this bounded observer. Continue so a nested literal-only template type
-      // can still be observed as its own completed type expression.
-      ts.forEachChild(node, visit);
+      // Type constructions have an independent population pass below. Runtime
+      // completion must not decide whether a type child is reachable.
       return;
     }
     if (ts.isTaggedTemplateExpression(node)) {
@@ -498,10 +486,47 @@ function staticallyConstructedStrings(
     visit(expression);
   };
   visit(sourceFile);
+  constructions.push(...staticallyConstructedTemplateTypes(sourceFile));
   return constructions;
 }
 
-function literalOnlyTemplateTypeConstruction(
+interface ExactStaticTypeString {
+  readonly literalRanges: readonly SourceRange[];
+  readonly value: string;
+}
+
+function staticallyConstructedTemplateTypes(
+  sourceFile: ts.SourceFile,
+): readonly StaticStringConstruction[] {
+  const constructions: StaticStringConstruction[] = [];
+  const visit = (node: ts.Node): void => {
+    if (!ts.isTemplateLiteralTypeNode(node)) {
+      ts.forEachChild(node, visit);
+      return;
+    }
+
+    const construction = exactTemplateTypeConstruction(node, sourceFile);
+    if (construction) {
+      constructions.push(construction);
+      // The complete template type is one exact static value. Its nested
+      // fragments are not independent observations of that same value.
+      return;
+    }
+
+    constructions.push(...staticallyKnownTemplateTypeRuns(node, sourceFile));
+    // An unresolved span remains outside this bounded evaluator, but may
+    // contain an independently complete nested template type.
+    for (const span of node.templateSpans) {
+      if (exactStaticTypeString(span.type, sourceFile) === undefined) {
+        visit(span.type);
+      }
+    }
+  };
+  visit(sourceFile);
+  return constructions;
+}
+
+function exactTemplateTypeConstruction(
   node: ts.TemplateLiteralTypeNode,
   sourceFile: ts.SourceFile,
 ): StaticStringConstruction | undefined {
@@ -509,15 +534,11 @@ function literalOnlyTemplateTypeConstruction(
   const literalRanges: SourceRange[] = [sourceRange(node.head, sourceFile)];
 
   for (const span of node.templateSpans) {
-    if (
-      !ts.isLiteralTypeNode(span.type) ||
-      !ts.isStringLiteralLike(span.type.literal)
-    ) {
-      return undefined;
-    }
-    value += span.type.literal.text + span.literal.text;
+    const exact = exactStaticTypeString(span.type, sourceFile);
+    if (!exact) return undefined;
+    value += exact.value + span.literal.text;
     literalRanges.push(
-      sourceRange(span.type.literal, sourceFile),
+      ...exact.literalRanges,
       sourceRange(span.literal, sourceFile),
     );
   }
@@ -531,9 +552,104 @@ function literalOnlyTemplateTypeConstruction(
   };
 }
 
-function staticallyKnownStringRuns(
-  node: ts.Expression,
+function exactStaticTypeString(
+  node: ts.TypeNode,
   sourceFile: ts.SourceFile,
+): ExactStaticTypeString | undefined {
+  if (ts.isParenthesizedTypeNode(node)) {
+    return exactStaticTypeString(node.type, sourceFile);
+  }
+  if (ts.isTemplateLiteralTypeNode(node)) {
+    const construction = exactTemplateTypeConstruction(node, sourceFile);
+    return construction
+      ? {
+          literalRanges: construction.literalRanges,
+          value: construction.value,
+        }
+      : undefined;
+  }
+  if (node.kind === ts.SyntaxKind.UndefinedKeyword) {
+    return {
+      literalRanges: [sourceRange(node, sourceFile)],
+      value: 'undefined',
+    };
+  }
+  if (!ts.isLiteralTypeNode(node)) return undefined;
+
+  const literal = node.literal;
+  let value: string | undefined;
+  if (ts.isStringLiteralLike(literal)) {
+    value = literal.text;
+  } else if (ts.isNumericLiteral(literal)) {
+    value = String(Number(literal.text));
+  } else if (ts.isBigIntLiteral(literal)) {
+    value = BigInt(literal.text.replace(/n$/u, '')).toString();
+  } else if (literal.kind === ts.SyntaxKind.TrueKeyword) {
+    value = 'true';
+  } else if (literal.kind === ts.SyntaxKind.FalseKeyword) {
+    value = 'false';
+  } else if (literal.kind === ts.SyntaxKind.NullKeyword) {
+    value = 'null';
+  } else if (
+    ts.isPrefixUnaryExpression(literal) &&
+    literal.operator === ts.SyntaxKind.MinusToken &&
+    (ts.isNumericLiteral(literal.operand) ||
+      ts.isBigIntLiteral(literal.operand))
+  ) {
+    value = ts.isBigIntLiteral(literal.operand)
+      ? (-BigInt(literal.operand.text.replace(/n$/u, ''))).toString()
+      : String(-Number(literal.operand.text));
+  }
+
+  return value === undefined
+    ? undefined
+    : {
+        literalRanges: [sourceRange(literal, sourceFile)],
+        value,
+      };
+}
+
+function staticallyKnownTemplateTypeRuns(
+  node: ts.TemplateLiteralTypeNode,
+  sourceFile: ts.SourceFile,
+): readonly StaticStringConstruction[] {
+  return collectStaticStringRuns((appendStatic, appendDynamic) => {
+    appendStatic(
+      node.head.text,
+      [sourceRange(node.head, sourceFile)],
+      node.getStart(sourceFile),
+    );
+    for (const span of node.templateSpans) {
+      const exact = exactStaticTypeString(span.type, sourceFile);
+      if (exact) {
+        appendStatic(
+          exact.value,
+          exact.literalRanges,
+          span.type.getStart(sourceFile),
+        );
+      } else {
+        appendDynamic();
+      }
+      appendStatic(
+        span.literal.text,
+        [sourceRange(span.literal, sourceFile)],
+        span.literal.getStart(sourceFile),
+      );
+    }
+  });
+}
+
+type AppendStaticStringRun = (
+  value: string,
+  literalRanges: readonly SourceRange[],
+  index: number,
+) => void;
+
+function collectStaticStringRuns(
+  populate: (
+    appendStatic: AppendStaticStringRun,
+    appendDynamic: () => void,
+  ) => void,
 ): readonly StaticStringConstruction[] {
   const runs: StaticStringConstruction[] = [];
   let current:
@@ -570,43 +686,52 @@ function staticallyKnownStringRuns(
     finish(false);
     nextLeftBoundaryKnown = false;
   };
-  const flatten = (expression: ts.Expression): void => {
-    const unwrapped = unwrapStaticStringExpression(expression);
-    if (ts.isStringLiteralLike(unwrapped)) {
-      appendStatic(
-        unwrapped.text,
-        runtimeStringLiteralRanges(unwrapped, sourceFile),
-        unwrapped.getStart(sourceFile),
-      );
-      return;
-    }
-    if (ts.isTemplateExpression(unwrapped)) {
-      appendStatic(
-        unwrapped.head.text,
-        [sourceRange(unwrapped.head, sourceFile)],
-        unwrapped.getStart(sourceFile),
-      );
-      for (const span of unwrapped.templateSpans) {
-        flatten(span.expression);
-        appendStatic(
-          span.literal.text,
-          [sourceRange(span.literal, sourceFile)],
-          span.literal.getStart(sourceFile),
-        );
-      }
-      return;
-    }
-    if (isStringConcatenation(unwrapped)) {
-      flatten(unwrapped.left);
-      flatten(unwrapped.right);
-      return;
-    }
-    appendDynamic();
-  };
-
-  flatten(node);
+  populate(appendStatic, appendDynamic);
   finish(true);
   return runs;
+}
+
+function staticallyKnownStringRuns(
+  node: ts.Expression,
+  sourceFile: ts.SourceFile,
+): readonly StaticStringConstruction[] {
+  return collectStaticStringRuns((appendStatic, appendDynamic) => {
+    const flatten = (expression: ts.Expression): void => {
+      const unwrapped = unwrapStaticStringExpression(expression);
+      if (ts.isStringLiteralLike(unwrapped)) {
+        appendStatic(
+          unwrapped.text,
+          runtimeStringLiteralRanges(unwrapped, sourceFile),
+          unwrapped.getStart(sourceFile),
+        );
+        return;
+      }
+      if (ts.isTemplateExpression(unwrapped)) {
+        appendStatic(
+          unwrapped.head.text,
+          [sourceRange(unwrapped.head, sourceFile)],
+          unwrapped.getStart(sourceFile),
+        );
+        for (const span of unwrapped.templateSpans) {
+          flatten(span.expression);
+          appendStatic(
+            span.literal.text,
+            [sourceRange(span.literal, sourceFile)],
+            span.literal.getStart(sourceFile),
+          );
+        }
+        return;
+      }
+      if (isStringConcatenation(unwrapped)) {
+        flatten(unwrapped.left);
+        flatten(unwrapped.right);
+        return;
+      }
+      appendDynamic();
+    };
+
+    flatten(node);
+  });
 }
 
 // A word character is also a namespace-continuation character. Padding an

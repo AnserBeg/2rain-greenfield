@@ -599,7 +599,8 @@ test('consolidated guard observes literal-only template types without refusing l
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [
       "export type DirectCapability = 'northstar.widget:capability.direct';",
-      "export type SplicedCapability = `${'northstar'}.${'widget'}:capability.spliced`;",
+      'export type SplicedCapability =',
+      "  `${'northstar'}.${'widget'}:capability.spliced`;",
       "export type ContractNamespace = `${'northstar'}.${'widget'}-contract/v1`;",
     ].join('\n'),
     'packages/domain/src/widget/definition.ts': [
@@ -617,7 +618,177 @@ test('consolidated guard observes literal-only template types without refusing l
     };
     assert.deepEqual(checkModulePressLaw(root).violations, [
       expectedViolation,
+      { ...expectedViolation, line: 3 },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard discovers spliced template types beneath completed typed runtime constructions', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      "export const direct = 'ordinary' satisfies string | `${'northstar'}.${'widget'}:capability.direct-type`;",
+      "export const completed = ('ordinary' satisfies string | `${'northstar'}.${'widget'}:capability.completed-type`) + '';",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    const expectedViolation: ModulePressLawViolation = {
+      file: 'apps/api/src/generic.ts',
+      line: 1,
+      message: 'generic press references widget identity northstar.widget',
+      moduleDirectory: 'widget',
+      ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    };
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      expectedViolation,
       { ...expectedViolation, line: 2 },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard preserves unknown right adjacency for contiguous and split template types', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'type UnknownContiguous<T extends string> = `northstar.widget${T}`;',
+      "type UnknownSplit<T extends string> = `${'northstar'}.${'widget'}${T}`;",
+      'type BoundedContiguous<T extends string> = `northstar.widget:${T}`;',
+      "type BoundedSplit<T extends string> = `${'northstar'}.${'widget'}:${T}`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    const expectedViolation: ModulePressLawViolation = {
+      file: 'apps/api/src/generic.ts',
+      line: 3,
+      message: 'generic press references widget identity northstar.widget',
+      moduleDirectory: 'widget',
+      ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    };
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      expectedViolation,
+      { ...expectedViolation, line: 4 },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard preserves unknown left adjacency across template type tails and substitutions', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'type TailUnknown<T extends string> = `${T}widget_list`;',
+      "type SubstitutionUnknown<T extends string> = `${T}${'widget_list'}`;",
+      'type TailBounded<T extends string> = `${T}:widget_list`;',
+      "type SubstitutionBounded<T extends string> = `${T}:${'widget_list'}`;",
+      'type SymbolUnknown<T extends string> = `${T}WIDGET_IDS`;',
+      'type SymbolBounded<T extends string> = `${T}:WIDGET_IDS`;',
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+      'const listQueryId = `${WIDGET_NAMESPACE}:query.widget_list`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(
+      checkModulePressLaw(root).violations,
+      [3, 4, 6].map((line) => ({
+        file: 'apps/api/src/generic.ts',
+        line,
+        message:
+          line === 6
+            ? 'generic press references widget identity WIDGET_IDS'
+            : 'generic press references widget identity widget_list',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      })),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard observes exact primitive and nested template type spans', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      "export type Numeric = `${'northstar.widget'}${1}`;",
+      "export type BigInt = `${'widget_phase'}${3n}`;",
+      "export type Boolean = `${'widget_flag'}${true}`;",
+      "export type Null = `${'widget_null'}${null}`;",
+      "export type Undefined = `${'widget_undefined'}${undefined}`;",
+      "export type Parenthesized = `${('widget')}_${('parenthesized')}`;",
+      "export type Nested = `${`${'widget'}_${'nested'}`}`;",
+      "export type Contract = `${'northstar.widget'}${1}-contract/v1`;",
+      "export type SubstitutionContinuation = `${'widget_phase3'}_extension`;",
+      "export type TailContinuation = `${'prefix_'}widget_phase3`;",
+      "export type HeadContinuation = `widget_phase3${'_extension'}`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget1';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+      'const primitiveIds = [',
+      '  `${WIDGET_NAMESPACE}:query.widget_phase3`,',
+      '  `${WIDGET_NAMESPACE}:query.widget_flagtrue`,',
+      '  `${WIDGET_NAMESPACE}:query.widget_nullnull`,',
+      '  `${WIDGET_NAMESPACE}:query.widget_undefinedundefined`,',
+      '  `${WIDGET_NAMESPACE}:query.widget_parenthesized`,',
+      '  `${WIDGET_NAMESPACE}:query.widget_nested`,',
+      '];',
+    ].join('\n'),
+  });
+  try {
+    const expectedIdentities = [
+      'northstar.widget1',
+      'widget_phase3',
+      'widget_flagtrue',
+      'widget_nullnull',
+      'widget_undefinedundefined',
+      'widget_parenthesized',
+      'widget_nested',
+    ];
+    assert.deepEqual(
+      checkModulePressLaw(root).violations,
+      expectedIdentities.map((identity, index) => ({
+        file: 'apps/api/src/generic.ts',
+        line: index + 1,
+        message: `generic press references widget identity ${identity}`,
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      })),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard discovers an independently exact template type inside a rejected outer type', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts':
+      "export type Nested<T extends string> = `${T | `${'northstar'}.${'widget'}:capability.nested`}`;",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 1,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
     ]);
   } finally {
     removeArchitectureFixture(root);
