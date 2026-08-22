@@ -750,12 +750,13 @@ test('consolidated guard attributes a multiline partial template type to the tem
 test('consolidated guard reports every bounded partial run in one unresolved template type', () => {
   const root = createArchitectureFixture({
     'apps/api/src/generic.ts': [
-      'type Two<A extends string, B extends string> =',
-      "  `${'northstar'}.${'widget'}:${A} ${'northstar'}.${'widget'}:${B}`;",
+      'type Three<A extends string, B extends string, C extends string> =',
+      "  `${'northstar'}.${'widget'}:${A} ${'northstar'}.${'widget'}:${B} ${'widget'}_${'list'}:${C}`;",
     ].join('\n'),
     'packages/domain/src/widget/definition.ts': [
       "export const WIDGET_NAMESPACE = 'northstar.widget';",
       'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+      'const listQueryId = `${WIDGET_NAMESPACE}:query.widget_list`;',
     ].join('\n'),
   });
   try {
@@ -769,6 +770,10 @@ test('consolidated guard reports every bounded partial run in one unresolved tem
     assert.deepEqual(checkModulePressLaw(root).violations, [
       expectedViolation,
       expectedViolation,
+      {
+        ...expectedViolation,
+        message: 'generic press references widget identity widget_list',
+      },
     ]);
   } finally {
     removeArchitectureFixture(root);
@@ -845,6 +850,32 @@ test('consolidated guard discovers an independently exact template type inside a
       {
         file: 'apps/api/src/generic.ts',
         line: 1,
+        message: 'generic press references widget identity northstar.widget',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard retains raw ownership inside an unresolved template type span', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': [
+      'type RawInsideRejectedSpan<T extends string> =',
+      "  `prefix:${T | 'northstar.widget:capability.raw'}`;",
+    ].join('\n'),
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 2,
         message: 'generic press references widget identity northstar.widget',
         moduleDirectory: 'widget',
         ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
