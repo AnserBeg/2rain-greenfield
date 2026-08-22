@@ -804,7 +804,7 @@ function assertEvidenceReconciles(entry, measured, root, phase) {
  * one such identity, there is no honest way to decide which occurrence a
  * declaration meant — so the gate refuses to decide rather than deciding badly.
  *
- * THIS REPLACES THREE SEPARATE PATCHES. Six rounds found the same root three
+ * THIS REPLACES THREE SEPARATE PATCHES. Review arms 2 and 6 found one root three
  * ways: Node's file wrapper impersonating a test that never registered, a
  * cancelled child credited as an executed failure, and two tests sharing one
  * name. Each was patched as its own predicate. The asymmetry that let the third

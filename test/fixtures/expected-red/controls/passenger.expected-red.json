@@ -9,9 +9,7 @@
       "original": "export const CONTROL_SENTINEL = 'pristine';",
       "replacement": "export const CONTROL_SENTINEL = 'moved';",
       "test": {
-        "files": [
-          "test/fixtures/expected-red/passenger.test.mjs"
-        ]
+        "files": ["test/fixtures/expected-red/passenger.test.mjs"]
       },
       "kills": [
         {

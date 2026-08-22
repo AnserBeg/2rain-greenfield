@@ -279,10 +279,14 @@ that join.
   ordering; both reporters use it; and the rule now carries an admission twin —
   a real path-named result must still be credited.
 
-**The scope limit, declared.** The gate certifies only manifests whose
-identities it can prove unique and provenanced, and refuses everything else. Six
-review rounds found the same root seven ways; the seventh and eighth — a skipped
-duplicate and a `./`-aliased path — were answered by widening the rule's
+**The scope limit, declared.**Arms are numbered by `review-log.md`, which is the authority; this ADR uses no
+other scheme.** Identity leaked **five ways** across them: Node's file wrapper
+impersonating a test that never registered, and a `cancelledByParent` child
+credited as an executed failure (both **arm 2**); two tests sharing one
+`{file, name}` (**arm 6**, where the scope limit was taken); and a **skipped**
+duplicate together with a `./`-aliased manifest path (**arm 7**). The first three
+were subsumed by the uniqueness rule; the last two were closed by widening that
+rule's population rather than by adding predicates./`-aliased path — were answered by widening the rule's
 population rather than by adding predicates, and the limit is now the product
 rather than an implication. A suite reporting two results under one
 `{file, name}`, in any status, cannot be an expected-red subject until its names

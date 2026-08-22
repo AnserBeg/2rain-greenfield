@@ -25,7 +25,7 @@ limit rather than implied by a list of patches.
 
 The charter for the final round declared this fallback in advance: *if a seventh
 way identity leaks is found, take the scope limit and say so; another predicate
-is not acceptable.* Round 6 found two more — a **skipped** duplicate, which held
+is not acceptable.* **Arm 7 found two more** — a **skipped** duplicate, which held
 its `{file, name}` while earning no reachability credit and so was dropped before
 uniqueness ran; and a **`./`-aliased** manifest path, checked as a raw string and
 adjudicated as a resolved one, so two declarations were satisfied by one
@@ -303,8 +303,7 @@ Two measurements, both taken with the gate:
    readiness deadline does not survive the cold start. **This is the open TIER 3
    row `container-pressure-forges-outcomes`, met head-on.**
 
-**The runner refused rather than measuring.** It reported *"the suite is not green
-is not wholly green"* and
+**The runner refused rather than measuring.** It reported *"the restored suite is not wholly green, so it cannot serve as the reference the kill set is measured against"* and
 stopped. Had it only checked for a non-zero exit — which is what the original
 inline runner did — it would have recorded a red for a suite that was already
 red, which is the admission-side vacuity this packet exists to close.
