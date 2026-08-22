@@ -2,15 +2,26 @@
 
 Date: 2026-08-22
 
-Base: `e8be8c31c286d92816146d595ef3e9114496208f` (`origin/main`, fetched and
-verified this session)
+Base: cut from `e8be8c31c286d92816146d595ef3e9114496208f`; rebased onto
+`4780efc3dd65e0bae5bdcc0088b041ec8c68e2c4` (`origin/main`) before freezing, which
+brought in the two `docs(purchasing)` commits that added plan §7.17.
 
 Branch: `packet/pur-1-v2` — **not** `packet/pur-1`, which is 430 commits behind
 and was read as REFERENCE only.
 
 Tier: Critical
 
-Status: evidence ready
+Status: **evidence ready** — frozen `404c9a09aba0be1de761b1c7f4620569e935edcb`, pushed.
+
+Gates at that exact SHA, all green, zero reds: `typecheck` · `lint` · `format` ·
+`check:app-release` · `check:demo-release` · `check:boundaries`, then
+`test:unit` 151 · `test:compiler` 152 · `test:integration` 149 ·
+`test:architecture` 141 · `test:postgres` 204. **`test:postgres` took five
+rounds**; what each found is recorded below. The full matrix runs after review
+converges, per `git-workflow`'s 2026-08-14 ruling.
+
+Rebased onto `origin/main` at `4780efc` before freezing; the rebase changed **no
+executable content**, verified with `git-workflow`'s exclusion diff.
 
 ## Goal
 
