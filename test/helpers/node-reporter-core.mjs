@@ -4,6 +4,27 @@ import { resolve } from 'node:path';
  * @param {{type: string, data: {name?: unknown, file?: unknown, skip?: unknown, todo?: unknown, details?: {type?: unknown}}}} event
  * @returns {string | undefined}
  */
+/**
+ * Every test result Node SELECTED for this run, skipped and todo included.
+ *
+ * Credit and selection are different questions. Reachability asks which files
+ * earned credit, and a skipped test earns none. Identity uniqueness asks what
+ * the run reported at all — and a skipped occurrence still occupies its
+ * `{file, name}`. Dropping skip/todo before the uniqueness check let a mutation
+ * add a skipped duplicate of a passing test and go uncounted, which is the same
+ * ambiguity class one population narrower.
+ */
+export function selectedNodeResultPath(event) {
+  const { data } = event;
+  if (event.type !== 'test:pass' && event.type !== 'test:fail')
+    return undefined;
+  if (data.details?.type !== 'test') return undefined;
+  if (typeof data.file !== 'string' || typeof data.name !== 'string') {
+    return undefined;
+  }
+  return data.file;
+}
+
 export function creditableNodeResultPath(event) {
   const { data } = event;
   if (event.type !== 'test:pass' && event.type !== 'test:fail')
@@ -136,11 +157,12 @@ export function createNodeResultLedger() {
         }
         return;
       }
-      const path = creditableNodeResultPath(event);
+      const path = selectedNodeResultPath(event);
       if (path === undefined) return;
       pending.push({ event, file: resolve(path), sequence });
     },
-    credited() {
+    /** Everything the run selected, skipped and todo included. */
+    selected() {
       return pending.filter((record) => {
         const summary = summaries.get(record.file);
         // A file that never reported a summary did not complete its run, so its
@@ -149,6 +171,12 @@ export function createNodeResultLedger() {
         // A result after its file's summary is the synthetic pass.
         return record.sequence < summary.sequence;
       });
+    },
+    /** Selected minus skip/todo — what earns reachability credit. */
+    credited() {
+      return this.selected().filter(
+        (record) => !record.event.data.skip && !record.event.data.todo,
+      );
     },
     summaries() {
       return new Map(

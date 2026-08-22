@@ -32,6 +32,12 @@ const KILL_ELIGIBLE_FAILURE_TYPES = new Set([
 ]);
 
 function classify(event) {
+  // A skipped or todo occupant still holds its {file, name}. It earns no
+  // reachability credit, but it is part of the population identity uniqueness
+  // must see — round 6 found a mutation adding a skipped duplicate of a passing
+  // test and going uncounted.
+  if (event.data.skip) return 'skipped';
+  if (event.data.todo) return 'todo';
   if (event.type === 'test:pass') return 'pass';
   const failureType = event.data.details?.error?.failureType;
   // An aborted test carries no failureType and is counted under `cancelled`.
@@ -48,7 +54,7 @@ export default async function* expectedRedReporter(source) {
   const ledger = createNodeResultLedger();
   for await (const event of source) ledger.observe(event);
 
-  const results = ledger.credited().map(({ event, file }) => ({
+  const results = ledger.selected().map(({ event, file }) => ({
     file,
     message: String(event.data.details?.error?.message ?? ''),
     name: String(event.data.name),
@@ -64,6 +70,8 @@ export default async function* expectedRedReporter(source) {
     failed: Number(counts.failed ?? 0),
     file,
     passed: Number(counts.passed ?? 0),
+    skipped: Number(counts.skipped ?? 0),
+    todo: Number(counts.todo ?? 0),
   }));
 
   yield `${JSON.stringify({ files, results, version: 3 }, undefined, 2)}\n`;

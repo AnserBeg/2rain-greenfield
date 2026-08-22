@@ -145,6 +145,13 @@ function pathProblem(candidate, root, tracked) {
     return 'must be a non-empty repository-relative path';
   }
   if (isAbsolute(candidate)) return 'must be repository-relative, not absolute';
+  // Static uniqueness compares raw strings while execution resolves them, so a
+  // `./` alias passed the duplicate guards and then collapsed to one identity at
+  // run time — two declarations satisfied by one regression. Refusing the
+  // noncanonical spelling makes the two equivalence relations the same one.
+  if (candidate !== relative(root, resolve(root, candidate))) {
+    return 'must be spelled canonically — no leading ./ and no redundant segments';
+  }
   const resolved = resolve(root, candidate);
   if (
     resolved !== join(root, candidate) ||
@@ -765,11 +772,15 @@ function assertEvidenceReconciles(entry, measured, root, phase) {
         cancelled: tally('cancelled'),
         failed: tally('fail') + tally('aggregate'),
         passed: tally('pass'),
+        skipped: tally('skipped'),
+        todo: tally('todo'),
       },
       {
         cancelled: summary.cancelled,
         failed: summary.failed,
         passed: summary.passed,
+        skipped: summary.skipped,
+        todo: summary.todo,
       },
       `${entry.name}: the ${phase} evidence for ${file} does not reconcile with Node's own counts`,
     );
