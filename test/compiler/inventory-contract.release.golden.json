@@ -149,6 +149,14 @@
       },
       {
         "classification": "entityOwned",
+        "familyId": "purchase_order"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "purchase_order_line"
+      },
+      {
+        "classification": "entityOwned",
         "familyId": "reservation"
       },
       {
@@ -185,6 +193,11 @@
         "semantics": "crossEntityAllowed",
         "sourceFamilyId": "party_role",
         "targetFamilyId": "party"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "purchase_order_line",
+        "targetFamilyId": "purchase_order"
       },
       {
         "semantics": "sameEntity",
@@ -277,7 +290,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "74e263befe5134f69e9e5c86f0a60612eed82d032251be9e9e12c405ecdc19b7",
+  "releaseRoot": "8da1a94ba5962be8cf91bd17dc64782acafe2427521f101067731bb906f00373",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

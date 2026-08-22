@@ -51,18 +51,31 @@ const LIFECYCLE = {
   ],
   transitions: [
     ['release', 'draft', 'released'],
+    ['draft_cancel', 'draft', 'cancelled'],
     ['close', 'released', 'closed'],
     ['reopen', 'closed', 'released'],
     ['cancel', 'released', 'cancelled'],
   ],
 } as const;
 
+/**
+ * Five transitions, four permissions: both cancels authorize on one
+ * `purchase_order_cancel` permission. ADR-0050 section 7's equality rule is per
+ * operation/transition PAIR, so sharing one id across two pairs satisfies it.
+ */
+const TRANSITION_PERMISSIONS: Readonly<Record<string, string>> = {
+  cancel: 'cancel',
+  close: 'close',
+  draft_cancel: 'cancel',
+  release: 'release',
+  reopen: 'reopen',
+};
+
 /** Every state-to-state pair the ruling REFUSES, so absence is asserted rather than assumed. */
 const REFUSED_MOVES = [
   ['released', 'draft'],
   ['closed', 'draft'],
   ['cancelled', 'draft'],
-  ['draft', 'cancelled'],
   ['closed', 'cancelled'],
   ['cancelled', 'released'],
   ['cancelled', 'closed'],
@@ -566,7 +579,7 @@ test('a transition permission that disagrees with its operation is refused, and 
   // compiled effect carries no permission at all.
   assert.equal(compile().status, 'compiled');
   for (const [action] of LIFECYCLE.transitions) {
-    const permissionId = `${namespace}:permission.purchase_order_${action}`;
+    const permissionId = `${namespace}:permission.purchase_order_${TRANSITION_PERMISSIONS[action]!}`;
     const transition = normalized().stateMachines[0]!.transitions.find(
       (candidate) =>
         candidate.transitionId === PURCHASING_IDS.transitionIds[action],
@@ -592,14 +605,20 @@ test('a transition permission that disagrees with its operation is refused, and 
 });
 
 test('each transition permission is a transition permission, on the document it moves', () => {
+  const distinct = [...new Set(Object.values(TRANSITION_PERMISSIONS))];
   const permissions = authored().permissions.filter((permission) =>
-    LIFECYCLE.transitions.some(
-      ([action]) =>
+    distinct.some(
+      (local) =>
         permission.permissionId ===
-        `${namespace}:permission.purchase_order_${action}`,
+        `${namespace}:permission.purchase_order_${local}`,
     ),
   );
-  assert.equal(permissions.length, LIFECYCLE.transitions.length);
+  assert.equal(permissions.length, distinct.length);
+  assert.equal(
+    distinct.length,
+    LIFECYCLE.transitions.length - 1,
+    'both cancels must share one permission, or this control observes nothing',
+  );
   for (const permission of permissions) {
     assert.equal(permission.action, 'transition');
     assert.equal(permission.resource.targetId, orderEntityId);
@@ -765,6 +784,7 @@ test('each transition is offered only where it can move the record', () => {
   const expected: Record<string, readonly string[]> = {
     cancel: ['released'],
     close: ['released'],
+    draft_cancel: ['draft'],
     release: ['draft'],
     reopen: ['closed'],
   };
@@ -858,12 +878,17 @@ test('the command verbs are the ones the renderer reads', () => {
       true,
     );
   }
+  // BOTH cancels end in `_cancel`, deliberately: ADR-0056 ranks on the final
+  // verb and `operationLabel` derives the button text from it, so each presents
+  // as "Cancel" -- the word for what each does. They are never offered together
+  // because their preconditions are disjoint, which the command matrix proves.
   assert.deepEqual(
     operationIds
       .filter((operationId) => /_(release|cancel)$/u.test(operationId))
       .toSorted(),
     [
       `${namespace}:operation.purchase_order_cancel`,
+      `${namespace}:operation.purchase_order_draft_cancel`,
       `${namespace}:operation.purchase_order_release`,
     ],
   );
@@ -1019,7 +1044,7 @@ test('the module rides the adopted language version and compiles deterministical
   );
   assert.equal(definition.entities.length, 2);
   assert.equal(definition.queries.length, 8);
-  assert.equal(definition.operations.length, 12);
+  assert.equal(definition.operations.length, 13);
   assert.equal(definition.permissions.length, 14);
   assert.equal(definition.assertions.length, 2);
 

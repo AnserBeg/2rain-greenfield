@@ -99,6 +99,17 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
       'anyPredicate',
       'fieldComparisonPredicate',
     ]),
+    // A definition file CONSTRUCTS predicates rather than dispatching on them,
+    // and the tripwire's heuristic -- three or more distinct kinds mentioned in
+    // one file -- cannot tell the two apart. `inventory/definition.ts` is
+    // registered for exactly the same reason. `PUR-1` authors an
+    // `all(not(equals), not(equals), not(equals))` editing guard, which is
+    // three kinds.
+    'packages/domain/src/purchasing/definition.ts': signature([
+      'fieldComparisonPredicate',
+      'allPredicate',
+      'notPredicate',
+    ]),
     'packages/domain/src/inventory/definition.ts': signature([
       'notPredicate',
       'fieldComparisonPredicate',

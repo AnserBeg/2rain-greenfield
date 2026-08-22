@@ -61,29 +61,43 @@ ADR-number-collision row applied.
 ### 1. The lifecycle is declared in full, including the parts this packet cannot drive
 
 ```
-draft --release--> released --cancel--> cancelled
-                       |  ^
-                  close|  |reopen
-                       v  |
-                     closed
+                    release                cancel
+          draft ---------------> released ---------------> cancelled
+            |                     |    ^                       ^
+            |               close |    | reopen                 |
+            |                     v    |                        |
+            |                     closed                        |
+            |                                                   |
+            +---------------------- cancel ---------------------+
 ```
 
-Four states, four transitions. Refused and asserted absent: `released → draft`
-(draft asserts no commitments exist, and once released, receipts may),
-`draft → cancelled` (a draft's exit is the generic ARCHIVE the four standard
-operations already provide), `closed → cancelled` (reopen first), and
-`cancelled → anything` (terminal; reissue instead).
+Four states, five transitions, four permissions. Refused and asserted absent:
+`released → draft` (draft asserts no commitments exist, and once released,
+receipts may), `closed → cancelled` (reopen first), and `cancelled → anything`
+(terminal; reissue instead).
 
-**Cancel departs from `released`, not from `draft`.** A released order is
-guarded against every generic operation, so cancel is its only exit; a draft
-order still has archive. `transitionStateEffect` carries exactly one
-`transition` reference, so one operation drives one transition and a cancel
-reachable from two states would need two of each.
+**Cancel departs from two states, so it is two transitions and two operations.**
+`transitionStateEffect` carries exactly one `transition` reference, so there is
+no spelling in which one operation reaches both. **An earlier commit in this
+packet shipped only the released-side cancel** on the argument that a draft's
+exit is the generic ARCHIVE; that was wrong and plan §7.17's table was right.
+ARCHIVE is a lifecycle fact (`archived_at`, hidden from read-backs); `cancelled`
+is a business state that stays reportable. They are not substitutes. The lane
+raised the conflict rather than improvising, and the user ruled for the plan.
+
+Both operation ids end in `_cancel` deliberately — ADR-0056 ranks on the final
+verb and `operationLabel` derives the button text from it, so each presents as
+"Cancel". They can never be offered together, because their preconditions are
+disjoint, and ADR-0051 made the write path address an operation by id, so two
+commands sharing a label post different operations correctly.
+
+Both authorize on one `purchase_order_cancel` permission: ADR-0050 §7's equality
+rule is per operation/transition pair, and §7 warns against buying a second
+authorization decision in advance of a shape that needs one.
 
 **Declaring the whole door at once was not a preference, and the cost was
-measured rather than argued.** An earlier commit in this packet shipped a
-three-state machine and minted lineage entry 14. Adding `closed` afterwards
-raised
+measured rather than argued.** An earlier commit shipped a three-state machine
+and minted lineage entry 14. Adding `closed` afterwards raised
 
 ```
 COMPILER_STORAGE_RETYPE_UNSUPPORTED
@@ -93,9 +107,11 @@ COMPILER_STORAGE_RETYPE_UNSUPPORTED
 ```
 
 The premature entry was discarded, the lineage rebuilt from the accepted
-13-entry head, and this packet mints exactly one. **Every state or transition
-added after this release is a normalization event and a lineage entry of its
-own.** That is ADR-0050's "expensive" made concrete on the first try.
+13-entry head, and this packet mints exactly one. **Every state added after this
+release is a normalization event and a lineage entry of its own.** Adding the
+fifth TRANSITION later did not retype the column — states retype, transitions do
+not — but it still moved the normalized bytes and the release root, so the
+lineage was rebuilt from the accepted head a second time for the same reason.
 
 ### 2. `state` is not authored, and the compiler is why
 
@@ -177,42 +193,25 @@ reads narrow.
 it.** The plan is the program authority and outside this packet's owned paths,
 so the correction is reported rather than made.
 
-### B. The plan and the bridge disagree on `draft → cancelled`, and it is a one-way door
+### B. The plan and the bridge disagreed on `draft → cancelled` — RESOLVED for the plan
 
 | Source | `draft → cancelled` |
 |---|---|
 | plan §7.17's table (`:713`) | **yes** — *"`draft → cancelled` · `released → cancelled` — abandoning an order is ordinary"* |
-| the bridge instruction's table | not listed, and it explicitly endorsed the opposite: *"Keep your cancel-departs-from-released reasoning — it is sound and the generic archive still owns a draft's exit."* |
+| the bridge instruction's table | not listed, and it endorsed the opposite: *"Keep your cancel-departs-from-released reasoning — it is sound and the generic archive still owns a draft's exit."* |
 
-**This packet ships ONE cancel, from `released`,** because that is the later and
-more specific instruction. **It is reported rather than improvised on**, because
-`AGENTS.md` §1 says a conflict with the plan is surfaced and not resolved by the
-lane, and because ADR-0059 makes it expensive to get wrong: adding the second
-cancel after this release costs a normalization event and a lineage entry.
+The lane shipped one cancel, raised the conflict rather than resolving it, and
+**the user ruled for the plan.** Both cancels now ship. The lane's own reasoning
+was wrong for the reason it had already suspected: ARCHIVE is a lifecycle fact
+and `cancelled` is a business state, so they are not substitutes.
 
-**The decision is not free either way, and the cost is not symmetric.**
+Recorded because the mechanism worked and is worth repeating: `AGENTS.md` §1
+says a conflict with the plan is surfaced rather than resolved by the lane, and
+ADR-0059 made getting it wrong cost a lineage entry. Raising it cost one round
+trip; discovering it after acceptance would have cost a release.
 
-- **If `draft → cancelled` should exist**, it needs a second transition AND a
-  second operation, because `transitionStateEffect` carries exactly one
-  `transition` reference. Two operations cannot both be named `..._cancel`, and
-  ADR-0056's renderer precedence ranks on the final underscore-delimited verb —
-  so exactly one of them can present as Cancel and the other lands at rank 1
-  under whatever verb it is given. **That naming is a durable presentation
-  decision, and it is the multi-command case ADR-0056 says triggers a new
-  decision rather than an extended verb list.**
-- **If it should not**, a draft's exit is the generic ARCHIVE, which is a
-  lifecycle fact (`archived_at`) rather than a business state. An archived draft
-  is hidden; a cancelled order is a business record that stays reportable. Those
-  are genuinely different, which is the strongest argument FOR §7.17's ruling
-  and against this lane's.
-
-**On balance the lane thinks §7.17 is probably right and its own reasoning
-probably wrong** — archive and cancel are not substitutes — but it is not the
-lane's call, it changes the shipped artifact, and it must be settled before
-freeze rather than after.
-
-Stop count for this packet: **2**. Both are decisions, not blocks: everything
-else is built and gated.
+Stop count for this packet: **2**. One is settled (B, ruled for the plan); one
+is routed to `PUR-2` (Stop 1, the amend). Neither blocked the packet.
 
 ## Stop 1 — the amend operation is not expressible in this lease
 
@@ -411,6 +410,69 @@ packet controls the declaration each of those reads. A Band B failure here is
 visible the first time an operator opens the form, which is the standard
 `review-tiers` sets for that band.
 
+## What `test:postgres` found, which nothing else could
+
+The charter made `test:postgres` a required gate because the packet moves
+release output. It earned that: four reds, two distinct causes, and **neither
+was reachable from any compiler or unit gate.**
+
+### 1. A text field shorter than about eight characters is non-deterministic under the release-verification prober
+
+```
+ReleaseVerificationIntegrityError
+  VERIFICATION_SEARCH_EXCLUSION_FAILED
+  excluded field value was searchable: northstar.app:field.purchase_order_currency
+```
+
+`verificationFieldValue` seeds every text field with `V-` plus a sha256 hex
+digest **truncated to `maximumLength`**, and the search predicate is a SUBSTRING
+match (`LIKE '%' || value || '%'`). At `maximumLength: 3` the generated value is
+`V-<one hex char>` — a prefix, hence a substring, of every sibling text value on
+the same record. It matches whenever a searchable sibling's digest happens to
+start with the same hex character: roughly **one run in eight** with two
+searchable siblings. At length 2 it would match every time.
+
+**`purchase_order_currency` is the application's first text field below 32
+characters**, which is why this has never fired. It is a platform weakness
+rather than a property of currency, it is not this packet's to fix
+(`packages/postgres-provider/**` is out of scope), and it is filed rather than
+worked around.
+
+`currency` is now `searchable: true`, which removes the scenario — and the
+justification stands on the field's own nature rather than on the defect: a
+currency code is a short, human-typed, controlled identifier of the same class as
+`party_number`, `item_sku`, `location_code` and
+`inventory_transaction_line_unit_id`, every one of which is searchable here.
+
+Two of the four reds were this. A third —
+*"a same-profile successor over one revision is not named a profile-only edge"* —
+raised its `ReleaseVerificationIntegrityError` from the same `createRuntime`
+call before reaching the rollback it was written to observe, so it is the same
+cause seen from a third site.
+
+### 2. Purchasing is `entityOwned`, so a release carrying it must carry Inventory
+
+```
+ModuleStorageMaterializationError
+  LEGAL_ENTITY_MASTER_TARGET_INVALID
+  expected one compiled legal-entity master, received 0
+```
+
+`createManagedTable` requires exactly one compiled legal-entity master for any
+entity-owned table, and `legal_entity` is declared by the **Inventory** module.
+`module-storage-transition.test.ts`'s ABI fixture builds a prior release as
+*"the composed application without Inventory"* — which, after this packet, still
+carries Purchasing. Before `PUR-1` that composition had **no entity-owned entity
+at all**, so the check was never reached.
+
+**This is the gate working, and it is a real architectural consequence of the
+charter's `entityOwned` ruling that deserves recording:** Purchasing is now
+coupled to Inventory at the storage layer, not merely at the file layer where
+the family map lives. The same repair was already needed in
+`surface-grammar-conformance.test.ts` for an unrelated reason (the navigation
+budget), so two independent fixtures now strip Purchasing to stay valid. **A
+third will appear.**
+
 ## Lease
 
 Three files outside the declared lease were edited, named here so they can be
@@ -421,12 +483,15 @@ revoked rather than discovered:
 | `package.json` | `test:unit` names its files explicitly; a new `test/unit` file is unreachable until listed, and AGENTS.md §6 requires every `*.test.ts` be proven reachable | `packet/expected-red-gate` |
 | `test/architecture/repository-hygiene.test.ts` | the reviewed suite inventory, same rule | `packet/record-claim-fidelity` |
 | `test/architecture/module-press-law.test.ts` | `checkModulePressLaw` AUTO-DISCOVERS module directories, so a new module moves `moduleDirectories` and `modulesRead` with no edit possible to avoid it; and the routed `conformance.ts` debt shifted 2364 → 2371 because the family rows land above it | `packet/press-law-splice` |
-| `test/helpers/reachability-producers.ts` | the THIRD suite inventory, which `check:reachability` reads. Missed on the first pass and caught by re-reading the `dev-environment` row, which records registering its own test file "in all three inventories". Measured unheld by the empirical disjointness check | none |
+| `test/helpers/reachability-producers.ts` | the THIRD suite inventory, which `check:reachability` reads. Missed on the first pass and caught by re-reading the `dev-environment` row, which records registering its own test file "in all three inventories". Measured unheld | none |
+| `packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts` | the tripwire flags any file mentioning three or more distinct predicate kinds. A definition file CONSTRUCTS predicates rather than dispatching on them, and the heuristic cannot tell the two apart — `inventory/definition.ts` is registered for the same reason. Authoring the editing guard at all trips it | none |
+| `test/postgres/module-storage-transition.test.ts` | its ABI fixture builds "the composed application without Inventory", which after this packet still carries Purchasing and therefore fails `LEGAL_ENTITY_MASTER_TARGET_INVALID`. See the `test:postgres` findings above | none |
 
-**Four, not three, and the fourth is the point of the open `suite-inventory-copies`
-row:** a suite's file list is written by hand in three places and
-`repository-hygiene` compares only two, so the third is caught by reading a
-ledger row rather than by any gate.
+**Six, not three, and every one after the first three was found by a gate rather
+than by reading the charter.** Four of the six are hand-written registries that a
+new module must be added to, and no single place lists them. The
+`suite-inventory-copies` row already names three of those four; the predicate
+tripwire is a fourth of the same shape.
 
 Each is additive and mechanical — one array entry, one list entry, one line
 number, one count — and none changes what those gates ASSERT. They were taken
