@@ -11,34 +11,37 @@ and was read as REFERENCE only.
 
 Tier: Critical
 
-Status: **evidence ready — round 3.**
+Status: **evidence ready — round 4, records converged.**
 
-**Gate SHA: `414a0e9211e5a6a79757b7897a5e1f5df6fb13a4`.** All five suites green,
-zero reds: `test:unit` 155 · `test:compiler` 152 · `test:integration` 149 ·
+**Gate SHA: `414a0e9211e5a6a79757b7897a5e1f5df6fb13a4`**, and it still covers this
+tree: rounds 3 and 4 changed `docs/` only, so
+`git diff --name-only 414a0e9 <tip> -- . ':!docs' ':!.agents' ':!CLAUDE.md'
+':!AGENTS.md' ':!learnings.md'` is empty. All five suites green there, zero reds:
+`test:unit` 155 · `test:compiler` 152 · `test:integration` 149 ·
 `test:architecture` 178 · `test:postgres` 205, plus `typecheck`, `lint`,
 `format`, `check:app-release`, `check:demo-release`, `check:boundaries`.
 
-The freeze SHA is the branch tip, which adds narrative only. Verify rather than
-take it:
+**PRODUCTION HAS NOT CHANGED SINCE THE ROUND-2 CANDIDATE.**
+`git diff --name-only 08fcaf1 <tip> -- packages/ apps/web/release/ db/` is empty.
+Rounds 3 and 4 changed one test file and three record files.
 
-```
-git diff --name-only 414a0e9 <tip> -- . \
-  ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
-```
+**Review history — three REVISE rounds, eight findings, all upheld, none argued
+down.** Round 1 `a052965` (tag `pur-1-reviewed-r1`): active `close`/`reopen`
+operations, a proxy where the parent-aggregate rule needed runtime observation,
+the plan-assigned builder registry refactor omitted. Round 2 `08fcaf1` (tag
+`pur-1-reviewed-r2`): no authority to omit the plan-assigned amend, a `restore`
+survivor in the parent-guard vertical, a stale active queue row. Round 3
+`d2f25c1` (tag `pur-1-reviewed-r3`), **records only**: the Goal still said the
+amend ruling was owed after recording it, and the ledger row was stale on
+lifecycle, lease count and delta. Every reviewed candidate remains retrievable at
+its tag.
 
-**PRODUCTION IS BYTE-IDENTICAL TO THE ROUND-2 CANDIDATE.** Round 3 changed one
-test file and two records and nothing else:
-
-```
-git diff --name-only 08fcaf1 414a0e9 -- packages/ apps/web/release/ db/   # empty
-```
-
-**Review history.** Round 1 `a052965` (tag `pur-1-reviewed-r1`) — REVISE, three
-blocking findings, all upheld. Round 2 `08fcaf1` (tag `pur-1-reviewed-r2`) —
-REVISE, three findings, all upheld; round 1's fixes confirmed and **no new
-defect found in the lifecycle implementation or the registry refactor**. Both
-reviewed candidates remain retrievable at their tags. Each prior review is void
-at this SHA.
+**The codex arm has not returned PASS.** Round 3's findings were records-only and
+the reviewer confirmed the restore correction sound, production unchanged and the
+amend ruling substantively adequate — so **the user ruled that the Fable confirm
+arm runs now.** `review-tiers` sequences Fable after a codex PASS on an identical
+SHA; that is not the case here and the Fable prompt says so plainly rather than
+implying a PASS that does not exist.
 
 ## Goal
 
