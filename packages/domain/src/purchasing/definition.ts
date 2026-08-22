@@ -40,24 +40,58 @@ const reference = (kind: string, targetId: string) => ({
 });
 
 /**
- * The three states, in lifecycle order. `orderKey` follows this order and the
+ * The four states, in lifecycle order. `orderKey` follows this order and the
  * materialized enum's options ARE these states, so a reader never has to keep
  * two lists in step.
  *
- * `closed` is deliberately ABSENT. Nothing in this packet can produce it: an
- * order closes when it is fully received, and `PUR-1` ships no receipts. That
- * is §7.12's `received_quantity` ruling applied to a state rather than a column
- * -- a value that can only ever be unreachable buys nothing, and authoring it
- * would pre-commit `PUR-2`'s choice between an automatic close on full receipt
- * and a manual one.
+ * THE WHOLE LIFECYCLE IS DECLARED HERE, INCLUDING THE PARTS `PUR-1` CANNOT
+ * DRIVE. That is deliberate and it is the expensive half of ADR-0050:150 --
+ * *"that is what makes the cut cheap today and expensive the moment any module
+ * adopts one."* Every state or transition added later is another normalization
+ * event and another lineage entry, so the one-way door is declared once, in
+ * full, by the module that opens it. What CLOSES an order is `PUR-2`'s to
+ * decide; that the transition exists is decided now.
+ *
+ * `cancelled` is terminal. `closed` is not -- a closed order needing a further
+ * receipt or an amended quantity returns to `released` through the reopen.
  */
 const STATES = [
   ['draft', 'Draft', false],
   ['released', 'Released', false],
+  ['closed', 'Closed', false],
   ['cancelled', 'Cancelled', true],
 ] as const;
 
 type StateLocalId = (typeof STATES)[number][0];
+
+/**
+ * The four transitions, and the four that are deliberately absent.
+ *
+ * | transition | ruled |
+ * |---|---|
+ * | `draft -> released` | the release |
+ * | `released -> closed` | the close; what triggers it is `PUR-2`'s |
+ * | `closed -> released` | the reopen |
+ * | `released -> cancelled` | the cancel |
+ * | `released -> draft` | **no** -- `draft` asserts no commitments exist, and once released, receipts may |
+ * | `draft -> cancelled` | **no** -- a draft's exit is the generic ARCHIVE the four standard operations already provide |
+ * | `closed -> cancelled` | **no** -- reopen first, so the cancel departs from one state and needs one transition |
+ * | `cancelled -> anything` | **no** -- terminal; reissue instead |
+ *
+ * Cancel departs from `released` rather than from `draft` because a released
+ * order is guarded against every generic operation, so cancel is its only exit,
+ * while a draft order still has archive. `transitionStateEffect` carries
+ * exactly ONE `transition` reference (`schemas.ts`), so one operation drives one
+ * transition and a cancel reachable from two states would need two of each.
+ */
+const TRANSITIONS = [
+  ['release', 'Release order', 10, 'draft', 'released'],
+  ['close', 'Close order', 20, 'released', 'closed'],
+  ['reopen', 'Reopen order', 30, 'closed', 'released'],
+  ['cancel', 'Cancel order', 40, 'released', 'cancelled'],
+] as const;
+
+type TransitionLocalId = (typeof TRANSITIONS)[number][0];
 
 /**
  * Both purchasing families are `entityOwned` (ADR-0015), so every query is
@@ -118,10 +152,12 @@ function ids(namespace: string) {
         `${namespace}:state.purchase_order_${local}`,
       ]),
     ) as Record<StateLocalId, string>,
-    transitionIds: {
-      cancel: `${namespace}:transition.purchase_order_cancel`,
-      release: `${namespace}:transition.purchase_order_release`,
-    },
+    transitionIds: Object.fromEntries(
+      TRANSITIONS.map(([local]) => [
+        local,
+        `${namespace}:transition.purchase_order_${local}`,
+      ]),
+    ) as Record<TransitionLocalId, string>,
   } as const;
 }
 
@@ -325,17 +361,12 @@ export function purchasingModuleDefinition(
         'purchase_order_line',
         entityIds.purchaseOrderLine,
       ),
-      transitionOperation(
-        definitionIds,
-        'release',
-        definitionIds.transitionIds.release,
-        inState(stateFieldId, definitionIds.stateIds.draft),
-      ),
-      transitionOperation(
-        definitionIds,
-        'cancel',
-        definitionIds.transitionIds.cancel,
-        inState(stateFieldId, definitionIds.stateIds.released),
+      ...TRANSITIONS.map(([local, , , fromState]) =>
+        transitionOperation(
+          definitionIds,
+          local,
+          inState(stateFieldId, definitionIds.stateIds[fromState]),
+        ),
       ),
     ],
     package: {
@@ -350,12 +381,24 @@ export function purchasingModuleDefinition(
       ...standardEntities.flatMap(([local, , entityId]) =>
         permissions(definitionIds, local, entityId),
       ),
-      // ADR-0050 §7: `operation.permission` must EQUAL
-      // `transition.permission`, refused by name at compile time
-      // (`COMPILER_TRANSITION_PERMISSION_MISMATCH`). One permission id is
-      // declared per transition and used in both positions.
-      transitionPermission(definitionIds, 'release'),
-      transitionPermission(definitionIds, 'cancel'),
+      // ADR-0050 §7 -- and this is the one rule in this file that guards a
+      // SECURITY declaration rather than a business one. The language declares
+      // two permissions for a transition: `transitionDefinition.permission` and
+      // the operation's. Execution honours exactly one -- the gateway
+      // authorizes `definition.permissionId`, which is the OPERATION's -- and
+      // the compiled effect carries `entity`, `fromStateId`, `toStateId`,
+      // `stateFieldId` and `transition` with NO permission at all. A transition
+      // declaring a restricted permission under an operation declaring a loose
+      // one therefore executes on the loose one, and the declaration a reader
+      // trusts is precisely the one ignored.
+      //
+      // So both positions carry the SAME id, deliberately and by construction:
+      // `transitionPermissionId` is the single source for both, and
+      // `COMPILER_TRANSITION_PERMISSION_MISMATCH` refuses any divergence by
+      // name at compile time.
+      ...TRANSITIONS.map(([local]) =>
+        transitionPermission(definitionIds, local),
+      ),
     ],
     queries: standardEntities.flatMap(([local, , entityId]) =>
       queries(
@@ -400,23 +443,13 @@ function derivedStateFieldId(machineId: string): string {
 }
 
 /**
- * The lifecycle, and the whole of it.
- *
- * `draft --release--> released --cancel--> cancelled`
- *
- * Two transitions, because `transitionStateEffect` carries exactly ONE
- * `transition` reference (`schemas.ts`), so one operation drives one
- * transition. That is also why cancel departs from `released` rather than from
- * `draft`: a draft order's exit is the generic ARCHIVE the four standard
- * operations already provide, whereas a released order is guarded against every
- * one of them, so cancel is its only exit and the state it must leave is
- * `released`. Cancelling from two states would need two transitions and two
- * operations; ADR-0050 §7 says that case must announce itself rather than be
- * generalized in advance.
+ * The lifecycle, and the whole of it. See `STATES` and `TRANSITIONS` above for
+ * what is declared and what is deliberately not.
  *
  * `stateField` is NOT authored: normalization derives it from `machineId` and
  * refuses any authored value that is not byte-identical
- * (`CANON_DERIVED_STATE_FIELD_INVALID`).
+ * (`CANON_DERIVED_STATE_FIELD_INVALID`), which is why the module addresses it
+ * through `ids().stateFieldId` and pins that spelling in a control.
  */
 function stateMachine(ids: PurchasingIds): Record<string, unknown> {
   return {
@@ -433,63 +466,35 @@ function stateMachine(ids: PurchasingIds): Record<string, unknown> {
       stateId: ids.stateIds[local],
       terminal,
     })),
-    transitions: [
-      transition(
-        ids,
-        ids.transitionIds.cancel,
-        'Cancel order',
-        10,
-        ids.stateIds.released,
-        ids.stateIds.cancelled,
-        'cancel',
-      ),
-      transition(
-        ids,
-        ids.transitionIds.release,
-        'Release order',
-        20,
-        ids.stateIds.draft,
-        ids.stateIds.released,
-        'release',
-      ),
-    ],
-  };
-}
-
-function transition(
-  ids: PurchasingIds,
-  transitionId: string,
-  label: string,
-  orderKey: number,
-  fromStateId: string,
-  toStateId: string,
-  action: 'cancel' | 'release',
-): Record<string, unknown> {
-  return {
-    fromState: reference('stateReference', fromStateId),
-    kind: 'transitionDefinition',
-    label,
-    orderKey,
-    permission: reference(
-      'permissionReference',
-      transitionPermissionId(ids, action),
+    transitions: TRANSITIONS.map(
+      ([local, label, orderKey, fromState, toState]) => ({
+        fromState: reference('stateReference', ids.stateIds[fromState]),
+        kind: 'transitionDefinition',
+        label,
+        orderKey,
+        // The SAME id the operation declares. See the permissions block.
+        permission: reference(
+          'permissionReference',
+          transitionPermissionId(ids, local),
+        ),
+        schemaVersion: version,
+        toState: reference('stateReference', ids.stateIds[toState]),
+        transitionId: ids.transitionIds[local],
+      }),
     ),
-    schemaVersion: version,
-    toState: reference('stateReference', toStateId),
-    transitionId,
   };
 }
 
 function transitionPermissionId(
   ids: PurchasingIds,
-  action: 'cancel' | 'release',
+  action: TransitionLocalId,
 ): string {
   return `${ids.namespace}:permission.purchase_order_${action}`;
 }
 
 function transitionPermission(
   ids: PurchasingIds,
-  action: 'cancel' | 'release',
+  action: TransitionLocalId,
 ): Record<string, unknown> {
   return {
     action: 'transition',
@@ -510,23 +515,31 @@ function transitionPermission(
  * from being OFFERED on a record it cannot move, and a second, independent
  * refusal when it is invoked anyway.
  *
+ * `readBack` is the header `get`, so the caller sees the new state without a
+ * second round trip.
+ *
  * The operation id's final verb is load-bearing presentation data: ADR-0056
  * gives the web renderer a closed precedence over `release` (first) and
- * `cancel` (last), and `surface-contract.ts`'s `operationLabel` derives the
- * button text from the same suffix.
+ * `cancel` (last), with every other verb keeping its compiled binding order --
+ * so `close` and `reopen` land between them, which is the order a reader wants.
+ * `surface-contract.ts`'s `operationLabel` derives the button text from the
+ * same suffix.
  */
 function transitionOperation(
   ids: PurchasingIds,
-  action: 'cancel' | 'release',
-  transitionId: string,
+  action: TransitionLocalId,
   precondition: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
+    // Only the terminal move asks for a human confirmation. `close` and
+    // `reopen` are each other's inverse and `release` is the primary forward
+    // action; `cancel` cannot be undone from `cancelled`, so it is the one that
+    // gets the extra step.
     confirmation: action === 'cancel' ? 'humanRequired' : 'none',
     effect: {
       kind: 'transitionStateEffect',
       schemaVersion: version,
-      transition: reference('transitionReference', transitionId),
+      transition: reference('transitionReference', ids.transitionIds[action]),
     },
     kind: 'operationDefinition',
     module: reference('moduleReference', ids.moduleId),
@@ -568,9 +581,10 @@ function inState(fieldId: string, stateId: string): Record<string, unknown> {
 }
 
 /**
- * The header's editing guard: `not(released) and not(cancelled)`.
+ * The header's editing guard: `not(released) and not(closed) and not(cancelled)`
+ * -- that is, "editable only while draft", spelled negatively.
  *
- * The NEGATIVE form is structurally forced, not stylistic. `prepareMutation`
+ * THE NEGATIVE FORM IS STRUCTURALLY FORCED, not stylistic. `prepareMutation`
  * evaluates a create's precondition against the CANDIDATE image, which is the
  * caller's patch -- and the state field is excluded from every caller-writable
  * contract, so it is absent there. Under ADR-0021 total-absence semantics
@@ -579,29 +593,27 @@ function inState(fieldId: string, stateId: string): Record<string, unknown> {
  * on the same absence, which is why ADR-0034's `stock_count` guard is spelled
  * the same way.
  *
- * Two terms rather than the charter's single not-released, and the second one
- * is not decoration: this module makes `cancelled` reachable, and a lone
- * `not(released)` would leave a cancelled order fully editable -- and, through
- * the parent-aggregate rule, its lines too. `all` composes them so one
- * predicate still covers all four generic operations, which is ADR-0034's
- * shape.
+ * Three terms rather than the charter's single not-released, and the extra two
+ * are not decoration: this module makes `closed` and `cancelled` reachable, and
+ * a lone `not(released)` would leave an order in either of them fully editable
+ * -- and, through the parent-aggregate rule, its lines too. `all` composes them
+ * so ONE predicate still covers all four generic operations, which is
+ * ADR-0034's shape.
+ *
+ * It is also the predicate the platform propagates: `parentGuardsFromCatalog`
+ * derives the line guard from the parent's UPDATE operation precondition, so
+ * this is what `purchase_order_line` inherits with zero declarations of its
+ * own.
  */
 function editableStates(ids: PurchasingIds): Record<string, unknown> {
   return {
     kind: 'allPredicate',
     schemaVersion: version,
-    terms: [
-      {
-        kind: 'notPredicate',
-        schemaVersion: version,
-        term: fieldComparison(ids.stateFieldId, ids.stateIds.released),
-      },
-      {
-        kind: 'notPredicate',
-        schemaVersion: version,
-        term: fieldComparison(ids.stateFieldId, ids.stateIds.cancelled),
-      },
-    ],
+    terms: (['released', 'closed', 'cancelled'] as const).map((state) => ({
+      kind: 'notPredicate',
+      schemaVersion: version,
+      term: fieldComparison(ids.stateFieldId, ids.stateIds[state]),
+    })),
   };
 }
 
