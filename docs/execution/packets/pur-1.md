@@ -143,6 +143,77 @@ date, expected date, **currency**, notes" and `:1276` gives
 model, **optional unit price**". Both monetary facts are retained, which is what
 §7.3's correction requires; neither valuation, invoicing, tax nor AR appears.
 
+## Two corrections owed to the plan, and one decision owed BEFORE freeze
+
+`main` moved two commits under this packet while it was in flight — `1aae9d8`
+and `4780efc`, both `docs(purchasing)`, adding §7.17 to the plan. §7.17 is the
+ruling the bridge instruction relayed, and reading it directly rather than
+through the relay surfaces two things the lane cannot settle for itself.
+
+### A. §7.17's `writableFieldIds` claim is measurably false, and it is load-bearing
+
+§7.17 rules the amend admissible on this basis:
+
+> `packages/compiler/src/projections.ts:1191` derives `writableFieldIds` from
+> the operation's own declared `fields`, all-or-nothing per operation. **So a
+> named amend operation whose `fields` is the quantity alone yields
+> `writableFieldIds` of exactly that quantity.**
+
+**`operationDefinition` has no `fields` member.** It is a `z.strictObject`
+carrying exactly `confirmation`, `effect`, `kind`, `lifecycle`, `module`,
+`operationId`, `permission`, `precondition`, `readBack`, `schemaVersion` and
+`tier`. There is nothing for an author to declare. `operationInputContract`
+receives `fieldsByEntity.get(operation.effect.entity.targetId)` — the ENTITY's
+whole active field set, minus materialized state fields — and `writableFieldIds`
+is `fields.map(f => f.fieldId).sort()` over that.
+
+"All-or-nothing per operation" is right; it is all-of-the-entity or nothing.
+Evidence beyond this lane's probe: the shipped `advance_period_lock` and
+`reopen_period` operations on `inventory_period_lock` compile to identical
+writable sets. That entity has one writable field, which is why the pattern
+reads narrow.
+
+**`PUR-2` inherits this section as a ratified plan ruling and will build against
+it.** The plan is the program authority and outside this packet's owned paths,
+so the correction is reported rather than made.
+
+### B. The plan and the bridge disagree on `draft → cancelled`, and it is a one-way door
+
+| Source | `draft → cancelled` |
+|---|---|
+| plan §7.17's table (`:713`) | **yes** — *"`draft → cancelled` · `released → cancelled` — abandoning an order is ordinary"* |
+| the bridge instruction's table | not listed, and it explicitly endorsed the opposite: *"Keep your cancel-departs-from-released reasoning — it is sound and the generic archive still owns a draft's exit."* |
+
+**This packet ships ONE cancel, from `released`,** because that is the later and
+more specific instruction. **It is reported rather than improvised on**, because
+`AGENTS.md` §1 says a conflict with the plan is surfaced and not resolved by the
+lane, and because ADR-0059 makes it expensive to get wrong: adding the second
+cancel after this release costs a normalization event and a lineage entry.
+
+**The decision is not free either way, and the cost is not symmetric.**
+
+- **If `draft → cancelled` should exist**, it needs a second transition AND a
+  second operation, because `transitionStateEffect` carries exactly one
+  `transition` reference. Two operations cannot both be named `..._cancel`, and
+  ADR-0056's renderer precedence ranks on the final underscore-delimited verb —
+  so exactly one of them can present as Cancel and the other lands at rank 1
+  under whatever verb it is given. **That naming is a durable presentation
+  decision, and it is the multi-command case ADR-0056 says triggers a new
+  decision rather than an extended verb list.**
+- **If it should not**, a draft's exit is the generic ARCHIVE, which is a
+  lifecycle fact (`archived_at`) rather than a business state. An archived draft
+  is hidden; a cancelled order is a business record that stays reportable. Those
+  are genuinely different, which is the strongest argument FOR §7.17's ruling
+  and against this lane's.
+
+**On balance the lane thinks §7.17 is probably right and its own reasoning
+probably wrong** — archive and cancel are not substitutes — but it is not the
+lane's call, it changes the shipped artifact, and it must be settled before
+freeze rather than after.
+
+Stop count for this packet: **2**. Both are decisions, not blocks: everything
+else is built and gated.
+
 ## Stop 1 — the amend operation is not expressible in this lease
 
 **The bridge instruction's item 3 asked for an amend operation writing ordered
