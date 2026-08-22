@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: evidence_ready — reviews converged; full integration matrix owed
+Status: evidence_ready — full matrix red on an unowned downstream expectation
 
 ## Goal
 
@@ -713,3 +713,30 @@ logic and generic duplicate negative control all remain. It accepted the
 recorded focused greens as local evidence and did not independently rerun them.
 No material finding survived. The complete serialized matrix on this staged
 tree is now the sole remaining acceptance gate.
+
+### Integration matrix attempt — RED at `ceaf108fc1e8aa643654fc6d3b958acbc72cd4c0`
+
+The first start waited five minutes behind another lane's live PostgreSQL suite
+and exited 75 before acquiring the lock; it was a non-run. The unchanged retry
+acquired the exclusive slot and passed performance 5/5 at 96.6% CPU idle with a
+1791.4 ms best-of-five sample against the 5000 ms budget. Format, lint,
+typecheck, build, boundaries (160 files), schema, both release-freshness checks,
+unit 120/120, compiler 152/152, integration 149/149, agent 3/3, architecture
+141/141 and contracts 29/29 passed.
+
+PostgreSQL then stopped the matrix at 202/204. The only failing nested specimen,
+`missing, null, and invisible release authority fail closed`, sends a real
+provider load refusal through `AuthenticatedRequestRuntimeEntryAdapter` but
+still requires the old provider-owned `RequestRuntimeViewLoadError` identity.
+This packet deliberately translates that boundary to the runtime-owned
+`RequestRuntimeViewRefusalError`; the exhaustive HTTP census already observes
+that translation for all fifteen codes. The other provider-direct calls in the
+same file correctly retain `RequestRuntimeViewLoadError`.
+
+The bounded correction belongs in
+`test/postgres/request-runtime-view.test.ts`, which is outside this lane's owned
+paths: the three adapter-boundary expectations should require the runtime-owned
+error and exact codes, while provider-direct expectations remain unchanged.
+No provider production change and no admission change is indicated. The matrix
+failure is recorded as red, not partial acceptance, and integration remains
+blocked pending an explicit bridge for that downstream test.
