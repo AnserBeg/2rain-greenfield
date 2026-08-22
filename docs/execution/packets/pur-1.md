@@ -38,9 +38,20 @@ main's 13-entry head so the packet still mints exactly one.
 
 ## Goal
 
-`purchase_order` + `purchase_order_line`: create, edit while draft, release,
-cancel, close, reopen, browse. No inventory movement — nothing posts, nothing
-touches stock.
+`purchase_order` + `purchase_order_line`: create and edit while draft, release,
+cancel, browse. No inventory movement — nothing posts, nothing touches stock.
+
+**Precisely what is operable, because an earlier version of this Goal said
+"release, close, reopen, cancel" and that was wrong:** a four-state vocabulary
+(`draft`, `released`, `closed`, `cancelled`) and **five declared transitions, of
+which THREE are operable** — `release`, and a `cancel` from each of `draft` and
+`released`. **`close` and `reopen` are declared edges with no operation**, and a
+committed control fails if anything binds one. `closed` is therefore declared
+and unreachable in this release, deliberately.
+
+**Not delivered, and owed a ruling:** the post-draft amend operation plan §7.17
+assigns to `PUR-1`. See Stop 1 — it is not expressible in this lease, and
+proving the plan's premise wrong is not the same as amending the plan.
 
 The packet's real subject is narrower and larger than that list: **this is the
 first first-party module to declare `stateMachines`.** ADR-0050:150 records what
@@ -234,8 +245,58 @@ says a conflict with the plan is surfaced rather than resolved by the lane, and
 ADR-0059 made getting it wrong cost a lineage entry. Raising it cost one round
 trip; discovering it after acceptance would have cost a release.
 
-Stop count for this packet: **2**. One is settled (B, ruled for the plan); one
-is routed to `PUR-2` (Stop 1, the amend). Neither blocked the packet.
+**AND THE ROUTING IS NOT YET AUTHORISED — review round 2, upheld.** Plan §7.17
+says the post-close editing requirement *"changes `PUR-1` rather than a later
+packet"*. The three measurements above prove the plan's IMPLEMENTATION PREMISE
+is wrong; **they do not amend the plan.** Stop 2 carries a direct user ruling.
+Stop 1 carries only the lane saying "routed to `PUR-2`", which is the lane
+resolving a plan conflict on its own authority — exactly what `AGENTS.md` §1
+forbids. ADR-0059 cannot supply it either: it is `proposed`, and it decides
+lifecycle width rather than packet ownership of the amend.
+
+**What is owed, from the user or the orchestrator, before this packet can be
+accepted under its own identity:** an explicit ruling that `PUR-1` is accepted
+without post-draft quantity amendment, that the carrier and the amend operation
+move to `PUR-2`, and that §7.17, the queue row and this record are amended to
+say so. Until that exists, this is a partial implementation carrying the
+original packet identity as though the obligation were complete.
+
+Stop count for this packet: **2**. Stop 2 is settled by user ruling. Stop 1 is
+NOT settled — it is measured, reported, and awaiting the ruling above.
+
+## Review round 2 — REVISE, and the authority gap it named
+
+Reviewed at `08fcaf1`. Round 1's three findings were confirmed materially
+addressed and **no new defect was found in the lifecycle implementation or the
+registry refactor.** Three items remained.
+
+**Finding 2 (Critical evidence gap) — the vertical did not cover `restore`.**
+Upheld and fixed. The test claimed *"every line mutation"* while never invoking
+`purchase_order_line_restore`, which is a distinct generic operation reaching a
+distinct interpreter branch — so the claim exceeded the evidence, and the
+reviewer named the exact survivor: archive a line while the parent is draft,
+release, delete only the `requireExistingParentGuards` call from the
+`restoreRecordEffect` branch, restore. The vertical now archives a second line
+as its own admission twin, requires typed refusal on restore after release, and
+reads BOTH rows back. **The named mutation was run against production:
+`Missing expected rejection.`, and the control died alone.** Production reverted
+untouched.
+
+**Finding 3 (Major) — the active queue row was stale and self-contradicting.**
+Upheld and fixed. It said the packet ships *"release/close/reopen/cancel"* when
+close and reopen have no operation, and said six out-of-lease files in one
+sentence and three in another. `current-plan.md` is what `PUR-2` reads to learn
+what exists, so a row claiming close/reopen shipped is worse than a wrong
+number. The Goal above carried the same error and is corrected too.
+
+**The evidence-count correction is upheld and it was the lane's error.** The
+round-2 review prompt said the ADR-0033 partition closes at *"205 + 47"*. `205`
+is the number of TESTS in the PostgreSQL suite; the partition is **151 executed
++ 47 derived = 198 planned scenarios**. The checked-in record said this
+correctly throughout — only the lane-written prompt conflated the two, and a
+prompt that misstates a count invites a reviewer to verify the wrong identity.
+
+**Finding 1 is not the lane's to close.** See Stop 1 immediately below.
 
 ## Stop 1 — the amend operation is not expressible in this lease
 
