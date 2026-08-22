@@ -17,18 +17,22 @@ this section now prevents.
 outliving its truth — committed two hours after writing the finding. **The instrument that
 would have caught it is R1's own `check-records.sh`, which is not built yet.**
 
-**R1's gate is now built — `record-claim-fidelity`, round 3 frozen at last executable
-commit `f6bdccd541130ef43d78c305c095b3d46b4f934b`.** `scripts/check-records.sh` plus
+**R1's gate is now built — `record-claim-fidelity`, round 4 frozen at last executable
+commit `6eb049e24367ad36ad13c98529e353df054f84cf`.** `scripts/check-records.sh` plus
 `test/architecture/record-claim-fidelity.test.ts` observe a packet record's claims against
 its frozen tree (Band A: every claimed path really differs between base and head, every
 claimed symbol is really declared there, no executable path changed that the record does
 not declare) and check record staleness against the ledger (Band C: a `proposed` ADR whose
 packet is accepted, a duplicate ledger id, a routing that resolves to nothing). Twenty-two
-diagnostics, twenty-two committed controls; evidence is 23/23 per report site, 10/10 over
+diagnostics, twenty-two committed controls; evidence is 23/23 per report site, 12/12 over
 the behavioural guards, and two admission twins.
 
-**Rounds 1 and 2 both returned REVISE, and every finding in both reproduced.** Round 1
-found six; round 2 found five still open. **Neither round's green matrices were
+**Rounds 1, 2 and 3 all returned REVISE, and every finding in all three reproduced.** Six,
+then five, then three — **the rounds converged rather than spiralled**, and every round-4
+correction is fail-closed or structural rather than a widened pattern, which is why this was
+a fourth round and not the re-scope the third-stop rule would otherwise call for. A reader
+that fails closed has a terminal state; one that learns another spelling each round does
+not. **Neither round's green matrices were
 completeness evidence, and that is the transferable lesson** — every round-2 finding was a
 branch nobody had written a case for: a copy-and-EDIT rather than a verbatim copy, an
 escaped backslash rather than an escaped pipe, an UNRESOLVED explicit ratification rather
