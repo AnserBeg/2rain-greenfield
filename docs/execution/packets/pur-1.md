@@ -11,30 +11,30 @@ and was read as REFERENCE only.
 
 Tier: Critical
 
-Status: **evidence ready.**
+Status: **evidence ready — round 2.**
 
-**Gate SHA: `404c9a09aba0be1de761b1c7f4620569e935edcb`.** The freeze SHA is the
-branch tip, which is this record plus later narrative only. **Every commit after
-the gate SHA touches `docs/` alone**, so the tip's executable content is
-identical to the gated tree — verify rather than take it:
+**Gate SHA: `3162356fc0d91e6a40fa67ec40ad92d890e425ac`.** All five suites green,
+**zero reds, first run**: `test:unit` 155 · `test:compiler` 152 ·
+`test:integration` 149 · `test:architecture` 178 · `test:postgres` 205, plus
+`typecheck`, `lint`, `format`, `check:app-release`, `check:demo-release` and
+`check:boundaries`.
+
+The freeze SHA is the branch tip, which adds narrative only. Every commit after
+the gate SHA touches `docs/` alone, so the tip's executable content is identical
+— verify rather than take it:
 
 ```
-git diff --name-only 404c9a0 <tip> -- . \
+git diff --name-only 3162356 <tip> -- . \
   ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
 ```
 
-Empty output is the evidence, and it is `git-workflow`'s own rule applied one
-step earlier than integration.
+**Round 1 (`a052965`) returned REVISE with three blocking findings. All three
+were upheld; none was argued down.** See the round-1 section below. The prior
+review is void — new SHA, fresh review.
 
-Gates at that exact SHA, all green, zero reds: `typecheck` · `lint` · `format` ·
-`check:app-release` · `check:demo-release` · `check:boundaries`, then
-`test:unit` 151 · `test:compiler` 152 · `test:integration` 149 ·
-`test:architecture` 141 · `test:postgres` 204. **`test:postgres` took five
-rounds**; what each found is recorded below. The full matrix runs after review
-converges, per `git-workflow`'s 2026-08-14 ruling.
-
-Rebased onto `origin/main` at `4780efc` before freezing; the rebase changed **no
-executable content**, verified with `git-workflow`'s exclusion diff.
+Rebased onto `origin/main` after `main` moved 96 commits (`expected-red-gate`
+and `press-law-splice` both integrated); the release lineage was rebuilt from
+main's 13-entry head so the packet still mints exactly one.
 
 ## Goal
 
