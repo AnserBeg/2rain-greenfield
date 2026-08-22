@@ -11,30 +11,34 @@ and was read as REFERENCE only.
 
 Tier: Critical
 
-Status: **evidence ready — round 2.**
+Status: **evidence ready — round 3.**
 
-**Gate SHA: `3162356fc0d91e6a40fa67ec40ad92d890e425ac`.** All five suites green,
-**zero reds, first run**: `test:unit` 155 · `test:compiler` 152 ·
-`test:integration` 149 · `test:architecture` 178 · `test:postgres` 205, plus
-`typecheck`, `lint`, `format`, `check:app-release`, `check:demo-release` and
-`check:boundaries`.
+**Gate SHA: `414a0e9211e5a6a79757b7897a5e1f5df6fb13a4`.** All five suites green,
+zero reds: `test:unit` 155 · `test:compiler` 152 · `test:integration` 149 ·
+`test:architecture` 178 · `test:postgres` 205, plus `typecheck`, `lint`,
+`format`, `check:app-release`, `check:demo-release`, `check:boundaries`.
 
-The freeze SHA is the branch tip, which adds narrative only. Every commit after
-the gate SHA touches `docs/` alone, so the tip's executable content is identical
-— verify rather than take it:
+The freeze SHA is the branch tip, which adds narrative only. Verify rather than
+take it:
 
 ```
-git diff --name-only 3162356 <tip> -- . \
+git diff --name-only 414a0e9 <tip> -- . \
   ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
 ```
 
-**Round 1 (`a052965`) returned REVISE with three blocking findings. All three
-were upheld; none was argued down.** See the round-1 section below. The prior
-review is void — new SHA, fresh review.
+**PRODUCTION IS BYTE-IDENTICAL TO THE ROUND-2 CANDIDATE.** Round 3 changed one
+test file and two records and nothing else:
 
-Rebased onto `origin/main` after `main` moved 96 commits (`expected-red-gate`
-and `press-law-splice` both integrated); the release lineage was rebuilt from
-main's 13-entry head so the packet still mints exactly one.
+```
+git diff --name-only 08fcaf1 414a0e9 -- packages/ apps/web/release/ db/   # empty
+```
+
+**Review history.** Round 1 `a052965` (tag `pur-1-reviewed-r1`) — REVISE, three
+blocking findings, all upheld. Round 2 `08fcaf1` (tag `pur-1-reviewed-r2`) —
+REVISE, three findings, all upheld; round 1's fixes confirmed and **no new
+defect found in the lifecycle implementation or the registry refactor**. Both
+reviewed candidates remain retrievable at their tags. Each prior review is void
+at this SHA.
 
 ## Goal
 
