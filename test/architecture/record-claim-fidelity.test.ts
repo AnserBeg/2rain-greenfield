@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -207,4 +210,47 @@ test('the checker never writes to the repository', () => {
     }),
     before,
   );
+});
+
+test('an escaped pipe inside an id cell does not fabricate a duplicate', () => {
+  // The ADMISSION TWIN for `splitRow`'s backslash parity. Its failure mode after
+  // the Family B retirement is a false RED, not a false green: without parity
+  // handling `a\\|b` truncates to `a` and collides with a real `a`. So the
+  // discriminating evidence is a positive case that dies when parity is removed.
+  const world = buildSyntheticWorld(root);
+  const report = verifyRecordClaims({
+    ...greenInput(world),
+    ledger: {
+      path: 'docs/execution/ledger.md',
+      text: '| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| a\\|b | x | — | — | planned | — | — |\n| a | y | — | — | planned | — | — |\n',
+    },
+  });
+  assert.deepEqual(report.findings, []);
+  assert.equal(report.ledgerRows, 2);
+});
+
+test('the repository adapter discovers a record in a subdirectory', () => {
+  // Drives the REAL `collectRepositoryInput`, not an injected input. A flat scan
+  // let a record moved into a subdirectory vanish while other records remained,
+  // which kept RECORD_CLAIM_NO_RECORDS green on a tree that had lost it.
+  const scratch = mkdtempSync(join(tmpdir(), 'record-claim-adapter-'));
+  mkdirSync(join(scratch, 'docs/execution/packets/nested'), {
+    recursive: true,
+  });
+  writeFileSync(
+    join(scratch, 'docs/execution/ledger.md'),
+    '| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| p | x | — | — | planned | — | — |\n',
+  );
+  writeFileSync(join(scratch, 'docs/execution/packets/flat.md'), '# flat\n');
+  writeFileSync(
+    join(scratch, 'docs/execution/packets/nested/deep.md'),
+    '# deep\n',
+  );
+  const discovered = collectRepositoryInput(scratch).records.map(
+    ({ path }) => path,
+  );
+  assert.deepEqual(discovered.sort(), [
+    'docs/execution/packets/flat.md',
+    'docs/execution/packets/nested/deep.md',
+  ]);
 });

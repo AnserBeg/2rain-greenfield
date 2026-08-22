@@ -467,8 +467,20 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
           ['probe-packet', 'planned'],
         ]),
       },
+      {
+        ...greenInput(world),
+        // A SECOND packet table, headed `**ID**`. It normalizes to the same
+        // signature, so it is the same table structurally; a literal source
+        // match saw `| ID |` and not `| **ID** |`, and the repeated id was
+        // invisible to the only reader that could have caught it.
+        ledger: document(
+          'docs/execution/ledger.md',
+          '# Execution ledger\n\n| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| probe-packet | canonical | — | — | accepted | — | — |\n\n| **ID** | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| probe-packet | copied row | — | — | planned | — | — |\n',
+        ),
+      },
     ],
-    title: 'a ledger id appearing twice reds',
+    title:
+      'a ledger id appearing twice reds, including across a second table headed `**ID**`',
     vacuity:
       'two rows disagree about one packet and each reader picks a different one',
   },
