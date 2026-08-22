@@ -41,8 +41,10 @@ concatenations and declares the observer's closed grammar. Candidate
 `d4d40339df78c82d36bc68da5b3ba65dcf47f815` received the prescribed narrow
 confirmation PASS: the reviewer closed both the deletion causality and declared-
 grammar questions, independently verified the branch/ranges and byte-identical
-production, and found no in-scope material defect. Review has converged; the one
-deferred full matrix is next on the constructed integration tree.
+production, and found no in-scope material defect. Review converged, and the
+complete matrix passed on integrated SHA
+`1ef547ca1206a5e5992f7839cd3d9b7d6b57498f`; packet-into-main integration is
+next.
 
 ## Packet definition
 
@@ -965,6 +967,35 @@ Only those seven expected line coordinates were refreshed; the focused
 module-press-law suite then passed 46/46 against the merged production tree.
 Neither the observer nor the provider production blob changed. A new committed
 integration SHA is required for the complete matrix rerun.
+
+The debt-coordinate refresh and this record formed clean integration SHA
+`1ef547ca1206a5e5992f7839cd3d9b7d6b57498f`. Its complete matrix passed:
+
+- performance 5/5;
+- unit 120/120;
+- compiler 152/152;
+- integration 149/149;
+- agent 3/3;
+- Architecture 177/177;
+- contracts 29/29;
+- PostgreSQL 204/204 in 746.9 seconds;
+- locale 1/1;
+- browser 93/93;
+- observability 11/11;
+- language coverage PASS;
+- reachability 104/104 with 10 producer artifacts; and
+- security scans PASS.
+
+The runner emitted the required acceptance token:
+
+```text
+FULL_MATRIX_PASS_SHA=1ef547ca1206a5e5992f7839cd3d9b7d6b57498f
+```
+
+The worktree remained clean. The production observer and provider blobs are
+still `83f9d84ff08a94c92563311fe8d5157dfd9517e7` and
+`1e141baa20004141321d4da1a7c95723bddf334c`; only execution records will differ
+between the matrix SHA and the packet tip used for the required `--no-ff` merge.
 
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
