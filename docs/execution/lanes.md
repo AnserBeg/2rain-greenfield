@@ -569,14 +569,16 @@ conflict.**
 | `test/helpers/reachability-producers.ts` | **nobody** — measured unheld | the same filename added to the THIRD suite inventory, the one `repository-hygiene` does not compare against |
 | `packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts` | **nobody** — measured unheld | one entry, because the tripwire flags any file mentioning three or more predicate kinds and a definition file CONSTRUCTS them. `inventory/definition.ts` is registered for the same reason |
 | `test/postgres/module-storage-transition.test.ts` | **nobody** — measured unheld | its "composed application without Inventory" fixture must strip Purchasing too, or `createManagedTable` fails closed: Purchasing is `entityOwned` and `legal_entity` belongs to Inventory |
+| `test/postgres/fresh-tenant-full-replay-schema.snapshot.json` | **nobody** — measured unheld | **REGENERATED, not edited.** A full-replay oracle produced by `test/helpers/generate-fresh-tenant-full-replay-schema.ts`; hand-editing it would destroy the independence it exists to provide. Verified purely additive across all twenty collections |
 
-**Six files, and only the first three were predictable from the charter.** Four
-of the six are hand-written registries a new module must be added to, and nothing
-lists them in one place — `package.json`, `repository-hygiene`,
+**Seven files, and only the first three were predictable from the charter.**
+Four are hand-written registries a new module must be added to, and nothing lists
+them in one place — `package.json`, `repository-hygiene`,
 `reachability-producers`, and the predicate tripwire. The open
 `suite-inventory-copies` row names three; the tripwire is a fourth of the same
-shape. **The next module mount will find them the same way this one did: one
-red at a time.**
+shape. The seventh is a generated oracle, which is the benign category. **The
+next module mount will find them the same way this one did: one red at a time,
+across four `test:postgres` rounds.**
 
 **None of these was avoidable by staying inside the lease.** `checkModulePressLaw`
 AUTO-DISCOVERS module directories under `packages/domain/src`, so a new module

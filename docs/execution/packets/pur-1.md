@@ -463,6 +463,32 @@ mint an `enumReject` and a `searchableExclusion` — but both probe a field
 THROUGH the create operation, and a machine's state field is structurally
 excluded from that contract. This is ADR-0050 §6 item 2 visible in a number.
 
+### 4. The full-replay schema oracle, REGENERATED rather than edited
+
+`assertBoundedInstallMatchesFullReplaySchema` compares the bounded fresh-tenant
+install's `north_star_module` schema against
+`test/postgres/fresh-tenant-full-replay-schema.snapshot.json`. It reported **987
+added lines and zero removed** — the bounded install materializes purchasing's
+two tables and the oracle did not know they exist. Traced through the compiled
+storage target rather than guessed: `nsm_t_brja23…` is
+`northstar.app:entity.purchase_order`.
+
+**That file is a GENERATED oracle, not a pin, and hand-editing it would destroy
+the property it exists to prove.** `test/helpers/generate-fresh-tenant-full-replay-schema.ts`
+stands up an ephemeral PostgreSQL and activates every lineage entry from the
+serving floor onward, one at a time, capturing the real schema that results —
+an independent full replay, which is the whole content of ADR-0040's Control B.
+It was run, exit 0.
+
+Precedented: `stock-balance-read-model` regenerated the same artifact when it
+added an entity.
+
+**The regenerated oracle is verified PURELY ADDITIVE**, member-by-member across
+all twenty collections: `relations` 21 → 23, `columns` 379 → 407, `indexes`
+119 → 127, `policies` 49 → 57, `constraints` 156 → 162, privileges to match, and
+**zero removals in every one.** The 94 "deleted" lines in the raw diff are
+alignment artifacts.
+
 ### 2. Purchasing is `entityOwned`, so a release carrying it must carry Inventory
 
 ```
@@ -499,12 +525,15 @@ revoked rather than discovered:
 | `test/helpers/reachability-producers.ts` | the THIRD suite inventory, which `check:reachability` reads. Missed on the first pass and caught by re-reading the `dev-environment` row, which records registering its own test file "in all three inventories". Measured unheld | none |
 | `packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts` | the tripwire flags any file mentioning three or more distinct predicate kinds. A definition file CONSTRUCTS predicates rather than dispatching on them, and the heuristic cannot tell the two apart — `inventory/definition.ts` is registered for the same reason. Authoring the editing guard at all trips it | none |
 | `test/postgres/module-storage-transition.test.ts` | its ABI fixture builds "the composed application without Inventory", which after this packet still carries Purchasing and therefore fails `LEGAL_ENTITY_MASTER_TARGET_INVALID`. See the `test:postgres` findings above | none |
+| `test/postgres/fresh-tenant-full-replay-schema.snapshot.json` | **regenerated, not edited** — a generated full-replay oracle whose own generator was run. Same category as `apps/web/release/**`, which the lease already grants as regenerated | none |
 
-**Six, not three, and every one after the first three was found by a gate rather
-than by reading the charter.** Four of the six are hand-written registries that a
-new module must be added to, and no single place lists them. The
-`suite-inventory-copies` row already names three of those four; the predicate
-tripwire is a fourth of the same shape.
+**Seven, not three, and every one after the first three was found by a gate
+rather than by reading the charter.** Four are hand-written registries a new
+module must be added to, and no single place lists them — the
+`suite-inventory-copies` row names three of those four and the predicate
+tripwire is a fourth of the same shape. The seventh is a GENERATED oracle
+re-produced by its own generator, which is the `apps/web/release/**` category
+the lease already grants.
 
 Each is additive and mechanical — one array entry, one list entry, one line
 number, one count — and none changes what those gates ASSERT. They were taken
