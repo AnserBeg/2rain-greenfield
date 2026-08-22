@@ -601,6 +601,48 @@ reproduces the author's blind spot**, which is a sharper failure than the
 disclaimer can offset. The round-2 prompt cites the plan generally and names
 §7.2 explicitly.
 
+## What only the FULL MATRIX found — the language-coverage ledger
+
+`check:language-coverage` runs in no packet-selected subset. It failed the first
+full matrix at `b50d605`:
+
+```
+LANGUAGE_COVERAGE_OBSERVATION_CHANGED:
+  authoredLanguage:$.operations[].effect.kind="transitionStateEffect"
+  moved from unobserved to observedOutsideRelationScope;
+  add an execution/refusal receipt or record a new explicit decision
+```
+
+**This is the packet's own subject arriving as a gate.** The ledger tracks which
+canonical-language shapes the first-party corpus actually authors, and `PUR-1`
+is the module that makes a whole subtree of them real for the first time.
+
+**Measured: 35 obligations moved from unobserved to observed, and NONE left.**
+
+| what became observed | why |
+|---|---|
+| the entire `$.stateMachines[]` subtree — `kind`, `entity`, `initialState`, `states[]` with `terminal` at **both** `true` and `false`, `transitions[]` with their from/to state and permission references, and the two `$presence="absent"` obligations for the omitted `lifecycle` and `stateField` | first first-party machine |
+| `$.operations[].effect.kind="transitionStateEffect"` and its `transitionReference` | first first-party transition operation |
+| `allPredicate` + `notPredicate` + `fieldComparisonPredicate` with `operator="equals"` and `textValue` | the header editing guard is the first first-party `allPredicate` in an operation precondition |
+| `loweredStorage:$.entities[].columns[].defaultSemantics="declaredDefault"` | the materialized state column, seeded from `initialState` — the only LOWERED obligation in the set |
+
+The corpus governs this by explicit decision rather than by receipt —
+`receipt-claims.json` holds **zero** claims and no receipts exist on disk — so the
+fix is the second branch the diagnostic names. Two of the three decisions moved
+(`observedOutsideRelationScope` gained the 35, `unobserved` lost them), each
+re-derived with a new `obligationSetDigest`, a new `decisionId`, and a rationale
+amendment naming exactly what moved. **`observedRelationScope` is untouched, and
+its identity re-derived byte-identically — which is the check that the
+re-derivation is faithful rather than merely accepted.**
+
+Gate after: `language coverage: PASS (2050 obligations; 0 receipts; 2050
+decision-covered obligations; 464 first-party observations)`.
+
+**The rationale claims declaration, not execution**, in the same terms the
+earlier amendments used. Three of the five declared transitions are additionally
+executed against real PostgreSQL by the release and cancel verticals; `close`
+and `reopen` are declared edges no operation binds.
+
 ## What `test:postgres` found, which nothing else could
 
 The charter made `test:postgres` a required gate because the packet moves
@@ -731,10 +773,12 @@ says what each actually is:
 | `packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts` | additive registration | the tripwire flags any file mentioning three or more distinct predicate kinds. A definition file CONSTRUCTS predicates rather than dispatching on them, and the heuristic cannot tell the two apart — `inventory/definition.ts` is registered for the same reason. Authoring the editing guard at all trips it | none |
 | `test/postgres/module-storage-transition.test.ts` | **scope-preserving fixture correction** — adds a removal helper and strips Purchasing from the prior release; not a one-entry edit | its ABI fixture builds "the composed application without Inventory", which after this packet still carries Purchasing and therefore fails `LEGAL_ENTITY_MASTER_TARGET_INVALID`. See the `test:postgres` findings above | none |
 | `apps/web/test/browser/composed-application.spec.ts` | **IN-LEASE, listed for completeness** — the charter grants `apps/web/test/browser/**` "where the mount moves them", so this is not an exception at all. It is named here because the Fable arm counted it as an eighth touched file absent from both enumerations, and an unexplained omission reads worse than an entry. **Its navigation expectations are UNEXECUTED by this lane in rounds 1–3** — only `test:browser` can verify them | n/a |
+| `test/fixtures/g2/language-conformance/coverage-decisions.json` | **a recorded language-coverage DECISION** — the heaviest of the eight, and the only one that is a judgement rather than a mechanical consequence. Precedented: `U5b`, `5g3-sm-impl` and `LANG-ADOPT-v5` each amended it when their own work moved the observed set | none |
 | `test/postgres/fresh-tenant-full-replay-schema.snapshot.json` | **regenerated oracle** — logically additive member-wise across all twenty collections; its TEXTUAL diff is not | **regenerated, not edited** — a generated full-replay oracle whose own generator was run. Same category as `apps/web/release/**`, which the lease already grants as regenerated | none |
 
-**Seven, not three, and every one after the first three was found by a gate
-rather than by reading the charter.** Four are hand-written registries a new
+**EIGHT, not three, and every one after the first three was found by a gate
+rather than by reading the charter — the eighth by the full matrix, after four
+review rounds had already passed over it.** Four are hand-written registries a new
 module must be added to, and no single place lists them — the
 `suite-inventory-copies` row names three of those four and the predicate
 tripwire is a fourth of the same shape. The seventh is a GENERATED oracle
