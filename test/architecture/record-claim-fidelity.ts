@@ -725,8 +725,14 @@ export function createGitReader(root: string): GitReader {
 
   return {
     executablePathsChanged(base, head) {
+      // `--no-renames` is load-bearing, not decoration. Rename detection is on
+      // by default, and it reports a pure rename as the DESTINATION path only —
+      // so a packet that renamed an executable file away would leave the
+      // vacated path changed, undeclared, and unreported. Measured, not
+      // assumed: without this flag `a.ts -> b.ts` prints `b.ts` alone.
       const result = run([
         'diff',
+        '--no-renames',
         '--name-only',
         base,
         head,

@@ -48,6 +48,7 @@ const PROBE_HEAD_SOURCE = `${PROBE_BASE_SOURCE}export function probeSymbol(): nu
 // a checker that read the working tree instead of the frozen commits would find
 // a difference and pass — which is exactly the ux-picker r3 failure.
 const HEALED_PATH = 'test/architecture/record-claim-fidelity.ts';
+const RENAMED_SOURCE = 'export const renamed = 1;\n';
 
 export interface SyntheticWorld {
   readonly root: string;
@@ -177,19 +178,43 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
   },
   {
     code: 'RECORD_CLAIM_PATH_UNDECLARED',
-    run: (world) => [
-      {
-        ...greenInput(world),
-        // `scripts/probe.sh` also changed and the block declares nothing over it.
-        records: [
-          recordDocument(declaration(world.base, world.undeclaredHead)),
-        ],
-      },
-    ],
+    run: (world) => {
+      const renameBase = commitTree(world.root, {
+        'probe/old.ts': RENAMED_SOURCE,
+      });
+      const renameHead = commitTree(
+        world.root,
+        { 'probe/new.ts': RENAMED_SOURCE },
+        renameBase,
+      );
+      return [
+        {
+          ...greenInput(world),
+          // `scripts/probe.sh` also changed and the block declares nothing over it.
+          records: [
+            recordDocument(declaration(world.base, world.undeclaredHead)),
+          ],
+        },
+        {
+          ...greenInput(world),
+          // A pure rename. The destination is declared; the VACATED path is not,
+          // and git's default rename detection reports only the destination, so
+          // without `--no-renames` this whole class is invisible.
+          records: [
+            recordDocument(
+              declaration(renameBase, renameHead, {
+                changedPaths: ['probe/new.ts'],
+                symbols: [{ name: 'renamed', path: 'probe/new.ts' }],
+              }),
+            ),
+          ],
+        },
+      ];
+    },
     title:
-      'an executable path changed but undeclared reds, including under scripts/',
+      'an executable path changed but undeclared reds — under scripts/, and on the vacated side of a rename',
     vacuity:
-      'an exclusion list that swallows scripts/ lets a lease violation land silently',
+      'an exclusion list that swallows scripts/, or default rename detection reporting only the destination, lets a lease violation land silently',
   },
   {
     code: 'RECORD_CLAIM_BLOCK_UNPARSABLE',
