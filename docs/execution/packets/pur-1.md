@@ -53,9 +53,12 @@ which THREE are operable** — `release`, and a `cancel` from each of `draft` an
 committed control fails if anything binds one. `closed` is therefore declared
 and unreachable in this release, deliberately.
 
-**Not delivered, and owed a ruling:** the post-draft amend operation plan §7.17
-assigns to `PUR-1`. See Stop 1 — it is not expressible in this lease, and
-proving the plan's premise wrong is not the same as amending the plan.
+**Not delivered, and RULED OUT of this packet:** the post-draft amend operation
+plan §7.17 assigns to `PUR-1`. Three measurements show it is not expressible in
+this lease, and **the user ruled on 2026-08-22 that `PUR-1` is accepted without
+it and that the carrier and the amend operation move to `PUR-2`** — see Stop 1
+for the ruling and its reasons. §7.17 itself is owed a correction, which is the
+orchestrator's to apply because the plan is outside this packet's owned paths.
 
 The packet's real subject is narrower and larger than that list: **this is the
 first first-party module to declare `stateMachines`.** ADR-0050:150 records what
@@ -383,7 +386,8 @@ at all. The reopen returns a closed order to `released`, but `released` is still
 guarded, and `released → draft` is refused by ruling. `PUR-2` inherits both the
 amend and the received-quantity floor that belongs with it.
 
-Stop count for this packet: **1**.
+Stop count **at the time this stop was raised: 1.** The packet's final count is
+**2**, both settled by user ruling — see the end of Stop 1 and Stop 2 below.
 
 ## ADR-0050 §6 — which owed items still reproduce
 
