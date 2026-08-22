@@ -23,7 +23,6 @@ import {
   type MarkdownDocument,
   type RecordClaimCode,
   type RecordClaimInput,
-  type RecordClaimManifest,
 } from './record-claim-fidelity.js';
 
 export interface RecordClaimControl {
@@ -49,11 +48,6 @@ const PROBE_HEAD_SOURCE = `${PROBE_BASE_SOURCE}export function probeSymbol(): nu
 // a difference and pass — which is exactly the ux-picker r3 failure.
 const HEALED_PATH = 'test/architecture/record-claim-fidelity.ts';
 const RENAMED_SOURCE = 'export const renamed = 1;\n';
-const PROBE_OWNING_TABLE = {
-  header: ['ID', 'Packet', 'Stage', 'Tier', 'Status', 'SHA', 'Evidence'],
-  path: 'docs/execution/ledger.md',
-  reason: 'the synthetic ledger every control varies one property of',
-} as const;
 
 export interface SyntheticWorld {
   readonly root: string;
@@ -111,28 +105,9 @@ export function buildSyntheticWorld(root: string): SyntheticWorld {
  */
 export function greenInput(world: SyntheticWorld): RecordClaimInput {
   return {
-    adrs: [
-      document(
-        'docs/decisions/ADR-9001-probe.md',
-        '# ADR-9001\n\nStatus: accepted\n\nTier: Mechanical\n',
-      ),
-    ],
     git: createGitReader(world.root),
     ledger: ledgerDocument([['probe-packet', 'accepted']]),
-    manifest: {
-      owningTables: [PROBE_OWNING_TABLE],
-      schemaVersion: 'probe',
-      unresolvableRatifications: [],
-    },
-    pathKind: () => 'absent',
     records: [recordDocument(declaration(world.base, world.head))],
-    routingSources: [
-      document(
-        'docs/execution/probe-queue.md',
-        'The finding is routed to `probe-packet`.\n',
-      ),
-    ],
-    rowIdSources: [ledgerDocument([['probe-packet', 'accepted']])],
   };
 }
 
@@ -294,21 +269,6 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
     vacuity: 'two records certify one packet and each reads as the authority',
   },
   {
-    code: 'RECORD_LEDGER_COLUMN_ABSENT',
-    run: (world) => [
-      {
-        ...greenInput(world),
-        ledger: document(
-          'docs/execution/ledger.md',
-          '# Execution ledger\n\n| ID | Packet | Stage | Tier | State | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| probe-packet | probe | — | Mechanical | accepted | — | — |\n',
-        ),
-      },
-    ],
-    title: 'a packet table whose header carries no Status column reds',
-    vacuity:
-      'a renamed or reordered column makes every ratification lookup read some other cell',
-  },
-  {
     code: 'RECORD_CLAIM_RANGE_UNOWNED',
     run: (world) => {
       const base = commitTree(
@@ -358,34 +318,31 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
       'filename equality proves only that a record agrees with itself, and one edit moves both halves',
   },
   {
-    code: 'RECORD_MANIFEST_OWNING_TABLE_STALE',
-    run: (world) => [
-      {
-        ...greenInput(world),
-        manifest: {
-          owningTables: [
-            PROBE_OWNING_TABLE,
-            {
-              header: ['Gone', 'Away'],
-              path: 'docs/execution/ledger.md',
-              reason: 'matches no table at that path',
-            },
-          ],
-          schemaVersion: 'probe',
-          unresolvableRatifications: [],
-        } satisfies RecordClaimManifest,
-      },
-    ],
-    title: 'an owning-table signature matching no table in the tree reds',
-    vacuity:
-      'the declared set rots into a permanent allowlist nobody re-derives against the records',
-  },
-  {
     code: 'RECORD_CLAIM_BLOCK_UNPARSABLE',
     run: (world) => [
       {
         ...greenInput(world),
         records: [recordDocument('{ "packet": not json }')],
+      },
+      {
+        ...greenInput(world),
+        // A FOUR-BACKTICK fence. Valid GFM, and invisible to an exact ``` match.
+        records: [
+          {
+            path: 'docs/execution/packets/probe-packet.md',
+            text: '# probe-packet\n\n````record-claim\n{ "packet": not json }\n````\n',
+          },
+        ],
+      },
+      {
+        ...greenInput(world),
+        // An INDENTED fence. GFM allows up to three spaces.
+        records: [
+          {
+            path: 'docs/execution/packets/probe-packet.md',
+            text: '# probe-packet\n\n   ```record-claim\n{ "packet": not json }\n   ```\n',
+          },
+        ],
       },
     ],
     title:
@@ -443,8 +400,20 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
           ),
         ],
       },
+      {
+        ...greenInput(world),
+        // The SECOND block uses a four-backtick fence. A parser counting only
+        // exact ``` fences sees one block and validates it happily.
+        records: [
+          {
+            path: 'docs/execution/packets/probe-packet.md',
+            text: `# probe-packet\n\n${fence(declaration(world.base, world.head))}\n\n\`\`\`\`record-claim\n${declaration(world.base, world.head)}\n\`\`\`\`\n`,
+          },
+        ],
+      },
     ],
-    title: 'two declaration blocks in one record red',
+    title:
+      'two declaration blocks in one record red, including when the second uses a wider fence',
     vacuity: 'a second block silently overrides or shadows the first',
   },
   {
@@ -489,172 +458,6 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
       'deleting the last declaration block disables the whole family in silence',
   },
   {
-    code: 'RECORD_ADR_RATIFICATION_STALE',
-    run: (world) => [
-      {
-        ...greenInput(world),
-        adrs: [
-          document(
-            'docs/decisions/ADR-9002-probe.md',
-            '# ADR-9002\n\nStatus: proposed by packet `probe-packet`; ratified when that\npacket is accepted\n\nTier: Critical\n',
-          ),
-        ],
-      },
-      {
-        ...greenInput(world),
-        // PRECEDENCE. The provenance packet is planned and the RATIFICATION
-        // packet is accepted. A reader that binds to the first anchor it tries
-        // reports success and never tests the condition the ADR states.
-        adrs: [
-          document(
-            'docs/decisions/ADR-9006-probe.md',
-            '# ADR-9006\n\nStatus: proposed by packet author-packet;\nratified when implementation-packet is accepted\n\nTier: Critical\n',
-          ),
-        ],
-        ledger: ledgerDocument([
-          ['author-packet', 'planned'],
-          ['implementation-packet', 'accepted'],
-        ]),
-        rowIdSources: [
-          ledgerDocument([
-            ['author-packet', 'planned'],
-            ['implementation-packet', 'accepted'],
-          ]),
-        ],
-        routingSources: [
-          document(
-            'docs/execution/probe-queue.md',
-            'The finding is routed to `author-packet`.\n',
-          ),
-        ],
-      },
-      {
-        ...greenInput(world),
-        // AN INSERTED COLUMN. The header still opens `| ID | Packet |`, so the
-        // table is still recognised, but Status has moved to index 5. A reader
-        // with a hardcoded index lands on Tier and passes.
-        ledger: document(
-          'docs/execution/ledger.md',
-          '# Execution ledger\n\n| ID | Packet | Stage | Phase | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|---|\n| probe-packet | probe | — | G3 | Mechanical | accepted | — | — |\n',
-        ),
-        adrs: [
-          document(
-            'docs/decisions/ADR-9008-probe.md',
-            '# ADR-9008\n\nStatus: proposed by packet `probe-packet`; ratified when that\npacket is accepted\n\nTier: Critical\n',
-          ),
-        ],
-      },
-      {
-        ...greenInput(world),
-        // ESCAPED BACKSLASH. `\\\\|` is an escaped backslash followed by a REAL
-        // delimiter. A splitter that inspects only the previous character
-        // swallows it, merges two cells, and moves Status off its index.
-        ledger: document(
-          'docs/execution/ledger.md',
-          '# Execution ledger\n\n| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| probe-packet | name ending \\\\| — | Mechanical | accepted | — | — |\n',
-        ),
-        adrs: [
-          document(
-            'docs/decisions/ADR-9009-probe.md',
-            '# ADR-9009\n\nStatus: proposed by packet `probe-packet`; ratified when that\npacket is accepted\n\nTier: Critical\n',
-          ),
-        ],
-      },
-      {
-        ...greenInput(world),
-        // ESCAPED PIPE. A literal `|` inside an earlier cell shifts every later
-        // column, so a status read at a fixed index lands on Tier and passes.
-        ledger: document(
-          'docs/execution/ledger.md',
-          '# Execution ledger\n\n| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| probe-packet | name with \\| detail | — | Mechanical | accepted | — | — |\n',
-        ),
-        adrs: [
-          document(
-            'docs/decisions/ADR-9007-probe.md',
-            '# ADR-9007\n\nStatus: proposed by packet `probe-packet`; ratified when that\npacket is accepted\n\nTier: Critical\n',
-          ),
-        ],
-      },
-    ],
-    title:
-      'a proposed ADR whose packet the ledger records as accepted reds — including when the ratification packet is named second, and when an escaped pipe shifts the Status column',
-    vacuity:
-      'the record layer keeps a status line the ledger has already contradicted',
-  },
-  {
-    code: 'RECORD_ADR_PACKET_UNRESOLVED',
-    run: (world) => [
-      {
-        ...greenInput(world),
-        adrs: [
-          document(
-            'docs/decisions/ADR-9003-probe.md',
-            '# ADR-9003\n\nStatus: proposed by the orchestrator; ratified when its first\nimplementing packet is accepted.\n\nTier: Critical\n',
-          ),
-        ],
-      },
-      {
-        ...greenInput(world),
-        // A TYPO in the explicit target. Falling back to the provenance packet
-        // substitutes a different packet for the condition the ADR states, and
-        // that packet is `planned`, so nothing reds at all.
-        adrs: [
-          document(
-            'docs/decisions/ADR-9010-probe.md',
-            '# ADR-9010\n\nStatus: proposed by packet author-packet;\nratified when implementation-pakcet is accepted\n\nTier: Critical\n',
-          ),
-        ],
-        ledger: ledgerDocument([
-          ['author-packet', 'planned'],
-          ['implementation-packet', 'accepted'],
-        ]),
-        rowIdSources: [
-          ledgerDocument([
-            ['author-packet', 'planned'],
-            ['implementation-packet', 'accepted'],
-          ]),
-        ],
-        routingSources: [
-          document(
-            'docs/execution/probe-queue.md',
-            'The finding is routed to `author-packet`.\n',
-          ),
-        ],
-      },
-    ],
-    title:
-      'a proposed ADR naming no resolvable packet reds unless it is pinned — including an explicit ratification target that does not resolve',
-    vacuity:
-      'an unparseable status is skipped, so the check quietly stops applying',
-  },
-  {
-    code: 'RECORD_ADR_NONE_SCANNED',
-    run: (world) => [{ ...greenInput(world), adrs: [] }],
-    title: 'discovering zero decision records reds',
-    vacuity:
-      'a discovery glob that matches nothing reports every ratification current',
-  },
-  {
-    code: 'RECORD_MANIFEST_PIN_STALE',
-    run: (world) => [
-      {
-        ...greenInput(world),
-        manifest: {
-          owningTables: [PROBE_OWNING_TABLE],
-          schemaVersion: 'probe',
-          unresolvableRatifications: [
-            {
-              adr: 'ADR-9004-probe.md',
-              reason: 'no longer observed unresolvable',
-            },
-          ],
-        } satisfies RecordClaimManifest,
-      },
-    ],
-    title: 'a pin that is no longer observed unresolvable reds',
-    vacuity: 'the pin becomes a permanent exemption nobody re-derives',
-  },
-  {
     code: 'RECORD_LEDGER_ID_DUPLICATE',
     run: (world) => [
       {
@@ -683,85 +486,6 @@ export const RECORD_CLAIM_CONTROLS: readonly RecordClaimControl[] = [
     title: 'a ledger with no packet table reds',
     vacuity:
       'a renamed or reshaped table makes uniqueness and ratification read zero rows',
-  },
-  {
-    code: 'RECORD_ROUTING_UNRESOLVED',
-    run: (world) => [
-      {
-        ...greenInput(world),
-        routingSources: [
-          document(
-            'docs/execution/probe-queue.md',
-            'The finding is routed to `no-such-owning-row`.\n',
-          ),
-        ],
-      },
-      {
-        ...greenInput(world),
-        // A TABLE HEADER is not a tracked row. `ID` is the ledger's own first
-        // column name, and it resolved until the header was excluded.
-        routingSources: [
-          document('docs/execution/probe-queue.md', 'routed to `ID`.\n'),
-        ],
-      },
-      {
-        ...greenInput(world),
-        // A LOOKALIKE table at another path. Its header signature matches an
-        // owning table exactly; a queue snapshot pasted into a packet record
-        // conferred ownership on whatever ids it happened to contain.
-        rowIdSources: [
-          ledgerDocument([['probe-packet', 'accepted']]),
-          document(
-            'docs/execution/packets/old-packet.md',
-            '# old-packet\n\n| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---|\n| ghost-owner | historical example | — | — | — | — | — |\n',
-          ),
-        ],
-        routingSources: [
-          document(
-            'docs/execution/probe-queue.md',
-            'The finding is routed to `ghost-owner`.\n',
-          ),
-        ],
-      },
-      {
-        ...greenInput(world),
-        // AN ORDINARY DATA TABLE is not an owning table. A colour swatch list
-        // supplied `blue` as a tracked row id until row collection was gated on
-        // the declared owning-table headers.
-        // The owning ledger stays in place, so exactly one property varies:
-        // an ADDITIONAL, non-owning table is present.
-        rowIdSources: [
-          ledgerDocument([['probe-packet', 'accepted']]),
-          document(
-            'docs/execution/palette.md',
-            '| Colour | Value |\n|---|---|\n| blue | #0066cc |\n',
-          ),
-        ],
-        routingSources: [
-          document(
-            'docs/execution/probe-queue.md',
-            'The finding is routed to `blue`.\n',
-          ),
-        ],
-      },
-      {
-        ...greenInput(world),
-        // A DIRECTORY is not a document. `docs/execution` exists and resolved
-        // nothing about who owns the finding.
-        pathKind: (candidate) =>
-          candidate === 'docs/execution' ? 'directory' : 'absent',
-        routingSources: [
-          document(
-            'docs/execution/probe-queue.md',
-            'routed to `docs/execution`.\n',
-          ),
-        ],
-      },
-    ],
-    title:
-      'a routing naming neither a tracked row nor a document reds — including a table header and a directory',
-    vacuity:
-      'a recorded finding with no owning row is a disposition with no executing gate',
   },
 ];
 

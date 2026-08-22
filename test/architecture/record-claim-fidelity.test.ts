@@ -40,7 +40,6 @@ test('at least one packet record declares claims, and they are observed', (conte
   assert.ok(report.pathsObserved > 0);
   assert.ok(report.symbolsObserved > 0);
   assert.ok(report.ledgerRows > 100);
-  assert.ok(report.routingsResolved > 0);
   context.diagnostic(
     `${report.declaredPackets.length} declaring record(s); ${report.pathsObserved} path(s) and ${report.symbolsObserved} symbol(s) observed`,
   );
@@ -177,30 +176,20 @@ test('the operator-facing gate and this suite run the same checker', () => {
 });
 
 test('a GFM table with inconsistent outer pipes is still read correctly', () => {
-  // The ADMISSION TWIN for the separator fix. Round 2 noted the delimiter
-  // matcher required both outer pipes while GFM makes them optional. The
-  // failure that causes is not a false green but a false RED — an owning table
-  // goes unrecognised and its real rows stop resolving — so the control is a
-  // positive one.
-  // The specimen sits at a DECLARED OWNING PATH, so the delimiter's missing
-  // outer pipe is the only property under test. It was at an undeclared path
-  // until round 4 bound ownership to `{path, header}`, at which point this twin
-  // failed — correctly, because it had been asserting separator tolerance
-  // through a table that no longer confers ownership for an unrelated reason.
+  // The ADMISSION TWIN for the separator fix. GFM makes a delimiter row's outer
+  // pipes optional. The failure that causes is not a false green but a false RED
+  // — the packet table goes unrecognised and its rows stop being read at all —
+  // so the control is a positive one.
   const world = buildSyntheticWorld(root);
-  const loose = {
-    path: 'docs/execution/ledger.md',
-    text: '| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---\n| loose-row | x | — | X | planned | — | — |\n',
-  };
   const report = verifyRecordClaims({
     ...greenInput(world),
-    rowIdSources: [loose],
-    routingSources: [
-      { path: 'docs/execution/q.md', text: 'routed to `loose-row`.\n' },
-    ],
+    ledger: {
+      path: 'docs/execution/ledger.md',
+      text: '| ID | Packet | Stage | Tier | Status | SHA | Evidence |\n|---|---|---|---|---|---|---\n| loose-row | x | — | X | planned | — | — |\n',
+    },
   });
   assert.deepEqual(report.findings, []);
-  assert.equal(report.routingsResolved, 1);
+  assert.equal(report.ledgerRows, 1);
 });
 
 test('the checker never writes to the repository', () => {

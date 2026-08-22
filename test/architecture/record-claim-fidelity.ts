@@ -35,7 +35,7 @@
 // against nothing. This gate closes "the commit does not contain what the record
 // claims"; it does not close "the record claims too little". See the packet
 // record for the full statement of limits.
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, relative, resolve, sep } from 'node:path';
 
@@ -56,15 +56,8 @@ export const RECORD_CLAIM_CODES = [
   'RECORD_CLAIM_COMMIT_UNRESOLVABLE',
   'RECORD_CLAIM_NO_RECORDS',
   'RECORD_CLAIM_NO_DECLARATIONS',
-  'RECORD_ADR_RATIFICATION_STALE',
-  'RECORD_ADR_PACKET_UNRESOLVED',
-  'RECORD_ADR_NONE_SCANNED',
-  'RECORD_MANIFEST_PIN_STALE',
-  'RECORD_MANIFEST_OWNING_TABLE_STALE',
   'RECORD_LEDGER_ID_DUPLICATE',
   'RECORD_LEDGER_TABLE_ABSENT',
-  'RECORD_LEDGER_COLUMN_ABSENT',
-  'RECORD_ROUTING_UNRESOLVED',
 ] as const;
 
 export type RecordClaimCode = (typeof RECORD_CLAIM_CODES)[number];
@@ -80,9 +73,7 @@ export interface RecordClaimReport {
   /** Records carrying a well-formed declaration block. */
   readonly declaredPackets: readonly string[];
   readonly recordsScanned: number;
-  readonly adrsScanned: number;
   readonly ledgerRows: number;
-  readonly routingsResolved: number;
   /** Claimed paths whose difference from base was observed. */
   readonly pathsObserved: number;
   /** Claimed symbols resolved in the frozen tree. */
@@ -108,48 +99,9 @@ export interface GitReader {
   readCommitMessage(commit: string): string | undefined;
 }
 
-/**
- * The pinned known-absence set. An ADR whose governing status is `proposed` but
- * whose named packet cannot be resolved to a ledger row is not checkable by
- * RECORD_ADR_RATIFICATION_STALE, so it is pinned here with its reason rather
- * than skipped silently. The pin is a two-way ratchet: a NEW unresolvable ADR
- * fails, and a pin that has become resolvable fails too.
- */
-export interface RecordClaimManifest {
-  readonly schemaVersion: string;
-  readonly unresolvableRatifications: readonly {
-    readonly adr: string;
-    readonly reason: string;
-  }[];
-  /**
-   * The tables whose rows OWN work, by exact header signature. A routing may
-   * resolve against these and nothing else: admitting every id-shaped first
-   * cell let a colour table's `blue` own a finding. Declared rather than
-   * inferred, and ratcheted both ways — a signature matching no table in the
-   * tree fails, so the list cannot rot into a permanent allowlist.
-   */
-  readonly owningTables: readonly {
-    readonly path: string;
-    readonly header: readonly string[];
-    readonly reason: string;
-  }[];
-}
-
 export interface RecordClaimInput {
   readonly records: readonly MarkdownDocument[];
-  readonly adrs: readonly MarkdownDocument[];
   readonly ledger: MarkdownDocument;
-  /** Documents whose table rows supply resolvable row ids. */
-  readonly rowIdSources: readonly MarkdownDocument[];
-  /** Documents scanned for `routed to \`<id>\`` references. */
-  readonly routingSources: readonly MarkdownDocument[];
-  readonly manifest: RecordClaimManifest;
-  /**
-   * What a repository-relative path IS. A routing may name a document; a
-   * DIRECTORY is not one, and answering with a bare boolean put that
-   * distinction in the wiring where no control could reach it.
-   */
-  readonly pathKind: (candidate: string) => 'file' | 'directory' | 'absent';
   readonly git: GitReader;
 }
 
@@ -173,11 +125,21 @@ export const NON_EXECUTABLE_PATHSPEC = [
 ] as const;
 
 const FULL_SHA = /^[0-9a-f]{40}$/u;
-const ROW_ID = '[A-Za-z0-9][A-Za-z0-9._-]*';
+// GFM allows a fence up to three spaces of indentation and any run of three or
+// more backticks. The exact `^```` form missed both, so a malformed block in a
+// four-backtick or indented fence was not a block at all and escaped every
+// validity assertion. Fence syntax is a CLOSED grammar, unlike the English the
+// retired Family B readers tried to parse, so widening it here terminates.
 const DECLARATION_FENCE =
-  /^```record-claim[^\S\n]*\n([\s\S]*?)^```[^\S\n]*$/gmu;
-const ROUTED_TO = /routed to `([^`\n]+)`/giu;
-const LEDGER_HEADER = /^\|\s*ID\s*\|\s*Packet\s*\|/u;
+  /^ {0,3}(`{3,})record-claim[^\S\n]*\n([\s\S]*?)^ {0,3}\1`*[^\S\n]*$/gmu;
+/**
+ * The ledger packet table, identified STRUCTURALLY by its normalized header.
+ * It was a literal source regex until review measured that a second table
+ * headed `**ID**` normalized to the same thing for one reader and was invisible
+ * to the other — two incompatible definitions of one table. There is now one
+ * definition and one reader, so they cannot disagree.
+ */
+const PACKET_TABLE_SIGNATURE = 'id|packet|stage|tier|status|sha|evidence';
 const SYMBOL_RESOLVABLE_SUFFIX = /\.(?:ts|mts|cts|tsx|js|mjs|cjs|jsx)$/u;
 const BLOCK_KEYS = [
   'schemaVersion',
@@ -188,14 +150,6 @@ const BLOCK_KEYS = [
   'symbols',
 ] as const;
 const BLOCK_SCHEMA_VERSION = 'northstar.record-claim/v1';
-const RATIFICATION_CLAUSE = /\bratif\w*\s+(?:when|once|if|upon|on)\b/iu;
-const RATIFICATION_BACKREFERENCE =
-  /\bratif\w*\s+(?:when|once|if)\s+(?:that|this)\s+packet\s+is\s+accepted/iu;
-const RATIFICATION_TARGET = new RegExp(
-  `ratified when (${ROW_ID}) is accepted`,
-  'iu',
-);
-
 /**
  * A GFM table delimiter row. Outer pipes are OPTIONAL in GFM, so a header whose
  * delimiter omits one was not recognised and the header's own first cell was
@@ -283,32 +237,14 @@ export function verifyRecordClaims(input: RecordClaimInput): RecordClaimReport {
     });
   }
 
-  const ledgerRows = readLedgerIds(input.ledger, findings);
-  const { ids: rowIds, matched } = collectRowIds(
-    input.rowIdSources,
-    input.manifest.owningTables,
-  );
-  for (const { header, path, reason } of input.manifest.owningTables) {
-    if (matched.has(`${path}::${signature(header)}`)) {
-      continue;
-    }
-    findings.push({
-      code: 'RECORD_MANIFEST_OWNING_TABLE_STALE',
-      subject: `${path}: | ${header.join(' | ')} |`,
-      message: `is declared an owning table (${reason}) and matches no table at that path; re-derive it rather than keeping a list that has stopped describing the records`,
-    });
-  }
-  checkRatifications(input, ledgerRows, findings);
-  const routingsResolved = checkRoutings(input, rowIds, findings);
+  const ledgerIds = readLedgerIds(input.ledger, findings);
 
   return {
-    adrsScanned: input.adrs.length,
     declaredPackets,
     findings,
-    ledgerRows: ledgerRows.size,
+    ledgerRows: ledgerIds.size,
     pathsObserved,
     recordsScanned: input.records.length,
-    routingsResolved,
     symbolsObserved,
   };
 }
@@ -318,7 +254,7 @@ export function verifyRecordClaims(input: RecordClaimInput): RecordClaimReport {
 // ---------------------------------------------------------------------------
 
 function declarationBodies(text: string): string[] {
-  return [...text.matchAll(DECLARATION_FENCE)].map((match) => match[1] ?? '');
+  return [...text.matchAll(DECLARATION_FENCE)].map((match) => match[2] ?? '');
 }
 
 function countDeclarationFences(text: string): number {
@@ -634,49 +570,34 @@ export function declaredNames(
 function readLedgerIds(
   ledger: MarkdownDocument,
   findings: RecordClaimFinding[],
-): ReadonlyMap<string, string> {
-  const rows = new Map<string, string>();
+): ReadonlySet<string> {
+  const ids = new Set<string>();
   const duplicates = new Set<string>();
   const lines = ledger.text.split('\n');
   let inPacketTable = false;
   let headerSeen = false;
-  let statusIndex = -1;
 
-  for (const line of lines) {
-    if (LEDGER_HEADER.test(line)) {
-      inPacketTable = true;
-      headerSeen = true;
-      // The Status column is LOCATED, never assumed at a fixed index. It was a
-      // hardcoded 4 until review measured that an escaped pipe in an earlier
-      // cell shifts every later column, so a stale ratification read the Tier
-      // cell, found no `accepted`, and passed.
-      statusIndex = splitRow(line).findIndex(
-        (cell) => stripMarkdown(cell).toLowerCase() === 'status',
-      );
-      if (statusIndex === -1) {
-        findings.push({
-          code: 'RECORD_LEDGER_COLUMN_ABSENT',
-          subject: ledger.path,
-          message:
-            'the packet table header carries no Status column, so every ratification lookup would read some other cell',
-        });
-      }
-      continue;
-    }
+  for (const [index, line] of lines.entries()) {
     if (!line.startsWith('|')) {
       inPacketTable = false;
       continue;
     }
-    if (!inPacketTable || statusIndex === -1 || isSeparatorRow(line)) {
+    // The packet table is recognised STRUCTURALLY, by the normalized header its
+    // signature pins. A literal source regex admitted `| ID |` and rejected
+    // `| **ID** |`, which gave two readers two different ideas of one table.
+    if (isSeparatorRow(lines[index + 1] ?? '')) {
+      inPacketTable = signature(splitRow(line)) === PACKET_TABLE_SIGNATURE;
+      headerSeen ||= inPacketTable;
       continue;
     }
-    const cells = splitRow(line);
-    const id = stripMarkdown(cells[0] ?? '');
-    const status = stripMarkdown(cells[statusIndex] ?? '');
+    if (!inPacketTable || isSeparatorRow(line)) {
+      continue;
+    }
+    const id = stripMarkdown(splitRow(line)[0] ?? '');
     if (id.length === 0) {
       continue;
     }
-    if (rows.has(id) && !duplicates.has(id)) {
+    if (ids.has(id) && !duplicates.has(id)) {
       duplicates.add(id);
       findings.push({
         code: 'RECORD_LEDGER_ID_DUPLICATE',
@@ -685,241 +606,19 @@ function readLedgerIds(
           'appears more than once in the ledger packet table; one packet, one row, and the accepted SHA is immutable once recorded',
       });
     }
-    if (!rows.has(id)) {
-      rows.set(id, status);
-    }
+    ids.add(id);
   }
 
-  // Guarded on `statusIndex` so this never co-fires with COLUMN_ABSENT: a table
-  // whose Status column is missing already has its own diagnostic, and two
-  // codes for one broken tree destroys attribution.
-  if (!headerSeen || (statusIndex !== -1 && rows.size === 0)) {
+  if (!headerSeen || ids.size === 0) {
     findings.push({
       code: 'RECORD_LEDGER_TABLE_ABSENT',
       subject: ledger.path,
       message: headerSeen
-        ? 'the packet table carries no rows, so ledger-id uniqueness and every ratification lookup read zero input'
-        : 'no packet table was found, so ledger-id uniqueness and every ratification lookup read zero input',
+        ? 'the packet table carries no rows, so id uniqueness read zero input'
+        : `no table matching the packet-table signature (${PACKET_TABLE_SIGNATURE.split('|').join(' | ')}) was found, so id uniqueness read zero input`,
     });
   }
-  return rows;
-}
-
-function checkRatifications(
-  input: RecordClaimInput,
-  ledgerRows: ReadonlyMap<string, string>,
-  findings: RecordClaimFinding[],
-): void {
-  if (input.adrs.length === 0) {
-    findings.push({
-      code: 'RECORD_ADR_NONE_SCANNED',
-      subject: 'docs/decisions',
-      message:
-        'no decision records were discovered, so the stale-ratification assertion read zero input',
-    });
-    return;
-  }
-
-  const pinned = new Map(
-    input.manifest.unresolvableRatifications.map(({ adr, reason }) => [
-      adr,
-      reason,
-    ]),
-  );
-  const observedUnresolvable = new Set<string>();
-
-  for (const adr of input.adrs) {
-    const status = statusParagraph(adr.text);
-    if (!status || !/^proposed\b/iu.test(status)) {
-      continue;
-    }
-    const packet = namedPacket(status, ledgerRows);
-    if (!packet) {
-      observedUnresolvable.add(basename(adr.path));
-      if (!pinned.has(basename(adr.path))) {
-        findings.push({
-          code: 'RECORD_ADR_PACKET_UNRESOLVED',
-          subject: adr.path,
-          message: `is proposed but names no packet resolvable to a ledger row, so its ratification cannot be checked: "${truncate(status)}"`,
-        });
-      }
-      continue;
-    }
-    if (ledgerRows.get(packet)?.startsWith('accepted')) {
-      findings.push({
-        code: 'RECORD_ADR_RATIFICATION_STALE',
-        subject: adr.path,
-        message: `is still \`proposed\` on packet \`${packet}\`, which the ledger records as accepted — the ADR's own status line disagrees with the ledger that governs it`,
-      });
-    }
-  }
-
-  for (const [adr, reason] of pinned) {
-    if (observedUnresolvable.has(adr)) {
-      continue;
-    }
-    findings.push({
-      code: 'RECORD_MANIFEST_PIN_STALE',
-      subject: adr,
-      message: `is pinned as unresolvable (${reason}) and is no longer observed that way; re-derive the pin rather than keeping it`,
-    });
-  }
-}
-
-function checkRoutings(
-  input: RecordClaimInput,
-  rowIds: ReadonlySet<string>,
-  findings: RecordClaimFinding[],
-): number {
-  let resolved = 0;
-  for (const source of input.routingSources) {
-    for (const match of source.text.matchAll(ROUTED_TO)) {
-      const target = stripMarkdown(match[1] ?? '');
-      if (target.length === 0) {
-        continue;
-      }
-      // A directory is not a document. `routed to `docs/execution`` resolved
-      // until this compared the KIND rather than mere existence.
-      const namesDocument = [
-        target,
-        join('docs/execution', target),
-        join('docs/decisions', target),
-      ].some((candidate) => input.pathKind(candidate) === 'file');
-      if (rowIds.has(target) || namesDocument) {
-        resolved += 1;
-        continue;
-      }
-      findings.push({
-        code: 'RECORD_ROUTING_UNRESOLVED',
-        subject: `${source.path}: ${target}`,
-        message:
-          'is routed to a destination that is neither a tracked row nor a document in this repository — a recorded finding with no owning row is a disposition with no executing gate',
-      });
-    }
-  }
-  return resolved;
-}
-
-function collectRowIds(
-  sources: readonly MarkdownDocument[],
-  owningTables: readonly {
-    readonly path: string;
-    readonly header: readonly string[];
-  }[],
-): { ids: ReadonlySet<string>; matched: ReadonlySet<string> } {
-  const rowStart = new RegExp(`^\\|\\s*\\**\`?(${ROW_ID})\`?\\**\\s*\\|`, 'u');
-  // Ownership is identified by PATH AND HEADER, not by header text alone. A
-  // header signature is copyable: a queue snapshot pasted into any packet
-  // record conferred ownership on whatever ids it happened to contain.
-  const wanted = new Set(
-    owningTables.map(({ header, path }) => `${path}::${signature(header)}`),
-  );
-  const ids = new Set<string>();
-  const matched = new Set<string>();
-
-  for (const source of sources) {
-    const lines = source.text.split('\n');
-    // Only rows UNDER a declared owning header count. A header row is itself
-    // never a tracked row: its first cell is a column name, and `ID` resolved a
-    // routing against the ledger's own header until this excluded it.
-    let inOwningTable = false;
-    for (const [index, line] of lines.entries()) {
-      if (!line.startsWith('|')) {
-        inOwningTable = false;
-        continue;
-      }
-      if (isSeparatorRow(lines[index + 1] ?? '')) {
-        const key = `${source.path}::${signature(splitRow(line).map(stripMarkdown))}`;
-        inOwningTable = wanted.has(key);
-        if (inOwningTable) {
-          matched.add(key);
-        }
-        continue;
-      }
-      if (!inOwningTable || isSeparatorRow(line)) {
-        continue;
-      }
-      const id = rowStart.exec(line)?.[1];
-      if (id) {
-        ids.add(id);
-      }
-    }
-  }
-  return { ids, matched };
-}
-
-function signature(header: readonly string[]): string {
-  return header.map((cell) => stripMarkdown(cell).toLowerCase()).join('|');
-}
-
-/**
- * The ADR's governing status, from the `Status:` line to the end of its
- * paragraph. Reading the whole paragraph matters: several statuses wrap, and
- * ADR-0050 and ADR-0055 QUOTE the stale wording they corrected, so a check
- * keyed to the phrase rather than to the governing state flags both.
- */
-function statusParagraph(text: string): string | undefined {
-  const lines = text.split('\n');
-  const start = lines.findIndex((line) => /^\s*Status:/u.test(line));
-  if (start === -1) {
-    return undefined;
-  }
-  const paragraph: string[] = [];
-  for (let index = start; index < lines.length; index += 1) {
-    const line = lines[index] ?? '';
-    if (index > start && line.trim().length === 0) {
-      break;
-    }
-    paragraph.push(line);
-  }
-  return stripMarkdown(paragraph.join(' ').replace(/^\s*Status:/u, ''));
-}
-
-/**
- * The packet a proposed ADR is conditional on. Anchors are tried in order and
- * the first candidate that resolves to a ledger row wins; a candidate that
- * resolves to nothing is not a packet name, which is how "proposed by the
- * orchestrator" avoids naming `the` as its packet.
- */
-function namedPacket(
-  status: string,
-  ledgerRows: ReadonlyMap<string, string>,
-): string | undefined {
-  // The EXPLICIT ratification condition outranks provenance. It was the other
-  // way round until review measured a status reading "proposed by packet A;
-  // ratified when B is accepted" with A planned and B accepted: the reader
-  // bound to A, and the condition the ADR actually states was never tested.
-  // The EXISTENCE of a ratification clause is detected separately from the
-  // extraction of its target, and an unrecognised clause fails CLOSED. Matching
-  // only one spelling meant any natural variation — "ratified when PACKET x is
-  // accepted", "ratified once x is accepted", "ratified when x has been
-  // accepted" — fell through to provenance and bound a different packet.
-  //
-  // The one clause that legitimately defers to provenance is the BACK-REFERENCE
-  // "ratified when that packet is accepted", where "that packet" is the packet
-  // the same sentence already named. That is a reading of English and it is
-  // stated as a limit in the packet record; every other wording is unresolved,
-  // which is visible in the pinned set rather than silent.
-  if (
-    RATIFICATION_CLAUSE.test(status) &&
-    !RATIFICATION_BACKREFERENCE.test(status)
-  ) {
-    const target = RATIFICATION_TARGET.exec(status)?.[1];
-    return target && ledgerRows.has(target) ? target : undefined;
-  }
-  const provenance = [
-    new RegExp(`proposed by packet (${ROW_ID})`, 'iu'),
-    new RegExp(`proposed \\(packet (${ROW_ID})`, 'iu'),
-    new RegExp(`proposed by (${ROW_ID})`, 'iu'),
-  ];
-  const resolved = new Set<string>();
-  for (const anchor of provenance) {
-    const candidate = anchor.exec(status)?.[1];
-    if (candidate && ledgerRows.has(candidate)) {
-      resolved.add(candidate);
-    }
-  }
-  return [...resolved][0];
+  return ids;
 }
 
 // ---------------------------------------------------------------------------
@@ -1005,46 +704,20 @@ export function repositoryRoot(): string {
   return result.stdout.trim();
 }
 
-export const MANIFEST_PATH =
-  'test/architecture/record-claim-fidelity.manifest.json';
-
 export function collectRepositoryInput(root: string): RecordClaimInput {
   const read = (path: string): MarkdownDocument => ({
     path,
     text: readFileSync(resolve(root, path), 'utf8'),
   });
-  const markdownIn = (
-    directory: string,
-    depth: 'flat' | 'recursive',
-  ): MarkdownDocument[] => listMarkdown(root, directory, depth).map(read);
-
-  const ledger = read('docs/execution/ledger.md');
-  const records = markdownIn('docs/execution/packets', 'flat');
-  const adrs = markdownIn('docs/decisions', 'flat').filter(
-    ({ path }) => !path.endsWith('ADR-TEMPLATE.md'),
-  );
-
   return {
-    adrs,
     git: createGitReader(root),
-    ledger,
-    manifest: JSON.parse(
-      readFileSync(resolve(root, MANIFEST_PATH), 'utf8'),
-    ) as RecordClaimManifest,
-    pathKind: (candidate) => {
-      if (
-        !isRepositoryPath(candidate) ||
-        !existsSync(resolve(root, candidate))
-      ) {
-        return 'absent';
-      }
-      return statSync(resolve(root, candidate)).isFile() ? 'file' : 'directory';
-    },
-    records,
-    // Every narrative document, recursively: routings are recorded in program
-    // reviews, rulings and debates as readily as in the queue.
-    routingSources: markdownIn('docs', 'recursive'),
-    rowIdSources: markdownIn('docs/execution', 'recursive'),
+    ledger: read('docs/execution/ledger.md'),
+    // RECURSIVE. A record moved into a subdirectory was invisible to a flat
+    // scan while other records remained, which kept RECORD_CLAIM_NO_RECORDS
+    // green on a tree that had lost declarations.
+    records: listMarkdown(root, 'docs/execution/packets', 'recursive').map(
+      read,
+    ),
   };
 }
 
@@ -1072,6 +745,10 @@ function listMarkdown(
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+function signature(header: readonly string[]): string {
+  return header.map((cell) => stripMarkdown(cell).toLowerCase()).join('|');
+}
 
 function isRepositoryPath(candidate: string): boolean {
   return (
@@ -1131,13 +808,9 @@ function basename(path: string): string {
   return path.split('/').at(-1) ?? path;
 }
 
-function truncate(value: string): string {
-  return value.length > 120 ? `${value.slice(0, 117)}...` : value;
-}
-
 export function formatReport(report: RecordClaimReport): string {
   if (report.findings.length === 0) {
-    return `records: OK (${report.recordsScanned} record(s), ${report.declaredPackets.length} declaring: ${report.pathsObserved} claimed path(s) and ${report.symbolsObserved} claimed symbol(s) observed in their frozen trees; ${report.adrsScanned} ADR(s) against ${report.ledgerRows} ledger row(s); ${report.routingsResolved} routing(s) resolved)`;
+    return `records: OK (${report.recordsScanned} record(s), ${report.declaredPackets.length} declaring: ${report.pathsObserved} claimed path(s) and ${report.symbolsObserved} claimed symbol(s) observed in their frozen trees; ${report.ledgerRows} ledger row(s), ids unique)`;
   }
   const lines = ['records: FAIL', ''];
   for (const finding of report.findings) {
