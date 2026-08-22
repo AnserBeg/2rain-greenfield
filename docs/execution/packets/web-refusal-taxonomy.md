@@ -8,7 +8,7 @@ Branch: `packet/web-refusal-taxonomy`
 
 Tier: Critical
 
-Status: evidence_ready — full matrix red on an unowned downstream expectation
+Status: evidence_ready — downstream expectation bridge awaiting narrow review
 
 ## Goal
 
@@ -740,3 +740,31 @@ error and exact codes, while provider-direct expectations remain unchanged.
 No provider production change and no admission change is indicated. The matrix
 failure is recorded as red, not partial acceptance, and integration remains
 blocked pending an explicit bridge for that downstream test.
+
+### Downstream runtime-entry expectation bridge — `d9f3fd577bf57c74492d6fbd3750d21bfc000dc1`
+
+The user granted `test/postgres/request-runtime-view.test.ts` for the bounded
+matrix correction. Current `main` moved only in `AGENTS.md` and
+`review-tiers`; merge `b1d1a86` composes those doctrine bytes before this
+bridge and changes no executable product or test behavior.
+
+The failing G1-P5 specimen now distinguishes its two boundaries explicitly:
+
+- the three calls through `AuthenticatedRequestRuntimeEntryAdapter` require
+  `RequestRuntimeViewRefusalError` and the exact runtime-owned code; and
+- the seven direct `PostgresRequestRuntimeViewService.load(...)` calls retain
+  the existing `RequestRuntimeViewLoadError` helper and exact provider codes.
+
+No production source, test fixture, request, provider raise site or refusal
+code changed. Focused gates on the executable correction passed:
+
+- `pnpm format`;
+- `pnpm lint`;
+- `pnpm typecheck`;
+- `pnpm --filter @north-star/web test:contracts`: 29/29; and
+- `pnpm test:postgres`: 204/204, including the corrected G1-P5 block at 13/13.
+
+Because a PostgreSQL test changed after review convergence, this exact
+executable correction receives a narrow review before the full matrix is
+restarted. The review scope is boundary attribution in this one specimen; it
+does not reopen the already reviewed runtime implementation or web behavior.
