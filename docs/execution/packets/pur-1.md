@@ -448,14 +448,18 @@ purchasing entities, `createIndex` and `addForeignKey`, and nothing matching
 
 ## Release lineage
 
-13 → 14. Head `c2b05dcdd48ed9af3e927ddf9f3a90d0273cc6d3d3a47645548c5741f4113223`,
+13 → 14. Head `ce5eb534afb0c877a888febf448c4a285841e25b3744f5898cf02e32cdd5420a`,
 succeeding `37057e242725b9604cdfb2c73d6e8aed25edf4f93e5cebd3f54e733100c11685`.
+**The root moved twice after it was first recorded** — once when the fifth
+transition landed and once when round 1's fix removed the two operations — and
+the record carried the first value until the Fable arm measured it. The value
+above is read from `apps/web/release/app.compiled.json`, not carried forward.
 `check:app-release` and `check:demo-release` both exit 0. The plan's stale "8
 entries" was corrected separately at `4780efc`.
 
 `app.authored.json` is verified PURELY ADDITIVE against the base: comparing both
 sides member-by-member on identity keys reports 0 removed and 0 changed across
-every collection, with exactly 2 assertions, 2 entities, 10 fields, 13
+every collection, with exactly 2 assertions, 2 entities, 10 fields, 11
 operations, 14 permissions, 8 queries, 1 state machine, 1 relation, 2 storage
 mappings, 6 surfaces and 1 module added. The "deleted" lines in the raw diff
 are alignment artifacts; the member-by-member comparison is the measurement.
@@ -726,6 +730,7 @@ says what each actually is:
 | `test/helpers/reachability-producers.ts` | additive pin | the THIRD suite inventory, which `check:reachability` reads. Missed on the first pass and caught by re-reading the `dev-environment` row, which records registering its own test file "in all three inventories". Measured unheld | none |
 | `packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts` | additive registration | the tripwire flags any file mentioning three or more distinct predicate kinds. A definition file CONSTRUCTS predicates rather than dispatching on them, and the heuristic cannot tell the two apart — `inventory/definition.ts` is registered for the same reason. Authoring the editing guard at all trips it | none |
 | `test/postgres/module-storage-transition.test.ts` | **scope-preserving fixture correction** — adds a removal helper and strips Purchasing from the prior release; not a one-entry edit | its ABI fixture builds "the composed application without Inventory", which after this packet still carries Purchasing and therefore fails `LEGAL_ENTITY_MASTER_TARGET_INVALID`. See the `test:postgres` findings above | none |
+| `apps/web/test/browser/composed-application.spec.ts` | **IN-LEASE, listed for completeness** — the charter grants `apps/web/test/browser/**` "where the mount moves them", so this is not an exception at all. It is named here because the Fable arm counted it as an eighth touched file absent from both enumerations, and an unexplained omission reads worse than an entry. **Its navigation expectations are UNEXECUTED by this lane in rounds 1–3** — only `test:browser` can verify them | n/a |
 | `test/postgres/fresh-tenant-full-replay-schema.snapshot.json` | **regenerated oracle** — logically additive member-wise across all twenty collections; its TEXTUAL diff is not | **regenerated, not edited** — a generated full-replay oracle whose own generator was run. Same category as `apps/web/release/**`, which the lease already grants as regenerated | none |
 
 **Seven, not three, and every one after the first three was found by a gate
@@ -770,6 +775,25 @@ This is a **new instance of an existing open row**, not a new defect and not a
 regression introduced here — every module with a terminal-state guard already
 has it, `stock_count` included. It is named so the R13 row can record that
 mounting a guarded document is what makes it operator-visible.
+
+## Owed at acceptance, and deliberately not taken here
+
+**`review-log.md` needs four rows** — R1 REVISE, R2 REVISE, R3 REVISE, R4 Fable
+confirm — and this lane did not add them. Two reasons, both measured:
+`scripts/check-review-record.sh` requires only that the SHA on `main` appears,
+and `PUR-1` is not integrated; and the file is **held by `packet/posting-error-shape`**
+per the empirical disjointness check, so appending would collide with a live
+lane. The rows belong to whoever integrates, keyed on the integrated SHA.
+
+**Plan §7.17 is owed a correction** for the amend reassignment and for its
+`writableFieldIds` premise. The plan is outside this packet's owned paths.
+
+**The full CI matrix on the integrated tree**, per `AGENTS.md` §6.
+
+**A codex PASS.** `review-tiers` sequences the Fable confirm after one; three
+codex rounds returned REVISE, the third on records only, and the user ruled the
+Fable arm forward from there. **The Fable confirm does not substitute for it**,
+and the packet stays `evidence_ready` until it lands.
 
 ## What this lane did NOT verify
 
