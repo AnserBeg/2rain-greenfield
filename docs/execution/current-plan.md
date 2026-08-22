@@ -18,7 +18,7 @@ outliving its truth — committed two hours after writing the finding. **The ins
 would have caught it is R1's own `check-records.sh`, which is not built yet.**
 
 **R1's gate is now built — `record-claim-fidelity`, 2026-08-21, frozen for review at last
-executable commit `7e2fc88`.** `scripts/check-records.sh` plus
+executable commit `cf21981`.** `scripts/check-records.sh` plus
 `test/architecture/record-claim-fidelity.test.ts` observe a packet record's claims against
 its frozen tree (Band A: every claimed path really differs between base and head, every
 claimed symbol is really declared there, no executable path changed that the record does

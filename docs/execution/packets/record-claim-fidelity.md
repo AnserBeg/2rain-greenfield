@@ -6,7 +6,7 @@ Branch: `packet/record-claim-fidelity`
 Tier: Behavioral — the diff adds a gate over narrative records and changes no
 product logic.
 Status: **frozen for review.** All gates green at the frozen tip; the packet's
-last executable commit is `7e2fc88c6ff383d5743d521e451e7030a89eaff5` and every
+last executable commit is `cf219813189e22d50dac143162632f3881410e60` and every
 commit above it is narrative.
 
 ## Why this exists
@@ -73,7 +73,7 @@ those declarations against the git tree. Concretely:
 
 Verified free before starting, by measurement rather than from the partition
 table. `lanes.md` mandates `git diff --name-only main...<branch>` over every
-`packet/*` branch; run at `7e2fc88` across all 22, **none touches
+`packet/*` branch; run at `cf21981` across all 22, **none touches
 `scripts/check-records.sh` or any `record-claim-fidelity*` file**.
 `packet/expected-red-gate` touches `scripts/check-expected-red.sh` — a different
 script, and R2's disposition rather than R1's. `packet/ps-2` and `packet/pur-1`
@@ -106,7 +106,7 @@ because it is a real limit, not an oversight.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "record-claim-fidelity",
   "base": "ba4304d0477784142442093c6783b20ae2f09424",
-  "head": "7e2fc88c6ff383d5743d521e451e7030a89eaff5",
+  "head": "cf219813189e22d50dac143162632f3881410e60",
   "changedPaths": [
     "scripts/check-records.sh",
     "test/architecture/record-claim-fidelity.ts",
@@ -151,6 +151,14 @@ per vacuity vector, each varying exactly one property.
    `git-workflow`'s identical-tree exclusion list verbatim: everything except
    `docs`, `.agents`, `CLAUDE.md`, `AGENTS.md` and `learnings.md`.
 
+   **`--no-renames` is load-bearing here and was found by measurement, not by
+   design.** Rename detection is on by default and reports a pure rename as the
+   **destination path only** — measured, `a.ts -> b.ts` prints `b.ts` alone — so
+   a packet that renamed an executable file away would leave the vacated path
+   changed, undeclared and unreported, which is exactly the class this assertion
+   exists to close. Deleting the flag reds the undeclared-path control and
+   nothing else.
+
 ### Family B — record staleness. **Band C.**
 
 Declared Band C. Docs and inventories; `review-tiers` is explicit that Band C
@@ -181,7 +189,7 @@ diagnostic, so that is how the gate is built.
 |---|---|---|---|
 | 1 | `RECORD_CLAIM_PATH_UNCHANGED` | A claimed path byte-identical at base and head, **while the working tree really has changed that same file** | read the working tree and pass the `ux-picker` r3 commit |
 | 2 | `RECORD_CLAIM_SYMBOL_ABSENT` | The claimed name occurs twice at head — once in a comment, once in a string literal — and is declared neither time | match the name as a string and count a mention as a declaration |
-| 3 | `RECORD_CLAIM_PATH_UNDECLARED` | `scripts/probe.sh` changes and the block declares nothing over it | carry an exclusion list that swallows `scripts/`, landing a lease violation silently |
+| 3 | `RECORD_CLAIM_PATH_UNDECLARED` | Two sub-cases: `scripts/probe.sh` changes and the block declares nothing over it; and a pure rename declares its destination but not its vacated origin | carry an exclusion list that swallows `scripts/`, or let default rename detection report only the destination |
 | 4 | `RECORD_CLAIM_BLOCK_UNPARSABLE` | A block body that is not JSON | silently exempt the packet from every claim assertion |
 | 5 | `RECORD_CLAIM_BLOCK_INVALID` | Ten malformed shapes, asserted one at a time: unknown key, wrong schema version, short SHA, empty `changedPaths`, repeated path, escaping path, empty packet name, symbol without a path, symbol whose name is not an identifier, symbol over a shell script | accept a shape the parser does not recognise as though it declared nothing |
 | 6 | `RECORD_CLAIM_BLOCK_DUPLICATED` | Two blocks in one record | let a second block shadow the first |
