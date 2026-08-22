@@ -4,7 +4,7 @@
   "entries": [
     {
       "name": "state-poison",
-      "claim": "The mutation must be the only cause of the red, so the restored suite must return the green it started from.",
+      "claim": "The restored suite must be wholly green, because it is the reference the kill set is measured against.",
       "file": "test/fixtures/expected-red/subject.mjs",
       "original": "export const CONTROL_SENTINEL = 'pristine';",
       "replacement": "export const CONTROL_SENTINEL = 'moved';",

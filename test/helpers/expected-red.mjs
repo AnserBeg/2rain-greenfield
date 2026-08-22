@@ -582,7 +582,9 @@ function runOneEntry(entry, { root, scratch, log, run }) {
     run,
     phase: 'restored',
   });
-  const notGreen = restored.results.filter((result) => result.status !== 'pass');
+  const notGreen = restored.results.filter(
+    (result) => result.status !== 'pass',
+  );
   assert.deepEqual(
     notGreen.map((result) => `${result.file}::${result.name}`),
     [],

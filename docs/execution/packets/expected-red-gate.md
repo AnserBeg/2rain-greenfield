@@ -6,6 +6,17 @@ Branch: `packet/expected-red-gate`
 Tier: Critical
 Status: frozen for review
 
+## One claim dropped rather than controlled — `git ls-tree HEAD`
+
+Membership is read from the `HEAD` tree rather than from `git ls-files`, which
+describes the index. **That is redundant hardening, not an independent property,
+and this record says so rather than building a control for it.** Once every mode
+asserts the tree is identical to `HEAD` before reading anything, a staged-only
+addition cannot exist without the assertion firing first, so index membership and
+`HEAD` membership cannot diverge at the point of use. It is retained only because
+reading the commit is the more obviously-correct source; no control holds it, and
+none is owed. *Round 6 asked for this ruling explicitly rather than a control.*
+
 ## Evidence band — A (SILENT), declared
 
 Per `review-tiers`' evidence-observability bands (2026-08-21, landed on `main`
@@ -45,8 +56,9 @@ transcribed into review-log prose, executable never again.
 
 **(a) A shared runner.** `test/helpers/expected-red.mjs` is
 `test/integration/scoped-create-operand-mutations.mjs` lifted out of one packet:
-it discovers manifests by glob rather than carrying one inline, memoizes a green
-baseline per distinct test command, and builds the `node --test` argv itself.
+it discovers manifests by glob rather than carrying one inline, measures each
+entry **mutation-first and restored-reference-second** with nothing memoized
+between entries, and builds the `node --test` argv itself.
 `test/helpers/expected-red-reporter.mjs` records one line per real test result
 so attribution is read from a produced artifact rather than parsed from TAP
 prose.
@@ -76,7 +88,7 @@ matrix; reproducing the reds costs minutes and belongs at acceptance.
 ## The three ways this gate could have betrayed itself
 
 Each has its own recorded red in `--self-test`, varying one property of an
-otherwise-correct manifest entry. **33 controls**, and the self-test is itself a
+otherwise-correct manifest entry. **35 controls**, and the self-test is itself a
 gate — `check:expected-red-controls` runs in CI and the matrix, so the proof
 that this instrument can fail is re-taken on every run rather than once at
 freeze time.
@@ -98,8 +110,8 @@ each of those checks and require the holding control to die.**
 
 **B — the check read zero input.** B1 a glob discovering no manifest
 (`EXPECTED_RED_NO_MANIFESTS`); B2 a name pattern selecting no test — refused at
-the baseline, before the mutation, because a suite that exits 0 having executed
-nothing is not a green baseline; B3 a mistyped entry name, refused rather than
+the mutated observation, because a suite that exits 0 having executed nothing
+says nothing by exiting non-zero either; B3 a mistyped entry name, refused rather than
 run as a selection of nothing.
 
 **C — the red fired for the wrong reason.** *The load-bearing one is C5, and it
@@ -244,7 +256,7 @@ Two measurements, both taken with the gate:
    row `container-pressure-forges-outcomes`, met head-on.**
 
 **The runner refused rather than measuring.** It reported *"the suite is not green
-before the mutation, so no red it produces can be attributed to the mutation"* and
+is not wholly green"* and
 stopped. Had it only checked for a non-zero exit — which is what the original
 inline runner did — it would have recorded a red for a suite that was already
 red, which is the admission-side vacuity this packet exists to close.
@@ -311,7 +323,7 @@ are already stable. Routed to `current-plan.md`.
 
 - The five focused-integration entries: **12 seconds** for five mutations,
   measured mutation-first and then restored.
-- `--self-test`: seconds, **33 controls**.
+- `--self-test`: seconds, **35 controls**.
 - The four PostgreSQL entries: `test/postgres/composed-application.test.ts` takes
   **9m48s** solo for one run, so an entry naming that whole file costs about
   twenty minutes for its baseline plus its mutated run. One full nine-entry run

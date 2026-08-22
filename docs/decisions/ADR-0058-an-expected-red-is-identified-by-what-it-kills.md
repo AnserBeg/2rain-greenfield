@@ -160,11 +160,12 @@ mutation's blast radius reds the gate until the entry is updated. That
 brittleness is the feature: it is drift detection, and the failure message
 prints the observed set so the fix is a paste.
 
-**Costly where the suite is.** Each entry costs one baseline (memoized per
-distinct command) plus one mutated run. Focused `namePattern` entries cost
-seconds; an entry naming a whole PostgreSQL file costs about ten minutes per
-run. Manifest authors should focus the test, and `--run` stays an
-acceptance-time entry point rather than a matrix step for exactly this reason.
+**Costly where the suite is.** Each entry costs a mutated run plus a restored
+run, with nothing memoized between entries — so the cost is per entry, not per
+distinct command. Focused entries stay in seconds; an entry naming a whole
+PostgreSQL file costs about ten minutes a run. Manifest authors should focus the
+test, and `--run` stays an acceptance-time entry point rather than a matrix step
+for exactly this reason.
 
 **The measurement cannot restore the subject, and the boundary is where the
 observation is DEFINED.** `observeMutatedRun` lives in
@@ -239,7 +240,7 @@ that join.
   `/Missing expected rejection/u`_, is satisfied by both. The kill set made the
   difference visible; the message pattern could not have. The four PostgreSQL
   entries are routed rather than shipped, for the reason in the packet record.
-- The gate's own negative controls: **31**, in
+- The gate's own negative controls: **35**, in
   `scripts/check-expected-red.sh --self-test`, wired as its own gate so the
   proof is re-taken on every CI and matrix run rather than once at freeze.
 - **Six meta-controls, each deleting one check and requiring the control that
