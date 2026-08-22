@@ -4258,10 +4258,23 @@ async function assertExactPartitionEvidence(
   );
   assert.ok(evidence.results.length > 0, 'real PostgreSQL probes still ran');
   assert.ok(derivations.length > 0);
+  // 127 -> 151. PUR-1's 24 scenarios ALL EXECUTE and none is derived, which is
+  // why `derivations` below is unchanged at 47 -- so the partition still closes:
+  // 151 + 47 = 198, the planned count asserted in
+  // `assertBoundedFreshTenantInstallEvidence`, and 127 + 47 = 174 was the same
+  // identity before this packet.
+  //
+  // That every one of them is ARRANGEABLE is a fact about the module rather
+  // than an accident. Inventory contributes derivations precisely because some
+  // of its scenarios are emitted-but-unarrangeable; purchasing declares no
+  // operationless entity, no provider-written read model, and no field a
+  // generic create cannot populate. **The materialized state field would have
+  // been the one exception, and it is not emitted at all** -- see the
+  // scenario-count comment in `assertBoundedFreshTenantInstallEvidence`.
   assert.equal(
     evidence.results.length,
-    127,
-    'three formerly excluded fields now carry real same-entity search authority while the posting refusal adds one executed scenario',
+    151,
+    'PUR-1 adds 24 executed scenarios and no derivation, so the partition still closes at 198',
   );
   assert.equal(
     derivations.length,
