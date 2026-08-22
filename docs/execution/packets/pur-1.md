@@ -463,6 +463,18 @@ mint an `enumReject` and a `searchableExclusion` — but both probe a field
 THROUGH the create operation, and a machine's state field is structurally
 excluded from that contract. This is ADR-0050 §6 item 2 visible in a number.
 
+**And the ADR-0033 partition moved with it: executed 127 → 151, derivations
+unchanged at 47.** All 24 purchasing scenarios EXECUTE and none is derived, so
+the partition still closes — 151 + 47 = 198, exactly the planned count above,
+as 127 + 47 = 174 was before this packet.
+
+That every one is arrangeable is a fact about the module rather than an
+accident. Inventory contributes derivations precisely because some of its
+scenarios are emitted-but-unarrangeable; purchasing declares no operationless
+entity, no provider-written read model, and no field a generic create cannot
+populate. **The state field would have been the one exception, and it is not
+emitted at all.**
+
 ### 4. The full-replay schema oracle, REGENERATED rather than edited
 
 `assertBoundedInstallMatchesFullReplaySchema` compares the bounded fresh-tenant
