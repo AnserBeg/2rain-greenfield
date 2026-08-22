@@ -59,7 +59,7 @@ exists to replace. **A gate that certifies a red it did not observe is not
 discovered by looking at it.**
 
 So full §6 applies with no relaxation: one recorded red per vacuity vector, each
-varying exactly one property, plus the admission twins. That is what the 33
+varying exactly one property, plus the admission twins. That is what the 37
 controls are. **The band is declared here so the reviewer checks it rather than
 infers it**, and nothing in this packet is self-assigned downward.
 
@@ -126,8 +126,28 @@ check. Each is now held: the entry frozen-tree precondition (D1, which used to
 accept the *exit* postcondition's identical message), the digest read-back (D2),
 the failure-join (C5), and file-qualified attribution (C6). Two further checks
 that had no control at all — staged-tree refusal and the real in-flight race —
-are now D3 and a rebuilt G1. **Six meta-controls run the deletion question on
-each of those checks and require the holding control to die.**
+are now D3 and a rebuilt G1.
+
+**All deletion evidence in this packet is HAND-RUN and recorded here. None of it
+is a committed mutation harness**, and `review-tiers` is explicit that an
+uncommitted harness is weaker evidence. Each was performed the same way — apply
+the sabotage, commit it, run `--self-test`, `git reset --hard` — and observed
+directly:
+
+*Rounds 1–4, on the checks of their day:* deleting the entry frozen-tree
+precondition (D1), the digest read-back (D2), the failure-join (C5), the
+file-qualified identity (C6), the index-versus-HEAD comparison (D3), and the
+journal ordering (G1).
+
+*Rounds 5–6, on the checks that ship:*
+
+| deletion | control that dies |
+|---|---|
+| the identity-uniqueness refusal | **C11** reports OK |
+| that refusal applied to the restored phase only | **C11** reports OK — the asymmetry, not the absence, was round 6's defect |
+| skip/todo dropped from the uniqueness population | **C12** stops refusing for its stated reason |
+| noncanonical path spellings accepted | **J6** reports OK |
+| only `main()`'s frozen-tree assertion (`runEntries` keeps its own) | **J5** reports OK |
 
 **A — the mutation did not apply.** A1 an `original` absent from its file
 (`EXPECTED_RED_VICTIM_ABSENT`); A2 an `original` matching more than once, where
@@ -224,7 +244,8 @@ credited-versus-counted mismatch reconciliation exists to refuse. Measured: admi
 suite shape produces this mismatch naturally. That was wrong, and the timeout
 shape produces it under any classifier that gets one type wrong.*
 
-**And the gate's own controls are not vacuous.** Two meta-controls, each run on
+**And the gate's own controls are not vacuous.** Two early hand-run deletions,
+each performed on
 a committed tree and reverted:
 
 - Disabling the victim-absent refusal makes A1 report *"the gate reported OK"*.
