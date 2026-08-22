@@ -793,7 +793,7 @@ function assertEvidenceReconciles(entry, measured, root, phase) {
 }
 
 /**
- * Every credited identity in a run must be unique, in EVERY phase, before any
+ * Every REPORTED identity in a run must be unique, in EVERY phase, before any
  * Set or Map is built over the results.
  *
  * A manifest can only name `{file, name}`. When a run reports two results under
