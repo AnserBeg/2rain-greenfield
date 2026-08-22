@@ -54,8 +54,10 @@ both offered and declined for v1.
 **They are serial, and the reason is mechanical rather than stylistic.** Every
 module mount touches three shared *sequential* things: `builder.ts` destructures a
 fixed tuple with a hard-coded count and error string; `apps/web/release/app.compiled.json`
-is a content-addressed lineage (8 entries, last root `b0177bf4…`) to which each
-mount appends the next entry; and the migration number. Two lanes mounting
+is a content-addressed lineage to which each mount appends the next entry
+(**13 entries as of 2026-08-22, measured in the artifact — the "8 entries, last root
+`b0177bf4…`" this line used to carry went stale nine mounts ago, so `PUR-1` appends
+entry 14**); and the migration number. Two lanes mounting
 concurrently do not merely conflict — the second lane's appended entry is invalid
 once the first lands, so it must regenerate, **voiding its reviewed artifact and
 the matrix that was green at it.**
@@ -662,3 +664,105 @@ post it through one compiled family-execution binding keyed by
 IDs and both revisions. **A mechanism whose nominated second family refutes it is
 not a mechanism**, and building goods receipt first is what let three passes miss
 that.
+
+### 7.17 The amendment lifecycle — reopen, edit-after-close, returns, and negative stock — ruled 2026-08-22
+
+**Raised by the user before `PUR-1` was cut, and it changes `PUR-1` rather than a later
+packet.** Four questions were asked: what happens when a purchase order is reopened; what
+if that would drive stock negative; what about returning purchased items; and — decisively
+— **a closed order may still need editing, and edited quantities must be accounted for.**
+
+**Measured against the plan: reopen and returns appear NOWHERE.** Neither in scope, nor in
+§6's exclusion list. Negative stock is fully answered by the platform and was never the
+gap.
+
+#### The conflation that has to be named first
+
+**Reopening a purchase order subtracts nothing, because the order never added anything.**
+The ORDER is a commercial document; the RECEIPT posts the movement. Sending goods back is a
+reversal of the receipt, not an edit of the order. The engine already carries that shape —
+`inventory-posting-service.ts:135` declares `'initial' | 'correction' | 'reversal'` and a
+`reversalOfMovementId` column.
+
+**Editing an ordered quantity on an order with posted receipts likewise does not change
+inventory.** Inventory is the sum of posted movements; ordered quantity is intent. What an
+amendment changes is the derived **open-to-receive**. `received_quantity` is ledger truth
+and an amendment never rewrites it.
+
+#### Negative stock was already answered, and answered well
+
+`packages/compiler/src/conformance.ts:215` declares
+`NEGATIVE_STOCK_MODES = ['reject', 'allowWithFlag', 'allow']`, and
+`packages/domain/src/inventory/contracts.ts:317-321` sets the dial: **default `reject`,
+evaluation `insidePostingTransactionAgainstSerializedState`.** A reversal that would drive
+on-hand below zero is refused inside the posting transaction against serialized state —
+not checked and then raced. **Nothing is owed here except the operator's experience of the
+refusal**, which is `PUR-2`'s and is named below.
+
+#### Ruled: the transition set is decided in `PUR-1`, because it is a one-way door
+
+[ADR-0050](../decisions/ADR-0050-the-record-transition-carrier.md):150 — *"Zero release
+roots move, because no first-party module declares a state machine... that is what makes
+the cut cheap today and **expensive the moment any module adopts one**."* `PUR-1` is that
+moment. **Every transition v1 will ever need must be declared now**, because adding one
+later is another normalization event and another lineage entry.
+
+| transition | ruled | why |
+|---|---|---|
+| `draft → released` | **yes** | the release itself; `transitionStateEffect` per ADR-0050 |
+| `draft → cancelled` · `released → cancelled` | **yes** | abandoning an order is ordinary |
+| `released → closed` | **yes**, but what CLOSES an order is `PUR-2`'s — it needs receipts to know | |
+| **`closed → released` (reopen)** | **YES** | this is the user's requirement. A closed order that needs more received, or an amended quantity, returns to `released` |
+| **`released → draft`** | **NO** | draft means no commitments exist. Receipts may exist against a released order, so draft would be a lie. Amend in place instead |
+| `cancelled → anything` | **NO** | cancel is terminal. Reissue a new order |
+
+#### Ruled: editing after close is an AMEND OPERATION, not a wider update precondition
+
+**The platform expresses this today and no platform change is owed.**
+`packages/compiler/src/projections.ts:1191` derives `writableFieldIds` from the
+operation's own declared `fields`, all-or-nothing per operation. **So a named amend
+operation whose `fields` is the quantity alone yields `writableFieldIds` of exactly that
+quantity** — field-scoped editing expressed as an operation, which is precisely
+[ADR-0051](../decisions/ADR-0051-the-write-path-addresses-an-operation.md)'s model, and
+`pur1-intent-limit` already made a surface admit more than one operation per intent.
+
+**It also avoids §7.7's trap.** A release cannot be an update carrying `not(released)`,
+because ADR-0034 evaluates the precondition against the **projected** image and the
+predicate refuses the very update performing it. An amend does not move the state, so prior
+and projected are both `released` or both `closed` and an ordinary precondition holds.
+
+- **Generic header and line update** — every active field, precondition `state == draft`.
+  This is the parked lane's surviving half and it is kept.
+- **Amend operation** — ordered quantity only, precondition `state in (released, closed)`.
+- **The parent-scoped rule carries the parent's precondition to lines** with zero
+  line-level declarations (ADR-0034).
+
+#### `PUR-2` owns the quantity floor, because `PUR-1` cannot express it
+
+`PUR-1` ships no `received_quantity` (§7.12), so it **cannot** state "refuse an amendment
+below what has been received." That precondition lands in `PUR-2` with the read model that
+decides received quantity — CAS stored column or lock-and-sum derived. **`PUR-2` must rule
+the over-receipt case explicitly:** amending ordered below received is either refused, or
+admitted and disclosed as over-received. It is not left to fall out of the arithmetic.
+
+**Also `PUR-2`'s:** what closes an order, and what a purchasing operator sees when the
+negative-stock dial refuses a reversal.
+
+#### Returns are a SEPARATE DOCUMENT and get their own packet
+
+**A purchase return is not a receipt correction, and building it as one destroys the audit
+trail** — the ledger then cannot distinguish *"we recorded the wrong thing"* from *"the
+goods were faulty and went back."* A correction is lineage- and idempotency-shaped; a
+return is a new source document with its own date, its own quantity, and a probable
+supplier credit.
+
+**New row `PUR-3` — purchase return + lines, negative movements against a received
+lineage.** It depends on `PUR-2` and inherits the negative-stock dial unchanged. **It is
+NOT in v1's four packets and it is NOT excluded either** — §6 is amended below so it stops
+being a silent gap.
+
+#### §6 is amended
+
+Add to what v1 explicitly does not include: **purchase returns and supplier credits (routed
+to `PUR-3`, not dropped)**, and **any reopen of a cancelled order**. Everything else in §6
+stands.
