@@ -2634,10 +2634,24 @@ async function assertBoundedFreshTenantInstallEvidence(
     compiled.application.compiled,
   ).plan.scenarios.length;
   await assertAttributedSearchCapabilityScenarioDelta(compiledApplication);
+  // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
+  // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
+  // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
+  // line's three non-searchable numerics), 2 resolverAuthority, 2
+  // typedErrorSurface, 1 uniquenessFold on the order number, and 1
+  // archiveRestrict on the line-to-order relation.
+  //
+  // THE MATERIALIZED STATE FIELD CONTRIBUTES ZERO, and that absence is the
+  // interesting half of the count. It is an enum on a searchable entity, so it
+  // would otherwise mint an `enumReject` and a `searchableExclusion` -- but both
+  // probe a field THROUGH the create operation, and a machine's state field is
+  // structurally excluded from that contract. `projections.ts` declines to emit
+  // either, which is ADR-0050 section 6 item 2 closed at the compiler. Not
+  // emitting differs from skipping: nothing is admitted unexecuted.
   assert.equal(
     servingScenarioCount,
-    174,
-    'posted stock adds six declared-evidence scenarios, one resolver, one typed-error scenario, and three searchable exclusions',
+    198,
+    'PUR-1 adds 24 scenarios and the materialized state field adds none of them',
   );
 
   const intermediate = await pool.query<{
