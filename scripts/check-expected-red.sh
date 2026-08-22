@@ -200,6 +200,15 @@ if [ "${1:-}" = '--self-test' ]; then
     'H4 a sibling whose hook throws under the same mutation, undeclared'
   control ambiguous-identity run 'refuses to guess which occurrence' \
     'C11 a mutation registering a failing duplicate of a still-passing test'
+  # C12 is the same class one population narrower: the duplicate is SKIPPED, so
+  # it earns no reachability credit and was dropped before uniqueness saw it,
+  # while still occupying its {file, name}.
+  control skipped-duplicate run 'refuses to guess which occurrence' \
+    'C12 a mutation registering a SKIPPED duplicate of a still-passing test'
+  # J6: static uniqueness compared raw strings while execution resolved them, so
+  # a ./ alias satisfied two declarations with one regression.
+  control aliased-path validate EXPECTED_RED_PATH_NOT_IN_CANDIDATE \
+    'J6 a manifest path spelled two ways for one file'
 
   # J5 holds the ALL-MODE frozen-tree assertion, and nothing else did. D1 and D3
   # both invoke `run`, where runEntries has its own pre-existing assertion, so
