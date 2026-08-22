@@ -25,10 +25,14 @@ literal-only TypeScript template-literal type fell outside the runtime-expressio
 observer. Candidate `0bba84397f190ba7c3d8e09022dfa22c006d0ce3` returned REVISE
 because that first type-space channel was skipped beneath completed runtime
 constructions and left unresolved outer template types to the raw source
-observer's punctuation boundaries. The round-11 production correction separates
-runtime and type populations, preserves partial type-run adjacency, and is
-gate-green for a fresh Critical arm; the full matrix remains deferred until
-review converges.
+observer's punctuation boundaries. Candidate
+`76d328d417201dfd355fb4c0dcbf650a4f3b95f4` returned REVISE because partial
+template-type diagnostics used interpolation-token positions, while nested exact
+composition, `false`, and plural partial type runs were not load-bearing under
+the controls. The round-12 correction attributes every run to its owning
+template-type node and adds the three requested discriminators. It is gate-green
+for a fresh Critical arm; the full matrix remains deferred until review
+converges.
 
 ## Packet definition
 
@@ -113,6 +117,9 @@ bounded partial run inside an incomplete runtime construction, each exact
 template-literal type once, and every independently bounded partial run in an
 unresolved outer template type. Runtime and type construction discovery are
 independent, so completing a runtime value cannot suppress an exact type child.
+Every run derived from one template-literal type is attributed to that semantic
+owner's source start; the head, substitution, and tail ranges remain separate
+ownership evidence and never decide the diagnostic location.
 Raw and constructed observation are
 disjoint by AST ownership: raw matching owns source occurrences outside static
 construction literal tokens, while the construction observer owns matches
@@ -204,7 +211,9 @@ not rely on the routed Inventory debt:
 | independent type population | the same spliced template type appears directly beneath `satisfies` and beneath `satisfies` inside a completed runtime `+ ''` construction | both type values report; runtime completion cannot suppress a type child, and stopping the independent type pass beneath runtime constructions loses only the second observation |
 | template-type right adjacency | contiguous and split namespaces precede an unresolved generic span either directly or after a static `:` | both unbounded forms admit and both colon-bounded forms refuse; raw template punctuation cannot invent the right boundary |
 | template-type left adjacency | local ID `widget_list` and symbol `WIDGET_IDS` follow an unresolved generic span in head, tail, and substitution positions, with and without a static `:` | unknown-adjacent forms admit and colon-bounded forms refuse; tail and substitution ownership plus left-boundary state are both observed |
-| exact type grammar and ranges | numeric, bigint, boolean, null, undefined, parenthesized, and nested exact spans compose definition-derived identities; complete identities placed only in head, substitution, or tail tokens continue into legal longer values | all exact identities report once, all three continuation forms admit, and removing head/substitution/tail ownership independently creates an extra raw observation |
+| partial template-type attribution | a multiline unresolved template type begins on one line, its unknown substitution closes on another, and a bounded local ID begins in the tail on a third | the PRESS006 line is the template-type node start, not the closing `}` or tail token |
+| partial template-type multiplicity | one unresolved template type contains two independently colon-bounded spliced namespaces separated by unknown type spans | two exact observations at the owning template-type line; first-partial-type-run compression fails |
+| exact type grammar and ranges | numeric, bigint, both boolean values, null, undefined, parenthesized, and nested exact spans compose definition-derived identities; the nested specimen requires the outer tail to complete its identity; complete identities placed only in head, substitution, or tail tokens continue into legal longer values | all exact identities report once, deleting `false` or nested exact support loses only its matching observation, all three continuation forms admit, and removing head/substitution/tail ownership independently creates an extra raw observation |
 | rejected outer type recursion | an unresolved union span contains an independently exact nested spliced template type | the nested exact type still reports; rejecting the outer type does not erase an independently completed type value |
 | unknown-left admission/refusal | local ID `widget_list` and symbol `WIDGET_IDS` each follow an unknown prefix either directly or after a static `:` | the directly adjacent identities admit because the runtime prefix may erase `\b`; the colon-bounded twins refuse exactly at their construction lines |
 | partial-run multiplicity | one incomplete outer concatenation contains two independently colon-bounded spliced namespaces separated by an unknown value | two exact observations at the two static-run positions; first-partial-run-only compression fails |
@@ -307,6 +316,21 @@ only the nested control; and deleting head, substitution, or tail ownership
 made the corresponding legal continuation report raw. Every mutation was
 restored by an explicit inverse patch before the final focused run; no mutation
 runner is committed.
+
+The round-12 focused run passes 44/44. Before the production correction, the
+new multiline attribution control made the focused suite fail 43/44: the
+bounded `widget_list` observation was reported at the closing interpolation
+token on fixture line 3 rather than the owning template-type node on line 2.
+The correction gives every static run from one `TemplateLiteralTypeNode` the
+node's source start while retaining its value-contributing literal ranges only
+for ownership. The exact-grammar control now uses a nested value that requires
+outer-tail composition and includes a distinct `${false}` identity. A separate
+unresolved type contains two bounded runs. Targeted discarded mutations proved
+each property independently: deleting nested exact support lost only
+`widget_nested`; deleting `FalseKeyword` support lost only `widget_flagfalse`;
+and truncating template-type runs to one lost the second required observation.
+Every mutation was restored by an explicit inverse patch before the final
+focused run; no mutation runner is committed.
 
 ## Gate evidence
 
@@ -542,6 +566,31 @@ completed green. The discarded mutations are corroboration; the committed
 fixtures are the reproducible evidence, every mutation was restored with an
 explicit inverse patch, and no mutation runner is committed.
 
+Round 12 corrects the attribution defect and control gaps found in the review
+of `76d328d`:
+
+| Gate | Result |
+|---|---|
+| focused `module-press-law.test.ts` before the production correction | EXPECTED RED — 43/44; only the multiline attribution control failed because the observation named fixture line 3 rather than the template-type node on line 2 |
+| focused `module-press-law.test.ts` | PASS — 44/44, including node-level partial-type attribution, two partial runs in one unresolved type, nested outer composition, and both boolean exact values |
+| delete nested exact-template support | EXPECTED RED — only `widget_nested` disappeared from the exact-grammar control; the independently exact inner value `widget_` could not satisfy the outer identity |
+| delete `FalseKeyword` exact support | EXPECTED RED — only `widget_flagfalse` disappeared from the exact-grammar control |
+| return only the first partial run from an unresolved template type | EXPECTED RED — the plural type-run control retained one observation and lost its required second observation |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm format` | PASS — all matched files use Prettier style |
+| `corepack pnpm test:architecture` | PASS — 175/175 in 45,278.2 ms, including 44/44 module-press-law tests and the unchanged exact eleven-item live debt set |
+| `corepack pnpm test:postgres` | PASS — 203/203 in 917,033.2 ms |
+
+The executable correction is commit
+`0d86e0a741a0f70b1f2cd183a1e91ab2ade7c6e4`. Architecture queued behind
+another lane's exclusive Architecture holder and acquired the repository lock
+after that run completed. PostgreSQL acquired the same exclusive lease after a
+short handoff race. Both suites completed green. The discarded mutations are
+corroboration; the committed controls are the reproducible evidence, every
+mutation was restored with an explicit inverse patch, and no mutation runner is
+committed.
+
 Per `git-workflow`, the full CI matrix runs once only after the Critical review
 chain converges; it is not a pre-review freeze gate.
 
@@ -743,6 +792,29 @@ licensed because both review findings were in-scope production false greens.
 Production changed, so the next review is a fresh full Critical arm; nothing
 from round 10 is treated as a narrow confirmation boundary.
 
+The fresh review of candidate
+`76d328d417201dfd355fb4c0dcbf650a4f3b95f4` closed the independent runtime/type
+populations, bilateral type adjacency, provider outcome, shared identity
+authority, and ADR/debt questions. It returned **REVISE** on one production
+attribution defect and two control gaps. Partial type runs beginning in an exact
+substitution or tail used that fragment's token start, so multiline formatting
+could report the closing `}` rather than the owning template-type node. The
+exact-grammar fixture did not make nested outer composition or `false`
+load-bearing, and no one unresolved type required two reportable partial runs.
+
+Round 12 separates attribution provenance from literal-token ownership: every
+run carries the containing `TemplateLiteralTypeNode` start, while its head,
+substitution, and tail ranges remain unchanged for raw/constructed routing. The
+multiline attribution control puts the node, closing interpolation token, and
+bounded identity on distinct lines. The exact-grammar control requires the
+outer tail to finish `widget_nested` and covers both boolean values, and a
+single unresolved type requires two bounded runs. The three selected deletion
+replays fail for the named missing observation. Continuation remains licensed
+because the first finding is an in-scope production defect and the other two are
+its bounded type-channel evidence companions. Production changed, so the next
+review is a fresh full Critical arm; nothing from round 11 is treated as a
+narrow confirmation boundary.
+
 The checkpoint program-review trigger check is **not due**: this packet is the
 bounded correction of finding R5 from the same-day first-office-worker program
 review, not a new fan-out, correctness domain, stage gate, or accumulated
@@ -790,6 +862,15 @@ an unresolved outer template lets `${` and `}` punctuation masquerade as value
 boundaries. Exact literal grammar therefore needs discriminator identities for
 its primitive and nested forms, and ownership needs legal continuation controls
 for every value-contributing token class rather than one aggregate happy path.
+
+The round-11 review adds the attribution-and-branch rule: **semantic ownership,
+token ownership, and diagnostic attribution are separate facts.** Literal-token
+ranges may decide which observer owns source text, but every partial value from
+one template-literal type still reports at that type node's start. Exact grammar
+evidence must also make each claimed arm causally necessary: a nested specimen
+must require outer composition, both boolean values need distinct outcomes, and
+plurality must be proved inside the specific partial-run channel rather than by
+another construction population.
 
 A second reusable rule follows from the confirmed Fable finding: **partial
 evaluation must preserve known semantic boundaries rather than classifying an
