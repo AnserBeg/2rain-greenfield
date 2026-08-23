@@ -152,8 +152,8 @@
       "name": "companion-derivation-namespace-moved",
       "claim": "Companion identity must be STABLE, not merely deterministic, because it is the join a reconciliation reader recomputes against already-posted counts. Moving the derivation namespace produces a derivation that is still pure and still deterministic, so write and read-back agree and the kernel's own `assertCompanionIdentitiesPersisted` passes -- it recomputes with the same function it wrote with. Only the golden vectors catch it, which is what makes them load-bearing rather than decorative. It dies alone: every other assertion in the packet compares the kernel against the same derivation and moves with it.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "const companionDerivationNamespace =\n  'northstar.inventory-posting-companion/v1';",
-      "replacement": "const companionDerivationNamespace =\n  'northstar.inventory-posting-companion/v2';",
+      "original": "const companionDerivationNamespace = 'northstar.inventory-posting-companion/v1';",
+      "replacement": "const companionDerivationNamespace = 'northstar.inventory-posting-companion/v2';",
       "test": {
         "files": ["test/postgres/inventory-stock-count.test.ts"],
         "namePattern": "companion derivation"
