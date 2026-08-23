@@ -1437,21 +1437,13 @@ function validatePinnedInventoryCountRelations(
   ) {
     return;
   }
-  // PUR-2a. The two COMPANION relations are optional, and that is pinned here
-  // rather than merely permitted. A reviewed stock count exists before its
-  // inventory transaction does; the posting kernel derives both companion
-  // identities and writes them inside the posting transaction. Requiring them
-  // is what made a stock-count source unconstructible without a pre-staged
-  // companion, which is the defect `purchasing-sales-v1-plan.md` section 7.16
-  // routed to this packet. `stock_count_line_session` stays required: the
-  // parent-scoped child genuinely cannot exist without its session.
   const rules = [
     [
       'stock_count_transaction',
       'stock_count',
       'inventory_transaction',
       'reference',
-      false,
+      false, // PUR-2a: kernel-written companion. ADR-0060.
     ],
     [
       'stock_count_supersedes',
@@ -1472,7 +1464,7 @@ function validatePinnedInventoryCountRelations(
       'stock_count_line',
       'inventory_transaction_line',
       'reference',
-      false,
+      false, // PUR-2a: kernel-written companion. ADR-0060.
     ],
   ] as const;
   for (const [localId, source, target, ownership, required] of rules) {

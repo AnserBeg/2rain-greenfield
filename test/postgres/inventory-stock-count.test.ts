@@ -572,6 +572,25 @@ test('stock-count companion derivation: a source with no pre-staged transaction 
         derivedTransactionId,
         'companion derivation must be deterministic',
       );
+      // STABILITY, which determinism alone does not give. Every assertion
+      // above compares the kernel against `deriveInventoryPostingCompanionId`,
+      // so a derivation that changed but stayed deterministic would move both
+      // sides together and pass -- including the kernel's own read-back, which
+      // recomputes with the same function. These two literals were computed by
+      // a separate implementation of the construction and are the only thing
+      // here that does not share the algorithm under test. A companion
+      // identity that moves is a reconciliation predicate that silently stops
+      // matching every already-posted count.
+      assert.equal(
+        derivedTransactionId,
+        'a2cdba01-9fed-8821-b202-0c2739d6cbe6',
+        'the companion transaction derivation must be stable across releases',
+      );
+      assert.equal(
+        derivedLineId,
+        'f11c5615-3db4-85b4-826a-f6827441cbb4',
+        'the companion line derivation must be stable across releases',
+      );
       assert.notEqual(
         expectedCompanionTransactionId('61000000-0000-4000-8000-000000000099'),
         derivedTransactionId,
