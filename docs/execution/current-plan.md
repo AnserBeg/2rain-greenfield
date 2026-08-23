@@ -46,8 +46,8 @@ ruling and the status, nothing else.
 **Net: nothing hard-gates `PUR-1`.** `R8` and `R5` gate `PUR-2`; `R4` gates PUR-2's
 chartering; `R7` gates `SAL-1`. Everything else delays with a reason stated above.
 
-**R1's gate is built and SPLIT — `record-claim-fidelity`, round 5 frozen at last executable
-commit `0f8b39308e276079b606d6bf2f715cd598f8dd15`.** `scripts/check-records.sh` plus
+**R1's gate is built, SPLIT, and ACCEPTED — `record-claim-fidelity`, integrated `bcb8c40` on
+2026-08-23.** `scripts/check-records.sh` plus
 `test/architecture/record-claim-fidelity.test.ts` observe a packet record's claims against
 its frozen tree — the declared head owned by that packet's own `Packet:` commit trailer,
 every claimed path really different between base and head, every claimed symbol really
