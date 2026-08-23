@@ -168,6 +168,41 @@ territory and is not claimed here.
 lines, no purchase-order change — building goods receipt first is what let
 three passes miss this.
 
+## Evidence — Band A, and what each vector is held by
+
+`test/evidence/pur-2a.expected-red.json`, eight entries, run through
+`evidence:expected-red` under ADR-0058: each mutation is measured before the
+restored run, each declared kill must fail in its own body for its own declared
+reason, and the observed kill set must equal the declared one exactly.
+
+| §6 vacuity vector | Held by |
+|---|---|
+| The subject absent entirely | `source-companion-column-never-written`, `source-line-companion-column-never-written` — the identity is not written; `companion-identity-not-derived-from-the-source` — the source-dependence is gone |
+| The check reading zero input | `source-line-companion-column-never-written` — the read-back's join returns zero line rows, and the length comparison reds rather than a loop passing over nothing |
+| A proxy satisfied while the fact does not hold | `companion-revision-left-at-the-column-default` and `source-line-companion-column-never-written` — every write reports its row count and the persisted fact is still wrong; only the read-back catches either |
+| Output shapes the parser does not recognize | The runner's own 38 controls, `check:expected-red-controls`, wired as its own gate in CI and the matrix. This packet adds no parser of its own |
+| **The subject repaired before it is measured** | Structurally: no authored verifier is re-run over kernel-written rows. Executably: `companion-derivation-namespace-moved` — a derivation that changes but stays deterministic passes the kernel's own read-back, because the read-back recomputes with the function that wrote. Two golden vectors computed by a separate implementation are the only assertion that does not share the algorithm under test |
+
+**Each entry's scope limit is declared on the entry.** Every run is scoped by
+`namePattern` to the three `companion derivation` tests, so the kill set is
+measured within those three — which is what the runner observes. Where a
+mutation also reds the wider stock-count file, the entry says so rather than
+implying it was measured.
+
+**Two mutations were repaired after measurement, not after reasoning.**
+Deleting a `SET` assignment leaves its bound parameter unreferenced and
+PostgreSQL refuses the statement with `42P18` — a red, but not the declared
+one, and an entry whose kill dies for the wrong reason certifies nothing. Both
+null-write mutations now use `NULLIF`. A third entry was declared against an
+`assert.rejects` message the assertion never reaches, and the test was
+restructured so its refusal identity is asserted directly.
+
+**One control was a survivor before it was evidence.**
+`family-roster-transaction-type-repointed` stayed green because the projection
+test read only the `correction` role's companion type while the mutation moved
+the `count` role's. The test now reads both, so each declared role binding is
+observed by something.
+
 ## The one blocked gate — a stop-and-bridge-request
 
 `check:app-release` is **RED** and cannot be made green inside this lease.
