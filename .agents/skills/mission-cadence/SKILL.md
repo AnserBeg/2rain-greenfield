@@ -70,6 +70,17 @@ A packet must have all of:
 - **Gates** — the exact commands that must pass.
 - **Runnable exit** — the repo builds and runs when the packet ends, even if
   the feature is partial. Stop at a safe boundary rather than overrun.
+- **Gate-invisible deliverables named as acceptance criteria — added 2026-08-22,
+  disposing program-review finding R4.** Where the packet owns something a stage's
+  build list names but no gate would miss — a read model, a browsable view, an
+  agent journey, a diagnostic an operator reads — **the charter names it as an
+  explicit acceptance criterion.** Sequencing devolved to `current-plan.md` and the
+  stage-gate evidence instrument was deliberately NOT revived, so **this per-packet
+  naming is the only thing standing between declared scope and silent
+  evaporation.** G3 lost its balance and availability read models, its stock
+  overview and its agent support exactly this way, between packet acceptances that
+  each passed every gate they declared; the loss surfaced as *"why can't a pilot
+  user see anything."*
 - **Foreseeable bridges named up front** — when a packet will predictably need
   edits outside its owned paths (e.g. a kernel-wiring packet whose own ratified
   design requires touching shared migration/activation machinery), the packet
