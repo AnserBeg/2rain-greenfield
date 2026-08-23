@@ -50,10 +50,10 @@
     },
     {
       "name": "source-companion-column-never-written",
-      "claim": "The posted transition is where the source's companion transaction identity is written. Dropping that one assignment leaves a posted stock count whose companion column is still null -- the source posts, the movements land, and nothing records which transaction they belong to. That is the silent-until-reconciled failure this packet's Band A declaration is about.",
+      "claim": "The posted transition is where the source's companion transaction identity is written. Writing null there instead of the derived identity leaves a posted stock count whose companion column is still empty -- the source posts, the movements land, and nothing records which transaction they belong to. That is the silent-until-reconciled failure this packet's Band A declaration is about. The mutation writes `NULLIF($11, $11)` rather than deleting the assignment, because deleting it leaves the bound parameter unreferenced and PostgreSQL then refuses the statement with 42P18 -- a red, but not this red, and an entry whose kill dies for the wrong reason certifies nothing.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "            ${quoted(binding.stockCountRelationToTransactionColumn)} = $11::uuid,\n",
-      "replacement": "",
+      "original": "            ${quoted(binding.stockCountRelationToTransactionColumn)} = $11::uuid,",
+      "replacement": "            ${quoted(binding.stockCountRelationToTransactionColumn)} = NULLIF($11::uuid, $11::uuid),",
       "test": {
         "files": ["test/postgres/inventory-stock-count.test.ts"],
         "namePattern": "companion derivation"
@@ -73,10 +73,10 @@
     },
     {
       "name": "source-line-companion-column-never-written",
-      "claim": "Line-level companion identity is written per source line, not implied by the header. Writing null instead still satisfies the update's own row count -- the guard is `IS NULL` and the row stays null -- so only the read-back catches it. This is the vacuity vector where a write reports success and the fact does not hold.",
+      "claim": "Line-level companion identity is written per source line, not implied by the header. Writing null instead still satisfies the update's own row count -- the guard is `IS NULL` and the row stays null -- so only the read-back catches it. This is the vacuity vector where a write reports success and the fact does not hold. `NULLIF($5, $5)` keeps the bound parameter referenced, for the reason recorded on `source-companion-column-never-written`.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid",
-      "replacement": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = NULL",
+      "replacement": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = NULLIF($5::uuid, $5::uuid)",
       "test": {
         "files": ["test/postgres/inventory-stock-count.test.ts"],
         "namePattern": "companion derivation"
