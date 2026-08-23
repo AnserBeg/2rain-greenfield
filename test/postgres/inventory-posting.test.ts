@@ -197,6 +197,204 @@ test('the global same-instant order reaches its movementId tie-break', () => {
   );
 });
 
+test('posting error translation: a non-SQLSTATE code keeps its own error identity', () => {
+  for (const code of [
+    'ECONNREFUSED',
+    'ERR_STREAM_DESTROYED',
+    'PS0_RECEIPT_OPEN_QUANTITY_EXCEEDED',
+  ]) {
+    const failure = postingFailure(code);
+    assert.equal(
+      translateInventoryPostingError(failure),
+      failure,
+      `${code} must pass through untranslated: a non-SQLSTATE code is not a PostgreSQL rejection`,
+    );
+  }
+});
+
+test('posting error translation: a five-character non-SQLSTATE code keeps its own error identity', () => {
+  // One property varied from the admitted twin '23503': the final character
+  // leaves the [0-9A-Z] alphabet while the length stays five.
+  const failure = postingFailure('2350x');
+  assert.equal(
+    translateInventoryPostingError(failure),
+    failure,
+    '2350x must pass through untranslated: five characters outside [0-9A-Z] are not a SQLSTATE',
+  );
+});
+
+test('posting error translation: a SQLSTATE-shaped code is relabelled as a storage rejection', () => {
+  const failure = postingFailure('23503');
+  const translated = translateInventoryPostingError(failure);
+  assert.ok(
+    translated instanceof InventoryPostingError,
+    'a real SQLSTATE must still be classified as a storage rejection',
+  );
+  assert.equal(translated.code, 'INVENTORY_POSTING_STORAGE_REJECTED');
+  assert.equal(
+    translated.message,
+    'INVENTORY_POSTING_STORAGE_REJECTED: PostgreSQL rejected inventory posting (23503)',
+  );
+  assert.equal(translated.details.sqlstate, '23503');
+});
+
+test(
+  'posting error replay: a genuine duplicate-key error reaches the 23505 replay branch',
+  { timeout: 180_000 },
+  async () => {
+    await withPostingDatabase(async (database) => {
+      const claim = command({
+        legalEntityId: legalReject,
+        locationId: locationPrimary,
+        quantityDelta: '1',
+        sourceId: 'raced-natural-claim',
+      });
+      await seedDraft(database, claim);
+      const claimMovementId = randomUUID();
+      let raced: Promise<InventoryPostingResultV1> | undefined;
+      await withModuleRole(
+        database.runtimePool,
+        database.context,
+        async (client) => {
+          // Claim the natural effect identity on this still-open transaction.
+          // The posting's pre-read cannot see the uncommitted claim, so it
+          // proceeds to its own insert, where the companion primary key makes
+          // it wait on this transaction — the only construction that lands a
+          // committed claim between the pre-read and the insert, which is the
+          // window the 23505 catch exists for.
+          await insertNaturalClaimMovement(
+            client,
+            database,
+            claim,
+            claimMovementId,
+          );
+          raced = database.service.postAdjustment(
+            database.context,
+            database.actor,
+            claim,
+          );
+          const outcome = await Promise.race([
+            raced.then(
+              () => 'settled-early' as const,
+              () => 'settled-early' as const,
+            ),
+            observeClaimWaiter(database),
+          ]);
+          if (outcome === 'settled-early') {
+            const early = await raced;
+            assert.fail(
+              `the posting settled without blocking on the uncommitted claim (replayed=${String(early.replayed)}); the raced window was not constructed`,
+            );
+          }
+          assert.equal(
+            outcome,
+            'observed',
+            'the posting never blocked on the uncommitted natural claim; the raced window was not constructed',
+          );
+        },
+      );
+      // The commit above releases the posting, whose companion insert now
+      // raises a genuine 23505. A blocked-then-released posting has already
+      // passed its pre-read, so only the catch branch can produce this typed
+      // refusal; the raw claim carries no receipt, which is the branch's one
+      // deterministically reachable outcome.
+      assert.ok(raced, 'the posting was never started');
+      await assert.rejects(raced, (error: unknown) => {
+        assert.ok(
+          error instanceof InventoryPostingError,
+          `a genuine duplicate-key error must resolve through the 23505 replay branch, not surface raw: ${String(error)}`,
+        );
+        assert.equal(
+          error.code,
+          'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+          'a genuine 23505 must be resolved by the replay branch, not relabelled as a storage rejection',
+        );
+        assert.equal(
+          error.message,
+          'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT: existing natural effects have no accepted posting receipt',
+        );
+        return true;
+      });
+      assert.equal(await movementCount(database), 1);
+    });
+  },
+);
+
+function postingFailure(code: string): Error {
+  return Object.assign(new Error('posting failed mid-flight'), { code });
+}
+
+async function observeClaimWaiter(
+  database: PostingDatabase,
+): Promise<'exhausted' | 'observed'> {
+  // Attempt-bounded observation of the posting's wait on the uncommitted
+  // claim: a unique-index conflict with an in-flight row parks the inserter
+  // on the claimant's transaction id, which pg_locks reports as an ungranted
+  // transactionid lock. The ephemeral database runs nothing else.
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const waiting = await database.adminPool.query<{ waiting: string }>(
+      `SELECT count(*)::text AS waiting
+         FROM pg_locks
+        WHERE locktype = 'transactionid' AND NOT granted`,
+    );
+    if (Number(waiting.rows[0]?.waiting ?? '0') > 0) return 'observed';
+    await new Promise((resolveDelay) => {
+      setTimeout(resolveDelay, 25);
+    });
+  }
+  return 'exhausted';
+}
+
+async function insertNaturalClaimMovement(
+  client: PoolClient,
+  database: PostingDatabase,
+  input: InventoryAdjustmentPostingCommandV1,
+  movementId: string,
+): Promise<void> {
+  assert.equal(input.lines.length, 1);
+  const postingLine = input.lines[0]!;
+  await insertEntity(
+    client,
+    database.binding,
+    database.binding.movement,
+    {
+      inventory_movement_actor_id: principalId,
+      inventory_movement_effective_at: input.effectiveAt,
+      inventory_movement_item_id: postingLine.itemId,
+      inventory_movement_location_id: postingLine.locationId,
+      inventory_movement_posting_role: enumOption(
+        field(database.binding.movement, 'inventory_movement_posting_role'),
+        'adjustment',
+      ),
+      inventory_movement_quantity_delta: postingLine.quantityDelta,
+      inventory_movement_reason_code: input.reason.code,
+      inventory_movement_reason_narrative: input.reason.narrative,
+      inventory_movement_recorded_at: recordedAt,
+      inventory_movement_reversal_of_movement_id: null,
+      inventory_movement_source_id: input.sourceId,
+      inventory_movement_source_line: postingLine.sourceLine,
+      inventory_movement_source_revision: input.sourceRevision,
+      inventory_movement_source_type: input.sourceType,
+      inventory_movement_stock_dimension_set_version: enumOption(
+        field(
+          database.binding.movement,
+          'inventory_movement_stock_dimension_set_version',
+        ),
+        'v1',
+      ),
+      inventory_movement_unit_id: postingLine.unitId,
+    },
+    movementId,
+    input.legalEntityId,
+    {
+      [database.binding.transaction.entity.entityId]: input.transactionId,
+      [database.binding.transactionLine.entity.entityId]:
+        postingLine.transactionLineId,
+    },
+    businessPeriod,
+  );
+}
+
 test(
   'the Inventory posting capability closes the first-movement one-way doors',
   { timeout: 180_000 },

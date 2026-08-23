@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "packet": "posting-error-shape",
+  "entries": [
+    {
+      "name": "shape-guard-removed",
+      "claim": "The SQLSTATE shape guard in postgresCode is what keeps a non-SQLSTATE string `code` (Node ERR_*/ECONNREFUSED, foreign refusal tokens) out of the INVENTORY_POSTING_STORAGE_REJECTED relabelling; this mutation restores exactly the unguarded sniff ADR-0049 observed misdiagnosing on main.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined;",
+      "replacement": "  return code;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "posting error translation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error translation: a non-SQLSTATE code keeps its own error identity",
+          "expected": "ECONNREFUSED must pass through untranslated"
+        },
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error translation: a five-character non-SQLSTATE code keeps its own error identity",
+          "expected": "2350x must pass through untranslated"
+        }
+      ]
+    },
+    {
+      "name": "shape-guard-refuses-everything",
+      "claim": "The shape guard is discriminating, not a wall: a guard that refuses every code stops classifying real SQLSTATEs as storage rejections and stops recognizing a genuine PostgreSQL duplicate-key error on the 23505 replay branch, which then surfaces raw.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined;",
+      "replacement": "  return undefined;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "posting error (translation|replay)"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error translation: a SQLSTATE-shaped code is relabelled as a storage rejection",
+          "expected": "a real SQLSTATE must still be classified as a storage rejection"
+        },
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error replay: a genuine duplicate-key error reaches the 23505 replay branch",
+          "expected": "duplicate key value violates unique constraint"
+        }
+      ]
+    },
+    {
+      "name": "admission-excludes-only-the-twin-sqlstate",
+      "claim": "The SQLSTATE admission twin dies alone over the whole inventory-posting file: withdrawing admission from 23503 and nothing else kills the twin and leaves every other test in the file green — including the one-way-doors test, which reaches this same guard with three genuine PostgreSQL errors by two different routes: a base-unit P0001 trigger error handed to the exported translator by the test itself, and a forced-rollback P0001 plus a held-lock 55P03 that both arrive through the posting service's own outer catch. Measured over the file's full population rather than a name pattern, because a pattern narrows the command without narrowing the claim.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined;",
+      "replacement": "  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) && code !== '23503'\n    ? code\n    : undefined;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error translation: a SQLSTATE-shaped code is relabelled as a storage rejection",
+          "expected": "a real SQLSTATE must still be classified as a storage rejection"
+        }
+      ]
+    },
+    {
+      "name": "replay-branch-stops-recognizing-23505",
+      "claim": "Defeating only the catch's 23505 recognition, with the shape guard and ordinary SQLSTATE translation intact, relabels a genuine PostgreSQL duplicate-key error as a storage rejection instead of resolving it through the replay branch. Scope of this entry's evidence: the kill is a singleton within the four tests this command runs, which is what the runner measures; the round-2 review arm separately read the file for another victim of this mutation and found none.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "        if (postgresCode(error) !== '23505') throw error;",
+      "replacement": "        if (postgresCode(error) !== '23506') throw error;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "posting error (translation|replay)"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error replay: a genuine duplicate-key error reaches the 23505 replay branch",
+          "expected": "a genuine 23505 must be resolved by the replay branch, not relabelled as a storage rejection"
+        }
+      ]
+    },
+    {
+      "name": "shape-guard-length-only",
+      "claim": "The charset half of the shape check is load-bearing on its own: a guard that checks only for five characters admits a five-character value outside [0-9A-Z] into the storage-rejection relabelling.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined;",
+      "replacement": "  return code !== undefined && /^.{5}$/u.test(code) ? code : undefined;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "posting error translation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error translation: a five-character non-SQLSTATE code keeps its own error identity",
+          "expected": "2350x must pass through untranslated"
+        }
+      ]
+    },
+    {
+      "name": "shape-guard-charset-only",
+      "claim": "The length half of the shape check is load-bearing on its own: a guard that checks only the [0-9A-Z] alphabet admits ECONNREFUSED, which is entirely uppercase, into the storage-rejection relabelling.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined;",
+      "replacement": "  return code !== undefined && /^[0-9A-Z]+$/u.test(code) ? code : undefined;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "posting error translation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting error translation: a non-SQLSTATE code keeps its own error identity",
+          "expected": "ECONNREFUSED must pass through untranslated"
+        }
+      ]
+    }
+  ]
+}
