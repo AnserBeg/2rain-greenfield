@@ -64,6 +64,7 @@ export const REFUSED_MESSAGE_PLACEMENTS = Object.freeze([
 export const MESSAGE_SUBJECT_KINDS = Object.freeze([
   'componentId',
   'legalEntityId',
+  'refusalCode',
   'relationId',
 ] as const);
 
@@ -223,6 +224,16 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Legal entity unavailable for new work',
     subject: 'legalEntityId',
   },
+  OPERATION_REFUSED: {
+    consequence: 'blocking',
+    detail:
+      'The provider refused this operation for a reason this application cannot yet present in plain language.',
+    nextAction:
+      'Give the refusal code to an administrator before trying this operation again.',
+    placements: ['page'],
+    sentence: 'Operation refused',
+    subject: 'refusalCode',
+  },
   OPERATION_UNAVAILABLE: {
     consequence: 'blocking',
     detail: 'The semantic operation could not be completed safely.',
@@ -315,6 +326,16 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Application shell unavailable',
     subject: null,
   },
+  REQUEST_RUNTIME_VIEW_REFUSED: {
+    consequence: 'blocking',
+    detail:
+      'The runtime refused to construct this pinned view for the reason named below.',
+    nextAction:
+      'Give the refusal code to an administrator before opening this page again.',
+    placements: ['page'],
+    sentence: 'Runtime view refused',
+    subject: 'refusalCode',
+  },
   ROUTE_NOT_FOUND: {
     consequence: 'blocking',
     detail:
@@ -396,6 +417,7 @@ export const OPERATION_DIAGNOSTIC_CODES = Object.freeze([
   'OPERATION_INPUT_INVALID',
   'OPERATION_LEGAL_ENTITY_INACTIVE',
   'OPERATION_PERMISSION_DENIED',
+  'OPERATION_REFUSED',
   'OPERATION_UNAVAILABLE',
   'OPERATION_UNSUPPORTED',
 ] as const satisfies readonly SurfaceMessageCode[]);

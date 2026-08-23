@@ -54,6 +54,7 @@ import {
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
@@ -465,6 +466,15 @@ test(
               assertConstrainedDomainVerificationCompleted(
                 pool,
                 connection,
+                tenantA,
+                compiledApplication,
+              ),
+          );
+          await context.test(
+            'a released purchase order refuses every line mutation, and a draft one admits them',
+            () =>
+              assertPurchaseOrderParentGuard(
+                pool,
                 tenantA,
                 compiledApplication,
               ),
@@ -931,10 +941,18 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    assert.equal(surfaces.length, 34);
+    // 34 + PUR-1's six Purchasing surfaces.
+    assert.equal(surfaces.length, 40);
     assert.ok(surfaces.includes(APPLICATION_IDS.party.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.catalog.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.location.listSurfaceId));
+    // Purchasing reaches a mounted runtime in full: it is the first module to
+    // declare a state machine, so a mounted purchase order form is also the
+    // first place `transitionStateEffect` binds to a real surface.
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.listSurfaceId));
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.lineListSurfaceId));
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.detailSurfaceId));
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.formSurfaceId));
     // Inventory only reaches a mounted runtime once its emitted-but-
     // unarrangeable verification scenarios are recorded as derivations.
     for (const inventorySurfaceId of [
@@ -2626,10 +2644,24 @@ async function assertBoundedFreshTenantInstallEvidence(
     compiled.application.compiled,
   ).plan.scenarios.length;
   await assertAttributedSearchCapabilityScenarioDelta(compiledApplication);
+  // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
+  // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
+  // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
+  // line's three non-searchable numerics), 2 resolverAuthority, 2
+  // typedErrorSurface, 1 uniquenessFold on the order number, and 1
+  // archiveRestrict on the line-to-order relation.
+  //
+  // THE MATERIALIZED STATE FIELD CONTRIBUTES ZERO, and that absence is the
+  // interesting half of the count. It is an enum on a searchable entity, so it
+  // would otherwise mint an `enumReject` and a `searchableExclusion` -- but both
+  // probe a field THROUGH the create operation, and a machine's state field is
+  // structurally excluded from that contract. `projections.ts` declines to emit
+  // either, which is ADR-0050 section 6 item 2 closed at the compiler. Not
+  // emitting differs from skipping: nothing is admitted unexecuted.
   assert.equal(
     servingScenarioCount,
-    174,
-    'posted stock adds six declared-evidence scenarios, one resolver, one typed-error scenario, and three searchable exclusions',
+    198,
+    'PUR-1 adds 24 scenarios and the materialized state field adds none of them',
   );
 
   const intermediate = await pool.query<{
@@ -3317,6 +3349,260 @@ async function assertConstrainedDomainVerificationCompleted(
     compiled,
     plan: releaseVerificationBinding(compiled).plan,
   });
+}
+
+/**
+ * THE PARENT-AGGREGATE RULE, OBSERVED AGAINST REAL POSTGRESQL.
+ *
+ * `PUR-1` declares the guard once, on the header's four generic operations, and
+ * relies on the platform to carry it down to `purchase_order_line` with zero
+ * line-level declarations: `parentGuardsFromCatalog` derives a guard from every
+ * active parent `updateRecordEffect`, and `requireRelationTarget` evaluates it
+ * against the parent's PERSISTED values under `FOR SHARE` whenever a child is
+ * created through its relation or mutated.
+ *
+ * The unit suite can only assert both halves of that mechanism and then
+ * REPLICATE the derivation, which is a proxy. AGENTS.md §6 wants the fact
+ * observed, and a stored-value boundary is exactly where a proxy is not enough:
+ * a line silently editable after release is wrong in the database long before
+ * anyone notices.
+ *
+ * So this runs the real gateway against the real interpreter:
+ *
+ *  1. create a DRAFT order and a line under it;
+ *  2. the ADMISSION TWIN -- update the line successfully while the parent is
+ *     draft, so the refusals below are known to be about state and not about a
+ *     line that could never be mutated at all;
+ *  3. release the order through its transition operation;
+ *  4. attempt line create, update, archive AND RESTORE; require typed
+ *     `MODULE_OPERATION_PRECONDITION_REFUSED` on each;
+ *  5. read both rows back and require revision, values and archive state
+ *     unchanged.
+ *
+ * Restore needs its own arm and its own archived line, because it is a distinct
+ * generic operation reaching a distinct interpreter branch. Round 2 of review
+ * found this vertical claiming "every line mutation" while never invoking it --
+ * a claim wider than its evidence, and a reachable one-property survivor.
+ */
+async function assertPurchaseOrderParentGuard(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled =
+    parseCompiledApplication(compiledApplication).application.compiled;
+  const storage = storageTarget(compiled);
+  const master = storage.entities.find(
+    (candidate) => candidate.legalEntityMaster !== undefined,
+  );
+  assert.ok(master?.legalEntityMaster);
+  const defaultEntity = await pool.query<{ legal_entity_id: string }>(
+    `SELECT "${master.recordIdentity.column}"::text AS legal_entity_id
+       FROM north_star_module.${master.physicalTableName}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND "${master.legalEntityMaster.fieldColumns.isDefault}" IS TRUE
+        AND "${master.archive.archivedAtColumn}" IS NULL`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  const legalEntityId = defaultEntity.rows[0]?.legal_entity_id;
+  assert.ok(legalEntityId);
+
+  const purchasing = APPLICATION_IDS.purchasing;
+  // `confirmed` matters for `archive`, which declares `humanRequired`: the
+  // gateway checks the confirmation grant BEFORE the interpreter evaluates any
+  // precondition, so without a grant the archive arm would observe
+  // `SemanticOperationConfirmationRequiredError` and prove nothing about the
+  // parent guard.
+  const invoke = (
+    operationId: string,
+    input: Readonly<Record<string, unknown>>,
+    confirmed = false,
+  ) =>
+    runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+      runtime.operationGateway.invoke(
+        view,
+        {
+          confirmationGrant: confirmed
+            ? runtime.operationMediation.issueConfirmationGrant(
+                view,
+                operationId,
+                input as ImmutableJsonValue,
+              )
+            : null,
+          idempotencyKey: randomUUID(),
+          input,
+          operationId,
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+        },
+        runtime.operationMediation.issueInvocation(view, 'UI'),
+      ),
+    );
+
+  const orderId = randomUUID();
+  await invoke(purchasing.createOperationId, {
+    legalEntityId,
+    recordId: orderId,
+    relations: {},
+    values: {
+      [purchasing.fieldIds.currency]: 'CAD',
+      [purchasing.fieldIds.expectedDate]: '2026-09-01T00:00:00.000Z',
+      [purchasing.fieldIds.notes]: 'parent guard vertical',
+      [purchasing.fieldIds.number]: 'PO-GUARD-001',
+      [purchasing.fieldIds.orderDate]: '2026-08-22T00:00:00.000Z',
+      [purchasing.fieldIds.supplierPartyId]: 'SUP-GUARD-001',
+    },
+  });
+
+  const lineId = randomUUID();
+  const lineValues = {
+    [purchasing.fieldIds.itemId]: 'ITEM-GUARD-001',
+    [purchasing.fieldIds.lineNumber]: '1',
+    [purchasing.fieldIds.orderedQuantity]: '10',
+    // Canonical decimal: no trailing zero. `2.50` is refused by the compiled
+    // value contract, `2.5` is the same number written canonically.
+    [purchasing.fieldIds.unitPrice]: '2.5',
+  } as const;
+  await invoke(purchasing.lineCreateOperationId, {
+    legalEntityId,
+    recordId: lineId,
+    relations: { [purchasing.lineRelationId]: orderId },
+    values: lineValues,
+  });
+
+  // THE ADMISSION TWIN. Without it, every refusal below is satisfiable by a
+  // line that could never be mutated in any state.
+  await invoke(purchasing.lineUpdateOperationId, {
+    expectedRevision: 1,
+    patch: { [purchasing.fieldIds.orderedQuantity]: '11' },
+    recordId: lineId,
+  });
+
+  // A SECOND line, archived while the parent is still draft, so the release
+  // below can be followed by a RESTORE attempt. Restore is its own generic
+  // operation and its own interpreter branch, and an earlier version of this
+  // vertical claimed "every line mutation" while never invoking it -- a claim
+  // wider than its evidence, and a one-property survivor: deleting only the
+  // `requireExistingParentGuards` call from the `restoreRecordEffect` branch
+  // would have left this test green.
+  const archivedLineId = randomUUID();
+  await invoke(purchasing.lineCreateOperationId, {
+    legalEntityId,
+    recordId: archivedLineId,
+    relations: { [purchasing.lineRelationId]: orderId },
+    values: { ...lineValues, [purchasing.fieldIds.lineNumber]: '2' },
+  });
+  await invoke(
+    `${APPLICATION_IDS.namespace}:operation.purchase_order_line_archive`,
+    { expectedRevision: 1, recordId: archivedLineId },
+    true,
+  );
+
+  const lineEntity = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === purchasing.entityIds.purchaseOrderLine,
+  );
+  assert.ok(lineEntity);
+  const quantityColumn = lineEntity.columns.find(
+    (column) => column.canonicalFieldId === purchasing.fieldIds.orderedQuantity,
+  );
+  assert.ok(quantityColumn);
+  const readLine = async (recordId: string = lineId) => {
+    const result = await pool.query<{
+      archived: boolean;
+      quantity: string;
+      revision: string;
+    }>(
+      `SELECT "${lineEntity.archive.archivedAtColumn}" IS NOT NULL AS archived,
+              "${quantityColumn.physicalName}"::text AS quantity,
+              "${lineEntity.optimisticRevision.column}"::text AS revision
+         FROM north_star_module.${lineEntity.physicalTableName}
+        WHERE "${lineEntity.recordIdentity.column}" = $1`,
+      [recordId],
+    );
+    assert.equal(result.rowCount, 1);
+    return result.rows[0]!;
+  };
+  const admitted = await readLine();
+  const archivedAdmitted = await readLine(archivedLineId);
+  assert.equal(
+    archivedAdmitted.archived,
+    true,
+    'the archive admission twin must have written',
+  );
+  assert.equal(admitted.revision, '2', 'the admission twin must have written');
+  assert.equal(admitted.archived, false);
+
+  await invoke(purchasing.releaseOperationId, {
+    expectedRevision: 1,
+    recordId: orderId,
+  });
+
+  const refused = async (
+    label: string,
+    operationId: string,
+    input: Readonly<Record<string, unknown>>,
+    confirmed = false,
+  ) => {
+    await assert.rejects(
+      invoke(operationId, input, confirmed),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof ModuleRuntimeInterpreterError,
+          `${label}: ${String(error)}`,
+        );
+        assert.equal(
+          error.code,
+          'MODULE_OPERATION_PRECONDITION_REFUSED',
+          `${label} was refused for the wrong reason: ${error.code}`,
+        );
+        return true;
+      },
+    );
+  };
+
+  await refused('line update after release', purchasing.lineUpdateOperationId, {
+    expectedRevision: 2,
+    patch: { [purchasing.fieldIds.orderedQuantity]: '99' },
+    recordId: lineId,
+  });
+  await refused(
+    'line archive after release',
+    `${APPLICATION_IDS.namespace}:operation.purchase_order_line_archive`,
+    { expectedRevision: 2, recordId: lineId },
+    true,
+  );
+  await refused('line create after release', purchasing.lineCreateOperationId, {
+    legalEntityId,
+    recordId: randomUUID(),
+    relations: { [purchasing.lineRelationId]: orderId },
+    values: lineValues,
+  });
+  await refused(
+    'line restore after release',
+    `${APPLICATION_IDS.namespace}:operation.purchase_order_line_restore`,
+    { expectedRevision: 2, recordId: archivedLineId },
+  );
+  // The header itself is closed by the same predicate, evaluated on its own
+  // prior image rather than through the relation.
+  await refused('header update after release', purchasing.updateOperationId, {
+    expectedRevision: 2,
+    patch: { [purchasing.fieldIds.notes]: 'edited after release' },
+    recordId: orderId,
+  });
+
+  // Nothing moved, on EITHER line. Revision, value and archive state are all as
+  // the two admission twins left them -- so the archived line is still archived
+  // and the active one still active.
+  assert.deepEqual(
+    await readLine(),
+    admitted,
+    'a refused mutation still changed the active line',
+  );
+  assert.deepEqual(
+    await readLine(archivedLineId),
+    archivedAdmitted,
+    'the refused restore still changed the archived line',
+  );
 }
 
 async function assertEntityOwnedCreateInput(
@@ -4236,10 +4522,23 @@ async function assertExactPartitionEvidence(
   );
   assert.ok(evidence.results.length > 0, 'real PostgreSQL probes still ran');
   assert.ok(derivations.length > 0);
+  // 127 -> 151. PUR-1's 24 scenarios ALL EXECUTE and none is derived, which is
+  // why `derivations` below is unchanged at 47 -- so the partition still closes:
+  // 151 + 47 = 198, the planned count asserted in
+  // `assertBoundedFreshTenantInstallEvidence`, and 127 + 47 = 174 was the same
+  // identity before this packet.
+  //
+  // That every one of them is ARRANGEABLE is a fact about the module rather
+  // than an accident. Inventory contributes derivations precisely because some
+  // of its scenarios are emitted-but-unarrangeable; purchasing declares no
+  // operationless entity, no provider-written read model, and no field a
+  // generic create cannot populate. **The materialized state field would have
+  // been the one exception, and it is not emitted at all** -- see the
+  // scenario-count comment in `assertBoundedFreshTenantInstallEvidence`.
   assert.equal(
     evidence.results.length,
-    127,
-    'three formerly excluded fields now carry real same-entity search authority while the posting refusal adds one executed scenario',
+    151,
+    'PUR-1 adds 24 executed scenarios and no derivation, so the partition still closes at 198',
   );
   assert.equal(
     derivations.length,

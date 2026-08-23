@@ -74,10 +74,32 @@ Authority in the new product is:
 
 ### 1.1 How this document governs the program
 
-This is the single sequencing, scope, architecture, and completion authority for
-the greenfield product. It governs the quick launch and every subsequent
-platform stage through the full north star. The existing replatform v2 document
-continues to govern only work in the existing repository.
+This is the single **scope, architecture, and completion** authority for the
+greenfield product. It governs the quick launch and every subsequent platform
+stage through the full north star. The existing replatform v2 document continues
+to govern only work in the existing repository.
+
+**SEQUENCING IS DEVOLVED to `docs/execution/current-plan.md` — ruled 2026-08-22 by
+the user, disposing program-review finding R4.** This paragraph previously claimed
+sequencing authority too, and the 2026-08-20 program review measured that the claim
+was not honoured: *"the plan calls itself 'the single sequencing authority' while
+real authority is the TRIAGE plus user directives never written back into it."*
+**A nominally supreme, practically ignored authority is worse than an honest
+division**, because a reader cannot tell which parts are live.
+
+**So: what to build and what "done" means live here. What runs next, and in what
+order, lives in `current-plan.md`.** The stage-gate evidence instrument is NOT
+revived — the alternative disposition R4 offered — so nothing structurally catches
+scope that evaporates between packet acceptances.
+
+**The consequence, and every packet charter must carry it:** where a stage's build
+list names something whose absence fails no gate — a read model, a browsable view,
+an agent journey — **the packet that owns it names it as an explicit acceptance
+criterion in its own charter.** That is now the only thing standing between
+declared scope and silent evaporation, and it is a per-packet obligation rather
+than a stage-boundary check. G3 lost balance and availability read models, a
+stock-overview UI, and agent support exactly this way, and the loss surfaced as
+*"why can't a pilot user see anything."*
 
 The program has two horizons:
 

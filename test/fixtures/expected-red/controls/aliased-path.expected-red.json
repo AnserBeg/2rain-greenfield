@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "aliased-path",
+      "claim": "A path spelled two ways is one identity at run time, so the noncanonical spelling is refused before it can satisfy two declarations with one regression.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": [
+          "test/fixtures/expected-red/subject.test.mjs",
+          "./test/fixtures/expected-red/subject.test.mjs"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/subject.test.mjs",
+          "name": "the fixture subject refuses a non-positive quantity",
+          "expected": "Missing expected exception"
+        },
+        {
+          "file": "./test/fixtures/expected-red/subject.test.mjs",
+          "name": "the fixture subject refuses a non-positive quantity",
+          "expected": "Missing expected exception"
+        }
+      ]
+    }
+  ]
+}

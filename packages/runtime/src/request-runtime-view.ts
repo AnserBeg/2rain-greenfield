@@ -262,6 +262,42 @@ export interface RequestRuntimeDefinitionLoader {
   load(context: TrustedRequestContext): Promise<LoadedRequestRuntimeDefinition>;
 }
 
+/**
+ * Provider load refusals that the runtime entry boundary can preserve for its
+ * transport consumers. The runtime owns this vocabulary: consumers must not
+ * import a concrete persistence provider merely to distinguish an identified
+ * refusal from an unavailable loader.
+ */
+export const REQUEST_RUNTIME_VIEW_REFUSAL_CODES = Object.freeze({
+  ACTIVE_POINTER_MISSING: true,
+  ACTIVE_RELEASE_NOT_ADMITTED: true,
+  ACTIVE_RELEASE_NOT_VISIBLE: true,
+  INVALIDATION_AHEAD_OF_AUTHORITY: true,
+  INVALIDATION_CONTEXT_MISMATCH: true,
+  MALFORMED_RELEASE: true,
+  MALFORMED_REQUIRED_PROJECTION: true,
+  NULL_ACTIVE_RELEASE: true,
+  PIN_CONTEXT_MISMATCH: true,
+  POINTER_CHANGED_DURING_LOAD: true,
+  POINTER_IDENTITY_CHANGED: true,
+  REQUEST_CONTEXT_MISMATCH: true,
+  REQUIRED_PROJECTION_DUPLICATE: true,
+  REQUIRED_PROJECTION_MISSING: true,
+  UNSUPPORTED_RUNTIME_CAPABILITY: true,
+} as const);
+
+export type RequestRuntimeViewRefusalCode =
+  keyof typeof REQUEST_RUNTIME_VIEW_REFUSAL_CODES;
+
+/** The provider-neutral refusal exposed by authenticated runtime entry. */
+export class RequestRuntimeViewRefusalError extends Error {
+  override readonly name = 'RequestRuntimeViewRefusalError';
+
+  constructor(readonly code: RequestRuntimeViewRefusalCode) {
+    super(`request runtime view load refused: ${code}`);
+  }
+}
+
 export interface CurrentPolicySubject {
   readonly environmentId: string;
   readonly principalId: string;
@@ -411,10 +447,12 @@ export class AuthenticatedRequestRuntimeEntryAdapter {
     const context = await this.requestEntry.enter(request);
     assertTrustedRequestContext(context);
     const subject = policySubject(context);
-    const [definition, policyEvidence] = await Promise.all([
-      this.loader.load(context),
-      this.currentPolicy.readCurrentVersion(subject),
-    ]);
+    const definitionLoad = startRuntimeDefinitionLoad(this.loader, context);
+    const policyRead = this.currentPolicy.readCurrentVersion(subject);
+    const [definition, policyEvidence] = await joinRuntimeDefinitionAndPolicy(
+      definitionLoad,
+      policyRead,
+    );
     const view = constructRequestRuntimeView(
       context,
       definition,
@@ -422,6 +460,94 @@ export class AuthenticatedRequestRuntimeEntryAdapter {
     );
     return unitOfWork(view);
   }
+}
+
+function startRuntimeDefinitionLoad(
+  loader: RequestRuntimeDefinitionLoader,
+  context: TrustedRequestContext,
+): Promise<LoadedRequestRuntimeDefinition> {
+  try {
+    return loader.load(context);
+  } catch (error) {
+    throw runtimeDefinitionFailure(error);
+  }
+}
+
+/**
+ * A two-input join with loader-only rejection translation.
+ *
+ * Contract controls observe five timing classes: a synchronous loader throw
+ * before policy; a synchronous policy throw after loader return but before the
+ * join; loader-first handling when both original promises are already rejected;
+ * no-wait settlement when either pending promise rejects while its sibling stays
+ * pending; and synchronous or asynchronous unit-of-work failure after this join
+ * remaining outside loader translation.
+ *
+ * They do not establish policy-first identity when two pending promises reject
+ * in one turn through a post-invocation policy-promise wrapper. That same-turn
+ * case is routed as `runtime-refusal-same-turn-precedence` and becomes required
+ * before any production-reachable policy-side branch participating in this join
+ * can fail, whether caller-supplied or derived here. Fallibility includes a
+ * gateway, version read, validation, normalization, adapter, or promise wrapper.
+ */
+function joinRuntimeDefinitionAndPolicy(
+  definitionLoad: Promise<LoadedRequestRuntimeDefinition>,
+  policyRead: Promise<CurrentPolicyVersionEvidence>,
+): Promise<
+  readonly [LoadedRequestRuntimeDefinition, CurrentPolicyVersionEvidence]
+> {
+  return new Promise((resolve, reject) => {
+    let definition!: LoadedRequestRuntimeDefinition;
+    let policyEvidence!: CurrentPolicyVersionEvidence;
+    let remaining = 2;
+    const resolveWhenComplete = (): void => {
+      remaining -= 1;
+      if (remaining === 0) {
+        resolve([definition, policyEvidence]);
+      }
+    };
+    void definitionLoad.then(
+      (loaded) => {
+        definition = loaded;
+        resolveWhenComplete();
+      },
+      (error: unknown) => {
+        reject(runtimeDefinitionFailure(error));
+      },
+    );
+    void policyRead.then(
+      (evidence) => {
+        policyEvidence = evidence;
+        resolveWhenComplete();
+      },
+      (error: unknown) => {
+        reject(error);
+      },
+    );
+  });
+}
+
+function runtimeDefinitionFailure(error: unknown): unknown {
+  const code = requestRuntimeViewRefusalCode(error);
+  if (code !== null) {
+    return new RequestRuntimeViewRefusalError(code);
+  }
+  return error;
+}
+
+function requestRuntimeViewRefusalCode(
+  error: unknown,
+): RequestRuntimeViewRefusalCode | null {
+  if (
+    !(error instanceof Error) ||
+    error.name !== 'RequestRuntimeViewLoadError' ||
+    !('code' in error) ||
+    typeof error.code !== 'string' ||
+    !Object.hasOwn(REQUEST_RUNTIME_VIEW_REFUSAL_CODES, error.code)
+  ) {
+    return null;
+  }
+  return error.code as RequestRuntimeViewRefusalCode;
 }
 
 /** Every call reaches the live gateway again; no ALLOW is stored in the view. */

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "undeclared-hook-failure",
+      "claim": "Every outcome the mutation produces must be declared; a sibling whose hook throws under the same mutation is a consequence too.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": ["test/fixtures/expected-red/undeclared-hook.test.mjs"]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/undeclared-hook.test.mjs",
+          "name": "the declared victim",
+          "expected": "DECLARED_VICTIM_TOKEN"
+        }
+      ]
+    }
+  ]
+}

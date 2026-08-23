@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "attribution-join",
+      "claim": "The declared victim must fail, not merely stop being reported, for its red to be its own.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": ["test/fixtures/expected-red/attribution.test.mjs"]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/attribution.test.mjs",
+          "name": "a declared victim that vanishes rather than failing",
+          "expected": "CONTROL_ATTRIBUTION_TOKEN"
+        }
+      ]
+    }
+  ]
+}

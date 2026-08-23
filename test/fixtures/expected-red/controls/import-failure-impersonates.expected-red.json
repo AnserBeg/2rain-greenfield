@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "packet": "expected-red-gate-control",
+  "entries": [
+    {
+      "name": "import-failure-impersonates",
+      "claim": "Node's file-level failure must not be credited as the real test that shares its name.",
+      "file": "test/fixtures/expected-red/subject.mjs",
+      "original": "export const CONTROL_SENTINEL = 'pristine';",
+      "replacement": "export const CONTROL_SENTINEL = 'moved';",
+      "test": {
+        "files": ["test/fixtures/expected-red/impersonator.test.mjs"]
+      },
+      "kills": [
+        {
+          "file": "test/fixtures/expected-red/impersonator.test.mjs",
+          "name": "test/fixtures/expected-red/impersonator.test.mjs",
+          "expected": "test failed"
+        }
+      ]
+    }
+  ]
+}

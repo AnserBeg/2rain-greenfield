@@ -4,7 +4,7 @@ import { URL } from 'node:url';
 
 import {
   assertUnfilteredNodeArguments,
-  creditableNodeResultPath,
+  createNodeResultLedger,
 } from './node-reporter-core.mjs';
 import { resolveReachabilityRunId } from './reachability-run.mjs';
 
@@ -26,15 +26,20 @@ export default async function* nodeTestEvidenceReporter(source) {
   const argv = process.argv.slice(1);
 
   const counts = new Map();
+  // One authority with the expected-red reporter. The ledger decides
+  // creditability from the event stream — a file that reported zero executed
+  // tests cannot then contribute a synthetic pass — rather than from the shape
+  // of a test's title, which a real test can coincidentally match.
+  const executed = createNodeResultLedger();
   let suiteSucceeded;
   for await (const event of source) {
-    if (event.type === 'test:pass' || event.type === 'test:fail') {
-      const path = creditableNodeResultPath(event);
-      if (path) counts.set(path, (counts.get(path) ?? 0) + 1);
-    }
+    executed.observe(event);
     if (event.type === 'test:summary' && event.data.file === undefined) {
       suiteSucceeded = event.data.success;
     }
+  }
+  for (const { file } of executed.credited()) {
+    counts.set(file, (counts.get(file) ?? 0) + 1);
   }
 
   const evidence = {

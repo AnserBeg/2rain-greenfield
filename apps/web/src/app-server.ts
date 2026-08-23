@@ -5,6 +5,7 @@ import {
   AuthenticationRequiredError,
   UntrustedIdentityInputError,
 } from '@north-star/runtime/request-context';
+import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 
 import {
@@ -92,6 +93,13 @@ async function handleRequest(
       );
       return;
     }
+    if (error instanceof RequestRuntimeViewRefusalError) {
+      writeHtml(
+        response,
+        renderApplicationDiagnostic(500, runtimeViewRefusalMessage(error)),
+      );
+      return;
+    }
     writeHtml(
       response,
       renderApplicationDiagnostic(500, {
@@ -99,6 +107,15 @@ async function handleRequest(
       }),
     );
   }
+}
+
+export function runtimeViewRefusalMessage(
+  error: RequestRuntimeViewRefusalError,
+) {
+  return {
+    code: 'REQUEST_RUNTIME_VIEW_REFUSED' as const,
+    subject: error.code,
+  };
 }
 
 async function readFormSubmission(
