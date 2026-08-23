@@ -223,6 +223,16 @@ re-scope.
   `definition.ts`'s surface declarations, which this lease explicitly excludes
   ("the two companion relation declarations only, nothing else in the file"),
   and `apps/web/src/**` is not owned. Filed rather than taken.
+- **`companion-key-collision-misreported-as-effect-race`.** Found by this
+  packet's own mutation control, not predicted. `#post`'s savepoint catch
+  treats any `23505` as a natural-effect identity race; the companion
+  transaction now carries a unique business key, so a collision on it is
+  diagnosed as a movement race. A primary-key collision on the derived
+  companion id is a genuinely different case and is handled correctly, so the
+  fix must discriminate by constraint rather than blanket-catch — which is a
+  change to the replay path, outside what this packet should touch. Not
+  reachable as shipped: the companion number is `SC-` plus the derived UUID.
+
 - **The input digest version was NOT bumped, and the reasoning is recorded.**
   `input_digest_version` is CHECK-constrained to `(1, 2, 3)` by migration
   `0017`, and `db/migrations/**` is outside the lease. It did not need bumping:
