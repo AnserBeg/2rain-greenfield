@@ -1,7 +1,12 @@
 # ADR-0024: Exact compatible release reversal
 
 Date: 2026-07-29
-Status: proposed by packet 1g2; pending packet acceptance
+Status: **ratified** 2026-08-21 — packet 1g2 is accepted (ledger; reviewed and integrated
+`7cdef1cb7fc2de239ceb3065ae56c2eb0a8f5e3e`), completing the condition this ADR set for
+itself. (Status corrected by the orchestrator's bridge to `record-claim-fidelity`,
+2026-08-21. The 2026-08-21 record sweep corrected the six ADRs phrased *"ratified when
+that packet is accepted"* and missed the five phrased *"pending packet acceptance"*;
+R1's own gate found them on its first run.)
 Tier: Critical (review per `review-tiers`)
 
 ## Context

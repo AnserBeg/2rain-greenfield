@@ -30,7 +30,7 @@ ruling and the status, nothing else.
 
 | R | what | ruling | status 2026-08-22 |
 |---|---|---|---|
-| R1 | Record layer ungated (R12 folded in) | **running, not a PUR gate** | `record-claim-fidelity` round 2 at `b8d1c31`; orchestrator sweep done `ba4304d` |
+| R1 | Record layer ungated (R12 folded in) | **CLAIM HALF DONE; the staleness half is re-chartered** | `record-claim-fidelity` **accepted 2026-08-23** — five REVISE rounds, then SPLIT. Ships the `ux-picker` r3 detector (a record's claims observed against its frozen tree) plus ledger id uniqueness. **ADR ratification staleness, routing resolution and owning-table identity were RETIRED, not shipped** — each tried to observe facts that live in prose and each was defeated by an unwritten spelling; they are routed to `record-marker-schema`. Orchestrator sweep done `ba4304d`. **The gate covers only packets that declare a block, and the `mission-cadence` edit making that mandatory has not landed — until it does its live coverage is one record.** |
 | R2 | Control verification missing | **running, not a PUR gate** — but PUR-1's charter must REQUIRE the gate; the measured convergence is 2 rounds with it vs 4–7 without | `expected-red-gate` at `b4c2767` |
 | R3 | Two armed traps the template copies | — | **DONE**, `web-refusal-taxonomy` merge `0c08412` |
 | R4 | Gate-invisible scope evaporates | **RULED 2026-08-22 by the user: sequencing devolves to THIS FILE.** The plan §1.1 now claims scope, architecture and completion only. Stage-gate evidence documents are NOT revived, so **every packet charter must name gate-invisible deliverables as explicit acceptance criteria** — that is now the only thing between declared scope and silent evaporation | **CLOSED.** Plan amended; `PUR-2`'s charter owes its read models as named acceptance criteria |
@@ -45,6 +45,59 @@ ruling and the status, nothing else.
 
 **Net: nothing hard-gates `PUR-1`.** `R8` and `R5` gate `PUR-2`; `R4` gates PUR-2's
 chartering; `R7` gates `SAL-1`. Everything else delays with a reason stated above.
+
+**R1's gate is built and SPLIT — `record-claim-fidelity`, round 5 frozen at last executable
+commit `0f8b39308e276079b606d6bf2f715cd598f8dd15`.** `scripts/check-records.sh` plus
+`test/architecture/record-claim-fidelity.test.ts` observe a packet record's claims against
+its frozen tree — the declared head owned by that packet's own `Packet:` commit trailer,
+every claimed path really different between base and head, every claimed symbol really
+declared there, no undeclared executable path — plus ledger id uniqueness. Fifteen
+diagnostics, fifteen controls, 16/16 per report site. See the
+[packet record](packets/record-claim-fidelity.md) and the [ledger row](ledger.md).
+
+**Rounds 1-5 all returned REVISE, and the fifth ruled the split.** ADR ratification
+staleness, routing resolution and owning-table identity are **retired, not shipped**. Each
+tried to observe facts that live in prose, and across four rounds each produced the same
+finding shape: a reader walking past a spelling nobody had written a case for. Measured in
+round 5 — `will be ratified after X is accepted` bound the wrong packet silently, and a
+soft-wrapped `routed to` never entered the scanner at all. **A gate whose terminal state is
+reached only by matching another finite list of English is not terminal**, which is round
+4's convergence argument withdrawn under measurement.
+
+**NEW ROW — `record-marker-schema`. Tier 1 for the record layer, and it owns what was
+retired.** Give ADRs a machine-readable governing status and ratification packet
+(frontmatter), and owning tables an explicit marker; then re-express the three retired
+assertions against that schema rather than against English. Needs `docs/decisions/**`
+across 58 files plus the inventories, so it is its own lease and its own packet.
+**Filed here because R1's own lesson is that a recorded finding with no owning row is a
+disposition with no executing gate** — and the cost of not doing it is explicit: **R1's
+headline stale-ratification finding is ungated again.** The eleven live instances were
+corrected under the orchestrator's bridge, so the tree is clean today; nothing stops the
+twelfth.
+
+**OWED TO THE ORCHESTRATOR, and neither is a lane decision.**
+
+1. **`docs/**` is an executed gate input while `git-workflow` still excludes it as never
+   executed.** Measured: a docs-only commit repointing the declared head to forty zeroes
+   leaves the identical-tree command EMPTY while `test:architecture` REDS. The lane removed
+   the false claim from its source and re-runs `test:architecture` rather than claiming
+   carry-forward, but the general rule is doctrine and `.agents/skills/**` is fenced out of
+   the charter. **Round 5 ruled that acceptance must not precede this correction.**
+2. **Tier.** Chartered Behavioral; all four review arms rule Critical. Round 5 also ruled
+   the out-of-sequence Fable arm the wrong process call — it counts as additional review,
+   and a fresh Codex arm is owed before any confirm.
+
+**One thing is flagged and not corrected**, because the bridge covers status lines only:
+ADR-0034's *"What this ADR does not yet implement"* still defers the enforcement half
+behind `G3-P5`, which the ledger also records as accepted, and `inventory-form-anatomy`
+records building on *"ADR-0034's existing predicate carrier"*. Confirming that is a
+measurement against `module-runtime-interpreter.ts`, and this gate reads the governing
+status rather than the body.
+
+**Still not built, and named so it does not rot:** the declaration block is **optional**.
+Making it mandatory is a `mission-cadence` edit that belongs to the orchestrator and lands
+after this gate, and until it does, a packet that declares nothing is checked against
+nothing.
 
 ## TRIAGE — 2026-08-13. Read this before the queue.
 

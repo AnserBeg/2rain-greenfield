@@ -1,7 +1,12 @@
 # ADR-0021: Total absent-value semantics
 
 Date: 2026-07-28
-Status: proposed by Q1-P0; pending packet acceptance
+Status: **ratified** 2026-08-21 — Q1-P0 is accepted (ledger; reviewed
+`185d78bbe2bc00b1142b535cde9774234d4e63ab`, integrated `1a8a165`), completing the
+condition this ADR set for itself. (Status corrected by the orchestrator's bridge to
+`record-claim-fidelity`, 2026-08-21. The 2026-08-21 record sweep corrected the six ADRs
+phrased *"ratified when that packet is accepted"* and missed the five phrased *"pending
+packet acceptance"*; R1's own gate found them on its first run.)
 Tier: Critical (review per `review-tiers`)
 
 ## Context
