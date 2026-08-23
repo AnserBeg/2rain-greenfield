@@ -345,6 +345,37 @@ Three rows come out of it. None is dormant; each has a named trigger.
 | `postgres-mutation-entries-need-an-isolable-subject` | **Found by running the new gate against the evidence `scoped-create-operand-impl` shipped.** Four PostgreSQL manifest entries could not be made stable. Whole-file, `unscoped-create-closed-key-fence-removed` stopped two tests in one run and four in another — the extra two are 300s-timeout-bounded release-lineage tests that run after the create the claim is about. Bounded to the test holding the claim, the **baseline** fails on unmutated production with an ephemeral-container readiness timeout at `test/helpers/postgres.ts:273`, reproduced twice with no orphaned containers — that test passes as the seventh container of a whole-file run and not as the first. **This is `container-pressure-forges-outcomes` blocking a second instrument.** The entries' manifest form is preserved in `e94441b`; restoring them is a one-file revert once a container-bearing test can start cold within its readiness deadline. |
 | `review-log-prose-reds-are-not-executable` | Reds across seven packets exist only as sentences — *"1/1 pass → 0/1 → restored"*. They were not backfilled because prose names the behaviour changed in English at a SHA that has since moved, so `original` would be a guess, and **a guessed entry that happens to red is worse than no entry: it looks like evidence.** Their load-bearing rows also sit in `apps/web/src` and `packages/**`, held by three frozen lanes. **Disposition: backfill belongs to each owning packet's next round**, where the author knows the seam and the source has not moved. |
 
+#### R8 LEAVES A NAMED RESIDUE — `posting-error-provenance`, filed 2026-08-22
+
+**Found by the Fable arm on `posting-error-shape`, verified by the orchestrator.** The
+SQLSTATE shape guard closes most of R8, and the residue is a slice of the very class R8
+names.
+
+**A SQLSTATE is five characters from `[0-9A-Z]`. So are eleven Node errnos** — `EPIPE`,
+`EBUSY`, `EBADF`, `EINTR`, `ELOOP`, `ENXIO`, `EPERM`, `EROFS`, `ESRCH`, `ETIME`, `EXDEV`.
+**`EPIPE` is the realistic member:** when the backend dies and node-postgres writes to the
+dead socket, the surfaced error carries `code: 'EPIPE'`, and the classifier reports
+`INVENTORY_POSTING_STORAGE_REJECTED` with `details.sqlstate: 'EPIPE'`. **A connection drop
+mid-posting still reads as a storage rejection** — narrowed from "any string `code`" to
+eleven specific tokens, but not closed.
+
+**This is NOT a defect in `posting-error-shape` and that packet must not be widened to
+chase it.** `EPIPE` is inside the legal SQLSTATE value space; tightening the shape (say,
+requiring a digit) would refuse legal custom trigger and extension `ERRCODE`s, which are
+real PostgreSQL emissions — the repo's own `P0001` among them. **Shape cannot separate
+these; only provenance can.** The discriminator is the server-error `severity` property or
+the driver's `DatabaseError` identity, and that is a different and larger change.
+
+**Does it block `PUR-2`? No — ruled 2026-08-22.** R8 was made a `PUR-2` prerequisite
+because `PUR-2` posts through this engine, and the shape guard delivers the bulk of that
+protection. Holding `PUR-2` for a provenance refactor is disproportionate to one residual
+errno. **Trigger instead: before the first production deployment, or before any incident
+runbook cites `details.sqlstate` as authoritative** — whichever comes first, because the
+failure mode is a stored false diagnostic and its whole cost is paid during an incident.
+
+**Tier: Behavioral.** Band A — a misclassified posting error is silent until an incident is
+misdiagnosed.
+
 ### Everything else is DORMANT
 
 That is roughly 115 rows — the G2/G3 backlog (`5g3-*`, `1b`–`1g`, `4a`–`4c`,
