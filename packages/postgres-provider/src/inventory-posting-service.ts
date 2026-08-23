@@ -37,10 +37,111 @@ export const INVENTORY_POSTING_CAPABILITY_ID =
   'northstar.inventory:capability.posting' as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
   'ffd4e9f6103b5c6053c39b62fe64e69dd255cb0c86cfd349ae465ab25179b3d3' as const;
+/**
+ * PUR-2a. The posting-family roster, keyed by `(capabilityId, familyId)`.
+ *
+ * A FAMILY is the source entity family a posting executes for, in the same
+ * vocabulary the inventory contract already uses for families. `origin` is
+ * ADR-0049 section 4's authored/companion axis:
+ *
+ *  - `authored`  — the caller authored an inventory transaction and hands it
+ *                  to the kernel, which validates the draft it was given.
+ *  - `companion` — the caller authored the SOURCE document; the inventory
+ *                  transaction is a COMPANION the kernel derives and writes
+ *                  inside the posting transaction. The source may, and before
+ *                  posting must, exist without one.
+ *
+ * This table is the ROSTER ONLY. Every part each entry names -- entities,
+ * relation columns, enum options -- is resolved out of the active release's
+ * compiled storage target by `resolvePostingFamilies`, so an entry the release
+ * cannot satisfy fails service construction rather than posting. What is
+ * frozen here is which families exist; what is compiled and release-verified
+ * is everything each family is made of. The packet record states that limit.
+ */
+interface PostingFamilyRoleDeclarationV1 {
+  readonly movementOption: string;
+  readonly postingRole: InventoryPostingRoleV1;
+  readonly transactionTypeOption: string;
+}
+
+interface PostingFamilyCompanionDeclarationV1 {
+  readonly companionEntitySuffix: string;
+  readonly companionLineEntitySuffix: string;
+  readonly numberPrefix: string;
+  readonly sourceLineEntitySuffix: string;
+}
+
+interface PostingFamilyDeclarationV1 {
+  readonly capabilityId: typeof INVENTORY_POSTING_CAPABILITY_ID;
+  readonly companion: PostingFamilyCompanionDeclarationV1 | null;
+  readonly familyId: string;
+  readonly origin: 'authored' | 'companion';
+  readonly roles: readonly PostingFamilyRoleDeclarationV1[];
+  readonly sourceEntitySuffix: string;
+  /** `null` means the caller declares `sourceType`; a string pins it. */
+  readonly sourceType: string | null;
+}
+
+const INVENTORY_POSTING_FAMILIES_V1 = Object.freeze([
+  Object.freeze({
+    capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+    companion: null,
+    familyId: 'inventory_transaction',
+    origin: 'authored',
+    roles: Object.freeze([
+      Object.freeze({
+        movementOption: 'adjustment',
+        postingRole: 'adjustment',
+        transactionTypeOption: 'adjustment',
+      }),
+      Object.freeze({
+        movementOption: 'transfer',
+        postingRole: 'transfer',
+        transactionTypeOption: 'transfer',
+      }),
+    ]),
+    sourceEntitySuffix: 'inventory_transaction',
+    sourceType: null,
+  }),
+  Object.freeze({
+    capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+    companion: Object.freeze({
+      companionEntitySuffix: 'inventory_transaction',
+      companionLineEntitySuffix: 'inventory_transaction_line',
+      numberPrefix: 'SC',
+      sourceLineEntitySuffix: 'stock_count_line',
+    }),
+    familyId: 'stock_count',
+    origin: 'companion',
+    roles: Object.freeze([
+      Object.freeze({
+        movementOption: 'count',
+        postingRole: 'count',
+        transactionTypeOption: 'count_correction',
+      }),
+      Object.freeze({
+        movementOption: 'correction',
+        postingRole: 'correction',
+        transactionTypeOption: 'count_correction',
+      }),
+    ]),
+    sourceEntitySuffix: 'stock_count',
+    sourceType: 'stockCount',
+  }),
+] as const satisfies readonly PostingFamilyDeclarationV1[]);
+
+const stockCountFamilyId = 'stock_count' as const;
+
 // Finite hang-prevention bound, not a posting-latency budget or SLA. Fifteen
 // seconds leaves room for lock-holder coordination while still terminating an
 // acyclic lock convoy that PostgreSQL's deadlock detector cannot break.
 const inventoryPostingLockTimeoutMilliseconds = 15_000;
+/**
+ * PUR-2a. Namespace for companion identity derivation. It is part of the
+ * derived name, so changing it changes every companion id this kernel would
+ * derive; it is versioned for exactly that reason.
+ */
+const companionDerivationNamespace = 'northstar.inventory-posting-companion/v1';
 const requestKeyLockDerivationVersion =
   'northstar.inventory-posting-request-lock/v1';
 const legacyInventoryPostingInputDigestVersion = 1 as const;
@@ -134,6 +235,11 @@ export interface InventoryTransferPostingCommandV1 {
 
 export type InventoryStockCountKindV1 = 'initial' | 'correction' | 'reversal';
 
+/**
+ * PUR-2a. A stock-count line names its own identity and no companion. The
+ * companion transaction-line id is DERIVED from `stockCountLineId` and written
+ * by the kernel; a command that supplies one is refused by `exactKeys`.
+ */
 export interface InventoryStockCountLineV1 {
   readonly countedQuantity: string;
   readonly expectedQuantity: string;
@@ -141,11 +247,15 @@ export interface InventoryStockCountLineV1 {
   readonly reversalOfMovementId: string | null;
   readonly sourceLine: string;
   readonly stockCountLineId: string;
-  readonly transactionLineId: string;
   readonly unitId: string;
   readonly varianceQuantity: string;
 }
 
+/**
+ * PUR-2a. A stock-count posting command carries the SOURCE only. There is no
+ * `transactionId`: the companion transaction is derived from `stockCountId`
+ * and written by the kernel inside the posting transaction.
+ */
 export interface InventoryStockCountPostingCommandV1 {
   readonly authorization: InventoryPostingAuthorizationV1;
   readonly channel: InvocationChannel;
@@ -165,12 +275,39 @@ export interface InventoryStockCountPostingCommandV1 {
   readonly stockCountId: string;
   readonly stockDimensionSetVersion: 'v1';
   readonly supersedesStockCountId: string | null;
+}
+
+/**
+ * The kernel's own view of a stock-count posting, after companion derivation.
+ * The two companion ids present here are OUTPUTS the kernel computed, never
+ * anything a caller supplied.
+ */
+interface DerivedStockCountLine extends InventoryStockCountLineV1 {
+  readonly transactionLineId: string;
+}
+
+interface DerivedStockCountCommand extends Omit<
+  InventoryStockCountPostingCommandV1,
+  'lines'
+> {
+  readonly lines: readonly DerivedStockCountLine[];
   readonly transactionId: string;
 }
 
 export type InventoryPostingCommandV1 =
   | InventoryAdjustmentPostingCommandV1
   | InventoryStockCountPostingCommandV1
+  | InventoryTransferPostingCommandV1;
+
+/**
+ * The command shape the kernel executes against: identical to the caller's
+ * for authored-origin families, and companion-augmented for companion-origin
+ * ones. Everything downstream of validation reads this, so a companion id is
+ * read from exactly one place whether it was authored or derived.
+ */
+type DerivedPostingCommand =
+  | InventoryAdjustmentPostingCommandV1
+  | DerivedStockCountCommand
   | InventoryTransferPostingCommandV1;
 
 export type InventoryPostingRoleV1 =
@@ -320,6 +457,29 @@ interface FieldBinding {
   name: string;
 }
 
+interface ResolvedPostingRole {
+  readonly movementPostingRoleOption: string;
+  readonly postingRole: InventoryPostingRoleV1;
+  readonly transactionTypeOption: string;
+}
+
+interface ResolvedPostingCompanion {
+  readonly companionEntityId: string;
+  readonly companionLineEntityId: string;
+  readonly numberPrefix: string;
+  readonly sourceLineEntityId: string;
+}
+
+interface ResolvedPostingFamily {
+  readonly capabilityId: string;
+  readonly companion: ResolvedPostingCompanion | null;
+  readonly familyId: string;
+  readonly origin: 'authored' | 'companion';
+  readonly roles: ReadonlyMap<InventoryPostingRoleV1, ResolvedPostingRole>;
+  readonly sourceEntityId: string;
+  readonly sourceType: string | null;
+}
+
 interface PostingStorageBinding {
   item: EntityBinding;
   itemBaseUnitColumn: string;
@@ -327,12 +487,14 @@ interface PostingStorageBinding {
   legalEntityActiveStatus: string;
   legalEntityStatusColumn: string;
   location: EntityBinding;
+  families: ReadonlyMap<string, ResolvedPostingFamily>;
+  familyByPostingRole: ReadonlyMap<
+    InventoryPostingRoleV1,
+    ResolvedPostingFamily
+  >;
   movement: EntityBinding;
   movementBusinessPeriodColumn: string;
-  movementPostingRoleAdjustment: string;
-  movementPostingRoleCorrection: string;
-  movementPostingRoleCount: string;
-  movementPostingRoleTransfer: string;
+  movementPostingRoleByOption: ReadonlyMap<string, InventoryPostingRoleV1>;
   movementRelationToLineColumn: string;
   movementRelationToTransactionColumn: string;
   movementReversalOfMovementColumn: string;
@@ -340,10 +502,8 @@ interface PostingStorageBinding {
   periodLock: EntityBinding;
   periodLockClosedThroughColumn: string;
   schemaName: string;
+  postingRoles: ReadonlyMap<InventoryPostingRoleV1, ResolvedPostingRole>;
   transaction: EntityBinding;
-  transactionAdjustmentType: string;
-  transactionCountCorrectionType: string;
-  transactionTransferType: string;
   transactionDraftState: string;
   transactionPostedState: string;
   transactionStateColumn: string;
@@ -444,7 +604,7 @@ type ParsedPosting =
       readonly postingRole: 'transfer';
     }
   | {
-      readonly command: InventoryStockCountPostingCommandV1;
+      readonly command: DerivedStockCountCommand;
       readonly postingRole: 'correction' | 'count';
     };
 
@@ -494,7 +654,14 @@ export class PostgresInventoryPostingService {
     actorEnvelope: TrustedActorEnvelope,
     command: InventoryStockCountPostingCommandV1,
   ): Promise<InventoryStockCountPostingResultV1> {
-    const parsed = validateStockCountCommand(command);
+    const parsed = validateStockCountCommand(
+      requiredPostingFamily(
+        this.#binding,
+        this.registration.capabilityId,
+        stockCountFamilyId,
+      ),
+      command,
+    );
     return this.#post(context, actorEnvelope, {
       command: parsed,
       postingRole: parsed.kind === 'initial' ? 'count' : 'correction',
@@ -594,19 +761,28 @@ export class PostgresInventoryPostingService {
         .toSorted(compareInventoryMovementOrderEntries);
 
       await assumeModuleRole(client);
-      await lockInventoryTransactionHeader(
-        client,
-        this.#binding,
-        context,
-        parsed,
-      );
-      const lineSetDigest = await captureInventoryLineSetDigest(
-        client,
-        this.#binding,
-        context,
-        parsed,
-      );
-      await assertInventoryLineSet(client, this.#binding, context, posting);
+      // PUR-2a. Execution is selected by the compiled family binding, not by a
+      // source-type literal. An authored-origin family hands the kernel a
+      // draft transaction to validate; a companion-origin family hands it a
+      // source, and the kernel writes the transaction itself further down.
+      const family = postingFamilyForRole(this.#binding, posting.postingRole);
+      const companionOrigin = family.origin === 'companion';
+      let lineSetDigest = '';
+      if (!companionOrigin) {
+        await lockInventoryTransactionHeader(
+          client,
+          this.#binding,
+          context,
+          parsed,
+        );
+        lineSetDigest = await captureInventoryLineSetDigest(
+          client,
+          this.#binding,
+          context,
+          parsed,
+        );
+        await assertInventoryLineSet(client, this.#binding, context, posting);
+      }
       const countEvidenceDigest = isStockCountPosting(posting)
         ? await lockAndAssertStockCountEvidence(
             client,
@@ -638,7 +814,14 @@ export class PostgresInventoryPostingService {
         return replay;
       }
 
-      await assertInventoryDraftHeader(client, this.#binding, context, posting);
+      if (!companionOrigin) {
+        await assertInventoryDraftHeader(
+          client,
+          this.#binding,
+          context,
+          posting,
+        );
+      }
       if (isStockCountPosting(posting)) {
         await assertStockCountCompensationAvailable(
           client,
@@ -676,6 +859,18 @@ export class PostgresInventoryPostingService {
       let transactionRevision = -1;
       let stockCountRevision: number | null = null;
       try {
+        // The companion must exist before the movements that reference it.
+        if (companionOrigin && isStockCountPosting(posting)) {
+          transactionRevision = await writeCompanionTransaction(
+            client,
+            this.#binding,
+            context,
+            actorEnvelope,
+            family,
+            posting,
+            recordedAt,
+          );
+        }
         for (const movement of ordered) {
           await insertMovement(
             client,
@@ -686,13 +881,15 @@ export class PostgresInventoryPostingService {
             movement,
           );
         }
-        transactionRevision = await transitionTransactionToPosted(
-          client,
-          this.#binding,
-          context,
-          posting,
-          lineSetDigest,
-        );
+        if (!companionOrigin) {
+          transactionRevision = await transitionTransactionToPosted(
+            client,
+            this.#binding,
+            context,
+            posting,
+            lineSetDigest,
+          );
+        }
         if (isStockCountPosting(posting)) {
           stockCountRevision = await transitionStockCountToPosted(
             client,
@@ -703,6 +900,22 @@ export class PostgresInventoryPostingService {
             countEvidenceDigest!,
             recordedAt,
           );
+          if (companionOrigin) {
+            await writeCompanionLineIdentities(
+              client,
+              this.#binding,
+              context,
+              posting,
+            );
+            await assertCompanionIdentitiesPersisted(
+              client,
+              this.#binding,
+              context,
+              family,
+              posting,
+              transactionRevision,
+            );
+          }
         }
         await client.query('RELEASE SAVEPOINT inventory_posting_write');
       } catch (error) {
@@ -963,7 +1176,44 @@ function resolvePostingStorage(
   );
   const stockCountKind = requiredField(stockCount, 'stock_count_kind');
   const stockCountState = requiredField(stockCount, 'stock_count_state');
+  // PUR-2a. Every declared family is resolved against the compiled storage
+  // target before the service exists. A family naming an entity, a relation or
+  // an enum option the active release does not carry throws here.
+  const families = resolvePostingFamilies(
+    target,
+    movementPostingRole,
+    transactionType,
+  );
+  const postingRoles = new Map<InventoryPostingRoleV1, ResolvedPostingRole>();
+  const familyByPostingRole = new Map<
+    InventoryPostingRoleV1,
+    ResolvedPostingFamily
+  >();
+  const movementPostingRoleByOption = new Map<string, InventoryPostingRoleV1>();
+  for (const family of families.values()) {
+    for (const role of family.roles.values()) {
+      if (
+        postingRoles.has(role.postingRole) ||
+        movementPostingRoleByOption.has(role.movementPostingRoleOption)
+      ) {
+        throw postingError(
+          'INVENTORY_POSTING_STORAGE_INVALID',
+          `posting role ${role.postingRole} is claimed by more than one family`,
+        );
+      }
+      postingRoles.set(role.postingRole, role);
+      familyByPostingRole.set(role.postingRole, family);
+      movementPostingRoleByOption.set(
+        role.movementPostingRoleOption,
+        role.postingRole,
+      );
+    }
+  }
   return Object.freeze({
+    families,
+    familyByPostingRole,
+    movementPostingRoleByOption,
+    postingRoles,
     item,
     itemBaseUnitColumn: requiredField(item, 'item_base_unit').name,
     legalEntity: legal,
@@ -973,19 +1223,6 @@ function resolvePostingStorage(
     movement,
     movementBusinessPeriodColumn:
       movementEntity.factStorage.businessPeriod.column,
-    movementPostingRoleAdjustment: requiredEnumOption(
-      movementPostingRole,
-      'adjustment',
-    ),
-    movementPostingRoleCorrection: requiredEnumOption(
-      movementPostingRole,
-      'correction',
-    ),
-    movementPostingRoleCount: requiredEnumOption(movementPostingRole, 'count'),
-    movementPostingRoleTransfer: requiredEnumOption(
-      movementPostingRole,
-      'transfer',
-    ),
     movementRelationToLineColumn: requiredRelationColumn(
       target,
       movementEntity,
@@ -1006,15 +1243,6 @@ function resolvePostingStorage(
       periodLockEntity.periodLock.closedThroughColumn,
     schemaName: target.providerAbi.managedSchema,
     transaction,
-    transactionAdjustmentType: requiredEnumOption(
-      transactionType,
-      'adjustment',
-    ),
-    transactionCountCorrectionType: requiredEnumOption(
-      transactionType,
-      'count_correction',
-    ),
-    transactionTransferType: requiredEnumOption(transactionType, 'transfer'),
     transactionDraftState: requiredEnumOption(transactionState, 'draft'),
     transactionPostedState: requiredEnumOption(transactionState, 'posted'),
     transactionStateColumn: transactionState.name,
@@ -1131,6 +1359,135 @@ function resolvePostingStorage(
   });
 }
 
+/**
+ * PUR-2a. Resolve the frozen family roster against the compiled storage
+ * target. Nothing here consults a module identity the release does not carry:
+ * each entity is located by its compiled entity id suffix, each relation
+ * column by the compiled relation, and each enum option by the compiled field
+ * contract. A roster entry the active release cannot satisfy throws.
+ */
+function resolvePostingFamilies(
+  target: StorageTargetPayloadV1,
+  movementPostingRoleField: FieldBinding,
+  transactionTypeField: FieldBinding,
+): ReadonlyMap<string, ResolvedPostingFamily> {
+  const uniqueEntity = (suffix: string): StorageEntityTarget => {
+    const matches = target.entities.filter((candidate) =>
+      candidate.entityId.endsWith(`:entity.${suffix}`),
+    );
+    if (matches.length !== 1) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_INVALID',
+        `storage target must contain exactly one ${suffix} entity`,
+      );
+    }
+    return matches[0]!;
+  };
+  const families = new Map<string, ResolvedPostingFamily>();
+  for (const declaration of INVENTORY_POSTING_FAMILIES_V1) {
+    const key = postingFamilyKey(
+      declaration.capabilityId,
+      declaration.familyId,
+    );
+    if (families.has(key)) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_INVALID',
+        `posting family ${key} is declared more than once`,
+      );
+    }
+    const roles = new Map<InventoryPostingRoleV1, ResolvedPostingRole>();
+    for (const role of declaration.roles) {
+      if (roles.has(role.postingRole)) {
+        throw postingError(
+          'INVENTORY_POSTING_STORAGE_INVALID',
+          `posting family ${key} declares role ${role.postingRole} twice`,
+        );
+      }
+      roles.set(
+        role.postingRole,
+        Object.freeze({
+          movementPostingRoleOption: requiredEnumOption(
+            movementPostingRoleField,
+            role.movementOption,
+          ),
+          postingRole: role.postingRole,
+          transactionTypeOption: requiredEnumOption(
+            transactionTypeField,
+            role.transactionTypeOption,
+          ),
+        }),
+      );
+    }
+    if (roles.size === 0) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_INVALID',
+        `posting family ${key} declares no posting role`,
+      );
+    }
+    const companionDeclaration = declaration.companion;
+    families.set(
+      key,
+      Object.freeze({
+        capabilityId: declaration.capabilityId,
+        companion:
+          companionDeclaration === null
+            ? null
+            : Object.freeze({
+                companionEntityId: uniqueEntity(
+                  companionDeclaration.companionEntitySuffix,
+                ).entityId,
+                companionLineEntityId: uniqueEntity(
+                  companionDeclaration.companionLineEntitySuffix,
+                ).entityId,
+                numberPrefix: companionDeclaration.numberPrefix,
+                sourceLineEntityId: uniqueEntity(
+                  companionDeclaration.sourceLineEntitySuffix,
+                ).entityId,
+              }),
+        familyId: declaration.familyId,
+        origin: declaration.origin,
+        roles,
+        sourceEntityId: uniqueEntity(declaration.sourceEntitySuffix).entityId,
+        sourceType: declaration.sourceType,
+      }),
+    );
+  }
+  return families;
+}
+
+function postingFamilyKey(capabilityId: string, familyId: string): string {
+  return `${capabilityId}\u001f${familyId}`;
+}
+
+function postingFamilyForRole(
+  binding: PostingStorageBinding,
+  postingRole: InventoryPostingRoleV1,
+): ResolvedPostingFamily {
+  const family = binding.familyByPostingRole.get(postingRole);
+  if (!family) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `no posting family execution is bound for role ${postingRole}`,
+    );
+  }
+  return family;
+}
+
+function requiredPostingFamily(
+  binding: PostingStorageBinding,
+  capabilityId: string,
+  familyId: string,
+): ResolvedPostingFamily {
+  const family = binding.families.get(postingFamilyKey(capabilityId, familyId));
+  if (!family) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `no posting family execution is bound for ${capabilityId} ${familyId}`,
+    );
+  }
+  return family;
+}
+
 function bindEntity(entity: StorageEntityTarget): EntityBinding {
   const fields = new Map<string, FieldBinding>();
   for (const column of entity.columns) {
@@ -1183,49 +1540,49 @@ function requiredEnumOption(field: FieldBinding, suffix: string): string {
   return matches[0]!;
 }
 
+// PUR-2a. These three were `switch` statements over a closed role literal.
+// They are now lookups in the compiled family binding, so a family adds its
+// roles as roster data rather than as three new switch arms.
+function resolvedPostingRole(
+  binding: PostingStorageBinding,
+  postingRole: InventoryPostingRoleV1,
+): ResolvedPostingRole {
+  const resolved = binding.postingRoles.get(postingRole);
+  if (!resolved) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `no posting family execution is bound for role ${postingRole}`,
+    );
+  }
+  return resolved;
+}
+
 function movementPostingRole(
   binding: PostingStorageBinding,
   postingRole: InventoryPostingRoleV1,
 ): string {
-  switch (postingRole) {
-    case 'adjustment':
-      return binding.movementPostingRoleAdjustment;
-    case 'correction':
-      return binding.movementPostingRoleCorrection;
-    case 'count':
-      return binding.movementPostingRoleCount;
-    case 'transfer':
-      return binding.movementPostingRoleTransfer;
-  }
+  return resolvedPostingRole(binding, postingRole).movementPostingRoleOption;
 }
 
 function postingRoleFromStorage(
   binding: PostingStorageBinding,
   value: string,
 ): InventoryPostingRoleV1 {
-  if (value === binding.movementPostingRoleAdjustment) return 'adjustment';
-  if (value === binding.movementPostingRoleCorrection) return 'correction';
-  if (value === binding.movementPostingRoleCount) return 'count';
-  if (value === binding.movementPostingRoleTransfer) return 'transfer';
-  throw postingError(
-    'INVENTORY_POSTING_STORAGE_REJECTED',
-    `movement read-back returned unsupported posting role ${value}`,
-  );
+  const postingRole = binding.movementPostingRoleByOption.get(value);
+  if (postingRole === undefined) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      `movement read-back returned unsupported posting role ${value}`,
+    );
+  }
+  return postingRole;
 }
 
 function transactionType(
   binding: PostingStorageBinding,
   postingRole: InventoryPostingRoleV1,
 ): string {
-  switch (postingRole) {
-    case 'adjustment':
-      return binding.transactionAdjustmentType;
-    case 'correction':
-    case 'count':
-      return binding.transactionCountCorrectionType;
-    case 'transfer':
-      return binding.transactionTransferType;
-  }
+  return resolvedPostingRole(binding, postingRole).transactionTypeOption;
 }
 
 function requiredRelationColumn(
@@ -1330,22 +1687,93 @@ function validateTransferCommand(
   };
 }
 
+/**
+ * PUR-2a. Derive a companion record identity from the SOURCE record alone.
+ *
+ * The derived name is
+ * `namespace | capabilityId | familyId | companionFamilyId | sourceRecordId`,
+ * SHA-256'd, with the first sixteen octets stamped as an RFC 9562 version-8
+ * UUID. Version 8 is the registered form for a custom derived UUID, and the
+ * repository's uuid pattern admits versions 1-8.
+ *
+ * Two properties matter and both come from purity:
+ *
+ *  - it is a FUNCTION OF THE SOURCE, so nothing a caller sends can steer the
+ *    companion identity, and
+ *  - it is DETERMINISTIC, so a retry derives the same identity and collides on
+ *    the primary key rather than minting a second companion for one source.
+ *
+ * Exported so a reconciliation reader can recompute a companion identity
+ * without the posting kernel and compare it to what is stored.
+ */
+export function deriveInventoryPostingCompanionId(input: {
+  readonly capabilityId: string;
+  readonly companionFamilyId: string;
+  readonly familyId: string;
+  readonly sourceRecordId: string;
+}): string {
+  requiredUuid(input.sourceRecordId, 'companion sourceRecordId');
+  const name = [
+    companionDerivationNamespace,
+    input.capabilityId,
+    input.familyId,
+    input.companionFamilyId,
+    input.sourceRecordId.toLowerCase(),
+  ].join('\u001f');
+  const digest = createHash('sha256').update(name, 'utf8').digest();
+  const bytes = Uint8Array.prototype.slice.call(digest, 0, 16);
+  // RFC 9562: version in the high nibble of octet 6, variant 0b10 in octet 8.
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Buffer.from(bytes).toString('hex');
+  const derived = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  requiredUuid(derived, 'derived companion id');
+  return derived;
+}
+
+/**
+ * The companion transaction's business key. `inventory_transaction_number` is
+ * `tenantEnvironmentCaseInsensitiveUnique`, so the companion needs a number no
+ * authored transaction is likely to have chosen and that is unique whenever
+ * the derived id is. Prefix plus the derived uuid is 39 characters against the
+ * field's 60. A collision with an authored number is a unique-violation, so it
+ * refuses the posting rather than overwriting anything.
+ */
+function companionTransactionNumber(
+  family: ResolvedPostingFamily,
+  transactionId: string,
+): string {
+  const companion = family.companion;
+  if (!companion) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `posting family ${family.familyId} derives no companion`,
+    );
+  }
+  return `${companion.numberPrefix}-${transactionId}`;
+}
+
 function validateStockCountCommand(
+  family: ResolvedPostingFamily,
   command: InventoryStockCountPostingCommandV1,
-): InventoryStockCountPostingCommandV1 {
-  validateCommandEnvelope(command, [
-    'kind',
-    'locationId',
-    'stockCountId',
-    'supersedesStockCountId',
-  ]);
+): DerivedStockCountCommand {
+  validateCommandEnvelope(
+    command,
+    ['kind', 'locationId', 'stockCountId', 'supersedesStockCountId'],
+    family,
+  );
   if (!['initial', 'correction', 'reversal'].includes(command.kind)) {
     throw inputError('stock count kind is not supported');
   }
   requiredUuid(command.locationId, 'locationId');
   requiredUuid(command.stockCountId, 'stockCountId');
-  if (command.sourceType !== 'stockCount') {
-    throw inputError('stock-count sourceType must be stockCount');
+  // PUR-2a. The admitted sourceType is the family's, not a literal written
+  // into the validator. A family whose roster entry pins no sourceType leaves
+  // the caller's declaration alone, which is what adjustment and transfer do.
+  if (family.sourceType !== null && command.sourceType !== family.sourceType) {
+    throw inputError(
+      `${family.familyId} sourceType must be ${family.sourceType}`,
+    );
   }
   if (command.sourceId.toLowerCase() !== command.stockCountId.toLowerCase()) {
     throw inputError('stock-count sourceId must equal stockCountId');
@@ -1379,11 +1807,10 @@ function validateStockCountCommand(
       'reversalOfMovementId',
       'sourceLine',
       'stockCountLineId',
-      'transactionLineId',
       'unitId',
       'varianceQuantity',
     ]);
-    validateLineIdentity(line);
+    validateLineIdentity(line, 80, false);
     requiredUuid(line.stockCountLineId, 'line.stockCountLineId');
     if (evidenceIds.has(line.stockCountLineId.toLowerCase())) {
       throw inputError('stock-count lines repeat a stockCountLineId');
@@ -1418,30 +1845,70 @@ function validateStockCountCommand(
     assertUniqueSourceLine(naturalKeys, line.sourceLine, 'correction');
   }
   const parsed = structuredClone(command);
+  const companion = family.companion;
+  if (!companion) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `posting family ${family.familyId} derives no companion`,
+    );
+  }
+  const stockCountId = parsed.stockCountId.toLowerCase();
+  // PUR-2a. Companion identity is minted HERE, from the source, and every
+  // later reader takes it from the parsed command. Nothing downstream can tell
+  // a derived companion id apart from an authored one, which is the point:
+  // there is one companion-reading path, not two.
+  const derivedTransactionId = deriveInventoryPostingCompanionId({
+    capabilityId: family.capabilityId,
+    companionFamilyId: companion.companionEntityId,
+    familyId: family.familyId,
+    sourceRecordId: stockCountId,
+  });
+  const derivedLines = parsed.lines.map((line) => ({
+    ...line,
+    countedQuantity: normalizeDecimal(line.countedQuantity),
+    expectedQuantity: normalizeDecimal(line.expectedQuantity),
+    itemId: line.itemId.toLowerCase(),
+    reversalOfMovementId: line.reversalOfMovementId?.toLowerCase() ?? null,
+    stockCountLineId: line.stockCountLineId.toLowerCase(),
+    transactionLineId: deriveInventoryPostingCompanionId({
+      capabilityId: family.capabilityId,
+      companionFamilyId: companion.companionLineEntityId,
+      familyId: family.familyId,
+      sourceRecordId: line.stockCountLineId.toLowerCase(),
+    }),
+    varianceQuantity: normalizeDecimal(line.varianceQuantity),
+  }));
+  const companionIds = new Set(
+    derivedLines.map((line) => line.transactionLineId),
+  );
+  if (companionIds.size !== derivedLines.length) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      'companion line derivation is not injective over this line set',
+    );
+  }
   return {
     ...normalizeCommandEnvelope(parsed),
     locationId: parsed.locationId.toLowerCase(),
     sourceId: parsed.sourceId.toLowerCase(),
-    stockCountId: parsed.stockCountId.toLowerCase(),
+    stockCountId,
     supersedesStockCountId:
       parsed.supersedesStockCountId?.toLowerCase() ?? null,
-    lines: parsed.lines.map((line) => ({
-      ...line,
-      countedQuantity: normalizeDecimal(line.countedQuantity),
-      expectedQuantity: normalizeDecimal(line.expectedQuantity),
-      itemId: line.itemId.toLowerCase(),
-      reversalOfMovementId: line.reversalOfMovementId?.toLowerCase() ?? null,
-      stockCountLineId: line.stockCountLineId.toLowerCase(),
-      transactionLineId: line.transactionLineId.toLowerCase(),
-      varianceQuantity: normalizeDecimal(line.varianceQuantity),
-    })),
+    lines: derivedLines,
+    transactionId: derivedTransactionId,
   };
 }
 
 function validateCommandEnvelope(
   command: InventoryPostingCommandV1,
   additionalKeys: readonly string[] = [],
+  family?: ResolvedPostingFamily,
 ): void {
+  // PUR-2a. `transactionId` is an envelope key only where the caller authors
+  // the transaction. For a companion-origin family it is a kernel output, so a
+  // command that carries one is refused here rather than quietly ignored.
+  const authoredCompanion =
+    family === undefined || family.origin === 'authored';
   exactKeys(command, [
     'authorization',
     'channel',
@@ -1454,7 +1921,7 @@ function validateCommandEnvelope(
     'sourceRevision',
     'sourceType',
     'stockDimensionSetVersion',
-    'transactionId',
+    ...(authoredCompanion ? ['transactionId'] : []),
     ...additionalKeys,
   ]);
   exactKeys(command.authorization, [
@@ -1472,7 +1939,12 @@ function validateCommandEnvelope(
   canonicalInstant(command.effectiveAt, 'effectiveAt');
   requiredUuid(command.idempotencyKey, 'idempotencyKey');
   requiredUuid(command.legalEntityId, 'legalEntityId');
-  requiredUuid(command.transactionId, 'transactionId');
+  if (authoredCompanion) {
+    requiredUuid(
+      (command as { readonly transactionId: string }).transactionId,
+      'transactionId',
+    );
+  }
   requiredText(command.sourceId, 'sourceId', 80);
   requiredText(command.sourceType, 'sourceType', 80);
   if (
@@ -1497,7 +1969,9 @@ function normalizeCommandEnvelope<T extends InventoryPostingCommandV1>(
     ...parsed,
     idempotencyKey: parsed.idempotencyKey.toLowerCase(),
     legalEntityId: parsed.legalEntityId.toLowerCase(),
-    transactionId: parsed.transactionId.toLowerCase(),
+    ...('transactionId' in parsed
+      ? { transactionId: (parsed.transactionId as string).toLowerCase() }
+      : {}),
   };
 }
 
@@ -1505,13 +1979,16 @@ function validateLineIdentity(
   line: {
     readonly itemId: string;
     readonly sourceLine: string;
-    readonly transactionLineId: string;
+    readonly transactionLineId?: string;
     readonly unitId: string;
   },
   maximumSourceLineLength = 80,
+  authoredCompanionLine = true,
 ): void {
   requiredUuid(line.itemId, 'line.itemId');
-  requiredUuid(line.transactionLineId, 'line.transactionLineId');
+  if (authoredCompanionLine) {
+    requiredUuid(line.transactionLineId!, 'line.transactionLineId');
+  }
   requiredText(line.sourceLine, 'line.sourceLine', maximumSourceLineLength);
   requiredText(line.unitId, 'line.unitId', 32);
 }
@@ -1581,11 +2058,9 @@ function plannedMovements(
 }
 
 function plannedMovement(
-  command: InventoryPostingCommandV1,
+  command: DerivedPostingCommand,
   line:
-    | InventoryAdjustmentLineV1
-    | InventoryStockCountLineV1
-    | InventoryTransferLineV1,
+    InventoryAdjustmentLineV1 | DerivedStockCountLine | InventoryTransferLineV1,
   locationId: string,
   quantityDelta: string,
   sourceLine: string,
@@ -2152,11 +2627,306 @@ async function insertMovement(
   );
 }
 
+/**
+ * PUR-2a. Write the companion transaction and its lines for a
+ * companion-origin family. THE KERNEL IS THE WRITER: nothing outside this
+ * function creates the row, the row is created inside the posting
+ * transaction, and its identity is the derived one -- so a second attempt
+ * collides on the primary key instead of minting a second companion.
+ *
+ * The header is written directly in `posted` state. There is deliberately no
+ * draft phase and no line-set digest compare-and-set: those exist to protect
+ * an AUTHORED draft against edits between validation and posting, and a row
+ * created inside this transaction has no such window. Re-running the authored
+ * verifiers over rows this same function just wrote would be a verifier
+ * sharing a code path with the writer, which `AGENTS.md` section 6 names as a
+ * vacuity vector rather than as evidence.
+ *
+ * Returns the revision it wrote.
+ */
+async function writeCompanionTransaction(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  actorEnvelope: TrustedActorEnvelope,
+  family: ResolvedPostingFamily,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+  recordedAt: string,
+): Promise<number> {
+  const { command } = posting;
+  const revision = command.sourceRevision + 1;
+  const headerFields = [
+    [
+      'inventory_transaction_number',
+      companionTransactionNumber(family, command.transactionId),
+    ],
+    [
+      'inventory_transaction_type',
+      transactionType(binding, posting.postingRole),
+    ],
+    ['inventory_transaction_state', binding.transactionPostedState],
+    ['inventory_transaction_reason_code', command.reason.code || null],
+    ['inventory_transaction_reason_narrative', command.reason.narrative],
+    ['inventory_transaction_source_type', command.sourceType],
+    ['inventory_transaction_source_id', command.sourceId],
+    ['inventory_transaction_effective_at', command.effectiveAt],
+    ['inventory_transaction_recorded_at', recordedAt],
+    [
+      'inventory_transaction_actor_id',
+      actorEnvelope.actor.executionPrincipal.principalId,
+    ],
+  ] as const;
+  const headerColumns = [
+    'tenant_id',
+    'environment_id',
+    binding.transaction.legalEntityColumn!,
+    binding.transaction.recordIdColumn,
+    binding.transaction.revisionColumn,
+    ...headerFields.map(
+      ([local]) => requiredField(binding.transaction, local).name,
+    ),
+  ];
+  const headerValues = [
+    context.tenantId,
+    context.environmentId,
+    command.legalEntityId,
+    command.transactionId,
+    revision,
+    ...headerFields.map(([, value]) => value),
+  ];
+  const header = await client.query(
+    `INSERT INTO ${table(binding, binding.transaction)}
+       (${headerColumns.map(quoted).join(', ')})
+     VALUES (${headerValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+    headerValues,
+  );
+  if (header.rowCount !== 1) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      `companion transaction ${command.transactionId} was not written`,
+      { transactionId: command.transactionId },
+    );
+  }
+  for (const line of command.lines) {
+    const negative = line.varianceQuantity.startsWith('-');
+    const lineFields = [
+      ['inventory_transaction_line_line_number', line.sourceLine],
+      ['inventory_transaction_line_item_id', line.itemId],
+      [
+        'inventory_transaction_line_from_location_id',
+        negative ? command.locationId : null,
+      ],
+      [
+        'inventory_transaction_line_to_location_id',
+        negative ? null : command.locationId,
+      ],
+      ['inventory_transaction_line_quantity', line.varianceQuantity],
+      ['inventory_transaction_line_unit_id', line.unitId],
+    ] as const;
+    const lineColumns = [
+      'tenant_id',
+      'environment_id',
+      binding.transactionLine.legalEntityColumn!,
+      binding.transactionLine.recordIdColumn,
+      ...lineFields.map(
+        ([local]) => requiredField(binding.transactionLine, local).name,
+      ),
+      binding.transactionLineRelationToTransactionColumn,
+    ];
+    const lineValues = [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      line.transactionLineId,
+      ...lineFields.map(([, value]) => value),
+      command.transactionId,
+    ];
+    const written = await client.query(
+      `INSERT INTO ${table(binding, binding.transactionLine)}
+         (${lineColumns.map(quoted).join(', ')})
+       VALUES (${lineValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+      lineValues,
+    );
+    if (written.rowCount !== 1) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        `companion transaction line ${line.transactionLineId} was not written`,
+        { transactionLineId: line.transactionLineId },
+      );
+    }
+  }
+  return revision;
+}
+
+/**
+ * PUR-2a. Write the derived companion line identity onto each source line.
+ *
+ * The guard is `IS NULL`, so this can only ever fill an unwritten companion
+ * identity. It never overwrites one, and if a row's identity has already been
+ * set by anything at all the update matches zero rows and the posting fails
+ * rather than silently disagreeing with what is stored.
+ */
+async function writeCompanionLineIdentities(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+): Promise<void> {
+  const { command } = posting;
+  for (const line of command.lines) {
+    const written = await client.query(
+      `UPDATE ${table(binding, binding.stockCountLine)}
+          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
+          AND ${quoted(binding.stockCountLine.recordIdColumn)} = $4
+          AND ${quoted(binding.stockCountLineRelationToSessionColumn)} = $6
+          AND ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} IS NULL
+          AND ${quoted(binding.stockCountLine.archiveColumn)} IS NULL`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        line.stockCountLineId,
+        line.transactionLineId,
+        command.stockCountId,
+      ],
+    );
+    if (written.rowCount !== 1) {
+      throw postingError(
+        'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+        `stock-count line ${line.stockCountLineId} would not accept its derived companion identity`,
+        { stockCountLineId: line.stockCountLineId },
+      );
+    }
+  }
+}
+
+/**
+ * PUR-2a. Read the companion identities and revisions back OUT OF STORAGE and
+ * compare them to what derivation says they must be.
+ *
+ * This is the observation `AGENTS.md` section 6 asks for: it reads the
+ * persisted effect rather than trusting that the writes above reported
+ * success. It recomputes the expected identity from the SOURCE record id read
+ * back from the same row, so a source whose companion points somewhere else is
+ * caught even if every write returned one row.
+ */
+async function assertCompanionIdentitiesPersisted(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  family: ResolvedPostingFamily,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+  companionRevision: number,
+): Promise<void> {
+  const { command } = posting;
+  const companion = family.companion;
+  if (!companion) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `posting family ${family.familyId} derives no companion`,
+    );
+  }
+  const session = await client.query<Record<string, unknown>>(
+    `SELECT source.${quoted(binding.stockCount.recordIdColumn)}::text AS "sourceRecordId",
+            source.${quoted(binding.stockCountRelationToTransactionColumn)}::text AS "companionId",
+            source.${quoted(binding.stockCount.revisionColumn)}::integer AS "sourceRevision",
+            companion.${quoted(binding.transaction.revisionColumn)}::integer AS "companionRevision",
+            companion.${quoted(binding.transactionStateColumn)} AS "companionState"
+       FROM ${table(binding, binding.stockCount)} AS source
+       JOIN ${table(binding, binding.transaction)} AS companion
+         ON companion.tenant_id = source.tenant_id
+        AND companion.environment_id = source.environment_id
+        AND companion.${quoted(binding.transaction.legalEntityColumn!)} = source.${quoted(binding.stockCount.legalEntityColumn!)}
+        AND companion.${quoted(binding.transaction.recordIdColumn)} = source.${quoted(binding.stockCountRelationToTransactionColumn)}
+      WHERE source.tenant_id = $1 AND source.environment_id = $2
+        AND source.${quoted(binding.stockCount.legalEntityColumn!)} = $3
+        AND source.${quoted(binding.stockCount.recordIdColumn)} = $4
+        AND source.${quoted(binding.stockCount.archiveColumn)} IS NULL
+        AND companion.${quoted(binding.transaction.archiveColumn)} IS NULL`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.stockCountId,
+    ],
+  );
+  const row = session.rows[0];
+  if (
+    session.rows.length !== 1 ||
+    String(row!.companionId).toLowerCase() !==
+      deriveInventoryPostingCompanionId({
+        capabilityId: family.capabilityId,
+        companionFamilyId: companion.companionEntityId,
+        familyId: family.familyId,
+        sourceRecordId: String(row!.sourceRecordId),
+      }) ||
+    String(row!.companionState) !== binding.transactionPostedState ||
+    Number(row!.companionRevision) !== companionRevision ||
+    Number(row!.sourceRevision) !== companionRevision
+  ) {
+    throw postingError(
+      'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+      `stock count ${command.stockCountId} does not carry the derived companion transaction identity`,
+      { stockCountId: command.stockCountId },
+    );
+  }
+  const lines = await client.query<Record<string, unknown>>(
+    `SELECT source.${quoted(binding.stockCountLine.recordIdColumn)}::text AS "sourceRecordId",
+            source.${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "companionId",
+            companion.${quoted(binding.transactionLineRelationToTransactionColumn)}::text AS "companionTransactionId"
+       FROM ${table(binding, binding.stockCountLine)} AS source
+       JOIN ${table(binding, binding.transactionLine)} AS companion
+         ON companion.tenant_id = source.tenant_id
+        AND companion.environment_id = source.environment_id
+        AND companion.${quoted(binding.transactionLine.legalEntityColumn!)} = source.${quoted(binding.stockCountLine.legalEntityColumn!)}
+        AND companion.${quoted(binding.transactionLine.recordIdColumn)} = source.${quoted(binding.stockCountLineRelationToTransactionLineColumn)}
+      WHERE source.tenant_id = $1 AND source.environment_id = $2
+        AND source.${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
+        AND source.${quoted(binding.stockCountLineRelationToSessionColumn)} = $4
+        AND source.${quoted(binding.stockCountLine.archiveColumn)} IS NULL
+        AND companion.${quoted(binding.transactionLine.archiveColumn)} IS NULL`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.stockCountId,
+    ],
+  );
+  if (lines.rows.length !== command.lines.length) {
+    throw postingError(
+      'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+      `stock count ${command.stockCountId} lines do not all carry a derived companion line identity`,
+      { stockCountId: command.stockCountId },
+    );
+  }
+  for (const line of lines.rows) {
+    if (
+      String(line.companionId).toLowerCase() !==
+        deriveInventoryPostingCompanionId({
+          capabilityId: family.capabilityId,
+          companionFamilyId: companion.companionLineEntityId,
+          familyId: family.familyId,
+          sourceRecordId: String(line.sourceRecordId),
+        }) ||
+      String(line.companionTransactionId).toLowerCase() !==
+        command.transactionId
+    ) {
+      throw postingError(
+        'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+        `stock-count line ${String(line.sourceRecordId)} does not carry the derived companion line identity`,
+        { stockCountLineId: String(line.sourceRecordId) },
+      );
+    }
+  }
+}
+
 async function lockInventoryTransactionHeader(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
-  command: InventoryPostingCommandV1,
+  command: DerivedPostingCommand,
 ): Promise<void> {
   const header = await client.query<{ present: boolean }>(
     `SELECT true AS present
@@ -2252,7 +3022,7 @@ async function captureInventoryLineSetDigest(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
-  command: InventoryPostingCommandV1,
+  command: DerivedPostingCommand,
 ): Promise<string> {
   const result = await client.query<{ lineSetDigest: string }>(
     `SELECT ${inventoryLineSetDigestSql(binding, '$1', '$2', '$3', '$4')}
@@ -2478,6 +3248,13 @@ async function lockAndAssertStockCountEvidence(
   );
   const row = session.rows[0];
   const state = row?.state;
+  // PUR-2a. The companion identity is a POST-TIME OUTPUT, so a reviewed count
+  // must not already name one -- the kernel is its only writer, and a reviewed
+  // source that already carries a companion was written by something else. An
+  // already-posted count is the replay case, and there the stored identity
+  // must be exactly the derived one.
+  const expectedCompanionId =
+    state === binding.stockCountReviewedState ? null : command.transactionId;
   if (
     session.rows.length !== 1 ||
     (state !== binding.stockCountReviewedState &&
@@ -2490,7 +3267,7 @@ async function lockAndAssertStockCountEvidence(
       command.reason.narrative ||
     nullableUuid(row!.supersedesStockCountId) !==
       command.supersedesStockCountId ||
-    String(row!.transactionId).toLowerCase() !== command.transactionId ||
+    nullableUuid(row!.transactionId) !== expectedCompanionId ||
     Number(row!.revision) !==
       (state === binding.stockCountReviewedState
         ? command.sourceRevision
@@ -2555,7 +3332,8 @@ async function lockAndAssertStockCountEvidence(
       String(persisted.unitId) !== line.unitId ||
       nullableUuid(persisted.reversalOfMovementId) !==
         line.reversalOfMovementId ||
-      nullableUuid(persisted.transactionLineId) !== line.transactionLineId
+      nullableUuid(persisted.transactionLineId) !==
+        (expectedCompanionId === null ? null : line.transactionLineId)
     ) {
       throw postingError(
         'INVENTORY_COUNT_EVIDENCE_CONFLICT',
@@ -2727,11 +3505,18 @@ async function transitionStockCountToPosted(
   recordedAt: string,
 ): Promise<number> {
   const { command } = posting;
+  // PUR-2a. The companion transaction identity is written HERE, in the same
+  // compare-and-set that posts the source. The guard is `IS NULL`, so this
+  // statement can only ever fill an unwritten companion identity, and the
+  // evidence digest in the WHERE clause is computed from the pre-statement
+  // snapshot -- it still measures the reviewed row, not the row this statement
+  // is producing.
   const result = await client.query<{ revision: number }>(
     `UPDATE ${table(binding, binding.stockCount)}
         SET ${quoted(binding.stockCountStateColumn)} = $5,
             ${quoted(binding.stockCountRecordedAtColumn)} = $6::timestamptz,
             ${quoted(binding.stockCountActorColumn)} = $7,
+            ${quoted(binding.stockCountRelationToTransactionColumn)} = $11::uuid,
             ${quoted(binding.stockCount.revisionColumn)} = ${quoted(binding.stockCount.revisionColumn)} + 1
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
@@ -2739,7 +3524,7 @@ async function transitionStockCountToPosted(
         AND ${quoted(binding.stockCountStateColumn)} = $8
         AND ${quoted(binding.stockCountKindColumn)} = $9
         AND ${quoted(binding.stockCountLocationColumn)} = $10
-        AND ${quoted(binding.stockCountRelationToTransactionColumn)} = $11
+        AND ${quoted(binding.stockCountRelationToTransactionColumn)} IS NULL
         AND ${quoted(binding.stockCountSupersedesColumn)} IS NOT DISTINCT FROM $12::uuid
         AND ${quoted(binding.stockCount.revisionColumn)} = $13
         AND ${quoted(binding.stockCount.archiveColumn)} IS NULL

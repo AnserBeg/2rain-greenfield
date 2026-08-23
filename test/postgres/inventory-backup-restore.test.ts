@@ -1609,7 +1609,6 @@ async function postStockCount(
         reversalOfMovementId: null,
         sourceLine: String(input.sequence),
         stockCountLineId: `6b000000-0000-4000-8000-0000000000${suffix}`,
-        transactionLineId: `6c000000-0000-4000-8000-0000000000${suffix}`,
         unitId: 'EA',
         varianceQuantity: input.varianceQuantity,
       },
@@ -1622,7 +1621,6 @@ async function postStockCount(
     stockCountId,
     stockDimensionSetVersion: 'v1',
     supersedesStockCountId: input.supersedesStockCountId,
-    transactionId: `6d000000-0000-4000-8000-0000000000${suffix}`,
   };
   await seedReviewedCount(context, command);
   const posted = await service.postStockCount(context, actor, command);
@@ -1710,56 +1708,8 @@ async function seedReviewedCount(
   command: InventoryStockCountPostingCommandV1,
 ): Promise<void> {
   const binding = requiredBinding();
+  // PUR-2a. No pre-staged companion transaction: the posting kernel writes it.
   await withModuleRole(requiredSeedingPool(), context, async (client) => {
-    await insertEntity(
-      client,
-      binding,
-      binding.transaction,
-      {
-        inventory_transaction_actor_id: principalId,
-        inventory_transaction_effective_at: command.effectiveAt,
-        inventory_transaction_number: `G3R3-COUNT-${command.lines[0]!.sourceLine}`,
-        inventory_transaction_reason_code: command.reason.code,
-        inventory_transaction_reason_narrative: command.reason.narrative,
-        inventory_transaction_recorded_at: recordedAt,
-        inventory_transaction_source_id: command.sourceId,
-        inventory_transaction_source_type: command.sourceType,
-        inventory_transaction_state: enumOption(
-          field(binding.transaction, 'inventory_transaction_state'),
-          'draft',
-        ),
-        inventory_transaction_type: enumOption(
-          field(binding.transaction, 'inventory_transaction_type'),
-          'count_correction',
-        ),
-      },
-      command.transactionId,
-      command.legalEntityId,
-      {},
-    );
-    for (const line of command.lines) {
-      const negative = line.varianceQuantity.startsWith('-');
-      await insertEntity(
-        client,
-        binding,
-        binding.transactionLine,
-        {
-          inventory_transaction_line_from_location_id: negative
-            ? command.locationId
-            : null,
-          inventory_transaction_line_item_id: line.itemId,
-          inventory_transaction_line_line_number: Number(line.sourceLine),
-          inventory_transaction_line_quantity: line.varianceQuantity,
-          inventory_transaction_line_to_location_id: negative
-            ? null
-            : command.locationId,
-          inventory_transaction_line_unit_id: line.unitId,
-        },
-        line.transactionLineId,
-        command.legalEntityId,
-        { [binding.transaction.entity.entityId]: command.transactionId },
-      );
-    }
     await insertEntity(
       client,
       binding,
@@ -1786,7 +1736,6 @@ async function seedReviewedCount(
       {
         [binding.stockCount.entity.entityId]:
           command.supersedesStockCountId ?? '',
-        [binding.transaction.entity.entityId]: command.transactionId,
       },
     );
     for (const line of command.lines) {
@@ -1807,7 +1756,6 @@ async function seedReviewedCount(
         command.legalEntityId,
         {
           [binding.stockCount.entity.entityId]: command.stockCountId,
-          [binding.transactionLine.entity.entityId]: line.transactionLineId,
         },
       );
     }
