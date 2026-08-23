@@ -755,18 +755,29 @@ test('stock-count companion derivation: a reviewed count that already names a co
         );
       });
 
-      await assert.rejects(
-        service.postStockCount(context, actor, command),
-        (error: unknown) => {
-          assert.ok(error instanceof InventoryPostingError);
-          assert.equal(error.code, 'INVENTORY_COUNT_EVIDENCE_CONFLICT');
-          assert.match(
-            error.message,
-            /does not exactly match the reviewed evidence/u,
-          );
-          return true;
-        },
+      const refusal = await service
+        .postStockCount(context, actor, command)
+        .then(
+          () => null,
+          (reason: unknown) => reason,
+        );
+      assert.ok(
+        refusal instanceof InventoryPostingError,
         'a reviewed count carrying a companion identity the kernel did not write must be refused',
+      );
+      assert.equal(
+        refusal.code,
+        'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+        'the refusal must be an evidence conflict',
+      );
+      // Which refusal it is matters. Without the reviewed-must-be-null fence
+      // the kernel adopts the foreign companion and the posting is refused
+      // further down, at the LINE check, for a reason that sends an operator
+      // to the wrong record.
+      assert.match(
+        refusal.message,
+        /does not exactly match the reviewed evidence/u,
+        'the refusal must name the reviewed session, not one of its lines',
       );
 
       const after = await readCompanionState(runtimePool, context, binding);

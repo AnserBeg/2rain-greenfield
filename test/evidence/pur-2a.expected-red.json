@@ -96,7 +96,7 @@
     },
     {
       "name": "reviewed-source-companion-must-be-null-fence-removed",
-      "claim": "The kernel is the ONLY writer of a companion identity, so a reviewed stock count must not already name one. Replacing the fence with whatever is stored makes the kernel adopt a companion transaction written by something else. This is the packet's gate-invisible deliverable -- an operator-visible refusal the binding makes possible -- and it dies alone: the two posting tests are unaffected because their stored value is null either way.",
+      "claim": "The kernel is the ONLY writer of a companion identity, so a reviewed stock count must not already name one. Replacing the fence with whatever is stored makes the kernel ADOPT a companion transaction written by something else. Measured, the posting is still refused -- the line check catches it further down -- so what the fence actually buys is the IDENTITY of the refusal: with it, the operator is told the reviewed session is wrong; without it, they are sent to a line that is fine. This is the packet's gate-invisible deliverable, and it dies alone: the two posting tests are unaffected because their stored value is null either way.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  const expectedCompanionId =\n    state === binding.stockCountReviewedState ? null : command.transactionId;",
       "replacement": "  const expectedCompanionId = nullableUuid(row?.transactionId ?? null);",
@@ -108,7 +108,7 @@
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: a reviewed count that already names a companion transaction is refused",
-          "expected": "a reviewed count carrying a companion identity the kernel did not write must be refused"
+          "expected": "the refusal must name the reviewed session, not one of its lines"
         }
       ]
     },
