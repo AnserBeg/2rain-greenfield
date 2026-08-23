@@ -11,37 +11,44 @@ and was read as REFERENCE only.
 
 Tier: Critical
 
-Status: **evidence ready — round 4, records converged.**
+Status: **evidence ready — full matrix GREEN, awaiting integration.**
 
-**Gate SHA: `414a0e9211e5a6a79757b7897a5e1f5df6fb13a4`**, and it still covers this
-tree: rounds 3 and 4 changed `docs/` only, so
-`git diff --name-only 414a0e9 <tip> -- . ':!docs' ':!.agents' ':!CLAUDE.md'
-':!AGENTS.md' ':!learnings.md'` is empty. All five suites green there, zero reds:
-`test:unit` 155 · `test:compiler` 152 · `test:integration` 149 ·
-`test:architecture` 178 · `test:postgres` 205, plus `typecheck`, `lint`,
-`format`, `check:app-release`, `check:demo-release`, `check:boundaries`.
+```
+FULL_MATRIX_PASS_SHA=ff3689246e7efc7428b6a9e7b0f068e55cbaed2b
+```
 
-**PRODUCTION HAS NOT CHANGED SINCE THE ROUND-2 CANDIDATE.**
-`git diff --name-only 08fcaf1 <tip> -- packages/ apps/web/release/ db/` is empty.
-Rounds 3 and 4 changed one test file and three record files.
+Run through `scripts/run-matrix.sh`, **zero reds**: `test:browser` 93 passed ·
+`check:reachability` 105/105 test files executed · `check:language-coverage`
+PASS (2050 obligations, 464 first-party observations) ·
+`architecture-boundaries` PASS · unit 155 · compiler 152 · integration 149 ·
+architecture 178 · postgres 205, plus performance, agent, contracts, locale,
+`check:app-release`, `check:demo-release` and the observability producer.
 
-**Review history — three REVISE rounds, eight findings, all upheld, none argued
-down.** Round 1 `a052965` (tag `pur-1-reviewed-r1`): active `close`/`reopen`
-operations, a proxy where the parent-aggregate rule needed runtime observation,
-the plan-assigned builder registry refactor omitted. Round 2 `08fcaf1` (tag
-`pur-1-reviewed-r2`): no authority to omit the plan-assigned amend, a `restore`
-survivor in the parent-guard vertical, a stale active queue row. Round 3
-`d2f25c1` (tag `pur-1-reviewed-r3`), **records only**: the Goal still said the
-amend ruling was owed after recording it, and the ledger row was stale on
-lifecycle, lease count and delta. Every reviewed candidate remains retrievable at
-its tag.
+**`test:browser` and `check:language-coverage` were both first run here.** The
+browser suite finally executes the navigation expectations this packet edited
+blind in round 1; the language-coverage gate found a real omission on its first
+run — see below.
 
-**The codex arm has not returned PASS.** Round 3's findings were records-only and
-the reviewer confirmed the restore correction sound, production unchanged and the
-amend ruling substantively adequate — so **the user ruled that the Fable confirm
-arm runs now.** `review-tiers` sequences Fable after a codex PASS on an identical
-SHA; that is not the case here and the Fable prompt says so plainly rather than
-implying a PASS that does not exist.
+**Matrix history: two runs.** The first, at `b50d605`, returned
+`FULL_MATRIX_FAILED rc=1` with **zero `not ok` lines and every node suite
+green** — the failure was `check:language-coverage`, which runs in no
+packet-selected subset and which four review rounds across two arms had passed
+over. The second run, at `ff36892`, is green.
+
+**Not yet integrated.** `main` is checked out in the orchestrator's worktree, so
+the `--no-ff` merge is the orchestrator's to run or to authorise. The ledger row
+stays `evidence_ready` until the merge exists, because `AGENTS.md` §6 wants the
+matrix green at the INTEGRATED SHA — and `main` has not moved during this
+packet, so that merge's tree will be byte-identical to the matrix tree and this
+run is the acceptance run.
+
+**Review history — four rounds, ten findings, all upheld, none argued down.**
+R1 `a052965` (`pur-1-reviewed-r1`), R2 `08fcaf1` (`pur-1-reviewed-r2`), R3
+`d2f25c1` (`pur-1-reviewed-r3`) — three codex REVISE rounds — then a Fable max
+confirm at `cbe156c` which **CONFIRMED the Critical logic with no production
+finding** and returned REVISE on four stale record facts. Every reviewed
+candidate is retrievable at its tag. **The codex arm never returned PASS**; the
+user ruled the sequence converged once both arms' findings were records-only.
 
 ## Goal
 
