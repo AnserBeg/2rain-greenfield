@@ -1,7 +1,18 @@
 # ADR-0049: The document-transition and inventory-effect seam
 
 Date: 2026-08-08
-Status: proposed by packet `PS-0`; ratified when that packet is accepted
+Status: **DESIGN PHASE CAPPED — not ratified, and will not be ratified as written.**
+Corrected 2026-08-22 by the orchestrator's record sweep; the line previously read
+*"proposed by packet `PS-0`; ratified when that packet is accepted"*, and `PS-0` was
+never accepted and never will be. **Three design passes (`PS-0`, `PS-1`, `PS-2`)
+returned three BLOCKs on one class:** every version ruled the posting-family
+mechanism settled having built only goods receipt, and every review found stock
+count refutes it. `purchasing-sales-v1-plan.md` §7.16 caps the design phase and
+routes the mechanism to **`PUR-2a`** as construction rather than ruling.
+**Read §7.16 for what this document still carries and what it lost** — §1.1, §1.2,
+§3.1, §3.2, §3.3, §4 and §6 are upheld; the profile-as-executable-authority claim,
+the baseline-plus-extension claim, and lock-and-sum as the settled physical
+implementation are refuted and must not be re-inherited from the text below.
 Tier: Critical (it decides how every business document reaches the ledger)
 
 ## Context
