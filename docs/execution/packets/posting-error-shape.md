@@ -259,6 +259,32 @@ added here to compensate for the gate.**
   round 4; the earlier wording called the Replay `23505` "the
   genuine-PG-error half", which contradicted the corrected route section
   above once the whole-file run was recorded.)*
+- **The residue: a SQLSTATE-SHAPED foreign code is still admitted, and this
+  packet cannot close that.** The guard tests shape, and shape alone cannot
+  separate a five-character `[0-9A-Z]` Node code from a real SQLSTATE,
+  because such a code sits **inside the legal SQLSTATE value space**.
+  Orchestrator-verified, the guard admits `EPIPE`, `EBUSY`, `EBADF`,
+  `EINTR`, `ELOOP`, `ENXIO`, `EPERM`, `EROFS`, `ESRCH`, `ETIME` and `EXDEV`;
+  `EPIPE` is the realistic one on a posting connection. (`ECONNREFUSED` is
+  refused at 12 characters, and every `ERR_*` code by its underscore.)
+  **Tightening the pattern is not the fix** — a narrower pattern would refuse
+  legal custom `ERRCODE`s, which are exactly as SQLSTATE-shaped. **Closure is
+  provenance-based, not shape-based:** ask whether the error actually came
+  from the server — its `severity` property — or whether the driver typed it
+  as a `DatabaseError`. That is a different question from the one this guard
+  asks, and it belongs to the row that owns it:
+  **`posting-error-provenance`, filed on `main` at `c6cce1c`**, which is the
+  packet that changes the guard. **Ruled not to block `PUR-2`:** this packet
+  removes the misdiagnosis class that was actually observed, and the residue
+  is a narrower, unobserved successor.
+- **A known imprecision in the production comment, deliberately NOT edited.**
+  The comment beside the guard names `ECONNREFUSED` as its example of a
+  refused Node code, which is true, while `EPIPE` — also a Node code — is
+  admitted, so the comment reads as a stronger claim than the guard makes.
+  It is left byte-identical on purpose: Fable's clearance rests on
+  `git diff --stat 7b525b3 <tip> -- packages/` returning empty, and editing a
+  comment would break that for a wording fix. Routed to
+  `posting-error-provenance` with the residue itself.
 - The `racedReplay !== null` (replay-resolved) arm of the catch and the
   `claimed by a different posting` refusal are **not exercised** by any test,
   before or after this packet — see the structural finding.
@@ -288,20 +314,20 @@ Round history, every candidate fetchable and tagged:
 | 2 | `7bad8d4` (executable `c36e0c6`), tag `…-reviewed-r2` | REVISE | the admission singleton was produced by a `namePattern`, not by its mutation; Q2 closed |
 | 3 | `28be329` (executable `cca8d02`), tag `…-reviewed-r3` | REVISE | the base-unit `P0001` was described as a posting path; Q1 closed |
 | 4 | `2f97b9c`, tag `…-reviewed-r4` | REVISE | a stale scope sentence, and a **fabricated SHA** in a review-log row |
+| 5 | `b2c23d2`, tag `…-reviewed-r5` — **Fable max confirm** | REVISE | the SQLSTATE-shaped residue (`EPIPE` and kin admitted; shape cannot close it) and the comment's `ECONNREFUSED` example reading stronger than the guard |
 
 **Production has been byte-identical since the first candidate**, through
-every round:
+every round — and it stays that way through this closing correction, which is
+docs-only by ruling precisely so the clearance holds:
 
     $ git diff --stat 7b525b3 cca8d02 -- packages/
     (empty)
 
-Round 2: candidate `7bad8d4` (executable `c36e0c6`) — REVISE. The arm found
-the admission singleton was produced by its `namePattern` rather than by its
-mutation, and named the excluded victim. Q2 closed.
-Round 1: candidate `8c41712` (executable `7b525b3`) — REVISE on evidence only;
-C1, C2 and C4 closed, no production defect.
-Both reviewed candidates are preserved as tags
-`posting-error-shape-reviewed-r1` and `-r2`.
+Rounds 1 and 2 are rows in the round-history table above; this paragraph used
+to restate them and drifted from it, so it is gone. **Every reviewed
+candidate is tagged and pushed to `origin`** —
+`posting-error-shape-reviewed-r1` through `-r5` — and each tag was verified
+to resolve to the SHA its row names.
 
 Gates in the packet worktree `/home/rvham/2rain-greenfield-pes`:
 
