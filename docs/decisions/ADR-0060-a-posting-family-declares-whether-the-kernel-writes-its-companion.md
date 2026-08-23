@@ -88,10 +88,17 @@ because a parent-scoped child genuinely cannot exist without its session.
 
 **The family roster is not executable authority.** What is frozen in the
 provider is WHICH families exist. What is compiled and release-verified is
-everything each family is MADE OF — every entity, relation column and enum
-option is resolved against the registration's content-hashed storage target,
-which `assertActiveRelease` already proves is the exact active-release
-artifact, so a family the release cannot satisfy fails service construction.
+everything each family is MADE OF: every entity, relation column and enum
+option is resolved out of the registration's storage target.
+
+*Stated at its real strength and no further, because the two halves happen at
+different times.* Resolution runs at service CONSTRUCTION, so on its own it
+only proves a family against the target it was handed. `assertActiveRelease`
+runs per POSTING, and it proves that target is the exact active-release
+artifact by comparing its canonical BYTES against the persisted projection
+chunk — not merely a content hash. Together they mean a family the ACTIVE
+RELEASE cannot satisfy can never post. Construction alone does not mean that.
+
 Moving the roster itself into the compiled contract release requires changing
 `InventoryPostingRegistrationV1`, which has fourteen construction sites.
 

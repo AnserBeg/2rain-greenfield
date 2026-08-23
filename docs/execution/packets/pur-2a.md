@@ -62,8 +62,16 @@ neighbours). `origin` is ADR-0049 §4's authored/companion axis:
 `resolvePostingFamilies` resolves every entry against the **compiled storage
 target** in the registration: each entity by its compiled entity id, each
 relation column by the compiled relation, each enum option by the compiled
-field contract. A family naming anything the active release does not carry
+field contract. A family naming anything the supplied target does not carry
 throws at service construction rather than at posting time.
+
+**The timing is worth stating exactly, because the obvious sentence overstates
+it.** Resolution happens at construction, against the target the service was
+handed. `assertActiveRelease` happens per posting, and it is stronger than a
+hash comparison — it matches the target's canonical BYTES against the
+projection chunk the active release persisted. So the honest claim is the
+conjunction: a family the ACTIVE RELEASE cannot satisfy can never post.
+Construction alone proves only the weaker half.
 
 The three `switch (postingRole)` statements became lookups in that binding, and
 the `'stockCount'` literal became the family's declared `sourceType`.
@@ -203,7 +211,50 @@ test read only the `correction` role's companion type while the mutation moved
 the `count` role's. The test now reads both, so each declared role binding is
 observed by something.
 
-## The one blocked gate — a stop-and-bridge-request
+## Gate results, measured at `499aab1`
+
+| Gate | Result |
+|---|---|
+| `typecheck`, `lint`, `format` | green |
+| `evidence:expected-red` (8 entries) | **OK — 8 reproduced and restored**, kill sets exact |
+| `check:expected-red-controls` | green |
+| `check:boundaries` | green |
+| `test:unit` | 155 pass, 0 fail |
+| `test:compiler` | 152 pass, 0 fail |
+| `test:integration` | 149 pass, 0 fail |
+| `test:architecture` | 177 pass, **1 fail** — stop 2 |
+| `test:postgres` | 210 pass, **2 fail** — stop 1 |
+| `check:app-release` | **RED** — stop 1 |
+
+**All three reds trace to exactly two out-of-lease causes, and neither is in
+this packet's production logic.** Every test this packet added or changed
+passes, including all four stock-count tests.
+
+## Stop 1 — the release lineage cannot advance
+
+**Corrected after measurement. An earlier draft of this record said the blast
+radius was `check:app-release` alone; it is not, and the difference matters
+because the second half is this packet's REQUIRED gate.**
+
+Regenerating `apps/web/release/app.compiled.json` refuses:
+
+    COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED
+    $.relations  northstar.app:relation.stock_count_line_transaction_line
+    v1 rejects mutation or removal of an existing relation physical shape,
+    requiredness, ownership, target, or referential action
+
+That one refusal reds three things:
+
+- `check:app-release` — *compiled application release is stale*;
+- `test:postgres` › `composed-application.test.ts` › *composed product advances
+  an existing deployment to an exact compiled successor* — it shells out to the
+  same compile script;
+- `test:postgres` › `composed-application.test.ts` › *a same-profile successor
+  over one revision is not named a profile-only edge* — same script, asserting
+  `compiled` and receiving `failed`.
+
+`test:postgres` is the gate the charter made REQUIRED here, so this stop lands
+on it and not only on a release artifact.
 
 `check:app-release` is **RED** and cannot be made green inside this lease.
 
@@ -246,8 +297,42 @@ lineage a compiler change invalidated, not for escaping a correct diagnostic.
 `definition.ts`; the staleness `check:app-release` now reports is the true
 state, not a hidden one.
 
-**Stop count for this packet: 1.** `mission-cadence` allows two before
-re-scope.
+## Stop 2 — a control pinned by line number, which this change moves
+
+`test:architecture` › `module-press-law.test.ts` › *consolidated guard red: the
+routed Inventory literal cannot mask a later live-comparison splice* fails on
+one stale integer.
+
+The control splices `${'northstar'}.${'inventory'}:capability.posting` into the
+live provider source at `registration.capabilityId !== INVENTORY_POSTING_CAPABILITY_ID`
+and asserts the guard reports it at a **hardcoded** line. That comparison sits
+at line 866 in the base and at **1079** here, because this packet added
+declarations above `validateRegistration`. The needed change is one integer at
+`test/architecture/module-press-law.test.ts:460`, and
+`test/architecture/**` is not in this packet's owned paths.
+
+**This packet already avoided the other half of the same problem.** The routed
+PRESS006 debt list in that same file pins eight coordinates in
+`conformance.ts`; an explanatory comment on the pinned relation table shifted
+all eight, so the comment was removed and the compiler change made
+**line-neutral** — measured with `checkModulePressLaw`, the eight coordinates
+are back at 2371, 2934, 2973, 3142, 3146, 3151, 3155 and 3289, unchanged. The
+remaining pin cannot be avoided that way: the public stock-count command types
+must change, and they live above the pinned line.
+
+**Filed as `press-law-splice-control-pinned-by-line-number`.** That control
+locates its subject by a hardcoded integer, so it breaks for any packet adding
+a line above `validateRegistration` in the posting service. The routed-debt
+list in the same file already carries the lesson in its own comment — *read the
+new values from `checkModulePressLaw` rather than arithmetic* — and locating
+the spliced line by content would make this control immune rather than merely
+easy to repair.
+
+**Stop count for this packet: 2, which is the cap before `mission-cadence`
+requires a re-scope rather than a third continuation.** Both stops are the same
+shape: an artifact pinned OUTSIDE this lease that an in-lease change
+necessarily moves. Neither is a defect in the packet's production logic, and
+neither was foreseeable from the charter.
 
 ## Findings routed out, not taken
 
@@ -278,3 +363,75 @@ re-scope.
   `INVENTORY_POSTING_IDEMPOTENCY_CONFLICT` rather than as a replay. That is a
   loud refusal, not a silent wrong answer, and no such receipt exists outside a
   live upgraded database.
+
+## Record claim
+
+`main` gained `record-claim-fidelity`'s gate while this packet ran, so this
+block is written to its `northstar.record-claim/v1` schema. **It is UNVERIFIED
+on this branch** — the checker lives on `main` and this branch was cut before
+it. `head` is the last EXECUTABLE commit; the commits after it are narrative.
+Verify at integration with `bash scripts/check-records.sh` on the merged tree.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "pur-2a",
+  "base": "2908e7faff74386bfef07abe741609fa0c76be24",
+  "head": "319eb5ac3ad5eca9484b5b87cfe735c2103aca1e",
+  "changedPaths": [
+    "apps/web/release/app.authored.json",
+    "packages/compiler/src/conformance.ts",
+    "packages/domain/src/inventory/definition.ts",
+    "packages/postgres-provider/src/inventory-posting-service.ts",
+    "test/evidence/pur-2a.expected-red.json",
+    "test/postgres/inventory-backup-restore.test.ts",
+    "test/postgres/inventory-stock-count.test.ts"
+  ],
+  "symbols": [
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "deriveInventoryPostingCompanionId"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "INVENTORY_POSTING_FAMILIES_V1"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "resolvePostingFamilies"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "writeCompanionTransaction"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "writeCompanionLineIdentities"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "assertCompanionIdentitiesPersisted"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "companionTransactionNumber"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "postingFamilyForRole"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "ResolvedPostingFamily"
+    },
+    {
+      "path": "test/postgres/inventory-stock-count.test.ts",
+      "name": "withCompanionEnvironment"
+    },
+    {
+      "path": "test/postgres/inventory-stock-count.test.ts",
+      "name": "readCompanionState"
+    }
+  ]
+}
+```
