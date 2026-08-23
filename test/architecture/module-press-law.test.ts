@@ -22,56 +22,61 @@ const routedPressLawDebt: readonly ModulePressLawViolation[] = [
   // replaces the hard-coded contract pattern.
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 2364,
+    // `PUR-1` declared two family rows and one relation-semantics row near the
+    // top of `conformance.ts`, so EVERY routed entry in that file moved down by
+    // the same seven lines. The routed debt itself is unchanged -- same files,
+    // same rules, same messages, same count -- and only the offsets moved. The
+    // new values were read from `checkModulePressLaw` rather than arithmetic.
+    line: 2371,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 2927,
+    line: 2934,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 2966,
+    line: 2973,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3135,
+    line: 3142,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3139,
+    line: 3146,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3144,
+    line: 3151,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3148,
+    line: 3155,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3282,
+    line: 3289,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
@@ -112,8 +117,9 @@ test('one auto-discovered guard covers every definition-backed product module', 
     'location',
     'party',
     'platform',
+    'purchasing',
   ]);
-  assert.equal(result.modulesRead, 5);
+  assert.equal(result.modulesRead, 6);
   assert.ok(
     result.productionFilesRead > 0,
     'press-law guard read zero production files',

@@ -557,3 +557,58 @@ renumbering a preserved probe costs one file rename and a reference sweep.
 **The durable fix is not a convention, it is that a number nobody reserves will
 collide again the moment two lanes run.** Two lanes is now normal here. Filed as a
 queue row rather than solved by asking lanes to be careful.
+
+## `PUR-1` (`packet/pur-1-v2`) — files taken outside its lease, 2026-08-22
+
+**Three files, all forced by the mount, all additive, all held on other lanes'
+branches. Named here so integration order is a decision rather than a merge
+conflict.**
+
+| File | Also changed on | What `PUR-1` did |
+|---|---|---|
+| `package.json` | `packet/expected-red-gate` | one filename added to `test:unit`'s explicit file list |
+| `test/architecture/repository-hygiene.test.ts` | `packet/record-claim-fidelity` | the same filename added to the reviewed suite inventory |
+| `test/architecture/module-press-law.test.ts` | `packet/press-law-splice` | `'purchasing'` added to `moduleDirectories`, `modulesRead` 5 -> 6, routed `conformance.ts` debt offset 2364 -> 2371 |
+| `test/helpers/reachability-producers.ts` | **nobody** — measured unheld | the same filename added to the THIRD suite inventory, the one `repository-hygiene` does not compare against |
+| `packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts` | **nobody** — measured unheld | one entry, because the tripwire flags any file mentioning three or more predicate kinds and a definition file CONSTRUCTS them. `inventory/definition.ts` is registered for the same reason |
+| `test/postgres/module-storage-transition.test.ts` | **nobody** — measured unheld | its "composed application without Inventory" fixture must strip Purchasing too, or `createManagedTable` fails closed: Purchasing is `entityOwned` and `legal_entity` belongs to Inventory |
+| `test/postgres/fresh-tenant-full-replay-schema.snapshot.json` | **nobody** — measured unheld | **REGENERATED, not edited.** A full-replay oracle produced by `test/helpers/generate-fresh-tenant-full-replay-schema.ts`; hand-editing it would destroy the independence it exists to provide. Verified purely additive across all twenty collections |
+
+**Seven files, and only the first three were predictable from the charter.**
+Four are hand-written registries a new module must be added to, and nothing lists
+them in one place — `package.json`, `repository-hygiene`,
+`reachability-producers`, and the predicate tripwire. The open
+`suite-inventory-copies` row names three; the tripwire is a fourth of the same
+shape. The seventh is a generated oracle, which is the benign category. **The
+next module mount will find them the same way this one did: one red at a time,
+across four `test:postgres` rounds.**
+
+**None of these was avoidable by staying inside the lease.** `checkModulePressLaw`
+AUTO-DISCOVERS module directories under `packages/domain/src`, so a new module
+moves that test with no edit that could prevent it; and the routed debt's line
+number moves because the family-map rows land above it. The other two are the
+consequence of registering one new `test/unit` file, which AGENTS.md §6 requires
+be proven reachable.
+
+**They were taken rather than stopped on** because the lease grants
+`test/unit/**` and a test file that cannot be run is not a test. That is the
+lane's judgement and the orchestrator's to revoke.
+
+**Whoever integrates second takes the union**, not a side: all three are
+independent one-line additions to different regions of their files.
+
+## THE MACHINE WAS HELD THROUGHOUT `PUR-1`'s DEVELOPMENT — recorded 2026-08-22
+
+A full `bash scripts/run-matrix.sh redgate /home/rvham/2rain-greenfield-redgate`
+held the exclusive matrix lock for the whole of this packet's implementation,
+which is the detached-worktree pattern this file prescribes and it worked
+exactly as intended: `PUR-1`'s gate sequence queued behind it rather than racing
+it, and `run-with-test-lock.mjs` reported the holder by pid, pgid and label.
+
+**Worth recording because the failure it prevented is one this file has filed
+twice.** The one gate that DID run unqueued —
+`repository-hygiene.test.ts`'s bounded-deadline test, invoked directly rather
+than through the lock — failed with `POSTGRES_CONTAINER_CONTAMINATION` naming
+the other lane's live container. That is the gate working, not a defect, and it
+is also the reason a lane must never read a direct suite invocation's red as its
+own.

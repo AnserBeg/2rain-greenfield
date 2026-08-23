@@ -11,6 +11,7 @@ import {
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
+import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/definition.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -4344,11 +4345,89 @@ function inventoryOwnedModuleDefinition(): Record<string, unknown> {
   return application;
 }
 
+/**
+ * Removes one module's declared entries from a composed application, asserting
+ * each is removed EXACTLY ONCE so a silently-absent module cannot masquerade as
+ * a removed one.
+ */
+function withoutModuleForTransition(
+  application: Record<string, unknown>,
+  module: Record<string, unknown>,
+  label: string,
+): Record<string, unknown> {
+  for (const collection of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const) {
+    const target = application[collection];
+    const source = module[collection];
+    assert.ok(Array.isArray(target));
+    assert.ok(Array.isArray(source));
+    application[collection] = target.filter(
+      (candidate) =>
+        !source.some(
+          (sourceEntry) =>
+            canonicalize(candidate) === canonicalize(sourceEntry),
+        ),
+    );
+    assert.equal(
+      target.length - (application[collection] as unknown[]).length,
+      source.length,
+      `transition fixture must remove every ${label} ${collection} entry exactly once`,
+    );
+  }
+  const modules = application.modules;
+  const sourceModules = module.modules;
+  assert.ok(Array.isArray(modules));
+  assert.ok(Array.isArray(sourceModules));
+  const sourceModule = sourceModules[0];
+  assert.ok(sourceModule && typeof sourceModule === 'object');
+  assert.ok('moduleId' in sourceModule);
+  application.modules = modules.filter(
+    (candidate) =>
+      candidate === null ||
+      typeof candidate !== 'object' ||
+      !('moduleId' in candidate) ||
+      candidate.moduleId !== sourceModule.moduleId,
+  );
+  assert.equal(
+    modules.length - (application.modules as unknown[]).length,
+    1,
+    `transition fixture must remove the ${label} module exactly once`,
+  );
+  return application;
+}
+
+/**
+ * The composed application with neither Inventory NOR Purchasing.
+ *
+ * Purchasing is stripped too, and the reason is structural rather than
+ * cosmetic: `PUR-1` classified both purchasing families as `entityOwned`, and
+ * `createManagedTable` requires exactly one compiled legal-entity master for
+ * any entity-owned table -- but `legal_entity` is declared by the INVENTORY
+ * module. A composition carrying Purchasing without Inventory therefore fails
+ * closed with `LEGAL_ENTITY_MASTER_TARGET_INVALID: expected one compiled
+ * legal-entity master, received 0`, which is the gate working. Before `PUR-1`
+ * this fixture had no entity-owned entity at all, so the check was never
+ * reached.
+ */
 function composedApplicationWithoutInventoryForTransition(): Record<
   string,
   unknown
 > {
-  const application = structuredClone(inventoryOwnedModuleDefinition());
+  const application = withoutModuleForTransition(
+    structuredClone(inventoryOwnedModuleDefinition()),
+    purchasingModuleDefinition(APPLICATION_NAMESPACE),
+    'purchasing',
+  );
   const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
   for (const collection of [
     'assertions',

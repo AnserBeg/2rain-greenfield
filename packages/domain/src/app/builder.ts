@@ -2,6 +2,7 @@ import { catalogModuleDefinition } from '../catalog/definition.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
+import { purchasingModuleDefinition } from '../purchasing/definition.js';
 
 const version = 'v5' as const;
 const normalizationProfileVersion = 'northstar.normalization/v5' as const;
@@ -23,45 +24,90 @@ type CollectionName =
   | 'surfaces';
 
 /**
- * The product application is one canonical package containing the same Party,
- * Catalog, Location, and Inventory definitions their standalone harnesses
- * compile. The factories are instantiated under one package namespace; no
- * definition body is copied and no separately namespaced package is composed.
+ * THE ORDERED MODULE REGISTRY.
+ *
+ * Plan §7.2 assigned this to *"the first packet that mounts anything"*, and
+ * §7.5's `PUR-1` row repeats it. Before this, `builder.ts` named every module
+ * five times over — a factory list, a destructured tuple, a truthiness guard, a
+ * hard-coded count in an error string, a re-listed array for module ordering,
+ * and a second re-listed array for the capability comparison. Each mount had to
+ * find all six and change the number in one of them.
+ *
+ * Order is the ONLY thing declared here, and it is load-bearing rather than
+ * cosmetic: `orderKey` is derived from position, and the compiled navigation
+ * tree groups by module in that order.
+ */
+const MODULE_REGISTRY = Object.freeze([
+  Object.freeze({ create: partyModuleDefinition, moduleName: 'party' }),
+  Object.freeze({ create: catalogModuleDefinition, moduleName: 'catalog' }),
+  Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),
+  Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
+  Object.freeze({
+    create: purchasingModuleDefinition,
+    moduleName: 'purchasing',
+  }),
+] as const);
+
+/** The mounted module names, in composition order, for callers that assert on the set. */
+export const COMPOSED_MODULE_NAMES = Object.freeze(
+  MODULE_REGISTRY.map((entry) => entry.moduleName),
+);
+
+/**
+ * The product application is one canonical package containing the same module
+ * definitions their standalone harnesses compile. The factories are
+ * instantiated under one package namespace; no definition body is copied and no
+ * separately namespaced package is composed.
+ *
+ * Adding a module is ONE registry entry. Nothing below counts, destructures, or
+ * re-lists them.
  */
 export function composedApplicationDefinition(): Record<string, unknown> {
-  const definitions = [
-    partyModuleDefinition(APPLICATION_NAMESPACE),
-    catalogModuleDefinition(APPLICATION_NAMESPACE),
-    locationModuleDefinition(APPLICATION_NAMESPACE),
-    inventoryModuleDefinition(APPLICATION_NAMESPACE),
-  ];
-  const [party, catalog, location, inventory] = definitions;
-  if (!party || !catalog || !location || !inventory) {
-    throw new TypeError('the composed application requires four modules');
+  const mounted = MODULE_REGISTRY.map((entry) => {
+    const definition = entry.create(APPLICATION_NAMESPACE);
+    if (!isRecord(definition)) {
+      throw new TypeError(
+        `module ${entry.moduleName} did not produce a definition`,
+      );
+    }
+    return { definition, moduleName: entry.moduleName };
+  });
+  if (mounted.length === 0) {
+    throw new TypeError(
+      'the composed application requires at least one module',
+    );
   }
+  const definitions = mounted.map((entry) => entry.definition);
 
-  const modules = [party, catalog, location, inventory].map(
-    (definition, index) => {
-      const [module] = collection(definition, 'modules');
-      if (!isRecord(module)) {
-        throw new TypeError('a composed module definition is missing');
-      }
-      return {
-        ...module,
-        orderKey: (index + 1) * 10,
-        ownerPackageId: packageId,
-      };
-    },
-  );
+  const modules = mounted.map(({ definition, moduleName }, index) => {
+    const [module] = collection(definition, 'modules');
+    if (!isRecord(module)) {
+      throw new TypeError(`module ${moduleName} declares no moduleDefinition`);
+    }
+    return {
+      ...module,
+      orderKey: (index + 1) * 10,
+      ownerPackageId: packageId,
+    };
+  });
 
-  const sharedCapability = collection(party, 'capabilityRequirements')[0];
+  // The FIRST registry entry supplies the standard surface capability and every
+  // other must match it exactly. Naming the first by position rather than by
+  // module keeps this independent of which module leads the registry.
+  const [lead, ...rest] = mounted;
+  const sharedCapability = collection(
+    lead!.definition,
+    'capabilityRequirements',
+  )[0];
   if (!isRecord(sharedCapability)) {
     throw new TypeError('the standard surface capability is missing');
   }
-  for (const definition of [catalog, location, inventory]) {
+  for (const { definition, moduleName } of rest) {
     const capability = collection(definition, 'capabilityRequirements')[0];
     if (JSON.stringify(capability) !== JSON.stringify(sharedCapability)) {
-      throw new TypeError('module surface capability requirements diverged');
+      throw new TypeError(
+        `module ${moduleName} surface capability requirements diverged`,
+      );
     }
   }
   const moduleCapabilities = definitions.flatMap((definition) =>
@@ -134,6 +180,49 @@ export const APPLICATION_IDS = Object.freeze({
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_form`,
     listQueryId: `${APPLICATION_NAMESPACE}:query.party_list`,
     listSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_list`,
+  }),
+  purchasing: Object.freeze({
+    cancelOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_cancel`,
+    createOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_create`,
+    detailSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_detail`,
+    entityIds: Object.freeze({
+      purchaseOrder: `${APPLICATION_NAMESPACE}:entity.purchase_order`,
+      purchaseOrderLine: `${APPLICATION_NAMESPACE}:entity.purchase_order_line`,
+    }),
+    fieldIds: Object.freeze({
+      currency: `${APPLICATION_NAMESPACE}:field.purchase_order_currency`,
+      expectedDate: `${APPLICATION_NAMESPACE}:field.purchase_order_expected_date`,
+      itemId: `${APPLICATION_NAMESPACE}:field.purchase_order_line_item_id`,
+      lineNumber: `${APPLICATION_NAMESPACE}:field.purchase_order_line_line_number`,
+      notes: `${APPLICATION_NAMESPACE}:field.purchase_order_notes`,
+      number: `${APPLICATION_NAMESPACE}:field.purchase_order_number`,
+      orderDate: `${APPLICATION_NAMESPACE}:field.purchase_order_order_date`,
+      orderedQuantity: `${APPLICATION_NAMESPACE}:field.purchase_order_line_ordered_quantity`,
+      supplierPartyId: `${APPLICATION_NAMESPACE}:field.purchase_order_supplier_party_id`,
+      unitPrice: `${APPLICATION_NAMESPACE}:field.purchase_order_line_unit_price`,
+    }),
+    formSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_form`,
+    lineCreateOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_line_create`,
+    lineDetailSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_line_detail`,
+    lineFormSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_line_form`,
+    lineListQueryId: `${APPLICATION_NAMESPACE}:query.purchase_order_line_list`,
+    lineListSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_line_list`,
+    lineRelationId: `${APPLICATION_NAMESPACE}:relation.purchase_order_line_order`,
+    lineUpdateOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_line_update`,
+    listQueryId: `${APPLICATION_NAMESPACE}:query.purchase_order_list`,
+    listSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_list`,
+    releaseOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_release`,
+    // Materialized by normalization from the machine identity, not authored.
+    // The composed application re-instantiates the module under
+    // `northstar.app`, so the machine id -- and therefore this field id --
+    // carry that namespace too.
+    stateFieldId: `${APPLICATION_NAMESPACE}:derived_state_field.machine.purchase_order_lifecycle`,
+    stateIds: Object.freeze({
+      cancelled: `${APPLICATION_NAMESPACE}:state.purchase_order_cancelled`,
+      draft: `${APPLICATION_NAMESPACE}:state.purchase_order_draft`,
+      released: `${APPLICATION_NAMESPACE}:state.purchase_order_released`,
+    }),
+    updateOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_update`,
   }),
 });
 
