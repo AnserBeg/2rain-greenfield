@@ -585,12 +585,25 @@ test('stock-count companion derivation: the companion transaction and its lines 
   await withCompanionEnvironment(
     'companion-projection',
     async ({ actor, binding, context, runtimePool, service }) => {
-      const command = countCommand({
-        countedQuantity: '0',
-        expectedQuantity: '4',
+      // A positive initial count, then a negative correction, so the
+      // sign-dependent from/to projection is observed in both directions.
+      const opening = countCommand({
+        countedQuantity: '6',
+        expectedQuantity: '0',
         kind: 'initial',
         sequence: 3,
         supersedesStockCountId: null,
+        varianceQuantity: '6',
+      });
+      await seedReviewedCount(runtimePool, context, binding, opening);
+      await service.postStockCount(context, actor, opening);
+
+      const command = countCommand({
+        countedQuantity: '2',
+        expectedQuantity: '6',
+        kind: 'correction',
+        sequence: 5,
+        supersedesStockCountId: opening.stockCountId,
         varianceQuantity: '-4',
       });
       await seedReviewedCount(runtimePool, context, binding, command);
@@ -599,8 +612,24 @@ test('stock-count companion derivation: the companion transaction and its lines 
       const derivedTransactionId = expectedCompanionTransactionId(
         command.stockCountId,
       );
+      const openingTransactionId = expectedCompanionTransactionId(
+        opening.stockCountId,
+      );
       const after = await readCompanionState(runtimePool, context, binding);
-      const header = after.transactions[0]!;
+      const header = after.transactions.find(
+        (candidate) => candidate.recordId === derivedTransactionId,
+      )!;
+      assert.ok(header, 'the correction companion must exist');
+      const openingLine = after.transactionLines.find(
+        (candidate) => candidate.transactionId === openingTransactionId,
+      )!;
+      assert.ok(openingLine, 'the opening companion line must exist');
+      assert.equal(
+        openingLine.toLocationId,
+        locationId,
+        'a positive variance is a move INTO the counted location',
+      );
+      assert.equal(openingLine.fromLocationId, null);
       assert.equal(
         header.number,
         `SC-${derivedTransactionId}`,
@@ -627,8 +656,11 @@ test('stock-count companion derivation: the companion transaction and its lines 
       assert.equal(header.reasonCode, command.reason.code);
       assert.equal(header.reasonNarrative, command.reason.narrative);
 
-      assert.equal(after.transactionLines.length, 1);
-      const line = after.transactionLines[0]!;
+      assert.equal(after.transactionLines.length, 2);
+      const line = after.transactionLines.find(
+        (candidate) => candidate.transactionId === derivedTransactionId,
+      )!;
+      assert.ok(line, 'the correction companion line must exist');
       assert.equal(
         line.recordId,
         expectedCompanionTransactionLineId(command.lines[0]!.stockCountLineId),
@@ -644,7 +676,11 @@ test('stock-count companion derivation: the companion transaction and its lines 
         'the companion line quantity is the count variance',
       );
       // A negative variance leaves the location, so it is a from-location move.
-      assert.equal(line.fromLocationId, locationId);
+      assert.equal(
+        line.fromLocationId,
+        locationId,
+        'a negative variance is a move OUT of the counted location',
+      );
       assert.equal(line.toLocationId, null);
       assert.equal(line.itemId, command.lines[0]!.itemId);
       assert.equal(line.unitId, command.lines[0]!.unitId);

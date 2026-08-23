@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "packet": "pur-2a",
+  "entries": [
+    {
+      "name": "companion-identity-not-derived-from-the-source",
+      "claim": "The companion transaction and line identities are a pure function of the stock-count source record ids. Deriving them from anything else -- here, from fresh randomness -- means the kernel mints a companion identity nothing can recompute, which is exactly the `#companionDerivation` copies-rather-than-derives defect `purchasing-sales-v1-plan.md` section 7.16 measured. Scope of this entry's evidence: the kill set is measured within the three `companion derivation` tests this command runs, which is what the runner observes; the mutation also reds the wider stock-count file, and that is stated rather than measured here.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const digest = createHash('sha256').update(name, 'utf8').digest();",
+      "replacement": "  const digest = createHash('sha256').update(randomUUID(), 'utf8').digest();",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the derived companion transaction identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the derived companion transaction identity"
+        }
+      ]
+    },
+    {
+      "name": "companion-revision-left-at-the-column-default",
+      "claim": "The kernel WRITES the companion transaction's revision, derived as sourceRevision + 1, rather than letting the column default supply it. Both companions of one posting carry the same derived revision, so a reader can join a posted count to its companion and see one consistent pair; a companion left at the default disagrees with the source it projects.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const revision = command.sourceRevision + 1;",
+      "replacement": "  const revision = 1;",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the derived companion transaction identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the derived companion transaction identity"
+        }
+      ]
+    },
+    {
+      "name": "source-companion-column-never-written",
+      "claim": "The posted transition is where the source's companion transaction identity is written. Dropping that one assignment leaves a posted stock count whose companion column is still null -- the source posts, the movements land, and nothing records which transaction they belong to. That is the silent-until-reconciled failure this packet's Band A declaration is about.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            ${quoted(binding.stockCountRelationToTransactionColumn)} = $11::uuid,\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the derived companion transaction identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the derived companion transaction identity"
+        }
+      ]
+    },
+    {
+      "name": "source-line-companion-column-never-written",
+      "claim": "Line-level companion identity is written per source line, not implied by the header. Writing null instead still satisfies the update's own row count -- the guard is `IS NULL` and the row stays null -- so only the read-back catches it. This is the vacuity vector where a write reports success and the fact does not hold.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid",
+      "replacement": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = NULL",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "lines do not all carry a derived companion line identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "lines do not all carry a derived companion line identity"
+        }
+      ]
+    },
+    {
+      "name": "reviewed-source-companion-must-be-null-fence-removed",
+      "claim": "The kernel is the ONLY writer of a companion identity, so a reviewed stock count must not already name one. Replacing the fence with whatever is stored makes the kernel adopt a companion transaction written by something else. This is the packet's gate-invisible deliverable -- an operator-visible refusal the binding makes possible -- and it dies alone: the two posting tests are unaffected because their stored value is null either way.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const expectedCompanionId =\n    state === binding.stockCountReviewedState ? null : command.transactionId;",
+      "replacement": "  const expectedCompanionId = nullableUuid(row?.transactionId ?? null);",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a reviewed count that already names a companion transaction is refused",
+          "expected": "a reviewed count carrying a companion identity the kernel did not write must be refused"
+        }
+      ]
+    },
+    {
+      "name": "family-roster-transaction-type-repointed",
+      "claim": "The companion transaction's type comes from the compiled family roster's role binding, not from a switch arm. Repointing the count role's declared transaction type in the roster changes what the kernel writes, which is what makes the roster load-bearing rather than decorative. It dies alone: only the projection test reads the companion's type.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'count_correction',\n      }),",
+      "replacement": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'adjustment',\n      }),",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "the companion type comes from the family role binding"
+        }
+      ]
+    },
+    {
+      "name": "companion-business-key-not-derived-from-identity",
+      "claim": "The companion transaction's business key is derived from the derived identity, so it is unique whenever the identity is. A fixed number makes every companion in a tenant collide on `inventory_transaction_number`'s case-insensitive unique business key -- the first posting looks correct and the second refuses, which is why a single-posting test must observe the number itself rather than the absence of a collision.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return `${companion.numberPrefix}-${transactionId}`;",
+      "replacement": "  return `${companion.numberPrefix}-companion`;",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "the companion business key must be derived from the companion identity"
+        }
+      ]
+    }
+  ]
+}
