@@ -114,7 +114,7 @@
     },
     {
       "name": "family-roster-transaction-type-repointed",
-      "claim": "The companion transaction's type comes from the compiled family roster's role binding, not from a switch arm. Repointing the count role's declared transaction type in the roster changes what the kernel writes, which is what makes the roster load-bearing rather than decorative. It dies alone: only the projection test reads the companion's type.",
+      "claim": "The companion transaction's type comes from the compiled family roster's ROLE binding, not from a switch arm, and each of the stock_count family's two roles carries its own. Repointing the `count` role's declared transaction type changes what the kernel writes for an initial count while leaving a correction alone -- which is what makes the roster load-bearing per role rather than decorative. It dies alone: only the projection test posts an initial count AND reads its companion's type.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'count_correction',\n      }),",
       "replacement": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'adjustment',\n      }),",
@@ -126,7 +126,7 @@
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
-          "expected": "the companion type comes from the family role binding"
+          "expected": "the count role companion type comes from the family role binding"
         }
       ]
     },

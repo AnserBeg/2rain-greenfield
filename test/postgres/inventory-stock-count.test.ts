@@ -630,6 +630,22 @@ test('stock-count companion derivation: the companion transaction and its lines 
         'a positive variance is a move INTO the counted location',
       );
       assert.equal(openingLine.fromLocationId, null);
+      const openingHeader = after.transactions.find(
+        (candidate) => candidate.recordId === openingTransactionId,
+      )!;
+      assert.ok(openingHeader, 'the opening companion must exist');
+      // Both roles the stock_count family declares are observed here: the
+      // opening count posts under `count` and the correction under
+      // `correction`, and each takes its companion type from its own role
+      // binding in the roster.
+      assert.equal(
+        openingHeader.type,
+        enumOption(
+          field(binding.transaction, 'inventory_transaction_type'),
+          'count_correction',
+        ),
+        'the count role companion type comes from the family role binding',
+      );
       assert.equal(
         header.number,
         `SC-${derivedTransactionId}`,
