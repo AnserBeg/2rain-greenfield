@@ -180,12 +180,12 @@
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
-          "expected": "lines do not all carry a derived companion line identity"
+          "expected": "does not carry the derived companion line identity"
         },
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
-          "expected": "lines do not all carry a derived companion line identity"
+          "expected": "does not carry the derived companion line identity"
         }
       ]
     },
