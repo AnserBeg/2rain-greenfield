@@ -457,7 +457,18 @@ test('consolidated guard red: the routed Inventory literal cannot mask a later l
         },
         {
           file: providerPath,
-          line: 866,
+          // PUR-2a. Read from `checkModulePressLaw`, not arithmetic -- the same
+          // instruction the routed-debt block above carries. This coordinate is
+          // the spliced `registration.capabilityId` comparison, and it moves for
+          // ANY packet that adds a line above `validateRegistration`. Locating
+          // it by content instead of by integer would make this control immune;
+          // filed as `press-law-splice-control-pinned-by-line-number`.
+          //
+          // Note it is the line AFTER the comparison starts: the splice is two
+          // lines, so the identity lands on the second. Deriving this from a
+          // grep of the unmutated source gives 1111 and is wrong -- which is
+          // what the routed-debt comment above means by "arithmetic".
+          line: 1112,
           message:
             'generic press references inventory identity northstar.inventory',
           moduleDirectory: 'inventory',

@@ -60,7 +60,10 @@ import {
   type AuthenticatedIdentity,
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
-import { withEphemeralPostgres } from '../helpers/postgres.js';
+import {
+  withEphemeralPostgres,
+  type EphemeralPostgres,
+} from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
 const tenantId = '12000000-0000-4000-8000-000000000001';
@@ -832,10 +835,69 @@ test('stock-count companion derivation: a reviewed count that already names a co
   );
 });
 
+/**
+ * PUR-2a, added on review. F1's decode boundary: a receipt written before
+ * companion derivation carries a version-3 digest computed from CALLER-authored
+ * companion ids. This kernel derives them, so it cannot reproduce that digest.
+ * The receipt must still decode by its own stored version, and the attempt to
+ * re-derive it must be refused for its own stated reason rather than
+ * recomputed into a mismatch reported as an ordinary idempotency conflict.
+ */
+test('stock-count companion derivation: a receipt written before companion derivation is refused for its own reason', async () => {
+  await withCompanionEnvironment(
+    'companion-legacy-receipt',
+    async ({ actor, binding, context, database, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 6,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      await service.postStockCount(context, actor, command);
+
+      // The posting just written is version 4. Rewriting it to 3 reproduces
+      // exactly what a pre-derivation receipt looks like at the decode
+      // boundary, without needing the old kernel to produce one.
+      const downgraded = await database.pool.query(
+        `UPDATE platform.semantic_operation_receipts
+            SET input_digest_version = 3
+          WHERE tenant_id = $1 AND environment_id = $2
+            AND idempotency_key = $3`,
+        [context.tenantId, context.environmentId, command.idempotencyKey],
+      );
+      assert.equal(
+        downgraded.rowCount,
+        1,
+        'the control must actually downgrade a stored receipt',
+      );
+
+      const refusal = await service
+        .postStockCount(context, actor, command)
+        .then(
+          () => null,
+          (reason: unknown) => reason,
+        );
+      assert.ok(
+        refusal instanceof InventoryPostingError,
+        'a receipt predating companion derivation must not replay silently',
+      );
+      assert.match(
+        refusal.message,
+        /predates companion derivation/u,
+        'the refusal must name the contract change, not an ordinary key conflict',
+      );
+    },
+  );
+});
+
 interface CompanionEnvironment {
   actor: StockCountActor;
   binding: StorageBinding;
   context: TrustedRequestContext;
+  database: EphemeralPostgres;
   runtimePool: Pool;
   service: PostgresInventoryPostingService;
 }
@@ -909,7 +971,7 @@ async function withCompanionEnvironment(
           subject: null,
         }),
       }).issue(context);
-      await run({ actor, binding, context, runtimePool, service });
+      await run({ actor, binding, context, database, runtimePool, service });
     } finally {
       await Promise.all([
         runtimePool.end(),
