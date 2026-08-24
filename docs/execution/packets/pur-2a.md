@@ -93,14 +93,15 @@ REFUTED, and it is not inherited here.
 
 - The command lost `transactionId` and per-line `transactionLineId`. A command
   that still supplies one is refused by `exactKeys`.
-- `writeCompanionTransaction` inserts the companion header and lines inside the
-  posting transaction, directly in `posted` state, at revision
-  `sourceRevision + 1`.
+- `writeCompanionTransaction` inserts the companion header and its lines inside
+  the posting transaction, directly in `posted` state, each at the compiled
+  optimistic-revision contract's `initialValue: '1'` — they are CREATES.
 - `transitionStockCountToPosted` writes the companion transaction id onto the
   source in the same compare-and-set that posts it. The guard is `IS NULL`, so
   it can only ever fill an unwritten identity.
 - `writeCompanionLineIdentities` writes each derived companion line id onto its
-  source line, guarded `IS NULL` for the same reason.
+  source line, guarded `IS NULL` for the same reason, **and advances that
+  line's revision**, because writing the relation mutates the row.
 - `assertCompanionIdentitiesPersisted` then reads both back **out of storage**
   and recomputes the expected identity from the source record id read back from
   the same row. That is observation of the persisted effect, not a report that
@@ -127,21 +128,24 @@ genuinely cannot exist without its session.
 Per `mission-cadence`'s R4 obligation. **The binding makes two things possible
 that were not possible before, and both are proven rather than asserted.**
 
-1. **An operator-visible refusal.** The kernel is the only writer of a
-   companion identity, so a reviewed stock count that already names one was
-   written by something else. Posting it is refused with
-   `INVENTORY_COUNT_EVIDENCE_CONFLICT` rather than adopting whatever is stored.
-   Proven by the test named below and held by manifest entry
-   `reviewed-source-companion-must-be-null-fence-removed`, which dies alone.
+1. **An operator-visible refusal.** The kernel writes the companion identity at
+   post time, so a reviewed stock count that already names one — the shape
+   every pre-derivation count has — is refused with
+   `INVENTORY_COUNT_EVIDENCE_CONFLICT` naming the companion specifically.
+   `reviewed-source-companion-must-be-null-fence-removed` holds the refusal's
+   IDENTITY and nothing more: non-adoption is enforced separately by
+   `transitionStockCountToPosted`'s own `IS NULL` compare-and-set, and the
+   kernel is **not** the only reachable writer of a companion column — see
+   `companion-writers-not-closed`.
 2. **A reconciliation predicate anyone can recompute.**
    `deriveInventoryPostingCompanionId` is exported, pure, and takes only source
    ids, so a reconciliation reader can recompute a companion identity **without
    the posting kernel** and compare it to what is stored. The acceptance test
    uses exactly that entry point rather than reading the value out of the
    posting result, so a kernel that minted its companion some other way fails
-   there. The pair
-   `stock_count.revision == inventory_transaction.revision == sourceRevision + 1`
-   is the second half of that predicate and is asserted directly.
+   there. **Revision equality is NOT part of that predicate** — the derived
+   identity is the whole join. Creates take revision `1` and mutated rows
+   advance by one; that is a different fact, asserted separately.
 
 **What the binding does NOT make possible, stated so it is not assumed:** no
 reconciliation VIEW, query, or surface ships in this packet. The predicate is a
@@ -187,7 +191,7 @@ reason, and the observed kill set must equal the declared one exactly.
 |---|---|
 | The subject absent entirely | `source-companion-column-never-written`, `source-line-companion-column-never-written` — the identity is not written; `companion-identity-not-derived-from-the-source` — the source-dependence is gone |
 | The check reading zero input | `source-line-companion-column-never-written` — the read-back's join returns zero line rows, and the length comparison reds rather than a loop passing over nothing |
-| A proxy satisfied while the fact does not hold | `companion-revision-left-at-the-column-default` and `source-line-companion-column-never-written` — every write reports its row count and the persisted fact is still wrong; only the read-back catches either |
+| A proxy satisfied while the fact does not hold | `companion-revision-not-the-contract-initial-value`, `source-line-revision-does-not-advance`, and `source-line-companion-column-never-written` — every write reports its row count and the persisted fact is still wrong; only the read-back catches either |
 | Output shapes the parser does not recognize | The runner's own 38 controls, `check:expected-red-controls`, wired as its own gate in CI and the matrix. This packet adds no parser of its own |
 | **The subject repaired before it is measured** | Structurally: no authored verifier is re-run over kernel-written rows. Executably: `companion-derivation-namespace-moved` — a derivation that changes but stays deterministic passes the kernel's own read-back, because the read-back recomputes with the function that wrote. Two golden vectors computed by a separate implementation are the only assertion that does not share the algorithm under test |
 
@@ -211,7 +215,14 @@ test read only the `correction` role's companion type while the mutation moved
 the `count` role's. The test now reads both, so each declared role binding is
 observed by something.
 
-## Review round 1 — BLOCK, and it was right on all four findings
+## Review history — HISTORICAL, superseded where it conflicts with the sections above
+
+**Everything below records how the packet got here. Where it disagrees with the
+mechanism described above, the sections above govern.** Round 1's account is
+kept because the corrections it forced are the substance of this packet, not
+because its original claims still hold.
+
+### Round 1 — BLOCK, and it was right on all four findings
 
 The first arm returned **BLOCK** with four Critical findings. I verified each
 against the tree before acting; **all four are correct**, and one of them is a
@@ -230,7 +241,7 @@ unchanged. The rule keys on the digest INPUT, and mine changed. I reasoned past
 a constraint instead of measuring it, and the packet record carried that
 reasoning as settled.
 
-### Taken in this round
+#### Taken in round 1
 
 - **F3** — the companion is inserted at the contract's initial revision. Its
   control is rewritten around the corrected invariant; the old control was
@@ -246,7 +257,7 @@ reasoning as settled.
   and the golden vectors and role types compared as single values so neither
   half masks the other.
 
-### Attempted, measured, and withdrawn
+#### Attempted, measured, and withdrawn
 
 **F1's versioned digest.** Migration `0022` plus a version-4 write were built
 here and were green in isolation — the version bump was observable in storage
@@ -273,7 +284,7 @@ a reviewed count that already names a companion keeps its own refusal message.
 Neither depends on the digest version. **What is knowingly owed:** the digest
 version, the capability version, and the migration, as one coherent piece.
 
-### NOT taken, because they are not a lane's to rule
+#### NOT taken, because they are not a lane's to rule
 
 The versioned transition for already-released data (`db/migrations/**`), making
 the roster an active-release artifact (`InventoryPostingRegistrationV1`, 14
@@ -282,7 +293,7 @@ and the O0 operations). All three are outside this lease and all three are
 design rulings. They are recorded in ADR-0060 under *The transition this ADR
 does NOT rule, and cannot*.
 
-### What this round refutes in the plan
+#### What round 1 refutes in the plan
 
 **§7.16's premise is refuted by construction**, in the same way §7.16 itself
 refuted the three design passes. It ruled that the stock-count relations
@@ -434,16 +445,18 @@ neither was foreseeable from the charter.
   change to the replay path, outside what this packet should touch. Not
   reachable as shipped: the companion number is `SC-` plus the derived UUID.
 
-- **The input digest version was NOT bumped, and the reasoning is recorded.**
-  `input_digest_version` is CHECK-constrained to `(1, 2, 3)` by migration
-  `0017`, and `db/migrations/**` is outside the lease. It did not need bumping:
-  a digest version names the input SHAPE, and the shape is unchanged — the same
-  keys in the same order, with values the kernel now derives instead of the
-  caller supplying. **The limit:** a receipt written by the pre-PUR-2a kernel
-  carries caller-chosen companion ids and will not re-derive, so it replays as
-  `INVENTORY_POSTING_IDEMPOTENCY_CONFLICT` rather than as a replay. That is a
-  loud refusal, not a silent wrong answer, and no such receipt exists outside a
-  live upgraded database.
+- **The input digest version is OWED, and the argument for not bumping it is
+  withdrawn.** *This bullet previously argued the exemption: that a digest
+  version names the input SHAPE and the shape was unchanged. Review round 1
+  refuted it and was right — migration `0016` keys the rule on the digest
+  INPUT, not its shape, and the input changed when the companion ids became
+  kernel-derived. A rule violation does not become compliance by being loud.*
+  The version, its `CHECK` migration, and the capability version move to
+  `PUR-2b` on the measurement recorded above. **The standing limit:** a receipt
+  written before companion derivation replays as an ordinary
+  `INVENTORY_POSTING_IDEMPOTENCY_CONFLICT` rather than one naming the contract
+  change — visible rather than silent, but the wrong diagnosis, and a violation
+  of the versioning rule until `PUR-2b` lands.
 
 ## Record claim
 

@@ -734,7 +734,7 @@ test('stock-count companion derivation: the companion transaction and its lines 
 /**
  * PUR-2a gate-invisible deliverable, named as an acceptance criterion: the
  * binding makes an operator-visible refusal possible that did not exist
- * before. The kernel is the only writer of a companion identity, so a reviewed
+ * before. The kernel writes the companion identity at post time, so a reviewed
  * source that already names one was written by something else, and posting it
  * refuses rather than adopting whatever is stored.
  */

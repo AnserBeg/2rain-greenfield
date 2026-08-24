@@ -3475,8 +3475,10 @@ async function lockAndAssertStockCountEvidence(
   const row = session.rows[0];
   const state = row?.state;
   // PUR-2a. The companion identity is a POST-TIME OUTPUT, so a reviewed count
-  // must not already name one -- the kernel is its only writer, and a reviewed
-  // source that already carries a companion was written by something else. An
+  // must not already name one: the kernel writes it at post time, so a reviewed
+  // source carrying one was written by something else. (The kernel is the only
+  // writer WITHIN a posting; generic writers remain open -- see
+  // `companion-writers-not-closed`.) An
   // already-posted count is the replay case, and there the stored identity
   // must be exactly the derived one.
   const expectedCompanionId =

@@ -66,8 +66,13 @@ Two properties follow from purity and both are load-bearing:
 
 1. **Nothing a caller sends can steer it.** The companion-origin command shape
    carries no companion id at all, and one that does is refused.
-2. **It is deterministic**, so a retry derives the same identity and collides
-   on the primary key rather than minting a second companion for one source.
+2. **It is deterministic**, so a retry derives the same identity for one source
+   rather than minting a second companion. *Narrowed on review: what is
+   established is the derivation's determinism and the fact that the stock
+   identity locks, the request-key lock and the natural-replay path serialize
+   posting. The simultaneous-post case — two concurrent postings racing to
+   INSERT one derived primary key, and resolving through the raced-replay
+   branch — is REASONED, NOT MEASURED, and no control holds it.*
    This is what `#companionDerivation` never had: §7.16 measured that it
    *copied* `transactionId` from the command, so `ON CONFLICT DO NOTHING`
    "converges by doing nothing" and declaring stock count companion-origin
