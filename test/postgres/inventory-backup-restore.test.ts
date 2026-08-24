@@ -41,7 +41,7 @@ import {
   PostgresInventoryPostingService,
   type InventoryAdjustmentPostingCommandV1,
   type InventoryPostingRegistrationV1,
-  type InventoryStockCountPostingCommandV1,
+  type InventoryStockCountPostingCommandV2,
   type InventoryTransferPostingCommandV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
 import {
@@ -1590,7 +1590,7 @@ async function postStockCount(
 }> {
   const suffix = String(input.sequence).padStart(2, '0');
   const stockCountId = `69000000-0000-4000-8000-0000000000${suffix}`;
-  const command: InventoryStockCountPostingCommandV1 = {
+  const command: InventoryStockCountPostingCommandV2 = {
     authorization: {
       decision: 'ALLOW',
       evaluatorVersion: 'g3-r3-evaluator/v1',
@@ -1705,7 +1705,7 @@ async function seedDraft(
 
 async function seedReviewedCount(
   context: TrustedRequestContext,
-  command: InventoryStockCountPostingCommandV1,
+  command: InventoryStockCountPostingCommandV2,
 ): Promise<void> {
   const binding = requiredBinding();
   // PUR-2a. No pre-staged companion transaction: the posting kernel writes it.

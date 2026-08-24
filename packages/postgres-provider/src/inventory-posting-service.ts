@@ -155,6 +155,20 @@ const requestKeyLockDerivationVersion =
 const legacyInventoryPostingInputDigestVersion = 1 as const;
 const standardInventoryPostingInputDigestVersion = 2 as const;
 const stockCountInventoryPostingInputDigestVersion = 3 as const;
+/**
+ * PUR-2a. Stock-count postings write version 4, because their digest INPUT
+ * changed: the companion ids the digest covers are now derived by the kernel
+ * rather than supplied by the caller. Migration `0016` states the rule this
+ * follows -- a writer keeps its version "until their own digest input changes
+ * under a versioned migration" -- and `0022` is that migration.
+ *
+ * Version 3 is RETAINED as readable legacy, never as writable. A version-3
+ * stock-count receipt was digested from caller-authored ids under a command
+ * shape that no longer exists, so it cannot be re-derived here; recomputing it
+ * from derived ids would produce a value that silently disagrees with what is
+ * stored, which is the failure this versioning exists to prevent.
+ */
+const derivedCompanionStockCountInputDigestVersion = 4 as const;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
@@ -244,11 +258,11 @@ export interface InventoryTransferPostingCommandV1 {
 export type InventoryStockCountKindV1 = 'initial' | 'correction' | 'reversal';
 
 /**
- * PUR-2a. A stock-count line names its own identity and no companion. The
+ * PUR-2a. **V2, and the version is the point.** A stock-count line names its own
  * companion transaction-line id is DERIVED from `stockCountLineId` and written
  * by the kernel; a command that supplies one is refused by `exactKeys`.
  */
-export interface InventoryStockCountLineV1 {
+export interface InventoryStockCountLineV2 {
   readonly countedQuantity: string;
   readonly expectedQuantity: string;
   readonly itemId: string;
@@ -264,14 +278,14 @@ export interface InventoryStockCountLineV1 {
  * `transactionId`: the companion transaction is derived from `stockCountId`
  * and written by the kernel inside the posting transaction.
  */
-export interface InventoryStockCountPostingCommandV1 {
+export interface InventoryStockCountPostingCommandV2 {
   readonly authorization: InventoryPostingAuthorizationV1;
   readonly channel: InvocationChannel;
   readonly effectiveAt: string;
   readonly idempotencyKey: string;
   readonly kind: InventoryStockCountKindV1;
   readonly legalEntityId: string;
-  readonly lines: readonly InventoryStockCountLineV1[];
+  readonly lines: readonly InventoryStockCountLineV2[];
   readonly locationId: string;
   readonly reason: {
     readonly code: string;
@@ -290,12 +304,12 @@ export interface InventoryStockCountPostingCommandV1 {
  * The two companion ids present here are OUTPUTS the kernel computed, never
  * anything a caller supplied.
  */
-interface DerivedStockCountLine extends InventoryStockCountLineV1 {
+interface DerivedStockCountLine extends InventoryStockCountLineV2 {
   readonly transactionLineId: string;
 }
 
 interface DerivedStockCountCommand extends Omit<
-  InventoryStockCountPostingCommandV1,
+  InventoryStockCountPostingCommandV2,
   'lines'
 > {
   readonly lines: readonly DerivedStockCountLine[];
@@ -304,7 +318,7 @@ interface DerivedStockCountCommand extends Omit<
 
 export type InventoryPostingCommandV1 =
   | InventoryAdjustmentPostingCommandV1
-  | InventoryStockCountPostingCommandV1
+  | InventoryStockCountPostingCommandV2
   | InventoryTransferPostingCommandV1;
 
 /**
@@ -585,7 +599,7 @@ interface VersionedInputDigest {
   readonly value: string;
   readonly version:
     | typeof standardInventoryPostingInputDigestVersion
-    | typeof stockCountInventoryPostingInputDigestVersion;
+    | typeof derivedCompanionStockCountInputDigestVersion;
 }
 
 interface EvidenceIds {
@@ -664,7 +678,7 @@ export class PostgresInventoryPostingService {
   async postStockCount(
     context: TrustedRequestContext,
     actorEnvelope: TrustedActorEnvelope,
-    command: InventoryStockCountPostingCommandV1,
+    command: InventoryStockCountPostingCommandV2,
   ): Promise<InventoryStockCountPostingResultV1> {
     const family = this.#familyFor(stockCountFamilyId);
     const parsed = validateStockCountCommand(family, command);
@@ -1791,7 +1805,7 @@ function companionTransactionNumber(
 
 function validateStockCountCommand(
   family: ResolvedPostingFamily,
-  command: InventoryStockCountPostingCommandV1,
+  command: InventoryStockCountPostingCommandV2,
 ): DerivedStockCountCommand {
   validateCommandEnvelope(
     command,
@@ -3306,7 +3320,7 @@ function transferLineMatches(
 function stockCountTransactionLineMatches(
   row: Record<string, unknown> | undefined,
   locationId: string,
-  line: InventoryStockCountLineV1,
+  line: InventoryStockCountLineV2,
 ): boolean {
   const negative = line.varianceQuantity.startsWith('-');
   return (
@@ -3416,6 +3430,22 @@ async function lockAndAssertStockCountEvidence(
         ? command.sourceRevision
         : command.sourceRevision + 1)
   ) {
+    // The companion half gets its own message. A reviewed count that already
+    // names a companion is the shape every count had before companion
+    // derivation, so this is the refusal a pre-existing row meets -- and
+    // "does not match the reviewed evidence" would send an operator to compare
+    // quantities that are fine.
+    if (
+      session.rows.length === 1 &&
+      state === binding.stockCountReviewedState &&
+      row!.transactionId !== null
+    ) {
+      throw postingError(
+        'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+        `stock count ${command.stockCountId} already names a companion transaction; the posting kernel derives and writes it, so a reviewed count must not carry one`,
+        { stockCountId: command.stockCountId },
+      );
+    }
     throw postingError(
       'INVENTORY_COUNT_EVIDENCE_CONFLICT',
       `stock count ${command.stockCountId} does not exactly match the reviewed evidence`,
@@ -4528,7 +4558,7 @@ function naturalEffects(
 
 function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
   const version = isStockCountPosting(posting)
-    ? stockCountInventoryPostingInputDigestVersion
+    ? derivedCompanionStockCountInputDigestVersion
     : standardInventoryPostingInputDigestVersion;
   return Object.freeze({
     value: digestCommand(posting, version),
@@ -4550,11 +4580,13 @@ function digestCommand(posting: ParsedPosting, version: number): string {
           posting.postingRole === 'transfer'
           ? { postingRole: posting.postingRole, ...semanticInput }
           : unsupportedReceiptVersion(version)
-        : version === stockCountInventoryPostingInputDigestVersion
+        : version === derivedCompanionStockCountInputDigestVersion
           ? isStockCountPosting(posting)
             ? { postingRole: posting.postingRole, ...semanticInput }
             : unsupportedReceiptVersion(version)
-          : unsupportedReceiptVersion(version);
+          : version === stockCountInventoryPostingInputDigestVersion
+            ? legacyStockCountReceipt()
+            : unsupportedReceiptVersion(version);
   return createHash('sha256').update(canonicalize(digestInput)).digest('hex');
 }
 
@@ -4565,7 +4597,8 @@ function recordedResultForReplay(
   if (
     version !== legacyInventoryPostingInputDigestVersion &&
     version !== standardInventoryPostingInputDigestVersion &&
-    version !== stockCountInventoryPostingInputDigestVersion
+    version !== stockCountInventoryPostingInputDigestVersion &&
+    version !== derivedCompanionStockCountInputDigestVersion
   ) {
     return unsupportedReceiptVersion(version);
   }
@@ -4582,8 +4615,13 @@ function recordedResultForReplay(
     ...receipt.mutation_result,
     movements,
     replayed: true,
+    // Both stock-count versions decode their stored evidence by their own
+    // version. Version 3 is readable here precisely because a stored receipt
+    // must keep decoding under the version it was written with; what version 3
+    // may not do is have a fresh digest computed for it.
     stockCountEvidence:
-      version === stockCountInventoryPostingInputDigestVersion
+      version === stockCountInventoryPostingInputDigestVersion ||
+      version === derivedCompanionStockCountInputDigestVersion
         ? requiredRecordedStockCountEvidence(
             receipt.mutation_result.stockCountEvidence,
           )
@@ -4602,7 +4640,8 @@ function requiredRecordedPostingRole(
     return postingRole;
   }
   if (
-    version === stockCountInventoryPostingInputDigestVersion &&
+    (version === stockCountInventoryPostingInputDigestVersion ||
+      version === derivedCompanionStockCountInputDigestVersion) &&
     (postingRole === 'count' || postingRole === 'correction')
   ) {
     return postingRole;
@@ -4627,6 +4666,24 @@ function requiredRecordedStockCountEvidence(
   throw postingError(
     'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
     'persisted stock-count receipt has no readable count evidence',
+  );
+}
+
+/**
+ * A version-3 stock-count receipt predates companion derivation. Its digest
+ * covers caller-authored companion ids, and this kernel cannot produce those:
+ * it derives them. Refusing here, with its own code, keeps the misdiagnosis
+ * out of the idempotency path -- recomputing would yield a mismatch reported as
+ * "already names another posting", which sends an operator to look for a
+ * conflicting posting that does not exist.
+ */
+function legacyStockCountReceipt(): never {
+  throw postingError(
+    'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+    'stock-count receipt predates companion derivation and cannot be replayed against the derived-companion command contract',
+    {
+      inputDigestVersion: String(stockCountInventoryPostingInputDigestVersion),
+    },
   );
 }
 

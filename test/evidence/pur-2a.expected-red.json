@@ -96,7 +96,7 @@
     },
     {
       "name": "reviewed-source-companion-must-be-null-fence-removed",
-      "claim": "The kernel does not ADOPT a companion identity it did not write. Replacing the fence with whatever is stored makes it do so. Measured, the posting is still refused -- the line check catches it further down -- so what the fence buys is the IDENTITY of the refusal: with it the operator is told the reviewed session is wrong; without it they are sent to a line that is fine. NARROWED ON REVIEW: this holds non-adoption and the refusal's identity. It does NOT establish that the kernel is the only reachable WRITER of a companion column, which it is not -- generic draft-transaction creation and stock-count relation mutation remain open, filed as `companion-writers-not-closed`. It dies alone: the two posting tests are unaffected because their stored value is null either way.",
+      "claim": "The kernel does not ADOPT a companion identity it did not write. Replacing the fence with whatever is stored makes it do so. Measured, the posting is still refused -- the line check catches it further down -- so what the fence buys is the IDENTITY of the refusal: with it the operator is told the companion is the problem -- the refusal every pre-derivation stock count meets -- and without it they are sent to a line that is fine. NARROWED ON REVIEW: this holds non-adoption and the refusal's identity. It does NOT establish that the kernel is the only reachable WRITER of a companion column, which it is not -- generic draft-transaction creation and stock-count relation mutation remain open, filed as `companion-writers-not-closed`. It dies alone: the two posting tests are unaffected because their stored value is null either way.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  const expectedCompanionId =\n    state === binding.stockCountReviewedState ? null : command.transactionId;",
       "replacement": "  const expectedCompanionId = nullableUuid(row?.transactionId ?? null);",
@@ -108,7 +108,7 @@
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: a reviewed count that already names a companion transaction is refused",
-          "expected": "the refusal must name the reviewed session, not one of its lines"
+          "expected": "the refusal must name the companion, not the reviewed evidence at large"
         }
       ]
     },

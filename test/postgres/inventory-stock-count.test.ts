@@ -42,7 +42,7 @@ import {
   deriveInventoryPostingCompanionId,
   type InventoryPostingErrorCode,
   type InventoryPostingRegistrationV1,
-  type InventoryStockCountPostingCommandV1,
+  type InventoryStockCountPostingCommandV2,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
 import {
   loadMigrations,
@@ -807,11 +807,14 @@ test('stock-count companion derivation: a reviewed count that already names a co
       // Which refusal it is matters. Without the reviewed-must-be-null fence
       // the kernel adopts the foreign companion and the posting is refused
       // further down, at the LINE check, for a reason that sends an operator
-      // to the wrong record.
+      // to the wrong record. The message also has to name the COMPANION
+      // specifically: this is the refusal every pre-derivation stock count
+      // meets, and "does not match the reviewed evidence" would send someone
+      // to compare quantities that are correct.
       assert.match(
         refusal.message,
-        /does not exactly match the reviewed evidence/u,
-        'the refusal must name the reviewed session, not one of its lines',
+        /already names a companion transaction/u,
+        'the refusal must name the companion, not the reviewed evidence at large',
       );
 
       const after = await readCompanionState(runtimePool, context, binding);
@@ -1039,7 +1042,7 @@ function countCommand(input: {
   sequence: number;
   supersedesStockCountId: string | null;
   varianceQuantity: string;
-}): InventoryStockCountPostingCommandV1 {
+}): InventoryStockCountPostingCommandV2 {
   const suffix = String(input.sequence).padStart(2, '0');
   const stockCountId = `61000000-0000-4000-8000-0000000000${suffix}`;
   return {
@@ -1907,7 +1910,7 @@ async function seedReviewedCount(
   pool: Pool,
   context: TrustedRequestContext,
   binding: StorageBinding,
-  command: InventoryStockCountPostingCommandV1,
+  command: InventoryStockCountPostingCommandV2,
 ): Promise<void> {
   // PUR-2a ACCEPTANCE CONTROL. Nothing here stages an inventory transaction or
   // its lines. A reviewed stock count is created with NO companion at all; the
