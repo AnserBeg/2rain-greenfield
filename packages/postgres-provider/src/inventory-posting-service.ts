@@ -131,6 +131,7 @@ const INVENTORY_POSTING_FAMILIES_V1 = Object.freeze([
 ] as const satisfies readonly PostingFamilyDeclarationV1[]);
 
 const stockCountFamilyId = 'stock_count' as const;
+const authoredTransactionFamilyId = 'inventory_transaction' as const;
 
 // Finite hang-prevention bound, not a posting-latency budget or SLA. Fifteen
 // seconds leaves room for lock-holder coordination while still terminating an
@@ -142,6 +143,13 @@ const inventoryPostingLockTimeoutMilliseconds = 15_000;
  * derive; it is versioned for exactly that reason.
  */
 const companionDerivationNamespace = 'northstar.inventory-posting-companion/v1';
+/**
+ * The compiled storage contract declares an entity's optimistic revision with
+ * `initialValue: '1'`, and the generic mutation interpreter gives every create
+ * `projectedRevision: 1`. A kernel-written companion is a create, so it takes
+ * the same initial revision rather than one derived from its source.
+ */
+const companionInitialRevision = 1;
 const requestKeyLockDerivationVersion =
   'northstar.inventory-posting-request-lock/v1';
 const legacyInventoryPostingInputDigestVersion = 1 as const;
@@ -467,7 +475,6 @@ interface ResolvedPostingCompanion {
   readonly companionEntityId: string;
   readonly companionLineEntityId: string;
   readonly numberPrefix: string;
-  readonly sourceLineEntityId: string;
 }
 
 interface ResolvedPostingFamily {
@@ -476,7 +483,6 @@ interface ResolvedPostingFamily {
   readonly familyId: string;
   readonly origin: 'authored' | 'companion';
   readonly roles: ReadonlyMap<InventoryPostingRoleV1, ResolvedPostingRole>;
-  readonly sourceEntityId: string;
   readonly sourceType: string | null;
 }
 
@@ -488,10 +494,6 @@ interface PostingStorageBinding {
   legalEntityStatusColumn: string;
   location: EntityBinding;
   families: ReadonlyMap<string, ResolvedPostingFamily>;
-  familyByPostingRole: ReadonlyMap<
-    InventoryPostingRoleV1,
-    ResolvedPostingFamily
-  >;
   movement: EntityBinding;
   movementBusinessPeriodColumn: string;
   movementPostingRoleByOption: ReadonlyMap<string, InventoryPostingRoleV1>;
@@ -594,17 +596,25 @@ interface EvidenceIds {
   outboxId: string;
 }
 
+// PUR-2a, corrected on review. The family the kernel EXECUTES is the one
+// resolved by the `(capabilityId, familyId)` pair, carried here from the entry
+// point. An earlier version resolved a family by pair for validation and then
+// reselected one by posting role inside `#post`, so the pair-keyed binding was
+// not what executed and the reviewer was right that the key was decorative.
 type ParsedPosting =
   | {
       readonly command: InventoryAdjustmentPostingCommandV1;
+      readonly family: ResolvedPostingFamily;
       readonly postingRole: 'adjustment';
     }
   | {
       readonly command: InventoryTransferPostingCommandV1;
+      readonly family: ResolvedPostingFamily;
       readonly postingRole: 'transfer';
     }
   | {
       readonly command: DerivedStockCountCommand;
+      readonly family: ResolvedPostingFamily;
       readonly postingRole: 'correction' | 'count';
     };
 
@@ -634,6 +644,7 @@ export class PostgresInventoryPostingService {
   ): Promise<InventoryAdjustmentPostingResultV1> {
     return this.#post(context, actorEnvelope, {
       command: validateAdjustmentCommand(command),
+      family: this.#familyFor(authoredTransactionFamilyId),
       postingRole: 'adjustment',
     });
   }
@@ -645,6 +656,7 @@ export class PostgresInventoryPostingService {
   ): Promise<InventoryTransferPostingResultV1> {
     return this.#post(context, actorEnvelope, {
       command: validateTransferCommand(command),
+      family: this.#familyFor(authoredTransactionFamilyId),
       postingRole: 'transfer',
     });
   }
@@ -654,18 +666,21 @@ export class PostgresInventoryPostingService {
     actorEnvelope: TrustedActorEnvelope,
     command: InventoryStockCountPostingCommandV1,
   ): Promise<InventoryStockCountPostingResultV1> {
-    const parsed = validateStockCountCommand(
-      requiredPostingFamily(
-        this.#binding,
-        this.registration.capabilityId,
-        stockCountFamilyId,
-      ),
-      command,
-    );
+    const family = this.#familyFor(stockCountFamilyId);
+    const parsed = validateStockCountCommand(family, command);
     return this.#post(context, actorEnvelope, {
       command: parsed,
+      family,
       postingRole: parsed.kind === 'initial' ? 'count' : 'correction',
     });
+  }
+
+  #familyFor(familyId: string): ResolvedPostingFamily {
+    return requiredPostingFamily(
+      this.#binding,
+      this.registration.capabilityId,
+      familyId,
+    );
   }
 
   async #post(
@@ -761,11 +776,14 @@ export class PostgresInventoryPostingService {
         .toSorted(compareInventoryMovementOrderEntries);
 
       await assumeModuleRole(client);
-      // PUR-2a. Execution is selected by the compiled family binding, not by a
-      // source-type literal. An authored-origin family hands the kernel a
-      // draft transaction to validate; a companion-origin family hands it a
-      // source, and the kernel writes the transaction itself further down.
-      const family = postingFamilyForRole(this.#binding, posting.postingRole);
+      // PUR-2a. Execution is selected by the compiled family binding the entry
+      // point resolved by `(capabilityId, familyId)`, not by a source-type
+      // literal and not by a second lookup keyed on the role. An
+      // authored-origin family hands the kernel a draft transaction to
+      // validate; a companion-origin family hands it a source, and the kernel
+      // writes the transaction itself further down.
+      const { family } = posting;
+      assertFamilyDeclaresRole(family, posting.postingRole);
       const companionOrigin = family.origin === 'companion';
       let lineSetDigest = '';
       if (!companionOrigin) {
@@ -913,7 +931,8 @@ export class PostgresInventoryPostingService {
               context,
               family,
               posting,
-              transactionRevision,
+              actorEnvelope.actor.executionPrincipal.principalId,
+              recordedAt,
             );
           }
         }
@@ -1185,10 +1204,6 @@ function resolvePostingStorage(
     transactionType,
   );
   const postingRoles = new Map<InventoryPostingRoleV1, ResolvedPostingRole>();
-  const familyByPostingRole = new Map<
-    InventoryPostingRoleV1,
-    ResolvedPostingFamily
-  >();
   const movementPostingRoleByOption = new Map<string, InventoryPostingRoleV1>();
   for (const family of families.values()) {
     for (const role of family.roles.values()) {
@@ -1202,7 +1217,6 @@ function resolvePostingStorage(
         );
       }
       postingRoles.set(role.postingRole, role);
-      familyByPostingRole.set(role.postingRole, family);
       movementPostingRoleByOption.set(
         role.movementPostingRoleOption,
         role.postingRole,
@@ -1211,7 +1225,6 @@ function resolvePostingStorage(
   }
   return Object.freeze({
     families,
-    familyByPostingRole,
     movementPostingRoleByOption,
     postingRoles,
     item,
@@ -1424,7 +1437,17 @@ function resolvePostingFamilies(
         `posting family ${key} declares no posting role`,
       );
     }
+    // The source entity and, for a companion family, the source LINE entity
+    // must exist in the compiled release even though execution does not read
+    // their ids: a family naming a source the release does not carry is not
+    // executable. These are assertions, not stored values -- an earlier version
+    // stored both and consumed neither, which implied a generic source port
+    // that does not exist. Building one is `PUR-2b`'s work, not a field here.
+    uniqueEntity(declaration.sourceEntitySuffix);
     const companionDeclaration = declaration.companion;
+    if (companionDeclaration) {
+      uniqueEntity(companionDeclaration.sourceLineEntitySuffix);
+    }
     families.set(
       key,
       Object.freeze({
@@ -1440,14 +1463,10 @@ function resolvePostingFamilies(
                   companionDeclaration.companionLineEntitySuffix,
                 ).entityId,
                 numberPrefix: companionDeclaration.numberPrefix,
-                sourceLineEntityId: uniqueEntity(
-                  companionDeclaration.sourceLineEntitySuffix,
-                ).entityId,
               }),
         familyId: declaration.familyId,
         origin: declaration.origin,
         roles,
-        sourceEntityId: uniqueEntity(declaration.sourceEntitySuffix).entityId,
         sourceType: declaration.sourceType,
       }),
     );
@@ -1459,18 +1478,21 @@ function postingFamilyKey(capabilityId: string, familyId: string): string {
   return `${capabilityId}\u001f${familyId}`;
 }
 
-function postingFamilyForRole(
-  binding: PostingStorageBinding,
+/**
+ * The carried family must be the one that declares the role being executed.
+ * This is a membership check on the binding the entry point resolved, not a
+ * second selection: selecting again is what made the pair key decorative.
+ */
+function assertFamilyDeclaresRole(
+  family: ResolvedPostingFamily,
   postingRole: InventoryPostingRoleV1,
-): ResolvedPostingFamily {
-  const family = binding.familyByPostingRole.get(postingRole);
-  if (!family) {
+): void {
+  if (!family.roles.has(postingRole)) {
     throw postingError(
       'INVENTORY_POSTING_CAPABILITY_MISMATCH',
-      `no posting family execution is bound for role ${postingRole}`,
+      `posting family ${family.familyId} does not declare role ${postingRole}`,
     );
   }
-  return family;
 }
 
 function requiredPostingFamily(
@@ -1578,11 +1600,25 @@ function postingRoleFromStorage(
   return postingRole;
 }
 
+/**
+ * The companion/authored transaction type comes from the EXECUTING family's own
+ * role binding, not from a global role table. Two families may legitimately map
+ * the same role to different transaction types, and a global table cannot
+ * express that -- which is the sense in which the roster has to be per family
+ * to be load-bearing at all.
+ */
 function transactionType(
-  binding: PostingStorageBinding,
+  family: ResolvedPostingFamily,
   postingRole: InventoryPostingRoleV1,
 ): string {
-  return resolvedPostingRole(binding, postingRole).transactionTypeOption;
+  const role = family.roles.get(postingRole);
+  if (!role) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `posting family ${family.familyId} does not declare role ${postingRole}`,
+    );
+  }
+  return role.transactionTypeOption;
 }
 
 function requiredRelationColumn(
@@ -2654,7 +2690,16 @@ async function writeCompanionTransaction(
   recordedAt: string,
 ): Promise<number> {
   const { command } = posting;
-  const revision = command.sourceRevision + 1;
+  // PUR-2a, corrected on review. The companion is a NEWLY CREATED entity row:
+  // it has no earlier revision and undergoes no update inside this posting, so
+  // it begins at the compiled optimistic-revision contract's `initialValue`,
+  // exactly as the generic interpreter's `projectedRevision: 1` gives every
+  // create. An earlier version wrote `sourceRevision + 1` so the two rows would
+  // match, which overloaded the optimistic-revision field with lineage it does
+  // not carry -- at source revision 9 it created a brand-new transaction at
+  // revision 10. The source-to-companion join is the DERIVED IDENTITY, which is
+  // recomputable from the source alone; it never needed revision equality.
+  const revision = companionInitialRevision;
   const headerFields = [
     [
       'inventory_transaction_number',
@@ -2662,7 +2707,7 @@ async function writeCompanionTransaction(
     ],
     [
       'inventory_transaction_type',
-      transactionType(binding, posting.postingRole),
+      transactionType(family, posting.postingRole),
     ],
     ['inventory_transaction_state', binding.transactionPostedState],
     ['inventory_transaction_reason_code', command.reason.code || null],
@@ -2818,7 +2863,8 @@ async function assertCompanionIdentitiesPersisted(
   context: TrustedRequestContext,
   family: ResolvedPostingFamily,
   posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
-  companionRevision: number,
+  expectedActorId: string,
+  expectedRecordedAt: string,
 ): Promise<void> {
   const { command } = posting;
   const companion = family.companion;
@@ -2833,7 +2879,16 @@ async function assertCompanionIdentitiesPersisted(
             source.${quoted(binding.stockCountRelationToTransactionColumn)}::text AS "companionId",
             source.${quoted(binding.stockCount.revisionColumn)}::integer AS "sourceRevision",
             companion.${quoted(binding.transaction.revisionColumn)}::integer AS "companionRevision",
-            companion.${quoted(binding.transactionStateColumn)} AS "companionState"
+            companion.${quoted(binding.transactionStateColumn)} AS "companionState",
+            companion.${quoted(binding.transactionTypeColumn)} AS "companionType",
+            companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_number').name)} AS "companionNumber",
+            companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_source_type').name)} AS "companionSourceType",
+            companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_source_id').name)} AS "companionSourceId",
+            companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_reason_code').name)} AS "companionReasonCode",
+            companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_reason_narrative').name)} AS "companionReasonNarrative",
+            companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_actor_id').name)} AS "companionActorId",
+            to_char(companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_effective_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "companionEffectiveAt",
+            to_char(companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_recorded_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "companionRecordedAt"
        FROM ${table(binding, binding.stockCount)} AS source
        JOIN ${table(binding, binding.transaction)} AS companion
          ON companion.tenant_id = source.tenant_id
@@ -2863,8 +2918,8 @@ async function assertCompanionIdentitiesPersisted(
         sourceRecordId: String(row!.sourceRecordId),
       }) ||
     String(row!.companionState) !== binding.transactionPostedState ||
-    Number(row!.companionRevision) !== companionRevision ||
-    Number(row!.sourceRevision) !== companionRevision
+    Number(row!.companionRevision) !== companionInitialRevision ||
+    Number(row!.sourceRevision) !== command.sourceRevision + 1
   ) {
     throw postingError(
       'INVENTORY_COUNT_EVIDENCE_CONFLICT',
@@ -2872,10 +2927,48 @@ async function assertCompanionIdentitiesPersisted(
       { stockCountId: command.stockCountId },
     );
   }
+  // Added on review. Identity, state and revision were the only things read
+  // back, so a writer that produced the RIGHT identities and the WRONG
+  // business fields -- another transaction type, a different reason, the wrong
+  // instant -- committed silently. That is precisely the silent-until-
+  // reconciled class this packet declares Band A for, so every field the
+  // companion writer projects is now compared against the projection.
+  if (
+    String(row!.companionNumber) !==
+      companionTransactionNumber(family, command.transactionId) ||
+    String(row!.companionType) !==
+      transactionType(family, posting.postingRole) ||
+    String(row!.companionSourceType) !== command.sourceType ||
+    String(row!.companionSourceId).toLowerCase() !== command.sourceId ||
+    (row!.companionReasonCode === null
+      ? ''
+      : String(row!.companionReasonCode)) !== command.reason.code ||
+    (row!.companionReasonNarrative === null
+      ? null
+      : String(row!.companionReasonNarrative)) !== command.reason.narrative ||
+    String(row!.companionActorId) !== expectedActorId ||
+    String(row!.companionEffectiveAt) !== command.effectiveAt ||
+    String(row!.companionRecordedAt) !== expectedRecordedAt
+  ) {
+    throw postingError(
+      'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+      `companion transaction ${command.transactionId} is not the projection of stock count ${command.stockCountId}`,
+      {
+        stockCountId: command.stockCountId,
+        transactionId: command.transactionId,
+      },
+    );
+  }
   const lines = await client.query<Record<string, unknown>>(
     `SELECT source.${quoted(binding.stockCountLine.recordIdColumn)}::text AS "sourceRecordId",
             source.${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "companionId",
-            companion.${quoted(binding.transactionLineRelationToTransactionColumn)}::text AS "companionTransactionId"
+            companion.${quoted(binding.transactionLineRelationToTransactionColumn)}::text AS "companionTransactionId",
+            companion.${quoted(binding.transactionLineItemColumn)}::text AS "companionItemId",
+            companion.${quoted(binding.transactionLineQuantityColumn)}::text AS "companionQuantity",
+            companion.${quoted(binding.transactionLineUnitColumn)} AS "companionUnitId",
+            companion.${quoted(binding.transactionLineLineNumberColumn)}::text AS "companionLineNumber",
+            companion.${quoted(binding.transactionLineFromLocationColumn)}::text AS "companionFromLocationId",
+            companion.${quoted(binding.transactionLineToLocationColumn)}::text AS "companionToLocationId"
        FROM ${table(binding, binding.stockCountLine)} AS source
        JOIN ${table(binding, binding.transactionLine)} AS companion
          ON companion.tenant_id = source.tenant_id
@@ -2901,14 +2994,20 @@ async function assertCompanionIdentitiesPersisted(
       { stockCountId: command.stockCountId },
     );
   }
+  const commandLines = new Map(
+    command.lines.map((line) => [line.stockCountLineId, line]),
+  );
   for (const line of lines.rows) {
+    const sourceRecordId = String(line.sourceRecordId).toLowerCase();
+    const expected = commandLines.get(sourceRecordId);
     if (
+      expected === undefined ||
       String(line.companionId).toLowerCase() !==
         deriveInventoryPostingCompanionId({
           capabilityId: family.capabilityId,
           companionFamilyId: companion.companionLineEntityId,
           familyId: family.familyId,
-          sourceRecordId: String(line.sourceRecordId),
+          sourceRecordId,
         }) ||
       String(line.companionTransactionId).toLowerCase() !==
         command.transactionId
@@ -2919,6 +3018,50 @@ async function assertCompanionIdentitiesPersisted(
         { stockCountLineId: String(line.sourceRecordId) },
       );
     }
+    // Added on review, for the same reason as the header comparison above.
+    const negative = expected.varianceQuantity.startsWith('-');
+    if (
+      String(line.companionItemId).toLowerCase() !== expected.itemId ||
+      normalizeDatabaseDecimal(String(line.companionQuantity)) !==
+        expected.varianceQuantity ||
+      String(line.companionUnitId) !== expected.unitId ||
+      String(line.companionLineNumber) !== expected.sourceLine ||
+      nullableUuid(line.companionFromLocationId) !==
+        (negative ? command.locationId : null) ||
+      nullableUuid(line.companionToLocationId) !==
+        (negative ? null : command.locationId)
+    ) {
+      throw postingError(
+        'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+        `companion line ${String(line.companionId)} is not the projection of stock-count line ${String(line.sourceRecordId)}`,
+        { stockCountLineId: String(line.sourceRecordId) },
+      );
+    }
+  }
+  // The join above walks SOURCE lines, so it cannot see a companion line the
+  // kernel wrote that no source line points at. Count the companion's own
+  // children and require exact set equality, which the prompt disclosed as a
+  // gap in the earlier read-back.
+  const companionLineCount = await client.query<{ total: string }>(
+    `SELECT count(*)::text AS total
+       FROM ${table(binding, binding.transactionLine)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.transactionLine.legalEntityColumn!)} = $3
+        AND ${quoted(binding.transactionLineRelationToTransactionColumn)} = $4
+        AND ${quoted(binding.transactionLine.archiveColumn)} IS NULL`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.transactionId,
+    ],
+  );
+  if (Number(companionLineCount.rows[0]?.total) !== command.lines.length) {
+    throw postingError(
+      'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+      `companion transaction ${command.transactionId} carries a line set the stock count does not account for`,
+      { transactionId: command.transactionId },
+    );
   }
 }
 
@@ -3000,7 +3143,7 @@ async function assertInventoryDraftHeader(
       command.legalEntityId,
       command.transactionId,
       binding.transactionDraftState,
-      transactionType(binding, posting.postingRole),
+      transactionType(posting.family, posting.postingRole),
       command.sourceRevision,
       command.effectiveAt,
       command.reason.code || null,
@@ -3711,7 +3854,7 @@ async function transitionTransactionToPosted(
       binding.transactionPostedState,
       command.transactionId,
       binding.transactionDraftState,
-      transactionType(binding, posting.postingRole),
+      transactionType(posting.family, posting.postingRole),
       command.effectiveAt,
       command.reason.code || null,
       command.reason.narrative,

@@ -4,7 +4,7 @@
   "entries": [
     {
       "name": "companion-identity-not-derived-from-the-source",
-      "claim": "The companion transaction and line identities are a pure function of the stock-count source record ids. Deriving them from anything else -- here, from fresh randomness -- means the kernel mints a companion identity nothing can recompute, which is exactly the `#companionDerivation` copies-rather-than-derives defect `purchasing-sales-v1-plan.md` section 7.16 measured. Scope of this entry's evidence: the kill set is measured within the three `companion derivation` tests this command runs, which is what the runner observes; the mutation also reds the wider stock-count file, and that is stated rather than measured here.",
+      "claim": "The companion transaction and line identities are a pure function of the stock-count source record ids. Deriving them from anything else -- here, from fresh randomness -- means the kernel mints a companion identity nothing can recompute, which is the copies-rather-than-derives defect `purchasing-sales-v1-plan.md` section 7.16 measured. SCOPE, narrowed on review: the kill is observed at the HEADER read-back, which runs before the line identities are independently compared, so this entry holds the header half at full strength and the line half only by construction. `source-line-companion-column-never-written` holds the line half. Kill sets are measured within the three `companion derivation` tests this command runs.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  const digest = createHash('sha256').update(name, 'utf8').digest();",
       "replacement": "  const digest = createHash('sha256').update(randomUUID(), 'utf8').digest();",
@@ -26,11 +26,11 @@
       ]
     },
     {
-      "name": "companion-revision-left-at-the-column-default",
-      "claim": "The kernel WRITES the companion transaction's revision, derived as sourceRevision + 1, rather than letting the column default supply it. Both companions of one posting carry the same derived revision, so a reader can join a posted count to its companion and see one consistent pair; a companion left at the default disagrees with the source it projects.",
+      "name": "companion-revision-not-the-contract-initial-value",
+      "claim": "REWRITTEN ON REVIEW, around the corrected invariant. The companion is a newly created entity row, so it takes the compiled optimistic-revision contract's `initialValue: '1'` -- the same revision the generic mutation interpreter gives every create. The earlier version of this entry asserted the OPPOSITE, that the companion should inherit `sourceRevision + 1` so the two rows matched, and the review was right that this overloads the optimistic-revision field with lineage it does not carry: at source revision 9 it created a brand-new transaction at revision 10. This mutation restores that behaviour and the read-back refuses it.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "  const revision = command.sourceRevision + 1;",
-      "replacement": "  const revision = 1;",
+      "original": "  const revision = companionInitialRevision;",
+      "replacement": "  const revision = command.sourceRevision + 1;",
       "test": {
         "files": ["test/postgres/inventory-stock-count.test.ts"],
         "namePattern": "companion derivation"
@@ -96,7 +96,7 @@
     },
     {
       "name": "reviewed-source-companion-must-be-null-fence-removed",
-      "claim": "The kernel is the ONLY writer of a companion identity, so a reviewed stock count must not already name one. Replacing the fence with whatever is stored makes the kernel ADOPT a companion transaction written by something else. Measured, the posting is still refused -- the line check catches it further down -- so what the fence actually buys is the IDENTITY of the refusal: with it, the operator is told the reviewed session is wrong; without it, they are sent to a line that is fine. This is the packet's gate-invisible deliverable, and it dies alone: the two posting tests are unaffected because their stored value is null either way.",
+      "claim": "The kernel does not ADOPT a companion identity it did not write. Replacing the fence with whatever is stored makes it do so. Measured, the posting is still refused -- the line check catches it further down -- so what the fence buys is the IDENTITY of the refusal: with it the operator is told the reviewed session is wrong; without it they are sent to a line that is fine. NARROWED ON REVIEW: this holds non-adoption and the refusal's identity. It does NOT establish that the kernel is the only reachable WRITER of a companion column, which it is not -- generic draft-transaction creation and stock-count relation mutation remain open, filed as `companion-writers-not-closed`. It dies alone: the two posting tests are unaffected because their stored value is null either way.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  const expectedCompanionId =\n    state === binding.stockCountReviewedState ? null : command.transactionId;",
       "replacement": "  const expectedCompanionId = nullableUuid(row?.transactionId ?? null);",
@@ -114,7 +114,7 @@
     },
     {
       "name": "family-roster-transaction-type-repointed",
-      "claim": "The companion transaction's type comes from the compiled family roster's ROLE binding, not from a switch arm, and each of the stock_count family's two roles carries its own. Repointing the `count` role's declared transaction type changes what the kernel writes for an initial count while leaving a correction alone -- which is what makes the roster load-bearing per role rather than decorative. It dies alone: only the projection test posts an initial count AND reads its companion's type.",
+      "claim": "The companion transaction's type comes from the EXECUTING family's own role binding, which the entry point resolved by `(capabilityId, familyId)` and which `#post` now carries rather than reselecting by role. Repointing the `count` role's declared type changes what the kernel writes for an initial count while leaving a correction alone, and the projection test compares both roles as ONE value so neither masks the other -- the correction the review asked for. It dies alone: only that test posts an initial count and reads its companion type.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'count_correction',\n      }),",
       "replacement": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'adjustment',\n      }),",
@@ -126,7 +126,7 @@
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
-          "expected": "the count role companion type comes from the family role binding"
+          "expected": "each role companion type comes from its own family role binding"
         }
       ]
     },
@@ -150,7 +150,7 @@
     },
     {
       "name": "companion-derivation-namespace-moved",
-      "claim": "Companion identity must be STABLE, not merely deterministic, because it is the join a reconciliation reader recomputes against already-posted counts. Moving the derivation namespace produces a derivation that is still pure and still deterministic, so write and read-back agree and the kernel's own `assertCompanionIdentitiesPersisted` passes -- it recomputes with the same function it wrote with. Only the golden vectors catch it, which is what makes them load-bearing rather than decorative. It dies alone: every other assertion in the packet compares the kernel against the same derivation and moves with it.",
+      "claim": "Companion identity must be STABLE, not merely deterministic, because it is the join a reconciliation reader recomputes against already-posted counts. Moving the namespace yields a derivation that is still pure and still deterministic, so write and read-back agree and the kernel's own read-back passes -- it recomputes with the function it wrote with. Only the golden vectors catch it. The two vectors are now compared as ONE value, so the transaction half no longer masks the line half; the review was right that sequential assertions measured only the first. It dies alone: every other assertion compares the kernel against the same derivation and moves with it.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "const companionDerivationNamespace = 'northstar.inventory-posting-companion/v1';",
       "replacement": "const companionDerivationNamespace = 'northstar.inventory-posting-companion/v2';",
@@ -162,7 +162,7 @@
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
-          "expected": "the companion transaction derivation must be stable across releases"
+          "expected": "both companion derivations must be stable across releases"
         }
       ]
     }

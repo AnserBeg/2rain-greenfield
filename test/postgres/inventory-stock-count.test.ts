@@ -524,15 +524,13 @@ test('stock-count companion derivation: a source with no pre-staged transaction 
       );
 
       const after = await readCompanionState(runtimePool, context, binding);
-      assert.equal(
-        after.sessions[0]?.companionId,
-        derivedTransactionId,
-        'the kernel must write the derived companion id onto the stock count',
-      );
       assert.deepEqual(
-        after.lines.map((line) => line.companionId),
-        [derivedLineId],
-        'the kernel must write the derived companion line id onto each stock-count line',
+        {
+          line: after.lines.map((line) => line.companionId),
+          session: after.sessions[0]?.companionId,
+        },
+        { line: [derivedLineId], session: derivedTransactionId },
+        'the kernel must write both derived companion identities onto the source',
       );
       assert.equal(
         after.transactions.length,
@@ -551,10 +549,14 @@ test('stock-count companion derivation: a source with no pre-staged transaction 
         command.sourceRevision + 1,
         'the source revision must advance to sourceRevision + 1',
       );
+      // Corrected on review. The companion is a CREATE, so it takes the
+      // compiled optimistic-revision contract's initial value; it does not
+      // inherit the source's post-transition revision. The source-to-companion
+      // join is the derived identity, not revision equality.
       assert.equal(
         after.transactions[0]?.revision,
-        command.sourceRevision + 1,
-        'the kernel must write the companion revision, not leave it at the column default',
+        1,
+        'a newly created companion begins at the contract initial revision',
       );
       assert.equal(
         after.transactions[0]?.state,
@@ -581,15 +583,16 @@ test('stock-count companion derivation: a source with no pre-staged transaction 
       // here that does not share the algorithm under test. A companion
       // identity that moves is a reconciliation predicate that silently stops
       // matching every already-posted count.
-      assert.equal(
-        derivedTransactionId,
-        'a2cdba01-9fed-8821-b202-0c2739d6cbe6',
-        'the companion transaction derivation must be stable across releases',
-      );
-      assert.equal(
-        derivedLineId,
-        'f11c5615-3db4-85b4-826a-f6827441cbb4',
-        'the companion line derivation must be stable across releases',
+      // Compared as ONE value so neither half masks the other. Two sequential
+      // equality assertions would stop at the transaction and never observe
+      // the line, which is a claim wider than the evidence.
+      assert.deepEqual(
+        { line: derivedLineId, transaction: derivedTransactionId },
+        {
+          line: 'f11c5615-3db4-85b4-826a-f6827441cbb4',
+          transaction: 'a2cdba01-9fed-8821-b202-0c2739d6cbe6',
+        },
+        'both companion derivations must be stable across releases',
       );
       assert.notEqual(
         expectedCompanionTransactionId('61000000-0000-4000-8000-000000000099'),
@@ -653,17 +656,21 @@ test('stock-count companion derivation: the companion transaction and its lines 
         (candidate) => candidate.recordId === openingTransactionId,
       )!;
       assert.ok(openingHeader, 'the opening companion must exist');
-      // Both roles the stock_count family declares are observed here: the
-      // opening count posts under `count` and the correction under
-      // `correction`, and each takes its companion type from its own role
-      // binding in the roster.
-      assert.equal(
-        openingHeader.type,
-        enumOption(
-          field(binding.transaction, 'inventory_transaction_type'),
-          'count_correction',
-        ),
-        'the count role companion type comes from the family role binding',
+      // BOTH roles the stock_count family declares, compared as one value so
+      // neither masks the other: the opening posts under `count` and the
+      // correction under `correction`, and each takes its companion type from
+      // its own role binding in the roster.
+      const expectedCountCorrectionType = enumOption(
+        field(binding.transaction, 'inventory_transaction_type'),
+        'count_correction',
+      );
+      assert.deepEqual(
+        { correction: header.type, count: openingHeader.type },
+        {
+          correction: expectedCountCorrectionType,
+          count: expectedCountCorrectionType,
+        },
+        'each role companion type comes from its own family role binding',
       );
       assert.equal(
         header.number,
@@ -679,14 +686,6 @@ test('stock-count companion derivation: the companion transaction and its lines 
         header.sourceId,
         command.stockCountId,
         'the companion must point back at the source it was derived from',
-      );
-      assert.equal(
-        header.type,
-        enumOption(
-          field(binding.transaction, 'inventory_transaction_type'),
-          'count_correction',
-        ),
-        'the companion type comes from the family role binding',
       );
       assert.equal(header.reasonCode, command.reason.code);
       assert.equal(header.reasonNarrative, command.reason.narrative);
