@@ -179,7 +179,7 @@
       "kills": [
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
-          "name": "stock-count legacy receipt: a receipt written before companion derivation is refused for its own reason",
+          "name": "stock-count legacy receipt: a pre-derivation receipt is refused for its own reason",
           "expected": "the refusal must name the contract change, not an ordinary key conflict"
         }
       ]

@@ -843,7 +843,7 @@ test('stock-count companion derivation: a reviewed count that already names a co
  * re-derive it must be refused for its own stated reason rather than
  * recomputed into a mismatch reported as an ordinary idempotency conflict.
  */
-test('stock-count legacy receipt: a receipt written before companion derivation is refused for its own reason', async () => {
+test('stock-count legacy receipt: a pre-derivation receipt is refused for its own reason', async () => {
   await withCompanionEnvironment(
     'companion-legacy-receipt',
     async ({ actor, binding, context, database, runtimePool, service }) => {
