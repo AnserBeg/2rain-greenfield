@@ -87,10 +87,66 @@ A packet must have all of:
   prompt names those bridges as pre-authorized with guardrails, so the writer
   does not stop mid-flight at a boundary that was known in advance. An
   UNforeseen out-of-lease need is still a stop-and-bridge-request.
+- **A `record-claim` block in the packet record, at freeze — MANDATORY from
+  2026-08-24, disposing program-review finding R1.** Every packet whose diff
+  touches executable content declares, in its own record, the range it claims and
+  what that range contains. `scripts/check-records.sh` then observes the
+  declaration against the git tree.
+
+## The declaration block (mandatory at freeze)
+
+**Why it is mandatory rather than offered.** `record-claim-fidelity` shipped the
+gate on 2026-08-23 and its live coverage was **one record — its own**, because a
+packet that declares nothing is checked against nothing. An optional gate over
+records is a gate over the one author who opted in. **This line is what converts
+it into a gate over the programme**, and until it landed the instrument was
+dormant.
+
+**What it closes, stated as the failure rather than as a rule.** `ux-picker`
+round 3 froze `56762ce` with a commit message describing an implementation the
+commit did not contain: a one-off drift probe had mutated `surface-contract.ts`,
+measured 9 reds, and reverted with `git checkout -- <path>`, which goes to HEAD
+and destroyed the round's work along with the mutation. **Nothing went red**,
+because the previous round's implementation passes the same suites. A reviewer
+found it by reading `git show --stat`. **Nothing in the repository could find it
+at all**, and that is what a declared, checked range fixes.
+
+The block is fenced `record-claim` in the packet record, exactly one per record,
+and carries `schemaVersion`, `packet`, `base`, `head`, `changedPaths` and
+`symbols`. Read a shipped one in
+`docs/execution/packets/record-claim-fidelity.md`; the schema is enforced by
+`test/architecture/record-claim-fidelity.ts`, and a malformed block fails closed
+rather than being skipped.
+
+**The mechanics that are not obvious, and each cost a review round to find:**
+
+- **`packet` must equal the record's filename stem, and `head` must carry a
+  `Packet:` trailer naming it.** A block copied into another record and merely
+  relabelled otherwise certifies commits the copying packet never made.
+- **`head` is the packet's LAST EXECUTABLE commit, not its tip.** Narrative
+  commits sit above it by construction — a record of a matrix is written after
+  the matrix. Declare the last commit that changed executable content.
+- **Every executable path in `base..head` must be declared**, per
+  `git-workflow`'s exclusion list. This doubles as a lease check: `matrix-unblock`
+  round 1 crossed its lease at 18 files against 11 chartered and reported it
+  afterwards.
+- **Symbols resolve only in TypeScript and JavaScript sources**, read from the
+  AST rather than matched as text. A shell script is claimed by path alone, and
+  the block refuses a symbol claim over one rather than guessing at it.
+
+**What the block does NOT do, so it is not over-trusted.** It closes *"the commit
+does not contain what the record claims"*. It does not close *"the record claims
+too little"* — the author still chooses what to declare, and no gate reads that
+choice for adequacy. **A reviewer still reads `git show --stat`.**
+
+**A packet whose diff is narrative-only declares nothing and owes no block.**
 
 ## Packet-completion block (mandatory, in this order)
 
-1. Frozen candidate SHA (any later fix produces a new SHA and fresh review).
+1. Frozen candidate SHA (any later fix produces a new SHA and fresh review), and
+   **the `record-claim` block written into the packet record naming that range**
+   — see "The declaration block" above. `scripts/check-records.sh` is green
+   before the freeze is reported, or the freeze is not reported.
    The base named in the packet prompt is where the branch was **cut from**, not
    a promise `main` still points there — orchestrator doc commits land on `main`
    between packets by design. If `main` moved, integration rebases or merges the

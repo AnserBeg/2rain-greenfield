@@ -100,12 +100,58 @@ EXECUTABLE CONTENT, not by the SHA** — corrected 2026-07-31.
       ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
 
 - **Empty output** — the integrated tree differs from the reviewed tree only in
-  non-executable narrative, or not at all: the reviewed matrix **is** the
-  acceptance matrix. Do not re-run. Record the reviewed run against the
-  integrated SHA, with the command's empty output as the evidence.
+  narrative the suites do not read, or not at all: the reviewed matrix **is** the
+  acceptance matrix for every suite except those named below. Do not re-run.
+  Record the reviewed run against the integrated SHA, with the command's empty
+  output as the evidence.
 - **Any output** — product code, test, config, migration, lockfile or generated
   artifact differs: re-run the full CI matrix at the integrated SHA before
   acceptance.
+
+### THE EXCLUSION LIST ANSWERS ONE QUESTION, NOT TWO — corrected 2026-08-24
+
+**These two claims used to share one command, and they are no longer the same
+claim:**
+
+1. *Which paths must a packet declare, and which changes are lease-relevant?*
+   The list above is right about this and needs no change.
+2. *May a reviewed suite result be carried forward past a narrative commit?*
+   **The list is no longer sufficient to answer this**, because a suite now
+   reads those paths.
+
+**`test:architecture` executes `docs/**`.** `record-claim-fidelity` landed
+2026-08-23 and its `record-claim-fidelity.test.ts` reads the ledger, every packet
+record and every Markdown file under `docs/`. **Measured, at a reviewer's request,
+before this correction was written:** a docs-only commit that repoints a declared
+head to forty zeroes leaves the command above **empty** while `test:architecture`
+**reds**. Two trees the rule calls identical, and the suite disagrees. The same
+packet's own five docs-only ADR corrections moved architecture 148/149 → 149/149.
+
+**So the rule splits.** Carry a suite forward past a narrative commit only when
+that suite does not read the narrative:
+
+- **Suites that read no narrative** — `unit`, `compiler`, `integration`,
+  `postgres`, `browser`, `contracts`, `agent`, `performance` — carry forward on
+  empty output, exactly as before.
+- **Suites that read narrative must RE-RUN.** Today that is **`test:architecture`**
+  — `record-claim-fidelity` reads `docs/**`, `ux-grammar-skill` reads
+  `.agents/skills/ux-grammar` and the plan, and `repository-hygiene` and
+  `test-reachability` read `package.json` and the workflow. A narrative-only commit
+  is a real input change for these.
+- **`pnpm format` re-runs too**, always: prettier checks Markdown, so a narrative
+  commit can make it red on its own. This has happened — `main` was format-red on
+  2026-08-13 and nothing gated it.
+
+**The cost is one suite, not a matrix.** `test:architecture` is minutes; the
+alternative is a carry-forward claim that is false for it.
+
+**How this was found, because the shape recurs.** The gate that made the premise
+false was reviewed against this file rather than against its own prompt, and the
+reviewer read the two together. A rule stating a *reason* — "these paths are never
+executed" — outlives the reason silently, because nothing re-checks the reason when
+a new reader appears. **When a rule's justification is a fact about the code, the
+rule needs an owner who re-derives it.** This one is now owned by whoever adds a
+suite that reads narrative: add it to the list above in the same packet.
 
 **ONE FULL MATRIX PER PACKET, AT THE FROZEN SHA — added 2026-08-03.** A lane runs
 the full matrix when it freezes its candidate, not after every intermediate fix.
@@ -334,8 +380,11 @@ any record of a matrix result must be written *after* the matrix. So the head th
 carries the gate table is always one commit above the SHA the gates were measured
 at.
 
-**This is already the identical-tree rule and needs no re-run.** The proof is the
-executable diff:
+**This is already the identical-tree rule and needs no re-run — for the suites the
+narrative does not feed.** See "The exclusion list answers one question, not two"
+above: `test:architecture` and `pnpm format` read narrative and re-run even here,
+where the delta is only the record of a matrix. The proof for everything else is
+the executable diff:
 
     git diff --name-only <matrix-sha> <freeze-sha> -- . \
       ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'

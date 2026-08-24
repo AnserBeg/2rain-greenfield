@@ -120,7 +120,14 @@ silently.
   re-run after the merge commit exists. When the integrated tree's executable
   content is identical to the reviewed one — narrative paths excluded, per the
   check in `git-workflow` — the reviewed run is the acceptance run, because a
-  second pass over the same bytes observes nothing.
+  second pass over the same bytes observes nothing. **Corrected 2026-08-24: that
+  reason no longer holds for every suite.** `test:architecture` now reads
+  `docs/**`, so a narrative commit changes its input and the bytes it observes
+  are not the same bytes. It and `pnpm format` re-run past a narrative commit;
+  the rest carry forward. `git-workflow`, "The exclusion list answers one
+  question, not two", holds the split, and the exclusion list itself remains
+  correct for the question it was written to answer — which paths a packet must
+  declare.
 - **Integration is a `--no-ff` merge of the PACKET into `main`, and the direction
   is a gate fact rather than a style preference.** `scripts/check-review-record.sh`
   walks `--first-parent` and covers a merge through its **second** parent. **Mechanism corrected
