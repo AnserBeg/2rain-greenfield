@@ -96,7 +96,7 @@
     },
     {
       "name": "reviewed-source-companion-must-be-null-fence-removed",
-      "claim": "The kernel does not ADOPT a companion identity it did not write. Replacing the fence with whatever is stored makes it do so. Measured, the posting is still refused -- the line check catches it further down -- so what the fence buys is the IDENTITY of the refusal: with it the operator is told the companion is the problem -- the refusal every pre-derivation stock count meets -- and without it they are sent to a line that is fine. NARROWED ON REVIEW: this holds non-adoption and the refusal's identity. It does NOT establish that the kernel is the only reachable WRITER of a companion column, which it is not -- generic draft-transaction creation and stock-count relation mutation remain open, filed as `companion-writers-not-closed`. It dies alone: the two posting tests are unaffected because their stored value is null either way.",
+      "claim": "NARROWED ON REVIEW, twice. This control holds ONE thing: which refusal an operator meets when a reviewed count already names a companion. With the evidence-stage fence the message names the companion -- the refusal every pre-derivation stock count would meet; without it the posting is still refused, but at the LINE check, pointing at a record that is fine. It does NOT hold non-adoption: `transitionStockCountToPosted` keeps its own `IS NULL` compare-and-set, so the mutant adopts nothing and writes no movement either way. Round 2 was right that the earlier claim credited this fence with a property a different mechanism enforces. It does NOT hold that the kernel is the only reachable writer of a companion column, which it is not -- see `companion-writers-not-closed`.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  const expectedCompanionId =\n    state === binding.stockCountReviewedState ? null : command.transactionId;",
       "replacement": "  const expectedCompanionId = nullableUuid(row?.transactionId ?? null);",
@@ -114,7 +114,7 @@
     },
     {
       "name": "family-roster-transaction-type-repointed",
-      "claim": "The companion transaction's type comes from the EXECUTING family's own role binding, which the entry point resolved by `(capabilityId, familyId)` and which `#post` now carries rather than reselecting by role. Repointing the `count` role's declared type changes what the kernel writes for an initial count while leaving a correction alone, and the projection test compares both roles as ONE value so neither masks the other -- the correction the review asked for. It dies alone: only that test posts an initial count and reads its companion type.",
+      "claim": "NARROWED ON REVIEW. This control holds that the ROSTER's declared role type is what the kernel writes: repointing the `count` role's transaction type changes the companion an initial count receives, and the projection test compares both roles as one value so neither masks the other. It does NOT prove that the family carried on `ParsedPosting` is what executes, and round 2 was right: regressing to the old global role lookup would consume the same mutated roster entry and produce the same red. It cannot be made to discriminate today, because `resolvePostingFamilies` forbids two families claiming one role, so role alone still identifies the family -- a fixture that could tell the two paths apart is not constructible under the current invariant. The dataflow correction is verifiable by reading the source; this control does not protect it from regression, and that limit is stated rather than implied.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'count_correction',\n      }),",
       "replacement": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'adjustment',\n      }),",
@@ -163,6 +163,75 @@
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
           "expected": "both companion derivations must be stable across releases"
+        }
+      ]
+    },
+    {
+      "name": "companion-line-identity-not-derived-from-its-source",
+      "claim": "The companion LINE identity is a function of its own source line record id, held independently of the header. Round 2 was right that the shared-derivation mutation cannot hold this: the header comparison fails first, so the line half was only ever held by construction, and `source-line-companion-column-never-written` proves the relation was WRITTEN rather than DERIVED. This mutation leaves header derivation intact and derives the line identity from the SESSION id instead of the line's own id -- still pure, still deterministic, and wrong in exactly the way a copy-paste would be. The header read-back passes; only the line identity comparison catches it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      sourceRecordId: line.stockCountLineId.toLowerCase(),\n    }),",
+      "replacement": "      sourceRecordId: stockCountId,\n    }),",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "lines do not all carry a derived companion line identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "lines do not all carry a derived companion line identity"
+        }
+      ]
+    },
+    {
+      "name": "companion-line-created-at-a-derived-revision",
+      "claim": "A companion LINE is a create, so it carries the compiled optimistic-revision contract's `initialValue: '1'` written explicitly by the kernel -- the same rule the header follows. Round 2 found the header writing its revision while the line relied silently on the column default, so the create invariant was never certified for lines even though it held by accident. This mutation writes a source-derived revision instead, which is what the header did before round 1 corrected it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      line.transactionLineId,\n      companionInitialRevision,",
+      "replacement": "      line.transactionLineId,\n      command.sourceRevision + 1,",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the revisions its writes require"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the revisions its writes require"
+        }
+      ]
+    },
+    {
+      "name": "source-line-revision-does-not-advance",
+      "claim": "Writing the derived companion relation MUTATES the source stock-count line, so its optimistic revision must advance. Round 2 found the relation being written while the revision stood still, which makes the mutation invisible to optimistic concurrency: `stock_count_line` receives ordinary generated operations, and a later one holding a pre-posting expected revision could not tell that posting had changed the row. This mutation restores that behaviour -- the relation is written, the revision is not -- and the write's own read-back plus the persisted comparison refuse it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid,\n              ${quoted(binding.stockCountLine.revisionColumn)} = ${quoted(binding.stockCountLine.revisionColumn)} + 1",
+      "replacement": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "would not accept its derived companion identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "would not accept its derived companion identity"
         }
       ]
     }

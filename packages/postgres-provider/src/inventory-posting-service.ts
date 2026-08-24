@@ -936,7 +936,7 @@ export class PostgresInventoryPostingService {
             recordedAt,
           );
           if (companionOrigin) {
-            await writeCompanionLineIdentities(
+            const sourceLineRevisions = await writeCompanionLineIdentities(
               client,
               this.#binding,
               context,
@@ -950,6 +950,7 @@ export class PostgresInventoryPostingService {
               posting,
               actorEnvelope.actor.executionPrincipal.principalId,
               recordedAt,
+              sourceLineRevisions,
             );
           }
         }
@@ -1618,11 +1619,17 @@ function postingRoleFromStorage(
 }
 
 /**
- * The companion/authored transaction type comes from the EXECUTING family's own
- * role binding, not from a global role table. Two families may legitimately map
- * the same role to different transaction types, and a global table cannot
- * express that -- which is the sense in which the roster has to be per family
- * to be load-bearing at all.
+ * The transaction type comes from the EXECUTING family's own role binding --
+ * the family the entry point resolved by `(capabilityId, familyId)` and that
+ * `#post` carries, rather than one selected again from the role.
+ *
+ * *Corrected on review.* An earlier comment here said two families may map the
+ * same role to different transaction types. `resolvePostingFamilies` forbids
+ * exactly that: a role claimed by two families throws at construction. So
+ * today a role still identifies its family uniquely, and reading through the
+ * carried family is a dataflow correction rather than a new capability. The
+ * per-family form is what a second capability would need; it is not yet what
+ * this binding proves.
  */
 function transactionType(
   family: ResolvedPostingFamily,
@@ -2790,6 +2797,10 @@ async function writeCompanionTransaction(
       'environment_id',
       binding.transactionLine.legalEntityColumn!,
       binding.transactionLine.recordIdColumn,
+      // A companion LINE is a create too, so the kernel writes its initial
+      // revision rather than leaving the column default to supply it. Round 2
+      // found the header doing this and the line not.
+      binding.transactionLine.revisionColumn,
       ...lineFields.map(
         ([local]) => requiredField(binding.transactionLine, local).name,
       ),
@@ -2800,6 +2811,7 @@ async function writeCompanionTransaction(
       context.environmentId,
       command.legalEntityId,
       line.transactionLineId,
+      companionInitialRevision,
       ...lineFields.map(([, value]) => value),
       command.transactionId,
     ];
@@ -2833,18 +2845,50 @@ async function writeCompanionLineIdentities(
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
   posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
-): Promise<void> {
+): Promise<ReadonlyMap<string, number>> {
   const { command } = posting;
+  const written = new Map<string, number>();
   for (const line of command.lines) {
-    const written = await client.query(
+    // The source line is READ first so the advance can be observed rather than
+    // assumed. Its row is already held `FOR NO KEY UPDATE` by the evidence
+    // lock, so nothing can move it between this read and the update below.
+    const prior = await client.query<{ revision: number }>(
+      `SELECT ${quoted(binding.stockCountLine.revisionColumn)}::integer AS revision
+         FROM ${table(binding, binding.stockCountLine)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
+          AND ${quoted(binding.stockCountLine.recordIdColumn)} = $4
+          AND ${quoted(binding.stockCountLine.archiveColumn)} IS NULL`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        line.stockCountLineId,
+      ],
+    );
+    const priorRevision = Number(prior.rows[0]?.revision);
+    if (!Number.isSafeInteger(priorRevision)) {
+      throw postingError(
+        'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+        `stock-count line ${line.stockCountLineId} has no readable revision`,
+        { stockCountLineId: line.stockCountLineId },
+      );
+    }
+    // Writing the companion relation MUTATES this row, so its optimistic
+    // revision advances with it. Round 2 found the relation being written
+    // while the revision stood still, which makes the mutation invisible to
+    // any later operation holding a pre-posting expected revision.
+    const updated = await client.query<{ revision: number }>(
       `UPDATE ${table(binding, binding.stockCountLine)}
-          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid
+          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid,
+              ${quoted(binding.stockCountLine.revisionColumn)} = ${quoted(binding.stockCountLine.revisionColumn)} + 1
         WHERE tenant_id = $1 AND environment_id = $2
           AND ${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
           AND ${quoted(binding.stockCountLine.recordIdColumn)} = $4
           AND ${quoted(binding.stockCountLineRelationToSessionColumn)} = $6
           AND ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} IS NULL
-          AND ${quoted(binding.stockCountLine.archiveColumn)} IS NULL`,
+          AND ${quoted(binding.stockCountLine.archiveColumn)} IS NULL
+        RETURNING ${quoted(binding.stockCountLine.revisionColumn)}::integer AS revision`,
       [
         context.tenantId,
         context.environmentId,
@@ -2854,14 +2898,19 @@ async function writeCompanionLineIdentities(
         command.stockCountId,
       ],
     );
-    if (written.rowCount !== 1) {
+    if (
+      updated.rowCount !== 1 ||
+      Number(updated.rows[0]?.revision) !== priorRevision + 1
+    ) {
       throw postingError(
         'INVENTORY_COUNT_EVIDENCE_CONFLICT',
         `stock-count line ${line.stockCountLineId} would not accept its derived companion identity`,
         { stockCountLineId: line.stockCountLineId },
       );
     }
+    written.set(line.stockCountLineId, priorRevision + 1);
   }
+  return written;
 }
 
 /**
@@ -2882,6 +2931,7 @@ async function assertCompanionIdentitiesPersisted(
   posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
   expectedActorId: string,
   expectedRecordedAt: string,
+  sourceLineRevisions: ReadonlyMap<string, number>,
 ): Promise<void> {
   const { command } = posting;
   const companion = family.companion;
@@ -2985,7 +3035,9 @@ async function assertCompanionIdentitiesPersisted(
             companion.${quoted(binding.transactionLineUnitColumn)} AS "companionUnitId",
             companion.${quoted(binding.transactionLineLineNumberColumn)}::text AS "companionLineNumber",
             companion.${quoted(binding.transactionLineFromLocationColumn)}::text AS "companionFromLocationId",
-            companion.${quoted(binding.transactionLineToLocationColumn)}::text AS "companionToLocationId"
+            companion.${quoted(binding.transactionLineToLocationColumn)}::text AS "companionToLocationId",
+            companion.${quoted(binding.transactionLine.revisionColumn)}::integer AS "companionRevision",
+            source.${quoted(binding.stockCountLine.revisionColumn)}::integer AS "sourceRevision"
        FROM ${table(binding, binding.stockCountLine)} AS source
        JOIN ${table(binding, binding.transactionLine)} AS companion
          ON companion.tenant_id = source.tenant_id
@@ -3032,6 +3084,20 @@ async function assertCompanionIdentitiesPersisted(
       throw postingError(
         'INVENTORY_COUNT_EVIDENCE_CONFLICT',
         `stock-count line ${String(line.sourceRecordId)} does not carry the derived companion line identity`,
+        { stockCountLineId: String(line.sourceRecordId) },
+      );
+    }
+    // Both line revisions are read back, because a write nothing observes is
+    // exactly the defect round 2 found: the companion line is a create and
+    // must carry the contract initial revision, and the source line was
+    // MUTATED here so its revision must have advanced by one.
+    if (
+      Number(line.companionRevision) !== companionInitialRevision ||
+      Number(line.sourceRevision) !== sourceLineRevisions.get(sourceRecordId)
+    ) {
+      throw postingError(
+        'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+        `companion line ${String(line.companionId)} does not carry the revisions its writes require`,
         { stockCountLineId: String(line.sourceRecordId) },
       );
     }

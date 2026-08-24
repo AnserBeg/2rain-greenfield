@@ -544,19 +544,28 @@ test('stock-count companion derivation: a source with no pre-staged transaction 
       );
 
       // Both revisions, and the fact that they are the SAME derived revision.
-      assert.equal(
-        after.sessions[0]?.revision,
-        command.sourceRevision + 1,
-        'the source revision must advance to sourceRevision + 1',
-      );
       // Corrected on review. The companion is a CREATE, so it takes the
       // compiled optimistic-revision contract's initial value; it does not
       // inherit the source's post-transition revision. The source-to-companion
       // join is the derived identity, not revision equality.
-      assert.equal(
-        after.transactions[0]?.revision,
-        1,
-        'a newly created companion begins at the contract initial revision',
+      // Every revision the posting touches, compared as one value. The
+      // companion header and line are CREATES and take the contract's initial
+      // revision; the source header and line were MUTATED and must each have
+      // advanced by exactly one from the revision 1 they were seeded at.
+      assert.deepEqual(
+        {
+          companionHeader: after.transactions[0]?.revision,
+          companionLine: after.transactionLines[0]?.revision,
+          sourceHeader: after.sessions[0]?.revision,
+          sourceLine: after.lines[0]?.revision,
+        },
+        {
+          companionHeader: 1,
+          companionLine: 1,
+          sourceHeader: 2,
+          sourceLine: 2,
+        },
+        'creates take the contract initial revision and mutated rows advance by one',
       );
       assert.equal(
         after.transactions[0]?.state,
@@ -940,7 +949,11 @@ function relationColumn(
 }
 
 interface CompanionState {
-  lines: Array<{ companionId: string | null; recordId: string }>;
+  lines: Array<{
+    companionId: string | null;
+    recordId: string;
+    revision: number;
+  }>;
   movements: Array<{ transactionId: string; transactionLineId: string }>;
   sessions: Array<{ companionId: string | null; revision: number }>;
   transactionLines: Array<{
@@ -948,6 +961,7 @@ interface CompanionState {
     itemId: string;
     quantity: string;
     recordId: string;
+    revision: number;
     toLocationId: string | null;
     transactionId: string;
     unitId: string;
@@ -982,6 +996,7 @@ async function readCompanionState(
     );
     const lines = await client.query<Record<string, unknown>>(
       `SELECT ${quoted(binding.stockCountLine.recordIdColumn)}::text AS "recordId",
+              ${quoted(binding.stockCountLine.revisionColumn)}::integer AS revision,
               ${quoted(relationColumn(binding, binding.stockCountLine, binding.transactionLine))}::text AS "companionId"
          FROM ${table(binding, binding.stockCountLine)}
         WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
@@ -1005,6 +1020,7 @@ async function readCompanionState(
     );
     const transactionLines = await client.query<Record<string, unknown>>(
       `SELECT ${quoted(binding.transactionLine.recordIdColumn)}::text AS "recordId",
+              ${quoted(binding.transactionLine.revisionColumn)}::integer AS revision,
               ${quoted(relationColumn(binding, binding.transactionLine, binding.transaction))}::text AS "transactionId",
               ${quoted(field(binding.transactionLine, 'inventory_transaction_line_item_id').physicalName)}::text AS "itemId",
               ${quoted(field(binding.transactionLine, 'inventory_transaction_line_quantity').physicalName)}::text AS quantity,
