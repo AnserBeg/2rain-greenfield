@@ -211,7 +211,60 @@ test read only the `correction` role's companion type while the mutation moved
 the `count` role's. The test now reads both, so each declared role binding is
 observed by something.
 
-## Gate results, measured at `499aab1`
+## Review round 1 — BLOCK, and it was right on all four findings
+
+The first arm returned **BLOCK** with four Critical findings. I verified each
+against the tree before acting; **all four are correct**, and one of them is a
+rule violation I argued my way into rather than measured.
+
+| Finding | What I measured | Verdict |
+|---|---|---|
+| F1 — a released contract changed in place | Migration `0016`'s own text: writers *"retain the v1 default until their own digest input changes under a versioned migration"* | **Correct, and decisive** |
+| F2 — the pair-keyed binding was not what executed | Two lookups: pair-keyed in the entry point, role-keyed in `#post`; `sourceEntityId` and `sourceLineEntityId` written and never read | **Correct** |
+| F3 — the companion should start at revision 1 | `storage.ts` declares `initialValue: '1'`; `module-runtime-interpreter.ts` gives every create `projectedRevision: 1` | **Correct** |
+| F4 — the read-back was identity-only | It selected six fields: identity, state, revision, parentage. No type, number, reason, instant, quantity, unit or location | **Correct** |
+
+**F1 is the one that should not have happened.** I recorded, as a deliberate
+decision, that the digest version need not move because the digest SHAPE was
+unchanged. The rule keys on the digest INPUT, and mine changed. I reasoned past
+a constraint instead of measuring it, and the packet record carried that
+reasoning as settled.
+
+### Taken in this round
+
+- **F3** — the companion is inserted at the contract's initial revision. Its
+  control is rewritten around the corrected invariant; the old control was
+  protecting the wrong one.
+- **F4** — the read-back compares every projected header and line field, and
+  counts the companion's own children so an extra companion line cannot hide
+  behind a source-side join.
+- **F2, execution half** — the family resolved by `(capabilityId, familyId)` is
+  carried on `ParsedPosting` and is what executes; `transactionType` reads the
+  executing family's own role binding; the two unread fields are gone, their
+  existence checks kept as visible assertions.
+- **Control claims** — three narrowed to what a non-masked assertion observes,
+  and the golden vectors and role types compared as single values so neither
+  half masks the other.
+
+### NOT taken, because they are not a lane's to rule
+
+The versioned transition for already-released data (`db/migrations/**`), making
+the roster an active-release artifact (`InventoryPostingRegistrationV1`, 14
+construction sites), and closing the generic companion writers (`apps/web/**`
+and the O0 operations). All three are outside this lease and all three are
+design rulings. They are recorded in ADR-0060 under *The transition this ADR
+does NOT rule, and cannot*.
+
+### What this round refutes in the plan
+
+**§7.16's premise is refuted by construction**, in the same way §7.16 itself
+refuted the three design passes. It ruled that the stock-count relations
+becoming post-time outputs is *"a code change, not a ruling."* It is a code
+change **and** a ruling, because the relations are already released: the
+storage planner refuses the transition, and the receipt rule refuses the digest
+change. Neither was visible from reasoning; both appeared on contact.
+
+## Gate results, measured at `499aab1` (round 1, superseded)
 
 | Gate | Result |
 |---|---|
@@ -328,8 +381,9 @@ new values from `checkModulePressLaw` rather than arithmetic* — and locating
 the spliced line by content would make this control immune rather than merely
 easy to repair.
 
-**Stop count for this packet: 2, which is the cap before `mission-cadence`
-requires a re-scope rather than a third continuation.** Both stops are the same
+**Stop count for this packet: 2, plus a BLOCK whose unresolved half is new
+scope. `mission-cadence` puts this at the re-scope point, not at a third
+continuation.** Both stops are the same
 shape: an artifact pinned OUTSIDE this lease that an in-lease change
 necessarily moves. Neither is a defect in the packet's production logic, and
 neither was foreseeable from the charter.

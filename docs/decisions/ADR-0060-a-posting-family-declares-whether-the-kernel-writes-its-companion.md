@@ -1,7 +1,7 @@
 # ADR-0060: A posting family declares whether the kernel writes its companion
 
 Date: 2026-08-23
-Status: accepted
+Status: PROPOSED — blocked on the released-contract transition below
 Tier: Critical (review per `review-tiers`)
 
 Written after the vertical was built and measured, not before it. That
@@ -47,6 +47,18 @@ ADR-0049 §4's authored/companion axis, made executable:
   the derived identity back onto the source, all inside the posting
   transaction. The source may — and before posting must — exist without one.
 
+  **The kernel is the only writer WITHIN a successful companion-origin posting;
+  it is not the only reachable writer in the application, and this ADR does not
+  claim otherwise.** *An earlier version did, and the review refuted it.*
+  Generic O0 operations still admit draft inventory-transaction create and
+  update, reviewed stock counts remain mutable, and the stock-count form still
+  renders the now-dead Transaction picker. Something else can therefore write a
+  transaction under the derived identity, or write the source relation, before
+  posting. What the reviewed-must-be-null fence buys is that the kernel refuses
+  to ADOPT such a row — refusal, not sole-writer enforcement. ADR-0049 required
+  user-reachable companion creation and update to be CLOSED; that remains owed
+  and is filed as `companion-writers-not-closed`.
+
 **A companion identity is DERIVED from the source, never copied from a
 command.** The derivation is
 `uuidv8(sha256(namespace | capabilityId | familyId | companionFamilyId | sourceRecordId))`.
@@ -61,20 +73,42 @@ Two properties follow from purity and both are load-bearing:
    "converges by doing nothing" and declaring stock count companion-origin
    "does not give it a kernel writer."
 
-**The authored verifiers are NOT re-run over kernel-written rows.** A row
-created inside the posting transaction has no validation-to-posting window, so
-there is nothing for them to protect, and running them would make a verifier
-share a code path with the writer — `AGENTS.md` §6's fifth vacuity vector.
-What replaces them is a **read-back**: both companion identities and both
-revisions are read out of storage, and the expected identity is recomputed from
-the source record id **read back from the same row**. That is observation of
-the persisted effect rather than trust in a reported row count.
+**The authored DRAFT PROTOCOL is not re-run over kernel-written rows, but its
+projection checks are not discarded.** A row created inside the posting
+transaction has no validation-to-posting window, so the header lock, the
+draft-state assertion and the line-set compare-and-set have nothing to protect,
+and running them would make a verifier share a code path with the writer —
+`AGENTS.md` §6's fifth vacuity vector.
 
-**Both revisions are derived and both are written.** The companion transaction
-is inserted directly in `posted` state at `sourceRevision + 1`, the same
-revision the source reaches. A reader joining a posted count to its companion
-sees one consistent pair, and `source.revision == companion.revision` is a
-reconciliation predicate rather than a coincidence.
+*The first review arm found that an earlier version of this ADR used that
+argument to discard too much, and it was right.* The authored path was also
+independently verifying every business field and the exact line set. Dropping
+those left a read-back that checked identity, state and revision only — so a
+writer producing the RIGHT identities and the WRONG transaction type, reason,
+instant, quantity, unit or direction committed silently, which is precisely the
+class this ADR invokes Band A for. **What replaces the draft protocol is a full
+projection read-back**: every persisted companion header and line field is
+compared against the projection of the source, the companion's own children are
+counted so an extra line cannot hide behind a source-side join, and each
+expected identity is recomputed from the source record id **read back from the
+same row**.
+
+**The companion is created at the contract's initial revision.** It is inserted
+directly in `posted` state at revision `1`, because it is a CREATE: the
+compiled storage contract declares an entity's optimistic revision with
+`initialValue: '1'`, and the generic mutation interpreter gives every create
+`projectedRevision: 1`.
+
+*An earlier version of this ADR ruled the opposite — that the companion takes
+`sourceRevision + 1` so the two rows match, making revision equality a
+reconciliation predicate. The first review arm refuted it and was right.* That
+overloads the optimistic-revision field with lineage it does not carry: at
+source revision 9 it created a brand-new transaction at revision 10, which no
+part of the compiled revision contract authorises. **The source-to-companion
+join is the DERIVED IDENTITY**, recomputable from the source alone, and it
+never needed revision equality. A packet that genuinely needs to know which
+source revision produced a companion owes a lineage field or a reconciliation
+fact, not a reinterpretation of an existing one.
 
 **Companion relations are optional, pinned rather than permitted.** The
 compiler's pinned stock-count relation table now requires
@@ -84,20 +118,72 @@ is what made the source unconstructible; permitting either value would let the
 defect return silently. `stock_count_line -> stock_count` stays required,
 because a parent-scoped child genuinely cannot exist without its session.
 
+## The transition this ADR does NOT rule, and cannot
+
+**This decision changes an ALREADY-RELEASED contract, and the first review arm
+was right that a fresh-install acceptance test cannot certify that.**
+
+The base `InventoryStockCountPostingCommandV1` required a caller-authored
+`transactionId` and per-line `transactionLineId`, and both companion relations
+were required, so reviewed stock counts necessarily carried caller-selected
+companions. Under this decision a reviewed count must carry NULL and a posted
+count must carry the derived identity. Relaxing `NOT NULL` clears no existing
+value and re-keys no existing row, so against already-released data:
+
+1. an existing reviewed count with its formerly required companion is refused
+   by the must-be-null fence;
+2. an existing posted count whose caller-chosen ids differ from the derivation
+   fails the projection read-back;
+3. an old caller cannot resend the old shape, because `exactKeys` refuses it;
+4. an existing version-3 receipt was digested from caller-selected ids and now
+   recomputes from derived ones, so it replays as an idempotency conflict.
+
+**Point 4 is a rule violation, not a judgement call.** Migration `0016` states
+the rule in its own text: writers *"retain the v1 default until their own
+digest input changes under a versioned migration."* The digest INPUT changed
+here. An earlier version of this packet argued the exemption on the grounds
+that the digest SHAPE was unchanged — a distinction the rule does not make.
+That argument is withdrawn.
+
+**What is owed before this ADR can be accepted**, and none of it is a lane's to
+rule: a versioned public command and capability version; a digest version with
+its `CHECK` migration; a disposition for legacy reviewed rows and their
+pre-staged drafts; a disposition for legacy posted rows, movements and
+receipts; and either an explicit proof that no live data exists or a transition
+that carries it. Until then this ADR is **proposed**, not accepted, and the
+mechanism it describes is proven only on a fresh install.
+
 ## What this ADR does NOT claim
 
-**The family roster is not executable authority.** What is frozen in the
-provider is WHICH families exist. What is compiled and release-verified is
-everything each family is MADE OF: every entity, relation column and enum
-option is resolved out of the registration's storage target.
+**The family roster IS executable authority — provider authority, not
+active-release authority.** *This corrects an earlier version of this ADR that
+said the roster "is not executable authority" flatly. The first review arm
+refuted it and supplied the right distinction, which is adopted verbatim
+because it is better than the one it replaces.*
+
+The provider-local roster decides whether execution is authored or
+companion-origin, the pinned source type, the movement role option, the
+companion transaction type, the business-key prefix, and which families exist
+at all. `family.origin` branches production execution directly. That is
+executable authority by any honest reading.
+
+What the compiled artifact contributes is narrower: every entity, relation
+column and enum option a family names is resolved out of the registration's
+storage target, so a provider-declared family whose storage parts are absent
+from the active release cannot post. **The active release does not declare the
+family, and does not authorise its origin.**
 
 *Stated at its real strength and no further, because the two halves happen at
 different times.* Resolution runs at service CONSTRUCTION, so on its own it
 only proves a family against the target it was handed. `assertActiveRelease`
 runs per POSTING, and it proves that target is the exact active-release
 artifact by comparing its canonical BYTES against the persisted projection
-chunk — not merely a content hash. Together they mean a family the ACTIVE
-RELEASE cannot satisfy can never post. Construction alone does not mean that.
+chunk — not merely a content hash. Together they mean a NEW WRITE cannot use a
+provider-declared family whose referenced storage parts are absent from the
+exact active target. Construction alone does not mean that, and neither half
+means the release declared the family. *Receipt replay returns before the
+active-release assertion; it writes no new effect, but the limit is stated
+rather than left to be discovered.*
 
 Moving the roster itself into the compiled contract release requires changing
 `InventoryPostingRegistrationV1`, which has fourteen construction sites.
@@ -117,10 +203,21 @@ for it.
 
 ## Consequences
 
-**Easier.** A new companion-origin family is a roster entry plus its compiled
-entities, not three new switch arms and a second companion-writing path. A
-reconciliation reader can recompute any companion identity from source ids
-alone, without the posting kernel, through an exported pure function.
+**Easier, but NOT roster-only — corrected on review.** A reconciliation reader
+can recompute any companion identity from source ids alone, without the posting
+kernel, through an exported pure function. That much holds.
+
+*An earlier version claimed a new companion-origin family is "a roster entry
+plus its compiled entities". That was false and the review measured why.* The
+roster supplies no generic source port: there is no family-driven source lock,
+source validation, or source transition. A second companion-origin family still
+needs a public entry point, a command type, a parsed-union arm, its own source
+validation and transition, and changes to the guards that are still written
+against stock count specifically. **What this ADR establishes is the KEY and
+the origin axis, proven on one family — not roster-only extensibility.**
+Building the generic source port is the next packet's work, and until it exists
+the honest claim is that the hardcoding moved up into the entry point rather
+than being eliminated.
 
 **Harder, and this is the real cost.** Relaxing requiredness on an
 **already-released** relation is a storage transition the v1 language cannot
