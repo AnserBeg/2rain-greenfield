@@ -165,6 +165,24 @@
           "expected": "both companion derivations must be stable across releases"
         }
       ]
+    },
+    {
+      "name": "legacy-stock-count-digest-recomputed",
+      "claim": "A stock-count receipt written before companion derivation carries a version-3 digest computed from CALLER-authored companion ids. This kernel derives them, so it cannot reproduce that digest and must refuse to try. Recomputing it instead produces a value that disagrees with what is stored, and the mismatch surfaces as the ordinary 'already names another posting' idempotency conflict -- sending an operator to hunt a conflicting posting that does not exist, when the real cause is a contract change. Migration 0016 is what makes this a rule rather than a preference: a writer keeps its version 'until their own digest input changes under a versioned migration', and 0022 is that migration. The control is scoped to the legacy-receipt test by name pattern, and the claim is scoped to match.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          : version === stockCountInventoryPostingInputDigestVersion\n            ? legacyStockCountReceipt()\n            : unsupportedReceiptVersion(version);",
+      "replacement": "          : version === stockCountInventoryPostingInputDigestVersion\n            ? { postingRole: posting.postingRole, ...semanticInput }\n            : unsupportedReceiptVersion(version);",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "legacy receipt"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count legacy receipt: a receipt written before companion derivation is refused for its own reason",
+          "expected": "the refusal must name the contract change, not an ordinary key conflict"
+        }
+      ]
     }
   ]
 }
