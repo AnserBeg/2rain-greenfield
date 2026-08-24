@@ -60,10 +60,7 @@ import {
   type AuthenticatedIdentity,
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
-import {
-  withEphemeralPostgres,
-  type EphemeralPostgres,
-} from '../helpers/postgres.js';
+import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
 const tenantId = '12000000-0000-4000-8000-000000000001';
@@ -835,129 +832,10 @@ test('stock-count companion derivation: a reviewed count that already names a co
   );
 });
 
-/**
- * PUR-2a, added on review. F1's decode boundary: a receipt written before
- * companion derivation carries a version-3 digest computed from CALLER-authored
- * companion ids. This kernel derives them, so it cannot reproduce that digest.
- * The receipt must still decode by its own stored version, and the attempt to
- * re-derive it must be refused for its own stated reason rather than
- * recomputed into a mismatch reported as an ordinary idempotency conflict.
- */
-test('stock-count legacy receipt: a pre-derivation receipt is refused for its own reason', async () => {
-  await withCompanionEnvironment(
-    'companion-legacy-receipt',
-    async ({ actor, binding, context, database, runtimePool, service }) => {
-      const command = countCommand({
-        countedQuantity: '5',
-        expectedQuantity: '0',
-        kind: 'initial',
-        sequence: 6,
-        supersedesStockCountId: null,
-        varianceQuantity: '5',
-      });
-      await seedReviewedCount(runtimePool, context, binding, command);
-      await service.postStockCount(context, actor, command);
-
-      // The digest version the kernel WRITES. This is the half migration 0022
-      // admits, and asserting it here is what proves the bump is live rather
-      // than merely declared.
-      const stored = await database.pool.query<{
-        correlationId: string;
-        digestVersion: number;
-        invocationId: string;
-        mutationResult: unknown;
-        principalId: string;
-        releaseContentHash: string;
-        releaseId: string;
-      }>(
-        `SELECT input_digest_version AS "digestVersion",
-                invocation_id::text AS "invocationId",
-                correlation_id::text AS "correlationId",
-                principal_id::text AS "principalId",
-                release_id::text AS "releaseId",
-                release_content_hash AS "releaseContentHash",
-                mutation_result AS "mutationResult"
-           FROM platform.semantic_operation_receipts
-          WHERE tenant_id = $1 AND environment_id = $2
-            AND idempotency_key = $3`,
-        [context.tenantId, context.environmentId, command.idempotencyKey],
-      );
-      assert.equal(stored.rowCount, 1);
-      assert.equal(
-        stored.rows[0]?.digestVersion,
-        4,
-        'a derived-companion posting must record the version its digest input belongs to',
-      );
-
-      // A receipt is IMMUTABLE — `semantic_operation_receipts_reject_update`
-      // rewrites any UPDATE into a guard violation, and rightly so. So the
-      // legacy receipt is INSERTED rather than manufactured by downgrading a
-      // real one, reusing the invocation the posting above already created so
-      // the trust foreign key is satisfied by a real row.
-      const legacyKey = '62000000-0000-4000-8000-000000000099';
-      const persisted = stored.rows[0]!;
-      await database.pool.query(
-        `INSERT INTO platform.semantic_operation_receipts (
-           tenant_id, environment_id, principal_id, release_id,
-           release_content_hash, action_id, idempotency_key, input_digest,
-           input_digest_version, mutation_result, invocation_id, correlation_id,
-           change_document_id, domain_event_id, outbox_id, recorded_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,3,$9::jsonb,$10,$11,$12,$13,$14,$15)`,
-        [
-          context.tenantId,
-          context.environmentId,
-          persisted.principalId,
-          persisted.releaseId,
-          persisted.releaseContentHash,
-          INVENTORY_CONTRACT_V1.capabilityId,
-          legacyKey,
-          'a'.repeat(64),
-          JSON.stringify(persisted.mutationResult),
-          persisted.invocationId,
-          persisted.correlationId,
-          randomUUID(),
-          randomUUID(),
-          randomUUID(),
-          recordedAt,
-        ],
-      );
-
-      const replay = countCommand({
-        countedQuantity: '9',
-        expectedQuantity: '5',
-        kind: 'correction',
-        sequence: 7,
-        supersedesStockCountId: command.stockCountId,
-        varianceQuantity: '4',
-      });
-      await seedReviewedCount(runtimePool, context, binding, replay);
-      const refusal = await service
-        .postStockCount(context, actor, {
-          ...replay,
-          idempotencyKey: legacyKey,
-        })
-        .then(
-          () => null,
-          (reason: unknown) => reason,
-        );
-      assert.ok(
-        refusal instanceof InventoryPostingError,
-        'a receipt predating companion derivation must not replay silently',
-      );
-      assert.match(
-        refusal.message,
-        /predates companion derivation/u,
-        'the refusal must name the contract change, not an ordinary key conflict',
-      );
-    },
-  );
-});
-
 interface CompanionEnvironment {
   actor: StockCountActor;
   binding: StorageBinding;
   context: TrustedRequestContext;
-  database: EphemeralPostgres;
   runtimePool: Pool;
   service: PostgresInventoryPostingService;
 }
@@ -1031,7 +909,7 @@ async function withCompanionEnvironment(
           subject: null,
         }),
       }).issue(context);
-      await run({ actor, binding, context, database, runtimePool, service });
+      await run({ actor, binding, context, runtimePool, service });
     } finally {
       await Promise.all([
         runtimePool.end(),

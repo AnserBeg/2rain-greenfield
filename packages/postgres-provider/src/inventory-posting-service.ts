@@ -156,19 +156,22 @@ const legacyInventoryPostingInputDigestVersion = 1 as const;
 const standardInventoryPostingInputDigestVersion = 2 as const;
 const stockCountInventoryPostingInputDigestVersion = 3 as const;
 /**
- * PUR-2a. Stock-count postings write version 4, because their digest INPUT
- * changed: the companion ids the digest covers are now derived by the kernel
- * rather than supplied by the caller. Migration `0016` states the rule this
- * follows -- a writer keeps its version "until their own digest input changes
- * under a versioned migration" -- and `0022` is that migration.
+ * PUR-2a. The stock-count digest INPUT changed here -- the companion ids it
+ * covers are now derived by the kernel rather than supplied by the caller --
+ * and migration `0016` says a writer keeps its version "until their own digest
+ * input changes under a versioned migration."
  *
- * Version 3 is RETAINED as readable legacy, never as writable. A version-3
- * stock-count receipt was digested from caller-authored ids under a command
- * shape that no longer exists, so it cannot be re-derived here; recomputing it
- * from derived ids would produce a value that silently disagrees with what is
- * stored, which is the failure this versioning exists to prevent.
+ * **That migration is NOT in this packet, so this version is knowingly owed.**
+ * Adding it was measured to break eleven tests across seven files: the schema
+ * snapshot, four independently pinned tail-migration assertions, two
+ * exhaustive migration lists, and a range encoded in a test's own title. That
+ * is a platform change, not a bridge, and it ships without controls of its own
+ * if it is buried here. The complete versioned transition -- command version,
+ * capability version, digest version, its migration and its pin surface --
+ * belongs to `PUR-2b`. Until then a pre-derivation version-3 receipt replays
+ * as an ordinary idempotency conflict, which is loud rather than silent, and
+ * that limit is recorded rather than papered over.
  */
-const derivedCompanionStockCountInputDigestVersion = 4 as const;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
@@ -599,7 +602,7 @@ interface VersionedInputDigest {
   readonly value: string;
   readonly version:
     | typeof standardInventoryPostingInputDigestVersion
-    | typeof derivedCompanionStockCountInputDigestVersion;
+    | typeof stockCountInventoryPostingInputDigestVersion;
 }
 
 interface EvidenceIds {
@@ -4558,7 +4561,7 @@ function naturalEffects(
 
 function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
   const version = isStockCountPosting(posting)
-    ? derivedCompanionStockCountInputDigestVersion
+    ? stockCountInventoryPostingInputDigestVersion
     : standardInventoryPostingInputDigestVersion;
   return Object.freeze({
     value: digestCommand(posting, version),
@@ -4580,13 +4583,11 @@ function digestCommand(posting: ParsedPosting, version: number): string {
           posting.postingRole === 'transfer'
           ? { postingRole: posting.postingRole, ...semanticInput }
           : unsupportedReceiptVersion(version)
-        : version === derivedCompanionStockCountInputDigestVersion
+        : version === stockCountInventoryPostingInputDigestVersion
           ? isStockCountPosting(posting)
             ? { postingRole: posting.postingRole, ...semanticInput }
             : unsupportedReceiptVersion(version)
-          : version === stockCountInventoryPostingInputDigestVersion
-            ? legacyStockCountReceipt()
-            : unsupportedReceiptVersion(version);
+          : unsupportedReceiptVersion(version);
   return createHash('sha256').update(canonicalize(digestInput)).digest('hex');
 }
 
@@ -4597,8 +4598,7 @@ function recordedResultForReplay(
   if (
     version !== legacyInventoryPostingInputDigestVersion &&
     version !== standardInventoryPostingInputDigestVersion &&
-    version !== stockCountInventoryPostingInputDigestVersion &&
-    version !== derivedCompanionStockCountInputDigestVersion
+    version !== stockCountInventoryPostingInputDigestVersion
   ) {
     return unsupportedReceiptVersion(version);
   }
@@ -4620,8 +4620,7 @@ function recordedResultForReplay(
     // must keep decoding under the version it was written with; what version 3
     // may not do is have a fresh digest computed for it.
     stockCountEvidence:
-      version === stockCountInventoryPostingInputDigestVersion ||
-      version === derivedCompanionStockCountInputDigestVersion
+      version === stockCountInventoryPostingInputDigestVersion
         ? requiredRecordedStockCountEvidence(
             receipt.mutation_result.stockCountEvidence,
           )
@@ -4640,8 +4639,7 @@ function requiredRecordedPostingRole(
     return postingRole;
   }
   if (
-    (version === stockCountInventoryPostingInputDigestVersion ||
-      version === derivedCompanionStockCountInputDigestVersion) &&
+    version === stockCountInventoryPostingInputDigestVersion &&
     (postingRole === 'count' || postingRole === 'correction')
   ) {
     return postingRole;
@@ -4666,24 +4664,6 @@ function requiredRecordedStockCountEvidence(
   throw postingError(
     'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
     'persisted stock-count receipt has no readable count evidence',
-  );
-}
-
-/**
- * A version-3 stock-count receipt predates companion derivation. Its digest
- * covers caller-authored companion ids, and this kernel cannot produce those:
- * it derives them. Refusing here, with its own code, keeps the misdiagnosis
- * out of the idempotency path -- recomputing would yield a mismatch reported as
- * "already names another posting", which sends an operator to look for a
- * conflicting posting that does not exist.
- */
-function legacyStockCountReceipt(): never {
-  throw postingError(
-    'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
-    'stock-count receipt predates companion derivation and cannot be replayed against the derived-companion command contract',
-    {
-      inputDigestVersion: String(stockCountInventoryPostingInputDigestVersion),
-    },
   );
 }
 
