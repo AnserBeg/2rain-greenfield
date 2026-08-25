@@ -2945,6 +2945,9 @@ async function assertCompanionIdentitiesPersisted(
     `SELECT source.${quoted(binding.stockCount.recordIdColumn)}::text AS "sourceRecordId",
             source.${quoted(binding.stockCountRelationToTransactionColumn)}::text AS "companionId",
             source.${quoted(binding.stockCount.revisionColumn)}::integer AS "sourceRevision",
+            source.${quoted(binding.stockCountStateColumn)} AS "sourceState",
+            source.${quoted(binding.stockCountActorColumn)} AS "sourceActorId",
+            to_char(source.${quoted(binding.stockCountRecordedAtColumn)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "sourceRecordedAt",
             companion.${quoted(binding.transaction.revisionColumn)}::integer AS "companionRevision",
             companion.${quoted(binding.transactionStateColumn)} AS "companionState",
             companion.${quoted(binding.transactionTypeColumn)} AS "companionType",
@@ -2991,6 +2994,25 @@ async function assertCompanionIdentitiesPersisted(
     throw postingError(
       'INVENTORY_COUNT_EVIDENCE_CONFLICT',
       `stock count ${command.stockCountId} does not carry the derived companion transaction identity`,
+      { stockCountId: command.stockCountId },
+    );
+  }
+  // Added on review, round 3. `transitionStockCountToPosted` writes FIVE facts
+  // in one compare-and-set -- state, recordedAt, actor, the companion id and
+  // the revision -- and only three of them were read back. A wrong-but-valid
+  // actor or instant therefore committed while the trust documents recorded
+  // the expected in-memory values, leaving the business row and its own
+  // evidence disagreeing on a successful posting. The companion header's actor
+  // and instant were already compared, but that is a DIFFERENT ROW. Every fact
+  // that statement writes is now observed on the row it writes it to.
+  if (
+    String(row!.sourceState) !== binding.stockCountPostedState ||
+    String(row!.sourceActorId) !== expectedActorId ||
+    String(row!.sourceRecordedAt) !== expectedRecordedAt
+  ) {
+    throw postingError(
+      'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+      `stock count ${command.stockCountId} does not carry the posting facts its transition wrote`,
       { stockCountId: command.stockCountId },
     );
   }

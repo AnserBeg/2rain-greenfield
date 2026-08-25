@@ -234,6 +234,52 @@
           "expected": "would not accept its derived companion identity"
         }
       ]
+    },
+    {
+      "name": "source-recorded-at-not-the-posting-instant",
+      "claim": "`transitionStockCountToPosted` writes FIVE facts to the source in one compare-and-set, and round 3 found only three of them read back. This mutation shifts the source's recorded instant by one second: the companion header still carries the correct instant, the companion id, revision and state all still match, the later evidence read-back still passes, and the trust documents are still built from the expected in-memory value -- so the posting reports success while the business row and its own evidence disagree about when it happened. Only reading the instant off the row the statement wrote catches it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            ${quoted(binding.stockCountRecordedAtColumn)} = $6::timestamptz,",
+      "replacement": "            ${quoted(binding.stockCountRecordedAtColumn)} = $6::timestamptz + interval '1 second',",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the posting facts its transition wrote"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the posting facts its transition wrote"
+        }
+      ]
+    },
+    {
+      "name": "source-actor-not-the-posting-principal",
+      "claim": "The same compare-and-set writes the source's actor, and it had the same observation gap as the instant. This mutation writes a different database-valid value -- the legal entity id, a well-formed identifier the column accepts -- so nothing structural refuses it. The companion header's actor is correct, every identity and revision matches, and the trust evidence records the expected principal, leaving the source attributing the posting to the wrong actor. Attribution that disagrees with its own trust record is the silent-until-reconciled class this packet declares Band A for.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            ${quoted(binding.stockCountActorColumn)} = $7,",
+      "replacement": "            ${quoted(binding.stockCountActorColumn)} = $3,",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the posting facts its transition wrote"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the posting facts its transition wrote"
+        }
+      ]
     }
   ]
 }

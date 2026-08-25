@@ -542,6 +542,27 @@ test('stock-count companion derivation: a source with no pre-staged transaction 
         derivedTransactionId,
         'the companion transaction identity must be the derived one',
       );
+      // Every fact the source transition writes, on the row it writes it to.
+      // Round 3 found the actor and instant escaping observation entirely: the
+      // companion header carried the right values while the source could carry
+      // wrong ones, and the trust documents recorded the expected in-memory
+      // values either way.
+      assert.deepEqual(
+        {
+          actorId: after.sessions[0]?.actorId,
+          recordedAt: after.sessions[0]?.recordedAt,
+          state: after.sessions[0]?.state,
+        },
+        {
+          actorId: principalId,
+          recordedAt,
+          state: enumOption(
+            field(binding.stockCount, 'stock_count_state'),
+            'posted',
+          ),
+        },
+        'the posted source must carry the actor, instant and state its transition wrote',
+      );
 
       // Both revisions, and the fact that they are the SAME derived revision.
       // Corrected on review. The companion is a CREATE, so it takes the
@@ -955,7 +976,13 @@ interface CompanionState {
     revision: number;
   }>;
   movements: Array<{ transactionId: string; transactionLineId: string }>;
-  sessions: Array<{ companionId: string | null; revision: number }>;
+  sessions: Array<{
+    actorId: string | null;
+    companionId: string | null;
+    recordedAt: string | null;
+    revision: number;
+    state: string;
+  }>;
   transactionLines: Array<{
     fromLocationId: string | null;
     itemId: string;
@@ -988,7 +1015,10 @@ async function readCompanionState(
     const scope = [context.tenantId, context.environmentId];
     const sessions = await client.query<Record<string, unknown>>(
       `SELECT ${quoted(relationColumn(binding, binding.stockCount, binding.transaction))}::text AS "companionId",
-              ${quoted(binding.stockCount.revisionColumn)}::integer AS revision
+              ${quoted(binding.stockCount.revisionColumn)}::integer AS revision,
+              ${quoted(field(binding.stockCount, 'stock_count_state').physicalName)} AS state,
+              ${quoted(field(binding.stockCount, 'stock_count_actor_id').physicalName)} AS "actorId",
+              to_char(${quoted(field(binding.stockCount, 'stock_count_recorded_at').physicalName)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "recordedAt"
          FROM ${table(binding, binding.stockCount)}
         WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
         ORDER BY ${quoted(binding.stockCount.recordIdColumn)}`,
