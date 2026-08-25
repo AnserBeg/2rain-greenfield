@@ -469,16 +469,17 @@ test('consolidated guard red: the routed Inventory literal cannot mask a later l
           // grep of the unmutated source is wrong -- which is what the
           // routed-debt comment above means by "arithmetic".
           //
-          // This coordinate moved FIVE times inside `PUR-2a` alone: 866, then
-          // 1112, 1115, 1116, 1118. Two of those moves were caused purely by
-          // adding COMMENTS above `validateRegistration`, and the last by
-          // passing two more arguments to a call inside `#post`. A control that
-          // a comment or an argument can break is not surviving ordinary
-          // editing of the file it guards. That is the measurement behind
-          // `press-law-splice-control-pinned-by-line-number`, and it is an
-          // argument for locating the splice by CONTENT rather than a stronger
-          // reminder to update the integer.
-          line: 1118,
+          // This coordinate moved SIX times inside `PUR-2a` alone: 866, then
+          // 1112, 1115, 1116, 1118, 1125. Two moves were caused purely by
+          // adding COMMENTS above `validateRegistration`, one by passing two
+          // more arguments to a call inside `#post`, and one by adding a call.
+          // A control that a comment, an argument or a call can break is not
+          // surviving ordinary editing of the file it guards. That is the
+          // measurement behind
+          // `press-law-splice-control-pinned-by-line-number`, and six moves in
+          // one packet is an argument for locating the splice by CONTENT, not
+          // a stronger reminder to update the integer.
+          line: 1125,
           message:
             'generic press references inventory identity northstar.inventory',
           moduleDirectory: 'inventory',
