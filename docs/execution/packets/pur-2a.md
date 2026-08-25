@@ -191,7 +191,7 @@ three passes miss this.
 
 ## Evidence — Band A, and what each vector is held by
 
-`test/evidence/pur-2a.expected-red.json`, thirteen entries, run through
+`test/evidence/pur-2a.expected-red.json`, fourteen entries, run through
 `evidence:expected-red` under ADR-0058: each mutation is measured before the
 restored run, each declared kill must fail in its own body for its own declared
 reason, and the observed kill set must equal the declared one exactly.
@@ -200,7 +200,7 @@ reason, and the observed kill set must equal the declared one exactly.
 |---|---|
 | The subject absent entirely | `source-companion-column-never-written`, `source-line-companion-column-never-written` — the identity is not written; `companion-identity-not-derived-from-the-source` — the source-dependence is gone |
 | The check reading zero input | `source-line-companion-column-never-written` — the read-back's join returns zero line rows, and the length comparison reds rather than a loop passing over nothing |
-| A proxy satisfied while the fact does not hold | `companion-revision-not-the-contract-initial-value`, `source-line-revision-does-not-advance`, and `source-line-companion-column-never-written` — every write reports its row count and the persisted fact is still wrong; only the read-back catches either |
+| A proxy satisfied while the fact does not hold | `companion-revision-not-the-contract-initial-value`, `source-line-revision-recorded-wrongly-for-comparison`, and `source-line-companion-column-never-written` — every write reports its row count and the persisted fact is still wrong; only the read-back catches either |
 | Output shapes the parser does not recognize | The runner's own 38 controls, `check:expected-red-controls`, wired as its own gate in CI and the matrix. This packet adds no parser of its own |
 | **The subject repaired before it is measured** | Structurally: no authored verifier is re-run over kernel-written rows. Executably: `companion-derivation-namespace-moved` — a derivation that changes but stays deterministic passes the kernel's own read-back, because the read-back recomputes with the function that wrote. Two golden vectors computed by a separate implementation are the only assertion that does not share the algorithm under test |
 

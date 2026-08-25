@@ -4,7 +4,7 @@
   "entries": [
     {
       "name": "companion-identity-not-derived-from-the-source",
-      "claim": "The companion transaction and line identities are a pure function of the stock-count source record ids. Deriving them from anything else -- here, from fresh randomness -- means the kernel mints a companion identity nothing can recompute, which is the copies-rather-than-derives defect `purchasing-sales-v1-plan.md` section 7.16 measured. SCOPE, narrowed on review: the kill is observed at the HEADER read-back, which runs before the line identities are independently compared, so this entry holds the header half at full strength and the line half only by construction. `source-line-companion-column-never-written` holds the line half. Kill sets are measured within the three `companion derivation` tests this command runs.",
+      "claim": "The companion transaction and line identities are a pure function of the stock-count source record ids. Deriving them from anything else -- here, from fresh randomness -- means the kernel mints a companion identity nothing can recompute, which is the copies-rather-than-derives defect `purchasing-sales-v1-plan.md` section 7.16 measured. SCOPE, narrowed on review: the kill is observed at the HEADER read-back, which runs before the line identities are independently compared, so this entry holds the header half at full strength and the line half only by construction. `companion-line-identity-not-derived-from-its-source` holds the line half. *Corrected on review: an earlier version of this sentence named `source-line-companion-column-never-written`, which proves the relation was WRITTEN, not that the identity was DERIVED -- the manifest contradicted itself about which mutation holds it.* Kill sets are measured within the three `companion derivation` tests this command runs.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  const digest = createHash('sha256').update(name, 'utf8').digest();",
       "replacement": "  const digest = createHash('sha256').update(randomUUID(), 'utf8').digest();",
@@ -214,7 +214,7 @@
     },
     {
       "name": "source-line-revision-does-not-advance",
-      "claim": "Writing the derived companion relation MUTATES the source stock-count line, so its optimistic revision must advance. Round 2 found the relation being written while the revision stood still, which makes the mutation invisible to optimistic concurrency: `stock_count_line` receives ordinary generated operations, and a later one holding a pre-posting expected revision could not tell that posting had changed the row. This mutation restores that behaviour -- the relation is written, the revision is not -- and the write's own read-back plus the persisted comparison refuse it.",
+      "claim": "Writing the derived companion relation MUTATES the source stock-count line, so its optimistic revision must advance. Round 2 found the relation being written while the revision stood still, which makes the mutation invisible to optimistic concurrency: `stock_count_line` receives ordinary generated operations, and a later one holding a pre-posting expected revision could not tell that posting had changed the row. This mutation restores that behaviour. NARROWED ON REVIEW: the kill is observed at the writer's IMMEDIATE `RETURNING` guard, which throws before `assertCompanionIdentitiesPersisted` is ever called, so this entry holds THAT guard and nothing else. An earlier version claimed the persisted comparison refuses it too; it is never reached. `source-line-revision-reported-but-not-stored` is the entry that holds the persisted comparison.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid,\n              ${quoted(binding.stockCountLine.revisionColumn)} = ${quoted(binding.stockCountLine.revisionColumn)} + 1",
       "replacement": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid",
@@ -260,7 +260,7 @@
     },
     {
       "name": "source-actor-not-the-posting-principal",
-      "claim": "The same compare-and-set writes the source's actor, and it had the same observation gap as the instant. This mutation appends one character to the posting principal: a well-formed, database-valid value the text column accepts, so nothing structural refuses it. The companion header's actor is correct, every identity and revision matches, and the trust evidence records the expected principal -- leaving the source attributing the posting to an actor that does not exist. Attribution disagreeing with its own trust record is the silent-until-reconciled class this packet declares Band A for. The mutation keeps `$7` referenced and stays within the column's type: dropping the reference reds with 42P18 and substituting a uuid-inferred parameter reds with 42804, and neither is this entry's declared reason.",
+      "claim": "The same compare-and-set writes the source's actor, and it had the same observation gap as the instant. This mutation appends one character to the posting principal: a well-formed, database-valid value the text column accepts, so nothing structural refuses it. The companion header's actor is correct, every identity and revision matches, and the trust evidence records the expected principal -- leaving the source attributing the posting to a DIFFERENT actor identifier than its own trust record names (the mutation shows difference, not nonexistence -- no existence check is part of it). Attribution disagreeing with its own trust record is the silent-until-reconciled class this packet declares Band A for. The mutation keeps `$7` referenced and stays within the column's type: dropping the reference reds with 42P18 and substituting a uuid-inferred parameter reds with 42804, and neither is this entry's declared reason.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "            ${quoted(binding.stockCountActorColumn)} = $7,",
       "replacement": "            ${quoted(binding.stockCountActorColumn)} = $7 || 'x',",
@@ -278,6 +278,29 @@
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
           "expected": "does not carry the posting facts its transition wrote"
+        }
+      ]
+    },
+    {
+      "name": "source-line-revision-recorded-wrongly-for-comparison",
+      "claim": "The PERSISTED source-line revision is compared against the revision the writer recorded, and this entry holds THAT comparison alone. The mutation leaves the SQL untouched -- the row really does advance -- and corrupts only the expectation the writer hands forward, so the immediate `RETURNING` guard passes and nothing before the persisted query can notice. It is the complement of `source-line-revision-does-not-advance`, which dies at that guard and never reaches this comparison: delete the persisted comparison and that entry reproduces unchanged while this one goes green. Round 4 was right that one mutation cannot hold both.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    written.set(line.stockCountLineId, priorRevision + 1);",
+      "replacement": "    written.set(line.stockCountLineId, priorRevision);",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the revisions its writes require"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the revisions its writes require"
         }
       ]
     }
