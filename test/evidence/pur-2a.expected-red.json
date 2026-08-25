@@ -260,10 +260,10 @@
     },
     {
       "name": "source-actor-not-the-posting-principal",
-      "claim": "The same compare-and-set writes the source's actor, and it had the same observation gap as the instant. This mutation writes a different database-valid value -- the legal entity id, a well-formed identifier the column accepts -- so nothing structural refuses it. The companion header's actor is correct, every identity and revision matches, and the trust evidence records the expected principal, leaving the source attributing the posting to the wrong actor. Attribution that disagrees with its own trust record is the silent-until-reconciled class this packet declares Band A for. The mutation writes `COALESCE(NULLIF($7, $7), $3)` rather than plain `$3`, because dropping the `$7` reference leaves a bound parameter untyped and PostgreSQL refuses the statement with 42P18 -- a red, but not this red. That trap was already recorded on the two NULLIF entries above and was walked into again here; recognising the shape is the part that fails, not knowing the remedy.",
+      "claim": "The same compare-and-set writes the source's actor, and it had the same observation gap as the instant. This mutation appends one character to the posting principal: a well-formed, database-valid value the text column accepts, so nothing structural refuses it. The companion header's actor is correct, every identity and revision matches, and the trust evidence records the expected principal -- leaving the source attributing the posting to an actor that does not exist. Attribution disagreeing with its own trust record is the silent-until-reconciled class this packet declares Band A for. The mutation keeps `$7` referenced and stays within the column's type: dropping the reference reds with 42P18 and substituting a uuid-inferred parameter reds with 42804, and neither is this entry's declared reason.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "            ${quoted(binding.stockCountActorColumn)} = $7,",
-      "replacement": "            ${quoted(binding.stockCountActorColumn)} = COALESCE(NULLIF($7, $7), $3),",
+      "replacement": "            ${quoted(binding.stockCountActorColumn)} = $7 || 'x',",
       "test": {
         "files": ["test/postgres/inventory-stock-count.test.ts"],
         "namePattern": "companion derivation"
