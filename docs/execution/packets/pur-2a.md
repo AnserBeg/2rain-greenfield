@@ -500,19 +500,35 @@ on this branch** — the checker lives on `main` and this branch was cut before
 it. Verify at integration with `bash scripts/check-records.sh` on the merged
 tree.
 
-**Regenerated from the frozen tree in round 3, not amended.** The previous
-block was stale in three ways the review named: it pointed `head` at a commit
-five executable commits behind, it omitted the changed architecture test, and
-it claimed `postingFamilyForRole`, a symbol the carried-family correction
-deleted. Each path below was re-read from `git diff` against the base and each
-symbol re-checked as a top-level declaration at this head.
+**Regenerated twice, and the second time for a reason worth recording.** Round
+3 rebuilt the roster from the frozen tree after it had gone stale in three ways
+— a head five executable commits behind, a missing architecture test, and
+`postingFamilyForRole`, a symbol the carried-family correction deleted. Round 4
+then found the regenerated block STILL invalid, on two grounds the first pass
+missed:
+
+- **`test/evidence/**` is executable for claim-fidelity purposes.** The
+  checker's non-executable list is `docs`, `.agents`, `CLAUDE.md`, `AGENTS.md`
+  and `learnings.md` — the manifest is not on it. So every manifest repair after
+  the declared head moved the tree the record must name, and "zero production
+  delta" was the wrong test. That framing was in this packet's own review prompt
+  and would have suppressed the finding.
+- **The declared head must attest the range.** The checker reads a
+  `Packet: <name>` trailer from the declared head's commit message and emits
+  `RECORD_CLAIM_RANGE_UNOWNED` before observing any path or symbol. None of this
+  packet's commits carried one, so the block was statically refused regardless of
+  how accurate its roster was.
+
+The head below is the final EXECUTABLE-evidence commit and carries
+`Packet: pur-2a`. Each path was re-read from `git diff` against the base; each
+symbol re-checked as a top-level declaration at that head.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "pur-2a",
   "base": "2908e7faff74386bfef07abe741609fa0c76be24",
-  "head": "5ee4b12d96c522bac13ef3ccd962f67bc0481341",
+  "head": "e38a22c11cc291c31ab8cb1f3eb385e51e7a93da",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "packages/compiler/src/conformance.ts",
