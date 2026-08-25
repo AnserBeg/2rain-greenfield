@@ -85,9 +85,18 @@ registration and checked by `assertActiveRelease`, and therefore true of every
 part each family resolves. It is **not** true of the roster itself. Moving the
 roster into the compiled contract release requires a change to
 `InventoryPostingRegistrationV1`, which has fourteen construction sites, two of
-them outside this packet's lease. **This packet does not claim the roster is
-executable authority** — that is precisely the ADR-0049 claim §7.16 marked
-REFUTED, and it is not inherited here.
+them outside this packet's lease.
+
+**The roster IS executable authority — PROVIDER authority, not active-release
+authority.** *Corrected in round 3; an earlier version of this section said the
+packet "does not claim the roster is executable authority", which contradicted
+both the code and the revised ADR-0060.* Production branches directly on
+`family.origin`, and the roster decides the pinned source type, the movement
+role option, the companion transaction type, the business-key prefix, and which
+families exist at all. What it is NOT is release-supplied: the active release
+validates that every part a provider-declared family names exists, and never
+declares the family or authorises its origin. That distinction — not a denial —
+is what keeps this clear of the ADR-0049 claim §7.16 marked REFUTED.
 
 ### The kernel is the writer of both companion identities and both revisions
 
@@ -182,7 +191,7 @@ three passes miss this.
 
 ## Evidence — Band A, and what each vector is held by
 
-`test/evidence/pur-2a.expected-red.json`, eight entries, run through
+`test/evidence/pur-2a.expected-red.json`, thirteen entries, run through
 `evidence:expected-red` under ADR-0058: each mutation is measured before the
 restored run, each declared kill must fail in its own body for its own declared
 reason, and the observed kill set must equal the declared one exactly.
@@ -214,6 +223,31 @@ restructured so its refusal identity is asserted directly.
 test read only the `correction` role's companion type while the mutation moved
 the `count` role's. The test now reads both, so each declared role binding is
 observed by something.
+
+## Round 3 — F8, and a record rewrite that was not yet final
+
+**F8, new and Critical, verified.** `transitionStockCountToPosted` writes five
+facts to the source in one compare-and-set — state, recorded instant, actor,
+companion id, revision — and only three were read back. The companion header's
+actor and instant WERE compared, but that is a different row, so a
+wrong-but-valid actor or instant committed on the source while the trust
+documents recorded the expected in-memory values. A posting could report
+success with the business row and its own evidence disagreeing about who posted
+it and when. All five are now read off the row the statement writes them to,
+and two controls hold them.
+
+**F7 was reopened and was right to be.** Round 2's rewrite quarantined the
+history but left three stale claims in the governing sections: a sentence
+denying the roster is executable authority, an entry count of eight against a
+manifest of eleven, and a record claim naming a head five executable commits
+behind, omitting a changed file, and claiming a deleted symbol. The record
+claim is now REGENERATED from the frozen tree rather than amended — each path
+re-read from the diff, each symbol re-checked as a top-level declaration.
+
+**The lesson, recorded because it recurred:** amending a record from its
+previous version reproduces the previous version's staleness. Both times F7 was
+raised, the fix that failed was an edit and the fix that worked was a
+regeneration.
 
 ## Review history — HISTORICAL, superseded where it conflicts with the sections above
 
@@ -463,20 +497,28 @@ neither was foreseeable from the charter.
 `main` gained `record-claim-fidelity`'s gate while this packet ran, so this
 block is written to its `northstar.record-claim/v1` schema. **It is UNVERIFIED
 on this branch** — the checker lives on `main` and this branch was cut before
-it. `head` is the last EXECUTABLE commit; the commits after it are narrative.
-Verify at integration with `bash scripts/check-records.sh` on the merged tree.
+it. Verify at integration with `bash scripts/check-records.sh` on the merged
+tree.
+
+**Regenerated from the frozen tree in round 3, not amended.** The previous
+block was stale in three ways the review named: it pointed `head` at a commit
+five executable commits behind, it omitted the changed architecture test, and
+it claimed `postingFamilyForRole`, a symbol the carried-family correction
+deleted. Each path below was re-read from `git diff` against the base and each
+symbol re-checked as a top-level declaration at this head.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "pur-2a",
   "base": "2908e7faff74386bfef07abe741609fa0c76be24",
-  "head": "319eb5ac3ad5eca9484b5b87cfe735c2103aca1e",
+  "head": "5ee4b12d96c522bac13ef3ccd962f67bc0481341",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "packages/compiler/src/conformance.ts",
     "packages/domain/src/inventory/definition.ts",
     "packages/postgres-provider/src/inventory-posting-service.ts",
+    "test/architecture/module-press-law.test.ts",
     "test/evidence/pur-2a.expected-red.json",
     "test/postgres/inventory-backup-restore.test.ts",
     "test/postgres/inventory-stock-count.test.ts"
@@ -496,6 +538,10 @@ Verify at integration with `bash scripts/check-records.sh` on the merged tree.
     },
     {
       "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "assertFamilyDeclaresRole"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
       "name": "writeCompanionTransaction"
     },
     {
@@ -512,7 +558,7 @@ Verify at integration with `bash scripts/check-records.sh` on the merged tree.
     },
     {
       "path": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "name": "postingFamilyForRole"
+      "name": "companionInitialRevision"
     },
     {
       "path": "packages/postgres-provider/src/inventory-posting-service.ts",
