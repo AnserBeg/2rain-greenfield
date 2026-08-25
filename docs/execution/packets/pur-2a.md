@@ -386,7 +386,7 @@ change. Neither was visible from reasoning; both appeared on contact.
 | `test:compiler` | 152 pass, 0 fail |
 | `test:integration` | 149 pass, 0 fail |
 | `test:architecture` | 177 pass, **1 fail** — stop 2 |
-| `test:postgres` | 210 pass, **2 fail** — stop 1 |
+| `test:postgres` | 209 pass, **3 fail** — two are stop 1; the third is `container-pressure-forges-outcomes`, confirmed by a 1/1 isolated re-run |
 | `check:app-release` | **RED** — stop 1 |
 
 **All three reds trace to exactly two out-of-lease causes, and neither is in
