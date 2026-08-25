@@ -214,7 +214,7 @@
     },
     {
       "name": "source-line-revision-does-not-advance",
-      "claim": "Writing the derived companion relation MUTATES the source stock-count line, so its optimistic revision must advance. Round 2 found the relation being written while the revision stood still, which makes the mutation invisible to optimistic concurrency: `stock_count_line` receives ordinary generated operations, and a later one holding a pre-posting expected revision could not tell that posting had changed the row. This mutation restores that behaviour. NARROWED ON REVIEW: the kill is observed at the writer's IMMEDIATE `RETURNING` guard, which throws before `assertCompanionIdentitiesPersisted` is ever called, so this entry holds THAT guard and nothing else. An earlier version claimed the persisted comparison refuses it too; it is never reached. `source-line-revision-reported-but-not-stored` is the entry that holds the persisted comparison.",
+      "claim": "Writing the derived companion relation MUTATES the source stock-count line, so its optimistic revision must advance. Round 2 found the relation being written while the revision stood still, which makes the mutation invisible to optimistic concurrency: `stock_count_line` receives ordinary generated operations, and a later one holding a pre-posting expected revision could not tell that posting had changed the row. This mutation restores that behaviour. NARROWED ON REVIEW: the kill is observed at the writer's IMMEDIATE `RETURNING` guard, which throws before `assertCompanionIdentitiesPersisted` is ever called, so this entry holds THAT guard and nothing else. An earlier version claimed the persisted comparison refuses it too; it is never reached. `source-line-revision-recorded-wrongly-for-comparison` is the entry that holds the persisted comparison.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid,\n              ${quoted(binding.stockCountLine.revisionColumn)} = ${quoted(binding.stockCountLine.revisionColumn)} + 1",
       "replacement": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid",
@@ -301,6 +301,24 @@
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
           "expected": "does not carry the revisions its writes require"
+        }
+      ]
+    },
+    {
+      "name": "movement-names-a-foreign-companion-header",
+      "claim": "A movement carries TWO companion relations -- the transaction directly, and the transaction line -- and nothing in the storage model ties them together. The compiler lowers each declared relation to its own foreign key over scope plus record id and asserts nothing about a movement's transaction being the parent of its own line, so a movement naming one posting's header and another posting's line satisfies both keys. This mutation builds exactly that: a correction's movement points at the SUPERSEDED count's companion header while keeping its own correction line. Every companion projection assertion still passes, the source still names the correction's companion, and the line still belongs to it; the returned result and the receipt still record the correct transaction while the persisted movement names a different one. It is invisible until an unrelated natural replay compares the two relations, which is what makes it silent-until-reconciled. An initial count has nothing to supersede, so the mutation is inert there and this dies alone in the projection test.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    command.transactionId,\n    movement.transactionLineId,\n  ];",
+      "replacement": "    isStockCountPosting(posting) && posting.command.supersedesStockCountId\n      ? deriveInventoryPostingCompanionId({\n          capabilityId: posting.family.capabilityId,\n          companionFamilyId: posting.family.companion!.companionEntityId,\n          familyId: posting.family.familyId,\n          sourceRecordId: posting.command.supersedesStockCountId,\n        })\n      : command.transactionId,\n    movement.transactionLineId,\n  ];",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not name the companion transaction and line it was written for"
         }
       ]
     }

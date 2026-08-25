@@ -191,7 +191,7 @@ three passes miss this.
 
 ## Evidence — Band A, and what each vector is held by
 
-`test/evidence/pur-2a.expected-red.json`, fourteen entries, run through
+`test/evidence/pur-2a.expected-red.json`, fifteen entries, run through
 `evidence:expected-red` under ADR-0058: each mutation is measured before the
 restored run, each declared kill must fail in its own body for its own declared
 reason, and the observed kill set must equal the declared one exactly.
@@ -223,6 +223,44 @@ restructured so its refusal identity is asserted directly.
 test read only the `correction` role's companion type while the mutation moved
 the `count` role's. The test now reads both, so each declared role binding is
 observed by something.
+
+## Round 5 — the movement row, which four rounds of "either row" never named
+
+**F11, Critical, verified.** `readBackMovements` selected the committed
+movements and MAPPED them into the result. It compared nothing but the row
+count, so whatever storage held became the returned value and the receipt's
+record of it. It also never read the movement's DIRECT transaction relation,
+its reason, actor, reversal identity, or stock-dimension version — the last of
+which it hardcoded to `'v1'` rather than reading.
+
+The sharpest consequence is one nothing else could catch. A movement carries
+two companion relations, and **the storage model does not tie them together**:
+the compiler lowers each declared relation to its own foreign key over scope
+plus record id, and asserts nothing about a movement's transaction being the
+parent of its own line. So a correction's movement can name the superseded
+count's companion header while keeping its own line, satisfy both foreign keys,
+and pass every companion projection assertion — while the result and the
+receipt record a different transaction than the row does. It surfaces only when
+an unrelated natural replay compares the two.
+
+`readBackMovements` is now a verifier: every field `insertMovement` writes is
+compared against what was planned, and the line's parent transaction is joined
+and required to be the transaction the movement names directly.
+
+**Why four rounds missed it.** F5 and F8 were both "a write the read-back did
+not observe", and after F8 this record predicted that a fifth finding, if it
+existed, would be of that class. It was — and the search went to the source and
+companion rows, which this packet's own review prompt called "either row". The
+movement row is written by `insertMovement` inside the same savepoint and was
+never in the frame. **The prediction was right and the scope of the search was
+wrong**, which is a more useful thing to have recorded than a clean sweep.
+
+**F12, records.** The `source-line-revision-does-not-advance` claim named
+`source-line-revision-reported-but-not-stored` as its complement — a control
+that does not exist under that name; it is
+`source-line-revision-recorded-wrongly-for-comparison`. The manifest's own
+derivation map was false, and `expected-red` stays green through it because the
+runner measures mutations and kills, not whether prose resolves.
 
 ## Round 3 — F8, and a record rewrite that was not yet final
 

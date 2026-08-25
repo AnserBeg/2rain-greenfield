@@ -992,6 +992,8 @@ export class PostgresInventoryPostingService {
         context,
         parsed.legalEntityId,
         ordered,
+        posting,
+        actorEnvelope.actor.executionPrincipal.principalId,
       );
       const stockCountEvidence = isStockCountPosting(posting)
         ? await readBackStockCountEvidence(
@@ -4031,33 +4033,66 @@ function inventoryLineSetDigestSql(
         AND ${alias}.${quoted(binding.transactionLine.archiveColumn)} IS NULL)`;
 }
 
+/**
+ * PUR-2a, rebuilt on review round 5. This SELECTED the committed movements and
+ * mapped them into the result without comparing anything but the row count, so
+ * every value it returned -- and every value the receipt then recorded -- was
+ * whatever storage happened to hold.
+ *
+ * The sharpest instance: `insertMovement` writes TWO companion relations, the
+ * direct transaction and the transaction line, and this read only the line.
+ * Nothing in the model ties them together -- the compiler lowers each declared
+ * relation to its own foreign key over scope plus record id, and asserts
+ * nothing about a movement's transaction being the parent of its line. So a
+ * movement could name one posting's companion header and another's line, with
+ * both foreign keys satisfied, every companion projection assertion passing,
+ * and the mismatch invisible until an unrelated natural replay compared them.
+ *
+ * It is now a verifier: every field `insertMovement` writes is read back and
+ * compared against what was planned, and the line's parent transaction is
+ * joined and required to be the same transaction the movement names directly.
+ */
 async function readBackMovements(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
   legalEntityId: string,
   movements: readonly PlannedMovement[],
+  posting: ParsedPosting,
+  expectedActorId: string,
 ): Promise<readonly PostedInventoryMovementV1[]> {
   const ids = movements.map((movement) => movement.movementId);
   const result = await client.query<Record<string, unknown>>(
-    `SELECT ${quoted(binding.movement.recordIdColumn)} AS "movementId",
-            ${quoted(binding.movementBusinessPeriodColumn)}::text AS "businessPeriod",
-            ${quoted(requiredField(binding.movement, 'inventory_movement_item_id').name)}::text AS "itemId",
-            ${quoted(requiredField(binding.movement, 'inventory_movement_location_id').name)}::text AS "locationId",
-            ${quoted(requiredField(binding.movement, 'inventory_movement_quantity_delta').name)}::text AS "quantityDelta",
-            ${quoted(requiredField(binding.movement, 'inventory_movement_unit_id').name)} AS "unitId",
-            to_char(${quoted(requiredField(binding.movement, 'inventory_movement_effective_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "effectiveAt",
-            to_char(${quoted(requiredField(binding.movement, 'inventory_movement_recorded_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "recordedAt",
-            ${quoted(requiredField(binding.movement, 'inventory_movement_source_type').name)} AS "sourceType",
-            ${quoted(requiredField(binding.movement, 'inventory_movement_source_id').name)} AS "sourceId",
-            ${quoted(requiredField(binding.movement, 'inventory_movement_source_line').name)} AS "sourceLine",
-            ${quoted(requiredField(binding.movement, 'inventory_movement_source_revision').name)}::integer AS "sourceRevision",
-            ${quoted(requiredField(binding.movement, 'inventory_movement_posting_role').name)} AS "postingRole",
-            ${quoted(binding.movementRelationToLineColumn)}::text AS "transactionLineId"
-       FROM ${table(binding, binding.movement)}
-      WHERE tenant_id = $1 AND environment_id = $2
-        AND ${quoted(binding.movement.legalEntityColumn!)} = $3
-        AND ${quoted(binding.movement.recordIdColumn)} = ANY($4::uuid[])`,
+    `SELECT movement.${quoted(binding.movement.recordIdColumn)} AS "movementId",
+            movement.${quoted(binding.movementBusinessPeriodColumn)}::text AS "businessPeriod",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_item_id').name)}::text AS "itemId",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_location_id').name)}::text AS "locationId",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_quantity_delta').name)}::text AS "quantityDelta",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_unit_id').name)} AS "unitId",
+            to_char(movement.${quoted(requiredField(binding.movement, 'inventory_movement_effective_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "effectiveAt",
+            to_char(movement.${quoted(requiredField(binding.movement, 'inventory_movement_recorded_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "recordedAt",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_source_type').name)} AS "sourceType",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_source_id').name)} AS "sourceId",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_source_line').name)} AS "sourceLine",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_source_revision').name)}::integer AS "sourceRevision",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_posting_role').name)} AS "postingRole",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_reason_code').name)} AS "reasonCode",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_reason_narrative').name)} AS "reasonNarrative",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_actor_id').name)} AS "actorId",
+            movement.${quoted(requiredField(binding.movement, 'inventory_movement_stock_dimension_set_version').name)} AS "stockVersion",
+            movement.${quoted(binding.movementReversalOfMovementColumn)}::text AS "reversalOfMovementId",
+            movement.${quoted(binding.movementRelationToLineColumn)}::text AS "transactionLineId",
+            movement.${quoted(binding.movementRelationToTransactionColumn)}::text AS "transactionId",
+            companion_line.${quoted(binding.transactionLineRelationToTransactionColumn)}::text AS "lineParentTransactionId"
+       FROM ${table(binding, binding.movement)} AS movement
+       JOIN ${table(binding, binding.transactionLine)} AS companion_line
+         ON companion_line.tenant_id = movement.tenant_id
+        AND companion_line.environment_id = movement.environment_id
+        AND companion_line.${quoted(binding.transactionLine.legalEntityColumn!)} = movement.${quoted(binding.movement.legalEntityColumn!)}
+        AND companion_line.${quoted(binding.transactionLine.recordIdColumn)} = movement.${quoted(binding.movementRelationToLineColumn)}
+      WHERE movement.tenant_id = $1 AND movement.environment_id = $2
+        AND movement.${quoted(binding.movement.legalEntityColumn!)} = $3
+        AND movement.${quoted(binding.movement.recordIdColumn)} = ANY($4::uuid[])`,
     [context.tenantId, context.environmentId, legalEntityId, ids],
   );
   if (result.rows.length !== movements.length) {
@@ -4066,6 +4101,7 @@ async function readBackMovements(
       'movement read-back did not return the complete committed set',
     );
   }
+  const { command } = posting;
   const byId = new Map(result.rows.map((row) => [String(row.movementId), row]));
   return Object.freeze(
     movements.map((movement) => {
@@ -4074,6 +4110,55 @@ async function readBackMovements(
         throw postingError(
           'INVENTORY_POSTING_STORAGE_REJECTED',
           `movement ${movement.movementId} is absent from read-back`,
+        );
+      }
+      // Both companion relations, and the fact that they agree. Nothing in the
+      // storage model ties a movement's transaction to the parent of its own
+      // transaction line, so this join is the only place the pairing is
+      // asserted. A movement naming one posting's header and another's line
+      // satisfies every foreign key.
+      if (
+        String(row.transactionId).toLowerCase() !== command.transactionId ||
+        String(row.lineParentTransactionId).toLowerCase() !==
+          command.transactionId ||
+        String(row.transactionLineId).toLowerCase() !==
+          movement.transactionLineId
+      ) {
+        throw postingError(
+          'INVENTORY_POSTING_STORAGE_REJECTED',
+          `movement ${movement.movementId} does not name the companion transaction and line it was written for`,
+          { movementId: movement.movementId },
+        );
+      }
+      // Every remaining fact `insertMovement` writes, compared against what was
+      // planned rather than copied into the result.
+      if (
+        String(row.itemId).toLowerCase() !== movement.itemId ||
+        String(row.locationId).toLowerCase() !== movement.locationId ||
+        normalizeDatabaseDecimal(String(row.quantityDelta)) !==
+          movement.quantityDelta ||
+        String(row.unitId) !== movement.unitId ||
+        String(row.effectiveAt) !== movement.effectiveAt ||
+        String(row.recordedAt) !== movement.recordedAt ||
+        String(row.businessPeriod) !== movement.businessPeriod ||
+        String(row.sourceType) !== movement.sourceType ||
+        String(row.sourceId).toLowerCase() !== movement.sourceId ||
+        String(row.sourceLine) !== movement.sourceLine ||
+        Number(row.sourceRevision) !== movement.sourceRevision ||
+        String(row.postingRole) !==
+          movementPostingRole(binding, movement.postingRole) ||
+        String(row.stockVersion) !== binding.movementStockVersionV1 ||
+        String(row.actorId) !== expectedActorId ||
+        (row.reasonCode === null ? '' : String(row.reasonCode)) !==
+          command.reason.code ||
+        (row.reasonNarrative === null ? null : String(row.reasonNarrative)) !==
+          command.reason.narrative ||
+        nullableUuid(row.reversalOfMovementId) !== movement.reversalOfMovementId
+      ) {
+        throw postingError(
+          'INVENTORY_POSTING_STORAGE_REJECTED',
+          `movement ${movement.movementId} was not persisted as it was planned`,
+          { movementId: movement.movementId },
         );
       }
       return Object.freeze({
