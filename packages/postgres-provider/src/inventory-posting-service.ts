@@ -924,6 +924,13 @@ export class PostgresInventoryPostingService {
             posting,
             lineSetDigest,
           );
+          await assertAuthoredTransactionPersisted(
+            client,
+            this.#binding,
+            context,
+            parsed,
+            transactionRevision,
+          );
         }
         if (isStockCountPosting(posting)) {
           stockCountRevision = await transitionStockCountToPosted(
@@ -3924,6 +3931,55 @@ async function readBackStockCountEvidence(
       persistedSession.supersedesStockCountId,
     ),
   });
+}
+
+/**
+ * PUR-2a, added on review round 6. `transitionTransactionToPosted` writes TWO
+ * facts to the AUTHORED transaction header -- state and revision -- and
+ * observed neither independently: it checked the affected row count and the
+ * revision its own `RETURNING` reported. A statement reporting on the mutation
+ * it just performed is not an independent verifier, and `state` was not read at
+ * all, so writing a wrong-but-valid state alongside a correct revision
+ * increment survived.
+ *
+ * This is the authored twin of what rounds 2, 3 and 5 found on the
+ * companion-origin path. The companion header is covered by
+ * `assertCompanionIdentitiesPersisted`; adjustment and transfer had nothing.
+ */
+async function assertAuthoredTransactionPersisted(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  command: DerivedPostingCommand,
+  expectedRevision: number,
+): Promise<void> {
+  const persisted = await client.query<Record<string, unknown>>(
+    `SELECT ${quoted(binding.transactionStateColumn)} AS state,
+            ${quoted(binding.transaction.revisionColumn)}::integer AS revision
+       FROM ${table(binding, binding.transaction)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.transaction.legalEntityColumn!)} = $3
+        AND ${quoted(binding.transaction.recordIdColumn)} = $4
+        AND ${quoted(binding.transaction.archiveColumn)} IS NULL`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.transactionId,
+    ],
+  );
+  const row = persisted.rows[0];
+  if (
+    persisted.rows.length !== 1 ||
+    String(row!.state) !== binding.transactionPostedState ||
+    Number(row!.revision) !== expectedRevision
+  ) {
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      `transaction ${command.transactionId} did not persist the posted state its transition wrote`,
+      { transactionId: command.transactionId },
+    );
+  }
 }
 
 async function transitionTransactionToPosted(

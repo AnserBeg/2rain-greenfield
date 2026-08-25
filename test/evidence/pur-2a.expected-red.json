@@ -131,8 +131,8 @@
       ]
     },
     {
-      "name": "companion-business-key-not-derived-from-identity",
-      "claim": "The companion transaction's business key is derived from the derived identity, so it is unique whenever the identity is. `inventory_transaction_number` is `tenantEnvironmentCaseInsensitiveUnique`, so a fixed number lets the FIRST companion in a tenant write and makes every later one impossible -- the projection test posts an opening count and then a correction, and the correction cannot get a companion at all. MEASURED, AND NOT WHAT WAS FIRST DECLARED: the collision surfaces as INVENTORY_POSTING_IDEMPOTENCY_CONFLICT naming a natural effect race, because the savepoint's 23505 handler predates the kernel writing a companion and attributes every unique violation to a movement identity. The red is real and attributable to this mutation; the DIAGNOSIS the kernel prints is wrong, and that is filed as `companion-key-collision-misreported-as-effect-race` rather than repaired here.",
+      "name": "companion-business-key-collides-across-companions",
+      "claim": "NARROWED ON REVIEW: this holds NON-COLLISION, not derivation. `inventory_transaction_number` is `tenantEnvironmentCaseInsensitiveUnique`, so a constant companion number lets the FIRST companion in a tenant write and makes every later one impossible -- the projection test posts an opening count and then a correction, and the correction cannot get a companion at all. The kill is observed at the database uniqueness boundary, BEFORE the test reaches its assertion that the number equals the derived identity, so an earlier version of this claim credited it with proving derivation and round 6 was right that it cannot. `companion-business-key-not-derived-from-identity` holds derivation with a wrong-but-UNIQUE number. MEASURED AND NOT WHAT WAS FIRST DECLARED: the collision surfaces as INVENTORY_POSTING_IDEMPOTENCY_CONFLICT naming a natural effect race, because the savepoint's 23505 handler predates the kernel writing a companion and attributes every unique violation to a movement identity -- filed as `companion-key-collision-misreported-as-effect-race`.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  return `${companion.numberPrefix}-${transactionId}`;",
       "replacement": "  return `${companion.numberPrefix}-companion`;",
@@ -319,6 +319,42 @@
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
           "expected": "does not name the companion transaction and line it was written for"
+        }
+      ]
+    },
+    {
+      "name": "companion-business-key-not-derived-from-identity",
+      "claim": "The companion transaction's business key is DERIVED from the derived companion identity, so it is recomputable by a reconciliation reader and unique whenever the identity is. This mutation keeps the identity in the number and changes only the prefix, so every companion number stays unique and nothing collides -- removing the uniqueness boundary as an alternate kill mechanism and forcing the projection test to reach its exact assertion that the persisted number equals `SC-${derivedTransactionId}`. That is the correction round 6 required: the constant mutation held by `companion-business-key-collides-across-companions` proves non-collision, which is a different property.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return `${companion.numberPrefix}-${transactionId}`;",
+      "replacement": "  return `BAD-${transactionId}`;",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "the companion business key must be derived from the companion identity"
+        }
+      ]
+    },
+    {
+      "name": "authored-transaction-not-persisted-posted",
+      "claim": "`transitionTransactionToPosted` writes two facts to the AUTHORED transaction header -- state and revision -- and observed neither independently: it checked the affected row count and the revision its own `RETURNING` reported, which is the mutating statement reporting on itself. `state` was not read back at all. This mutation writes a wrong-but-valid state, `draft`, while leaving the revision increment correct, so the row count is one, the returned revision is exactly what was expected, and the movements are all correct -- an adjustment reports a successful posting while its header is still a draft. Only an independently issued re-read of the persisted header catches it. This is the authored twin of the companion-origin omissions rounds 2, 3 and 5 found; adjustment and transfer had no persisted header observation at all.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      binding.transactionPostedState,\n      command.transactionId,\n      binding.transactionDraftState,",
+      "replacement": "      binding.transactionDraftState,\n      command.transactionId,\n      binding.transactionDraftState,",
+      "test": {
+        "files": ["test/postgres/inventory-backdate-policy.test.ts"],
+        "namePattern": "backdate window"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-backdate-policy.test.ts",
+          "name": "the configured backdate window decides which effective period a posting may carry",
+          "expected": "did not persist the posted state its transition wrote"
         }
       ]
     }

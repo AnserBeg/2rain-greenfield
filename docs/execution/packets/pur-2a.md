@@ -191,7 +191,7 @@ three passes miss this.
 
 ## Evidence — Band A, and what each vector is held by
 
-`test/evidence/pur-2a.expected-red.json`, fifteen entries, run through
+`test/evidence/pur-2a.expected-red.json`, seventeen entries, run through
 `evidence:expected-red` under ADR-0058: each mutation is measured before the
 restored run, each declared kill must fail in its own body for its own declared
 reason, and the observed kill set must equal the declared one exactly.
@@ -223,6 +223,44 @@ restructured so its refusal identity is asserted directly.
 test read only the `correction` role's companion type while the mutation moved
 the `count` role's. The test now reads both, so each declared role binding is
 observed by something.
+
+## Round 6 — the AUTHORED header, and a control masked by a uniqueness collision
+
+**F13, Critical, verified.** `transitionTransactionToPosted` writes state and
+revision to the authored transaction header and observed neither
+independently: it checked the affected row count and the revision its own
+`RETURNING` reported — the mutating statement reporting on itself — and never
+read `state` at all. A wrong-but-valid state written alongside a correct
+revision increment survived, so an adjustment could report a successful posting
+while its header stayed a draft. An independently issued re-read now compares
+identity, state and revision, held by a control that writes `draft` while
+keeping the increment correct.
+
+**This is the authored twin of rounds 2, 3 and 5.** Those found unobserved
+writes on the source line, the source header, and the movement — all on the
+companion-origin path, because that is what this packet built and what its
+review prompts kept naming. Adjustment and transfer run through
+`transitionTransactionToPosted` and had no persisted header observation at all.
+**The correct enumeration was never "source header, source line, companion
+header, companion lines, movement" — it is every direct writer executed inside
+the savepoint, across BOTH origins**, and three consecutive prompts of mine
+framed it the narrower way.
+
+**F14, evidence.** `companion-business-key-not-derived-from-identity` used a
+CONSTANT number, so the second companion in the projection test collided on
+`inventory_transaction_number`'s unique business key and the mutant died at the
+database boundary — before the test reached its assertion that the number
+equals the derived identity. It proved non-collision while claiming derivation.
+Split: the constant mutation now holds non-collision under its own name, and a
+wrong-but-UNIQUE prefix holds derivation by removing uniqueness as an alternate
+kill.
+
+**A factual correction to the round-6 review, which does not change its
+verdict.** It reported the delta above the attested head as
+`docs/execution/packets/pur-2a.md` and `docs/plans/purchasing-sales-v1-volume-2.md`.
+The second path does not exist anywhere in this repository; the actual second
+file is `docs/execution/current-plan.md`. Both are narrative, so "docs-only
+above the attested head" holds either way.
 
 ## Round 5 — the movement row, which four rounds of "either row" never named
 
