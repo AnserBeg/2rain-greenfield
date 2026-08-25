@@ -566,7 +566,7 @@ symbol re-checked as a top-level declaration at that head.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "pur-2a",
   "base": "2908e7faff74386bfef07abe741609fa0c76be24",
-  "head": "e38a22c11cc291c31ab8cb1f3eb385e51e7a93da",
+  "head": "83eb77ab233b93ab57f47da7a95de4754f896632",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "packages/compiler/src/conformance.ts",
