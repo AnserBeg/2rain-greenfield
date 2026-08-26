@@ -16,7 +16,7 @@
         {
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "posting writer inventory: the movement effect reservation is observed before the posting commits",
-          "expected": "did not reserve exactly one natural effect for each movement"
+          "expected": "a movement that reserved no natural effect must refuse the posting"
         }
       ]
     },
@@ -34,7 +34,7 @@
         {
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "posting writer inventory: the movement effect reservation is observed before the posting commits",
-          "expected": "does not reserve the natural effect this posting claimed"
+          "expected": "a reservation of the wrong natural effect must refuse the posting"
         }
       ]
     },
@@ -70,7 +70,7 @@
         {
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "posting writer inventory: the movement effect reservation is observed before the posting commits",
-          "expected": "does not reserve the natural effect this posting claimed"
+          "expected": "a reservation of the wrong natural effect must refuse the posting"
         }
       ]
     },

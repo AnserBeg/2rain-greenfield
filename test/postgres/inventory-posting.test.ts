@@ -4343,6 +4343,15 @@ async function assertAbsentEffectReservationRefuses(
   } finally {
     await removeReplacementReservation(database);
   }
+  // Named before the shared helper runs. A mutation that REMOVES this refusal
+  // makes the posting succeed, and the manifest entry that kills this control
+  // must be able to declare a message that actually appears -- not the refusal
+  // text, which by then is exactly what is missing.
+  assert.equal(
+    outcome.status,
+    'rejected',
+    `a movement that reserved no natural effect must refuse the posting: ${JSON.stringify(outcome)}`,
+  );
   assertRejectedPosting(
     testContext,
     'reservation-absent',
@@ -4418,6 +4427,11 @@ async function assertWrongEffectReservationRefuses(
   } finally {
     await removeReplacementReservation(database);
   }
+  assert.equal(
+    outcome.status,
+    'rejected',
+    `a reservation of the wrong natural effect must refuse the posting: ${JSON.stringify(outcome)}`,
+  );
   assertRejectedPosting(
     testContext,
     'reservation-wrong-effect',
