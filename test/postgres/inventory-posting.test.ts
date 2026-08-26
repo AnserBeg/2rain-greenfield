@@ -4243,6 +4243,20 @@ async function installReplacementReservation(
        FOR EACH ROW EXECUTE FUNCTION public.pwi_replacement_generation()`,
   );
   if (reserve === 'nothing') return;
+  // THE WRONG-EFFECT ROW IS NOT REACHABLE WHILE THE COMPILED FOREIGN KEY
+  // STANDS, and that is a finding rather than an inconvenience. The companion
+  // -> movement foreign key covers ALL TEN companion columns and targets
+  // exactly `effectIdentityUnique`, so a reservation whose effect tuple
+  // differs from its movement's has no referent and PostgreSQL refuses it with
+  // 23503. Suspending the constraint is therefore the only way to construct
+  // the row at all, and this control's claim is scoped to match: it proves the
+  // read-back is INDEPENDENT of that constraint, not that a wrong effect can
+  // be written today.
+  const foreignKey = companion.movementForeignKey;
+  await database.adminPool.query(
+    `ALTER TABLE ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
+       DROP CONSTRAINT ${quoted(foreignKey.physicalName)}`,
+  );
   await database.adminPool.query(
     `CREATE FUNCTION public.pwi_replacement_reservation()
        RETURNS trigger LANGUAGE plpgsql AS $body$
@@ -4272,6 +4286,25 @@ async function removeReplacementReservation(
      DROP FUNCTION IF EXISTS public.pwi_replacement_generation();
      ALTER TABLE ${table(database.binding, database.binding.movement)}
        ENABLE TRIGGER ${quoted(companion.reservationTriggerName)}`,
+  );
+  // Restore the composite foreign key from the COMPILED declaration rather
+  // than from a local copy, and prove it validates: the refused posting rolled
+  // its wrong row back, so a failure to re-add here would mean one survived.
+  const foreignKey = companion.movementForeignKey;
+  const present = await database.adminPool.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_catalog.pg_constraint WHERE conname = $1
+     ) AS present`,
+    [foreignKey.physicalName],
+  );
+  if (present.rows[0]?.present === true) return;
+  await database.adminPool.query(
+    `ALTER TABLE ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
+       ADD CONSTRAINT ${quoted(foreignKey.physicalName)}
+       FOREIGN KEY (${foreignKey.sourceColumns.map((column) => quoted(column)).join(', ')})
+       REFERENCES ${table(database.binding, database.binding.movement)}
+         (${foreignKey.targetColumns.map((column) => quoted(column)).join(', ')})
+       ON DELETE RESTRICT ON UPDATE RESTRICT`,
   );
 }
 
@@ -4344,10 +4377,19 @@ async function assertAbsentEffectReservationRefuses(
  * copies the movement faithfully except for one column of the five-column
  * effect tuple.
  *
- * The row count is right, the foreign key holds, and the primary key is
- * satisfied. Only a column-for-column comparison catches it: the effect that is
- * reserved is not the effect that was posted, so a later posting of the REAL
- * effect would find nothing reserved and commit a duplicate.
+ * SCOPE, narrowed after measurement rather than asserted. The compiled
+ * companion -> movement foreign key covers ALL TEN companion columns and
+ * targets exactly `effectIdentityUnique`, so a reservation carrying a wrong
+ * effect tuple has no referent and the database refuses it with 23503. This
+ * control must SUSPEND that constraint to construct the row at all.
+ *
+ * So it does NOT prove a live defect. It proves the read-back does not depend
+ * on the compiled foreign key remaining exactly this wide -- if that
+ * declaration ever narrows, the comparison is what still catches a reservation
+ * that reserves an effect the posting did not claim. What the read-back adds
+ * over the database TODAY is the reservation's EXISTENCE and its one-to-one
+ * pairing with this posting's movements, which no constraint requires; that is
+ * held by `assertAbsentEffectReservationRefuses`.
  */
 async function assertWrongEffectReservationRefuses(
   testContext: TestContext,
