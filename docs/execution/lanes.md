@@ -84,6 +84,11 @@ lane's suite was contending — was WRONG, and was written here as measured befo
 it had been.** It is recorded that way on purpose: the re-run that was supposed
 to confirm it refuted it instead.
 
+**CONFIRMED by removing it:** with the container gone and nothing else changed,
+architecture returned **178/177/1** — the single remaining failure being an
+unrelated routed line-pin. Three runs at one commit gave 2, 2 and 1 failures;
+only the container state differed.
+
 **The rule:** before believing an architecture red, run
 `docker ps -a --format '{{.Names}}' | grep north-star`. If anything is there,
 remove it and re-run. **A killed suite is the usual source**, which is one more

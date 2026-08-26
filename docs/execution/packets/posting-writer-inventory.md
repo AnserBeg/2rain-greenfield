@@ -346,7 +346,7 @@ matrix sit above it by construction, and it carries a
 | `test:unit` | **155 / 155** |
 | `test:compiler` | **152 / 152** |
 | `test:integration` | **149 / 149** |
-| `test:architecture` | **177 pass, 1 fail** — the out-of-lease line-pinned press-law control; see Stops |
+| `test:architecture` | **178 tests, 177 pass, 1 fail** — the out-of-lease line-pinned press-law control; see Stops |
 | `test:postgres` **(REQUIRED)** | **216 tests, 214 pass, 2 fail** — both the inherited `composed-application.test.ts` refusals, measured at the base and unchanged |
 | `check:expected-red` (validate) | OK — 39 entries across 4 manifests still name live production text |
 | `evidence:expected-red` (this packet's 5) | **5 / 5 reproduced and restored** |
@@ -372,6 +372,26 @@ production change, so the diff cannot reach the failing path.
 `COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED` on
 `northstar.app:relation.stock_count_line_transaction_line`. Identical at base and
 at head; nothing about this pair changed.
+
+### An architecture red that was NOT the tree, and a first diagnosis that was wrong
+
+Architecture returned **178/176/2** twice. The extra failure was
+`repository-hygiene.test.ts`'s *"matrix lock and legacy-process waits fail busy
+at their bounded deadline"*.
+
+**The first diagnosis was that a second lane's suite was contending for the test
+lock, and it was written into `lanes.md` as measured before it had been
+measured.** The re-run meant to confirm it refuted it. The real cause was a
+leaked `north-star-*` ephemeral container from a run this lane had killed:
+`run-matrix.sh` refuses with `POSTGRES_CONTAINER_CONTAMINATION` before it can
+refuse for the reason the test asserts, so the validator sees the wrong refusal
+and reports a bare assertion failure that names neither the container nor the
+cause.
+
+Removing the container and changing nothing else returned **178/177/1**. Three
+runs at one commit gave 2, 2 and 1 failures, differing only in container state.
+Recorded in `lanes.md`, wrong first diagnosis included, because the correction is
+the useful part.
 
 ## Stops
 
