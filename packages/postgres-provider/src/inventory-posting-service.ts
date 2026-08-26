@@ -3036,6 +3036,8 @@ async function assertCompanionIdentitiesPersisted(
             source.${quoted(binding.stockCountStateColumn)} AS "sourceState",
             source.${quoted(binding.stockCountActorColumn)} AS "sourceActorId",
             to_char(source.${quoted(binding.stockCountRecordedAtColumn)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "sourceRecordedAt",
+            to_jsonb(source) AS "sourcePersistedRow",
+            to_jsonb(companion) AS "companionPersistedRow",
             companion.${quoted(binding.transaction.revisionColumn)}::integer AS "companionRevision",
             companion.${quoted(binding.transactionStateColumn)} AS "companionState",
             companion.${quoted(binding.transactionTypeColumn)} AS "companionType",
@@ -3136,6 +3138,57 @@ async function assertCompanionIdentitiesPersisted(
       },
     );
   }
+  assertPersistedRowFullyAccountedFor(
+    `stock count ${command.stockCountId}`,
+    row!.sourcePersistedRow,
+    binding.stockCount,
+    [
+      'tenant_id',
+      'environment_id',
+      binding.stockCount.legalEntityColumn!,
+      binding.stockCount.recordIdColumn,
+      binding.stockCount.revisionColumn,
+      binding.stockCount.archiveColumn,
+      binding.stockCountStateColumn,
+      binding.stockCountKindColumn,
+      binding.stockCountLocationColumn,
+      binding.stockCountCountedAtColumn,
+      binding.stockCountRecordedAtColumn,
+      binding.stockCountActorColumn,
+      binding.stockCountReasonCodeColumn,
+      binding.stockCountReasonNarrativeColumn,
+      binding.stockCountSupersedesColumn,
+      binding.stockCountRelationToTransactionColumn,
+      requiredField(binding.stockCount, 'stock_count_number').name,
+    ],
+  );
+  assertPersistedRowFullyAccountedFor(
+    `companion transaction ${command.transactionId}`,
+    row!.companionPersistedRow,
+    binding.transaction,
+    [
+      'tenant_id',
+      'environment_id',
+      binding.transaction.legalEntityColumn!,
+      binding.transaction.recordIdColumn,
+      binding.transaction.revisionColumn,
+      binding.transaction.archiveColumn,
+      binding.transactionStateColumn,
+      binding.transactionTypeColumn,
+      ...(
+        [
+          'inventory_transaction_number',
+          'inventory_transaction_reason_code',
+          'inventory_transaction_reason_narrative',
+          'inventory_transaction_source_type',
+          'inventory_transaction_source_id',
+          'inventory_transaction_effective_at',
+          'inventory_transaction_recorded_at',
+          'inventory_transaction_actor_id',
+        ] as const
+      ).map((local) => requiredField(binding.transaction, local).name),
+    ],
+  );
   const lines = await client.query<Record<string, unknown>>(
     `SELECT source.${quoted(binding.stockCountLine.recordIdColumn)}::text AS "sourceRecordId",
             source.${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "companionId",
@@ -3147,7 +3200,9 @@ async function assertCompanionIdentitiesPersisted(
             companion.${quoted(binding.transactionLineFromLocationColumn)}::text AS "companionFromLocationId",
             companion.${quoted(binding.transactionLineToLocationColumn)}::text AS "companionToLocationId",
             companion.${quoted(binding.transactionLine.revisionColumn)}::integer AS "companionRevision",
-            source.${quoted(binding.stockCountLine.revisionColumn)}::integer AS "sourceRevision"
+            source.${quoted(binding.stockCountLine.revisionColumn)}::integer AS "sourceRevision",
+            to_jsonb(source) AS "sourcePersistedRow",
+            to_jsonb(companion) AS "companionPersistedRow"
        FROM ${table(binding, binding.stockCountLine)} AS source
        JOIN ${table(binding, binding.transactionLine)} AS companion
          ON companion.tenant_id = source.tenant_id
@@ -3211,6 +3266,48 @@ async function assertCompanionIdentitiesPersisted(
         { stockCountLineId: String(line.sourceRecordId) },
       );
     }
+    assertPersistedRowFullyAccountedFor(
+      `stock-count line ${sourceRecordId}`,
+      line.sourcePersistedRow,
+      binding.stockCountLine,
+      [
+        'tenant_id',
+        'environment_id',
+        binding.stockCountLine.legalEntityColumn!,
+        binding.stockCountLine.recordIdColumn,
+        binding.stockCountLine.revisionColumn,
+        binding.stockCountLine.archiveColumn,
+        binding.stockCountLineRelationToSessionColumn,
+        binding.stockCountLineRelationToTransactionLineColumn,
+        binding.stockCountLineItemColumn,
+        binding.stockCountLineLineNumberColumn,
+        binding.stockCountLineExpectedColumn,
+        binding.stockCountLineCountedColumn,
+        binding.stockCountLineVarianceColumn,
+        binding.stockCountLineUnitColumn,
+        binding.stockCountLineReversalColumn,
+      ],
+    );
+    assertPersistedRowFullyAccountedFor(
+      `companion line ${String(line.companionId)}`,
+      line.companionPersistedRow,
+      binding.transactionLine,
+      [
+        'tenant_id',
+        'environment_id',
+        binding.transactionLine.legalEntityColumn!,
+        binding.transactionLine.recordIdColumn,
+        binding.transactionLine.revisionColumn,
+        binding.transactionLine.archiveColumn,
+        binding.transactionLineRelationToTransactionColumn,
+        binding.transactionLineItemColumn,
+        binding.transactionLineQuantityColumn,
+        binding.transactionLineUnitColumn,
+        binding.transactionLineLineNumberColumn,
+        binding.transactionLineFromLocationColumn,
+        binding.transactionLineToLocationColumn,
+      ],
+    );
     // Added on review, for the same reason as the header comparison above.
     const negative = expected.varianceQuantity.startsWith('-');
     if (
@@ -4034,8 +4131,9 @@ async function assertAuthoredTransactionPersisted(
 ): Promise<void> {
   const persisted = await client.query<Record<string, unknown>>(
     `SELECT ${quoted(binding.transactionStateColumn)} AS state,
-            ${quoted(binding.transaction.revisionColumn)}::integer AS revision
-       FROM ${table(binding, binding.transaction)}
+            ${quoted(binding.transaction.revisionColumn)}::integer AS revision,
+            to_jsonb(header) AS "persistedRow"
+       FROM ${table(binding, binding.transaction)} AS header
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.transaction.legalEntityColumn!)} = $3
         AND ${quoted(binding.transaction.recordIdColumn)} = $4
@@ -4059,6 +4157,36 @@ async function assertAuthoredTransactionPersisted(
       { transactionId: command.transactionId },
     );
   }
+  // The authored transition writes only state and revision; every other column
+  // is pinned by its compare-and-set WHERE clause, which is why they are
+  // accounted for here without a separate value comparison.
+  assertPersistedRowFullyAccountedFor(
+    `transaction ${command.transactionId}`,
+    row!.persistedRow,
+    binding.transaction,
+    [
+      'tenant_id',
+      'environment_id',
+      binding.transaction.legalEntityColumn!,
+      binding.transaction.recordIdColumn,
+      binding.transaction.revisionColumn,
+      binding.transaction.archiveColumn,
+      binding.transactionStateColumn,
+      binding.transactionTypeColumn,
+      ...(
+        [
+          'inventory_transaction_number',
+          'inventory_transaction_reason_code',
+          'inventory_transaction_reason_narrative',
+          'inventory_transaction_source_type',
+          'inventory_transaction_source_id',
+          'inventory_transaction_effective_at',
+          'inventory_transaction_recorded_at',
+          'inventory_transaction_actor_id',
+        ] as const
+      ).map((local) => requiredField(binding.transaction, local).name),
+    ],
+  );
 }
 
 async function transitionTransactionToPosted(

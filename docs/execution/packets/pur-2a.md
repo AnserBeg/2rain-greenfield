@@ -191,7 +191,7 @@ three passes miss this.
 
 ## Evidence — Band A, and what each vector is held by
 
-`test/evidence/pur-2a.expected-red.json`, seventeen entries, run through
+`test/evidence/pur-2a.expected-red.json`, nineteen entries, run through
 `evidence:expected-red` under ADR-0058: each mutation is measured before the
 restored run, each declared kill must fail in its own body for its own declared
 reason, and the observed kill set must equal the declared one exactly.
@@ -223,6 +223,48 @@ restructured so its refusal identity is asserted directly.
 test read only the `correction` role's companion type while the mutation moved
 the `count` role's. The test now reads both, so each declared role binding is
 observed by something.
+
+## Round 7 — the class, not its seventh field
+
+**F15, Critical, verified:** the movement relied on the column default for its
+revision and had no archive check, so a create-contract violation survived the
+insert, the row count, every field comparison and every parent check.
+
+**But the finding that mattered was the convergence one.** Rounds 2, 3, 5, 6
+and 7 each found exactly one more column a posting wrote and no read-back
+observed — source-line revision, source-header actor and instant, movement
+transaction relation, authored header state, movement revision. Every fix was
+correct and none stopped the next, because each was a FIELD and the defect was
+a CLASS: a verifier whose coverage was a hand-written list that nothing ever
+compared against the row it verified.
+
+`assertPersistedRowFullyAccountedFor` compares them. Every read-back selects
+`to_jsonb` of the row it verified and declares the columns it actually
+COMPARED; any column the row carries that the verifier does not account for
+fails the posting. **Applied to all six direct writers** — companion header,
+companion lines, movement, authored header, source header, source lines. A
+column added to an entity, or a comparison quietly dropped, is now refused at
+posting time instead of found by the next reviewer, and
+`a-verifier-stops-accounting-for-a-column` holds exactly that.
+
+**The accounted list is deliberately NOT derived from the compiled binding.**
+Deriving both the row and its coverage from one source would make a shared
+omission invisible, which is the failure round 7 named explicitly.
+
+**It found a category on its first run that seven review rounds had not.**
+Storage-GENERATED case-fold columns exist on these entities: the database
+computes them, and the kernel never writes one. They are admitted by
+DERIVATION — a generated column is accounted for only if its source column is
+itself compared — because comparing one would be comparing the database to
+itself, and admitting one unconditionally would be a hole in the mechanism that
+closes the hole.
+
+**Declared limit of the class control.** It proves that REMOVING coverage
+fails the posting. It cannot be built the other way round: with full coverage
+and correct values there is nothing for a mutation that disables the mechanism
+to kill. The generated-column admission likewise has no committed control for
+its conditional half; what is held is that removing the admission entirely
+breaks correct postings.
 
 ## Round 6 — the AUTHORED header, and a control masked by a uniqueness collision
 

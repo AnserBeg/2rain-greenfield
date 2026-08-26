@@ -357,6 +357,52 @@
           "expected": "did not persist the posted state its transition wrote"
         }
       ]
+    },
+    {
+      "name": "movement-created-at-a-wrong-revision",
+      "claim": "A movement is a create, so the kernel writes the compiled optimistic-revision contract's initial value explicitly -- the rule the companion header and line already followed. Round 7 found the movement the last writer still relying on the column default, with neither its revision nor its archive state read back, so a schema-valid create-contract violation survived the insert, the row-count check, every field comparison and every parent check. This mutation writes revision 2 with all other values correct.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    movement.movementId,\n    companionInitialRevision,",
+      "replacement": "    movement.movementId,\n    companionInitialRevision + 1,",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "was not persisted as it was planned"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "was not persisted as it was planned"
+        }
+      ]
+    },
+    {
+      "name": "a-verifier-stops-accounting-for-a-column",
+      "claim": "THE CLASS-LEVEL CONTROL. `assertPersistedRowFullyAccountedFor` is what stops the next round finding an eighth unobserved column: it compares the columns a persisted row actually carries against the columns the verifier compared, and refuses any it does not account for. This mutation drops one column -- the movement's reversal identity -- from the movement verifier's accounted list, exactly as a future edit removing a comparison would. Nothing about the posting is wrong; what changes is that a written column is no longer covered, and the mechanism refuses the posting instead of returning success. Note the direction: this control cannot be built by disabling the mechanism, because with full coverage and correct values there would be nothing to kill. It is built by removing coverage, which is the failure mode the mechanism exists for.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          binding.movementReversalOfMovementColumn,\n          ...(",
+      "replacement": "          ...(",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "carries persisted columns no read-back compares"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "carries persisted columns no read-back compares"
+        }
+      ]
     }
   ]
 }
