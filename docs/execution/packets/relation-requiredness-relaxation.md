@@ -428,6 +428,95 @@ moved the production text that entry named. **That is the drift half of the gate
 working on its author**, one packet after it was written, and the entry was
 repointed rather than deleted.
 
+## Round 3 — two evidence defects, and one place the lane read the review wrong
+
+Round 2 returned **BLOCK** with F1, F2 and F3's production behaviour all CLOSED
+and two evidence findings open. Both were correct.
+
+### F5 — the control proved the opposite of its claim
+
+The F3 mutation replaced the allowlist condition with one that refused **every
+current element kind**. The focused test asserts first that all fourteen matrix
+keys produce zero diagnostics, so the mutation died there — measured, not
+inferred:
+
+    expected: 0
+    actual:   14
+
+The unknown-kind assertion was never reached, and the manifest's generic
+`strictEqual|deepEqual` pattern accepted the unrelated failure. **The control
+demonstrated that the allowlist ADMITS element kinds, which is the opposite of
+the fail-closed property it was written for.** That is `review-tiers`' "verify
+why a red fired, not just that it fired" landing on the lane one packet after it
+cited the rule.
+
+Recalibrated to admit **only** the sentinel, so every other kind's disposition is
+unchanged and the fail-closed assertion is the one that dies:
+
+    expected: subjectId: 'someFutureUnclassifiedStatement'
+    actual:   (empty)
+
+Its `expected` pattern now binds to the sentinel rather than to any assertion
+failure. The test additionally asserts all six names the retired denylist
+refused are **still** refused, so replacing a denylist with an allowlist is
+measured rather than reasoned.
+
+### F4 — one real record defect, and one question of sequencing
+
+**The record defect is the lane's.** The round-2 record said *"every gate below
+was measured at `a0a6cd…`"* while `format` and `test:architecture` had in fact
+been re-run at the frozen tip, as §6's 2026-08-24 correction requires. The record
+contradicted the work — the `record-claim-fidelity` failure class — and it is
+corrected above with a note rather than quietly repaired.
+
+**The full matrix at freeze is sequenced later, and that is a ruling rather than
+a preference.** `git-workflow`, "The matrix runs AFTER review converges, not
+before it — ruled 2026-08-14", puts one full matrix at step 4, at the SHA that
+will integrate, and states its own reconciliation: *"AGENTS.md §6 is satisfied
+exactly as written — it requires the matrix green at the INTEGRATED SHA and has
+never required one before review"*, and *"a freeze… no longer implies
+matrix-green."* It was measured: two lanes burned matrices on candidates a REVISE
+then superseded. `posting-error-shape`'s ledger row records the same deferral.
+
+**But the finding surfaced a real gap inside step 2, and arguing the boundary
+would have been the wrong answer.** `check:app-release` IS in this packet's blast
+radius under that rule's own wording — *a packet changing compiler or release
+output runs `test:postgres` and `check:app-release`* — and round 2 moved the
+compiler without re-running it. Round 3 therefore ran most of step 4's remainder
+anyway; all of it passes, including `test:browser` 93/93. What is left is named
+above rather than left to inference, and `check:reachability` is a step-4 gate by
+construction because it cannot run piecemeal.
+
+### Where the lane read the review wrong, recorded because it is the lane's error
+
+The round-2 checkpoint said it would flag back the reviewer's
+`DROP NOT NULL` → `SET NOT NULL` counterexample as not surviving every gate.
+**That was a misreading.** The review's table is headed *"per-gate
+counterexamples, not claims that one mutation survives the entire matrix"*, and
+`SET NOT NULL` was its **typecheck** row, which is trivially true. The table was
+careful; the objection was not.
+
+The mutation was executed before anything was claimed, and the result is worth
+keeping on its own merits: `SET NOT NULL` dies in `test:postgres` with
+
+    managed catalog is not attributable: altered managed column …
+    expected nullable true, actual false
+
+so the new test discriminates the SQL token, not only the presence of the case.
+
+### One limit the review named that the lane accepted rather than closed
+
+`test:postgres` alone does not catch a restored F1 — the PostgreSQL test does not
+vary `archiveBehavior`. That is true and it stays true. F1 is caught by
+`test:compiler` through `widening-inherits-the-hand-maintained-subset`, and no
+rule requires every gate to catch every defect. It is recorded rather than
+answered with a second database test.
+
+The review's forward guidance on the derived allowlist is recorded on the open
+finding: a future legitimately-destructive element kind must split *known
+transition element* from *renderer-safe transition element* rather than inherit
+this allowlist unchanged.
+
 ## The declared range
 
 ```record-claim
@@ -435,7 +524,7 @@ repointed rather than deleted.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "relation-requiredness-relaxation",
   "base": "643a5b5b6b713f02c724ba15e5de15c51209210a",
-  "head": "a0a6cd183d3e795572cba19286b6b09fd93b9046",
+  "head": "0783cc1ac75e71a66d95e2cfab682025cfb9d7ac",
   "changedPaths": [
     "db/migrations/0022_module_storage_relation_requiredness_relaxation.sql",
     "db/schema.snapshot.json",
@@ -492,15 +581,21 @@ repointed rather than deleted.
 ## Gates and SHAs
 
 **A record cannot name its own commit**, so this names only SHAs that exist when
-it is written. The **round-2 executable candidate is
-`a0a6cd183d3e795572cba19286b6b09fd93b9046`** — the last commit to move
+it is written. The **round-3 executable candidate is
+`0783cc1ac75e71a66d95e2cfab682025cfb9d7ac`** — the last commit to move
 production, a test, or a manifest's executable fields. Everything above it is
 records-only, and the freeze is the branch tip, reported in the checkpoint block.
 
-Round 1's candidate was `baabc0f6f1dc6d487e84d6d730dadad5798b6667`, frozen at
-tip `8226279…` and reviewed there. **That review is void** — round 2 changes
-production, so §4's new-SHA rule applies and this is a fresh candidate rather
-than a continuation.
+Round history, every candidate tagged and fetchable:
+
+| round | executable candidate | frozen tip | verdict |
+|---|---|---|---|
+| 1 | `baabc0f` | `8226279`, tag `…-reviewed-r1` | **BLOCK** — F1 production defect, F2 evidence, F3 fail-open |
+| 2 | `a0a6cd1` | `deaa70b`, tag `…-reviewed-r2` | **BLOCK** — F1/F2/F3 closed; F4 record + matrix, F5 non-discriminating control |
+| 3 | `0783cc1` | this freeze | — |
+
+**Each prior review is void** — rounds 2 and 3 both change production, so §4's
+new-SHA rule applies and each is a fresh candidate rather than a continuation.
 
 **This is the FREEZE-CANDIDATE gate set, not the full CI matrix, and the
 distinction is a rule rather than an omission.** `git-workflow`, "The matrix runs
@@ -541,19 +636,28 @@ below was measured at `a0a6cd…`"*, which contradicted what had actually been
 run; the round-2 reviewer caught the contradiction, and this paragraph is the
 correction rather than a quiet repair.
 
-| gate | round 1 | round 2 |
-|---|---|---|
-| `typecheck` / `lint` / `format` | PASS | PASS |
-| `test:unit` | 155/155 | 155/155 |
-| `test:compiler` | 155/155 | **157/157** (+2 for F1 and F3) |
-| `test:integration` | 149/149 | 149/149 |
-| `test:architecture` | 189/189 | 189/189 |
-| `check:schema` | 22/22, drift PASS | 22/22, drift PASS |
-| `test:postgres` | 209/209 | **210/210** (+1: the executing DDL observation) |
-| `check:expected-red` (static) | OK, 18 entries | OK, **22 entries** |
-| `check:expected-red-controls` | OK, 38 controls | OK, 38 controls |
-| `evidence:expected-red` | 7/7 | **11/11 reproduced and restored** |
-| `scripts/check-records.sh` | PASS | PASS |
+| gate | round 1 | round 2 | round 3 |
+|---|---|---|---|
+| `typecheck` / `lint` / `format` | PASS | PASS | PASS |
+| `test:unit` | 155/155 | 155/155 | 155/155 |
+| `test:compiler` | 155/155 | **157/157** (+2 for F1 and F3) | 157/157 |
+| `test:integration` | 149/149 | 149/149 | 149/149 |
+| `test:architecture` | 189/189 | 189/189 | 189/189 |
+| `check:schema` | 22/22, drift PASS | 22/22, drift PASS | 22/22, drift PASS |
+| `test:postgres` | 209/209 | **210/210** (+1: the executing DDL observation) | 210/210 |
+| `check:expected-red` (static) | OK, 18 entries | OK, **22 entries** | OK, 22 entries |
+| `check:expected-red-controls` | OK, 38 controls | OK, 38 controls | OK, 38 controls |
+| `evidence:expected-red` | this packet's 7/7 | this packet's 11/11 | **ALL 22/22** — the whole committed population, every manifest |
+| `scripts/check-records.sh` | PASS | PASS | PASS |
+| `build` | — | — | **PASS** |
+| `check:app-release` | on branch, round 1 | — | **PASS** |
+| `check:demo-release` | — | — | **PASS** |
+| `test:contracts` | — | — | **PASS** |
+| `test:agent` | — | — | **PASS** |
+| `check:language-coverage` | — | — | **PASS** |
+| `test:performance` | — | — | **PASS** |
+| `test:locale` | — | — | **PASS** |
+| `test:browser` | — | — | **93/93** |
 
 `test:postgres` is REQUIRED here under §6's cross-layer rule, and after round 2
 it is no longer only a regression check — one of its tests observes the new DDL.
