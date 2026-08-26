@@ -4189,18 +4189,85 @@ test(
 );
 
 /**
- * The reservation trigger is DISABLED, so the movement inserts and reserves
- * nothing. The foreign key runs companion -> movement `ON DELETE RESTRICT`, so
+ * Install a REPLACEMENT reservation writer through the admin pool -- the
+ * pattern `installLineRaceBlocker` already uses -- and disable the real one.
+ *
+ * WHY A REPLACEMENT RATHER THAN SIMPLY DISABLING THE REAL TRIGGER, and this was
+ * measured rather than predicted. `reserve_inventory_movement_effect` does TWO
+ * things on every movement insert: it writes the effect reservation, and it
+ * calls `north_star_internal.advance_semantic_aggregate_generation`. The
+ * posted-stock balance trigger fires later on the same insert and RAISES
+ * `POSTED_STOCK_BALANCE_GENERATION_MISSING` when that generation row is absent.
+ *
+ * So disabling the real trigger removes both effects at once, and the posting
+ * refuses from the balance trigger before the reservation read-back is ever
+ * reached — a red for the wrong reason, which certifies nothing. The
+ * replacement keeps the generation advance and varies exactly ONE property:
+ * what, if anything, gets reserved.
+ */
+async function installReplacementReservation(
+  database: PostingDatabase,
+  reserve: 'nothing' | 'theWrongEffect',
+): Promise<string> {
+  const fact = movementFactStorage(database);
+  const companion = fact.companion;
+  const columns = companion.columns.map((column) => column.name);
+  const wrongSourceLine = 'reserved-wrong-line';
+  const values = columns.map((column) =>
+    column === fact.fieldColumns.sourceLine
+      ? `'${wrongSourceLine}'`
+      : `NEW.${quoted(column)}`,
+  );
+  const body =
+    reserve === 'nothing'
+      ? ''
+      : `INSERT INTO ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
+             (${columns.map((column) => quoted(column)).join(', ')})
+           VALUES (${values.join(', ')});`;
+  await database.adminPool.query(
+    `ALTER TABLE ${table(database.binding, database.binding.movement)}
+       DISABLE TRIGGER ${quoted(companion.reservationTriggerName)};
+     CREATE FUNCTION public.pwi_replacement_reservation()
+       RETURNS trigger LANGUAGE plpgsql AS $body$
+       BEGIN
+         ${body}
+         PERFORM north_star_internal.advance_semantic_aggregate_generation(
+           NEW.tenant_id, NEW.environment_id);
+         RETURN NEW;
+       END
+       $body$;
+     CREATE TRIGGER pwi_replacement_reservation
+       AFTER INSERT ON ${table(database.binding, database.binding.movement)}
+       FOR EACH ROW EXECUTE FUNCTION public.pwi_replacement_reservation()`,
+  );
+  return wrongSourceLine;
+}
+
+async function removeReplacementReservation(
+  database: PostingDatabase,
+): Promise<void> {
+  const companion = movementFactStorage(database).companion;
+  await database.adminPool.query(
+    `DROP TRIGGER IF EXISTS pwi_replacement_reservation
+       ON ${table(database.binding, database.binding.movement)};
+     DROP FUNCTION IF EXISTS public.pwi_replacement_reservation();
+     ALTER TABLE ${table(database.binding, database.binding.movement)}
+       ENABLE TRIGGER ${quoted(companion.reservationTriggerName)}`,
+  );
+}
+
+/**
+ * A reservation writer that reserves NOTHING. The movement inserts, the
+ * generation advances, the balance projects — and no natural effect is
+ * reserved. The foreign key runs companion -> movement ON DELETE RESTRICT, so
  * a movement with no reservation row violates no constraint: without this
- * read-back the posting commits, and the `23505` raced-replay refusal that
+ * read-back the posting COMMITS, and the 23505 raced-replay refusal that
  * depends on the reservation is silently unreachable for that effect.
  */
 async function assertAbsentEffectReservationRefuses(
   testContext: TestContext,
   database: PostingDatabase,
 ): Promise<void> {
-  const reservationTrigger =
-    movementFactStorage(database).companion.reservationTriggerName;
   const posting = command({
     legalEntityId: legalReject,
     sourceId: 'reservation-absent',
@@ -4211,10 +4278,7 @@ async function assertAbsentEffectReservationRefuses(
     database.context.requestId,
   );
   const balanceBefore = await activeBalanceCount(database);
-  await database.adminPool.query(
-    `ALTER TABLE ${table(database.binding, database.binding.movement)}
-       DISABLE TRIGGER ${quoted(reservationTrigger)}`,
-  );
+  await installReplacementReservation(database, 'nothing');
   let outcome: PostingOutcome;
   try {
     outcome = await settlePosting(
@@ -4225,10 +4289,7 @@ async function assertAbsentEffectReservationRefuses(
       ),
     );
   } finally {
-    await database.adminPool.query(
-      `ALTER TABLE ${table(database.binding, database.binding.movement)}
-         ENABLE TRIGGER ${quoted(reservationTrigger)}`,
-    );
+    await removeReplacementReservation(database);
   }
   assertRejectedPosting(
     testContext,
@@ -4260,29 +4321,19 @@ async function assertAbsentEffectReservationRefuses(
 }
 
 /**
- * A reservation writer that reserves the WRONG natural effect. The real
- * trigger is disabled and a replacement installed through the admin pool --
- * the pattern `installLineRaceBlocker` already uses -- which copies the
- * movement faithfully except for one column of the five-column effect tuple.
+ * A reservation writer that reserves the WRONG natural effect: the replacement
+ * copies the movement faithfully except for one column of the five-column
+ * effect tuple.
  *
  * The row count is right, the foreign key holds, and the primary key is
- * satisfied. Only a column-for-column comparison catches it: the effect that
- * is reserved is not the effect that was posted, so a second posting of the
- * REAL effect would find nothing reserved and commit a duplicate.
+ * satisfied. Only a column-for-column comparison catches it: the effect that is
+ * reserved is not the effect that was posted, so a later posting of the REAL
+ * effect would find nothing reserved and commit a duplicate.
  */
 async function assertWrongEffectReservationRefuses(
   testContext: TestContext,
   database: PostingDatabase,
 ): Promise<void> {
-  const fact = movementFactStorage(database);
-  const companion = fact.companion;
-  const columns = companion.columns.map((column) => column.name);
-  const wrongSourceLine = 'reserved-wrong-line';
-  const values = columns.map((column) =>
-    column === fact.fieldColumns.sourceLine
-      ? `'${wrongSourceLine}'`
-      : `NEW.${quoted(column)}`,
-  );
   const posting = command({
     legalEntityId: legalReject,
     sourceId: 'reservation-wrong',
@@ -4293,22 +4344,7 @@ async function assertWrongEffectReservationRefuses(
     database.context.requestId,
   );
   const balanceBefore = await activeBalanceCount(database);
-  await database.adminPool.query(
-    `ALTER TABLE ${table(database.binding, database.binding.movement)}
-       DISABLE TRIGGER ${quoted(companion.reservationTriggerName)};
-     CREATE FUNCTION public.pwi_wrong_reservation()
-       RETURNS trigger LANGUAGE plpgsql AS $body$
-       BEGIN
-         INSERT INTO ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
-           (${columns.map((column) => quoted(column)).join(', ')})
-         VALUES (${values.join(', ')});
-         RETURN NEW;
-       END
-       $body$;
-     CREATE TRIGGER pwi_wrong_reservation
-       AFTER INSERT ON ${table(database.binding, database.binding.movement)}
-       FOR EACH ROW EXECUTE FUNCTION public.pwi_wrong_reservation()`,
-  );
+  await installReplacementReservation(database, 'theWrongEffect');
   let outcome: PostingOutcome;
   try {
     outcome = await settlePosting(
@@ -4319,13 +4355,7 @@ async function assertWrongEffectReservationRefuses(
       ),
     );
   } finally {
-    await database.adminPool.query(
-      `DROP TRIGGER IF EXISTS pwi_wrong_reservation
-         ON ${table(database.binding, database.binding.movement)};
-       DROP FUNCTION IF EXISTS public.pwi_wrong_reservation();
-       ALTER TABLE ${table(database.binding, database.binding.movement)}
-         ENABLE TRIGGER ${quoted(companion.reservationTriggerName)}`,
-    );
+    await removeReplacementReservation(database);
   }
   assertRejectedPosting(
     testContext,
