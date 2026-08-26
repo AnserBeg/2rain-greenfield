@@ -349,8 +349,16 @@ matrix sit above it by construction, and it carries a
 | `test:architecture` | **178 tests, 177 pass, 1 fail** — the out-of-lease line-pinned press-law control; see Stops |
 | `test:postgres` **(REQUIRED)** | **216 tests, 214 pass, 2 fail** — both the inherited `composed-application.test.ts` refusals, measured at the base and unchanged |
 | `check:expected-red` (validate) | OK — 39 entries across 4 manifests still name live production text |
-| `evidence:expected-red` (this packet's 5) | **5 / 5 reproduced and restored** |
+| `evidence:expected-red` (FULL manifest population) | **OK — 41 expected reds reproduced and restored**, this packet's 5 among them |
+| `check:expected-red-controls` | **OK — 38 controls** |
 | `check:app-release` | **RED, inherited** — `compiled application release is stale` |
+
+**The widened verifier was re-measured rather than assumed.** This packet narrows
+`assertPersistedRowVerified`'s entity parameter to the shape it actually reads, so
+`PUR-2a`'s two controls over that mechanism —
+`a-verifier-stops-comparing-a-column` and `a-read-back-observes-a-partial-row` —
+were run against the new signature and **both still kill their two declared
+victims each**. They are also inside the full-manifest run above.
 
 **Every one of this packet's three new postgres tests passes**, and the five
 other postgres files that import `inventory-posting-service.ts` —
