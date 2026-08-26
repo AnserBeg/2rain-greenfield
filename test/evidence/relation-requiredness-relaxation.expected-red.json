@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "packet": "relation-requiredness-relaxation",
+  "entries": [
+    {
+      "name": "relaxation-is-never-recognised",
+      "claim": "A candidate release that widens an already-released relation from required to optional is PLANNED, as one relaxNotNull element, rather than refused with COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "      const relaxed = relaxesRelationRequiredness(previousRelation, relation);",
+      "replacement": "      const relaxed = false;",
+      "test": {
+        "files": ["test/compiler/g2-module-storage.test.ts"],
+        "namePattern": "widens through one relaxNotNull element"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "a released required relation widens through one relaxNotNull element",
+          "expected": "COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED"
+        }
+      ]
+    },
+    {
+      "name": "widening-guard-admits-anything",
+      "claim": "The widening is admitted only when NOTHING ELSE about the relation's physical shape moved, so the new element cannot become a channel for an unrelated mutation.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "  return sameRelationShape(\n    {\n      ...previous,\n      relationColumn: { ...previous.relationColumn, nullable: true },\n    },\n    candidate,\n  );",
+      "replacement": "  return true;",
+      "test": {
+        "files": ["test/compiler/g2-module-storage.test.ts"],
+        "namePattern": "existing physical mutations fail closed"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "relation mapping fingerprints include nullability and existing physical mutations fail closed",
+          "expected": "assert\\.ok\\('diagnostic' in result\\)"
+        }
+      ]
+    },
+    {
+      "name": "requiredness-leaves-the-compared-shape",
+      "claim": "Nullability is part of the relation shape sameRelationShape compares, so a re-tightening is REFUSED rather than riding through as a shape-identical no-op with no DDL at all.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "    relationColumn: relation.relationColumn,\n    relationId: relation.relationId,",
+      "replacement": "    relationColumn: { ...relation.relationColumn, nullable: false },\n    relationId: relation.relationId,",
+      "test": {
+        "files": ["test/compiler/g2-module-storage.test.ts"],
+        "namePattern": "re-tightening a released relation is refused|never widened from the relation side"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "relaxation is one-way: re-tightening a released relation is refused",
+          "expected": "assert\\.ok\\('diagnostic' in result\\)"
+        },
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "a field-origin relation column is never widened from the relation side",
+          "expected": "assert\\.ok\\('diagnostic' in result\\)"
+        }
+      ]
+    },
+    {
+      "name": "field-origin-relations-are-widened-too",
+      "claim": "A relation whose column originates from a field is excluded from relaxation, because that column's NOT NULL is rendered from entity.columns and a fresh install of the same release would still create it required.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "  if (\n    previous.relationColumn.origin === 'field' ||\n    candidate.relationColumn.origin === 'field'\n  ) {\n    return false;\n  }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/compiler/g2-module-storage.test.ts"],
+        "namePattern": "never widened from the relation side"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "a field-origin relation column is never widened from the relation side",
+          "expected": "assert\\.ok\\('diagnostic' in result\\)"
+        }
+      ]
+    },
+    {
+      "name": "old-readers-are-told-relaxation-is-transparent",
+      "claim": "The compatibility cell states oldRead: requiresReadFallback — a reader compiled against a required relation observes a null the moment a new writer stores one, and the matrix says so.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "    oldRead: 'requiresReadFallback',\n    oldWrite: 'compatible',\n  }),\n  tightenNotNull: Object.freeze({",
+      "replacement": "    oldRead: 'compatible',\n    oldWrite: 'compatible',\n  }),\n  tightenNotNull: Object.freeze({",
+      "test": {
+        "files": ["test/compiler/g2-module-storage.test.ts"],
+        "namePattern": "classification axes and compatibility carve-outs are exact|widens through one relaxNotNull element"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "A2/A4 classification axes and compatibility carve-outs are exact",
+          "expected": "requiresReadFallback"
+        },
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "a released required relation widens through one relaxNotNull element",
+          "expected": "requiresReadFallback"
+        }
+      ]
+    },
+    {
+      "name": "impact-reads-only-the-new-reader",
+      "claim": "coexistenceImpact observes oldRead as well as newRead, so an element whose fallback burden falls on the OLD side does not publish 'none' beside a cell that says a live reader needs a fallback.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "      : coexistence.newRead === 'requiresReadFallback' ||\n          coexistence.oldRead === 'requiresReadFallback'",
+      "replacement": "      : coexistence.newRead === 'requiresReadFallback'",
+      "test": {
+        "files": ["test/compiler/g2-module-storage.test.ts"],
+        "namePattern": "classification axes and compatibility carve-outs are exact|widens through one relaxNotNull element"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "A2/A4 classification axes and compatibility carve-outs are exact",
+          "expected": "requiresReadFallback"
+        },
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "a released required relation widens through one relaxNotNull element",
+          "expected": "requiresReadFallback"
+        }
+      ]
+    },
+    {
+      "name": "migration-does-not-admit-the-new-kind",
+      "claim": "Migration 0022 admits relaxNotNull to north_star_internal.module_storage_elements_shape, a CHECK constraint no TypeScript build observes, and the checked-in schema snapshot records that it did.",
+      "file": "db/migrations/0022_module_storage_relation_requiredness_relaxation.sql",
+      "original": "      'relaxNotNull',\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/trust-substrate.test.ts"],
+        "namePattern": "migrations 0006-0022 upgrade accepted G1"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/trust-substrate.test.ts",
+          "name": "migrations 0006-0022 upgrade accepted G1 and converge with the checked-in snapshot",
+          "expected": "physical schema differs from schema\\.snapshot\\.json"
+        }
+      ]
+    }
+  ]
+}
