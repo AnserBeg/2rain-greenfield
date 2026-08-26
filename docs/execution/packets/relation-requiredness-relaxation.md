@@ -516,9 +516,20 @@ full matrix on candidates a REVISE then superseded. The precedent is on the
 ledger — `posting-error-shape` recorded *"Full matrix deliberately deferred to
 post-review integration per `git-workflow`."*
 
-**Not yet run, and named rather than left to inference:** `test:browser`, the
-dependency and secret scans, `check:reachability`, and the observability
-producer. Those belong to step 4, at the integrated SHA.
+**Round 3 nevertheless ran most of step 4's remainder**, because the round-2
+reviewer named the omission and measuring it is cheaper than arguing about it:
+`build`, `check:demo-release`, `check:app-release`, `test:contracts`,
+`test:agent`, `check:language-coverage`, `test:performance` and `test:locale`
+all PASS at the round-3 candidate. `check:app-release` is in this packet's blast
+radius under the sequencing rule's own step 2 — a packet changing compiler output
+runs it — and round 2 had not re-run it after the compiler moved. That was a real
+gap in the freeze set and it is closed.
+
+**Still not run, and named rather than left to inference:** the dependency and
+secret scans, `check:reachability`, and the observability producer.
+`check:reachability` cannot be run piecemeal — it needs `begin-reachability-run`
+and every suite in one session — so it is a step-4 gate by construction. Those
+belong at the integrated SHA.
 
 **Where the gates were measured, stated exactly.** The suites below ran at
 `a0a6cd183d3e795572cba19286b6b09fd93b9046`, with `HEAD` re-read after the run
