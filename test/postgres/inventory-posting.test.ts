@@ -4145,6 +4145,67 @@ test(
       };
       transaction.factStorage = injected;
 
+      // CHAINED REACHABILITY, required by round 1's F1. The balance is reached
+      // only THROUGH the projection trigger installed on the movement; it is
+      // not one of the kernel's declared write roots. Giving the BALANCE its
+      // own fact storage means the posting reaches those partitions and that
+      // companion at two removes -- movement -> balance -> reservation.
+      //
+      // The first version of the traversal tested each edge against the
+      // ORIGINAL root set in one pass, so it reached the balance and then
+      // stopped, and every relation behind it was invisible. A control that
+      // only injects storage onto an existing ROOT cannot tell the two
+      // traversals apart, which is why this case is separate.
+      const chained = structuredClone(
+        database.registration.storageTarget,
+      ) as StorageTargetPayloadV1;
+      const chainedMovement = requiredTargetEntity(
+        chained,
+        'inventory_movement',
+      );
+      const chainedBalance = requiredTargetEntity(
+        chained,
+        'posted_stock_balance',
+      );
+      const chainedFact = structuredClone(chainedMovement.factStorage!);
+      chainedFact.companion.physicalTableName = 'nsm_t_pwi_chained_companion';
+      chainedFact.partitioning = {
+        ...chainedFact.partitioning,
+        partitions: chainedFact.partitioning.partitions.map(
+          (partition, index) => ({
+            ...partition,
+            physicalTableName: `nsm_t_pwi_chained_partition_${String(index)}`,
+          }),
+        ),
+      };
+      chainedBalance.factStorage = chainedFact;
+      assert.throws(
+        () =>
+          new PostgresInventoryPostingService(
+            database.runtimePool,
+            { ...database.registration, storageTarget: chained },
+            { currentInstant: () => recordedAt },
+          ),
+        (error: unknown) => {
+          assert.equal(
+            observePostingError(
+              testContext,
+              'writer-inventory-chained-relation',
+              error,
+              'INVENTORY_POSTING_STORAGE_INVALID',
+            ),
+            true,
+          );
+          assert.match(
+            String(error),
+            /reaches physical relations no read-back verifies/u,
+          );
+          assert.match(String(error), /nsm_t_pwi_chained_companion/u);
+          assert.match(String(error), /nsm_t_pwi_chained_partition_0/u);
+          return true;
+        },
+      );
+
       assert.throws(
         () =>
           new PostgresInventoryPostingService(
