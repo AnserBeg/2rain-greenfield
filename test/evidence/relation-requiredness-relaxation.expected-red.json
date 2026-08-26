@@ -22,9 +22,9 @@
     },
     {
       "name": "widening-guard-admits-anything",
-      "claim": "The widening is admitted only when NOTHING ELSE about the relation's physical shape moved, so the new element cannot become a channel for an unrelated mutation.",
+      "claim": "The widening is admitted only when NOTHING ELSE about the relation moved, so the new element cannot become a channel for an unrelated mutation. Repointed after round-1 finding F1 moved the comparison from sameRelationShape's subset to the whole object.",
       "file": "packages/compiler/src/storage.ts",
-      "original": "  return sameRelationShape(\n    {\n      ...previous,\n      relationColumn: { ...previous.relationColumn, nullable: true },\n    },\n    candidate,\n  );",
+      "original": "  return (\n    hashCanonical(\n      `${HASH_DOMAINS.projectionSemantic}/storage-relation-relaxation`,\n      comparable(widened),\n    ).digest ===\n    hashCanonical(\n      `${HASH_DOMAINS.projectionSemantic}/storage-relation-relaxation`,\n      comparable(candidate),\n    ).digest\n  );",
       "replacement": "  return true;",
       "test": {
         "files": ["test/compiler/g2-module-storage.test.ts"],
