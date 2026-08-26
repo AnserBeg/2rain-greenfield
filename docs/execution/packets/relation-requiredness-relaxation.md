@@ -517,6 +517,56 @@ finding: a future legitimately-destructive element kind must split *known
 transition element* from *renderer-safe transition element* rather than inherit
 this allowlist unchanged.
 
+## Stopped at round 3, and the criterion that licenses that
+
+`review-tiers`' backstop requires the criterion for continuing to be **written
+down from round three onward**, and says an orchestrator who cannot name one is
+chasing. Run against this packet:
+
+| criterion | fires? |
+|---|---|
+| Defect in production | **No.** Round 2 found none, and `git diff deaa70b..HEAD -- packages/ apps/ db/` is **empty** — production is byte-identical to the candidate round 2 reviewed and cleared |
+| New failure class | No — nothing outstanding to classify |
+| Last fix subsuming, class converging | No — the class is closed, not converging toward closure |
+| Regression from the previous round's fix | No — the F5 recalibration was verified by execution, and all 22 committed reds reproduce |
+| Blast-radius override | Bounded — the DDL bytes carrying the blast radius were cleared at round 2 with an executing test that dies against both broken trees |
+
+**No criterion fits, so this is the stop.** Two further rules point the same way.
+*"Rounds one and two find production defects; rounds three and beyond find
+control defects — when that transition happens, the loop has stopped being about
+the code"*: round 2 found zero production defects. And *"if successive rounds
+keep finding things the lane's own checklist would have caught… the defect is in
+the lane's process, not the code. Route it to doctrine and stop spending arms on
+it"* — which is exactly what F5 was.
+
+**What stopping costs, stated rather than left implicit.** The round-3 delta —
+47 executable lines: the F5 recalibration, two added assertions, one corrected
+comment — is unreviewed. If the recalibrated control were still
+non-discriminating, the fail-closed claim would have no valid control. It was
+verified by execution in both directions (the wrong death and the right one),
+but by the lane, on the exact thing the lane already got wrong once here. **That
+is an evidence gap on one claim, not a production risk**, and the
+doctrine-shaped instrument for it is a narrow confirm on the delta, not a fourth
+full arm.
+
+### The two classes routed on stopping
+
+`review-tiers`: *"STOP means route the class to a queue row, narrow the claim to
+what was actually measured, and declare the limit where a reader will hit it."*
+The claim and its limits are narrowed above. Two classes are routed out:
+
+- **The lane's process defect** — a control that proved the opposite of its
+  claim — is an adjudicated lesson in `learnings.md`, *"Bind a control's expected
+  red to the assertion that carries its claim."* It is a lane-process failure and
+  another review arm does not fix it.
+- **The §6 / `git-workflow` sequencing collision** is a queue row,
+  `section-6-does-not-point-at-its-own-sequencing-ruling`. Two independent
+  reviewers read §6 as demanding a full matrix at freeze; that is a doctrine gap
+  rather than a reviewer error, and it is the same shape §4 and `review-tiers`
+  already solved by citing each other. **Not taken here** — `AGENTS.md` and
+  `.agents/skills/**` are outside every packet lease, and a lane editing the
+  doctrine it is judged against is the failure the routing exists to avoid.
+
 ## The declared range
 
 ```record-claim
