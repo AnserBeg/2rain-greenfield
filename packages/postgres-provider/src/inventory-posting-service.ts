@@ -471,6 +471,13 @@ interface EntityBinding {
   archiveColumn: string;
   entityId: string;
   fields: ReadonlyMap<string, FieldBinding>;
+  /**
+   * Storage-GENERATED columns, each derived by the database from a source
+   * column. The kernel never writes one, so the class check admits it only
+   * when its source is itself compared -- see
+   * `assertPersistedRowFullyAccountedFor`.
+   */
+  foldedColumns: readonly { name: string; sourceColumn: string }[];
   legalEntityColumn: string | null;
   recordIdColumn: string;
   revisionColumn: string;
@@ -1556,6 +1563,14 @@ function bindEntity(entity: StorageEntityTarget): EntityBinding {
     archiveColumn: safeIdentifier(entity.archive.archivedAtColumn),
     entityId: entity.entityId,
     fields,
+    foldedColumns: Object.freeze(
+      (entity.foldedColumns ?? []).map((folded) =>
+        Object.freeze({
+          name: safeIdentifier(folded.physicalName),
+          sourceColumn: safeIdentifier(folded.sourceColumn),
+        }),
+      ),
+    ),
     legalEntityColumn: entity.legalEntity
       ? safeIdentifier(entity.legalEntity.column)
       : null,
@@ -2629,6 +2644,64 @@ async function enforceNegativeStock(
   return flagged;
 }
 
+/**
+ * PUR-2a, round 7. THE CLASS-LEVEL CLOSURE, and it exists because enumerating
+ * omissions one per review round stopped being defensible.
+ *
+ * Rounds 2, 3, 5, 6 and 7 each found exactly one more column a posting wrote
+ * and no read-back observed: the source line's revision, the source header's
+ * actor and instant, the movement's transaction relation, the authored
+ * header's state, the movement's revision. Every fix was correct and none of
+ * them stopped the next one, because each was a field and the defect was a
+ * CLASS -- a verifier whose coverage was a hand-written list nothing compared
+ * against the row it verified.
+ *
+ * This compares the two. Each read-back selects `to_jsonb` of the row it
+ * verified and passes the columns it actually COMPARED. Any column the
+ * persisted row carries that the verifier did not account for fails the
+ * posting. A column added to an entity, or a comparison quietly dropped, is
+ * refused here rather than found by the next reviewer.
+ *
+ * The accounted list is deliberately NOT derived from the compiled binding:
+ * deriving both the row and its coverage from one source would make a shared
+ * omission invisible, which is the failure round 7 named explicitly.
+ */
+function assertPersistedRowFullyAccountedFor(
+  entityLabel: string,
+  persistedRow: unknown,
+  entity: EntityBinding,
+  accountedFor: readonly string[],
+): void {
+  if (
+    persistedRow === null ||
+    typeof persistedRow !== 'object' ||
+    Array.isArray(persistedRow)
+  ) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      `${entityLabel} read-back returned no inspectable row`,
+    );
+  }
+  const accounted = new Set(accountedFor);
+  // A storage-GENERATED column is admitted by DERIVATION, not by comparison:
+  // the database computes it from a source column, so it cannot be
+  // independently wrong, and comparing it would be comparing the database to
+  // itself. Admission is conditional on that source being compared -- if the
+  // source is unaccounted, so is the column derived from it.
+  for (const folded of entity.foldedColumns) {
+    if (accounted.has(folded.sourceColumn)) accounted.add(folded.name);
+  }
+  const unaccounted = Object.keys(persistedRow as Record<string, unknown>)
+    .filter((column) => !accounted.has(column))
+    .sort();
+  if (unaccounted.length > 0) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      `${entityLabel} carries persisted columns no read-back compares: ${unaccounted.join(', ')}`,
+    );
+  }
+}
+
 async function insertMovement(
   client: PoolClient,
   binding: PostingStorageBinding,
@@ -2674,6 +2747,11 @@ async function insertMovement(
     binding.movement.legalEntityColumn!,
     binding.movementBusinessPeriodColumn,
     binding.movement.recordIdColumn,
+    // A movement is a create, so the kernel writes its initial revision rather
+    // than leaving the column default to supply it -- the same rule the
+    // companion header and line follow. Round 7 found this the last writer
+    // still relying on the default.
+    binding.movement.revisionColumn,
     ...fields.map(([local]) => requiredField(binding.movement, local).name),
     binding.movementRelationToTransactionColumn,
     binding.movementRelationToLineColumn,
@@ -2684,6 +2762,7 @@ async function insertMovement(
     command.legalEntityId,
     movement.businessPeriod,
     movement.movementId,
+    companionInitialRevision,
     ...fields.map(([, value]) => value),
     command.transactionId,
     movement.transactionLineId,
@@ -4139,6 +4218,9 @@ async function readBackMovements(
             movement.${quoted(binding.movementReversalOfMovementColumn)}::text AS "reversalOfMovementId",
             movement.${quoted(binding.movementRelationToLineColumn)}::text AS "transactionLineId",
             movement.${quoted(binding.movementRelationToTransactionColumn)}::text AS "transactionId",
+            movement.${quoted(binding.movement.revisionColumn)}::integer AS "revision",
+            movement.${quoted(binding.movement.archiveColumn)}::text AS "archivedAt",
+            to_jsonb(movement) AS "persistedRow",
             companion_line.${quoted(binding.transactionLineRelationToTransactionColumn)}::text AS "lineParentTransactionId"
        FROM ${table(binding, binding.movement)} AS movement
        JOIN ${table(binding, binding.transactionLine)} AS companion_line
@@ -4209,7 +4291,12 @@ async function readBackMovements(
           command.reason.code ||
         (row.reasonNarrative === null ? null : String(row.reasonNarrative)) !==
           command.reason.narrative ||
-        nullableUuid(row.reversalOfMovementId) !== movement.reversalOfMovementId
+        nullableUuid(row.reversalOfMovementId) !==
+          movement.reversalOfMovementId ||
+        // A movement is a create and must be active. Round 7 found both
+        // escaping every committed observation.
+        Number(row.revision) !== companionInitialRevision ||
+        row.archivedAt !== null
       ) {
         throw postingError(
           'INVENTORY_POSTING_STORAGE_REJECTED',
@@ -4217,6 +4304,44 @@ async function readBackMovements(
           { movementId: movement.movementId },
         );
       }
+      // The class check: every column this row actually carries must be one
+      // the comparisons above touched.
+      assertPersistedRowFullyAccountedFor(
+        `movement ${movement.movementId}`,
+        row.persistedRow,
+        binding.movement,
+        [
+          'tenant_id',
+          'environment_id',
+          binding.movement.legalEntityColumn!,
+          binding.movementBusinessPeriodColumn,
+          binding.movement.recordIdColumn,
+          binding.movement.revisionColumn,
+          binding.movement.archiveColumn,
+          binding.movementRelationToTransactionColumn,
+          binding.movementRelationToLineColumn,
+          binding.movementReversalOfMovementColumn,
+          ...(
+            [
+              'inventory_movement_stock_dimension_set_version',
+              'inventory_movement_item_id',
+              'inventory_movement_location_id',
+              'inventory_movement_quantity_delta',
+              'inventory_movement_unit_id',
+              'inventory_movement_effective_at',
+              'inventory_movement_recorded_at',
+              'inventory_movement_source_type',
+              'inventory_movement_source_id',
+              'inventory_movement_source_line',
+              'inventory_movement_source_revision',
+              'inventory_movement_posting_role',
+              'inventory_movement_reason_code',
+              'inventory_movement_reason_narrative',
+              'inventory_movement_actor_id',
+            ] as const
+          ).map((local) => requiredField(binding.movement, local).name),
+        ],
+      );
       return Object.freeze({
         businessPeriod: String(row.businessPeriod),
         effectiveAt: String(row.effectiveAt),
