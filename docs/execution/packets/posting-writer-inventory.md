@@ -385,6 +385,43 @@ why the control must suspend that key. Both artifacts corrected.
 **ADR-0062 carries both corrections inline and must not be read as claiming edge
 completeness.**
 
+### Round 2's substantive answer: observation, not a better list
+
+F1's edge half could not be closed by writing a more careful edge list, because
+the compiled target declares no edge at all for the projection. So the posting
+**stopped asking the target what it wrote and asked PostgreSQL.** Before any
+trust document or receipt, the module-plane write set is read from
+`pg_stat_xact_user_tables` and every relation in it must appear in the derived
+inventory.
+
+**Two measurements decided the design, and one of them would have made it wrong
+if skipped:**
+
+| question | measured |
+|---|---|
+| do the per-transaction counters reset at transaction boundaries? | **NO.** A session that inserted 1000 rows reported them at the next `BEGIN` before writing anything. The service borrows pooled connections, so the write set must be a DELTA against a baseline taken inside the transaction. |
+| what does it cost per posting? | **4.5ms per snapshot**, on 20 relations one carrying 200k rows, **flat in table size**. |
+| what does the obvious alternative cost? | The `xmin = txid_current()` scan agreed **exactly** on the answer and cost **11x more** at that trivial scale, growing with the data. |
+
+**An observer that sees nothing passes everything**, so an empty write set is
+refused — every posting inserts at least one movement, and a wrong schema
+filter or an unreadable view would otherwise look like unbroken green. The
+control writes to a module relation nothing declares, through a trigger the
+target knows nothing about, and requires the posting to refuse and name it. The
+suite records the refusal verbatim:
+
+> `INVENTORY_POSTING_STORAGE_REJECTED: this posting wrote module relations the
+> compiled writer inventory does not derive: nsm_t_pwi_undeclared_writer`
+
+**This needed no out-of-lease file.** The bridge into `storage.ts` and
+`module-storage-materializer.ts` is no longer on this packet's critical path —
+the design defect behind F1 stays filed and open, but the RISK it created is
+closed by a different route than the reviewer proposed.
+
+**What is still not proved:** that a registered verifier actually RAN for the
+relation it is registered against. Observation proves the relation was written
+and is derived; it does not prove a read-back compared its columns.
+
 ### Three things this round got wrong, all found by running rather than reading
 
 1. The first closure claimed a projection's table twice — once at the edge, once

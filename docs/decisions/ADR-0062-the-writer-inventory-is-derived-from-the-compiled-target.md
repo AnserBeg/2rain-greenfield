@@ -89,6 +89,50 @@ costs a registration entry and under-listing is the failure this exists to
 prevent. Round 7's concern was a check that passes when it should fail; this
 mechanism fails when it is uncertain.
 
+## AMENDED AFTER ROUND 1 — derivation is the plan, OBSERVATION is the backstop
+
+The decision above is amended rather than replaced. Round 1 showed a derivation
+over declarations can never be complete while one of the edges is a convention
+rather than a declaration. **The amendment is to stop relying on the target
+alone for completeness.**
+
+**Before any trust document or receipt, the posting reads the module-plane write
+set from `pg_stat_xact_user_tables` and requires every relation in it to appear
+in the derived inventory.** It does not ask the compiled target what was
+written; it asks PostgreSQL. A writer grown by a new materializer convention,
+declared nowhere, refuses the posting instead of committing.
+
+**Two things were measured before choosing this, and both changed the design:**
+
+1. **Those counters do NOT reset at transaction boundaries.** A session that
+   inserts 1000 rows and then opens a new transaction still reports them before
+   the new transaction writes anything, and this service borrows pooled
+   connections. The write set is therefore a DELTA against a baseline taken
+   inside the transaction. Using the raw counters would have attributed a
+   previous posting's writes to this one.
+2. **Cost, on 20 relations one of which carried 200k rows: 4.5ms per snapshot,
+   flat in table size**, because the counters live in memory. Scanning every
+   relation for rows whose `xmin` is this transaction agreed exactly on the
+   answer and cost **11x more at that trivial scale**, growing with the data.
+   That is the whole reason one is affordable per posting and the other is not.
+
+**An observer that sees nothing passes everything**, so an empty write set is a
+refusal: every posting inserts at least one movement, and a wrong schema filter
+or an unreadable view would otherwise look like unbroken green. Held by a
+control that writes to a module relation nothing declares, through a trigger the
+target knows nothing about, and requires the posting to refuse and name it.
+
+**What this does and does not change.** The derivation still carries the
+inventory and still refuses at construction when a derived relation has no
+registered read-back — that is the cheap, early check. Observation is what makes
+its incompleteness non-fatal. **The edge-declaration gap is still real and still
+filed**; what changed is that it is no longer the only thing standing between an
+undeclared writer and a commit.
+
+**Still module-plane only.** The view is filtered to the module schema, so
+platform-plane writes remain filed as
+`posting-platform-plane-writes-not-row-complete`.
+
 ## CORRECTED AFTER ROUND 1 — the edge is not declared, only the destination is
 
 Round 1 returned BLOCK on this ADR's central claim, and the finding is upheld.
