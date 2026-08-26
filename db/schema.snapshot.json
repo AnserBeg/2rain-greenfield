@@ -9543,7 +9543,7 @@
       "domain": null,
       "name": "module_storage_elements_shape",
       "type": "c",
-      "definition": "CHECK (btrim(element_id) <> ''::text AND (element_kind = ANY (ARRAY['addAbiFunctionCheck'::text, 'addColumn'::text, 'addForeignKey'::text, 'addNotValidConstraint'::text, 'backfill'::text, 'createCompanionTable'::text, 'createIndex'::text, 'createPartition'::text, 'createRejectMutationTrigger'::text, 'createTable'::text, 'duplicateScan'::text, 'tightenNotNull'::text, 'validateConstraint'::text])) AND btrim(physical_object_name) <> ''::text AND shape_fingerprint ~ '^[0-9a-f]{64}$'::text)",
+      "definition": "CHECK (btrim(element_id) <> ''::text AND (element_kind = ANY (ARRAY['addAbiFunctionCheck'::text, 'addColumn'::text, 'addForeignKey'::text, 'addNotValidConstraint'::text, 'backfill'::text, 'createCompanionTable'::text, 'createIndex'::text, 'createPartition'::text, 'createRejectMutationTrigger'::text, 'createTable'::text, 'duplicateScan'::text, 'relaxNotNull'::text, 'tightenNotNull'::text, 'validateConstraint'::text])) AND btrim(physical_object_name) <> ''::text AND shape_fingerprint ~ '^[0-9a-f]{64}$'::text)",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,

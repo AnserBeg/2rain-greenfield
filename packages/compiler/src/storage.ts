@@ -201,6 +201,20 @@ export const STORAGE_COMPATIBILITY_MATRIX: Readonly<
     oldRead: 'compatible',
     oldWrite: 'compatible',
   }),
+  relaxNotNull: Object.freeze({
+    admission: 'additive',
+    newRead: 'compatible',
+    newWrite: 'compatible',
+    // An old reader was compiled against a relation its model calls required,
+    // so it never planned for the absence of a target. Relaxation does not make
+    // it reject -- reads do not reject -- but the moment a NEW writer stores a
+    // null, that old reader observes one where its model says a value is always
+    // present. That is the same shape as `addColumn`'s `newRead`, read from the
+    // other side of the release boundary, and it is the honest cell: the
+    // widening is safe for the DATABASE and not transparent to a live READER.
+    oldRead: 'requiresReadFallback',
+    oldWrite: 'compatible',
+  }),
   tightenNotNull: Object.freeze({
     admission: 'blockingWhileAffectedWritersLive',
     newRead: 'compatible',
@@ -2086,11 +2100,24 @@ export function buildStorageTransitionEnvelope(
   for (const relation of candidate.relations) {
     const previousRelation = previousRelations.get(relation.relationId);
     if (previousRelation) {
-      if (!sameRelationShape(previousRelation, relation)) {
+      const relaxed = relaxesRelationRequiredness(previousRelation, relation);
+      if (!relaxed && !sameRelationShape(previousRelation, relation)) {
         return failureDiagnostic(
           'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED',
           '$.relations',
           relation.relationId,
+        );
+      }
+      if (relaxed) {
+        elements.push(
+          element(
+            'relaxNotNull',
+            relation.relationId,
+            null,
+            relation.relationColumn.physicalName,
+            [],
+            'existing',
+          ),
         );
       }
       const source = candidateEntities.get(relation.sourceEntityId)!;
@@ -2327,6 +2354,21 @@ export function classifyStorageTransitionElement(
           preparationValidity: 'inAttemptOnly',
           semanticEffect: 'none',
         };
+      case 'relaxNotNull':
+        // `ALTER COLUMN ... DROP NOT NULL` rewrites no rows and reads none, so
+        // it is catalogOnly rather than a scan; it takes a brief ACCESS
+        // EXCLUSIVE lock, so the risk is the same bounded catalog lock that
+        // `addColumn` carries. It is `preApprovalInert` for the property that
+        // separates inert from in-attempt everywhere else in this planner: it
+        // can never reject a write. Every `inAttemptOnly` kind either rejects
+        // old writes (`oldWrite: 'mayReject'`) or mutates rows (`backfill`);
+        // relaxation does neither.
+        return {
+          dataEffect: 'catalogOnly',
+          operationalRisk: 'boundedCatalogLock',
+          preparationValidity: 'preApprovalInert',
+          semanticEffect: 'additive',
+        };
       case 'tightenNotNull':
         return {
           dataEffect: 'dataScan',
@@ -2353,7 +2395,8 @@ export function classifyStorageTransitionElement(
   const coexistenceImpact =
     coexistence.oldWrite === 'mayReject'
       ? 'oldWritesMayReject'
-      : coexistence.newRead === 'requiresReadFallback'
+      : coexistence.newRead === 'requiresReadFallback' ||
+          coexistence.oldRead === 'requiresReadFallback'
         ? 'requiresReadFallback'
         : 'none';
   return { classification, coexistence, coexistenceImpact };
@@ -2730,6 +2773,53 @@ function sameRelationShape(
       `${HASH_DOMAINS.projectionSemantic}/storage-relation-shape`,
       physicalShape(candidate),
     ).digest
+  );
+}
+
+/**
+ * A relation is RELAXED when the previous release carried it as required, the
+ * candidate carries it as optional, and nothing else about its physical shape
+ * moved. `NOT NULL` -> `NULL` is a widening DDL: it rewrites no rows, cannot
+ * reject a write that used to succeed, and leaves every row that already exists
+ * valid. It is the only direction of requiredness this planner takes.
+ *
+ * Two exclusions are load-bearing.
+ *
+ * The equality is expressed by WIDENING THE PREVIOUS SHAPE and reusing
+ * `sameRelationShape`, rather than by comparing field by field. A future
+ * property added to `StorageRelationTarget` is then refused by default instead
+ * of silently riding along inside a relaxation, because the widened previous
+ * shape would still differ from the candidate in that new property.
+ *
+ * `origin: 'field'` relations are excluded, and that exclusion is a
+ * correctness boundary rather than caution. Their physical column is an
+ * ORDINARY ENTITY COLUMN -- `createManagedTable` filters them out of the
+ * relation columns it renders and emits them from `entity.columns`, whose own
+ * `nullable` governs the `NOT NULL`. Planning a relaxation from the relation
+ * side would therefore drop a constraint on an existing tenant that a FRESH
+ * install of the very same release still creates as `NOT NULL`: one release,
+ * two physical shapes, and no gate between them. Requiredness for those columns
+ * has to move through the column path, which refuses it today with
+ * `COMPILER_STORAGE_RETYPE_UNSUPPORTED`.
+ */
+function relaxesRelationRequiredness(
+  previous: StorageRelationTarget,
+  candidate: StorageRelationTarget,
+): boolean {
+  if (previous.relationColumn.nullable) return false;
+  if (!candidate.relationColumn.nullable) return false;
+  if (
+    previous.relationColumn.origin === 'field' ||
+    candidate.relationColumn.origin === 'field'
+  ) {
+    return false;
+  }
+  return sameRelationShape(
+    {
+      ...previous,
+      relationColumn: { ...previous.relationColumn, nullable: true },
+    },
+    candidate,
   );
 }
 

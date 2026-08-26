@@ -15,6 +15,7 @@ import {
   POSTGRESQL_FIELD_TYPE_TABLE,
   PROJECTION_FAMILY_IDS,
   STORAGE_COMPATIBILITY_MATRIX,
+  STORAGE_ELEMENT_CONTRACT_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   buildStorageTransitionEnvelope,
   classifyStorageTransitionElement,
@@ -22,6 +23,7 @@ import {
   diffCompiledReleases,
   expectedActiveReleaseFrom,
   lowerStorageTargetV1,
+  physicalNameFor,
   validatePhysicalMappingRecords,
   validateStorageRendererStatements,
   type CompileSuccess,
@@ -1101,6 +1103,41 @@ test('A2/A4 classification axes and compatibility carve-outs are exact', () => {
       .preparationValidity,
     'deferredTightening',
   );
+
+  // Relaxation is the counterpart of `tightenNotNull` and shares none of its
+  // axes: no scan, no tightening, and inert before approval because it cannot
+  // reject a write. Its `oldRead` is the ruling this packet owns.
+  const relax = classifyStorageTransitionElement('relaxNotNull', 'existing');
+  assert.deepEqual(relax.classification, {
+    dataEffect: 'catalogOnly',
+    operationalRisk: 'boundedCatalogLock',
+    preparationValidity: 'preApprovalInert',
+    semanticEffect: 'additive',
+  });
+  assert.deepEqual(relax.coexistence, {
+    admission: 'additive',
+    newRead: 'compatible',
+    newWrite: 'compatible',
+    oldRead: 'requiresReadFallback',
+    oldWrite: 'compatible',
+  });
+  // `coexistenceImpact` used to read `newRead` alone. `relaxNotNull` is the
+  // first kind whose fallback burden falls on the OLD reader, so an impact
+  // derived from `newRead` only would publish 'none' beside a cell that says a
+  // live reader needs a fallback -- the element's own summary contradicting its
+  // own matrix row.
+  assert.equal(relax.coexistenceImpact, 'requiresReadFallback');
+  assert.equal(
+    classifyStorageTransitionElement('relaxNotNull', 'samePlan')
+      .coexistenceImpact,
+    'requiresReadFallback',
+  );
+  // ... and the wider derivation is inert for every kind that existed before
+  // it, because no other cell carries `oldRead: 'requiresReadFallback'`.
+  for (const [kind, cell] of Object.entries(STORAGE_COMPATIBILITY_MATRIX)) {
+    if (kind === 'relaxNotNull') continue;
+    assert.notEqual(cell.oldRead, 'requiresReadFallback');
+  }
 });
 
 test('new-in-plan entities create required NOT NULL storage with coexistence impact none', () => {
@@ -1274,13 +1311,30 @@ test('relation mapping fingerprints include nullability and existing physical mu
   const packageRevision = normalizeApplicationPackage(ordinaryModuleV1());
   const previous = lowerStorageTargetV1(packageRevision);
   const relationId = previous.relations[0]!.relationId;
+  // The fixture relation is REQUIRED, so toggling `nullable` here would be a
+  // relaxation, which is planned rather than refused from this packet onward.
+  // The tightening direction is asserted below and the widening direction in
+  // 'a released required relation widens through one relaxNotNull element'.
+  assert.equal(previous.relations[0]!.relationColumn.nullable, false);
   const mutations: Array<(target: StorageTargetPayloadV1) => void> = [
     (target) => {
       target.relations.splice(0, 1);
     },
+    // Relaxation is admitted only when NOTHING ELSE about the physical shape
+    // moves. Each of these carries the widening AND a second change, and each
+    // must still fail closed -- otherwise the new element becomes a channel for
+    // smuggling an unrelated mutation past the guard.
     (target) => {
-      target.relations[0]!.relationColumn.nullable =
-        !target.relations[0]!.relationColumn.nullable;
+      target.relations[0]!.relationColumn.nullable = true;
+      target.relations[0]!.ownership = 'reference';
+    },
+    (target) => {
+      target.relations[0]!.relationColumn.nullable = true;
+      target.relations[0]!.targetEntityId = FIXTURE_IDS.entityIds.child;
+    },
+    (target) => {
+      target.relations[0]!.relationColumn.nullable = true;
+      target.relations[0]!.relationColumn.physicalName = `${target.relations[0]!.relationColumn.physicalName}_changed`;
     },
     (target) => {
       target.relations[0]!.ownership = 'reference';
@@ -1322,6 +1376,182 @@ test('relation mapping fingerprints include nullability and existing physical mu
         subjectId: relationId,
       },
     );
+  }
+});
+
+test('a released required relation widens through one relaxNotNull element', () => {
+  const requiredDefinition = ordinaryModuleV1() as {
+    relations: Array<Record<string, unknown>>;
+  };
+  requiredDefinition.relations.push(secondaryParentRelation(true));
+  const optionalDefinition = ordinaryModuleV1() as {
+    relations: Array<Record<string, unknown>>;
+  };
+  optionalDefinition.relations.push(secondaryParentRelation(false));
+
+  const first = mustCompile(input(requiredDefinition));
+  const second = mustCompile(
+    input(optionalDefinition, expectedActiveReleaseFrom(first)),
+  );
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    second,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+
+  const relationId = `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`;
+  const physicalObjectName = physicalNameFor(
+    'column',
+    `${relationId}/target-record-id`,
+  );
+  // ONE element, and it is the whole plan. A widening that also emitted an
+  // addColumn or a createIndex would mean the planner had stopped recognising
+  // the relation as already-present, which is the failure this element exists
+  // to remove.
+  assert.deepEqual(
+    transition.elements.map(({ elementId, ...entry }) => {
+      void elementId;
+      return entry;
+    }),
+    [
+      {
+        classification: {
+          dataEffect: 'catalogOnly',
+          operationalRisk: 'boundedCatalogLock',
+          preparationValidity: 'preApprovalInert',
+          semanticEffect: 'additive',
+        },
+        coexistence: {
+          admission: 'additive',
+          newRead: 'compatible',
+          newWrite: 'compatible',
+          oldRead: 'requiresReadFallback',
+          oldWrite: 'compatible',
+        },
+        coexistenceImpact: 'requiresReadFallback',
+        declaredDependencyIds: [],
+        fieldId: null,
+        kind: 'relaxNotNull',
+        physicalObjectName,
+        schemaVersion: STORAGE_ELEMENT_CONTRACT_VERSION,
+        scope: {
+          keyColumns: ['tenant_id', 'environment_id'],
+          kind: 'tenantEnvironment',
+        },
+        storageDomain: 'managedModule',
+        storageGeneration: 'dedicatedTyped/v1',
+        subjectId: relationId,
+      },
+    ],
+  );
+  // A widening is not a tightening, so it raises no debt and blocks nothing.
+  assert.deepEqual(transition.tighteningDebt, []);
+
+  const target = projectionPayload<StorageTargetPayloadV1>(
+    second,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const relation = target.relations.find(
+    (entry) => entry.relationId === relationId,
+  );
+  assert.equal(relation?.relationColumn.nullable, true);
+  assert.equal(relation?.relationColumn.physicalName, physicalObjectName);
+});
+
+test('relaxation is one-way: re-tightening a released relation is refused', () => {
+  const optionalDefinition = ordinaryModuleV1() as {
+    relations: Array<Record<string, unknown>>;
+  };
+  optionalDefinition.relations.push(secondaryParentRelation(false));
+  const requiredDefinition = ordinaryModuleV1() as {
+    relations: Array<Record<string, unknown>>;
+  };
+  requiredDefinition.relations.push(secondaryParentRelation(true));
+
+  const packageRevision = normalizeApplicationPackage(requiredDefinition);
+  const previous = lowerStorageTargetV1(
+    normalizeApplicationPackage(optionalDefinition),
+  );
+  const candidate = lowerStorageTargetV1(packageRevision);
+  const relationId = `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`;
+  assert.equal(
+    previous.relations.find((entry) => entry.relationId === relationId)
+      ?.relationColumn.nullable,
+    true,
+  );
+  assert.equal(
+    candidate.relations.find((entry) => entry.relationId === relationId)
+      ?.relationColumn.nullable,
+    false,
+  );
+
+  const result = buildStorageTransitionEnvelope(
+    packageRevision,
+    previous,
+    candidate,
+    transitionBinding(),
+  );
+  // The round trip is REFUSED, not planned. `tightenNotNull` is only ever
+  // emitted in this planner for a column created inside the same transition,
+  // with an optional backfill ahead of it, so it carries no admissibility story
+  // for rows a live release already wrote as NULL under the optional relation.
+  // Routing a re-tightening through it would plan a `SET NOT NULL` scan against
+  // exactly the rows the relaxation made legal. Re-tightening therefore needs
+  // machinery this element does not supply, and until it exists the diagnostic
+  // is the honest answer.
+  assert.ok('diagnostic' in result);
+  if (!('diagnostic' in result)) return;
+  assert.deepEqual(
+    {
+      code: result.diagnostic.code,
+      path: result.diagnostic.path,
+      subjectId: result.diagnostic.subjectId,
+    },
+    {
+      code: 'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED',
+      path: '$.relations',
+      subjectId: relationId,
+    },
+  );
+});
+
+test('a field-origin relation column is never widened from the relation side', () => {
+  const packageRevision = normalizeApplicationPackage(
+    inventoryModuleDefinition(),
+  );
+  const previous = lowerStorageTargetV1(packageRevision);
+  const fieldOrigin = previous.relations.filter(
+    (relation) =>
+      relation.relationColumn.origin === 'field' &&
+      !relation.relationColumn.nullable,
+  );
+  // The inventory module is the only definition in the tree that lowers
+  // field-origin relations, so an empty set here means the exclusion below is
+  // being asserted against nothing.
+  assert.ok(fieldOrigin.length > 0);
+
+  for (const subject of fieldOrigin) {
+    const candidate = structuredClone(previous);
+    candidate.relations.find(
+      (relation) => relation.relationId === subject.relationId,
+    )!.relationColumn.nullable = true;
+    const result = buildStorageTransitionEnvelope(
+      packageRevision,
+      previous,
+      candidate,
+      transitionBinding(),
+    );
+    // Their physical column is an ordinary entity column, whose NOT NULL comes
+    // from `entity.columns` and is what `createManagedTable` renders on a fresh
+    // install. Widening from the relation side would drop the constraint for a
+    // migrating tenant while a fresh install of the same release still creates
+    // it NOT NULL: one release, two physical shapes.
+    assert.ok('diagnostic' in result);
+    if (!('diagnostic' in result)) continue;
+    assert.equal(
+      result.diagnostic.code,
+      'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED',
+    );
+    assert.equal(result.diagnostic.subjectId, subject.relationId);
   }
 });
 
@@ -1377,6 +1607,7 @@ test('the compatibility matrix is closed and old-writes-may-reject is never addi
     'createRejectMutationTrigger',
     'createTable',
     'duplicateScan',
+    'relaxNotNull',
     'tightenNotNull',
     'validateConstraint',
   ]);
