@@ -247,7 +247,7 @@ matrix sit above it by construction, and it carries a
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-writer-inventory",
   "base": "8bc097cdd6402388d80911db004590e335a6d5c6",
-  "head": "d441baafe71eee9aa1d1fa32b66143ccf66070a7",
+  "head": "90dd6a616a8ee1e441a811ce3866bc4e042d95df",
   "changedPaths": [
     "packages/postgres-provider/src/inventory-posting-service.ts",
     "test/evidence/posting-writer-inventory.expected-red.json",
@@ -261,6 +261,10 @@ matrix sit above it by construction, and it carries a
     {
       "path": "packages/postgres-provider/src/inventory-posting-service.ts",
       "name": "PostingWriterRelation"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "PostingWriterRegistration"
     },
     {
       "path": "packages/postgres-provider/src/inventory-posting-service.ts",
@@ -342,6 +346,62 @@ matrix sit above it by construction, and it carries a
 }
 ```
 
+## Round 1 — BLOCK, and every finding is upheld
+
+The first online arm returned **BLOCK** on three findings. All three were
+verified against the tree; **none was argued down.**
+
+**F1 — the projection edge is convention, not declaration, and the traversal was
+not transitive.** Both halves real.
+
+- *Traversal (FIXED here).* Each trigger edge was tested against the ORIGINAL
+  root set in one pass, so a relation reached only THROUGH another trigger was
+  invisible. It is now a worklist closure carrying the origin by which each
+  entity was reached. Held by a chained-writer control — the balance given its
+  own fact storage, reached at two removes — and by an expected-red entry that
+  restores the single-pass behaviour exactly.
+- *Edge declaration (NOT FIXED, and not fixable in this lease).* The target
+  declares an entity's table, its partitions, and its
+  `factStorage.companion.reservationTriggerName` — three of four expansions,
+  honestly. It declares **nothing** about the movement → balance edge. The
+  materializer invents it from an entity-id suffix and a computed trigger name;
+  this service reconstructs the same convention independently. *"Both are pure
+  functions of the target" does not make the edge target-declared.* Filed as
+  `module-writer-edges-are-convention-not-declaration`.
+
+**F2 — a registration was an unchecked string.** Upheld, and the reviewer's
+evidence was decisive: the shipped registration named `assertDraftTransaction`,
+**a function that does not exist anywhere in the file**, and construction
+accepted it. Registrations now pass the verifier FUNCTION and read the id off
+the function object, so naming an absent verifier is a compile error and an
+empty list is refused. **That closes "names something absent". It does not close
+"never runs on this posting's path"** — filed as
+`posting-writer-coverage-is-declared-not-observed`.
+
+**F3 — committed evidence overclaimed.** Upheld. The manifest and the record
+said a wrong-effect reservation satisfies the foreign key; it does not, which is
+why the control must suspend that key. Both artifacts corrected.
+
+**ADR-0062 carries both corrections inline and must not be read as claiming edge
+completeness.**
+
+### Three things this round got wrong, all found by running rather than reading
+
+1. The first closure claimed a projection's table twice — once at the edge, once
+   on dequeue — and **red five tests**. The duplicate-writer guard caught it.
+2. The first version of the transitive-closure expected-red entry **was not a
+   control**: deleting the enqueue dropped the balance from the inventory
+   entirely, so it red broadly for a stale-registration reason another entry
+   already owns. A red that cannot be attributed to its own subject proves
+   nothing.
+3. A `test:postgres` run showed a third failure that was a **300s timeout** in
+   `composed-application.test.ts` after five suites ran back to back. Run alone,
+   that file returns 17/15/**2** — the inherited pair only.
+
+**That is the third, fourth and fifth time in this packet that a control or a
+measurement had to be right for its OWN reason rather than merely red.** It is a
+pattern in this lane's work, not a run of slips, and it is recorded as one.
+
 ## Gate results — measured at `d441baa`
 
 | Gate | Result |
@@ -353,6 +413,7 @@ matrix sit above it by construction, and it carries a
 | `test:compiler` | **152 / 152** |
 | `test:integration` | **149 / 149** |
 | `test:architecture` | **178 tests, 177 pass, 1 fail** — the out-of-lease line-pinned press-law control; see Stops |
+| `evidence:expected-red` at round 2 | **OK — 42 reproduced and restored**, this packet's 6 among them |
 | `test:postgres` **(REQUIRED)** | **216 tests, 214 pass, 2 fail** — both the inherited `composed-application.test.ts` refusals, measured at the base and unchanged |
 | `check:expected-red` (validate) | OK — 39 entries across 4 manifests still name live production text |
 | `evidence:expected-red` (FULL manifest population) | **OK — 41 expected reds reproduced and restored**, this packet's 5 among them |
