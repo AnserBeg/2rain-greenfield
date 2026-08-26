@@ -4060,6 +4060,64 @@ test(
           ),
       );
 
+      // OBSERVE THE DERIVATION ITSELF, not only the refusal it produces. A
+      // control that proves an unverified relation is refused says nothing
+      // about whether the derivation reaches anything in the first place: an
+      // inventory that derived only entity tables would pass that control and
+      // still miss every writer PUR-2a's rounds found.
+      const derived = new PostgresInventoryPostingService(
+        database.runtimePool,
+        database.registration,
+        { currentInstant: () => recordedAt },
+      ).writerInventory;
+      const fact = movementFactStorage(database);
+      const balance = requiredTargetEntity(
+        database.binding.storageTarget,
+        'posted_stock_balance',
+      );
+      const periodLock = requiredTargetEntity(
+        database.binding.storageTarget,
+        'inventory_period_lock',
+      );
+      // The movement's own table, every partition the target declares, the
+      // effect-reservation companion, and the projection whose trigger the
+      // target declares on the movement.
+      assert.equal(
+        derived.get(database.binding.movement.tableName)?.origin,
+        'entityTable',
+      );
+      for (const partition of fact.partitioning.partitions) {
+        assert.equal(
+          derived.get(partition.physicalTableName)?.origin,
+          'factPartition',
+          `partition ${partition.physicalTableName} is not derived`,
+        );
+      }
+      assert.equal(
+        derived.get(fact.companion.physicalTableName)?.origin,
+        'factCompanion',
+      );
+      assert.equal(
+        derived.get(balance.physicalTableName)?.origin,
+        'triggerProjection',
+      );
+      // The period-lock table is EXCLUDED, and by derivation rather than by
+      // assumption: its provisioning trigger is declared exactly like the
+      // projection trigger above and is installed on the legal-entity master,
+      // which a posting never inserts.
+      assert.equal(derived.has(periodLock.physicalTableName), false);
+      assert.equal(
+        derived.has(database.binding.legalEntity.tableName),
+        false,
+        'a posting reads the legal-entity master and must not claim to write it',
+      );
+      // All four origins are reached on the real compiled target, so no origin
+      // branch of the derivation is dead.
+      assert.deepEqual(
+        [...new Set([...derived.values()].map((entry) => entry.origin))].sort(),
+        ['entityTable', 'factCompanion', 'factPartition', 'triggerProjection'],
+      );
+
       // Now declare append-only fact storage on a SECOND entity this posting
       // writes, carrying physical names of its own. Nothing in the kernel
       // changes. The compiled target now says that writing an

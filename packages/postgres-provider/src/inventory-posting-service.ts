@@ -522,10 +522,10 @@ interface PostedStockProjectionBinding {
  * A physical relation this posting writes, and the compiled declaration that
  * says so. `origin` is what the target declared, not what the kernel assumed.
  */
-type PostingWriterOrigin =
+export type PostingWriterOrigin =
   'entityTable' | 'factCompanion' | 'factPartition' | 'triggerProjection';
 
-interface PostingWriterRelation {
+export interface PostingWriterRelation {
   readonly origin: PostingWriterOrigin;
   readonly relation: string;
   readonly rootEntityId: string;
@@ -787,6 +787,18 @@ export class PostgresInventoryPostingService {
       family,
       postingRole: parsed.kind === 'initial' ? 'count' : 'correction',
     });
+  }
+
+  /**
+   * Every physical relation this posting writes, derived from the active
+   * compiled storage target. Exposed so the derivation can be OBSERVED
+   * directly rather than only through the refusal it produces -- a negative
+   * control proves an unverified relation is refused, and this proves the
+   * derivation reaches the partitions, the effect-reservation companion and
+   * the trigger-written projection in the first place.
+   */
+  get writerInventory(): ReadonlyMap<string, PostingWriterRelation> {
+    return this.#binding.writerInventory;
   }
 
   #familyFor(familyId: string): ResolvedPostingFamily {
