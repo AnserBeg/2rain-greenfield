@@ -78,6 +78,20 @@ Two properties follow from purity and both are load-bearing:
    "converges by doing nothing" and declaring stock count companion-origin
    "does not give it a kernel writer."
 
+   **CORRECTED in review round 9, and the correction is not a narrowing but a
+   substitution.** The sentence above is about ONE source retried, and for that
+   case the derived companion transaction identity is indeed the colliding key.
+   It says nothing about TWO DIFFERENT sources carrying the same natural effect
+   tuple, and this ADR previously left the reader to assume the same mechanism
+   covered both. It does not. The movement table's own `effectIdentityUnique`
+   carries `record_id`, minted fresh per posting, so it cannot collide across
+   postings at all; the only key that reserves a natural effect is the PRIMARY
+   KEY of `movement.factStorage.companion`, which omits `business_period` and
+   `record_id` and which the posting service does not bind. **The
+   raced-replay branch's refusal depends on a table this ADR never named.**
+   Filed as `movement-effect-reservation-not-observed`; the verification packet
+   owns both the read-back and the measurement.
+
 **The authored DRAFT PROTOCOL is not re-run over kernel-written rows, but its
 projection checks are not discarded.** A row created inside the posting
 transaction has no validation-to-posting window, so the header lock, the

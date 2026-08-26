@@ -224,7 +224,97 @@ test read only the `correction` role's companion type while the mutation moved
 the `count` role's. The test now reads both, so each declared role binding is
 observed by something.
 
-## Round 8 — the seventh writer, and coverage that was an allowlist
+## Round 9 — the eighth writer, and a concurrency claim that named the wrong mechanism
+
+**F18, Critical, verified against this branch's own tree. NOT FIXED HERE — this
+packet is frozen and the work is re-scoped.** See
+`movement-effect-reservation-not-observed` in `current-plan.md` and the
+verification packet chartered from it.
+
+Every movement insert fires a SECOND `AFTER INSERT` trigger,
+`north_star_internal.reserve_inventory_movement_effect`, which copies the
+inserted movement's columns into `movement.factStorage.companion` — a real
+table the compiler declares, the materializer creates under
+`north_star_module`, and this service has never bound. `factStorage` is read
+exactly three times in `inventory-posting-service.ts`, for `mutability` and
+`businessPeriod.column`. There is no companion binding and no read-back.
+
+**The part that is worse than one more uncovered row.** Compare the two keys
+the compiler emits for a movement:
+
+- `effectIdentityUnique` on the movement table itself:
+  `(tenant_id, business_period, environment_id, legal_entity_id, record_id, sourceType, sourceId, sourceLine, sourceRevision, postingRole)`.
+  It contains `record_id`, which is **freshly minted on every posting**, so it
+  can never collide between two postings. It is not a duplicate-effect guard at
+  all. (It is shaped that way because the movement table is partitioned by
+  `(tenant_id, business_period)`, and a partitioned table's unique constraint
+  must contain its partition key.)
+- The companion's PRIMARY KEY:
+  `(tenant_id, environment_id, legal_entity_id, sourceType, sourceId, sourceLine, sourceRevision, postingRole)`.
+  It omits both `business_period` and `record_id`. **This is the only thing in
+  the system that reserves a natural effect.**
+
+And the foreign key runs companion → movement, `ON DELETE RESTRICT`, so a
+movement carrying no reservation row violates no constraint.
+
+**Therefore the raced-replay branch in `#post` — the `23505` handler whose
+refusal reads "a natural effect identity was claimed by a different posting" —
+depends entirely on a table this packet never identified.** Through nine
+rounds this record and ADR-0060 have said the simultaneous-post case is
+"reasoned, not measured". The measurement was owed, which was disclosed. What
+was not disclosed, because it was not known, is that **the reasoning named the
+wrong constraint.** A retry on one source collides on the derived companion
+transaction identity, which is true and is what the ADR argues; two DIFFERENT
+sources carrying the same natural effect tuple collide only on the fact
+companion's primary key, and nothing in this packet's evidence reaches it.
+
+**Why this is re-scoped rather than fixed in a tenth round.** Nine rounds each
+found one more writer, and the reason is now legible: **the writer inventory is
+hand-enumerated while the compiled storage target already declares every
+writer** — `factStorage.companion` with its `reservationTriggerName`, and the
+posted-stock projection. A verifier that derived its TABLE inventory from the
+compiled target would have found F16 and F18 mechanically in round 1.
+
+Round 7's argument that coverage must not be derived from the compiled binding
+is correct for column VALUES inside a row: deriving both the row and its
+coverage from one source hides a shared omission. It is **wrong for which
+tables a posting writes**, which is declared data. Hand-copying that list is
+the defect, and the eighth instance of it is where the packet stops
+enumerating. `mission-cadence`'s stop-convergence rule — at most two, then
+re-scope — is binding, and this is the ninth.
+
+**What round 9 confirms closed.** F16 for the posted-stock writer: the check
+executes before trust persistence, recomputes from the movement ledger,
+verifies identity and revision, and accounts for row creation. F17
+materially: an executed proof now carries its own column instead of a parallel
+allowlist. Neither reaches F18, because the reservation companion is a
+different table and absent from the binding.
+
+**What round 9 declined to re-file, correctly.** The `verified(column, true)`
+limit stands as disclosed: F17 proves every persisted column has an executed
+proof object, not that the boolean inside every proof is independently
+trustworthy.
+
+**Round 9 on the fence question, adopted.** The three transient materializer
+mutations are measurement, not an out-of-lease source change: ADR-0058 applies
+a named mutation, observes it, restores production, and proves the restored
+suite green, and the committed candidate carries no materializer delta. If
+lane ownership is meant to forbid even temporary mutations, that stronger rule
+needs stating; it is not a defect in this SHA.
+
+**Round 9 on prompt steering, adopted and it cost a round.** Calling F16 "the
+trigger writer" and the posted-stock effect "the seventh writer" primed the
+reader to treat that trigger as exhaustive, when the missing effect is another
+`AFTER INSERT` writer on the same insert. The prompt left the question open, so
+it steered attention without fencing the finding — but the framing was mine and
+it was wrong twice over, since "seventh" implied a count that had been
+hand-derived.
+
+## Round 8 — a trigger writer, and coverage that was an allowlist
+
+*Retitled after round 9: this section called the posted-stock trigger "the
+seventh writer" and that number was hand-derived and wrong. There is an eighth
+on the same insert.*
 
 Both findings were Critical, both were verified against the tree, and one of
 them says the round-7 mechanism did not do what its own comment claimed.
