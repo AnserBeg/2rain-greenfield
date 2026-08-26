@@ -134,6 +134,17 @@ else**, so any other divergence still conflicts.
 `buildExpectedColumns` consumes that merged map and already skips
 `origin === 'field'`, which is the same boundary the compiler takes.
 
+**And the tables are tenant-SHARED, which makes the tolerance necessary rather
+than convenient.** `north_star_module` holds one physical table per entity,
+scoped by `tenant_id`/`environment_id` under forced RLS, and
+`loadAccountedLiveTargets` gathers live roots across **every** tenant scope. So
+one tenant's relaxation makes the column nullable for all of them, and every
+tenant still on the previous release holds a root asserting a `NOT NULL` that no
+longer physically exists. Without the tolerance the refusal would fire fleet-wide
+until the last tenant migrated. It also sharpens the `oldRead` ruling: for a
+not-yet-migrated tenant, what keeps that column populated is its own release's
+writers, not the constraint.
+
 ## The `origin: 'field'` exclusion is a correctness boundary, not caution
 
 Their physical column is an **ordinary entity column**: `createManagedTable`

@@ -112,6 +112,21 @@ longer a claim it can enforce. The tolerance is expressed by widening the
 required member and requiring exact equality of everything else, so any other
 divergence still conflicts.
 
+**The managed tables are TENANT-SHARED, and that makes this tolerance necessary
+rather than merely convenient.** `north_star_module` holds one physical table per
+entity, scoped by `tenant_id`/`environment_id` columns under forced RLS, and
+`loadAccountedLiveTargets` gathers live roots across **every** tenant scope, not
+just the one preparing. So the moment any tenant prepares a relaxation the column
+is nullable for all of them, and a tenant still on the previous release holds a
+root asserting a `NOT NULL` that no longer physically exists. Without the
+tolerance, `LIVE_SET_SHAPE_CONFLICT` would fire for **every** tenant until the
+last one migrated — the compiler emitting a correct plan that the provider
+refuses fleet-wide.
+
+It also sharpens point 2 and the rollback note below: what keeps that column
+populated for a not-yet-migrated tenant is its own release's writers, not the
+constraint. The constraint is gone for everyone.
+
 ## Consequences
 
 **Easier.** A module may make a required relation optional without carrying a
