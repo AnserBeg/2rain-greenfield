@@ -5252,6 +5252,18 @@ async function assertObservedWriteSetIsDerived(
   const written = [...current.entries()]
     .filter(([relation, count]) => count > (baseline.get(relation) ?? 0n))
     .map(([relation]) => relation);
+  // AN OBSERVER THAT SEES NOTHING PASSES EVERYTHING, so the empty case is a
+  // refusal rather than a silent success. Every posting inserts at least one
+  // movement, so an empty write set means this check is not observing -- a
+  // wrong schema filter, a view the role cannot read, or a baseline taken in
+  // the wrong transaction would all look like unbroken green otherwise.
+  if (written.length === 0) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      'the module write set observed for this posting is empty, so nothing was observed at all',
+      { schema: binding.schemaName },
+    );
+  }
   const undeclared = written
     .filter((relation) => !binding.writerInventory.has(relation))
     .sort();

@@ -4605,6 +4605,101 @@ async function removeEffectReservationBlocker(
  * had named the movement's own `effectIdentityUnique`, which carries a freshly
  * minted `record_id` and therefore cannot collide between two postings at all.
  */
+/**
+ * THE OBSERVER, PROVED TO OBSERVE.
+ *
+ * The derivation cannot be complete on its own: the compiled target declares
+ * nothing about the movement -> balance projection edge, so a writer grown by a
+ * new materializer convention would appear in no target shape this service
+ * reads. Round 1 was right that this is the same omission generator one level
+ * up.
+ *
+ * The backstop is to stop asking the target what was written and ask
+ * PostgreSQL. This control builds exactly the case the derivation cannot see: a
+ * module relation nothing declares, written by a trigger the target knows
+ * nothing about, on the movement insert. The posting must refuse and name it.
+ *
+ * It also closes the vacuity vector the green suite could not distinguish -- an
+ * observer that sees nothing passes everything -- because a write set that
+ * failed to observe this table would let the posting commit.
+ */
+test(
+  'posting writer inventory: a module relation nothing declares is caught by observing what the posting wrote',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      const undeclared = 'nsm_t_pwi_undeclared_writer';
+      const posting = command({
+        legalEntityId: legalReject,
+        sourceId: 'undeclared-writer',
+      });
+      await seedDraft(database, posting);
+      await database.adminPool.query(
+        `CREATE TABLE ${quoted(database.binding.schemaName)}.${quoted(undeclared)} (
+           tenant_id uuid NOT NULL, record_id uuid NOT NULL);
+         GRANT INSERT ON ${quoted(database.binding.schemaName)}.${quoted(undeclared)}
+           TO north_star_module_runtime;
+         CREATE FUNCTION public.pwi_undeclared_writer()
+           RETURNS trigger LANGUAGE plpgsql AS $body$
+           BEGIN
+             INSERT INTO ${quoted(database.binding.schemaName)}.${quoted(undeclared)}
+               (tenant_id, record_id) VALUES (NEW.tenant_id, NEW.record_id);
+             RETURN NEW;
+           END
+           $body$;
+         CREATE TRIGGER pwi_undeclared_writer
+           AFTER INSERT ON ${table(database.binding, database.binding.movement)}
+           FOR EACH ROW EXECUTE FUNCTION public.pwi_undeclared_writer()`,
+      );
+      let outcome: PostingOutcome;
+      try {
+        outcome = await settlePosting(
+          database.service.postAdjustment(
+            database.context,
+            database.actor,
+            posting,
+          ),
+        );
+      } finally {
+        await database.adminPool.query(
+          `DROP TRIGGER IF EXISTS pwi_undeclared_writer
+             ON ${table(database.binding, database.binding.movement)};
+           DROP FUNCTION IF EXISTS public.pwi_undeclared_writer();
+           DROP TABLE IF EXISTS ${quoted(database.binding.schemaName)}.${quoted(undeclared)}`,
+        );
+      }
+      assert.equal(
+        outcome.status,
+        'rejected',
+        `a module relation no read-back verifies must refuse the posting: ${JSON.stringify(outcome)}`,
+      );
+      assertRejectedPosting(
+        testContext,
+        'undeclared-module-writer',
+        outcome,
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+      );
+      const reason = String(
+        outcome.status === 'rejected' ? outcome.reason : '',
+      );
+      assert.match(
+        reason,
+        /wrote module relations the compiled writer inventory does not derive/u,
+      );
+      // Named, so an operator learns WHICH relation rather than that one exists.
+      assert.match(reason, new RegExp(undeclared, 'u'));
+      // Nothing committed: the undeclared write is refused before the trust
+      // document and the receipt, not reconciled afterwards.
+      assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+      assert.equal(await companionCount(database), 0);
+      assert.equal(
+        await receiptCountByKey(database, posting.idempotencyKey),
+        0,
+      );
+    });
+  },
+);
+
 test(
   'posting writer inventory: two simultaneous postings of one natural effect accept exactly one',
   { timeout: 300_000 },

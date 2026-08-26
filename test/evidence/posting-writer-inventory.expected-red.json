@@ -109,6 +109,42 @@
           "expected": "Missing expected exception"
         }
       ]
+    },
+    {
+      "name": "the-observed-write-set-is-never-checked",
+      "claim": "THE BACKSTOP ABSENT ENTIRELY. The compiled target declares nothing about the movement -> balance projection edge, so a writer grown by a new materializer convention appears in no target shape this service reads -- round 1's F1, and a hand-written edge list cannot close it. The backstop stops asking the target and asks PostgreSQL what this transaction wrote. Remove the call and a module relation nothing declares commits silently, which is exactly the failure PUR-2a's nine rounds kept finding one instance of.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      await assertObservedWriteSetIsDerived(\n        client,\n        this.#binding,\n        writeBaseline,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "a module relation nothing declares is caught by observing"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: a module relation nothing declares is caught by observing what the posting wrote",
+          "expected": "a module relation no read-back verifies must refuse the posting"
+        }
+      ]
+    },
+    {
+      "name": "an-empty-observation-passes-silently",
+      "claim": "THE CHECK READING ZERO INPUT, and this one is the vacuity vector a green suite cannot distinguish from success. If the write set comes back empty -- a wrong schema filter, a statistics view the module role cannot read, a baseline taken in the wrong transaction -- then every relation is trivially 'derived' and the backstop passes everything while observing nothing. Every posting inserts at least one movement, so an empty observation is refused rather than accepted. This mutation removes that refusal; the undeclared-writer control then commits, because its relation is absent from an observation that saw nothing.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  if (written.length === 0) {",
+      "replacement": "  if (false) {",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "a module relation nothing declares is caught by observing"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: a module relation nothing declares is caught by observing what the posting wrote",
+          "expected": "a module relation no read-back verifies must refuse the posting"
+        }
+      ]
     }
   ]
 }
