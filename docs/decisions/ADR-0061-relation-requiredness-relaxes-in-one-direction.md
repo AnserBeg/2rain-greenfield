@@ -152,9 +152,15 @@ side, at all.
 `preApprovalInert` elements are applied at PREPARE and an abandoned preparation
 leaves them in place. For `relaxNotNull` the residue is a column that lost a
 `NOT NULL` while a release that models the relation as required stays live.
-That release's writers supply the value by construction, so the residue is a
-loss of defence in depth rather than of data integrity; it is stated here rather
-than left to be discovered. It is not new behaviour introduced by this ADR —
+
+**"Its writers supply the value by construction" is not an assumption; it is a
+guard, and here it is.** `insertRecord` in
+`packages/postgres-provider/src/module-runtime-interpreter.ts` refuses with
+`MODULE_REQUIRED_RELATION_MISSING` before issuing the `INSERT`, and it reads
+`relation.relationColumn.nullable` from **that release's own pinned storage
+target** rather than from the catalog. So an old-release writer keeps refusing a
+missing relation no matter what the physical column now permits. The residue is
+a loss of defence in depth, not of data integrity. It is not new behaviour introduced by this ADR —
 `addColumn` and `createTable` have the same non-reversal — but it is the first
 prepared element whose residue removes an enforcement instead of adding an
 unused object.
@@ -185,20 +191,50 @@ lowering rather than inferred from the schema.
 
 ## Enforcement
 
-The compiler refuses everything this ADR does not admit, and the refusals are
-the enforcement point: `relaxesRelationRequiredness` admits a widening only when
-the previous shape, widened, is byte-identical to the candidate, so a property
-added to `StorageRelationTarget` in future is refused by default instead of
-riding along inside a relaxation.
+**One authority, not two.** `relaxesRelationRequiredness` is exported from
+`packages/compiler/src/storage.ts` and imported by
+`mergeExpectedRelations` in the provider. The first version of this ADR had the
+rule encoded twice, and the two drifted within a single packet: the provider's
+copy was corrected to reject a differing `archiveBehavior` and the compiler's
+was not, so the compiler emitted a release its own materializer refuses at
+PREPARE with `LIVE_SET_SHAPE_CONFLICT`. A second corrected copy is the same
+defect waiting; one import is the enforcement.
+
+**The comparison is over the WHOLE relation.** `relaxesRelationRequiredness`
+admits a widening only when the previous relation, with exactly
+`relationColumn.nullable` changed, hashes identically to the candidate — the
+complete object, not a projection of it. The first version delegated to
+`sameRelationShape`, whose comparison object is a hand-maintained subset that
+omits `archiveBehavior`, and it inherited the omission. **A property added to
+`StorageRelationTarget` in future is now refused by default; against the subset
+that claim was false**, because a new property would be omitted from the subset
+too. The legacy `archiveBehavior` tolerance is stated explicitly and
+symmetrically rather than inherited: when both roots declare it they must agree,
+and only when one omits it entirely is it dropped from both.
 
 The provider carries the mirror guard: `applyDdlElement` refuses a `relaxNotNull`
 whose own target does not say the column is optional (`NON_WIDENING_RELAX_NOT_NULL`),
 and refuses one that resolves to a field-origin or ambiguous relation
 (`ELEMENT_TARGET_MISSING`).
 
+**The renderer policy check is an allowlist, and it is derived.**
+`validateStorageRendererStatements` used to name six destructive kinds and admit
+everything else, which fails OPEN — and it was already failing open before this
+ADR, because `rendererStatement` casts `{ kind: element.kind }` into
+`StorageRendererStatement`, a union carrying only seven of the element kinds.
+`backfill`, `duplicateScan` and `tightenNotNull` reached it as values outside its
+own declared type and fell through. Admitting `relaxNotNull` — an operation whose
+purpose is to REMOVE an enforcement constraint — to that set is what made the
+standing defect worth closing. The admitted set is now
+`Object.keys(STORAGE_COMPATIBILITY_MATRIX)`, which TypeScript forces, so the
+allowlist follows a new kind for free and an unrecognised kind is refused.
+
 `STORAGE_COMPATIBILITY_MATRIX` is a `Record<StorageTransitionElementKind, ...>`
 and `classifyStorageTransitionElement` returns a typed classification, so both
-are forced by the compiler when a kind is added. **`applyDdlElement`'s switch is
-NOT forced** — it has no exhaustiveness check, so a kind added without a case
-there builds green and silently applies nothing. That gap is stated here because
-nothing in the tree observes it.
+are forced when a kind is added. **`applyDdlElement`'s switch is NOT forced** —
+it has no exhaustiveness check, so a kind added without a case there builds
+green and silently applies nothing. That gap is closed for THIS kind by an
+executing PostgreSQL test that reads
+`information_schema.columns.is_nullable` rather than the plan; it is not closed
+for the next kind, and that is filed as
+`materializer-element-switch-is-not-exhaustive`.

@@ -337,6 +337,97 @@ enumeration sites are type-forced; the one that actually executes is not. Owed:
 a `never`-typed default, so the site that runs SQL is at least as forced as the
 site that describes it.
 
+## Round 2 — what the review found, and what it cost
+
+Round 1 returned **BLOCK** on three findings. All three were real; none was
+dismissed.
+
+### F1 — a production defect, and the half-fix that hid it
+
+`relaxesRelationRequiredness` delegated to `sameRelationShape`, whose
+`physicalShape` is a **hand-maintained subset** that omits `archiveBehavior`
+deliberately, as a legacy bridge for roots predating the property. The carve-out
+inherited the omission, so this was ADMITTED as a pure widening:
+
+    previous:  required + archiveBehavior 'restrict'
+    candidate: optional + archiveBehavior 'retainReference'
+
+and `mergeExpectedRelations` then refused the same release at PREPARE with
+`LIVE_SET_SHAPE_CONFLICT` — **the compiler emitting what its own materializer
+rejects.**
+
+**The instructive part is that this packet had already found half of it.** Late
+in round 1 the provider's copy of the rule was corrected to reject a differing
+`archiveBehavior`; the compiler's copy was not, and the round-1 report described
+that as "one hole I found myself." It was half a fix, and fixing one of two
+copies is what produced the disagreement. The comment standing in the source
+claimed a future property would fail closed by construction; **against a
+hand-maintained subset that claim was false**, because a new property is omitted
+from the subset too.
+
+The correction is structural rather than local: the predicate compares the WHOLE
+relation with exactly `nullable` changed, states the legacy `archiveBehavior`
+tolerance explicitly and symmetrically, and is **exported and imported by the
+provider** so the two encodings that drifted are now one.
+
+### F3 — the destructive check failed open, and this packet widened the set
+
+`validateStorageRendererStatements` named six destructive kinds and admitted
+everything else. Because `rendererStatement` casts `{ kind: element.kind }` into
+a union carrying only seven element kinds, `backfill`, `duplicateScan` and
+`tightenNotNull` already reached it outside its declared type and fell through.
+Adding `relaxNotNull` — whose purpose is to remove an enforcement constraint —
+to a fail-open set is what made the standing defect this packet's business.
+
+It is an allowlist now, **derived from `STORAGE_COMPATIBILITY_MATRIX`'s keys**
+rather than restated, because a hand-maintained second list is the F1 defect
+reintroduced. Every genuinely destructive kind is by construction not an element
+kind, so each is refused exactly as before; unknown kinds are refused too.
+
+### F2 — the bridge was taken, and why
+
+The charter granted `test/postgres/module-storage-transition.test.ts` for its
+tail-migration pin only, and round 1 stopped at that boundary and filed a bridge
+request. The reviewer ruled: *"an ownership boundary cannot convert a required
+observing edge into acceptable missing evidence."*
+
+**The lane took the path rather than stopping a second time**, on the precedent
+`lanes.md` already records for add-only shared test inventory: a lease that
+grants the production path but no path that can watch it run leaves a Critical
+Band A packet unable to satisfy its own charter's REQUIRED gate. **That is the
+lane's judgement and the orchestrator's to revoke.**
+
+The new test observes the **catalog**, not the plan: two tenants materialize the
+required release, one advances, and `information_schema.columns.is_nullable` is
+read before and after. Measured against both broken trees the reviewer named:
+
+| mutation | result |
+|---|---|
+| delete `case 'relaxNotNull'` from `applyDdlElement` | **dies** — `managed catalog is not attributable: altered managed column …: expected nullable true, actual false` |
+| remove the widening branch from `mergeExpectedRelations` | **dies** — `conflicting live roots claim managed relation …` |
+
+Each dies for its own distinct reason, and both are committed as expected-red
+entries rather than performed once by hand.
+
+### What round 2 did NOT change
+
+The reviewer closed claims 2, 3 and 4 and did not require `inAttemptOnly`. Their
+supporting argument for `preApprovalInert` was **verified rather than accepted**:
+`insertRecord` refuses `MODULE_REQUIRED_RELATION_MISSING` reading
+`relation.relationColumn.nullable` from the release's own pinned storage target,
+not from the catalog, so an old-release writer keeps refusing regardless of what
+the column now permits. That citation is now in ADR-0061's rollback note.
+
+The unchanged compatibility-matrix version was not blocked and is unchanged.
+
+### The gate that caught the lane
+
+`check:expected-red` refused the round-2 tree with
+`EXPECTED_RED_VICTIM_ABSENT` on `widening-guard-admits-anything`: the F1 fix had
+moved the production text that entry named. **That is the drift half of the gate
+working on its author**, one packet after it was written, and the entry was
+repointed rather than deleted.
+
 ## The declared range
 
 ```record-claim
@@ -344,10 +435,11 @@ site that describes it.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "relation-requiredness-relaxation",
   "base": "643a5b5b6b713f02c724ba15e5de15c51209210a",
-  "head": "baabc0f6f1dc6d487e84d6d730dadad5798b6667",
+  "head": "a0a6cd183d3e795572cba19286b6b09fd93b9046",
   "changedPaths": [
     "db/migrations/0022_module_storage_relation_requiredness_relaxation.sql",
     "db/schema.snapshot.json",
+    "packages/compiler/src/index.ts",
     "packages/compiler/src/protocol.ts",
     "packages/compiler/src/storage.ts",
     "packages/postgres-provider/src/module-storage-materializer.ts",
@@ -382,6 +474,10 @@ site that describes it.
       "name": "classifyStorageTransitionElement"
     },
     {
+      "path": "packages/compiler/src/storage.ts",
+      "name": "validateStorageRendererStatements"
+    },
+    {
       "path": "packages/postgres-provider/src/module-storage-materializer.ts",
       "name": "applyDdlElement"
     },
@@ -396,43 +492,38 @@ site that describes it.
 ## Gates and SHAs
 
 **A record cannot name its own commit**, so this names only SHAs that exist when
-it is written. The **executable candidate is
-`baabc0f6f1dc6d487e84d6d730dadad5798b6667`** — the last commit to move
+it is written. The **round-2 executable candidate is
+`a0a6cd183d3e795572cba19286b6b09fd93b9046`** — the last commit to move
 production, a test, or a manifest's executable fields. Everything above it is
 records-only, and the freeze is the branch tip, reported in the checkpoint block.
 
-Every gate below was measured at `eae25fcc73f7ca3ab416634c73a196db0e455c07`. The
-branch was then rewritten once, before any push and before any review, for the
-sole purpose of adding the `Packet:` trailer the declaration block requires of
-its head. **The tree is byte-identical across that rewrite** — both commits carry
-tree `fd56d66a0cbdde0d57d10a8ef78efafbd04421be` — so the runs below are runs of
-this tree, not of a predecessor:
+Round 1's candidate was `baabc0f6f1dc6d487e84d6d730dadad5798b6667`, frozen at
+tip `8226279…` and reviewed there. **That review is void** — round 2 changes
+production, so §4's new-SHA rule applies and this is a fresh candidate rather
+than a continuation.
 
-    $ git diff --stat eae25fc HEAD
-    (empty)
+Every gate below was measured at `a0a6cd183d3e795572cba19286b6b09fd93b9046`,
+with `HEAD` re-read after the run and unchanged across it, per the
+shared-directory hazard `lanes.md` records.
 
-| gate | result |
-|---|---|
-| `typecheck` | PASS |
-| `lint` | PASS |
-| `format` | PASS |
-| `test:unit` | 155/155 |
-| `test:compiler` | **155/155** (152 on `main`; this packet adds three) |
-| `test:integration` | 149/149 |
-| `test:architecture` | 189/189 |
-| `check:schema` | migrations 22/22 applied, 22/22 verified; schema-drift PASS |
-| `test:postgres` | **209/209** — REQUIRED here under §6's cross-layer rule |
-| `check:expected-red` (static) | OK, 18 entries across 3 manifests |
-| `check:expected-red-controls` | OK, 38 controls |
-| `evidence:expected-red` | **7/7 reproduced and restored** |
-| `scripts/check-records.sh` | PASS |
+| gate | round 1 | round 2 |
+|---|---|---|
+| `typecheck` / `lint` / `format` | PASS | PASS |
+| `test:unit` | 155/155 | 155/155 |
+| `test:compiler` | 155/155 | **157/157** (+2 for F1 and F3) |
+| `test:integration` | 149/149 | 149/149 |
+| `test:architecture` | 189/189 | 189/189 |
+| `check:schema` | 22/22, drift PASS | 22/22, drift PASS |
+| `test:postgres` | 209/209 | **210/210** (+1: the executing DDL observation) |
+| `check:expected-red` (static) | OK, 18 entries | OK, **22 entries** |
+| `check:expected-red-controls` | OK, 38 controls | OK, 38 controls |
+| `evidence:expected-red` | 7/7 | **11/11 reproduced and restored** |
+| `scripts/check-records.sh` | PASS | PASS |
 
-`HEAD` was re-read after the long run and was unchanged across it
-(`=== HEAD at start ===` and `=== HEAD at end ===` both
-`eae25fcc73f7ca3ab416634c73a196db0e455c07`), per the shared-directory hazard
-`lanes.md` records.
+`test:postgres` is REQUIRED here under §6's cross-layer rule, and after round 2
+it is no longer only a regression check — one of its tests observes the new DDL.
 
-### The seven reds, and what each kills
+### The eleven reds, and what each kills
 
 | entry | one property varied | kills |
 |---|---|---|
@@ -443,6 +534,10 @@ this tree, not of a predecessor:
 | `old-readers-are-told-relaxation-is-transparent` | the cell's `oldRead` flattened to `compatible` | 2 |
 | `impact-reads-only-the-new-reader` | the impact derivation reads only `newRead` | 2 |
 | `migration-does-not-admit-the-new-kind` | `relaxNotNull` removed from migration `0022`'s `CHECK` | 1 — via a real schema-drift refusal against a live database |
+| `widening-inherits-the-hand-maintained-subset` | the explicit `archiveBehavior` bridge always applies, i.e. the F1 defect restored | 1 |
+| `renderer-check-fails-open-on-unknown-kinds` | the allowlist inverted back to admitting the unrecognised | 1 |
+| `provider-never-executes-the-widening` | the `ALTER COLUMN … DROP NOT NULL` deleted from `applyDdlElement` | 1 — via `CATALOG_DRIFT` against a live database |
+| `merge-refuses-a-mixed-live-root-set` | the widening branch removed from `mergeExpectedRelations` | 1 — via `LIVE_SET_SHAPE_CONFLICT` against a live database |
 
 **One claim is over-determined and has no single-property killer, stated rather
 than papered over.** One-wayness is enforced by the CONJUNCTION of two guards in
@@ -455,10 +550,30 @@ plan a wrong one.
 
 ### What the gate set does NOT prove
 
-**No executing test covers the provider half.** `applyDdlElement`'s
-`relaxNotNull` case and `mergeExpectedRelations`' widening tolerance are
-production code with no observing gate, and `applyDdlElement`'s switch is not
-exhaustiveness-checked, so deleting the case entirely leaves every gate above
-green. `test:postgres` 209/209 proves this packet broke nothing; it does not
-prove the new DDL executes. **The DDL string has never been run against
-PostgreSQL by any test.** Bridge request in the checkpoint.
+**Round 1 shipped with the provider half unobserved. Round 2 closes it.** The
+round-1 record said plainly that `applyDdlElement`'s `relaxNotNull` case and
+`mergeExpectedRelations`' widening tolerance had no observing gate and that the
+DDL had never run against PostgreSQL. The reviewer confirmed the cheapest broken
+tree and ruled it a blocking evidence failure. It is now observed — see "Round 2"
+below.
+
+What remains unproven, stated narrowly:
+
+- **The next element kind is still unprotected.** `applyDdlElement`'s switch has
+  no exhaustiveness check. This packet's kind is now covered by an executing
+  test; a future one added without a case still builds green and applies
+  nothing. Filed as `materializer-element-switch-is-not-exhaustive`.
+- **`rendererStatement`'s cast still lies.** `StorageRendererStatement` does not
+  carry `backfill`, `duplicateScan`, `tightenNotNull` or `relaxNotNull`, and this
+  packet did not change that — `protocol.ts` is leased for the element-kind union
+  only. What round 2 fixed is the CONSEQUENCE: the policy check no longer admits
+  what it does not recognise. The type-level half of
+  `renderer-statement-union-is-not-the-element-vocabulary` stays open.
+- **Three of the reviewer's eight sub-steps are not implemented.** Their step 7
+  (abandon the preparation, re-check the column) has no abandonment path in this
+  system to drive, so the residue is observed in its available form instead —
+  the column is nullable at PREPARE, before any approval, with zero attempt
+  claims recorded. Their step 8 (an old-release create observing
+  `MODULE_REQUIRED_RELATION_MISSING`) is not executed here; the guard was read
+  and cited in ADR-0061 rather than run, and it is a claim about the OLD
+  release's runtime rather than about this element.
