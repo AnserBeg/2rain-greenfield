@@ -73,6 +73,7 @@ import {
 } from '../../packages/runtime/src/request-context.js';
 import {
   FIXTURE_IDS,
+  FIXTURE_LANGUAGE_VERSION,
   ordinaryModuleV1,
   ordinaryModuleV2,
 } from '../fixtures/g2/module-conformance/definitions.js';
@@ -3849,6 +3850,254 @@ test('a pre-existing relation index executes as atomic locking DDL and rejects i
   );
 });
 
+test('a released required relation is widened by executed DDL, and a mixed live-root set is tolerated', async () => {
+  // Round-1 finding F2. Before this test, BOTH new provider behaviours were
+  // unobserved: deleting the whole `case 'relaxNotNull'` from `applyDdlElement`
+  // left every gate green (the switch is not exhaustiveness-checked), and so
+  // did deleting the widening branch from `mergeExpectedRelations`, because no
+  // suite supplied the mixed old/new root set that branch exists for. This test
+  // observes the CATALOG, not the plan.
+  const emptyDefinition = emptyModuleDefinition();
+  const requiredDefinition = ordinaryModuleV1() as {
+    relations: Array<Record<string, unknown>>;
+  };
+  requiredDefinition.relations.push(widenableRelation(true));
+  const optionalDefinition = ordinaryModuleV1() as {
+    relations: Array<Record<string, unknown>>;
+  };
+  optionalDefinition.relations.push(widenableRelation(false));
+
+  const source = mustCompile(moduleInput(emptyDefinition));
+  const required = mustCompile(
+    moduleInput(requiredDefinition, expectedActiveReleaseFrom(source)),
+  );
+  const optional = mustCompile(
+    moduleInput(optionalDefinition, expectedActiveReleaseFrom(required)),
+  );
+
+  const requiredStorage = projectionPayload<StorageTargetPayloadV1>(
+    required,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const relationId = `${FIXTURE_IDS.namespace}:relation.master_role_widenable`;
+  const relation = requiredStorage.relations.find(
+    (entry) => entry.relationId === relationId,
+  );
+  assert.ok(relation);
+  assert.equal(relation.relationColumn.nullable, false);
+  const columnName = relation.relationColumn.physicalName;
+  const tableName = requiredStorage.entities.find(
+    (entity) => entity.entityId === relation.sourceEntityId,
+  )!.physicalTableName;
+
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    optional,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  const widening = transition.elements.find(
+    (element) => element.kind === 'relaxNotNull',
+  );
+  assert.ok(widening);
+  assert.equal(widening.physicalObjectName, columnName);
+  assert.equal(widening.classification.preparationValidity, 'preApprovalInert');
+
+  const readNullability = async (pool: pg.Pool): Promise<string | undefined> =>
+    (
+      await pool.query<{ is_nullable: string }>(
+        `SELECT is_nullable
+           FROM information_schema.columns
+          WHERE table_schema = 'north_star_module'
+            AND table_name = $1
+            AND column_name = $2`,
+        [tableName, columnName],
+      )
+    ).rows[0]?.is_nullable;
+
+  await withEphemeralPostgres(
+    'module-relation-requiredness-relaxation',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        const loaded = await loadMigrations(migrations);
+        const migrationResult = await runMigrations(admin, loaded);
+        assert.equal(migrationResult.verified.length, loaded.length);
+        await seedScope(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        // BOTH tenants are accounted on the REQUIRED root. That is what makes
+        // the live-root set mixed once tenant A advances, and it is the whole
+        // point of using `persistPairForBothTenants` here.
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          source,
+          definitionBytes(emptyDefinition),
+          required,
+          definitionBytes(requiredDefinition),
+        );
+        const next = await persistNextRelease(
+          runtimePool,
+          contexts.a,
+          releases.a.target,
+          optional,
+          definitionBytes(optionalDefinition),
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+
+        // Tenant A materializes the REQUIRED release. The column is created
+        // NOT NULL, and that pre-state is asserted so the flip below cannot be
+        // read from a column that was already nullable.
+        await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId: randomUUID(),
+          initiatedBy: principalA,
+          preparationId: randomUUID(),
+          targetReleaseId: releases.a.target,
+        });
+        assert.equal(await readNullability(pool), 'NO');
+
+        // Tenant B materializes the SAME required release and STAYS there, so
+        // its root remains accounted while A moves on.
+        await materializer.prepare({
+          context: contexts.b,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId: randomUUID(),
+          initiatedBy: principalB,
+          preparationId: randomUUID(),
+          targetReleaseId: releases.b.target,
+        });
+        assert.equal(await readNullability(pool), 'NO');
+
+        await setActiveReleasePointer(pool, releases.a.target);
+        const generationId = randomUUID();
+        const prepared = await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId,
+          initiatedBy: principalA,
+          preparationId: randomUUID(),
+          targetReleaseId: next.target,
+        });
+
+        // 1. The element is APPLIED at PREPARE, not deferred to an attempt.
+        assert.equal(
+          prepared.diff.elements.find(
+            (element) => element.elementId === widening.elementId,
+          )?.disposition,
+          'APPLIED',
+        );
+        assert.equal(prepared.dataState, 'NOT_REQUIRED');
+
+        // 2. The element is PERSISTED under its new kind, which is what
+        //    migration 0022's CHECK constraint has to admit.
+        const persisted = await pool.query<{
+          element_kind: string;
+          physical_object_name: string;
+        }>(
+          `SELECT element_kind, physical_object_name
+             FROM north_star_internal.module_storage_elements
+            WHERE element_id = $1`,
+          [widening.elementId],
+        );
+        assert.deepEqual(persisted.rows, [
+          { element_kind: 'relaxNotNull', physical_object_name: columnName },
+        ]);
+        const applied = await pool.query<{ application_state: string }>(
+          `SELECT application_state
+             FROM north_star_internal.module_storage_element_applications
+            WHERE element_id = $1 AND generation_id = $2
+            ORDER BY application_state`,
+          [widening.elementId, generationId],
+        );
+        assert.deepEqual(
+          applied.rows.map((row) => row.application_state),
+          ['APPLIED'],
+        );
+
+        // 3. THE OBSERVATION. The catalog moved, so the DDL actually ran.
+        //    Deleting `case 'relaxNotNull'` from `applyDdlElement` fails here
+        //    and nowhere else in the matrix.
+        assert.equal(await readNullability(pool), 'YES');
+
+        // 4. Reaching this line at all proves `mergeExpectedRelations`
+        //    tolerated the mixed set: tenant B is still accounted on the
+        //    REQUIRED root while A now holds the OPTIONAL one, and catalog
+        //    verification runs inside `prepare` over the union of both.
+        //    Without the widening branch this throws LIVE_SET_SHAPE_CONFLICT.
+        const accounted = await pool.query<{ count: string }>(
+          `SELECT count(DISTINCT tenant_id)::text AS count
+             FROM north_star_internal.module_storage_generations`,
+        );
+        assert.equal(accounted.rows[0]?.count, '2');
+
+        // 5. The OTHER root order. Tenant B now advances to the optional
+        //    release too, so its own prepare presents (required, optional) as
+        //    `initial` while tenant A's accounted root is already optional --
+        //    the reverse of the pairing A saw. The merge is order-independent
+        //    or one of these two prepares fails.
+        const nextB = await persistNextRelease(
+          runtimePool,
+          contexts.b,
+          releases.b.target,
+          optional,
+          definitionBytes(optionalDefinition),
+        );
+        await setActiveReleasePointerFor(pool, tenantB, releases.b.target);
+        await materializer.prepare({
+          context: contexts.b,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId: randomUUID(),
+          initiatedBy: principalB,
+          preparationId: randomUUID(),
+          targetReleaseId: nextB.target,
+        });
+        assert.equal(await readNullability(pool), 'YES');
+
+        // 6. The residue ADR-0061 declares, observed rather than argued: the
+        //    constraint is gone at PREPARE, before any approval or attempt, and
+        //    nothing in this system reverses a prepared element.
+        const attempts = await pool.query<{ count: string }>(
+          `SELECT count(*)::text AS count
+             FROM north_star_internal.module_storage_attempt_claims`,
+        );
+        assert.equal(attempts.rows[0]?.count, '0');
+        assert.equal(await readNullability(pool), 'YES');
+      } finally {
+        await moduleRuntimePool.end();
+        await materializerPool.end();
+        await runtimePool.end();
+      }
+    },
+  );
+});
+
 test('a pre-existing generated fold and prefix index record their measured locking window', async () => {
   const emptyDefinition = emptyModuleDefinition();
   const source = mustCompile(moduleInput(emptyDefinition));
@@ -5031,6 +5280,68 @@ async function setActiveReleasePointer(
       'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
     );
   }
+}
+
+/**
+ * `setActiveReleasePointer` is hard-wired to tenant A. The relaxation test needs
+ * tenant B moved too, to present the merge with the reverse root pairing.
+ */
+async function setActiveReleasePointerFor(
+  pool: pg.Pool,
+  tenantId: string,
+  releaseId: MintedUuid,
+): Promise<void> {
+  await pool.query(
+    'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
+  );
+  try {
+    await pool.query(
+      `UPDATE platform.active_release_pointers
+          SET release_id = $2
+        WHERE tenant_id = $1`,
+      [tenantId, releaseId],
+    );
+  } finally {
+    await pool.query(
+      'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
+    );
+  }
+}
+
+/**
+ * A second `child -> parent` reference relation whose requiredness the
+ * relaxation test moves. It is a distinct relation from the fixture's own
+ * `master_role_parent` so that widening it leaves every other relation in the
+ * module byte-identical, which is what makes the resulting transition envelope
+ * a single element.
+ */
+function widenableRelation(required: boolean): Record<string, unknown> {
+  return {
+    archiveBehavior: 'retainReference',
+    cardinality: 'manyToOne',
+    foreignKeyActions: {
+      onDelete: 'restrict',
+      onUpdate: 'restrict',
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
+    },
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey: 20,
+    ownership: 'reference',
+    relationId: `${FIXTURE_IDS.namespace}:relation.master_role_widenable`,
+    required,
+    schemaVersion: FIXTURE_LANGUAGE_VERSION,
+    sourceEntity: {
+      kind: 'entityReference',
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
+      targetId: FIXTURE_IDS.entityIds.child,
+    },
+    targetEntity: {
+      kind: 'entityReference',
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
+      targetId: FIXTURE_IDS.entityIds.parent,
+    },
+  };
 }
 
 async function insertUniqueKeyRecord(

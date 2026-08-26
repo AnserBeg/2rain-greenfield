@@ -2462,20 +2462,41 @@ export function validatePhysicalMappingRecords(
   return diagnostics;
 }
 
+/**
+ * The renderer allowlist, and it is an ALLOWLIST rather than a denylist since
+ * this packet -- which is the correction, not the original design.
+ *
+ * It used to name six destructive kinds and admit everything else. That fails
+ * OPEN, and it was already failing open before this packet: `rendererStatement`
+ * casts `{ kind: element.kind }` into `StorageRendererStatement`, a union that
+ * carries only seven of the element kinds, so `backfill`, `duplicateScan` and
+ * `tightenNotNull` reached this function as values outside its own declared
+ * type and were admitted by falling through the denylist. Adding `relaxNotNull`
+ * -- an operation whose entire purpose is to REMOVE an enforcement constraint
+ * -- to that fail-open set is what made the standing defect worth closing here.
+ *
+ * The admitted set is DERIVED from `STORAGE_COMPATIBILITY_MATRIX`'s keys rather
+ * than restated. That object is a `Record<StorageTransitionElementKind, ...>`,
+ * so TypeScript forces a new element kind into it, and the allowlist follows
+ * for free. A hand-maintained second list is the `sameRelationShape` defect
+ * this packet already had to correct once; it is not reintroduced here.
+ *
+ * Every genuinely destructive statement kind -- `dropBusinessObject`,
+ * `truncateTable`, `onDeleteCascade`, `removePartition`, `deleteCapableRule`,
+ * `deleteCapableTrigger` -- is by construction NOT an element kind, so each is
+ * refused exactly as before. What changes is that an unrecognised kind is now
+ * refused too, instead of being waved through.
+ */
 export function validateStorageRendererStatements(
   statements: readonly StorageRendererStatement[],
 ): CompilerDiagnostic[] {
-  const destructive = new Set<StorageRendererStatement['kind']>([
-    'deleteCapableRule',
-    'deleteCapableTrigger',
-    'dropBusinessObject',
-    'onDeleteCascade',
-    'removePartition',
-    'truncateTable',
-  ]);
+  const admitted: ReadonlySet<string> = new Set(
+    Object.keys(STORAGE_COMPATIBILITY_MATRIX),
+  );
   return statements.flatMap((statement, index) =>
-    destructive.has(statement.kind)
-      ? [
+    admitted.has(statement.kind)
+      ? []
+      : [
           compilerDiagnostic(
             'COMPILER_DESTRUCTIVE_STORAGE_DDL_UNSUPPORTED',
             'postLoweringValidation',
@@ -2483,8 +2504,7 @@ export function validateStorageRendererStatements(
             statement.kind,
             index,
           ),
-        ]
-      : [],
+        ],
   );
 }
 
@@ -2778,18 +2798,32 @@ function sameRelationShape(
 
 /**
  * A relation is RELAXED when the previous release carried it as required, the
- * candidate carries it as optional, and nothing else about its physical shape
- * moved. `NOT NULL` -> `NULL` is a widening DDL: it rewrites no rows, cannot
- * reject a write that used to succeed, and leaves every row that already exists
- * valid. It is the only direction of requiredness this planner takes.
+ * candidate carries it as optional, and NOTHING ELSE about it moved.
+ * `NOT NULL` -> `NULL` is a widening DDL: it rewrites no rows, cannot reject a
+ * write that used to succeed, and leaves every row that already exists valid.
+ * It is the only direction of requiredness this planner takes.
  *
- * Two exclusions are load-bearing.
+ * **This compares the WHOLE relation, not a projection of it, and that is a
+ * correction rather than a preference.** The first version delegated to
+ * `sameRelationShape`, whose `physicalShape` is a HAND-MAINTAINED SUBSET that
+ * omits `archiveBehavior` -- deliberately, as a legacy bridge for roots that
+ * predate the property. Reusing it made this carve-out inherit the omission, so
+ * `required + archiveBehavior: 'restrict'` -> `optional + 'retainReference'`
+ * was ADMITTED as a pure widening, and the provider then refused the same
+ * release at PREPARE with `LIVE_SET_SHAPE_CONFLICT`. The comment that stood
+ * here claimed a future property would fail closed by construction; against a
+ * hand-maintained subset that claim was FALSE, because a new property is
+ * omitted from the subset too. Comparing the whole object makes it true.
  *
- * The equality is expressed by WIDENING THE PREVIOUS SHAPE and reusing
- * `sameRelationShape`, rather than by comparing field by field. A future
- * property added to `StorageRelationTarget` is then refused by default instead
- * of silently riding along inside a relaxation, because the widened previous
- * shape would still differ from the candidate in that new property.
+ * The legacy `archiveBehavior` tolerance is therefore stated EXPLICITLY and
+ * symmetrically instead of being inherited: when both roots declare it they
+ * must agree, and only when one omits it entirely is it dropped from both.
+ *
+ * **This function is exported and the provider imports it**, because two copies
+ * of this rule already drifted once -- the provider's copy was corrected while
+ * this one was not, and the compiler then accepted a release its own
+ * materializer refuses. One authority is the fix; a second corrected copy is
+ * the same defect waiting.
  *
  * `origin: 'field'` relations are excluded, and that exclusion is a
  * correctness boundary rather than caution. Their physical column is an
@@ -2802,7 +2836,7 @@ function sameRelationShape(
  * has to move through the column path, which refuses it today with
  * `COMPILER_STORAGE_RETYPE_UNSUPPORTED`.
  */
-function relaxesRelationRequiredness(
+export function relaxesRelationRequiredness(
   previous: StorageRelationTarget,
   candidate: StorageRelationTarget,
 ): boolean {
@@ -2814,12 +2848,28 @@ function relaxesRelationRequiredness(
   ) {
     return false;
   }
-  return sameRelationShape(
-    {
-      ...previous,
-      relationColumn: { ...previous.relationColumn, nullable: true },
-    },
-    candidate,
+  const bridgeLegacyArchiveBehavior =
+    !Object.hasOwn(previous, 'archiveBehavior') ||
+    !Object.hasOwn(candidate, 'archiveBehavior');
+  const comparable = (relation: StorageRelationTarget) => {
+    if (!bridgeLegacyArchiveBehavior) return relation;
+    const { archiveBehavior: _archiveBehavior, ...rest } = relation;
+    void _archiveBehavior;
+    return rest;
+  };
+  const widened: StorageRelationTarget = {
+    ...previous,
+    relationColumn: { ...previous.relationColumn, nullable: true },
+  };
+  return (
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-relation-relaxation`,
+      comparable(widened),
+    ).digest ===
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-relation-relaxation`,
+      comparable(candidate),
+    ).digest
   );
 }
 

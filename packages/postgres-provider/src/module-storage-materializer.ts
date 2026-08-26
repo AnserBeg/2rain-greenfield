@@ -13,6 +13,7 @@ import {
   STORAGE_RENDERER_POLICY_VERSION,
   STORAGE_TARGET_PAYLOAD_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
+  relaxesRelationRequiredness,
   type StorageRendererStatement,
   type StorageTargetPayloadV1,
   type StorageTransitionElement,
@@ -3548,31 +3549,15 @@ function mergeExpectedRelations(
   // root are accounted live against ONE physical column, and the widening DDL
   // has already run, so the column is nullable and the old root's `NOT NULL`
   // is no longer a claim it can enforce. Merging to the relaxed value is
-  // therefore reading the physical truth rather than forgiving a conflict --
-  // and it forgives exactly this: `widened` differs from the required shape in
-  // `nullable` alone, so any other divergence still conflicts.
-  const relaxes = (
-    required: StorageRelationTarget,
-    optional: StorageRelationTarget,
-  ): boolean =>
-    !required.relationColumn.nullable &&
-    optional.relationColumn.nullable &&
-    required.relationColumn.origin !== 'field' &&
-    optional.relationColumn.origin !== 'field' &&
-    // `archiveBehavior` is stripped by `physicalShape`, so it has to be
-    // checked here or a widening would carry a differing one past the
-    // conflict branch below, which the widening skips.
-    !(
-      Object.hasOwn(required, 'archiveBehavior') &&
-      Object.hasOwn(optional, 'archiveBehavior') &&
-      required.archiveBehavior !== optional.archiveBehavior
-    ) &&
-    canonicalize(
-      physicalShape({
-        ...required,
-        relationColumn: { ...required.relationColumn, nullable: true },
-      }),
-    ) === canonicalize(physicalShape(optional));
+  // therefore reading the physical truth rather than forgiving a conflict.
+  //
+  // The predicate is the COMPILER'S, imported rather than restated. A local
+  // copy of this rule already drifted from the compiler's once: the copy here
+  // was corrected to reject a differing `archiveBehavior` while the planner's
+  // was not, so the compiler emitted a release that this function then refused
+  // with `LIVE_SET_SHAPE_CONFLICT`. Two encodings of one rule is the defect;
+  // one authority is the fix.
+  const relaxes = relaxesRelationRequiredness;
   for (const relation of targets.flatMap((target) => target.relations)) {
     const key = relation.foreignKey.physicalName;
     const existing = result.get(key);

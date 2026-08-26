@@ -31,6 +31,7 @@ import {
   type PhysicalMappingRecord,
   type ProjectionFamilyId,
   type ProjectionManifestEnvelope,
+  type StorageRendererStatement,
   type StorageTargetPayloadV1,
   type StorageTransitionEnvelope,
 } from '../../packages/compiler/src/index.js';
@@ -1455,6 +1456,125 @@ test('a released required relation widens through one relaxNotNull element', () 
   );
   assert.equal(relation?.relationColumn.nullable, true);
   assert.equal(relation?.relationColumn.physicalName, physicalObjectName);
+});
+
+test('a widening that also moves archiveBehavior is refused', () => {
+  // Round-1 finding F1. `relaxesRelationRequiredness` used to delegate to
+  // `sameRelationShape`, whose comparison object is a HAND-MAINTAINED SUBSET
+  // that omits `archiveBehavior` as a legacy bridge. The carve-out inherited
+  // the omission, so this transition was ADMITTED as a pure widening and the
+  // provider then refused the same release at PREPARE with
+  // LIVE_SET_SHAPE_CONFLICT -- the compiler emitting what its own materializer
+  // rejects.
+  const requiredDefinition = ordinaryModuleV1() as {
+    relations: Array<Record<string, unknown>>;
+  };
+  requiredDefinition.relations.push(secondaryParentRelation(true));
+  const packageRevision = normalizeApplicationPackage(requiredDefinition);
+  const previous = lowerStorageTargetV1(packageRevision);
+  const relationId = `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`;
+  const subject = previous.relations.find(
+    (entry) => entry.relationId === relationId,
+  )!;
+  assert.equal(subject.relationColumn.nullable, false);
+  assert.equal(subject.archiveBehavior, 'retainReference');
+
+  const candidate = structuredClone(previous);
+  const moved = candidate.relations.find(
+    (entry) => entry.relationId === relationId,
+  )!;
+  moved.relationColumn.nullable = true;
+  moved.archiveBehavior = 'restrict';
+
+  const result = buildStorageTransitionEnvelope(
+    packageRevision,
+    previous,
+    candidate,
+    transitionBinding(),
+  );
+  assert.ok('diagnostic' in result);
+  if (!('diagnostic' in result)) return;
+  assert.deepEqual(
+    {
+      code: result.diagnostic.code,
+      path: result.diagnostic.path,
+      subjectId: result.diagnostic.subjectId,
+    },
+    {
+      code: 'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED',
+      path: '$.relations',
+      subjectId: relationId,
+    },
+  );
+
+  // ... and the legacy bridge still holds: a previous root that predates the
+  // property entirely is compared without it, so the widening is admitted.
+  const legacyPrevious = structuredClone(previous);
+  delete (
+    legacyPrevious.relations.find(
+      (entry) => entry.relationId === relationId,
+    )! as Partial<StorageTargetPayloadV1['relations'][number]>
+  ).archiveBehavior;
+  const widenedOnly = structuredClone(previous);
+  widenedOnly.relations.find(
+    (entry) => entry.relationId === relationId,
+  )!.relationColumn.nullable = true;
+  const bridged = buildStorageTransitionEnvelope(
+    packageRevision,
+    legacyPrevious,
+    widenedOnly,
+    transitionBinding(),
+  );
+  assert.equal('diagnostic' in bridged, false);
+  if ('diagnostic' in bridged) return;
+  assert.deepEqual(
+    bridged.elements.map((entry) => ({
+      kind: entry.kind,
+      subjectId: entry.subjectId,
+    })),
+    [{ kind: 'relaxNotNull', subjectId: relationId }],
+  );
+});
+
+test('the renderer allowlist is derived from the element vocabulary and fails closed', () => {
+  // Round-1 finding F3. The check named six destructive kinds and admitted
+  // everything else, so the four element kinds absent from
+  // `StorageRendererStatement` -- backfill, duplicateScan, tightenNotNull and
+  // now relaxNotNull -- reached it as values outside its own declared type and
+  // fell through. It is an allowlist now, derived from the type-forced matrix.
+  const admitted = Object.keys(STORAGE_COMPATIBILITY_MATRIX);
+  assert.equal(
+    validateStorageRendererStatements(
+      admitted.map((kind) => ({ kind }) as StorageRendererStatement),
+    ).length,
+    0,
+  );
+  // Every element kind is admitted -- including the four the renderer union
+  // does not carry, which is what the provider actually hands it.
+  for (const kind of [
+    'backfill',
+    'duplicateScan',
+    'tightenNotNull',
+    'relaxNotNull',
+  ]) {
+    assert.ok(admitted.includes(kind));
+  }
+  // An unrecognised kind is REFUSED rather than waved through.
+  const unknown = validateStorageRendererStatements([
+    { kind: 'createTable' },
+    {
+      kind: 'someFutureUnclassifiedStatement',
+    } as unknown as StorageRendererStatement,
+  ]);
+  assert.deepEqual(
+    unknown.map(({ code, subjectId }) => ({ code, subjectId })),
+    [
+      {
+        code: 'COMPILER_DESTRUCTIVE_STORAGE_DDL_UNSUPPORTED',
+        subjectId: 'someFutureUnclassifiedStatement',
+      },
+    ],
+  );
 });
 
 test('relaxation is one-way: re-tightening a released relation is refused', () => {
