@@ -64,6 +64,31 @@ the one needing a canonical concept** — migration 0012 scopes saved-filter RLS
 anywhere in the compiled path. Full finding, with the discriminator answer, is in
 `current-plan.md` row 1c. **Do not re-derive it from this file; read that row.**
 
+## A LEAKED ephemeral container fails an architecture test, and it reads as a defect — measured 2026-08-26
+
+`test/architecture/repository-hygiene.test.ts`, *"matrix lock and legacy-process
+waits fail busy at their bounded deadline"*, **fails whenever a stray
+`north-star-*` container is still running**, and it fails in a way that names
+neither the container nor the real cause in its assertion text.
+
+The test asserts `scripts/run-matrix.sh` refuses with a specific message.
+`run-matrix.sh` refuses FIRST with
+`POSTGRES_CONTAINER_CONTAMINATION: refusing to start with north-star-* containers
+present after exclusive lock acquisition`, so the validator sees the wrong
+refusal and reports a plain assertion failure.
+
+**Measured on 2026-08-26 by `posting-writer-inventory`.** Architecture returned
+178/176/2 twice; the extra failure was a container leaked from a killed
+expected-red run, aged eight minutes. **The first diagnosis — that a second
+lane's suite was contending — was WRONG, and was written here as measured before
+it had been.** It is recorded that way on purpose: the re-run that was supposed
+to confirm it refuted it instead.
+
+**The rule:** before believing an architecture red, run
+`docker ps -a --format '{{.Names}}' | grep north-star`. If anything is there,
+remove it and re-run. **A killed suite is the usual source**, which is one more
+reason not to kill one.
+
 ## Disjointness is VERIFIED, not predicted — corrected 2026-07-30
 
 **Before granting any path, run the check. Do not consult the table below as
