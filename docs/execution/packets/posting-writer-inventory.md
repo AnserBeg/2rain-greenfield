@@ -241,7 +241,7 @@ matrix sit above it by construction, and it carries a
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-writer-inventory",
   "base": "8bc097cdd6402388d80911db004590e335a6d5c6",
-  "head": "be9e3336c0b542e283ac39c2b442ad43cbf47708",
+  "head": "d441baafe71eee9aa1d1fa32b66143ccf66070a7",
   "changedPaths": [
     "packages/postgres-provider/src/inventory-posting-service.ts",
     "test/evidence/posting-writer-inventory.expected-red.json",
@@ -336,10 +336,53 @@ matrix sit above it by construction, and it carries a
 }
 ```
 
-## Gate results
+## Gate results — measured at `d441baa`
 
-*(filled at freeze — see the packet-completion block)*
+| Gate | Result |
+|---|---|
+| `typecheck` | OK |
+| `lint` (`eslint .`) | OK |
+| `format` (`prettier --check .`) | OK |
+| `test:unit` | **155 / 155** |
+| `test:compiler` | **152 / 152** |
+| `test:integration` | **149 / 149** |
+| `test:architecture` | **177 pass, 1 fail** — the out-of-lease line-pinned press-law control; see Stops |
+| `test:postgres` **(REQUIRED)** | **216 tests, 214 pass, 2 fail** — both the inherited `composed-application.test.ts` refusals, measured at the base and unchanged |
+| `check:expected-red` (validate) | OK — 39 entries across 4 manifests still name live production text |
+| `evidence:expected-red` (this packet's 5) | **5 / 5 reproduced and restored** |
+| `check:app-release` | **RED, inherited** — `compiled application release is stale` |
+
+**Every one of this packet's three new postgres tests passes**, and the five
+other postgres files that import `inventory-posting-service.ts` —
+`inventory-backdate-policy`, `inventory-backup-restore`, `inventory-stock-count`,
+`inventory-reconciliation` and `inventory-posting` — all pass with the new
+read-back running on every posting they perform.
+
+### The inherited pair, measured rather than recalled
+
+`composed-application.test.ts` **does not import `inventory-posting-service.ts`**,
+and this packet's only production change is in that file, so the diff cannot
+reach the failing path. Both tests were then re-run **at the base commit
+`8bc097c`** in a separate worktree and fail there identically. The second names
+the cause outright: `COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED` on
+`northstar.app:relation.stock_count_line_transaction_line`.
 
 ## Stops
 
-*(none recorded yet)*
+**ONE, and it is a bridge request rather than a quiet edit.**
+
+`test:architecture` is 177 pass / 1 fail. `test/architecture/module-press-law.test.ts`
+pins a routed PRESS006 coordinate **by line number** at
+`inventory-posting-service.ts:1193`; this packet's insertions move that same
+source line to 1278. The file is **outside this packet's lease** and is held by
+no live lane, so the change was not made.
+
+The fix is one integer at `module-press-law.test.ts:484`, plus the move history
+in the comment above it.
+
+**This is the ninth move of that pin, caused by the fourth unrelated packet**
+(`PUR-2a` recorded the eighth, 1132 → 1193). Filed by `PUR-2a` as
+`press-law-splice-control-pinned-by-line-number`. Nine moves by four packets is
+the argument for **fixing the pin rather than the integer**: every packet that
+adds a line above the routed coordinate inherits an architecture red it did not
+cause and cannot fix inside its own lease.
