@@ -3559,6 +3559,14 @@ function mergeExpectedRelations(
     optional.relationColumn.nullable &&
     required.relationColumn.origin !== 'field' &&
     optional.relationColumn.origin !== 'field' &&
+    // `archiveBehavior` is stripped by `physicalShape`, so it has to be
+    // checked here or a widening would carry a differing one past the
+    // conflict branch below, which the widening skips.
+    !(
+      Object.hasOwn(required, 'archiveBehavior') &&
+      Object.hasOwn(optional, 'archiveBehavior') &&
+      required.archiveBehavior !== optional.archiveBehavior
+    ) &&
     canonicalize(
       physicalShape({
         ...required,
