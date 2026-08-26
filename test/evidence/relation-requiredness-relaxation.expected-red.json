@@ -81,7 +81,7 @@
     },
     {
       "name": "old-readers-are-told-relaxation-is-transparent",
-      "claim": "The compatibility cell states oldRead: requiresReadFallback — a reader compiled against a required relation observes a null the moment a new writer stores one, and the matrix says so.",
+      "claim": "The compatibility cell states oldRead: requiresReadFallback \u2014 a reader compiled against a required relation observes a null the moment a new writer stores one, and the matrix says so.",
       "file": "packages/compiler/src/storage.ts",
       "original": "    oldRead: 'requiresReadFallback',\n    oldWrite: 'compatible',\n  }),\n  tightenNotNull: Object.freeze({",
       "replacement": "    oldRead: 'compatible',\n    oldWrite: 'compatible',\n  }),\n  tightenNotNull: Object.freeze({",
@@ -140,6 +140,78 @@
           "file": "test/postgres/trust-substrate.test.ts",
           "name": "migrations 0006-0022 upgrade accepted G1 and converge with the checked-in snapshot",
           "expected": "physical schema differs from schema\\.snapshot\\.json"
+        }
+      ]
+    },
+    {
+      "name": "widening-inherits-the-hand-maintained-subset",
+      "claim": "A relaxation is admitted only when the WHOLE relation is otherwise identical, compared as a whole object rather than through sameRelationShape's hand-maintained subset, which omits archiveBehavior. Round-1 finding F1: inheriting that subset let the compiler emit a release its own materializer refuses at PREPARE.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "  const bridgeLegacyArchiveBehavior =\n    !Object.hasOwn(previous, 'archiveBehavior') ||\n    !Object.hasOwn(candidate, 'archiveBehavior');",
+      "replacement": "  const bridgeLegacyArchiveBehavior = true;",
+      "test": {
+        "files": ["test/compiler/g2-module-storage.test.ts"],
+        "namePattern": "also moves archiveBehavior is refused"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "a widening that also moves archiveBehavior is refused",
+          "expected": "assert\\.ok\\('diagnostic' in result\\)"
+        }
+      ]
+    },
+    {
+      "name": "renderer-check-fails-open-on-unknown-kinds",
+      "claim": "The renderer policy check is an ALLOWLIST derived from the element vocabulary, so a statement kind it does not recognise is refused rather than waved through. Round-1 finding F3: the destructive denylist admitted the four element kinds that StorageRendererStatement does not carry.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "    admitted.has(statement.kind)\n      ? []\n      : [",
+      "replacement": "    !admitted.has(statement.kind) && statement.kind !== 'someFutureUnclassifiedStatement'\n      ? []\n      : [",
+      "test": {
+        "files": ["test/compiler/g2-module-storage.test.ts"],
+        "namePattern": "renderer allowlist is derived from the element vocabulary"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-storage.test.ts",
+          "name": "the renderer allowlist is derived from the element vocabulary and fails closed",
+          "expected": "Expected values to be strictly equal|Expected values to be loosely deep-equal|strictEqual|deepEqual"
+        }
+      ]
+    },
+    {
+      "name": "provider-never-executes-the-widening",
+      "claim": "applyDdlElement really runs ALTER COLUMN ... DROP NOT NULL against PostgreSQL. Round-1 finding F2, and the reviewer's confirmed cheapest broken tree: the switch is not exhaustiveness-checked, so deleting the case leaves every other gate green while no DDL runs.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "      await client.query(\n        `ALTER TABLE north_star_module.${quoted(source.physicalTableName)}\n           ALTER COLUMN ${quoted(relation.relationColumn.physicalName)} DROP NOT NULL`,\n      );\n      return;",
+      "replacement": "      return;",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "widened by executed DDL"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released required relation is widened by executed DDL, and a mixed live-root set is tolerated",
+          "expected": "managed catalog is not attributable: altered managed column"
+        }
+      ]
+    },
+    {
+      "name": "merge-refuses-a-mixed-live-root-set",
+      "claim": "mergeExpectedRelations tolerates a requiredness widening between two accounted live roots. Round-1 finding F2: without an observing test, removing the branch left the compiler and provider disagreeing with every gate green, and the managed tables are tenant-shared so the refusal would fire fleet-wide.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "    const widening =\n      existing !== undefined &&\n      (relaxes(existing, relation) || relaxes(relation, existing));",
+      "replacement": "    const widening = false as boolean;",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "widened by executed DDL"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released required relation is widened by executed DDL, and a mixed live-root set is tolerated",
+          "expected": "conflicting live roots claim managed relation"
         }
       ]
     }
