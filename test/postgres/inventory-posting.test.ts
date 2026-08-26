@@ -4201,38 +4201,55 @@ test(
  *
  * So disabling the real trigger removes both effects at once, and the posting
  * refuses from the balance trigger before the reservation read-back is ever
- * reached — a red for the wrong reason, which certifies nothing. The
+ * reached -- a red for the wrong reason, which certifies nothing. The
  * replacement keeps the generation advance and varies exactly ONE property:
  * what, if anything, gets reserved.
+ *
+ * IT IS SPLIT ACROSS TWO TRIGGERS ON PURPOSE, and this was also measured. The
+ * real reservation trigger is named `nsm_g_...` and the balance trigger
+ * `nsm_z_...`, so the real one wins on the name ordering PostgreSQL fires
+ * same-event triggers in. A replacement named anything else may not, and the
+ * first version of this helper lost that race and reproduced the same
+ * wrong-reason red it was written to remove. The generation advance therefore
+ * runs `BEFORE INSERT`, which precedes every `AFTER INSERT` trigger BY
+ * CONSTRUCTION rather than by sorting late enough; only the companion write,
+ * which needs the movement row to exist for its foreign key, stays `AFTER`.
  */
 async function installReplacementReservation(
   database: PostingDatabase,
   reserve: 'nothing' | 'theWrongEffect',
-): Promise<string> {
+): Promise<void> {
   const fact = movementFactStorage(database);
   const companion = fact.companion;
   const columns = companion.columns.map((column) => column.name);
-  const wrongSourceLine = 'reserved-wrong-line';
   const values = columns.map((column) =>
     column === fact.fieldColumns.sourceLine
-      ? `'${wrongSourceLine}'`
+      ? `'reserved-wrong-line'`
       : `NEW.${quoted(column)}`,
   );
-  const body =
-    reserve === 'nothing'
-      ? ''
-      : `INSERT INTO ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
-             (${columns.map((column) => quoted(column)).join(', ')})
-           VALUES (${values.join(', ')});`;
   await database.adminPool.query(
     `ALTER TABLE ${table(database.binding, database.binding.movement)}
        DISABLE TRIGGER ${quoted(companion.reservationTriggerName)};
-     CREATE FUNCTION public.pwi_replacement_reservation()
+     CREATE FUNCTION public.pwi_replacement_generation()
        RETURNS trigger LANGUAGE plpgsql AS $body$
        BEGIN
-         ${body}
          PERFORM north_star_internal.advance_semantic_aggregate_generation(
            NEW.tenant_id, NEW.environment_id);
+         RETURN NEW;
+       END
+       $body$;
+     CREATE TRIGGER pwi_replacement_generation
+       BEFORE INSERT ON ${table(database.binding, database.binding.movement)}
+       FOR EACH ROW EXECUTE FUNCTION public.pwi_replacement_generation()`,
+  );
+  if (reserve === 'nothing') return;
+  await database.adminPool.query(
+    `CREATE FUNCTION public.pwi_replacement_reservation()
+       RETURNS trigger LANGUAGE plpgsql AS $body$
+       BEGIN
+         INSERT INTO ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
+           (${columns.map((column) => quoted(column)).join(', ')})
+         VALUES (${values.join(', ')});
          RETURN NEW;
        END
        $body$;
@@ -4240,7 +4257,6 @@ async function installReplacementReservation(
        AFTER INSERT ON ${table(database.binding, database.binding.movement)}
        FOR EACH ROW EXECUTE FUNCTION public.pwi_replacement_reservation()`,
   );
-  return wrongSourceLine;
 }
 
 async function removeReplacementReservation(
@@ -4250,7 +4266,10 @@ async function removeReplacementReservation(
   await database.adminPool.query(
     `DROP TRIGGER IF EXISTS pwi_replacement_reservation
        ON ${table(database.binding, database.binding.movement)};
+     DROP TRIGGER IF EXISTS pwi_replacement_generation
+       ON ${table(database.binding, database.binding.movement)};
      DROP FUNCTION IF EXISTS public.pwi_replacement_reservation();
+     DROP FUNCTION IF EXISTS public.pwi_replacement_generation();
      ALTER TABLE ${table(database.binding, database.binding.movement)}
        ENABLE TRIGGER ${quoted(companion.reservationTriggerName)}`,
   );
