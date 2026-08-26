@@ -525,7 +525,16 @@ interface PostedStockProjectionBinding {
 export type PostingWriterOrigin =
   'entityTable' | 'factCompanion' | 'factPartition' | 'triggerProjection';
 
-export interface PostingWriterRelation {
+export /**
+ * A read-back registered against a physical relation, named by REFERENCE so it
+ * cannot name something absent. `name` is read off the function object itself.
+ */
+interface PostingWriterRegistration {
+  readonly relation: string;
+  readonly verifiedBy: readonly { readonly name: string }[];
+}
+
+interface PostingWriterRelation {
   readonly origin: PostingWriterOrigin;
   readonly relation: string;
   readonly rootEntityId: string;
@@ -1458,40 +1467,43 @@ function resolvePostingStorage(
   // Each registration names the read-back that observes the relation
   // column-for-column through `assertPersistedRowVerified`.
   assertPostingWriterInventoryRegistered(writerInventory, [
-    { relation: movement.tableName, verifierId: 'readBackMovements' },
+    { relation: movement.tableName, verifiedBy: [readBackMovements] },
     // A routed row is observed by reading the PARTITIONED PARENT, which is the
     // only correct way to read one: reading a partition directly would mean
     // re-deriving the partition hash here. Detaching a partition makes the
     // parent read-back return an incomplete set, which it refuses.
     ...movementEntity.factStorage.partitioning.partitions.map((partition) => ({
       relation: partition.physicalTableName,
-      verifierId: 'readBackMovements',
+      verifiedBy: [readBackMovements],
     })),
     {
       relation: movementEffectReservation.tableName,
-      verifierId: 'assertMovementEffectReservations',
+      verifiedBy: [assertMovementEffectReservations],
     },
     {
       relation: stockCount.tableName,
-      verifierId: 'readBackStockCountEvidence',
+      verifiedBy: [readBackStockCountEvidence],
     },
     {
       relation: stockCountLine.tableName,
-      verifierId: 'readBackStockCountEvidence',
+      verifiedBy: [readBackStockCountEvidence],
     },
     {
       relation: transaction.tableName,
-      verifierId: 'assertCompanionIdentitiesPersisted+assertDraftTransaction',
+      verifiedBy: [
+        assertCompanionIdentitiesPersisted,
+        assertAuthoredTransactionPersisted,
+      ],
     },
     {
       relation: transactionLine.tableName,
-      verifierId: 'assertCompanionIdentitiesPersisted',
+      verifiedBy: [assertCompanionIdentitiesPersisted],
     },
     ...(postedStockBalanceEntity
       ? [
           {
             relation: postedStockBalanceEntity.physicalTableName,
-            verifierId: 'assertPostedStockBalancesReconcile',
+            verifiedBy: [assertPostedStockBalancesReconcile],
           },
         ]
       : []),
@@ -1734,32 +1746,47 @@ function derivePostingWriterInventory(
       },
     );
   }
-  for (const entity of written) {
+  // A TRANSITIVE CLOSURE, not one pass over the roots.
+  //
+  // Corrected after review. The first version tested each trigger edge against
+  // the ORIGINAL root set, so a trigger installed on a relation the posting
+  // reaches only THROUGH another trigger was silently skipped: writing a
+  // movement writes the balance, and a trigger installed on the balance writes
+  // something this posting also causes. Reachability is transitive and the
+  // traversal has to be too.
+  const reached = new Set<string>();
+  const pending = [...written];
+  while (pending.length > 0) {
+    const entity = pending.shift()!;
+    if (reached.has(entity.entityId)) continue;
+    reached.add(entity.entityId);
     claim(entity.physicalTableName, 'entityTable', entity.entityId);
     const fact = entity.factStorage;
-    if (!fact) continue;
-    // A partitioned insert names the parent and lands in a partition, so the
-    // partition is a relation this posting writes.
-    for (const partition of fact.partitioning.partitions) {
-      claim(partition.physicalTableName, 'factPartition', entity.entityId);
+    if (fact) {
+      // A partitioned insert names the parent and lands in a partition, so the
+      // partition is a relation this posting writes.
+      for (const partition of fact.partitioning.partitions) {
+        claim(partition.physicalTableName, 'factPartition', entity.entityId);
+      }
+      // `reservationTriggerName` is a trigger the target declares ON THIS
+      // ENTITY'S OWN TABLE, and the relation it writes is the companion it
+      // names in the same declaration.
+      claim(fact.companion.physicalTableName, 'factCompanion', entity.entityId);
     }
-    // `reservationTriggerName` is a trigger the target declares ON THIS
-    // ENTITY'S OWN TABLE, and the relation it writes is the companion it
-    // names in the same declaration.
-    claim(fact.companion.physicalTableName, 'factCompanion', entity.entityId);
-  }
-  // A projection reaches this posting only when the trigger that writes it is
-  // installed on a table this posting writes. The period-lock provisioning
-  // trigger is declared the same way and is EXCLUDED by this test rather than
-  // by an assumption: it fires on the legal-entity master, which a posting
-  // never inserts.
-  for (const projection of triggerProjections) {
-    if (!roots.has(projection.installedOnEntityId)) continue;
-    claim(
-      projection.writes.physicalTableName,
-      'triggerProjection',
-      projection.installedOnEntityId,
-    );
+    // Every edge installed on a relation reached SO FAR, including one reached
+    // by an earlier edge. The period-lock provisioning trigger is supplied to
+    // this traversal on the same footing and is EXCLUDED by this test rather
+    // than by an assumption: it fires on the legal-entity master, which a
+    // posting never reaches.
+    for (const projection of triggerProjections) {
+      if (projection.installedOnEntityId !== entity.entityId) continue;
+      claim(
+        projection.writes.physicalTableName,
+        'triggerProjection',
+        projection.installedOnEntityId,
+      );
+      pending.push(projection.writes);
+    }
   }
   return Object.freeze(inventory);
 }
@@ -1778,10 +1805,31 @@ function derivePostingWriterInventory(
  */
 function assertPostingWriterInventoryRegistered(
   inventory: ReadonlyMap<string, PostingWriterRelation>,
-  registrations: readonly { relation: string; verifierId: string }[],
+  registrations: readonly PostingWriterRegistration[],
 ): void {
   const registered = new Map<string, string>();
   for (const registration of registrations) {
+    // A registration names its verifier by passing the FUNCTION, and the id is
+    // read off that function object. Corrected after review: this was an
+    // arbitrary string, and one shipped registration named
+    // `assertDraftTransaction`, which does not exist anywhere in this file --
+    // proving the strings were decorative rather than binding. A reference
+    // cannot name a verifier that is absent, because deleting or renaming one
+    // fails to compile.
+    //
+    // WHAT THIS STILL DOES NOT PROVE, stated because the gap is the point: that
+    // the named verifier RUNS for that relation on the path a given posting
+    // takes. See `posting-writer-coverage-is-declared-not-observed`.
+    if (registration.verifiedBy.length === 0) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_INVALID',
+        'a physical relation is registered with no verifier at all',
+        { relation: registration.relation },
+      );
+    }
+    const verifierId = registration.verifiedBy
+      .map((verifier) => verifier.name)
+      .join('+');
     const existing = registered.get(registration.relation);
     if (existing !== undefined) {
       throw postingError(
@@ -1790,11 +1838,11 @@ function assertPostingWriterInventoryRegistered(
         {
           first: existing,
           relation: registration.relation,
-          second: registration.verifierId,
+          second: verifierId,
         },
       );
     }
-    registered.set(registration.relation, registration.verifierId);
+    registered.set(registration.relation, verifierId);
   }
   const unverified = [...inventory.values()]
     .filter((relation) => !registered.has(relation.relation))

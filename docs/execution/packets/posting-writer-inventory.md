@@ -169,9 +169,15 @@ reservation writer through the admin pool — the `installLineRaceBlocker`
 pattern — and disable the real one.
 
 - **A wrong reservation writer** — the replacement copies the movement
-  faithfully except one column of the five-column effect tuple. Row count,
-  foreign key and primary key are all satisfied; only the column comparison
-  catches it.
+  faithfully except one column of the five-column effect tuple. **CORRECTED
+  AFTER REVIEW: this control must SUSPEND the compiled foreign key to construct
+  its subject at all**, because that key covers all ten companion columns, so a
+  wrong effect tuple has no referent and PostgreSQL refuses it with `23503`. It
+  therefore proves the read-back compares the effect tuple INDEPENDENTLY of the
+  constraint and would still catch a wrong reservation if the compiled
+  declaration narrowed. **It is not evidence of a reachable defect today**, and
+  an earlier version of this line said the foreign key was satisfied, which was
+  false.
 - **A missing reservation writer** — the replacement reserves nothing, and the
   posting must refuse and commit no movement, no reservation, no balance, no
   document transition, no trust evidence and no receipt.
