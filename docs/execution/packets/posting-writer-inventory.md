@@ -414,6 +414,12 @@ pattern in this lane's work, not a run of slips, and it is recorded as one.
 | `test:integration` | **149 / 149** |
 | `test:architecture` | **178 tests, 177 pass, 1 fail** — the out-of-lease line-pinned press-law control; see Stops |
 | `evidence:expected-red` at round 2 | **OK — 42 reproduced and restored**, this packet's 6 among them |
+
+**Re-measured at round 2 on a quiet machine, after the F1/F2/F3 fixes:**
+`test:architecture` **178 / 177 / 1** (the out-of-lease pin alone) and
+`test:postgres` **216 / 214 / 2** (the inherited pair alone, no timeout). Both
+identical to round 1, which is what confirms the intervening third postgres
+failure was load, not tree.
 | `test:postgres` **(REQUIRED)** | **216 tests, 214 pass, 2 fail** — both the inherited `composed-application.test.ts` refusals, measured at the base and unchanged |
 | `check:expected-red` (validate) | OK — 39 entries across 4 manifests still name live production text |
 | `evidence:expected-red` (FULL manifest population) | **OK — 41 expected reds reproduced and restored**, this packet's 5 among them |
