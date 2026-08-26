@@ -337,6 +337,128 @@ enumeration sites are type-forced; the one that actually executes is not. Owed:
 a `never`-typed default, so the site that runs SQL is at least as forced as the
 site that describes it.
 
+## The declared range
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "relation-requiredness-relaxation",
+  "base": "643a5b5b6b713f02c724ba15e5de15c51209210a",
+  "head": "baabc0f6f1dc6d487e84d6d730dadad5798b6667",
+  "changedPaths": [
+    "db/migrations/0022_module_storage_relation_requiredness_relaxation.sql",
+    "db/schema.snapshot.json",
+    "packages/compiler/src/protocol.ts",
+    "packages/compiler/src/storage.ts",
+    "packages/postgres-provider/src/module-storage-materializer.ts",
+    "test/architecture/release-persistence-boundary.test.ts",
+    "test/compiler/g2-module-storage.test.ts",
+    "test/evidence/relation-requiredness-relaxation.expected-red.json",
+    "test/helpers/regenerate-schema-snapshot.ts",
+    "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/trust-substrate.test.ts"
+  ],
+  "symbols": [
+    {
+      "path": "packages/compiler/src/protocol.ts",
+      "name": "StorageTransitionElementKind"
+    },
+    {
+      "path": "packages/compiler/src/storage.ts",
+      "name": "relaxesRelationRequiredness"
+    },
+    {
+      "path": "packages/compiler/src/storage.ts",
+      "name": "sameRelationShape"
+    },
+    {
+      "path": "packages/compiler/src/storage.ts",
+      "name": "STORAGE_COMPATIBILITY_MATRIX"
+    },
+    {
+      "path": "packages/compiler/src/storage.ts",
+      "name": "classifyStorageTransitionElement"
+    },
+    {
+      "path": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "name": "applyDdlElement"
+    },
+    {
+      "path": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "name": "mergeExpectedRelations"
+    }
+  ]
+}
+```
+
 ## Gates and SHAs
 
-*(filled in at freeze — see the checkpoint block)*
+**A record cannot name its own commit**, so this names only SHAs that exist when
+it is written. The **executable candidate is
+`baabc0f6f1dc6d487e84d6d730dadad5798b6667`** — the last commit to move
+production, a test, or a manifest's executable fields. Everything above it is
+records-only, and the freeze is the branch tip, reported in the checkpoint block.
+
+Every gate below was measured at `eae25fcc73f7ca3ab416634c73a196db0e455c07`. The
+branch was then rewritten once, before any push and before any review, for the
+sole purpose of adding the `Packet:` trailer the declaration block requires of
+its head. **The tree is byte-identical across that rewrite** — both commits carry
+tree `fd56d66a0cbdde0d57d10a8ef78efafbd04421be` — so the runs below are runs of
+this tree, not of a predecessor:
+
+    $ git diff --stat eae25fc HEAD
+    (empty)
+
+| gate | result |
+|---|---|
+| `typecheck` | PASS |
+| `lint` | PASS |
+| `format` | PASS |
+| `test:unit` | 155/155 |
+| `test:compiler` | **155/155** (152 on `main`; this packet adds three) |
+| `test:integration` | 149/149 |
+| `test:architecture` | 189/189 |
+| `check:schema` | migrations 22/22 applied, 22/22 verified; schema-drift PASS |
+| `test:postgres` | **209/209** — REQUIRED here under §6's cross-layer rule |
+| `check:expected-red` (static) | OK, 18 entries across 3 manifests |
+| `check:expected-red-controls` | OK, 38 controls |
+| `evidence:expected-red` | **7/7 reproduced and restored** |
+| `scripts/check-records.sh` | PASS |
+
+`HEAD` was re-read after the long run and was unchanged across it
+(`=== HEAD at start ===` and `=== HEAD at end ===` both
+`eae25fcc73f7ca3ab416634c73a196db0e455c07`), per the shared-directory hazard
+`lanes.md` records.
+
+### The seven reds, and what each kills
+
+| entry | one property varied | kills |
+|---|---|---|
+| `relaxation-is-never-recognised` | the planner never recognises a widening | 1 — the widening test refuses instead of planning |
+| `widening-guard-admits-anything` | the shape equality always returns true | 1 — the three widening-plus-a-second-change combinations stop being refused |
+| `requiredness-leaves-the-compared-shape` | `sameRelationShape` stops comparing `nullable` | 2 — a re-tightening becomes a shape-identical no-op with no DDL, and the field-origin exclusion falls with it |
+| `field-origin-relations-are-widened-too` | the `origin: 'field'` guard is removed | 1 |
+| `old-readers-are-told-relaxation-is-transparent` | the cell's `oldRead` flattened to `compatible` | 2 |
+| `impact-reads-only-the-new-reader` | the impact derivation reads only `newRead` | 2 |
+| `migration-does-not-admit-the-new-kind` | `relaxNotNull` removed from migration `0022`'s `CHECK` | 1 — via a real schema-drift refusal against a live database |
+
+**One claim is over-determined and has no single-property killer, stated rather
+than papered over.** One-wayness is enforced by the CONJUNCTION of two guards in
+`relaxesRelationRequiredness` — deleting either alone leaves the other refusing —
+so no one-line mutation of that function kills the round-trip test.
+`requiredness-leaves-the-compared-shape` kills it from the other side, by
+removing nullability from the compared shape, which is the more dangerous
+failure anyway: it makes a re-tightening pass silently with no DDL rather than
+plan a wrong one.
+
+### What the gate set does NOT prove
+
+**No executing test covers the provider half.** `applyDdlElement`'s
+`relaxNotNull` case and `mergeExpectedRelations`' widening tolerance are
+production code with no observing gate, and `applyDdlElement`'s switch is not
+exhaustiveness-checked, so deleting the case entirely leaves every gate above
+green. `test:postgres` 209/209 proves this packet broke nothing; it does not
+prove the new DDL executes. **The DDL string has never been run against
+PostgreSQL by any test.** Bridge request in the checkpoint.
