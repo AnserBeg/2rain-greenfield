@@ -1517,12 +1517,20 @@ async function assertCountPostingRejected(
   expectedMessage: RegExp,
   victim: string,
 ): Promise<void> {
-  await assert.rejects(action, (error: unknown) => {
-    assert.ok(error instanceof InventoryPostingError, victim);
-    assert.equal(error.code, expectedCode, victim);
-    assert.match(error.message, expectedMessage, victim);
-    return true;
-  });
+  // The victim is passed as the third argument as well as inside the
+  // validator, because the validator never runs when the action does not
+  // reject at all -- and "the posting succeeded where it must refuse" is
+  // exactly the shape a control that REMOVES a refusal has to produce.
+  await assert.rejects(
+    action,
+    (error: unknown) => {
+      assert.ok(error instanceof InventoryPostingError, victim);
+      assert.equal(error.code, expectedCode, victim);
+      assert.match(error.message, expectedMessage, victim);
+      return true;
+    },
+    victim,
+  );
 }
 
 function tracingPool(pool: Pool, trace: TraceEntry[]): Pool {
