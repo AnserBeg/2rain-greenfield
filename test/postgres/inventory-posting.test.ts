@@ -4275,7 +4275,7 @@ async function installReplacementReservation(
 
 async function removeReplacementReservation(
   database: PostingDatabase,
-): Promise<void> {
+): Promise<unknown> {
   const companion = movementFactStorage(database).companion;
   await database.adminPool.query(
     `DROP TRIGGER IF EXISTS pwi_replacement_reservation
@@ -4287,9 +4287,22 @@ async function removeReplacementReservation(
      ALTER TABLE ${table(database.binding, database.binding.movement)}
        ENABLE TRIGGER ${quoted(companion.reservationTriggerName)}`,
   );
-  // Restore the composite foreign key from the COMPILED declaration rather
-  // than from a local copy, and prove it validates: the refused posting rolled
-  // its wrong row back, so a failure to re-add here would mean one survived.
+  // Restore the composite foreign key from the COMPILED declaration rather than
+  // from a local copy.
+  //
+  // THE CLEANUP IS NOT OPTIONAL, and leaving it out made a committed expected-red
+  // entry unattributable. When a mutation REMOVES the refusal this control
+  // exists to observe, the posting succeeds and its wrong reservation row
+  // COMMITS -- so re-adding the foreign key fails validation, and it fails
+  // inside `finally`, before the test's own rejection assertion ever runs. The
+  // control then reds for a foreign-key violation instead of for its declared
+  // reason, which is precisely the failure `review-tiers` calls out in "Verify
+  // why a red fired, not just that it fired".
+  //
+  // So orphaned reservations are swept first. Under normal operation the
+  // refused posting rolled its row back and this deletes nothing; when it
+  // deletes something, that IS the signal the refusal did not happen, and it is
+  // reported rather than swallowed.
   const foreignKey = companion.movementForeignKey;
   const present = await database.adminPool.query<{ present: boolean }>(
     `SELECT EXISTS (
@@ -4298,6 +4311,22 @@ async function removeReplacementReservation(
     [foreignKey.physicalName],
   );
   if (present.rows[0]?.present === true) return;
+  const orphans = await database.adminPool.query(
+    `ALTER TABLE ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
+       DISABLE TRIGGER ${quoted(companion.rejectMutationTriggerName)};
+     DELETE FROM ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)} AS reservation
+      WHERE NOT EXISTS (
+        SELECT 1 FROM ${table(database.binding, database.binding.movement)} AS movement
+         WHERE ${foreignKey.sourceColumns
+           .map(
+             (column, index) =>
+               `movement.${quoted(foreignKey.targetColumns[index]!)} = reservation.${quoted(column)}`,
+           )
+           .join('\n           AND ')}
+      );
+     ALTER TABLE ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
+       ENABLE TRIGGER ${quoted(companion.rejectMutationTriggerName)}`,
+  );
   await database.adminPool.query(
     `ALTER TABLE ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
        ADD CONSTRAINT ${quoted(foreignKey.physicalName)}
@@ -4306,6 +4335,7 @@ async function removeReplacementReservation(
          (${foreignKey.targetColumns.map((column) => quoted(column)).join(', ')})
        ON DELETE RESTRICT ON UPDATE RESTRICT`,
   );
+  return orphans;
 }
 
 /**
