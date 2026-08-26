@@ -89,6 +89,62 @@ costs a registration entry and under-listing is the failure this exists to
 prevent. Round 7's concern was a check that passes when it should fail; this
 mechanism fails when it is uncertain.
 
+## CORRECTED AFTER ROUND 1 — the edge is not declared, only the destination is
+
+Round 1 returned BLOCK on this ADR's central claim, and the finding is upheld.
+**This section overrides any sentence above that reads more strongly.**
+
+The claim was that the compiled target supplies every relation reachable from
+the kernel's write roots. It does not. **Three of the four expansions are
+genuinely target-declared, and one is not:**
+
+| expansion | what declares it | declared? |
+|---|---|---|
+| the entity's own table | `physicalTableName` | **yes** |
+| its partitions | `factStorage.partitioning.partitions[]` | **yes** |
+| its effect companion | `factStorage.companion.reservationTriggerName`, which names both the trigger and the companion it writes, on the fact storage of the source entity | **yes** |
+| the posted-stock balance | **nothing** | **NO** |
+
+For the balance, the compiled target declares only that a `posted_stock_balance`
+ENTITY exists. **Nothing in it says a trigger runs from the movement to that
+entity.** The materializer reconstructs the edge by matching entity-id suffixes
+and computing a trigger name from the balance's table name; this service
+reconstructs the same convention independently, in a hand-written list of two
+edges. *"Both are pure functions of the target"* does not make the edge
+target-declared — it makes it a convention implemented twice.
+
+**The consequence, stated as the failure rather than as a caveat:** a sixth
+materializer-installed writer can be added, on a new provider convention, without
+changing any target shape this service reads and without appearing in that list.
+That is the same omission generator this ADR was written to eliminate, one level
+up.
+
+**What round 1 DID close, and what it did not.** The traversal was also not
+transitive — it tested each edge against the original roots in one pass, so a
+relation reached only through another trigger was invisible. That is fixed and
+held by a chained-writer control. The **edge-declaration** half is not fixed and
+**cannot be fixed inside this packet's lease**: it requires one authoritative
+source-relation → trigger → destination-relation artifact in
+`packages/compiler/src/storage.ts` and
+`packages/postgres-provider/src/module-storage-materializer.ts`, both held by
+another lane. Filed as `module-writer-edges-are-convention-not-declaration`.
+
+**Until that lands, this ADR's status is: the derivation is complete over the
+expansions the target declares, and incomplete over trigger edges it does not.**
+
+## A registration proves a verifier EXISTS, not that it RUNS
+
+Also corrected after round 1. The registry originally paired each relation with
+an arbitrary string, and one shipped registration named a function that does not
+exist anywhere in the file — proof that the strings were decorative. Registrations
+now pass the verifier **function**, so naming an absent one is a compile error.
+
+**That closes "names something that isn't there". It does not close "the named
+verifier never runs for that relation on this posting's path."** The check is
+still a declaration compared against a derivation, and `AGENTS.md` §6 is explicit
+that inferring from a declaration is a proxy rather than an observation. Filed as
+`posting-writer-coverage-is-declared-not-observed`.
+
 ## What is derived, and what is NOT — the boundary of the claim
 
 **DERIVED:** given an entity the kernel writes, every physical relation that

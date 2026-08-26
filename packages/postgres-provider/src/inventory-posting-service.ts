@@ -1754,13 +1754,21 @@ function derivePostingWriterInventory(
   // movement writes the balance, and a trigger installed on the balance writes
   // something this posting also causes. Reachability is transitive and the
   // traversal has to be too.
+  //
+  // Each queued entity carries the ORIGIN by which it was reached, so a
+  // projection's table is claimed once, as a projection. Claiming it at the
+  // edge AND again on dequeue is what the first attempt at this loop did, and
+  // the duplicate guard caught it.
   const reached = new Set<string>();
-  const pending = [...written];
+  const pending: {
+    entity: StorageEntityTarget;
+    origin: PostingWriterOrigin;
+  }[] = written.map((entity) => ({ entity, origin: 'entityTable' as const }));
   while (pending.length > 0) {
-    const entity = pending.shift()!;
+    const { entity, origin } = pending.shift()!;
     if (reached.has(entity.entityId)) continue;
     reached.add(entity.entityId);
-    claim(entity.physicalTableName, 'entityTable', entity.entityId);
+    claim(entity.physicalTableName, origin, entity.entityId);
     const fact = entity.factStorage;
     if (fact) {
       // A partitioned insert names the parent and lands in a partition, so the
@@ -1780,12 +1788,7 @@ function derivePostingWriterInventory(
     // posting never reaches.
     for (const projection of triggerProjections) {
       if (projection.installedOnEntityId !== entity.entityId) continue;
-      claim(
-        projection.writes.physicalTableName,
-        'triggerProjection',
-        projection.installedOnEntityId,
-      );
-      pending.push(projection.writes);
+      pending.push({ entity: projection.writes, origin: 'triggerProjection' });
     }
   }
   return Object.freeze(inventory);

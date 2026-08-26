@@ -96,7 +96,7 @@
       "name": "derivation-stops-at-the-original-roots",
       "claim": "REACHABILITY IS NOT TRANSITIVE. Round 1's F1 found the traversal tested each trigger edge against the ORIGINAL kernel write roots in a single pass, so a relation the posting reaches only THROUGH another trigger -- movement -> balance -> anything installed on the balance -- was silently absent from the inventory and needed no verifier. This mutation removes the worklist step that extends reachability past a projection's destination, restoring exactly that single-pass behaviour. The direct cases still pass, which is the point: a control that injects storage onto an existing ROOT cannot tell the two traversals apart, so only the chained case discriminates.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "      pending.push(projection.writes);",
+      "original": "      pending.push({ entity: projection.writes, origin: 'triggerProjection' });",
       "replacement": "",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],
