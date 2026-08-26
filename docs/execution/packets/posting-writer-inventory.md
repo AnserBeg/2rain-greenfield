@@ -360,12 +360,18 @@ read-back running on every posting they perform.
 
 ### The inherited pair, measured rather than recalled
 
-`composed-application.test.ts` **does not import `inventory-posting-service.ts`**,
-and this packet's only production change is in that file, so the diff cannot
-reach the failing path. Both tests were then re-run **at the base commit
-`8bc097c`** in a separate worktree and fail there identically. The second names
-the cause outright: `COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED` on
-`northstar.app:relation.stock_count_line_transaction_line`.
+Two independent arguments, because "inherited" is a claim and not an excuse.
+
+**Non-causation by construction:** `composed-application.test.ts` **does not
+import `inventory-posting-service.ts`**, and that file is this packet's ONLY
+production change, so the diff cannot reach the failing path.
+
+**Non-causation by measurement:** the file was run **at the base commit
+`8bc097c`**, in the separate `packet/pur-2a` worktree, and returns
+**17 tests / 15 pass / 2 fail** — the same two test names, carrying
+`COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED` on
+`northstar.app:relation.stock_count_line_transaction_line`. Identical at base and
+at head; nothing about this pair changed.
 
 ## Stops
 
