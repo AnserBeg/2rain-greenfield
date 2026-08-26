@@ -1,8 +1,15 @@
-# ADR-0060: Relation requiredness relaxes, in one direction, at prepare time
+# ADR-0061: Relation requiredness relaxes, in one direction, at prepare time
 
 Date: 2026-08-26
 Status: proposed
 Tier: Critical (review per `review-tiers`)
+
+**Numbered 0061, not 0060, on purpose.** `packet/pur-2a` — the unmerged packet
+this decision exists to unblock — already carries an
+`ADR-0060-a-posting-family-declares-whether-the-kernel-writes-its-companion.md`.
+Neither is on `main`, so the collision was invisible until the two branches were
+merged; it was found by this packet's merge measurement. The lower number goes
+to the packet that reached it first.
 
 Extends [ADR-0011](ADR-0011-compiled-module-storage-transitions.md), which
 established the storage transition element vocabulary and its A2/A4

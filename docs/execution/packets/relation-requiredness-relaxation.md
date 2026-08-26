@@ -7,7 +7,7 @@ until something reconciles it, which is `review-tiers`' silent band, so full
 `AGENTS.md` §6 applies: one recorded red per vacuity vector, each varying
 exactly one property.
 
-Decision record: [ADR-0060](../../decisions/ADR-0060-relation-requiredness-relaxes-in-one-direction.md).
+Decision record: [ADR-0061](../../decisions/ADR-0061-relation-requiredness-relaxes-in-one-direction.md).
 
 ## The defect
 
@@ -202,6 +202,92 @@ byte. With `0022` present the whole diff is **one line** — the CHECK constrain
 It is deliberately not a gate, and it never reads the existing snapshot, so it
 cannot repair the file the verifier then measures — §6's
 subject-repaired-before-measured vector.
+
+## The gate-invisible deliverable — measured, and the answer is nuanced
+
+The charter asked: merge `packet/pur-2a` into this branch locally without
+committing, run `check:app-release`, and report whether it goes green.
+
+**It does not go green.** It says:
+
+    Error: compiled application release is stale;
+    run pnpm --filter @north-star/web build:app-release
+
+**And that is not this packet's failure.** The attribution was measured, not
+assumed, in four steps.
+
+**Step 1 — this branch alone.** `pnpm check:app-release` **PASSES**. So nothing
+in this packet moves the app release.
+
+**Step 2 — `packet/pur-2a` alone, on `main`'s compiler.** `pnpm check:app-release`
+**FAILS with the identical message.** The red is pre-existing on `pur-2a` and
+reproduces with this packet nowhere in the tree.
+
+**Step 3 — why.** `pur-2a`'s only change to `apps/web/release/app.authored.json`
+is two lines:
+
+    "relationId": "northstar.app:relation.stock_count_transaction",
+    -  "required": true,
+    +  "required": false,
+
+    "relationId": "northstar.app:relation.stock_count_line_transaction_line",
+    -  "required": true,
+    +  "required": false,
+
+It did not regenerate `app.compiled.json` alongside them — **because on `main` it
+cannot.** Running the compile (write) path on `pur-2a` with `main`'s compiler
+returns, verbatim:
+
+    Error: composed application release did not compile:
+    [{"acceptedAlternative":"preserve the complete existing physical relation
+      shape or add a distinct optional relation through the v1 additive path",
+      "code":"COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED",
+      "path":"$.relations","phase":"postLoweringValidation",
+      "rule":"v1 rejects mutation or removal of an existing relation physical
+      shape, requiredness, ownership, target, or referential action",
+      "subjectId":"northstar.app:relation.stock_count_line_transaction_line"}]
+
+That is this packet's chartered defect, quoted back by the real application,
+naming a real relation, and offering the second-column alternative verbatim.
+
+**Step 4 — the merged tree.** The same compile **SUCCEEDS**, and its transition
+envelope is exactly:
+
+| kind | subject | coexistenceImpact |
+|---|---|---|
+| `relaxNotNull` | `northstar.app:relation.stock_count_transaction` | `requiresReadFallback` |
+| `relaxNotNull` | `northstar.app:relation.stock_count_line_transaction_line` | `requiresReadFallback` |
+
+Two elements, no others, and `tighteningDebt: []`. The element carries the cell
+ADR-0061 declares, read back out of the produced artifact rather than asserted:
+`preApprovalInert` / `catalogOnly` / `boundedCatalogLock` / `additive`, with
+`oldRead: "requiresReadFallback"`. Re-running `check:app-release --check` against
+that regenerated release then **PASSES**.
+
+**So the unblocking is real and the residual red is a regeneration `pur-2a`
+owes.** `apps/web/**` is explicitly out of this packet's scope, so
+`app.compiled.json` was deliberately not regenerated here; every measurement
+above used `NORTH_STAR_APP_COMPILED_PATH` against a scratch copy and the tracked
+file is byte-identical to `main`.
+
+**The finding worth carrying forward is about the gate, not the packet.**
+`check:app-release --check` compares bytes and never compiles — `mustCompile`
+sits inside `if (!authoredIsCurrent && !checkOnly)`. So for a lineage the
+compiler REFUSES to advance, `--check` reports "stale", which reads as a missing
+regeneration rather than as a refusal. The two are indistinguishable from the
+gate's output, and they need opposite responses: one is `pnpm build:app-release`,
+the other is a compiler packet. **`pur-2a` spent its time under a message that
+named neither cause.**
+
+## A collision found only by merging: two ADR-0060s
+
+`packet/pur-2a` carries
+`docs/decisions/ADR-0060-a-posting-family-declares-whether-the-kernel-writes-its-companion.md`.
+This packet had also taken 0060. Neither is on `main`, so nothing in either tree
+could see the other; the merge measurement above is what surfaced it. **This
+packet renumbered to ADR-0061** — `pur-2a` reached 0060 first and is the packet
+this one exists to unblock. Numbers are claimed against `main`, and `main` is
+blind to unmerged branches, so this will recur.
 
 ## What this packet does NOT claim
 
