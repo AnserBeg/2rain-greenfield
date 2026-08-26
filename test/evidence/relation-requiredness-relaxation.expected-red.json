@@ -163,10 +163,10 @@
     },
     {
       "name": "renderer-check-fails-open-on-unknown-kinds",
-      "claim": "The renderer policy check is an ALLOWLIST derived from the element vocabulary, so a statement kind it does not recognise is refused rather than waved through. Round-1 finding F3: the destructive denylist admitted the four element kinds that StorageRendererStatement does not carry.",
+      "claim": "The renderer policy check refuses a statement kind it does not recognise. Recalibrated after the round-2 review: the first mutation refused every CURRENT element kind, so it died on the admission assertion and never reached the fail-closed claim -- it proved the opposite property. This one admits ONLY the sentinel, leaving every other kind's disposition unchanged, so the unknown-kind assertion is the assertion that dies.",
       "file": "packages/compiler/src/storage.ts",
       "original": "    admitted.has(statement.kind)\n      ? []\n      : [",
-      "replacement": "    !admitted.has(statement.kind) && statement.kind !== 'someFutureUnclassifiedStatement'\n      ? []\n      : [",
+      "replacement": "    admitted.has(statement.kind) ||\n    statement.kind === 'someFutureUnclassifiedStatement'\n      ? []\n      : [",
       "test": {
         "files": ["test/compiler/g2-module-storage.test.ts"],
         "namePattern": "renderer allowlist is derived from the element vocabulary"
@@ -175,7 +175,7 @@
         {
           "file": "test/compiler/g2-module-storage.test.ts",
           "name": "the renderer allowlist is derived from the element vocabulary and fails closed",
-          "expected": "Expected values to be strictly equal|Expected values to be loosely deep-equal|strictEqual|deepEqual"
+          "expected": "someFutureUnclassifiedStatement"
         }
       ]
     },

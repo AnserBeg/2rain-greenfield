@@ -182,9 +182,15 @@ refused); 'A2/A4 classification axes and compatibility carve-outs are exact'
 (the cell, the impact, and the emptiness of `oldRead: 'requiresReadFallback'`
 across every other kind).
 
-`test/evidence/relation-requiredness-relaxation.expected-red.json` — seven
+`test/evidence/relation-requiredness-relaxation.expected-red.json` — **eleven**
 recorded reds, each varying one property, reproduced by
-`pnpm evidence:expected-red`.
+`pnpm evidence:expected-red`. Four were added at round 2 for the findings that
+review returned, and two of those run against a live database: deleting the
+`applyDdlElement` case produces `CATALOG_DRIFT`, and removing the merge
+tolerance produces `LIVE_SET_SHAPE_CONFLICT`. **This line said "seven" for one
+round after the count moved** — a stale record the round-2 reviewer caught, and
+the reason the count is now stated with what each new entry kills rather than as
+a bare number.
 
 The load-bearing sweep in Context above was run against the compiler's own
 lowering rather than inferred from the schema.

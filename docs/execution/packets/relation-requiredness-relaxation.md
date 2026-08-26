@@ -502,9 +502,33 @@ tip `8226279…` and reviewed there. **That review is void** — round 2 changes
 production, so §4's new-SHA rule applies and this is a fresh candidate rather
 than a continuation.
 
-Every gate below was measured at `a0a6cd183d3e795572cba19286b6b09fd93b9046`,
-with `HEAD` re-read after the run and unchanged across it, per the
-shared-directory hazard `lanes.md` records.
+**This is the FREEZE-CANDIDATE gate set, not the full CI matrix, and the
+distinction is a rule rather than an omission.** `git-workflow`, "The matrix runs
+AFTER review converges, not before it — ruled 2026-08-14", sequences it: cheap
+gates, then the packet's blast-radius suites, then **freeze and review at that
+SHA**, then **one full matrix, once, at the SHA that will integrate**. That
+ruling states its own reconciliation with `AGENTS.md` §6 — *"§6 is satisfied
+exactly as written: it requires the matrix green at the INTEGRATED SHA and has
+never required one before review"* — and states what a freeze means under it:
+*"gates and blast-radius suites green, and this is the SHA under review. It no
+longer implies matrix-green."* It was measured, not asserted: two lanes burned a
+full matrix on candidates a REVISE then superseded. The precedent is on the
+ledger — `posting-error-shape` recorded *"Full matrix deliberately deferred to
+post-review integration per `git-workflow`."*
+
+**Not yet run, and named rather than left to inference:** `test:browser`, the
+dependency and secret scans, `check:reachability`, and the observability
+producer. Those belong to step 4, at the integrated SHA.
+
+**Where the gates were measured, stated exactly.** The suites below ran at
+`a0a6cd183d3e795572cba19286b6b09fd93b9046`, with `HEAD` re-read after the run
+and unchanged across it. **`format` and `test:architecture` were then re-run at
+the frozen tip**, because §6's 2026-08-24 correction says those two cannot carry
+past a narrative commit — `test:architecture` reads `docs/**`, so a narrative
+commit changes its input. The round-2 record originally said only *"every gate
+below was measured at `a0a6cd…`"*, which contradicted what had actually been
+run; the round-2 reviewer caught the contradiction, and this paragraph is the
+correction rather than a quiet repair.
 
 | gate | round 1 | round 2 |
 |---|---|---|

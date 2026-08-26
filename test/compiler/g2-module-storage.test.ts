@@ -1559,7 +1559,31 @@ test('the renderer allowlist is derived from the element vocabulary and fails cl
   ]) {
     assert.ok(admitted.includes(kind));
   }
-  // An unrecognised kind is REFUSED rather than waved through.
+  // Every name the retired six-kind DENYLIST refused is still refused, stated
+  // literally rather than left to follow from "not a matrix key". Replacing a
+  // denylist with an allowlist is only safe if nothing it used to catch escapes.
+  const destructive = [
+    'deleteCapableRule',
+    'deleteCapableTrigger',
+    'dropBusinessObject',
+    'onDeleteCascade',
+    'removePartition',
+    'truncateTable',
+  ] as const;
+  assert.deepEqual(
+    validateStorageRendererStatements(
+      destructive.map((kind) => ({ kind }) as StorageRendererStatement),
+    ).map(({ code, subjectId }) => ({ code, subjectId })),
+    destructive.map((kind) => ({
+      code: 'COMPILER_DESTRUCTIVE_STORAGE_DDL_UNSUPPORTED',
+      subjectId: kind,
+    })),
+  );
+
+  // An unrecognised kind is REFUSED rather than waved through. This is the
+  // fail-closed claim, and it is the assertion the manifest's mutation must
+  // kill -- the round-2 review found the first version killing the admission
+  // assertion above instead, which proves the opposite property.
   const unknown = validateStorageRendererStatements([
     { kind: 'createTable' },
     {
