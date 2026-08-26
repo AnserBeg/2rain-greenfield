@@ -247,7 +247,7 @@ matrix sit above it by construction, and it carries a
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-writer-inventory",
   "base": "8bc097cdd6402388d80911db004590e335a6d5c6",
-  "head": "90dd6a616a8ee1e441a811ce3866bc4e042d95df",
+  "head": "9f91a709254b7fe88de2946bb4892166d19621b8",
   "changedPaths": [
     "packages/postgres-provider/src/inventory-posting-service.ts",
     "test/evidence/posting-writer-inventory.expected-red.json",
@@ -341,6 +341,14 @@ matrix sit above it by construction, and it carries a
     {
       "path": "test/postgres/inventory-posting.test.ts",
       "name": "effectRaceLockKey"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "moduleWriteCounters"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "assertObservedWriteSetIsDerived"
     }
   ]
 }
@@ -422,6 +430,25 @@ closed by a different route than the reviewer proposed.
 relation it is registered against. Observation proves the relation was written
 and is derived; it does not prove a read-back compared its columns.
 
+### A control of this packet's own was a SURVIVOR, and the run caught it
+
+`an-empty-observation-passes-silently` removed the empty-observation refusal and
+**the suite stayed green** — because the undeclared-writer control does not
+produce an empty observation, so the guard it was meant to hold was never
+exercised. **A mutation that stays green holds nothing.** Shipping it would have
+certified the guard while testing something else entirely.
+
+Rebuilding it needed a measurement first: **`ALTER SYSTEM SET track_counts = off`
+does NOT empty `pg_stat_xact_user_tables`** — those counters are backend-local,
+so the backstop survives that misconfiguration and **no operator setting can
+reach the empty case.** The guard therefore defends against a defect in the
+observer itself, and the control has to induce one: the schema filter is sent
+looking for a schema that does not exist, with the bound parameter kept
+referenced (dropping it would red with `42P18`, the wrong reason). The control
+then dies by refusing for the EMPTY reason rather than the UNDECLARED one, which
+is exactly what separates an observer that saw nothing from one that saw the
+writer.
+
 ### Three things this round got wrong, all found by running rather than reading
 
 1. The first closure claimed a projection's table twice — once at the edge, once
@@ -452,11 +479,16 @@ pattern in this lane's work, not a run of slips, and it is recorded as one.
 | `test:architecture` | **178 tests, 177 pass, 1 fail** — the out-of-lease line-pinned press-law control; see Stops |
 | `evidence:expected-red` at round 2 | **OK — 42 reproduced and restored**, this packet's 6 among them |
 
-**Re-measured at round 2 on a quiet machine, after the F1/F2/F3 fixes:**
-`test:architecture` **178 / 177 / 1** (the out-of-lease pin alone) and
-`test:postgres` **216 / 214 / 2** (the inherited pair alone, no timeout). Both
-identical to round 1, which is what confirms the intervening third postgres
-failure was load, not tree.
+**FINAL round-2 matrix, measured with container cleanup between suites:**
+`test:unit` 155/155, `test:compiler` 152/152, `test:integration` 149/149,
+`test:architecture` **178 / 177 / 1** (the out-of-lease pin alone),
+`test:postgres` **217 / 215 / 2** (the inherited pair alone),
+`evidence:expected-red` **OK — 44 reproduced and restored**, all eight of this
+packet's among them, `check:expected-red-controls` OK (38).
+
+Architecture and postgres are identical to round 1 apart from this packet's own
+added test, which is what confirms the intervening third postgres failure was
+machine load rather than the tree.
 | `test:postgres` **(REQUIRED)** | **216 tests, 214 pass, 2 fail** — both the inherited `composed-application.test.ts` refusals, measured at the base and unchanged |
 | `check:expected-red` (validate) | OK — 39 entries across 4 manifests still name live production text |
 | `evidence:expected-red` (FULL manifest population) | **OK — 41 expected reds reproduced and restored**, this packet's 5 among them |
