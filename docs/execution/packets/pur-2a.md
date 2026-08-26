@@ -224,6 +224,111 @@ test read only the `correction` role's companion type while the mutation moved
 the `count` role's. The test now reads both, so each declared role binding is
 observed by something.
 
+## Round 8 — the seventh writer, and coverage that was an allowlist
+
+Both findings were Critical, both were verified against the tree, and one of
+them says the round-7 mechanism did not do what its own comment claimed.
+
+**F17, and it is a correction of this record.** Round 7 shipped coverage as a
+hand-written `string[]` standing beside the comparisons, and this record said
+it refused "a comparison quietly dropped". It did not. It asked one question —
+does the persisted row carry a column the list omits — so deleting a comparison
+and leaving its name in the list passed, an empty observation passed (no extra
+columns, therefore no refusal), and a partial one passed. It authenticated an
+allowlist.
+
+**Round 7's declared limit was also wrong, and the reviewer showed how.** This
+record said the control "cannot be built the other way round: with full
+coverage and correct values there is nothing for a mutation that disables the
+mechanism to kill." That is only true while coverage is a list of names. Make
+coverage EXECUTABLE and the same mutation has something to kill.
+
+So it is. `verified(column, held, reason)` and `preserved(column, prior,
+current, reason)` each carry the column they were evaluated on: the comparison
+and its coverage are one value, and there is no name to leave behind. What
+`assertPersistedRowVerified` asserts is now an EQUALITY between two sets —
+
+    columns the row actually carries
+      = columns an executed proof verified or preserved
+        + generated columns whose SOURCE an executed proof covered
+
+— and both directions refuse. A column the row carries and no proof covers is
+an unobserved write. A column a proof covers and the row does not carry means
+the OBSERVATION was narrowed, and that is refused rather than read as full
+coverage. Three controls hold it: `a-verifier-stops-comparing-a-column`
+deletes a proof with every value still correct,
+`a-read-back-observes-a-partial-row` replaces a whole-row observation with an
+empty object with every comparison still in place, and
+`a-generated-column-loses-its-source-proof` removes a source proof and requires
+the column derived from it to lose its admission in the same breath — the
+conditional half round 7 disclosed as uncontrolled.
+
+**`preserved` is self-enforcing in the direction that matters.** A column the
+writer DOES write cannot be quietly reclassified as unwritten, because the
+write makes the preservation comparison fail and the posting refuses. That
+replaced round 7's weakest argument: the authored header accounted for nine
+columns by pointing at its compare-and-set `WHERE` clause, and a clause that
+pinned a column BEFORE the write says nothing about the row after it. Every
+one of them is now proved identical to a snapshot taken under the same row lock
+the writer holds.
+
+**F16 — a movement insert is not one write.** An `AFTER INSERT` trigger on the
+movement table upserts the browsable posted-stock balance in the same
+transaction. The only thing observing it was its own `ROW_COUNT` — a mutating
+statement reporting on itself, which this packet had already rejected as
+evidence for the headers it writes directly. So a wrong-but-valid balance
+committed on a SUCCESSFUL posting: a correct movement read-back, correct
+evidence, a receipt, and a wrong browsable row that stayed silent until
+reconciliation independently recomputed it. That is the same
+silent-until-reconciled class this packet declares Band A for; it was simply
+outside the six writers the round-7 sweep enumerated.
+
+`capturePostedStockBalances` snapshots every affected identity under the stock
+identity locks the posting has held since before any work, and
+`assertPostedStockBalancesReconcile` runs after the movements are read back and
+BEFORE any trust document or receipt is written. It recomputes the ledger from
+the movement rows themselves — so a balance that was ALREADY divergent before
+this posting is caught too, not just a wrong delta — proves the row identity
+against an independently written derivation rather than the trigger's own,
+requires the revision to have advanced exactly once per movement appended, and
+counts the projection's rows so a balance written for an identity this posting
+never touched cannot hide from a per-identity lookup.
+
+**The refusal is operator-visible and it is tested.** `stock-count posted-stock
+projection: a balance that does not equal the movement ledger refuses the
+posting` proves both halves: a projection corrupted before the posting refuses
+the posting that adds to it, and a projection whose trigger did not run refuses
+too. Without that test the whole mechanism was unheld — nothing else in the
+suite observes the balance at post time — which is why
+`posted-balance-verification-removed-at-the-binding` exists: it resolves the
+projection binding to null and the test must red.
+
+**Three controls mutate the trigger itself**, because proving the verifier
+catches a wrong trigger by mutating the verifier proves only that the verifier
+runs: `posted-balance-accumulation-replaced-by-assignment` (invisible on the
+row-creating posting, wrong on every later one, and the trigger still reports
+one affected row), `posted-balance-revision-advances-by-two` (the quantity
+stays exactly right, so this is the fact the ledger recomputation CANNOT catch
+and the revision proof must), and
+`posted-balance-identity-drops-the-location-dimension` (two locations for one
+item collapse onto one identity, which a single-location run cannot see by
+comparing dimensions).
+
+**Fence disclosure.** Those three name
+`packages/postgres-provider/src/module-storage-materializer.ts`, which this
+packet does not own. They are MEASUREMENTS: the runner applies each, measures
+the red, and restores the file, and the committed tree carries no delta there.
+Stated here rather than left implicit.
+
+**What is still not row-complete, stated rather than implied.** A successful
+posting also writes platform-plane rows — the trust and evidence documents, the
+semantic-operation receipt, and the aggregate-generation advance the movement
+table's other `AFTER INSERT` trigger performs. None of them is observed by a
+row-complete read-back, and none is in this packet's owned paths. The claim
+this packet makes is therefore the MODULE plane: every module row a posting
+writes, directly or through a trigger, is compared column-for-column before the
+posting commits. Filed as `posting-platform-plane-writes-not-row-complete`.
+
 ## Round 7 — the class, not its seventh field
 
 **F15, Critical, verified:** the movement relied on the column default for its
@@ -242,10 +347,13 @@ compared against the row it verified.
 `to_jsonb` of the row it verified and declares the columns it actually
 COMPARED; any column the row carries that the verifier does not account for
 fails the posting. **Applied to all six direct writers** — companion header,
-companion lines, movement, authored header, source header, source lines. A
-column added to an entity, or a comparison quietly dropped, is now refused at
-posting time instead of found by the next reviewer, and
-`a-verifier-stops-accounting-for-a-column` holds exactly that.
+companion lines, movement, authored header, source header, source lines.
+
+**Two claims in that paragraph were false and round 8 proved both.** "A
+comparison quietly dropped" was NOT refused — the declaration was a separate
+`string[]`, so deleting a comparison and leaving its name behind passed. And
+"all six direct writers" was the wrong denominator: a movement insert fires a
+trigger that writes a seventh row, which no read-back observed at all.
 
 **The accounted list is deliberately NOT derived from the compiled binding.**
 Deriving both the row and its coverage from one source would make a shared
@@ -259,12 +367,17 @@ itself compared — because comparing one would be comparing the database to
 itself, and admitting one unconditionally would be a hole in the mechanism that
 closes the hole.
 
-**Declared limit of the class control.** It proves that REMOVING coverage
-fails the posting. It cannot be built the other way round: with full coverage
-and correct values there is nothing for a mutation that disables the mechanism
-to kill. The generated-column admission likewise has no committed control for
-its conditional half; what is held is that removing the admission entirely
-breaks correct postings.
+**Declared limit of the class control — WRONG, and round 8 showed how.** This
+paragraph used to say the control "cannot be built the other way round: with
+full coverage and correct values there is nothing for a mutation that disables
+the mechanism to kill." That holds only while coverage is a list of NAMES.
+Make coverage executable and the disabling mutation has something to kill;
+`a-read-back-observes-a-partial-row` and
+`posted-balance-verification-removed-at-the-binding` are both built that way.
+The generated-column admission's conditional half, likewise disclosed here as
+uncontrolled, is now held by `a-generated-column-loses-its-source-proof`. See
+the round-8 section above; everything in this section about the mechanism
+itself is SUPERSEDED by it.
 
 ## Round 6 — the AUTHORED header, and a control masked by a uniqueness collision
 
@@ -641,12 +754,19 @@ The head below is the final EXECUTABLE-evidence commit and carries
 `Packet: pur-2a`. Each path was re-read from `git diff` against the base; each
 symbol re-checked as a top-level declaration at that head.
 
+**Round 8 note on the path roster.** Three expected-red entries name
+`packages/postgres-provider/src/module-storage-materializer.ts`, which is NOT
+in the roster below and must not be: those mutations are measurements the
+runner applies and restores, so the file carries no delta at this head. The
+roster records what the packet CHANGED, and disclosure of what it transiently
+mutates lives in the round-8 section and in each entry's own claim.
+
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "pur-2a",
   "base": "2908e7faff74386bfef07abe741609fa0c76be24",
-  "head": "8010eafc000c79630ed3e8adb13e7cf79243255e",
+  "head": "4aa64dc96d1cdcec10908066cd98d55e94c70776",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "packages/compiler/src/conformance.ts",
@@ -697,6 +817,42 @@ symbol re-checked as a top-level declaration at that head.
     {
       "path": "packages/postgres-provider/src/inventory-posting-service.ts",
       "name": "ResolvedPostingFamily"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "assertPersistedRowVerified"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "verified"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "preserved"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "preservedColumns"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "capturePostedStockBalances"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "assertPostedStockBalancesReconcile"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "postedStockBalanceIdentitySql"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "PostedStockProjectionBinding"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "StockCountEvidenceCapture"
     },
     {
       "path": "test/postgres/inventory-stock-count.test.ts",

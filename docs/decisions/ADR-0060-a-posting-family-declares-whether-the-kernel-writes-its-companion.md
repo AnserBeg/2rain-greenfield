@@ -219,6 +219,20 @@ catalog arrives as a compiled projection, and `PUR-2` still owes the proof that
 the ROSTER is the exact active-release artifact, as the storage target already
 is.
 
+**Nothing here is claimed about the platform plane — added in review round
+8.** This ADR's verification rule is that every MODULE row a posting writes is
+compared column-for-column against an executed proof before the posting
+commits, and that the set of columns proved must EQUAL the set the row carries.
+Round 8 established that the writer inventory has to be taken from every
+synchronous effect on the tables a posting touches, not from the SQL statements
+the kernel issues: an `AFTER INSERT` trigger maintaining the posted-stock
+projection is a writer, and the rule now covers it. It does NOT cover the trust
+documents, the semantic-operation receipt, or the aggregate-generation advance.
+Those belong to the platform contract, and whether they adopt this rule or
+carry their own is open as
+`posting-platform-plane-writes-not-row-complete`. **A reader must not restate
+this ADR as "every write is read back".**
+
 **Nothing here is claimed about goods receipt.** The mechanism is proven on one
 companion-origin family. A second family is how a mechanism is tested, and
 §7.16's whole point is that a mechanism whose nominated second family refutes
