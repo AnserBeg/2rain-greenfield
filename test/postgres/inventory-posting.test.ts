@@ -4007,6 +4007,509 @@ function bindingRelationToTransaction(binding: TestStorageBinding): string {
   return relations[0]!.relationColumn.physicalName;
 }
 
+function requiredTargetEntity(
+  target: StorageTargetPayloadV1,
+  suffix: string,
+): StorageEntityTarget {
+  const matches = target.entities.filter((candidate) =>
+    candidate.entityId.endsWith(`:entity.${suffix}`),
+  );
+  assert.equal(matches.length, 1, `expected exactly one ${suffix} entity`);
+  return matches[0]!;
+}
+
+function movementFactStorage(
+  database: PostingDatabase,
+): NonNullable<StorageEntityTarget['factStorage']> {
+  const fact = requiredTargetEntity(
+    database.binding.storageTarget,
+    'inventory_movement',
+  ).factStorage;
+  assert.ok(fact, 'the compiled movement entity carries no fact storage');
+  return fact;
+}
+
+async function activeBalanceCount(database: PostingDatabase): Promise<number> {
+  const balance = requiredTargetEntity(
+    database.binding.storageTarget,
+    'posted_stock_balance',
+  );
+  const result = await database.adminPool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM ${quoted(database.binding.schemaName)}.${quoted(balance.physicalTableName)}
+      WHERE ${quoted(balance.archive.archivedAtColumn)} IS NULL`,
+  );
+  return Number(result.rows[0]?.count ?? '-1');
+}
+
+test(
+  'posting writer inventory: a relation the compiled target reaches with no registered read-back refuses at construction',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      // The real target constructs. Every relation the derivation names --
+      // each written entity's table, the movement's partitions, its
+      // effect-reservation companion, and the balance the declared projection
+      // trigger writes -- carries a registered read-back.
+      assert.doesNotThrow(
+        () =>
+          new PostgresInventoryPostingService(
+            database.runtimePool,
+            database.registration,
+            { currentInstant: () => recordedAt },
+          ),
+      );
+
+      // Now declare append-only fact storage on a SECOND entity this posting
+      // writes, carrying physical names of its own. Nothing in the kernel
+      // changes. The compiled target now says that writing an
+      // `inventory_transaction` also reaches partitions and an
+      // effect-reservation companion, and no read-back observes any of them.
+      //
+      // This is the whole claim of the packet, exercised: the inventory is
+      // DERIVED from the compiled declaration, so a writer the target grows
+      // is refused without anyone remembering to add it to a list.
+      const target = structuredClone(
+        database.registration.storageTarget,
+      ) as StorageTargetPayloadV1;
+      const movement = requiredTargetEntity(target, 'inventory_movement');
+      const transaction = requiredTargetEntity(target, 'inventory_transaction');
+      const injected = structuredClone(movement.factStorage!);
+      injected.companion.physicalTableName = 'nsm_t_pwi_unverified_companion';
+      injected.partitioning = {
+        ...injected.partitioning,
+        partitions: injected.partitioning.partitions.map(
+          (partition, index) => ({
+            ...partition,
+            physicalTableName: `nsm_t_pwi_unverified_partition_${String(index)}`,
+          }),
+        ),
+      };
+      transaction.factStorage = injected;
+
+      assert.throws(
+        () =>
+          new PostgresInventoryPostingService(
+            database.runtimePool,
+            { ...database.registration, storageTarget: target },
+            { currentInstant: () => recordedAt },
+          ),
+        (error: unknown) => {
+          assert.equal(
+            observePostingError(
+              testContext,
+              'writer-inventory-unverified-relation',
+              error,
+              'INVENTORY_POSTING_STORAGE_INVALID',
+            ),
+            true,
+          );
+          assert.match(
+            String(error),
+            /reaches physical relations no read-back verifies/u,
+          );
+          // Named individually, because an operator reading the refusal needs
+          // to know WHICH relation is unobserved, not merely that one is.
+          assert.match(String(error), /nsm_t_pwi_unverified_companion/u);
+          assert.match(String(error), /nsm_t_pwi_unverified_partition_0/u);
+          return true;
+        },
+      );
+    });
+  },
+);
+
+test(
+  'posting writer inventory: the movement effect reservation is observed before the posting commits',
+  { timeout: 300_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      await assertAbsentEffectReservationRefuses(testContext, database);
+      await assertWrongEffectReservationRefuses(testContext, database);
+    });
+  },
+);
+
+/**
+ * The reservation trigger is DISABLED, so the movement inserts and reserves
+ * nothing. The foreign key runs companion -> movement `ON DELETE RESTRICT`, so
+ * a movement with no reservation row violates no constraint: without this
+ * read-back the posting commits, and the `23505` raced-replay refusal that
+ * depends on the reservation is silently unreachable for that effect.
+ */
+async function assertAbsentEffectReservationRefuses(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const reservationTrigger =
+    movementFactStorage(database).companion.reservationTriggerName;
+  const posting = command({
+    legalEntityId: legalReject,
+    sourceId: 'reservation-absent',
+  });
+  await seedDraft(database, posting);
+  const trustBefore = await trustCountByRequest(
+    database,
+    database.context.requestId,
+  );
+  const balanceBefore = await activeBalanceCount(database);
+  await database.adminPool.query(
+    `ALTER TABLE ${table(database.binding, database.binding.movement)}
+       DISABLE TRIGGER ${quoted(reservationTrigger)}`,
+  );
+  let outcome: PostingOutcome;
+  try {
+    outcome = await settlePosting(
+      database.service.postAdjustment(
+        database.context,
+        database.actor,
+        posting,
+      ),
+    );
+  } finally {
+    await database.adminPool.query(
+      `ALTER TABLE ${table(database.binding, database.binding.movement)}
+         ENABLE TRIGGER ${quoted(reservationTrigger)}`,
+    );
+  }
+  assertRejectedPosting(
+    testContext,
+    'reservation-absent',
+    outcome,
+    'INVENTORY_POSTING_STORAGE_REJECTED',
+  );
+  assert.match(
+    String(outcome.status === 'rejected' ? outcome.reason : ''),
+    /did not reserve exactly one natural effect for each movement/u,
+  );
+  // The refusal rolls the whole posting back: no movement, no reservation, no
+  // balance, no document transition, no trust evidence and no receipt.
+  assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+  assert.equal(await companionCount(database), 0);
+  assert.equal(await activeBalanceCount(database), balanceBefore);
+  assert.deepEqual(await transactionState(database, posting.transactionId), {
+    revision: 1,
+    state: enumOption(
+      field(database.binding.transaction, 'inventory_transaction_state'),
+      'draft',
+    ),
+  });
+  assert.equal(
+    await trustCountByRequest(database, database.context.requestId),
+    trustBefore,
+  );
+  assert.equal(await receiptCountByKey(database, posting.idempotencyKey), 0);
+}
+
+/**
+ * A reservation writer that reserves the WRONG natural effect. The real
+ * trigger is disabled and a replacement installed through the admin pool --
+ * the pattern `installLineRaceBlocker` already uses -- which copies the
+ * movement faithfully except for one column of the five-column effect tuple.
+ *
+ * The row count is right, the foreign key holds, and the primary key is
+ * satisfied. Only a column-for-column comparison catches it: the effect that
+ * is reserved is not the effect that was posted, so a second posting of the
+ * REAL effect would find nothing reserved and commit a duplicate.
+ */
+async function assertWrongEffectReservationRefuses(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const fact = movementFactStorage(database);
+  const companion = fact.companion;
+  const columns = companion.columns.map((column) => column.name);
+  const wrongSourceLine = 'reserved-wrong-line';
+  const values = columns.map((column) =>
+    column === fact.fieldColumns.sourceLine
+      ? `'${wrongSourceLine}'`
+      : `NEW.${quoted(column)}`,
+  );
+  const posting = command({
+    legalEntityId: legalReject,
+    sourceId: 'reservation-wrong',
+  });
+  await seedDraft(database, posting);
+  const trustBefore = await trustCountByRequest(
+    database,
+    database.context.requestId,
+  );
+  const balanceBefore = await activeBalanceCount(database);
+  await database.adminPool.query(
+    `ALTER TABLE ${table(database.binding, database.binding.movement)}
+       DISABLE TRIGGER ${quoted(companion.reservationTriggerName)};
+     CREATE FUNCTION public.pwi_wrong_reservation()
+       RETURNS trigger LANGUAGE plpgsql AS $body$
+       BEGIN
+         INSERT INTO ${quoted(database.binding.schemaName)}.${quoted(companion.physicalTableName)}
+           (${columns.map((column) => quoted(column)).join(', ')})
+         VALUES (${values.join(', ')});
+         RETURN NEW;
+       END
+       $body$;
+     CREATE TRIGGER pwi_wrong_reservation
+       AFTER INSERT ON ${table(database.binding, database.binding.movement)}
+       FOR EACH ROW EXECUTE FUNCTION public.pwi_wrong_reservation()`,
+  );
+  let outcome: PostingOutcome;
+  try {
+    outcome = await settlePosting(
+      database.service.postAdjustment(
+        database.context,
+        database.actor,
+        posting,
+      ),
+    );
+  } finally {
+    await database.adminPool.query(
+      `DROP TRIGGER IF EXISTS pwi_wrong_reservation
+         ON ${table(database.binding, database.binding.movement)};
+       DROP FUNCTION IF EXISTS public.pwi_wrong_reservation();
+       ALTER TABLE ${table(database.binding, database.binding.movement)}
+         ENABLE TRIGGER ${quoted(companion.reservationTriggerName)}`,
+    );
+  }
+  assertRejectedPosting(
+    testContext,
+    'reservation-wrong-effect',
+    outcome,
+    'INVENTORY_POSTING_STORAGE_REJECTED',
+  );
+  assert.match(
+    String(outcome.status === 'rejected' ? outcome.reason : ''),
+    /does not reserve the natural effect this posting claimed/u,
+  );
+  assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+  assert.equal(await companionCount(database), 0);
+  assert.equal(await activeBalanceCount(database), balanceBefore);
+  assert.equal(
+    await trustCountByRequest(database, database.context.requestId),
+    trustBefore,
+  );
+  assert.equal(await receiptCountByKey(database, posting.idempotencyKey), 0);
+}
+
+const effectRaceLockKey = 2;
+
+/**
+ * A hold point the existing `installLineRaceBlocker` cannot provide. That one
+ * is `BEFORE INSERT` on the movement, which parks a posting BEFORE its
+ * reservation row exists -- so a second posting finds nothing reserved and the
+ * collision under measurement never happens.
+ *
+ * This one fires `AFTER INSERT` on the effect-reservation companion itself, so
+ * the paused posting holds BOTH its movement and its reservation, uncommitted.
+ * Installing it on the companion rather than on the movement makes the hold
+ * point independent of trigger firing ORDER: it is reached by construction
+ * when the reservation row is written, not by a name that sorts late enough.
+ */
+async function installEffectReservationBlocker(
+  database: PostingDatabase,
+  sourceId: string,
+): Promise<void> {
+  const fact = movementFactStorage(database);
+  await database.adminPool.query(
+    `CREATE FUNCTION public.pwi_wait_for_effect_race()
+       RETURNS trigger LANGUAGE plpgsql AS $body$
+       BEGIN
+         IF NEW.${quoted(fact.fieldColumns.sourceId)} = TG_ARGV[0] THEN
+           PERFORM pg_advisory_xact_lock(${String(lineRaceLockNamespace)}, ${String(effectRaceLockKey)});
+         END IF;
+         RETURN NEW;
+       END
+       $body$;
+     CREATE TRIGGER pwi_wait_for_effect_race
+       AFTER INSERT ON ${quoted(database.binding.schemaName)}.${quoted(fact.companion.physicalTableName)}
+       FOR EACH ROW EXECUTE FUNCTION public.pwi_wait_for_effect_race('${sourceId}')`,
+  );
+}
+
+async function removeEffectReservationBlocker(
+  database: PostingDatabase,
+): Promise<void> {
+  const fact = movementFactStorage(database);
+  await database.adminPool.query(
+    `DROP TRIGGER IF EXISTS pwi_wait_for_effect_race
+       ON ${quoted(database.binding.schemaName)}.${quoted(fact.companion.physicalTableName)};
+     DROP FUNCTION IF EXISTS public.pwi_wait_for_effect_race()`,
+  );
+}
+
+/**
+ * The limit that has stood since PUR-2a round 1, measured rather than reasoned.
+ *
+ * Two authored documents claim ONE natural effect at the same instant. They
+ * share neither lock the posting takes -- the stock serializer keys on
+ * tenant/environment/legal entity/item/location and these carry different
+ * locations, and the request lock derives from the idempotency key and these
+ * carry different keys -- so nothing serialises them before the write. What
+ * they collide on is the effect reservation's primary key, which omits
+ * `business_period` and `record_id` and is the only natural-effect guard in the
+ * system.
+ *
+ * The standing disclosure was worse than disclosed: round 9 found the reasoning
+ * had named the movement's own `effectIdentityUnique`, which carries a freshly
+ * minted `record_id` and therefore cannot collide between two postings at all.
+ */
+test(
+  'posting writer inventory: two simultaneous postings of one natural effect accept exactly one',
+  { timeout: 300_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      const sharedSourceId = 'simultaneous-natural-effect';
+      const first = command({
+        legalEntityId: legalReject,
+        locationId: locationPrimary,
+        sourceId: sharedSourceId,
+      });
+      const second = command({
+        legalEntityId: legalReject,
+        locationId: locationRace,
+        sourceId: sharedSourceId,
+      });
+      const firstLine = first.lines[0]!;
+      const secondLine = second.lines[0]!;
+      // One natural effect: the five-column tuple the reservation's primary
+      // key carries is identical across the two requests.
+      assert.equal(first.sourceType, second.sourceType);
+      assert.equal(first.sourceId, second.sourceId);
+      assert.equal(first.sourceRevision, second.sourceRevision);
+      assert.equal(firstLine.sourceLine, secondLine.sourceLine);
+      // Two stock identities, and therefore two disjoint serializer lock sets.
+      const stockKeys = (
+        input: InventoryAdjustmentPostingCommandV1,
+      ): readonly number[] =>
+        planStockIdentityLocks(
+          input.lines.map((postingLine) => ({
+            environmentId,
+            itemId: postingLine.itemId,
+            legalEntityId: input.legalEntityId,
+            locationId: postingLine.locationId,
+            tenantId,
+          })),
+        ).map((target) => target.identityKey);
+      const firstKeys = new Set(stockKeys(first));
+      assert.equal(
+        stockKeys(second).some((key) => firstKeys.has(key)),
+        false,
+        'the two requests must not share a stock-identity lock',
+      );
+      // Two request keys, and therefore two disjoint request locks.
+      assert.notEqual(first.idempotencyKey, second.idempotencyKey);
+      assert.notEqual(
+        planInventoryPostingRequestLock(
+          database.context,
+          postingCapabilityId,
+          first.idempotencyKey,
+        ).requestKey,
+        planInventoryPostingRequestLock(
+          database.context,
+          postingCapabilityId,
+          second.idempotencyKey,
+        ).requestKey,
+      );
+
+      await seedDraft(database, first);
+      await seedDraft(database, second);
+      await installEffectReservationBlocker(database, sharedSourceId);
+      const blocker = await database.adminPool.connect();
+      let blockerOpen = false;
+      let firstOutcome: Promise<PostingOutcome> | undefined;
+      let secondOutcome: Promise<PostingOutcome> | undefined;
+      try {
+        await beginBoundedControlTransaction(blocker);
+        blockerOpen = true;
+        const blockerPid = await backendPid(blocker);
+        await blocker.query(
+          'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
+          [lineRaceLockNamespace, effectRaceLockKey],
+        );
+        // The first posting parks INSIDE its reservation trigger: its movement
+        // row and its reservation row both exist and neither is committed.
+        firstOutcome = settlePosting(
+          database.service.postAdjustment(
+            database.context,
+            database.actor,
+            first,
+          ),
+        );
+        const parked = await waitForPostingBlockedBy(
+          database.adminPool,
+          blockerPid,
+          'test effect-reservation barrier',
+        );
+        testContext.diagnostic(
+          `simultaneous-natural-effect: backend ${String(parked.pid)} holds an uncommitted movement and its uncommitted effect reservation`,
+        );
+        // The second posting now runs concurrently. Its pre-read cannot see
+        // the uncommitted claim, so it proceeds to its own insert, where the
+        // reservation primary key parks it on the first posting's transaction.
+        secondOutcome = settlePosting(
+          database.service.postAdjustment(
+            database.context,
+            database.actor,
+            second,
+          ),
+        );
+        assert.equal(
+          await observeClaimWaiter(database),
+          'observed',
+          'the second posting never blocked on the uncommitted effect reservation; the simultaneous window was not constructed',
+        );
+        await blocker.query('COMMIT');
+        blockerOpen = false;
+
+        const accepted = await firstOutcome;
+        assert.equal(
+          accepted.status,
+          'fulfilled',
+          `the first posting must be accepted: ${JSON.stringify(accepted)}`,
+        );
+        const contested = await secondOutcome;
+        // EXACTLY ONE semantic effect is accepted. The second must reach
+        // replay/conflict handling; which of the two it reaches depends on
+        // whether the winner's receipt is visible when the loser re-reads, and
+        // both are correct outcomes. What is NOT admissible is a second
+        // committed movement for the same natural effect.
+        if (contested.status === 'fulfilled') {
+          assert.equal(
+            contested.value.replayed,
+            true,
+            'a second acceptance of one natural effect is not admissible',
+          );
+          assert.deepEqual(
+            contested.value.movements.map((movement) => movement.movementId),
+            accepted.value.movements.map((movement) => movement.movementId),
+            'a replay must return the accepted posting movements',
+          );
+        } else {
+          assert.equal(
+            observePostingError(
+              testContext,
+              'simultaneous-natural-effect-conflict',
+              contested.reason,
+              'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+            ),
+            true,
+          );
+        }
+        testContext.diagnostic(
+          `simultaneous-natural-effect: the contested posting settled as ${contested.status}`,
+        );
+        // One effect, one movement, one reservation.
+        assert.equal(await movementCountBySource(database, sharedSourceId), 1);
+        assert.equal(await companionCount(database), 1);
+      } finally {
+        if (blockerOpen) await blocker.query('ROLLBACK');
+        blocker.release();
+        if (firstOutcome) await firstOutcome;
+        if (secondOutcome) await secondOutcome;
+        await removeEffectReservationBlocker(database);
+      }
+    });
+  },
+);
+
 async function installLineRaceBlocker(
   database: PostingDatabase,
   sourceId: string,

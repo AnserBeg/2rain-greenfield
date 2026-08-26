@@ -518,6 +518,61 @@ interface PostedStockProjectionBinding {
   readonly unitColumn: string;
 }
 
+/**
+ * A physical relation this posting writes, and the compiled declaration that
+ * says so. `origin` is what the target declared, not what the kernel assumed.
+ */
+type PostingWriterOrigin =
+  'entityTable' | 'factCompanion' | 'factPartition' | 'triggerProjection';
+
+interface PostingWriterRelation {
+  readonly origin: PostingWriterOrigin;
+  readonly relation: string;
+  readonly rootEntityId: string;
+}
+
+/**
+ * A relation some OTHER relation's insert trigger writes, as the compiled
+ * target declares the pair. Listed for both the projection a posting does
+ * reach and the one it does not, so the exclusion is derived rather than
+ * assumed -- see `derivePostingWriterInventory`.
+ */
+interface TriggerInstalledProjection {
+  readonly installedOnEntityId: string;
+  readonly writes: StorageEntityTarget;
+}
+
+/**
+ * `movement.factStorage.companion`, bound from the active compiled target.
+ *
+ * Nothing here is reconstructed locally: every column name is read from
+ * `companion.columns` or `factStorage.fieldColumns`, and a name the compiled
+ * companion does not declare refuses at construction.
+ */
+interface MovementEffectReservationBinding {
+  readonly businessPeriodColumn: string;
+  readonly effectTuple: {
+    readonly postingRole: string;
+    readonly sourceId: string;
+    readonly sourceLine: string;
+    readonly sourceRevision: string;
+    readonly sourceType: string;
+  };
+  readonly environmentColumn: string;
+  /**
+   * Storage-GENERATED columns the reservation carries, DERIVED as the
+   * intersection of the movement's generated columns with the columns the
+   * companion declares -- measured empty today, and it stays correct if the
+   * compiler ever copies one, because `assertPersistedRowVerified` still
+   * requires the generating source column to be compared.
+   */
+  readonly foldedColumns: readonly { name: string; sourceColumn: string }[];
+  readonly legalEntityColumn: string;
+  readonly movementIdColumn: string;
+  readonly tableName: string;
+  readonly tenantColumn: string;
+}
+
 interface PostingStorageBinding {
   item: EntityBinding;
   itemBaseUnitColumn: string;
@@ -533,6 +588,10 @@ interface PostingStorageBinding {
   movementRelationToTransactionColumn: string;
   movementReversalOfMovementColumn: string;
   movementStockVersionV1: string;
+  // PUR-2a round 9's eighth writer. Bound from the active compiled target so
+  // the reservation the `23505` raced-replay branch depends on is observed
+  // rather than trusted; see `assertMovementEffectReservations`.
+  movementEffectReservation: MovementEffectReservationBinding;
   periodLock: EntityBinding;
   periodLockClosedThroughColumn: string;
   // PUR-2a, round 8. The posting does not write these columns; an AFTER INSERT
@@ -559,6 +618,9 @@ interface PostingStorageBinding {
   transactionLineRelationToTransactionColumn: string;
   transactionLineToLocationColumn: string;
   transactionLineUnitColumn: string;
+  // Every physical relation a posting writes, DERIVED from the compiled
+  // storage target rather than enumerated. Keyed by physical relation name.
+  writerInventory: ReadonlyMap<string, PostingWriterRelation>;
   stockCount: EntityBinding;
   stockCountActorColumn: string;
   stockCountCountedAtColumn: string;
@@ -1055,6 +1117,17 @@ export class PostgresInventoryPostingService {
         posting,
         actorEnvelope.actor.executionPrincipal.principalId,
       );
+      // The natural effect this posting RESERVED, observed before any trust
+      // document or receipt is written. The reservation is what makes the
+      // raced-replay refusal reachable at all, and nothing else in the kernel
+      // reads it.
+      await assertMovementEffectReservations(
+        client,
+        this.#binding,
+        context,
+        parsed.legalEntityId,
+        ordered,
+      );
       // The trigger-written half of this posting's effect, observed before any
       // evidence or receipt is persisted. A balance that does not equal the
       // ledger refuses the posting rather than committing and waiting for
@@ -1328,6 +1401,89 @@ function resolvePostingStorage(
       );
     }
   }
+  const movementEffectReservation = movementEffectReservationBinding(
+    movementEntity,
+    movement,
+  );
+  // The relations whose insert triggers the compiled target declares. BOTH are
+  // listed: the posted-stock projection, which a posting DOES reach, and the
+  // period-lock provisioning trigger, which it does not. The derivation
+  // excludes the second by testing where its trigger is installed, so the
+  // exclusion is measured rather than assumed.
+  const triggerProjections: TriggerInstalledProjection[] = [
+    ...(postedStockBalanceEntity
+      ? [
+          {
+            installedOnEntityId: movementEntity.entityId,
+            writes: postedStockBalanceEntity,
+          },
+        ]
+      : []),
+    {
+      installedOnEntityId: legalEntity.entityId,
+      writes: periodLockEntity,
+    },
+  ];
+  // The kernel's own declaration of the entities it writes. The compiled
+  // target cannot supply this: `consumerWriterRoots.writerOperationIds` records
+  // AUTHORED operations and is empty for the movement, because the posting
+  // kernel is a capability rather than an authored operation. Item, location,
+  // legal entity and period lock are absent because the posting only READS
+  // them -- and a write that appeared on one of them would be caught by the
+  // relation's own read-back, not here.
+  const postingWriteRoots = [
+    movementEntity.entityId,
+    stockCountEntity.entityId,
+    stockCountLineEntity.entityId,
+    transactionEntity.entityId,
+    transactionLineEntity.entityId,
+  ];
+  const writerInventory = derivePostingWriterInventory(
+    target,
+    postingWriteRoots,
+    triggerProjections,
+  );
+  // Each registration names the read-back that observes the relation
+  // column-for-column through `assertPersistedRowVerified`.
+  assertPostingWriterInventoryRegistered(writerInventory, [
+    { relation: movement.tableName, verifierId: 'readBackMovements' },
+    // A routed row is observed by reading the PARTITIONED PARENT, which is the
+    // only correct way to read one: reading a partition directly would mean
+    // re-deriving the partition hash here. Detaching a partition makes the
+    // parent read-back return an incomplete set, which it refuses.
+    ...movementEntity.factStorage.partitioning.partitions.map((partition) => ({
+      relation: partition.physicalTableName,
+      verifierId: 'readBackMovements',
+    })),
+    {
+      relation: movementEffectReservation.tableName,
+      verifierId: 'assertMovementEffectReservations',
+    },
+    {
+      relation: stockCount.tableName,
+      verifierId: 'readBackStockCountEvidence',
+    },
+    {
+      relation: stockCountLine.tableName,
+      verifierId: 'readBackStockCountEvidence',
+    },
+    {
+      relation: transaction.tableName,
+      verifierId: 'assertCompanionIdentitiesPersisted+assertDraftTransaction',
+    },
+    {
+      relation: transactionLine.tableName,
+      verifierId: 'assertCompanionIdentitiesPersisted',
+    },
+    ...(postedStockBalanceEntity
+      ? [
+          {
+            relation: postedStockBalanceEntity.physicalTableName,
+            verifierId: 'assertPostedStockBalancesReconcile',
+          },
+        ]
+      : []),
+  ]);
   return Object.freeze({
     families,
     movementPostingRoleByOption,
@@ -1341,6 +1497,7 @@ function resolvePostingStorage(
     movement,
     movementBusinessPeriodColumn:
       movementEntity.factStorage.businessPeriod.column,
+    movementEffectReservation,
     movementRelationToLineColumn: requiredRelationColumn(
       target,
       movementEntity,
@@ -1477,6 +1634,221 @@ function resolvePostingStorage(
       stockCountLine,
       'stock_count_line_variance_quantity',
     ).name,
+    writerInventory,
+  });
+}
+
+/**
+ * PUR-2a's root cause, closed. A posting writes more physical relations than
+ * it names entities: a partitioned fact routes its row into a partition, an
+ * `AFTER INSERT` trigger the target declares copies it into the effect
+ * reservation companion, and a second declared trigger projects it into the
+ * browsable balance. Nine review rounds enumerated those consequences BY HAND
+ * and each round found one more. The compiled storage target already declares
+ * every one of them, so this DERIVES the inventory.
+ *
+ * WHAT IS DERIVED AND WHAT IS NOT -- the boundary of the claim, stated because
+ * the difference is the whole point:
+ *
+ *  - DERIVED: given an entity the kernel writes, every physical relation that
+ *    write reaches. That is the enumeration round 9 found incomplete.
+ *  - NOT DERIVED: WHICH entities the kernel writes at all. The target's
+ *    `consumerWriterRoots.writerOperationIds` records AUTHORED operations,
+ *    and it is MEASURED EMPTY for `inventory_movement` and
+ *    `posted_stock_balance` -- the posting kernel is a capability, not an
+ *    authored operation, so the target does not record that the kernel writes
+ *    them. `postingWriteRoots` below is the kernel's own declaration.
+ *
+ * Round 7 ruled that coverage must not be derived from the compiled binding.
+ * That ruling holds for column VALUES inside a row -- deriving both the row
+ * and its expectation from one source hides a shared omission -- and it does
+ * not reach here. WHICH TABLES a write reaches is declared data, and a
+ * hand-written table list is precisely what failed nine times. The value
+ * comparisons stay independent. See ADR-0062; this reads as a reversal of
+ * round 7 and it is not.
+ *
+ * The derivation is fail-closed in the direction that matters: a relation it
+ * lists and no verifier covers REFUSES CONSTRUCTION, so over-listing costs a
+ * registration while under-listing is the failure this exists to prevent.
+ *
+ * SCOPED TO THE MODULE PLANE. `reserve_inventory_movement_effect` also calls
+ * `north_star_internal.advance_semantic_aggregate_generation`, a platform-plane
+ * row the compiled target does not declare as a relation and this derivation
+ * therefore cannot see. That is filed as
+ * `posting-platform-plane-writes-not-row-complete` and must not be read as
+ * covered here.
+ */
+function derivePostingWriterInventory(
+  target: StorageTargetPayloadV1,
+  postingWriteRoots: readonly string[],
+  triggerProjections: readonly TriggerInstalledProjection[],
+): ReadonlyMap<string, PostingWriterRelation> {
+  const inventory = new Map<string, PostingWriterRelation>();
+  const claim = (
+    relation: string,
+    origin: PostingWriterOrigin,
+    rootEntityId: string,
+  ): void => {
+    const existing = inventory.get(relation);
+    if (existing) {
+      // Two declarations resolving to one physical relation would let a
+      // single verifier stand in for two distinct writes.
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_INVALID',
+        'the storage target declares one physical relation as two distinct writers',
+        {
+          first: `${existing.rootEntityId}/${existing.origin}`,
+          relation,
+          second: `${rootEntityId}/${origin}`,
+        },
+      );
+    }
+    inventory.set(relation, Object.freeze({ origin, relation, rootEntityId }));
+  };
+  const roots = new Set(postingWriteRoots);
+  const written = target.entities.filter((candidate) =>
+    roots.has(candidate.entityId),
+  );
+  if (written.length !== roots.size) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      'the storage target does not carry every entity this posting writes',
+      {
+        declared: [...roots].sort().join(', '),
+        resolved: written
+          .map((candidate) => candidate.entityId)
+          .sort()
+          .join(', '),
+      },
+    );
+  }
+  for (const entity of written) {
+    claim(entity.physicalTableName, 'entityTable', entity.entityId);
+    const fact = entity.factStorage;
+    if (!fact) continue;
+    // A partitioned insert names the parent and lands in a partition, so the
+    // partition is a relation this posting writes.
+    for (const partition of fact.partitioning.partitions) {
+      claim(partition.physicalTableName, 'factPartition', entity.entityId);
+    }
+    // `reservationTriggerName` is a trigger the target declares ON THIS
+    // ENTITY'S OWN TABLE, and the relation it writes is the companion it
+    // names in the same declaration.
+    claim(fact.companion.physicalTableName, 'factCompanion', entity.entityId);
+  }
+  // A projection reaches this posting only when the trigger that writes it is
+  // installed on a table this posting writes. The period-lock provisioning
+  // trigger is declared the same way and is EXCLUDED by this test rather than
+  // by an assumption: it fires on the legal-entity master, which a posting
+  // never inserts.
+  for (const projection of triggerProjections) {
+    if (!roots.has(projection.installedOnEntityId)) continue;
+    claim(
+      projection.writes.physicalTableName,
+      'triggerProjection',
+      projection.installedOnEntityId,
+    );
+  }
+  return Object.freeze(inventory);
+}
+
+/**
+ * Every relation the derivation names must have a REGISTERED VERIFIER, proved
+ * at construction rather than at posting time: a release whose compiled target
+ * reaches a relation this kernel does not observe must not accept a posting at
+ * all.
+ *
+ * The check is a set EQUALITY, for the same reason `assertPersistedRowVerified`
+ * is. An unregistered relation is an unobserved write. A registration for a
+ * relation the derivation does not name means the registration went stale --
+ * a verifier pointed at a table the target no longer reaches -- and that is
+ * refused rather than read as coverage.
+ */
+function assertPostingWriterInventoryRegistered(
+  inventory: ReadonlyMap<string, PostingWriterRelation>,
+  registrations: readonly { relation: string; verifierId: string }[],
+): void {
+  const registered = new Map<string, string>();
+  for (const registration of registrations) {
+    const existing = registered.get(registration.relation);
+    if (existing !== undefined) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_INVALID',
+        'two verifiers are registered for one physical relation',
+        {
+          first: existing,
+          relation: registration.relation,
+          second: registration.verifierId,
+        },
+      );
+    }
+    registered.set(registration.relation, registration.verifierId);
+  }
+  const unverified = [...inventory.values()]
+    .filter((relation) => !registered.has(relation.relation))
+    .map((relation) => `${relation.relation} (${relation.origin})`)
+    .sort();
+  if (unverified.length > 0) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      `the compiled storage target reaches physical relations no read-back verifies: ${unverified.join(', ')}`,
+    );
+  }
+  const stale = [...registered.keys()]
+    .filter((relation) => !inventory.has(relation))
+    .sort();
+  if (stale.length > 0) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      `read-backs are registered for physical relations this posting does not write: ${stale.join(', ')}`,
+    );
+  }
+}
+
+/**
+ * Bind `movement.factStorage.companion` from the active compiled target. Every
+ * name is READ from the target; none is reconstructed here, and a column the
+ * compiled companion does not declare refuses at construction.
+ */
+function movementEffectReservationBinding(
+  movementEntity: StorageEntityTarget,
+  movement: EntityBinding,
+): MovementEffectReservationBinding {
+  const fact = movementEntity.factStorage;
+  if (!fact) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      'the movement entity carries no fact storage to reserve effects in',
+    );
+  }
+  const declared = new Set(fact.companion.columns.map((column) => column.name));
+  const required = (column: string): string => {
+    if (!declared.has(column)) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_INVALID',
+        'the compiled effect reservation does not declare a column this read-back compares',
+        { column },
+      );
+    }
+    return column;
+  };
+  return Object.freeze({
+    businessPeriodColumn: required(fact.businessPeriod.column),
+    effectTuple: Object.freeze({
+      postingRole: required(fact.fieldColumns.postingRole),
+      sourceId: required(fact.fieldColumns.sourceId),
+      sourceLine: required(fact.fieldColumns.sourceLine),
+      sourceRevision: required(fact.fieldColumns.sourceRevision),
+      sourceType: required(fact.fieldColumns.sourceType),
+    }),
+    environmentColumn: required('environment_id'),
+    foldedColumns: Object.freeze(
+      movement.foldedColumns.filter((folded) => declared.has(folded.name)),
+    ),
+    legalEntityColumn: required(movementEntity.legalEntity!.column),
+    movementIdColumn: required(movementEntity.recordIdentity.column),
+    tableName: fact.companion.physicalTableName,
+    tenantColumn: required('tenant_id'),
   });
 }
 
@@ -2835,7 +3207,13 @@ function persistedRowObject(value: unknown): Record<string, unknown> | null {
 function assertPersistedRowVerified(
   subject: string,
   code: InventoryPostingErrorCode,
-  entity: EntityBinding,
+  // Only the GENERATED columns are read here, so the parameter is the shape
+  // this function actually uses rather than a whole `EntityBinding`. That lets
+  // the effect reservation -- a compiled companion relation, not an entity --
+  // be verified by the same mechanism instead of a parallel one.
+  entity: {
+    readonly foldedColumns: readonly { name: string; sourceColumn: string }[];
+  },
   persistedRow: unknown,
   details: Readonly<Record<string, string>>,
   proofs: readonly PersistedColumnProof[],
@@ -4707,6 +5085,164 @@ function inventoryLineSetDigestSql(
  * compared against what was planned, and the line's parent transaction is
  * joined and required to be the same transaction the movement names directly.
  */
+/**
+ * PUR-2a round 9's eighth writer, observed.
+ *
+ * Every movement insert fires the trigger the compiled target declares as
+ * `factStorage.companion.reservationTriggerName`, which copies the movement's
+ * columns into `factStorage.companion`. Nine review rounds of evidence never
+ * named that table, and nothing in the kernel read it.
+ *
+ * WHY IT IS LOAD-BEARING, and this is the part that is easy to get wrong. The
+ * movement table's own `effectIdentityUnique` contains `record_id`, minted
+ * fresh on every posting, so it can NEVER collide between two postings -- it
+ * is not a duplicate-effect guard, and it carries `record_id` because a
+ * partitioned table's unique constraint must carry its partition key. The
+ * companion's PRIMARY KEY omits `business_period` and `record_id`, so it is
+ * the ONLY thing in the system that reserves a natural effect. The `23505`
+ * raced-replay branch in `#post`, whose refusal reads "a natural effect
+ * identity was claimed by a different posting", depends entirely on it.
+ *
+ * The foreign key runs companion -> movement `ON DELETE RESTRICT`, so a
+ * movement with NO reservation row violates no constraint. A reservation that
+ * silently failed to appear would leave the raced-replay refusal unreachable
+ * and a second posting free to commit the same natural effect -- silent until
+ * something reconciles it, which is why this refuses and rolls back.
+ */
+async function assertMovementEffectReservations(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  movements: readonly PlannedMovement[],
+): Promise<void> {
+  const reservation = binding.movementEffectReservation;
+  const ids = movements.map((movement) => movement.movementId);
+  const result = await client.query<Record<string, unknown>>(
+    `SELECT reservation.${quoted(reservation.movementIdColumn)}::text AS "movementId",
+            reservation.${quoted(reservation.tenantColumn)}::text AS "tenantId",
+            reservation.${quoted(reservation.environmentColumn)}::text AS "environmentId",
+            reservation.${quoted(reservation.legalEntityColumn)}::text AS "legalEntityId",
+            reservation.${quoted(reservation.businessPeriodColumn)}::text AS "businessPeriod",
+            reservation.${quoted(reservation.effectTuple.sourceType)} AS "sourceType",
+            reservation.${quoted(reservation.effectTuple.sourceId)} AS "sourceId",
+            reservation.${quoted(reservation.effectTuple.sourceLine)} AS "sourceLine",
+            reservation.${quoted(reservation.effectTuple.sourceRevision)}::integer AS "sourceRevision",
+            reservation.${quoted(reservation.effectTuple.postingRole)} AS "postingRole",
+            to_jsonb(reservation) AS "persistedRow"
+       FROM ${quoted(binding.schemaName)}.${quoted(reservation.tableName)} AS reservation
+      WHERE reservation.${quoted(reservation.tenantColumn)} = $1
+        AND reservation.${quoted(reservation.environmentColumn)} = $2
+        AND reservation.${quoted(reservation.legalEntityColumn)} = $3
+        AND reservation.${quoted(reservation.movementIdColumn)} = ANY($4::uuid[])`,
+    [context.tenantId, context.environmentId, legalEntityId, ids],
+  );
+  // Exact one-to-one. Zero rows means the reservation never happened and the
+  // raced-replay refusal is unreachable; extra rows mean one movement reserved
+  // more than one natural effect.
+  if (result.rows.length !== movements.length) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      'the movement effect reservation did not reserve exactly one natural effect for each movement this posting appended',
+      {
+        movements: String(movements.length),
+        reservations: String(result.rows.length),
+      },
+    );
+  }
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const row of result.rows) {
+    const movementId = String(row.movementId).toLowerCase();
+    if (byId.has(movementId)) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        'one movement carries more than one effect reservation',
+        { movementId },
+      );
+    }
+    byId.set(movementId, row);
+  }
+  for (const movement of movements) {
+    const row = byId.get(movement.movementId);
+    if (!row) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        `movement ${movement.movementId} reserved no natural effect`,
+        { movementId: movement.movementId },
+      );
+    }
+    // The reservation is a trigger-written COPY of the movement, so every
+    // column it carries is compared against what this posting planned. There
+    // is nothing on it the posting does not determine, and therefore nothing
+    // to preserve.
+    const copied = 'does not copy the movement this posting appended';
+    const effect = 'does not reserve the natural effect this posting claimed';
+    assertPersistedRowVerified(
+      `effect reservation for movement ${movement.movementId}`,
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      reservation,
+      row.persistedRow,
+      { movementId: movement.movementId },
+      [
+        verified(
+          reservation.tenantColumn,
+          String(row.tenantId).toLowerCase() === context.tenantId,
+          copied,
+        ),
+        verified(
+          reservation.environmentColumn,
+          String(row.environmentId).toLowerCase() === context.environmentId,
+          copied,
+        ),
+        verified(
+          reservation.legalEntityColumn,
+          String(row.legalEntityId).toLowerCase() === legalEntityId,
+          copied,
+        ),
+        verified(
+          reservation.businessPeriodColumn,
+          String(row.businessPeriod) === movement.businessPeriod,
+          copied,
+        ),
+        verified(
+          reservation.movementIdColumn,
+          String(row.movementId).toLowerCase() === movement.movementId,
+          copied,
+        ),
+        // The five-column effect tuple. This is the reservation's whole
+        // purpose: these columns plus the tenancy triple ARE the primary key
+        // that refuses a second posting of the same natural effect.
+        verified(
+          reservation.effectTuple.sourceType,
+          String(row.sourceType) === movement.sourceType,
+          effect,
+        ),
+        verified(
+          reservation.effectTuple.sourceId,
+          String(row.sourceId).toLowerCase() === movement.sourceId,
+          effect,
+        ),
+        verified(
+          reservation.effectTuple.sourceLine,
+          String(row.sourceLine) === movement.sourceLine,
+          effect,
+        ),
+        verified(
+          reservation.effectTuple.sourceRevision,
+          Number(row.sourceRevision) === movement.sourceRevision,
+          effect,
+        ),
+        verified(
+          reservation.effectTuple.postingRole,
+          String(row.postingRole) ===
+            movementPostingRole(binding, movement.postingRole),
+          effect,
+        ),
+      ],
+    );
+  }
+}
+
 async function readBackMovements(
   client: PoolClient,
   binding: PostingStorageBinding,

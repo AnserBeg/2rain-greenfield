@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "packet": "posting-writer-inventory",
+  "entries": [
+    {
+      "name": "effect-reservation-never-observed",
+      "claim": "THE SUBJECT ABSENT ENTIRELY. Every movement insert fires the trigger the compiled target declares as `factStorage.companion.reservationTriggerName`, which copies the movement into the effect-reservation companion. That companion's PRIMARY KEY omits `business_period` and `record_id` and is the ONLY natural-effect guard in the system -- the movement's own `effectIdentityUnique` carries a freshly minted `record_id` and can never collide between two postings. The foreign key runs companion -> movement ON DELETE RESTRICT, so a movement with NO reservation row violates no constraint. Remove the read-back and a posting whose reservation never happened commits silently, leaving the 23505 raced-replay refusal unreachable for that effect. Kill is measured in the reservation test this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      await assertMovementEffectReservations(\n        client,\n        this.#binding,\n        context,\n        parsed.legalEntityId,\n        ordered,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the movement effect reservation is observed"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: the movement effect reservation is observed before the posting commits",
+          "expected": "did not reserve exactly one natural effect for each movement"
+        }
+      ]
+    },
+    {
+      "name": "effect-reservation-compared-on-count-not-columns",
+      "claim": "A PROXY SATISFIED WHILE THE FACT DOES NOT HOLD. The reservation read-back could pass by observing that a row EXISTS for each movement while never comparing what that row reserves. This mutation leaves the row count, the one-to-one mapping and every other column comparison intact and neuters exactly one column of the five-column effect tuple. A reservation writer that reserves the WRONG natural effect then satisfies the foreign key, the primary key and the row count, and a later posting of the REAL effect finds nothing reserved and commits a duplicate. Only the column comparison catches it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          reservation.effectTuple.sourceLine,\n          String(row.sourceLine) === movement.sourceLine,\n          effect,",
+      "replacement": "          reservation.effectTuple.sourceLine,\n          true,\n          effect,",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the movement effect reservation is observed"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: the movement effect reservation is observed before the posting commits",
+          "expected": "does not reserve the natural effect this posting claimed"
+        }
+      ]
+    },
+    {
+      "name": "derived-writer-inventory-registration-never-required",
+      "claim": "THE DERIVED INVENTORY STOPS REQUIRING A VERIFIER. The inventory is derived from the compiled storage target -- each written entity's table, its declared partitions, its declared effect-reservation companion, and any projection whose insert trigger the target declares on a table this posting writes -- and construction refuses when any derived relation carries no registered read-back. This mutation makes the unverified set permanently empty, so construction STOPS THROWING and a release whose compiled target reaches an unobserved relation is accepted. That is precisely the failure PUR-2a's nine rounds each found one more instance of: the inventory was hand-enumerated while the target already declared every writer.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    .filter((relation) => !registered.has(relation.relation))\n    .map((relation) => `${relation.relation} (${relation.origin})`)",
+      "replacement": "    .filter(() => false)\n    .map((relation) => `${relation.relation} (${relation.origin})`)",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "with no registered read-back refuses at construction"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: a relation the compiled target reaches with no registered read-back refuses at construction",
+          "expected": "Missing expected exception"
+        }
+      ]
+    }
+  ]
+}
