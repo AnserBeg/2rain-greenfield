@@ -4057,11 +4057,16 @@ test('a released required relation is widened by executed DDL, and a mixed live-
         );
         assert.equal(accounted.rows[0]?.count, '2');
 
-        // 5. The OTHER root order. Tenant B now advances to the optional
-        //    release too, so its own prepare presents (required, optional) as
-        //    `initial` while tenant A's accounted root is already optional --
-        //    the reverse of the pairing A saw. The merge is order-independent
-        //    or one of these two prepares fails.
+        // 5. A SECOND root pairing, by construction rather than permutation --
+        //    and the round-2 review was right that the earlier wording here
+        //    overstated it. Tenant B advances too, so its prepare presents
+        //    (required, optional) as `initial` while tenant A's accounted root
+        //    is already optional: the reverse of the pairing A saw. What this
+        //    does NOT do is deterministically permute the scope order
+        //    `loadAccountedLiveTargets` reads from
+        //    `SELECT DISTINCT tenant_id ...`, so full order-independence rests
+        //    on the predicate being tried in both directions, which is read
+        //    from the source rather than executed here.
         const nextB = await persistNextRelease(
           runtimePool,
           contexts.b,
