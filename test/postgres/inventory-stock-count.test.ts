@@ -753,6 +753,128 @@ test('stock-count companion derivation: the companion transaction and its lines 
 });
 
 /**
+ * PUR-2a, round 8. The seventh writer.
+ *
+ * A movement insert fires an `AFTER INSERT` trigger that maintains the
+ * browsable posted-stock balance in the same transaction. Nothing observed
+ * that write: the trigger checked its own `ROW_COUNT`, and a wrong-but-valid
+ * balance committed silently until reconciliation independently recomputed it.
+ *
+ * This is the test that makes the observation load-bearing. Both halves are
+ * needed. The first proves a balance that was ALREADY divergent before this
+ * posting refuses the posting that adds to it -- a correct delta applied to a
+ * wrong base is still a wrong browsable row. The second proves a projection
+ * that did not maintain itself at all refuses too. A verifier removed, or a
+ * projection binding that resolves to nothing, fails here.
+ */
+test('stock-count posted-stock projection: a balance that does not equal the movement ledger refuses the posting', async () => {
+  await withCompanionEnvironment(
+    'posted-stock-refusal',
+    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+      const initial = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 5,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, initial);
+      await service.postStockCount(context, actor, initial);
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '5.000000000000000000',
+        'the projection must carry the posted ledger before anything is corrupted',
+      );
+
+      const correction = countCommand({
+        countedQuantity: '7',
+        expectedQuantity: '5',
+        kind: 'correction',
+        sequence: 6,
+        supersedesStockCountId: initial.stockCountId,
+        varianceQuantity: '2',
+      });
+      await seedReviewedCount(runtimePool, context, binding, correction);
+
+      const quantityColumn = quoted(
+        field(
+          binding.postedStockBalance,
+          'posted_stock_balance_posted_quantity',
+        ).physicalName,
+      );
+      const divergence = await databasePool.query(
+        `UPDATE ${table(binding, binding.postedStockBalance)}
+            SET ${quantityColumn} = ${quantityColumn} + 1
+          WHERE tenant_id = $1 AND environment_id = $2`,
+        [context.tenantId, context.environmentId],
+      );
+      assert.equal(
+        divergence.rowCount,
+        1,
+        'the control must actually diverge the browsable row first',
+      );
+      await assertCountPostingRejected(
+        () => service.postStockCount(context, actor, correction),
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        /does not equal the movement ledger it projects/u,
+        'a balance already divergent from the ledger must refuse the posting that adds to it',
+      );
+      const afterDivergence = await readCompanionState(
+        runtimePool,
+        context,
+        binding,
+      );
+      assert.equal(
+        afterDivergence.transactions.length,
+        1,
+        'the refused posting must leave no companion transaction behind',
+      );
+      assert.equal(
+        afterDivergence.movements.length,
+        1,
+        'the refused posting must leave no movement behind',
+      );
+
+      const repaired = await databasePool.query(
+        `UPDATE ${table(binding, binding.postedStockBalance)}
+            SET ${quantityColumn} = ${quantityColumn} - 1
+          WHERE tenant_id = $1 AND environment_id = $2`,
+        [context.tenantId, context.environmentId],
+      );
+      assert.equal(
+        repaired.rowCount,
+        1,
+        'the second half must measure an unmaintained projection, not the first half leftover',
+      );
+
+      await disablePostedStockTrigger(databasePool, binding);
+      await assertCountPostingRejected(
+        () => service.postStockCount(context, actor, correction),
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        /does not equal the movement ledger it projects/u,
+        'a posting whose projection trigger did not maintain the balance must refuse',
+      );
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '5.000000000000000000',
+        'the refused posting must leave the projection exactly as it found it',
+      );
+      const afterUnmaintained = await readCompanionState(
+        runtimePool,
+        context,
+        binding,
+      );
+      assert.equal(
+        afterUnmaintained.movements.length,
+        1,
+        'the refused posting must not commit its movement',
+      );
+    },
+  );
+});
+
+/**
  * PUR-2a gate-invisible deliverable, named as an acceptance criterion: the
  * binding makes an operator-visible refusal possible that did not exist
  * before. The kernel writes the companion identity at post time, so a reviewed
@@ -866,6 +988,11 @@ interface CompanionEnvironment {
   actor: StockCountActor;
   binding: StorageBinding;
   context: TrustedRequestContext;
+  // PUR-2a, round 8. The owner connection. Corrupting the provider-owned
+  // posted-stock projection, or disabling the trigger that maintains it, is
+  // exactly what ordinary runtime writes are forbidden to do -- so the control
+  // that proves the posting observes that projection needs this pool.
+  databasePool: Pool;
   runtimePool: Pool;
   service: PostgresInventoryPostingService;
 }
@@ -939,7 +1066,14 @@ async function withCompanionEnvironment(
           subject: null,
         }),
       }).issue(context);
-      await run({ actor, binding, context, runtimePool, service });
+      await run({
+        actor,
+        binding,
+        context,
+        databasePool: database.pool,
+        runtimePool,
+        service,
+      });
     } finally {
       await Promise.all([
         runtimePool.end(),

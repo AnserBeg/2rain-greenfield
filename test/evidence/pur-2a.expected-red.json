@@ -27,7 +27,7 @@
     },
     {
       "name": "companion-revision-not-the-contract-initial-value",
-      "claim": "REWRITTEN ON REVIEW, around the corrected invariant. The companion is a newly created entity row, so it takes the compiled optimistic-revision contract's `initialValue: '1'` -- the same revision the generic mutation interpreter gives every create. The earlier version of this entry asserted the OPPOSITE, that the companion should inherit `sourceRevision + 1` so the two rows matched, and the review was right that this overloads the optimistic-revision field with lineage it does not carry: at source revision 9 it created a brand-new transaction at revision 10. This mutation restores that behaviour and the read-back refuses it.",
+      "claim": "A companion transaction is a CREATE, so it must carry the contract initial revision and nothing else. This mutation writes a different one. Round 8 moved the refusal onto its own message: the revision proof now lives on the companion header rather than inside the source header s derived-identity group, so a wrong revision no longer reports itself as a wrong identity. Kill sets are measured within the three `companion derivation` tests this command runs.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  const revision = companionInitialRevision;",
       "replacement": "  const revision = command.sourceRevision + 1;",
@@ -39,12 +39,12 @@
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
-          "expected": "does not carry the derived companion transaction identity"
+          "expected": "was not created at the revision the companion contract declares"
         },
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
-          "expected": "does not carry the derived companion transaction identity"
+          "expected": "was not created at the revision the companion contract declares"
         }
       ]
     },
@@ -382,11 +382,11 @@
       ]
     },
     {
-      "name": "a-verifier-stops-accounting-for-a-column",
-      "claim": "THE CLASS-LEVEL CONTROL. `assertPersistedRowFullyAccountedFor` is what stops the next round finding an eighth unobserved column: it compares the columns a persisted row actually carries against the columns the verifier compared, and refuses any it does not account for. This mutation drops one column -- the movement's reversal identity -- from the movement verifier's accounted list, exactly as a future edit removing a comparison would. Nothing about the posting is wrong; what changes is that a written column is no longer covered, and the mechanism refuses the posting instead of returning success. Note the direction: this control cannot be built by disabling the mechanism, because with full coverage and correct values there would be nothing to kill. It is built by removing coverage, which is the failure mode the mechanism exists for.",
+      "name": "a-verifier-stops-comparing-a-column",
+      "claim": "THE CLASS-LEVEL CONTROL, rebuilt. Round 7 shipped coverage as a hand-written list of column names standing beside the comparisons, and round 8 showed what that bought: deleting a comparison and leaving its name in the list still passed. Coverage is now the comparison -- a `verified(...)` proof carries the column it was executed on, so there is no name to leave behind. This mutation deletes one proof, the movement s reversal identity. Nothing about the posting is wrong and every remaining value is correct; what changes is that a written column is no longer covered, and `assertPersistedRowVerified` refuses the posting rather than returning success. Kill sets are measured within the three `companion derivation` tests this command runs.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "          binding.movementReversalOfMovementColumn,\n          ...(",
-      "replacement": "          ...(",
+      "original": "          verified(\n            binding.movementReversalOfMovementColumn,\n            nullableUuid(row.reversalOfMovementId) ===\n              movement.reversalOfMovementId,\n            planned,\n          ),\n",
+      "replacement": "",
       "test": {
         "files": ["test/postgres/inventory-stock-count.test.ts"],
         "namePattern": "companion derivation"
@@ -401,6 +401,124 @@
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
           "expected": "carries persisted columns no read-back compares"
+        }
+      ]
+    },
+    {
+      "name": "a-read-back-observes-a-partial-row",
+      "claim": "The other direction of the same equality, and the one round 8 named as the vacuous pass: round 7 s guard asked only whether the persisted row carried a column the coverage list omitted, so an EMPTY observation satisfied it -- no extra columns, therefore no refusal. This mutation replaces the movement read-back s whole-row observation with an empty JSON object while leaving every comparison in place and every value correct. The posting must refuse because the columns it proved are not columns the observation returned. Kill sets are measured within the three `companion derivation` tests this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            to_jsonb(movement) AS \"persistedRow\",",
+      "replacement": "            '{}'::jsonb AS \"persistedRow\",",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "was verified on columns its read-back did not observe"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "was verified on columns its read-back did not observe"
+        }
+      ]
+    },
+    {
+      "name": "a-generated-column-loses-its-source-proof",
+      "claim": "The CONDITIONAL half of the generated-column admission, which the round-7 prompt disclosed as having no committed control. A storage-generated column is admitted by derivation rather than by comparison -- the database computes it from a source column under a pinned expression -- but that admission is conditional on an EXECUTED proof of the source. This mutation removes the preservation proof for the stock count s business key, whose unicode-case-fold column the release generates. Both columns must lose their accounting together: if the derived column survived its source, the admission would be unconditional and the hole would be reopened rather than closed. Kill sets are measured within the three `companion derivation` tests this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          binding.stockCountSupersedesColumn,\n          requiredField(binding.stockCount, 'stock_count_number').name,\n",
+      "replacement": "          binding.stockCountSupersedesColumn,\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "generated columns whose source column is itself uncompared"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "generated columns whose source column is itself uncompared"
+        }
+      ]
+    },
+    {
+      "name": "posted-balance-verification-removed-at-the-binding",
+      "claim": "That the posted-stock observation is REACHED, not merely written. The projection binding resolves to null when the active release carries no balance entity, and a posting then has no trigger write to observe; this mutation makes it resolve to null unconditionally, so the verification is skipped on a release that does carry one. Every value the posting writes stays correct and every other assertion still passes -- which is the point: before round 8 nothing in the suite observed the balance at post time, so a skipped verification was indistinguishable from a passing one. SCOPE: the kill is measured in the single `posted-stock projection` test this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    postedStockProjection: postedStockBalanceEntity\n      ? postedStockProjectionBinding(bindEntity(postedStockBalanceEntity))\n      : null,\n",
+      "replacement": "    postedStockProjection: null,\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "posted-stock projection"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posted-stock projection: a balance that does not equal the movement ledger refuses the posting",
+          "expected": "does not equal the movement ledger it projects"
+        }
+      ]
+    },
+    {
+      "name": "posted-balance-accumulation-replaced-by-assignment",
+      "claim": "That a WRONG-BUT-VALID projection trigger refuses the posting instead of committing a wrong browsable row. The trigger accumulates each movement delta onto the standing balance; this mutation makes it assign the delta instead, which is invisible on the row-creating posting and wrong on every later one. The trigger still reports one affected row, so its own `ROW_COUNT` check -- the only thing that observed it before round 8 -- still passes. SCOPE: the kill is measured in the single `three-value evidence` test this command runs, which is the one that posts twice against one stock identity. FENCE DISCLOSURE: this mutation names a file this packet does not own. It is a MEASUREMENT, not a change -- the runner applies it, measures the red, and restores the file, and the committed tree carries no delta there. It is named here rather than left implicit because the alternative -- proving the verifier catches a wrong trigger by mutating the verifier -- would prove only that the verifier runs.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "       SET %I = balance.%I + EXCLUDED.%I,",
+      "replacement": "       SET %I = balance.%I * 0 + EXCLUDED.%I,",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "three-value evidence"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posting preserves three-value evidence and appends correction and exact reversal through the shared protocol",
+          "expected": "does not equal the movement ledger it projects"
+        }
+      ]
+    },
+    {
+      "name": "posted-balance-revision-advances-by-two",
+      "claim": "The balance row carries an optimistic revision, and a projection that advances it wrongly hands every later reader a stale-write conflict that never happened. This mutation advances it by two per movement. The quantity stays exactly right, so this is the fact the ledger recomputation CANNOT catch and the revision proof must. SCOPE: the kill is measured in the single `three-value evidence` test this command runs, which is the one that posts twice against one stock identity. FENCE DISCLOSURE: this mutation names a file this packet does not own. It is a MEASUREMENT, not a change -- the runner applies it, measures the red, and restores the file, and the committed tree carries no delta there. It is named here rather than left implicit because the alternative -- proving the verifier catches a wrong trigger by mutating the verifier -- would prove only that the verifier runs.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "           %I = balance.%I + 1",
+      "replacement": "           %I = balance.%I + 2",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "three-value evidence"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posting preserves three-value evidence and appends correction and exact reversal through the shared protocol",
+          "expected": "did not advance one revision for each movement this posting appended"
+        }
+      ]
+    },
+    {
+      "name": "posted-balance-identity-drops-the-location-dimension",
+      "claim": "The projection derives its row identity from the stock dimensions it aggregates. This mutation feeds the item where the location belongs, so two locations for one item collapse onto one identity. A single-location run cannot see that by comparing dimensions -- the row it finds carries the right item and the right location -- which is why the posting recomputes the identity independently of the trigger that writes it. SCOPE: the kill is measured in the single `three-value evidence` test this command runs. FENCE DISCLOSURE: this mutation names a file this packet does not own. It is a MEASUREMENT, not a change -- the runner applies it, measures the red, and restores the file, and the committed tree carries no delta there. It is named here rather than left implicit because the alternative -- proving the verifier catches a wrong trigger by mutating the verifier -- would prove only that the verifier runs.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "    TG_ARGV[1], TG_ARGV[1], TG_ARGV[2], TG_ARGV[3],",
+      "replacement": "    TG_ARGV[1], TG_ARGV[1], TG_ARGV[2], TG_ARGV[2],",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "three-value evidence"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posting preserves three-value evidence and appends correction and exact reversal through the shared protocol",
+          "expected": "does not carry the identity the projection derives"
         }
       ]
     }
