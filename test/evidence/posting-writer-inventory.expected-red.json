@@ -129,11 +129,11 @@
       ]
     },
     {
-      "name": "an-empty-observation-passes-silently",
-      "claim": "THE CHECK READING ZERO INPUT, and this one is the vacuity vector a green suite cannot distinguish from success. If the write set comes back empty -- a wrong schema filter, a statistics view the module role cannot read, a baseline taken in the wrong transaction -- then every relation is trivially 'derived' and the backstop passes everything while observing nothing. Every posting inserts at least one movement, so an empty observation is refused rather than accepted. This mutation removes that refusal; the undeclared-writer control then commits, because its relation is absent from an observation that saw nothing.",
+      "name": "the-observation-looks-at-the-wrong-schema",
+      "claim": "THE CHECK READING ZERO INPUT, held by INDUCING the code defect rather than a runtime state, because the runtime state does not exist. An observer that sees nothing passes everything: an empty write set makes every relation trivially derived. MEASURED FIRST: `ALTER SYSTEM SET track_counts = off` does NOT empty `pg_stat_xact_user_tables` -- those per-transaction counters are backend-local, so the backstop survives that misconfiguration and no operator setting can produce the empty case. What CAN produce it is a defect in the observer itself, so this mutation induces exactly one: the schema filter is sent looking for a schema that does not exist, keeping the bound parameter referenced. The write set comes back empty and the undeclared-writer control dies -- not by committing, but by refusing for the EMPTY reason instead of the undeclared one, which is what distinguishes an observer that saw nothing from one that saw the writer. This holds the empty-observation refusal and the schema filter together, in the one direction that matters. The previous version of this entry was a SURVIVOR: it removed the empty refusal, which changed nothing because the control does not produce an empty observation.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "  if (written.length === 0) {",
-      "replacement": "  if (false) {",
+      "original": "      WHERE schemaname = $1",
+      "replacement": "      WHERE schemaname = $1 || '_absent'",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],
         "namePattern": "a module relation nothing declares is caught by observing"
@@ -142,7 +142,7 @@
         {
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "posting writer inventory: a module relation nothing declares is caught by observing what the posting wrote",
-          "expected": "a module relation no read-back verifies must refuse the posting"
+          "expected": "the module write set observed for this posting is empty"
         }
       ]
     }
