@@ -295,7 +295,7 @@ matrix sit above it by construction, and it carries a
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-writer-inventory",
   "base": "8bc097cdd6402388d80911db004590e335a6d5c6",
-  "head": "9f91a709254b7fe88de2946bb4892166d19621b8",
+  "head": "794770527d1e9ea65f37be001a3547e2744a43a0",
   "changedPaths": [
     "packages/postgres-provider/src/inventory-posting-service.ts",
     "test/evidence/posting-writer-inventory.expected-red.json",
@@ -397,6 +397,10 @@ matrix sit above it by construction, and it carries a
     {
       "path": "packages/postgres-provider/src/inventory-posting-service.ts",
       "name": "assertObservedWriteSetIsDerived"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "name": "PostingReadBack"
     }
   ]
 }
