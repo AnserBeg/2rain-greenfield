@@ -188,6 +188,24 @@ legacy-version-three-recomputes-a-fresh-digest   1 passing -> 1 killed
 capability-version-not-bumped                    1 passing -> 1 killed
 ```
 
+**One architecture run failed and is recorded rather than quietly re-run.** The
+first re-run at the freeze returned **188/189**, failing *matrix lock and
+legacy-process waits fail busy at their bounded deadline* with
+`POSTGRES_CONTAINER_CONTAMINATION: refusing to start with north-star-* containers
+present after exclusive lock acquisition`, naming
+`north-star-companion-derivation-41471-7f034a09` at `age_seconds=1678`.
+
+**The cause was this lane's own tooling, not the packet.** An earlier
+`evidence:expected-red` invocation was run in the FOREGROUND, hit a 10-minute
+harness cap and was SIGTERM'd mid-entry; that killed run had
+`test/postgres/inventory-stock-count.test.ts` in flight and its ephemeral
+container outlived the process. The container's creation timestamp matches the
+minute of the kill. The guard behaved exactly as designed — it refused to start
+on a contaminated host and printed its own remediation — so this is the control
+working, not a flake to retry past. After `docker rm --force` of that single
+orphan the suite returned **189/189**. The subsequent `evidence:expected-red` run
+was backgrounded and completed cleanly, restoring the tree.
+
 **Sequencing.** `test:postgres` and the other suites ran at `0ec2ed2`. Three
 narrative commits sit above the last executable commit `fbfc295`. Per `AGENTS.md`
 §6, `test:architecture` and `format` read `docs/**` and were re-run at the freeze;
