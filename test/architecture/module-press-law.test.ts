@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -56,9 +57,16 @@ interface RoutedPressLawDebt {
  * report fails closed instead of silently comparing `undefined`.
  */
 function locatedByContent(
+  root: string,
+): (violation: ModulePressLawViolation) => RoutedPressLawDebt {
+  return (violation) => locateIn(root, violation);
+}
+
+function locateIn(
+  root: string,
   violation: ModulePressLawViolation,
 ): RoutedPressLawDebt {
-  const lines = readFileSync(violation.file, 'utf8').split('\n');
+  const lines = readFileSync(join(root, violation.file), 'utf8').split('\n');
   const text = lines[violation.line - 1];
   assert.ok(
     text !== undefined,
@@ -194,13 +202,16 @@ test('one auto-discovered guard covers every definition-backed product module', 
     'press-law guard read zero production files',
   );
   assert.ok(result.scannedFiles > 0, 'press-law guard read zero files');
-  assert.deepEqual(result.violations.map(locatedByContent), routedPressLawDebt);
+  assert.deepEqual(
+    result.violations.map(locatedByContent(process.cwd())),
+    routedPressLawDebt,
+  );
 });
 
 test('consolidated guard red: the previously omitted Platform module is observed', () => {
   const result = checkModulePressLaw(process.cwd());
   const platformViolations = result.violations
-    .map(locatedByContent)
+    .map(locatedByContent(process.cwd()))
     .filter((violation) => violation.moduleDirectory === 'platform');
   assert.deepEqual(
     platformViolations,
@@ -509,20 +520,23 @@ test('consolidated guard red: the routed Inventory literal cannot mask a later l
   });
   try {
     assert.deepEqual(
-      checkModulePressLaw(root).violations.filter(
-        (violation) =>
-          violation.ruleId === 'PRESS006_MODULE_ID_IN_PRESS' &&
-          violation.message ===
-            'generic press references inventory identity northstar.inventory',
-      ),
+      checkModulePressLaw(root)
+        .violations.filter(
+          (violation) =>
+            violation.ruleId === 'PRESS006_MODULE_ID_IN_PRESS' &&
+            violation.message ===
+              'generic press references inventory identity northstar.inventory',
+        )
+        .map(locatedByContent(root)),
       [
         {
           file: providerPath,
-          line: 37,
           message:
             'generic press references inventory identity northstar.inventory',
           moduleDirectory: 'inventory',
+          occurrence: 1,
           ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+          sourceLine: "'northstar.inventory:capability.posting' as const;",
         },
         {
           file: providerPath,
@@ -551,20 +565,23 @@ test('consolidated guard red: the routed Inventory literal cannot mask a later l
           // integer; it is an argument that the integer is the wrong locator
           // and the splice should be found by CONTENT.
           //
-          // **TENTH AND ELEVENTH MOVES, 2026-08-31, by
-          // `posting-writer-inventory` -- and the eleventh is the argument
-          // finishing itself.** The writer-inventory work moved it 1193 -> 1278.
-          // That number was reported to the orchestrator, a bridge was requested
-          // to change this one integer, and **by the time the grant came back
-          // the answer was already 1311**: closing a review finding had added a
-          // type alias and narrowed two comments in the upper half of the same
-          // file. The integer went stale INSIDE the round trip that existed
-          // solely to update it. A locator that cannot survive the latency of
-          // its own repair is not a locator.
-          line: 1311,
+          // **DONE, 2026-08-31, after an ELEVENTH move settled it.** The
+          // writer-inventory work moved this coordinate 1193 -> 1278. A bridge
+          // was requested to change the one integer, and **by the time the
+          // grant came back the answer was 1311**: closing a review finding had
+          // added a type alias in the upper half of the same file. The integer
+          // went stale INSIDE the round trip that existed solely to update it.
+          // A locator that cannot survive the latency of its own repair is not
+          // a locator, so there is no longer an integer here to go stale.
+          //
+          // This entry is the SPLICED line the mutation above introduces, which
+          // is why its text is a template literal rather than the frozen
+          // constant.
           message:
             'generic press references inventory identity northstar.inventory',
           moduleDirectory: 'inventory',
+          occurrence: 1,
+          sourceLine: "`${'northstar'}.${'inventory'}:capability.posting` ||",
           ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
         },
       ],
