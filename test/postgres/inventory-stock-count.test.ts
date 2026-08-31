@@ -1183,6 +1183,124 @@ test('PUR-2b: a pre-derivation version-3 receipt is refused as unreconstructible
   );
 });
 
+test('PUR-2b: a version-3 stock-count receipt still DECODES through natural replay, with no digest reconstructed', async () => {
+  await withCompanionEnvironment(
+    'companion-digest-natural',
+    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 7,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      const posted = await service.postStockCount(context, actor, command);
+
+      // THE SPECIMEN, and its shape is forced rather than chosen. Receipts are
+      // immutable -- migration 0009 rejects UPDATE and DELETE by RULE -- so a
+      // version-3 row cannot be made by rewriting the accepted one. It is added
+      // BESIDE it with an earlier `recorded_at`, which is what
+      // `findNaturalReplay`'s `ORDER BY receipt.recorded_at LIMIT 1` selects.
+      // Two receipts sharing one outbox_id is a real shape, not a contrivance:
+      // `persistAdditionalReceipt` writes exactly that on every natural replay.
+      const legacyKey = '62000000-0000-4000-8000-0000000000fe';
+      const { idempotencyKey, ...callerInput } = command;
+      void idempotencyKey;
+      const legacyDigest = createHash('sha256')
+        .update(
+          canonicalize({
+            postingRole: 'count',
+            ...callerInput,
+            lines: callerInput.lines.map((line) => ({
+              ...line,
+              transactionLineId: '65000000-0000-4000-8000-000000000065',
+            })),
+            transactionId: '64000000-0000-4000-8000-000000000064',
+          }),
+        )
+        .digest('hex');
+      await cloneReceiptAsPreDerivationVersion3(
+        databasePool,
+        command.idempotencyKey,
+        legacyKey,
+        legacyDigest,
+        { earlier: true },
+      );
+
+      // A DIFFERENT idempotency key, so the explicit-key lookup finds nothing
+      // and the posting reaches `findNaturalReplay`. That route proves replay
+      // from the persisted effects and the recorded principal, so it must NOT
+      // reconstruct a digest -- and a version-3 receipt must still decode.
+      const freshKey = '62000000-0000-4000-8000-0000000000fd';
+      const replay = await service.postStockCount(context, actor, {
+        ...command,
+        idempotencyKey: freshKey,
+      });
+
+      assert.equal(
+        replay.replayed,
+        true,
+        'an identical count under a new key must replay from its natural effects',
+      );
+      // THE ASSERTION THAT CARRIES THE CLAIM. Decoding a version-3 receipt goes
+      // through the stock-count version predicate twice: once for each recorded
+      // movement's posting role, once for the count evidence. Drop 3 from that
+      // predicate and the role fails to decode, so this call throws instead of
+      // returning -- which is the point. Version 3 must keep decoding under the
+      // version it was written with.
+      assert.deepEqual(
+        replay.stockCountEvidence,
+        posted.stockCountEvidence,
+        'a version-3 receipt must still decode its stored count evidence',
+      );
+      assert.deepEqual(
+        replay.movements.map((movement) => movement.postingRole),
+        posted.movements.map((movement) => movement.postingRole),
+        'a version-3 receipt must still decode its recorded posting roles',
+      );
+      // And it must not have gone anywhere near `digestCommand`: reconstructing
+      // a version-3 digest here would raise the unreconstructible refusal, so a
+      // successful replay is the observation that no reconstruction happened.
+      assert.deepEqual(
+        replay.movements.map((movement) => movement.movementId),
+        posted.movements.map((movement) => movement.movementId),
+        'natural replay must return the recorded movements, not new ones',
+      );
+
+      const after = await readCompanionState(runtimePool, context, binding);
+      assert.equal(
+        after.movements.length,
+        posted.movements.length,
+        'a replay must not post a second time',
+      );
+      assert.equal(
+        after.transactions.length,
+        1,
+        'a replay must not write a second companion transaction',
+      );
+
+      // The carry-forward receipt for the new key is written at the CURRENT
+      // version, so the transition moves forward without touching the old row.
+      assert.equal(
+        (await readReceipt(databasePool, freshKey)).inputDigestVersion,
+        4,
+        'the receipt a natural replay adds must be written at version 4',
+      );
+      const specimen = await readReceipt(databasePool, legacyKey);
+      assert.deepEqual(
+        {
+          inputDigest: specimen.inputDigest,
+          inputDigestVersion: specimen.inputDigestVersion,
+        },
+        { inputDigest: legacyDigest, inputDigestVersion: 3 },
+        'the version-3 receipt must be left exactly as it was found',
+      );
+    },
+  );
+});
+
 async function readInvocationCapabilityVersion(
   pool: Pool,
   invocationId: string,
@@ -1228,6 +1346,7 @@ async function cloneReceiptAsPreDerivationVersion3(
   sourceIdempotencyKey: string,
   targetIdempotencyKey: string,
   legacyDigest: string,
+  { earlier = false }: { earlier?: boolean } = {},
 ): Promise<void> {
   const inserted = await pool.query(
     `INSERT INTO platform.semantic_operation_receipts (
@@ -1241,7 +1360,8 @@ async function cloneReceiptAsPreDerivationVersion3(
             $5, $6, 3, receipt.mutation_result,
             receipt.invocation_id, receipt.correlation_id,
             receipt.change_document_id, receipt.domain_event_id,
-            receipt.outbox_id, receipt.recorded_at
+            receipt.outbox_id,
+            receipt.recorded_at - $7::interval
        FROM platform.semantic_operation_receipts AS receipt
       WHERE receipt.tenant_id = $1 AND receipt.environment_id = $2
         AND receipt.action_id = $3 AND receipt.idempotency_key = $4`,
@@ -1252,6 +1372,7 @@ async function cloneReceiptAsPreDerivationVersion3(
       sourceIdempotencyKey,
       targetIdempotencyKey,
       legacyDigest,
+      earlier ? '1 second' : '0 seconds',
     ],
   );
   assert.equal(
