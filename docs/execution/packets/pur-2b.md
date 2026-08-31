@@ -160,8 +160,40 @@ title rather than to keep advancing it in two files at once.
 
 ## Gates
 
-See the packet-completion block in the session report. `check:app-release` was
-green on `main` and is unchanged here: no tracked release artifact moved.
+| gate | result |
+|---|---|
+| `typecheck` | PASS |
+| `lint` | PASS |
+| `format` | PASS |
+| `test:unit` | 155/155 |
+| `test:compiler` | 157/157 |
+| `test:integration` | 149/149 |
+| `test:architecture` | 189/189 |
+| **`test:postgres`** (REQUIRED) | **220/220** |
+| `check:schema` | PASS — 23 applied, 23 verified; schema-drift PASS |
+| `check:app-release` | PASS — green on `main` and unchanged here; no tracked release artifact moved |
+| `check:expected-red` | OK — 59 entries in 6 manifests still name live production text |
+| `evidence:expected-red` | OK — **all 59 reproduced and restored**, this packet's four included |
+| `check:expected-red-controls` | OK — 38 controls |
+| `scripts/check-records.sh` | OK — 136 records, 5 declaring, 42 claimed paths and 68 claimed symbols observed |
+| `test:browser` | **NOT RUN** — see the declared limits |
+
+**Each of this packet's four controls died ALONE.** Every entry reports
+`1 killed` against `1 passing`, so no control takes a bystander with it:
+
+```
+migration-does-not-admit-version-four            1 passing -> 1 killed
+version-four-digest-keeps-the-derived-identities 1 passing -> 1 killed
+legacy-version-three-recomputes-a-fresh-digest   1 passing -> 1 killed
+capability-version-not-bumped                    1 passing -> 1 killed
+```
+
+**Sequencing.** `test:postgres` and the other suites ran at `0ec2ed2`. Three
+narrative commits sit above the last executable commit `fbfc295`. Per `AGENTS.md`
+§6, `test:architecture` and `format` read `docs/**` and were re-run at the freeze;
+every other suite carries forward, because
+`git diff --name-only fbfc295 <freeze> -- . ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'`
+is empty.
 
 ## The declared range
 
