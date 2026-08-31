@@ -1,0 +1,526 @@
+{
+  "version": 1,
+  "packet": "pur-2a",
+  "entries": [
+    {
+      "name": "companion-identity-not-derived-from-the-source",
+      "claim": "The companion transaction and line identities are a pure function of the stock-count source record ids. Deriving them from anything else -- here, from fresh randomness -- means the kernel mints a companion identity nothing can recompute, which is the copies-rather-than-derives defect `purchasing-sales-v1-plan.md` section 7.16 measured. SCOPE, narrowed on review: the kill is observed at the HEADER read-back, which runs before the line identities are independently compared, so this entry holds the header half at full strength and the line half only by construction. `companion-line-identity-not-derived-from-its-source` holds the line half. *Corrected on review: an earlier version of this sentence named `source-line-companion-column-never-written`, which proves the relation was WRITTEN, not that the identity was DERIVED -- the manifest contradicted itself about which mutation holds it.* Kill sets are measured within the three `companion derivation` tests this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const digest = createHash('sha256').update(name, 'utf8').digest();",
+      "replacement": "  const digest = createHash('sha256').update(randomUUID(), 'utf8').digest();",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the derived companion transaction identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the derived companion transaction identity"
+        }
+      ]
+    },
+    {
+      "name": "companion-revision-not-the-contract-initial-value",
+      "claim": "A companion transaction is a CREATE, so it must carry the contract initial revision and nothing else. This mutation writes a different one. Round 8 moved the refusal onto its own message: the revision proof now lives on the companion header rather than inside the source header s derived-identity group, so a wrong revision no longer reports itself as a wrong identity. Kill sets are measured within the three `companion derivation` tests this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const revision = companionInitialRevision;",
+      "replacement": "  const revision = command.sourceRevision + 1;",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "was not created at the revision the companion contract declares"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "was not created at the revision the companion contract declares"
+        }
+      ]
+    },
+    {
+      "name": "source-companion-column-never-written",
+      "claim": "The posted transition is where the source's companion transaction identity is written. Writing null there instead of the derived identity leaves a posted stock count whose companion column is still empty -- the source posts, the movements land, and nothing records which transaction they belong to. That is the silent-until-reconciled failure this packet's Band A declaration is about. The mutation writes `NULLIF($11, $11)` rather than deleting the assignment, because deleting it leaves the bound parameter unreferenced and PostgreSQL then refuses the statement with 42P18 -- a red, but not this red, and an entry whose kill dies for the wrong reason certifies nothing.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            ${quoted(binding.stockCountRelationToTransactionColumn)} = $11::uuid,",
+      "replacement": "            ${quoted(binding.stockCountRelationToTransactionColumn)} = NULLIF($11::uuid, $11::uuid),",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the derived companion transaction identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the derived companion transaction identity"
+        }
+      ]
+    },
+    {
+      "name": "source-line-companion-column-never-written",
+      "claim": "Line-level companion identity is written per source line, not implied by the header. Writing null instead still satisfies the update's own row count -- the guard is `IS NULL` and the row stays null -- so only the read-back catches it. This is the vacuity vector where a write reports success and the fact does not hold. `NULLIF($5, $5)` keeps the bound parameter referenced, for the reason recorded on `source-companion-column-never-written`.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid",
+      "replacement": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = NULLIF($5::uuid, $5::uuid)",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "lines do not all carry a derived companion line identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "lines do not all carry a derived companion line identity"
+        }
+      ]
+    },
+    {
+      "name": "reviewed-source-companion-must-be-null-fence-removed",
+      "claim": "NARROWED ON REVIEW, twice. This control holds ONE thing: which refusal an operator meets when a reviewed count already names a companion. With the evidence-stage fence the message names the companion -- the refusal every pre-derivation stock count would meet; without it the posting is still refused, but at the LINE check, pointing at a record that is fine. It does NOT hold non-adoption: `transitionStockCountToPosted` keeps its own `IS NULL` compare-and-set, so the mutant adopts nothing and writes no movement either way. Round 2 was right that the earlier claim credited this fence with a property a different mechanism enforces. It does NOT hold that the kernel is the only reachable writer of a companion column, which it is not -- see `companion-writers-not-closed`.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const expectedCompanionId =\n    state === binding.stockCountReviewedState ? null : command.transactionId;",
+      "replacement": "  const expectedCompanionId = nullableUuid(row?.transactionId ?? null);",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a reviewed count that already names a companion transaction is refused",
+          "expected": "the refusal must name the companion, not the reviewed evidence at large"
+        }
+      ]
+    },
+    {
+      "name": "family-roster-transaction-type-repointed",
+      "claim": "NARROWED ON REVIEW. This control holds that the ROSTER's declared role type is what the kernel writes: repointing the `count` role's transaction type changes the companion an initial count receives, and the projection test compares both roles as one value so neither masks the other. It does NOT prove that the family carried on `ParsedPosting` is what executes, and round 2 was right: regressing to the old global role lookup would consume the same mutated roster entry and produce the same red. It cannot be made to discriminate today, because `resolvePostingFamilies` forbids two families claiming one role, so role alone still identifies the family -- a fixture that could tell the two paths apart is not constructible under the current invariant. The dataflow correction is verifiable by reading the source; this control does not protect it from regression, and that limit is stated rather than implied.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'count_correction',\n      }),",
+      "replacement": "      Object.freeze({\n        movementOption: 'count',\n        postingRole: 'count',\n        transactionTypeOption: 'adjustment',\n      }),",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "each role companion type comes from its own family role binding"
+        }
+      ]
+    },
+    {
+      "name": "companion-business-key-collides-across-companions",
+      "claim": "NARROWED ON REVIEW: this holds NON-COLLISION, not derivation. `inventory_transaction_number` is `tenantEnvironmentCaseInsensitiveUnique`, so a constant companion number lets the FIRST companion in a tenant write and makes every later one impossible -- the projection test posts an opening count and then a correction, and the correction cannot get a companion at all. The kill is observed at the database uniqueness boundary, BEFORE the test reaches its assertion that the number equals the derived identity, so an earlier version of this claim credited it with proving derivation and round 6 was right that it cannot. `companion-business-key-not-derived-from-identity` holds derivation with a wrong-but-UNIQUE number. MEASURED AND NOT WHAT WAS FIRST DECLARED: the collision surfaces as INVENTORY_POSTING_IDEMPOTENCY_CONFLICT naming a natural effect race, because the savepoint's 23505 handler predates the kernel writing a companion and attributes every unique violation to a movement identity -- filed as `companion-key-collision-misreported-as-effect-race`.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return `${companion.numberPrefix}-${transactionId}`;",
+      "replacement": "  return `${companion.numberPrefix}-companion`;",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "a natural effect identity was claimed by a different posting"
+        }
+      ]
+    },
+    {
+      "name": "companion-derivation-namespace-moved",
+      "claim": "Companion identity must be STABLE, not merely deterministic, because it is the join a reconciliation reader recomputes against already-posted counts. Moving the namespace yields a derivation that is still pure and still deterministic, so write and read-back agree and the kernel's own read-back passes -- it recomputes with the function it wrote with. Only the golden vectors catch it. The two vectors are now compared as ONE value, so the transaction half no longer masks the line half; the review was right that sequential assertions measured only the first. It dies alone: every other assertion compares the kernel against the same derivation and moves with it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "const companionDerivationNamespace = 'northstar.inventory-posting-companion/v1';",
+      "replacement": "const companionDerivationNamespace = 'northstar.inventory-posting-companion/v2';",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "both companion derivations must be stable across releases"
+        }
+      ]
+    },
+    {
+      "name": "companion-line-identity-not-derived-from-its-source",
+      "claim": "The companion LINE identity is a function of its own source line record id, held independently of the header. Round 2 was right that the shared-derivation mutation cannot hold this: the header comparison fails first, so the line half was only ever held by construction, and `source-line-companion-column-never-written` proves the relation was WRITTEN rather than DERIVED. This mutation leaves header derivation intact and derives the line identity from the SESSION id instead of the line's own id -- still pure, still deterministic, and wrong in exactly the way a copy-paste would be. The header read-back passes; only the line identity comparison catches it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      sourceRecordId: line.stockCountLineId.toLowerCase(),\n    }),",
+      "replacement": "      sourceRecordId: stockCountId,\n    }),",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the derived companion line identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the derived companion line identity"
+        }
+      ]
+    },
+    {
+      "name": "companion-line-created-at-a-derived-revision",
+      "claim": "A companion LINE is a create, so it carries the compiled optimistic-revision contract's `initialValue: '1'` written explicitly by the kernel -- the same rule the header follows. Round 2 found the header writing its revision while the line relied silently on the column default, so the create invariant was never certified for lines even though it held by accident. This mutation writes a source-derived revision instead, which is what the header did before round 1 corrected it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      line.transactionLineId,\n      companionInitialRevision,",
+      "replacement": "      line.transactionLineId,\n      command.sourceRevision + 1,",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the revisions its writes require"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the revisions its writes require"
+        }
+      ]
+    },
+    {
+      "name": "source-line-revision-does-not-advance",
+      "claim": "Writing the derived companion relation MUTATES the source stock-count line, so its optimistic revision must advance. Round 2 found the relation being written while the revision stood still, which makes the mutation invisible to optimistic concurrency: `stock_count_line` receives ordinary generated operations, and a later one holding a pre-posting expected revision could not tell that posting had changed the row. This mutation restores that behaviour. NARROWED ON REVIEW: the kill is observed at the writer's IMMEDIATE `RETURNING` guard, which throws before `assertCompanionIdentitiesPersisted` is ever called, so this entry holds THAT guard and nothing else. An earlier version claimed the persisted comparison refuses it too; it is never reached. `source-line-revision-recorded-wrongly-for-comparison` is the entry that holds the persisted comparison.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid,\n              ${quoted(binding.stockCountLine.revisionColumn)} = ${quoted(binding.stockCountLine.revisionColumn)} + 1",
+      "replacement": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "would not accept its derived companion identity"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "would not accept its derived companion identity"
+        }
+      ]
+    },
+    {
+      "name": "source-recorded-at-not-the-posting-instant",
+      "claim": "`transitionStockCountToPosted` writes FIVE facts to the source in one compare-and-set, and round 3 found only three of them read back. This mutation shifts the source's recorded instant by one second: the companion header still carries the correct instant, the companion id, revision and state all still match, the later evidence read-back still passes, and the trust documents are still built from the expected in-memory value -- so the posting reports success while the business row and its own evidence disagree about when it happened. Only reading the instant off the row the statement wrote catches it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            ${quoted(binding.stockCountRecordedAtColumn)} = $6::timestamptz,",
+      "replacement": "            ${quoted(binding.stockCountRecordedAtColumn)} = $6::timestamptz + interval '1 second',",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the posting facts its transition wrote"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the posting facts its transition wrote"
+        }
+      ]
+    },
+    {
+      "name": "source-actor-not-the-posting-principal",
+      "claim": "The same compare-and-set writes the source's actor, and it had the same observation gap as the instant. This mutation appends one character to the posting principal: a well-formed, database-valid value the text column accepts, so nothing structural refuses it. The companion header's actor is correct, every identity and revision matches, and the trust evidence records the expected principal -- leaving the source attributing the posting to a DIFFERENT actor identifier than its own trust record names (the mutation shows difference, not nonexistence -- no existence check is part of it). Attribution disagreeing with its own trust record is the silent-until-reconciled class this packet declares Band A for. The mutation keeps `$7` referenced and stays within the column's type: dropping the reference reds with 42P18 and substituting a uuid-inferred parameter reds with 42804, and neither is this entry's declared reason.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            ${quoted(binding.stockCountActorColumn)} = $7,",
+      "replacement": "            ${quoted(binding.stockCountActorColumn)} = $7 || 'x',",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the posting facts its transition wrote"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the posting facts its transition wrote"
+        }
+      ]
+    },
+    {
+      "name": "source-line-revision-recorded-wrongly-for-comparison",
+      "claim": "The PERSISTED source-line revision is compared against the revision the writer recorded, and this entry holds THAT comparison alone. The mutation leaves the SQL untouched -- the row really does advance -- and corrupts only the expectation the writer hands forward, so the immediate `RETURNING` guard passes and nothing before the persisted query can notice. It is the complement of `source-line-revision-does-not-advance`, which dies at that guard and never reaches this comparison: delete the persisted comparison and that entry reproduces unchanged while this one goes green. Round 4 was right that one mutation cannot hold both.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    written.set(line.stockCountLineId, priorRevision + 1);",
+      "replacement": "    written.set(line.stockCountLineId, priorRevision);",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "does not carry the revisions its writes require"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not carry the revisions its writes require"
+        }
+      ]
+    },
+    {
+      "name": "movement-names-a-foreign-companion-header",
+      "claim": "A movement carries TWO companion relations -- the transaction directly, and the transaction line -- and nothing in the storage model ties them together. The compiler lowers each declared relation to its own foreign key over scope plus record id and asserts nothing about a movement's transaction being the parent of its own line, so a movement naming one posting's header and another posting's line satisfies both keys. This mutation builds exactly that: a correction's movement points at the SUPERSEDED count's companion header while keeping its own correction line. Every companion projection assertion still passes, the source still names the correction's companion, and the line still belongs to it; the returned result and the receipt still record the correct transaction while the persisted movement names a different one. It is invisible until an unrelated natural replay compares the two relations, which is what makes it silent-until-reconciled. An initial count has nothing to supersede, so the mutation is inert there and this dies alone in the projection test.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    command.transactionId,\n    movement.transactionLineId,\n  ];",
+      "replacement": "    isStockCountPosting(posting) && posting.command.supersedesStockCountId\n      ? deriveInventoryPostingCompanionId({\n          capabilityId: posting.family.capabilityId,\n          companionFamilyId: posting.family.companion!.companionEntityId,\n          familyId: posting.family.familyId,\n          sourceRecordId: posting.command.supersedesStockCountId,\n        })\n      : command.transactionId,\n    movement.transactionLineId,\n  ];",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "does not name the companion transaction and line it was written for"
+        }
+      ]
+    },
+    {
+      "name": "companion-business-key-not-derived-from-identity",
+      "claim": "The companion transaction's business key is DERIVED from the derived companion identity, so it is recomputable by a reconciliation reader and unique whenever the identity is. This mutation keeps the identity in the number and changes only the prefix, so every companion number stays unique and nothing collides -- removing the uniqueness boundary as an alternate kill mechanism and forcing the projection test to reach its exact assertion that the persisted number equals `SC-${derivedTransactionId}`. That is the correction round 6 required: the constant mutation held by `companion-business-key-collides-across-companions` proves non-collision, which is a different property.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return `${companion.numberPrefix}-${transactionId}`;",
+      "replacement": "  return `BAD-${transactionId}`;",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "the companion business key must be derived from the companion identity"
+        }
+      ]
+    },
+    {
+      "name": "authored-transaction-not-persisted-posted",
+      "claim": "`transitionTransactionToPosted` writes two facts to the AUTHORED transaction header -- state and revision -- and observed neither independently: it checked the affected row count and the revision its own `RETURNING` reported, which is the mutating statement reporting on itself. `state` was not read back at all. This mutation writes a wrong-but-valid state, `draft`, while leaving the revision increment correct, so the row count is one, the returned revision is exactly what was expected, and the movements are all correct -- an adjustment reports a successful posting while its header is still a draft. Only an independently issued re-read of the persisted header catches it. This is the authored twin of the companion-origin omissions rounds 2, 3 and 5 found; adjustment and transfer had no persisted header observation at all.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      binding.transactionPostedState,\n      command.transactionId,\n      binding.transactionDraftState,",
+      "replacement": "      binding.transactionDraftState,\n      command.transactionId,\n      binding.transactionDraftState,",
+      "test": {
+        "files": ["test/postgres/inventory-backdate-policy.test.ts"],
+        "namePattern": "backdate window"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-backdate-policy.test.ts",
+          "name": "the configured backdate window decides which effective period a posting may carry",
+          "expected": "did not persist the posted state its transition wrote"
+        }
+      ]
+    },
+    {
+      "name": "movement-created-at-a-wrong-revision",
+      "claim": "A movement is a create, so the kernel writes the compiled optimistic-revision contract's initial value explicitly -- the rule the companion header and line already followed. Round 7 found the movement the last writer still relying on the column default, with neither its revision nor its archive state read back, so a schema-valid create-contract violation survived the insert, the row-count check, every field comparison and every parent check. This mutation writes revision 2 with all other values correct.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    movement.movementId,\n    companionInitialRevision,",
+      "replacement": "    movement.movementId,\n    companionInitialRevision + 1,",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "was not persisted as it was planned"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "was not persisted as it was planned"
+        }
+      ]
+    },
+    {
+      "name": "a-verifier-stops-comparing-a-column",
+      "claim": "THE CLASS-LEVEL CONTROL, rebuilt. Round 7 shipped coverage as a hand-written list of column names standing beside the comparisons, and round 8 showed what that bought: deleting a comparison and leaving its name in the list still passed. Coverage is now the comparison -- a `verified(...)` proof carries the column it was executed on, so there is no name to leave behind. This mutation deletes one proof, the movement s reversal identity. Nothing about the posting is wrong and every remaining value is correct; what changes is that a written column is no longer covered, and `assertPersistedRowVerified` refuses the posting rather than returning success. Kill sets are measured within the three `companion derivation` tests this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          verified(\n            binding.movementReversalOfMovementColumn,\n            nullableUuid(row.reversalOfMovementId) ===\n              movement.reversalOfMovementId,\n            planned,\n          ),\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "carries persisted columns no read-back compares"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "carries persisted columns no read-back compares"
+        }
+      ]
+    },
+    {
+      "name": "a-read-back-observes-a-partial-row",
+      "claim": "The other direction of the same equality, and the one round 8 named as the vacuous pass: round 7 s guard asked only whether the persisted row carried a column the coverage list omitted, so an EMPTY observation satisfied it -- no extra columns, therefore no refusal. This mutation replaces the movement read-back s whole-row observation with an empty JSON object while leaving every comparison in place and every value correct. The posting must refuse because the columns it proved are not columns the observation returned. Kill sets are measured within the three `companion derivation` tests this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            to_jsonb(movement) AS \"persistedRow\",",
+      "replacement": "            '{}'::jsonb AS \"persistedRow\",",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "was verified on columns its read-back did not observe"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "was verified on columns its read-back did not observe"
+        }
+      ]
+    },
+    {
+      "name": "a-generated-column-loses-its-source-proof",
+      "claim": "The CONDITIONAL half of the generated-column admission, which the round-7 prompt disclosed as having no committed control. A storage-generated column is admitted by derivation rather than by comparison -- the database computes it from a source column under a pinned expression -- but that admission is conditional on an EXECUTED proof of the source. This mutation removes the preservation proof for the stock count s business key, whose unicode-case-fold column the release generates. Both columns must lose their accounting together: if the derived column survived its source, the admission would be unconditional and the hole would be reopened rather than closed. Kill sets are measured within the three `companion derivation` tests this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          binding.stockCountSupersedesColumn,\n          requiredField(binding.stockCount, 'stock_count_number').name,\n",
+      "replacement": "          binding.stockCountSupersedesColumn,\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "companion derivation"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities",
+          "expected": "generated columns whose source column is itself uncompared"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count",
+          "expected": "generated columns whose source column is itself uncompared"
+        }
+      ]
+    },
+    {
+      "name": "posted-balance-verification-removed-at-the-binding",
+      "claim": "That the posted-stock observation is REACHED, not merely written. The projection binding resolves to null when the active release carries no balance entity, and a posting then has no trigger write to observe; this mutation makes it resolve to null unconditionally, so the verification is skipped on a release that does carry one. Every value the posting writes stays correct and every other assertion still passes -- which is the point: before round 8 nothing in the suite observed the balance at post time, so a skipped verification was indistinguishable from a passing one. The declared red is the ABSENCE of a refusal: with the verification skipped the posting succeeds, so the control test fails with a missing rejection rather than with a refusal message. SCOPE: the kill is measured in the single `posted-stock projection` test this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    postedStockProjection: postedStockBalanceEntity\n      ? postedStockProjectionBinding(bindEntity(postedStockBalanceEntity))\n      : null,\n",
+      "replacement": "    postedStockProjection: null,\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "posted-stock projection"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posted-stock projection: a balance that does not equal the movement ledger refuses the posting",
+          "expected": "Missing expected rejection: a balance already divergent from the ledger must refuse the posting that adds to it"
+        }
+      ]
+    },
+    {
+      "name": "posted-balance-accumulation-replaced-by-assignment",
+      "claim": "That a WRONG-BUT-VALID projection trigger refuses the posting instead of committing a wrong browsable row. The trigger accumulates each movement delta onto the standing balance; this mutation makes it assign the delta instead, which is invisible on the row-creating posting and wrong on every later one. The trigger still reports one affected row, so its own `ROW_COUNT` check -- the only thing that observed it before round 8 -- still passes. SCOPE: the kill is measured in the single `three-value evidence` test this command runs, which is the one that posts twice against one stock identity. FENCE DISCLOSURE: this mutation names a file this packet does not own. It is a MEASUREMENT, not a change -- the runner applies it, measures the red, and restores the file, and the committed tree carries no delta there. It is named here rather than left implicit because the alternative -- proving the verifier catches a wrong trigger by mutating the verifier -- would prove only that the verifier runs.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "       SET %I = balance.%I + EXCLUDED.%I,",
+      "replacement": "       SET %I = balance.%I * 0 + EXCLUDED.%I,",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "three-value evidence"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posting preserves three-value evidence and appends correction and exact reversal through the shared protocol",
+          "expected": "does not equal the movement ledger it projects"
+        }
+      ]
+    },
+    {
+      "name": "posted-balance-revision-advances-by-two",
+      "claim": "The balance row carries an optimistic revision, and a projection that advances it wrongly hands every later reader a stale-write conflict that never happened. This mutation advances it by two per movement. The quantity stays exactly right, so this is the fact the ledger recomputation CANNOT catch and the revision proof must. SCOPE: the kill is measured in the single `three-value evidence` test this command runs, which is the one that posts twice against one stock identity. FENCE DISCLOSURE: this mutation names a file this packet does not own. It is a MEASUREMENT, not a change -- the runner applies it, measures the red, and restores the file, and the committed tree carries no delta there. It is named here rather than left implicit because the alternative -- proving the verifier catches a wrong trigger by mutating the verifier -- would prove only that the verifier runs.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "           %I = balance.%I + 1",
+      "replacement": "           %I = balance.%I + 2",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "three-value evidence"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posting preserves three-value evidence and appends correction and exact reversal through the shared protocol",
+          "expected": "did not advance one revision for each movement this posting appended"
+        }
+      ]
+    },
+    {
+      "name": "posted-balance-identity-drops-the-location-dimension",
+      "claim": "The projection derives its row identity from the stock dimensions it aggregates. This mutation feeds the item where the location belongs, so two locations for one item collapse onto one identity. A single-location run cannot see that by comparing dimensions -- the row it finds carries the right item and the right location -- which is why the posting recomputes the identity independently of the trigger that writes it. SCOPE: the kill is measured in the single `three-value evidence` test this command runs. FENCE DISCLOSURE: this mutation names a file this packet does not own. It is a MEASUREMENT, not a change -- the runner applies it, measures the red, and restores the file, and the committed tree carries no delta there. It is named here rather than left implicit because the alternative -- proving the verifier catches a wrong trigger by mutating the verifier -- would prove only that the verifier runs.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "    TG_ARGV[1], TG_ARGV[1], TG_ARGV[2], TG_ARGV[3],",
+      "replacement": "    TG_ARGV[1], TG_ARGV[1], TG_ARGV[2], TG_ARGV[2],",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "three-value evidence"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posting preserves three-value evidence and appends correction and exact reversal through the shared protocol",
+          "expected": "does not carry the identity the projection derives"
+        }
+      ]
+    }
+  ]
+}

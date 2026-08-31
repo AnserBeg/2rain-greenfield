@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -12,99 +13,175 @@ import {
   removeArchitectureFixture,
 } from '../helpers/architecture-fixture.js';
 
+/**
+ * A routed press-law observation, located BY CONTENT.
+ *
+ * **This replaced a line number, and the reason is measured rather than
+ * asserted.** The `inventory-posting-service.ts` coordinate moved ELEVEN times
+ * across FOUR unrelated packets -- 866, 1112, 1115, 1116, 1118, 1125, 1132,
+ * 1193, 1278, 1311 -- and every packet that added a line to the upper half of
+ * that file inherited an architecture red it did not cause and, being outside
+ * its lease, could not fix. Two of those moves were caused purely by adding
+ * COMMENTS.
+ *
+ * The eleventh move is what settled it. A bridge was granted to change the
+ * integer from 1193 to 1278, and **by the time the grant came back the answer
+ * was 1311**, because closing an unrelated review finding had added a type
+ * alias in the same file. **The integer went stale inside the round trip that
+ * existed solely to update it.** A locator that cannot survive the latency of
+ * its own repair is not a locator.
+ *
+ * `sourceLine` is the trimmed text of the line the violation sits on, and
+ * `occurrence` disambiguates identical text within one file -- three of these
+ * rows are the same `'northstar.inventory:capability.posting',` literal in
+ * `conformance.ts`, so content ALONE would have silently collapsed them.
+ *
+ * WHAT THIS IS STILL SENSITIVE TO, and deliberately: adding or removing an
+ * EARLIER occurrence of the same text shifts the occurrence index. That is a
+ * real change to which pinned identity is routed, and it should fail.
+ */
+interface RoutedPressLawDebt {
+  readonly file: string;
+  readonly message: string;
+  // Mirrors `ModulePressLawViolation` exactly, nullability included, so a
+  // violation outside any module directory cannot be silently reshaped here.
+  readonly moduleDirectory: string | null;
+  readonly occurrence: number;
+  readonly ruleId: ModulePressLawViolation['ruleId'];
+  readonly sourceLine: string;
+}
+
+/**
+ * Re-express a reported violation by WHAT it sits on rather than WHERE. Refuses
+ * rather than guessing when the line cannot be read, so a stale or out-of-range
+ * report fails closed instead of silently comparing `undefined`.
+ */
+function locatedByContent(
+  root: string,
+): (violation: ModulePressLawViolation) => RoutedPressLawDebt {
+  return (violation) => locateIn(root, violation);
+}
+
+function locateIn(
+  root: string,
+  violation: ModulePressLawViolation,
+): RoutedPressLawDebt {
+  const lines = readFileSync(join(root, violation.file), 'utf8').split('\n');
+  const text = lines[violation.line - 1];
+  assert.ok(
+    text !== undefined,
+    `press-law reported ${violation.file}:${String(violation.line)}, which that file does not have`,
+  );
+  const trimmed = text.trim();
+  const occurrence = lines
+    .slice(0, violation.line)
+    .filter((candidate) => candidate.trim() === trimmed).length;
+  return {
+    file: violation.file,
+    message: violation.message,
+    moduleDirectory: violation.moduleDirectory,
+    occurrence,
+    ruleId: violation.ruleId,
+    sourceLine: trimmed,
+  };
+}
+
 // Keeping every routed observation exact is a two-way ratchet: another branch
 // fails, and resolving one also fails until its owning row deliberately removes
 // it from this record.
-const routedPressLawDebt: readonly ModulePressLawViolation[] = [
-  // Row 1e-2 owns these accepted G3-P1a module identities, newly visible when
-  // Inventory became definition-backed. Occurrence-complete PRESS006 exposes
-  // every pinned compiler assertion; keep all of them exact until that row
-  // replaces the hard-coded contract pattern.
+//
+// Row 1e-2 owns the accepted G3-P1a compiler-conformance identities; row
+// press-law-evasion owns the posting provider's frozen identity, whose
+// retirement path is not adjudicated.
+const routedPressLawDebt: readonly RoutedPressLawDebt[] = [
   {
     file: 'packages/compiler/src/conformance.ts',
-    // `PUR-1` declared two family rows and one relation-semantics row near the
-    // top of `conformance.ts`, so EVERY routed entry in that file moved down by
-    // the same seven lines. The routed debt itself is unchanged -- same files,
-    // same rules, same messages, same count -- and only the offsets moved. The
-    // new values were read from `checkModulePressLaw` rather than arithmetic.
-    line: 2371,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
+    occurrence: 1,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "'northstar.inventory:capability.posting',",
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 2934,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
+    occurrence: 1,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "'northstar.inventory:operation.re_baseline',",
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 2973,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
+    occurrence: 2,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "'northstar.inventory:capability.posting',",
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3142,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
+    occurrence: 1,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "'northstar.inventory:operation.advance_period_lock',",
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3146,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
+    occurrence: 1,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "'northstar.inventory:permission.advance_period_lock',",
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3151,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
+    occurrence: 1,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "'northstar.inventory:operation.reopen_period',",
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3155,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
+    occurrence: 1,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "'northstar.inventory:permission.reopen_period',",
   },
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 3289,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
+    occurrence: 3,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "'northstar.inventory:capability.posting',",
   },
-  // Row press-law-evasion owns the posting provider's exact frozen identity.
-  // Its retirement path is not adjudicated; row 1e-2 owns only the separate
-  // compiler-conformance identity.
   {
     file: 'packages/postgres-provider/src/inventory-posting-service.ts',
-    line: 37,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
+    occurrence: 1,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "'northstar.inventory:capability.posting' as const;",
   },
   {
     file: 'packages/postgres-provider/src/saved-filter-executor.ts',
-    line: 103,
     message:
       'generic press contains platform-specific PostgresSavedFilterExecutor',
     moduleDirectory: 'platform',
+    occurrence: 1,
     ruleId: 'PRESS007_MODULE_GLUE_IN_PRESS',
+    sourceLine: 'export class PostgresSavedFilterExecutor',
   },
   {
     file: 'packages/postgres-provider/src/saved-filter-executor.ts',
-    line: 1013,
     message: 'generic press references platform identity northstar.platform',
     moduleDirectory: 'platform',
+    occurrence: 1,
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine: "eventType: 'northstar.platform:event.saved_filter_changed',",
   },
 ] as const;
 
@@ -125,14 +202,17 @@ test('one auto-discovered guard covers every definition-backed product module', 
     'press-law guard read zero production files',
   );
   assert.ok(result.scannedFiles > 0, 'press-law guard read zero files');
-  assert.deepEqual(result.violations, routedPressLawDebt);
+  assert.deepEqual(
+    result.violations.map(locatedByContent(process.cwd())),
+    routedPressLawDebt,
+  );
 });
 
 test('consolidated guard red: the previously omitted Platform module is observed', () => {
   const result = checkModulePressLaw(process.cwd());
-  const platformViolations = result.violations.filter(
-    (violation) => violation.moduleDirectory === 'platform',
-  );
+  const platformViolations = result.violations
+    .map(locatedByContent(process.cwd()))
+    .filter((violation) => violation.moduleDirectory === 'platform');
   assert.deepEqual(
     platformViolations,
     routedPressLawDebt.filter(
@@ -440,27 +520,68 @@ test('consolidated guard red: the routed Inventory literal cannot mask a later l
   });
   try {
     assert.deepEqual(
-      checkModulePressLaw(root).violations.filter(
-        (violation) =>
-          violation.ruleId === 'PRESS006_MODULE_ID_IN_PRESS' &&
-          violation.message ===
-            'generic press references inventory identity northstar.inventory',
-      ),
+      checkModulePressLaw(root)
+        .violations.filter(
+          (violation) =>
+            violation.ruleId === 'PRESS006_MODULE_ID_IN_PRESS' &&
+            violation.message ===
+              'generic press references inventory identity northstar.inventory',
+        )
+        .map(locatedByContent(root)),
       [
         {
           file: providerPath,
-          line: 37,
           message:
             'generic press references inventory identity northstar.inventory',
           moduleDirectory: 'inventory',
+          occurrence: 1,
           ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+          sourceLine: "'northstar.inventory:capability.posting' as const;",
         },
         {
           file: providerPath,
-          line: 866,
+          // PUR-2a. Read from `checkModulePressLaw`, not arithmetic -- the same
+          // instruction the routed-debt block above carries. This coordinate is
+          // the spliced `registration.capabilityId` comparison, and it moves for
+          // ANY packet that adds a line above `validateRegistration`. Locating
+          // it by content instead of by integer would make this control immune;
+          // filed as `press-law-splice-control-pinned-by-line-number`.
+          //
+          // Note it is the line AFTER the comparison starts: the splice is two
+          // lines, so the identity lands on the second. Deriving this from a
+          // grep of the unmutated source is wrong -- which is what the
+          // routed-debt comment above means by "arithmetic".
+          //
+          // This coordinate moved EIGHT times inside `PUR-2a` alone: 866, then
+          // 1112, 1115, 1116, 1118, 1125, 1132, 1193. Two moves were caused
+          // purely by adding COMMENTS above `validateRegistration`; the others
+          // by an argument list, a call, a struct field, and -- the last, and
+          // the largest jump -- two interface declarations and a nullable
+          // binding. **Every single edit this packet made to the upper half of
+          // a 4,000-line file moved it, without exception, across eight
+          // rounds.** That is the measurement behind
+          // `press-law-splice-control-pinned-by-line-number`. Eight moves in
+          // one packet is not an argument for a stronger reminder to update the
+          // integer; it is an argument that the integer is the wrong locator
+          // and the splice should be found by CONTENT.
+          //
+          // **DONE, 2026-08-31, after an ELEVENTH move settled it.** The
+          // writer-inventory work moved this coordinate 1193 -> 1278. A bridge
+          // was requested to change the one integer, and **by the time the
+          // grant came back the answer was 1311**: closing a review finding had
+          // added a type alias in the upper half of the same file. The integer
+          // went stale INSIDE the round trip that existed solely to update it.
+          // A locator that cannot survive the latency of its own repair is not
+          // a locator, so there is no longer an integer here to go stale.
+          //
+          // This entry is the SPLICED line the mutation above introduces, which
+          // is why its text is a template literal rather than the frozen
+          // constant.
           message:
             'generic press references inventory identity northstar.inventory',
           moduleDirectory: 'inventory',
+          occurrence: 1,
+          sourceLine: "`${'northstar'}.${'inventory'}:capability.posting` ||",
           ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
         },
       ],

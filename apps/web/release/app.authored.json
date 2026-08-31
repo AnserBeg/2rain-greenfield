@@ -11472,7 +11472,7 @@
       "orderKey": 40,
       "ownership": "reference",
       "relationId": "northstar.app:relation.stock_count_transaction",
-      "required": true,
+      "required": false,
       "schemaVersion": "v5",
       "sourceEntity": {
         "kind": "entityReference",
@@ -11550,7 +11550,7 @@
       "orderKey": 70,
       "ownership": "reference",
       "relationId": "northstar.app:relation.stock_count_line_transaction_line",
-      "required": true,
+      "required": false,
       "schemaVersion": "v5",
       "sourceEntity": {
         "kind": "entityReference",

@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "packet": "posting-writer-inventory",
+  "entries": [
+    {
+      "name": "effect-reservation-never-observed",
+      "claim": "THE SUBJECT ABSENT ENTIRELY. Every movement insert fires the trigger the compiled target declares as `factStorage.companion.reservationTriggerName`, which copies the movement into the effect-reservation companion. That companion's PRIMARY KEY omits `business_period` and `record_id` and is the ONLY natural-effect guard in the system -- the movement's own `effectIdentityUnique` carries a freshly minted `record_id` and can never collide between two postings. The foreign key runs companion -> movement ON DELETE RESTRICT, so a movement with NO reservation row violates no constraint. Remove the read-back and a posting whose reservation never happened commits silently, leaving the 23505 raced-replay refusal unreachable for that effect. Kill is measured in the reservation test this command runs.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      await assertMovementEffectReservations(\n        client,\n        this.#binding,\n        context,\n        parsed.legalEntityId,\n        ordered,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the movement effect reservation is observed"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: the movement effect reservation is observed before the posting commits",
+          "expected": "a movement that reserved no natural effect must refuse the posting"
+        }
+      ]
+    },
+    {
+      "name": "effect-reservation-compared-on-count-not-columns",
+      "claim": "A PROXY SATISFIED WHILE THE FACT DOES NOT HOLD. The reservation read-back could pass by observing that a row EXISTS for each movement while never comparing what that row reserves. This mutation leaves the row count, the one-to-one mapping and every other column comparison intact and neuters exactly one column of the five-column effect tuple. SCOPE, NARROWED AFTER REVIEW AND NOT TO BE READ AS MORE: the compiled companion -> movement foreign key covers ALL TEN companion columns and targets exactly `effectIdentityUnique`, so a reservation carrying a wrong effect tuple has NO REFERENT and PostgreSQL refuses it with 23503. The control must SUSPEND that foreign key to construct its own subject. This entry therefore proves the read-back compares the effect tuple INDEPENDENTLY of that constraint, and would still catch a wrong reservation if the compiled declaration were ever narrowed. It is NOT evidence that a wrong-effect reservation is reachable under the committed schema. The live production claim is held by `effect-reservation-never-observed`, whose subject -- a reservation that never happens -- violates nothing and needs no schema change to construct.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          reservation.effectTuple.sourceLine,\n          String(row.sourceLine) === movement.sourceLine,\n          effect,",
+      "replacement": "          reservation.effectTuple.sourceLine,\n          true,\n          effect,",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the movement effect reservation is observed"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: the movement effect reservation is observed before the posting commits",
+          "expected": "a reservation of the wrong natural effect must refuse the posting"
+        }
+      ]
+    },
+    {
+      "name": "derived-writer-inventory-registration-never-required",
+      "claim": "THE DERIVED INVENTORY STOPS REQUIRING A VERIFIER. The inventory is derived from the compiled storage target -- each written entity's table, its declared partitions, its declared effect-reservation companion, and any projection whose insert trigger the target declares on a table this posting writes -- and construction refuses when any derived relation carries no registered read-back. This mutation makes the unverified set permanently empty, so construction STOPS THROWING and a release whose compiled target reaches an unobserved relation is accepted. That is precisely the failure PUR-2a's nine rounds each found one more instance of: the inventory was hand-enumerated while the target already declared every writer.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    .filter((relation) => !registered.has(relation.relation))\n    .map((relation) => `${relation.relation} (${relation.origin})`)",
+      "replacement": "    .filter(() => false)\n    .map((relation) => `${relation.relation} (${relation.origin})`)",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "with no registered read-back refuses at construction"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: a relation the compiled target reaches with no registered read-back refuses at construction",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "effect-reservation-compares-zero-movements",
+      "claim": "THE CHECK READING ZERO INPUT. The read-back could satisfy its row-count equality and then compare nothing, because the count check and the column comparisons are separate steps over the same set. This mutation leaves the query, the row count and the one-to-one mapping intact and makes the per-movement comparison loop read an empty set, so every column proof is skipped while the shape of the check is preserved. This is a DIFFERENT vector from `effect-reservation-compared-on-count-not-columns`, which leaves the loop running and neuters one column inside it. SCOPE, NARROWED AFTER REVIEW AND NOT TO BE READ AS MORE: the compiled companion -> movement foreign key covers ALL TEN companion columns and targets exactly `effectIdentityUnique`, so a reservation carrying a wrong effect tuple has NO REFERENT and PostgreSQL refuses it with 23503. The control must SUSPEND that foreign key to construct its own subject. This entry therefore proves the read-back compares the effect tuple INDEPENDENTLY of that constraint, and would still catch a wrong reservation if the compiled declaration were ever narrowed. It is NOT evidence that a wrong-effect reservation is reachable under the committed schema. The live production claim is held by `effect-reservation-never-observed`, whose subject -- a reservation that never happens -- violates nothing and needs no schema change to construct.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    byId.set(movementId, row);\n  }\n  for (const movement of movements) {",
+      "replacement": "    byId.set(movementId, row);\n  }\n  for (const movement of []) {",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the movement effect reservation is observed"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: the movement effect reservation is observed before the posting commits",
+          "expected": "a reservation of the wrong natural effect must refuse the posting"
+        }
+      ]
+    },
+    {
+      "name": "derivation-stops-reaching-the-effect-reservation",
+      "claim": "THE DERIVATION UNDER-LISTS. The registry check is a set equality in BOTH directions, and this mutation exercises the second direction: the derivation stops expanding an entity's declared `factStorage.companion`, so the effect-reservation read-back is registered for a relation the inventory no longer names. Construction refuses as a STALE VERIFIER rather than silently accepting a narrowed inventory -- which is the failure mode where a derivation quietly stops reaching a writer and the coverage claim keeps reading as complete. Without the second direction this mutation would be invisible.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    claim(fact.companion.physicalTableName, 'factCompanion', entity.entityId);",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "with no registered read-back refuses at construction"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: a relation the compiled target reaches with no registered read-back refuses at construction",
+          "expected": "read-backs are registered for physical relations this posting does not write"
+        }
+      ]
+    },
+    {
+      "name": "derivation-stops-at-the-original-roots",
+      "claim": "REACHABILITY IS NOT TRANSITIVE. Round 1's F1 found the traversal tested each trigger edge against the ORIGINAL kernel write roots in a single pass, so a relation the posting reaches only THROUGH another trigger -- movement -> balance -> anything installed on the balance -- was silently absent from the inventory and needed no verifier. This mutation restores that exact behaviour: the projection's destination is still CLAIMED, so the direct cases and the real compiled target are unaffected and every other test still passes; what is removed is the enqueue that lets the traversal continue PAST it. Only the chained-writer control discriminates, which is the point -- a control that injects storage onto an existing ROOT cannot tell the two traversals apart, and the first version of this entry deleted the enqueue outright, which dropped the balance from the inventory and red every posting for a stale-registration reason another entry already owns.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      pending.push({ entity: projection.writes, origin: 'triggerProjection' });",
+      "replacement": "      claim(\n        projection.writes.physicalTableName,\n        'triggerProjection',\n        entity.entityId,\n      );",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "with no registered read-back refuses at construction"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: a relation the compiled target reaches with no registered read-back refuses at construction",
+          "expected": "Missing expected exception"
+        }
+      ]
+    },
+    {
+      "name": "the-observed-write-set-is-never-checked",
+      "claim": "THE BACKSTOP ABSENT ENTIRELY. The compiled target declares nothing about the movement -> balance projection edge, so a writer grown by a new materializer convention appears in no target shape this service reads -- round 1's F1, and a hand-written edge list cannot close it. The backstop stops asking the target and asks PostgreSQL what this transaction wrote. Remove the call and a module relation nothing declares commits silently, which is exactly the failure PUR-2a's nine rounds kept finding one instance of.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      await assertObservedWriteSetIsDerived(\n        client,\n        this.#binding,\n        writeBaseline,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "a module relation nothing declares is caught by observing"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: a module relation nothing declares is caught by observing what the posting wrote",
+          "expected": "a module relation no read-back verifies must refuse the posting"
+        }
+      ]
+    },
+    {
+      "name": "the-observation-looks-at-the-wrong-schema",
+      "claim": "THE CHECK READING ZERO INPUT, held by INDUCING the code defect rather than a runtime state, because the runtime state does not exist. An observer that sees nothing passes everything: an empty write set makes every relation trivially derived. MEASURED FIRST: `ALTER SYSTEM SET track_counts = off` does NOT empty `pg_stat_xact_user_tables` -- those per-transaction counters are backend-local, so the backstop survives that misconfiguration and no operator setting can produce the empty case. What CAN produce it is a defect in the observer itself, so this mutation induces exactly one: the schema filter is sent looking for a schema that does not exist, keeping the bound parameter referenced. The write set comes back empty and the undeclared-writer control dies -- not by committing, but by refusing for the EMPTY reason instead of the undeclared one, which is what distinguishes an observer that saw nothing from one that saw the writer. This holds the empty-observation refusal and the schema filter together, in the one direction that matters. The previous version of this entry was a SURVIVOR: it removed the empty refusal, which changed nothing because the control does not produce an empty observation.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      WHERE schemaname = $1",
+      "replacement": "      WHERE schemaname = $1 || '_absent'",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "a module relation nothing declares is caught by observing"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting writer inventory: a module relation nothing declares is caught by observing what the posting wrote",
+          "expected": "the module write set observed for this posting is empty"
+        }
+      ]
+    }
+  ]
+}

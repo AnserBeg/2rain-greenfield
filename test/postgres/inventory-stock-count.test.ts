@@ -34,13 +34,15 @@ import type {
   StoreAppPackageRevisionCommand,
 } from '../../packages/platform-runtime/src/index.js';
 import {
+  INVENTORY_POSTING_CAPABILITY_ID,
   INVENTORY_POSTING_CAPABILITY_VERSION,
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
   InventoryPostingError,
   PostgresInventoryPostingService,
+  deriveInventoryPostingCompanionId,
   type InventoryPostingErrorCode,
   type InventoryPostingRegistrationV1,
-  type InventoryStockCountPostingCommandV1,
+  type InventoryStockCountPostingCommandV2,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
 import {
   loadMigrations,
@@ -450,6 +452,768 @@ test('stock-count posting preserves three-value evidence and appends correction 
   });
 });
 
+/**
+ * PUR-2a ACCEPTANCE CONTROL, named by `purchasing-sales-v1-plan.md` section
+ * 7.16: create and review a stock-count source with NO pre-staged transaction
+ * or transaction lines, post it through the compiled family-execution binding,
+ * and prove the kernel derives and writes both companion IDs and both
+ * revisions.
+ */
+test('stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities', async () => {
+  await withCompanionEnvironment(
+    'companion-derivation',
+    async ({ actor, binding, context, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 1,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+
+      // The source exists and its companion does not. Both halves matter: a
+      // fixture that quietly staged a transaction would make everything below
+      // pass while proving nothing.
+      const before = await readCompanionState(runtimePool, context, binding);
+      assert.equal(
+        before.sessions.length,
+        1,
+        'the reviewed stock-count source must exist before posting',
+      );
+      assert.equal(
+        before.sessions[0]?.companionId,
+        null,
+        'a reviewed stock count must not name a companion transaction',
+      );
+      assert.deepEqual(
+        before.lines.map((line) => line.companionId),
+        [null],
+        'a reviewed stock-count line must not name a companion transaction line',
+      );
+      assert.equal(
+        before.transactions.length,
+        0,
+        'nothing may pre-stage the companion transaction: staging one here is the shape three design passes assumed',
+      );
+      assert.equal(
+        before.transactionLines.length,
+        0,
+        'nothing may pre-stage companion transaction lines',
+      );
+
+      const result = await service.postStockCount(context, actor, command);
+
+      // Recomputed from the source ids alone, not read out of the result.
+      const derivedTransactionId = expectedCompanionTransactionId(
+        command.stockCountId,
+      );
+      const derivedLineId = expectedCompanionTransactionLineId(
+        command.lines[0]!.stockCountLineId,
+      );
+      assert.notEqual(
+        derivedTransactionId,
+        derivedLineId,
+        'the transaction and line derivations must not collide',
+      );
+      assert.equal(
+        result.transactionId,
+        derivedTransactionId,
+        'the posting result must name the derived companion transaction',
+      );
+
+      const after = await readCompanionState(runtimePool, context, binding);
+      assert.deepEqual(
+        {
+          line: after.lines.map((line) => line.companionId),
+          session: after.sessions[0]?.companionId,
+        },
+        { line: [derivedLineId], session: derivedTransactionId },
+        'the kernel must write both derived companion identities onto the source',
+      );
+      assert.equal(
+        after.transactions.length,
+        1,
+        'the kernel must write exactly one companion transaction',
+      );
+      assert.equal(
+        after.transactions[0]?.recordId,
+        derivedTransactionId,
+        'the companion transaction identity must be the derived one',
+      );
+      // Every fact the source transition writes, on the row it writes it to.
+      // Round 3 found the actor and instant escaping observation entirely: the
+      // companion header carried the right values while the source could carry
+      // wrong ones, and the trust documents recorded the expected in-memory
+      // values either way.
+      assert.deepEqual(
+        {
+          actorId: after.sessions[0]?.actorId,
+          recordedAt: after.sessions[0]?.recordedAt,
+          state: after.sessions[0]?.state,
+        },
+        {
+          actorId: principalId,
+          recordedAt,
+          state: enumOption(
+            field(binding.stockCount, 'stock_count_state'),
+            'posted',
+          ),
+        },
+        'the posted source must carry the actor, instant and state its transition wrote',
+      );
+
+      // Both revisions, and the fact that they are the SAME derived revision.
+      // Corrected on review. The companion is a CREATE, so it takes the
+      // compiled optimistic-revision contract's initial value; it does not
+      // inherit the source's post-transition revision. The source-to-companion
+      // join is the derived identity, not revision equality.
+      // Every revision the posting touches, compared as one value. The
+      // companion header and line are CREATES and take the contract's initial
+      // revision; the source header and line were MUTATED and must each have
+      // advanced by exactly one from the revision 1 they were seeded at.
+      assert.deepEqual(
+        {
+          companionHeader: after.transactions[0]?.revision,
+          companionLine: after.transactionLines[0]?.revision,
+          sourceHeader: after.sessions[0]?.revision,
+          sourceLine: after.lines[0]?.revision,
+        },
+        {
+          companionHeader: 1,
+          companionLine: 1,
+          sourceHeader: 2,
+          sourceLine: 2,
+        },
+        'creates take the contract initial revision and mutated rows advance by one',
+      );
+      assert.equal(
+        after.transactions[0]?.state,
+        enumOption(
+          field(binding.transaction, 'inventory_transaction_state'),
+          'posted',
+        ),
+        'the kernel-written companion is created posted',
+      );
+
+      // Determinism: the same source derives the same companion, and a
+      // different source does not.
+      assert.equal(
+        expectedCompanionTransactionId(command.stockCountId),
+        derivedTransactionId,
+        'companion derivation must be deterministic',
+      );
+      // STABILITY, which determinism alone does not give. Every assertion
+      // above compares the kernel against `deriveInventoryPostingCompanionId`,
+      // so a derivation that changed but stayed deterministic would move both
+      // sides together and pass -- including the kernel's own read-back, which
+      // recomputes with the same function. These two literals were computed by
+      // a separate implementation of the construction and are the only thing
+      // here that does not share the algorithm under test. A companion
+      // identity that moves is a reconciliation predicate that silently stops
+      // matching every already-posted count.
+      // Compared as ONE value so neither half masks the other. Two sequential
+      // equality assertions would stop at the transaction and never observe
+      // the line, which is a claim wider than the evidence.
+      assert.deepEqual(
+        { line: derivedLineId, transaction: derivedTransactionId },
+        {
+          line: 'f11c5615-3db4-85b4-826a-f6827441cbb4',
+          transaction: 'a2cdba01-9fed-8821-b202-0c2739d6cbe6',
+        },
+        'both companion derivations must be stable across releases',
+      );
+      assert.notEqual(
+        expectedCompanionTransactionId('61000000-0000-4000-8000-000000000099'),
+        derivedTransactionId,
+        'companion derivation must separate distinct sources',
+      );
+    },
+  );
+});
+
+test('stock-count companion derivation: the companion transaction and its lines are the kernel projection of the count', async () => {
+  await withCompanionEnvironment(
+    'companion-projection',
+    async ({ actor, binding, context, runtimePool, service }) => {
+      // A positive initial count, then a negative correction, so the
+      // sign-dependent from/to projection is observed in both directions.
+      const opening = countCommand({
+        countedQuantity: '6',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 3,
+        supersedesStockCountId: null,
+        varianceQuantity: '6',
+      });
+      await seedReviewedCount(runtimePool, context, binding, opening);
+      await service.postStockCount(context, actor, opening);
+
+      const command = countCommand({
+        countedQuantity: '2',
+        expectedQuantity: '6',
+        kind: 'correction',
+        sequence: 5,
+        supersedesStockCountId: opening.stockCountId,
+        varianceQuantity: '-4',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      await service.postStockCount(context, actor, command);
+
+      const derivedTransactionId = expectedCompanionTransactionId(
+        command.stockCountId,
+      );
+      const openingTransactionId = expectedCompanionTransactionId(
+        opening.stockCountId,
+      );
+      const after = await readCompanionState(runtimePool, context, binding);
+      const header = after.transactions.find(
+        (candidate) => candidate.recordId === derivedTransactionId,
+      )!;
+      assert.ok(header, 'the correction companion must exist');
+      const openingLine = after.transactionLines.find(
+        (candidate) => candidate.transactionId === openingTransactionId,
+      )!;
+      assert.ok(openingLine, 'the opening companion line must exist');
+      assert.equal(
+        openingLine.toLocationId,
+        locationId,
+        'a positive variance is a move INTO the counted location',
+      );
+      assert.equal(openingLine.fromLocationId, null);
+      const openingHeader = after.transactions.find(
+        (candidate) => candidate.recordId === openingTransactionId,
+      )!;
+      assert.ok(openingHeader, 'the opening companion must exist');
+      // BOTH roles the stock_count family declares, compared as one value so
+      // neither masks the other: the opening posts under `count` and the
+      // correction under `correction`, and each takes its companion type from
+      // its own role binding in the roster.
+      const expectedCountCorrectionType = enumOption(
+        field(binding.transaction, 'inventory_transaction_type'),
+        'count_correction',
+      );
+      assert.deepEqual(
+        { correction: header.type, count: openingHeader.type },
+        {
+          correction: expectedCountCorrectionType,
+          count: expectedCountCorrectionType,
+        },
+        'each role companion type comes from its own family role binding',
+      );
+      assert.equal(
+        header.number,
+        `SC-${derivedTransactionId}`,
+        'the companion business key must be derived from the companion identity',
+      );
+      assert.equal(
+        header.sourceType,
+        command.sourceType,
+        'the companion must record the family source type',
+      );
+      assert.equal(
+        header.sourceId,
+        command.stockCountId,
+        'the companion must point back at the source it was derived from',
+      );
+      assert.equal(header.reasonCode, command.reason.code);
+      assert.equal(header.reasonNarrative, command.reason.narrative);
+
+      assert.equal(after.transactionLines.length, 2);
+      const line = after.transactionLines.find(
+        (candidate) => candidate.transactionId === derivedTransactionId,
+      )!;
+      assert.ok(line, 'the correction companion line must exist');
+      assert.equal(
+        line.recordId,
+        expectedCompanionTransactionLineId(command.lines[0]!.stockCountLineId),
+      );
+      assert.equal(
+        line.transactionId,
+        derivedTransactionId,
+        'the companion line must belong to the companion transaction',
+      );
+      assert.equal(
+        line.quantity,
+        '-4.000000000000000000',
+        'the companion line quantity is the count variance',
+      );
+      // A negative variance leaves the location, so it is a from-location move.
+      assert.equal(
+        line.fromLocationId,
+        locationId,
+        'a negative variance is a move OUT of the counted location',
+      );
+      assert.equal(line.toLocationId, null);
+      assert.equal(line.itemId, command.lines[0]!.itemId);
+      assert.equal(line.unitId, command.lines[0]!.unitId);
+    },
+  );
+});
+
+/**
+ * PUR-2a, round 8. The seventh writer.
+ *
+ * A movement insert fires an `AFTER INSERT` trigger that maintains the
+ * browsable posted-stock balance in the same transaction. Nothing observed
+ * that write: the trigger checked its own `ROW_COUNT`, and a wrong-but-valid
+ * balance committed silently until reconciliation independently recomputed it.
+ *
+ * This is the test that makes the observation load-bearing. Both halves are
+ * needed. The first proves a balance that was ALREADY divergent before this
+ * posting refuses the posting that adds to it -- a correct delta applied to a
+ * wrong base is still a wrong browsable row. The second proves a projection
+ * that did not maintain itself at all refuses too. A verifier removed, or a
+ * projection binding that resolves to nothing, fails here.
+ */
+test('stock-count posted-stock projection: a balance that does not equal the movement ledger refuses the posting', async () => {
+  await withCompanionEnvironment(
+    'posted-stock-refusal',
+    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+      const initial = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 5,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, initial);
+      await service.postStockCount(context, actor, initial);
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '5.000000000000000000',
+        'the projection must carry the posted ledger before anything is corrupted',
+      );
+
+      const correction = countCommand({
+        countedQuantity: '7',
+        expectedQuantity: '5',
+        kind: 'correction',
+        sequence: 6,
+        supersedesStockCountId: initial.stockCountId,
+        varianceQuantity: '2',
+      });
+      await seedReviewedCount(runtimePool, context, binding, correction);
+
+      const quantityColumn = quoted(
+        field(
+          binding.postedStockBalance,
+          'posted_stock_balance_posted_quantity',
+        ).physicalName,
+      );
+      const divergence = await databasePool.query(
+        `UPDATE ${table(binding, binding.postedStockBalance)}
+            SET ${quantityColumn} = ${quantityColumn} + 1
+          WHERE tenant_id = $1 AND environment_id = $2`,
+        [context.tenantId, context.environmentId],
+      );
+      assert.equal(
+        divergence.rowCount,
+        1,
+        'the control must actually diverge the browsable row first',
+      );
+      await assertCountPostingRejected(
+        () => service.postStockCount(context, actor, correction),
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        /does not equal the movement ledger it projects/u,
+        'a balance already divergent from the ledger must refuse the posting that adds to it',
+      );
+      const afterDivergence = await readCompanionState(
+        runtimePool,
+        context,
+        binding,
+      );
+      assert.equal(
+        afterDivergence.transactions.length,
+        1,
+        'the refused posting must leave no companion transaction behind',
+      );
+      assert.equal(
+        afterDivergence.movements.length,
+        1,
+        'the refused posting must leave no movement behind',
+      );
+
+      const repaired = await databasePool.query(
+        `UPDATE ${table(binding, binding.postedStockBalance)}
+            SET ${quantityColumn} = ${quantityColumn} - 1
+          WHERE tenant_id = $1 AND environment_id = $2`,
+        [context.tenantId, context.environmentId],
+      );
+      assert.equal(
+        repaired.rowCount,
+        1,
+        'the second half must measure an unmaintained projection, not the first half leftover',
+      );
+
+      await disablePostedStockTrigger(databasePool, binding);
+      await assertCountPostingRejected(
+        () => service.postStockCount(context, actor, correction),
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        /does not equal the movement ledger it projects/u,
+        'a posting whose projection trigger did not maintain the balance must refuse',
+      );
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '5.000000000000000000',
+        'the refused posting must leave the projection exactly as it found it',
+      );
+      const afterUnmaintained = await readCompanionState(
+        runtimePool,
+        context,
+        binding,
+      );
+      assert.equal(
+        afterUnmaintained.movements.length,
+        1,
+        'the refused posting must not commit its movement',
+      );
+    },
+  );
+});
+
+/**
+ * PUR-2a gate-invisible deliverable, named as an acceptance criterion: the
+ * binding makes an operator-visible refusal possible that did not exist
+ * before. The kernel writes the companion identity at post time, so a reviewed
+ * source that already names one was written by something else, and posting it
+ * refuses rather than adopting whatever is stored.
+ */
+test('stock-count companion derivation: a reviewed count that already names a companion transaction is refused', async () => {
+  await withCompanionEnvironment(
+    'companion-refusal',
+    async ({ actor, binding, context, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 4,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      const foreignTransactionId = '68000000-0000-4000-8000-000000000068';
+      await withModuleRole(runtimePool, context, async (client) => {
+        await insertEntity(
+          client,
+          binding,
+          binding.transaction,
+          {
+            inventory_transaction_actor_id: principalId,
+            inventory_transaction_effective_at: command.effectiveAt,
+            inventory_transaction_number: 'FOREIGN-COUNT-TXN',
+            inventory_transaction_reason_code: command.reason.code,
+            inventory_transaction_reason_narrative: command.reason.narrative,
+            inventory_transaction_recorded_at: recordedAt,
+            inventory_transaction_source_id: command.sourceId,
+            inventory_transaction_source_type: command.sourceType,
+            inventory_transaction_state: enumOption(
+              field(binding.transaction, 'inventory_transaction_state'),
+              'draft',
+            ),
+            inventory_transaction_type: enumOption(
+              field(binding.transaction, 'inventory_transaction_type'),
+              'count_correction',
+            ),
+          },
+          foreignTransactionId,
+          command.legalEntityId,
+          {},
+        );
+        const written = await client.query(
+          `UPDATE ${table(binding, binding.stockCount)}
+              SET ${quoted(relationColumn(binding, binding.stockCount, binding.transaction))} = $4::uuid
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND ${quoted(binding.stockCount.recordIdColumn)} = $3`,
+          [
+            context.tenantId,
+            context.environmentId,
+            command.stockCountId,
+            foreignTransactionId,
+          ],
+        );
+        assert.equal(
+          written.rowCount,
+          1,
+          'the control must actually pre-write a companion identity',
+        );
+      });
+
+      const refusal = await service
+        .postStockCount(context, actor, command)
+        .then(
+          () => null,
+          (reason: unknown) => reason,
+        );
+      assert.ok(
+        refusal instanceof InventoryPostingError,
+        'a reviewed count carrying a companion identity the kernel did not write must be refused',
+      );
+      assert.equal(
+        refusal.code,
+        'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+        'the refusal must be an evidence conflict',
+      );
+      // Which refusal it is matters. Without the reviewed-must-be-null fence
+      // the kernel adopts the foreign companion and the posting is refused
+      // further down, at the LINE check, for a reason that sends an operator
+      // to the wrong record. The message also has to name the COMPANION
+      // specifically: this is the refusal every pre-derivation stock count
+      // meets, and "does not match the reviewed evidence" would send someone
+      // to compare quantities that are correct.
+      assert.match(
+        refusal.message,
+        /already names a companion transaction/u,
+        'the refusal must name the companion, not the reviewed evidence at large',
+      );
+
+      const after = await readCompanionState(runtimePool, context, binding);
+      assert.equal(
+        after.sessions[0]?.companionId,
+        foreignTransactionId,
+        'the refusal must leave the stored state alone',
+      );
+      assert.equal(
+        after.movements.length,
+        0,
+        'a refused posting must write no movement',
+      );
+    },
+  );
+});
+
+interface CompanionEnvironment {
+  actor: StockCountActor;
+  binding: StorageBinding;
+  context: TrustedRequestContext;
+  // PUR-2a, round 8. The owner connection. Corrupting the provider-owned
+  // posted-stock projection, or disabling the trigger that maintains it, is
+  // exactly what ordinary runtime writes are forbidden to do -- so the control
+  // that proves the posting observes that projection needs this pool.
+  databasePool: Pool;
+  runtimePool: Pool;
+  service: PostgresInventoryPostingService;
+}
+
+async function withCompanionEnvironment(
+  label: string,
+  run: (environment: CompanionEnvironment) => Promise<void>,
+): Promise<void> {
+  const fixture = await compiledFixture();
+  const binding = storageBinding(fixture.storage);
+  await withEphemeralPostgres(label, async (database) => {
+    await migrateAndProvision(database.pool, fixture.inventory.releaseRoot);
+    const runtimePool = new pg.Pool({
+      ...database.connection,
+      application_name: `pur-2a-${label}`,
+      max: 4,
+      user: 'north_star_runtime',
+    });
+    const materializerPool = new pg.Pool({
+      ...database.connection,
+      max: 1,
+      user: 'north_star_module_materializer',
+    });
+    const moduleRuntimePool = new pg.Pool({
+      ...database.connection,
+      max: 1,
+      user: 'north_star_module_runtime',
+    });
+    try {
+      const context = await trustedContext();
+      const releases = await persistSequence(runtimePool, context, [
+        [fixture.empty, fixture.emptyDefinition],
+        [fixture.inventory, fixture.inventoryDefinition],
+      ]);
+      await setPointer(database.pool, releases[0]!);
+      await grantExecutorAuthority(database.pool);
+      const materializer = new PostgresModuleStorageMaterializer(
+        materializerPool,
+        moduleRuntimePool,
+      );
+      const prepared = await materializer.prepare({
+        context,
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        generationId: randomUUID(),
+        initiatedBy: principalId,
+        preparationId: randomUUID(),
+        targetReleaseId: releases[1]!,
+      });
+      assert.equal(prepared.schemaState, 'APPLIED');
+      await setPointer(database.pool, releases[1]!);
+      await seedFoundation(runtimePool, context, binding);
+      const service = new PostgresInventoryPostingService(
+        runtimePool,
+        {
+          capabilityId: INVENTORY_CONTRACT_V1.capabilityId,
+          capabilityVersion: INVENTORY_POSTING_CAPABILITY_VERSION,
+          dependencySetRoot: DECLARED_DEPENDENCY_ROOT,
+          releaseContentHash: fixture.inventory.releaseRoot,
+          releaseId: releases[1]!,
+          storageTarget: fixture.storage,
+          storageTargetContentHash: fixture.storageContentHash,
+        },
+        { currentInstant: () => recordedAt },
+      );
+      const actor = await new TrustedActorEnvelopeIssuer({
+        resolve: async () => ({
+          approvingHumanId: null,
+          delegation: null,
+          executionPrincipal: { kind: 'HUMAN', principalId },
+          initiatingHumanId: principalId,
+          subject: null,
+        }),
+      }).issue(context);
+      await run({
+        actor,
+        binding,
+        context,
+        databasePool: database.pool,
+        runtimePool,
+        service,
+      });
+    } finally {
+      await Promise.all([
+        runtimePool.end(),
+        materializerPool.end(),
+        moduleRuntimePool.end(),
+      ]);
+    }
+  });
+}
+
+function relationColumn(
+  binding: StorageBinding,
+  source: EntityBinding,
+  target: EntityBinding,
+): string {
+  const matches = binding.storageTarget.relations.filter(
+    (relation) =>
+      relation.sourceEntityId === source.entity.entityId &&
+      relation.targetEntityId === target.entity.entityId &&
+      relation.relationColumn.origin !== 'field',
+  );
+  assert.equal(
+    matches.length,
+    1,
+    `expected exactly one relation from ${source.entity.entityId} to ${target.entity.entityId}`,
+  );
+  return matches[0]!.relationColumn.physicalName;
+}
+
+interface CompanionState {
+  lines: Array<{
+    companionId: string | null;
+    recordId: string;
+    revision: number;
+  }>;
+  movements: Array<{ transactionId: string; transactionLineId: string }>;
+  sessions: Array<{
+    actorId: string | null;
+    companionId: string | null;
+    recordedAt: string | null;
+    revision: number;
+    state: string;
+  }>;
+  transactionLines: Array<{
+    fromLocationId: string | null;
+    itemId: string;
+    quantity: string;
+    recordId: string;
+    revision: number;
+    toLocationId: string | null;
+    transactionId: string;
+    unitId: string;
+  }>;
+  transactions: Array<{
+    number: string;
+    reasonCode: string | null;
+    reasonNarrative: string | null;
+    recordId: string;
+    revision: number;
+    sourceId: string;
+    sourceType: string;
+    state: string;
+    type: string;
+  }>;
+}
+
+async function readCompanionState(
+  pool: Pool,
+  context: TrustedRequestContext,
+  binding: StorageBinding,
+): Promise<CompanionState> {
+  return withModuleRole(pool, context, async (client) => {
+    const scope = [context.tenantId, context.environmentId];
+    const sessions = await client.query<Record<string, unknown>>(
+      `SELECT ${quoted(relationColumn(binding, binding.stockCount, binding.transaction))}::text AS "companionId",
+              ${quoted(binding.stockCount.revisionColumn)}::integer AS revision,
+              ${quoted(field(binding.stockCount, 'stock_count_state').physicalName)} AS state,
+              ${quoted(field(binding.stockCount, 'stock_count_actor_id').physicalName)} AS "actorId",
+              to_char(${quoted(field(binding.stockCount, 'stock_count_recorded_at').physicalName)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "recordedAt"
+         FROM ${table(binding, binding.stockCount)}
+        WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
+        ORDER BY ${quoted(binding.stockCount.recordIdColumn)}`,
+      scope,
+    );
+    const lines = await client.query<Record<string, unknown>>(
+      `SELECT ${quoted(binding.stockCountLine.recordIdColumn)}::text AS "recordId",
+              ${quoted(binding.stockCountLine.revisionColumn)}::integer AS revision,
+              ${quoted(relationColumn(binding, binding.stockCountLine, binding.transactionLine))}::text AS "companionId"
+         FROM ${table(binding, binding.stockCountLine)}
+        WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
+        ORDER BY ${quoted(binding.stockCountLine.recordIdColumn)}`,
+      scope,
+    );
+    const transactions = await client.query<Record<string, unknown>>(
+      `SELECT ${quoted(binding.transaction.recordIdColumn)}::text AS "recordId",
+              ${quoted(binding.transaction.revisionColumn)}::integer AS revision,
+              ${quoted(field(binding.transaction, 'inventory_transaction_number').physicalName)} AS number,
+              ${quoted(field(binding.transaction, 'inventory_transaction_state').physicalName)} AS state,
+              ${quoted(field(binding.transaction, 'inventory_transaction_type').physicalName)} AS type,
+              ${quoted(field(binding.transaction, 'inventory_transaction_source_type').physicalName)} AS "sourceType",
+              ${quoted(field(binding.transaction, 'inventory_transaction_source_id').physicalName)} AS "sourceId",
+              ${quoted(field(binding.transaction, 'inventory_transaction_reason_code').physicalName)} AS "reasonCode",
+              ${quoted(field(binding.transaction, 'inventory_transaction_reason_narrative').physicalName)} AS "reasonNarrative"
+         FROM ${table(binding, binding.transaction)}
+        WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
+        ORDER BY ${quoted(binding.transaction.recordIdColumn)}`,
+      scope,
+    );
+    const transactionLines = await client.query<Record<string, unknown>>(
+      `SELECT ${quoted(binding.transactionLine.recordIdColumn)}::text AS "recordId",
+              ${quoted(binding.transactionLine.revisionColumn)}::integer AS revision,
+              ${quoted(relationColumn(binding, binding.transactionLine, binding.transaction))}::text AS "transactionId",
+              ${quoted(field(binding.transactionLine, 'inventory_transaction_line_item_id').physicalName)}::text AS "itemId",
+              ${quoted(field(binding.transactionLine, 'inventory_transaction_line_quantity').physicalName)}::text AS quantity,
+              ${quoted(field(binding.transactionLine, 'inventory_transaction_line_unit_id').physicalName)} AS "unitId",
+              ${quoted(field(binding.transactionLine, 'inventory_transaction_line_from_location_id').physicalName)}::text AS "fromLocationId",
+              ${quoted(field(binding.transactionLine, 'inventory_transaction_line_to_location_id').physicalName)}::text AS "toLocationId"
+         FROM ${table(binding, binding.transactionLine)}
+        WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
+        ORDER BY ${quoted(binding.transactionLine.recordIdColumn)}`,
+      scope,
+    );
+    const movements = await client.query<Record<string, unknown>>(
+      `SELECT ${quoted(relationColumn(binding, binding.movement, binding.transaction))}::text AS "transactionId",
+              ${quoted(relationColumn(binding, binding.movement, binding.transactionLine))}::text AS "transactionLineId"
+         FROM ${table(binding, binding.movement)}
+        WHERE tenant_id=$1 AND environment_id=$2`,
+      scope,
+    );
+    return {
+      lines: lines.rows as CompanionState['lines'],
+      movements: movements.rows as CompanionState['movements'],
+      sessions: sessions.rows as CompanionState['sessions'],
+      transactionLines:
+        transactionLines.rows as CompanionState['transactionLines'],
+      transactions: transactions.rows as CompanionState['transactions'],
+    };
+  });
+}
+
 function countCommand(input: {
   countedQuantity: string;
   expectedQuantity: string;
@@ -458,7 +1222,7 @@ function countCommand(input: {
   sequence: number;
   supersedesStockCountId: string | null;
   varianceQuantity: string;
-}): InventoryStockCountPostingCommandV1 {
+}): InventoryStockCountPostingCommandV2 {
   const suffix = String(input.sequence).padStart(2, '0');
   const stockCountId = `61000000-0000-4000-8000-0000000000${suffix}`;
   return {
@@ -480,7 +1244,6 @@ function countCommand(input: {
         reversalOfMovementId: input.reversalOfMovementId ?? null,
         sourceLine: String(input.sequence),
         stockCountLineId: `63000000-0000-4000-8000-0000000000${suffix}`,
-        transactionLineId: `64000000-0000-4000-8000-0000000000${suffix}`,
         unitId: 'EA',
         varianceQuantity: input.varianceQuantity,
       },
@@ -493,8 +1256,30 @@ function countCommand(input: {
     stockCountId,
     stockDimensionSetVersion: 'v1',
     supersedesStockCountId: input.supersedesStockCountId,
-    transactionId: `65000000-0000-4000-8000-0000000000${suffix}`,
   };
+}
+
+// PUR-2a. The companion identities the kernel must derive, recomputed here by
+// the test from the SOURCE ids alone. This is deliberately an independent
+// recomputation through the exported reconciliation entry point rather than a
+// value read back out of the command, so a kernel that mints a companion id
+// some other way fails here.
+function expectedCompanionTransactionId(stockCountId: string): string {
+  return deriveInventoryPostingCompanionId({
+    capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+    companionFamilyId: 'northstar.app:entity.inventory_transaction',
+    familyId: 'stock_count',
+    sourceRecordId: stockCountId,
+  });
+}
+
+function expectedCompanionTransactionLineId(stockCountLineId: string): string {
+  return deriveInventoryPostingCompanionId({
+    capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+    companionFamilyId: 'northstar.app:entity.inventory_transaction_line',
+    familyId: 'stock_count',
+    sourceRecordId: stockCountLineId,
+  });
 }
 
 function assertThreeValues(
@@ -732,12 +1517,20 @@ async function assertCountPostingRejected(
   expectedMessage: RegExp,
   victim: string,
 ): Promise<void> {
-  await assert.rejects(action, (error: unknown) => {
-    assert.ok(error instanceof InventoryPostingError, victim);
-    assert.equal(error.code, expectedCode, victim);
-    assert.match(error.message, expectedMessage, victim);
-    return true;
-  });
+  // The victim is passed as the third argument as well as inside the
+  // validator, because the validator never runs when the action does not
+  // reject at all -- and "the posting succeeded where it must refuse" is
+  // exactly the shape a control that REMOVES a refusal has to produce.
+  await assert.rejects(
+    action,
+    (error: unknown) => {
+      assert.ok(error instanceof InventoryPostingError, victim);
+      assert.equal(error.code, expectedCode, victim);
+      assert.match(error.message, expectedMessage, victim);
+      return true;
+    },
+    victim,
+  );
 }
 
 function tracingPool(pool: Pool, trace: TraceEntry[]): Pool {
@@ -1305,58 +2098,14 @@ async function seedReviewedCount(
   pool: Pool,
   context: TrustedRequestContext,
   binding: StorageBinding,
-  command: InventoryStockCountPostingCommandV1,
+  command: InventoryStockCountPostingCommandV2,
 ): Promise<void> {
+  // PUR-2a ACCEPTANCE CONTROL. Nothing here stages an inventory transaction or
+  // its lines. A reviewed stock count is created with NO companion at all; the
+  // posting kernel derives and writes both companion identities. Reinstating a
+  // pre-staged transaction here is the shape three design passes assumed and
+  // it is exactly what this fixture must not do.
   await withModuleRole(pool, context, async (client) => {
-    await insertEntity(
-      client,
-      binding,
-      binding.transaction,
-      {
-        inventory_transaction_actor_id: principalId,
-        inventory_transaction_effective_at: command.effectiveAt,
-        inventory_transaction_number: `COUNT-TXN-${command.lines[0]!.sourceLine}`,
-        inventory_transaction_reason_code: command.reason.code,
-        inventory_transaction_reason_narrative: command.reason.narrative,
-        inventory_transaction_recorded_at: recordedAt,
-        inventory_transaction_source_id: command.sourceId,
-        inventory_transaction_source_type: command.sourceType,
-        inventory_transaction_state: enumOption(
-          field(binding.transaction, 'inventory_transaction_state'),
-          'draft',
-        ),
-        inventory_transaction_type: enumOption(
-          field(binding.transaction, 'inventory_transaction_type'),
-          'count_correction',
-        ),
-      },
-      command.transactionId,
-      command.legalEntityId,
-      {},
-    );
-    for (const line of command.lines) {
-      const negative = line.varianceQuantity.startsWith('-');
-      await insertEntity(
-        client,
-        binding,
-        binding.transactionLine,
-        {
-          inventory_transaction_line_from_location_id: negative
-            ? command.locationId
-            : null,
-          inventory_transaction_line_item_id: line.itemId,
-          inventory_transaction_line_line_number: Number(line.sourceLine),
-          inventory_transaction_line_quantity: line.varianceQuantity,
-          inventory_transaction_line_to_location_id: negative
-            ? null
-            : command.locationId,
-          inventory_transaction_line_unit_id: line.unitId,
-        },
-        line.transactionLineId,
-        command.legalEntityId,
-        { [binding.transaction.entity.entityId]: command.transactionId },
-      );
-    }
     await insertEntity(
       client,
       binding,
@@ -1383,7 +2132,6 @@ async function seedReviewedCount(
       {
         [binding.stockCount.entity.entityId]:
           command.supersedesStockCountId ?? '',
-        [binding.transaction.entity.entityId]: command.transactionId,
       },
     );
     for (const line of command.lines) {
@@ -1404,7 +2152,6 @@ async function seedReviewedCount(
         command.legalEntityId,
         {
           [binding.stockCount.entity.entityId]: command.stockCountId,
-          [binding.transactionLine.entity.entityId]: line.transactionLineId,
         },
       );
     }

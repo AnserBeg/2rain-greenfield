@@ -1443,7 +1443,7 @@ function validatePinnedInventoryCountRelations(
       'stock_count',
       'inventory_transaction',
       'reference',
-      true,
+      false, // PUR-2a: kernel-written companion. ADR-0060.
     ],
     [
       'stock_count_supersedes',
@@ -1464,7 +1464,7 @@ function validatePinnedInventoryCountRelations(
       'stock_count_line',
       'inventory_transaction_line',
       'reference',
-      true,
+      false, // PUR-2a: kernel-written companion. ADR-0060.
     ],
   ] as const;
   for (const [localId, source, target, ownership, required] of rules) {

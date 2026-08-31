@@ -883,12 +883,17 @@ export function inventoryModuleDefinition(
         30,
         'reference',
       ),
+      // PUR-2a. The companion transaction is a POST-TIME OUTPUT the posting
+      // kernel derives and writes, not a create-time input. A reviewed count
+      // exists before its companion does, so this relation is optional and the
+      // kernel is its only writer.
       relation(
         definitionIds.relationIds.stockCountTransaction,
         entityIds.stockCount,
         entityIds.transaction,
         40,
         'reference',
+        false,
       ),
       relation(
         definitionIds.relationIds.stockCountSupersedes,
@@ -904,12 +909,15 @@ export function inventoryModuleDefinition(
         entityIds.stockCount,
         60,
       ),
+      // PUR-2a. Companion line identity is derived and written by the posting
+      // kernel, for the same reason as stockCountTransaction above.
       relation(
         definitionIds.relationIds.stockCountLineTransactionLine,
         entityIds.stockCountLine,
         entityIds.transactionLine,
         70,
         'reference',
+        false,
       ),
     ],
     schemaVersion: version,
