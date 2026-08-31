@@ -481,7 +481,18 @@ test('consolidated guard red: the routed Inventory literal cannot mask a later l
           // one packet is not an argument for a stronger reminder to update the
           // integer; it is an argument that the integer is the wrong locator
           // and the splice should be found by CONTENT.
-          line: 1193,
+          //
+          // **TENTH AND ELEVENTH MOVES, 2026-08-31, by
+          // `posting-writer-inventory` -- and the eleventh is the argument
+          // finishing itself.** The writer-inventory work moved it 1193 -> 1278.
+          // That number was reported to the orchestrator, a bridge was requested
+          // to change this one integer, and **by the time the grant came back
+          // the answer was already 1311**: closing a review finding had added a
+          // type alias and narrowed two comments in the upper half of the same
+          // file. The integer went stale INSIDE the round trip that existed
+          // solely to update it. A locator that cannot survive the latency of
+          // its own repair is not a locator.
+          line: 1311,
           message:
             'generic press references inventory identity northstar.inventory',
           moduleDirectory: 'inventory',
