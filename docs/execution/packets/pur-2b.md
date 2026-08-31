@@ -213,6 +213,60 @@ every other suite carries forward, because
 `git diff --name-only fbfc295 <freeze> -- . ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'`
 is empty.
 
+## Round 1 — REVISE, and the finding was real
+
+Reviewed `dae3bede502a871dfeeb91da1850ccb811df7a03`. The reviewer found **no**
+released route to `postStockCount`, no other production writer of version 3, no
+incorrect version-4 construction, and no explicit-key path that fabricates a
+version-3 digest — so C1 through C5 survived. It returned REVISE on evidence,
+and the gap it named was genuine.
+
+**The gap.** The implementation deliberately splits the two replay routes:
+`validateReceiptReplay` reaches `digestCommand` and refuses a version-3
+stock-count receipt; `findNaturalReplay` proves replay from the persisted effects
+and the recorded principal and calls `recordedResultForReplay` **without**
+recomputing a digest, and `isStockCountReceiptVersion` keeps admitting version 3
+there. That split is the whole transition — refuse what cannot be proven equal,
+keep decoding what can.
+
+**The packet's first four controls protected only the refusal half.** The
+reviewer named the exact survivor: drop `3` from `isStockCountReceiptVersion` and
+all four stay green while a legitimate version-3 receipt stops decoding through
+natural replay. **Measured, and it is exactly right** — the mutation dies at
+`findNaturalReplay -> recordedResultForReplay -> requiredRecordedPostingRole`
+with *persisted posting receipt has no valid posting role*, and none of the four
+original entries moves.
+
+**What was added.** One test and two controls:
+
+| control | mutation | measured red |
+|---|---|---|
+| `stock-count-decoder-drops-version-three` | `isStockCountReceiptVersion` stops admitting 3 | `persisted posting receipt has no valid posting role` |
+| `natural-replay-reconstructs-a-digest` | the `findNaturalReplay` handoff routes through `validateReceiptReplay` | `...input digest version 3, whose caller-supplied companion identities cannot be reconstructed...` |
+
+**The second one holds an ABSENCE, which is why it is worth having.**
+`findNaturalReplay` must NOT reconstruct a digest. Nothing observes an absence
+unless something restores it, so the mutation restores it — and a version-3
+receipt then meets the unreconstructible refusal on the one route that had
+independent evidence for replaying it.
+
+**The specimen's shape is forced, not chosen.** Migration `0009` rejects UPDATE
+and DELETE on receipts by RULE, so a version-3 row cannot be made by rewriting
+the accepted one. It is added BESIDE it with an earlier `recorded_at`, which is
+what `findNaturalReplay`'s `ORDER BY receipt.recorded_at LIMIT 1` selects. Two
+receipts sharing one `outbox_id` is a real shape rather than a contrivance —
+`persistAdditionalReceipt` writes exactly that on every natural replay.
+
+**Two reviewer observations recorded rather than actioned here.** The
+capability-version encodings may be serving more than one MEANING — an exact
+negotiated protocol version, a minimum-compatible version, or a provider
+result-format version — and a consumer could compare as exact what validation
+treats as a lower bound; that is added to
+`posting-capability-version-has-three-encodings`. And the packet must not
+describe browser behaviour as freshly observed: `test:browser` is recorded as NOT
+RUN, and the carry-forward argument covers the executable tree, not a fresh
+browser observation.
+
 ## The declared range
 
 ```record-claim
@@ -220,7 +274,7 @@ is empty.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "pur-2b",
   "base": "5e02d09526654b7dcdb36e15de360ef42b5f769f",
-  "head": "fbfc2955166f531387f3b353364fe6d66be42609",
+  "head": "9a28824fcb7ad26f5e274dd2e7be462ca2bd4c60",
   "changedPaths": [
     "db/migrations/0023_inventory_stock_count_companion_digest_version.sql",
     "db/schema.snapshot.json",
