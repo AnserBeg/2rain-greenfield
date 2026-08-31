@@ -161,6 +161,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0020_semantic_aggregate_anchors.sql',
           '0021_bounded_fresh_tenant_install_evidence.sql',
           '0022_module_storage_relation_requiredness_relaxation.sql',
+          '0023_inventory_stock_count_companion_digest_version.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);

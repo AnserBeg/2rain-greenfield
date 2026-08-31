@@ -65,7 +65,7 @@ test('migrations 0006-0022 upgrade accepted G1 and converge with the checked-in 
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0022_module_storage_relation_requiredness_relaxation.sql',
+      '0023_inventory_stock_count_companion_digest_version.sql',
     );
     const admin = await pool.connect();
     try {
@@ -99,6 +99,7 @@ test('migrations 0006-0022 upgrade accepted G1 and converge with the checked-in 
         '0020_semantic_aggregate_anchors.sql',
         '0021_bounded_fresh_tenant_install_evidence.sql',
         '0022_module_storage_relation_requiredness_relaxation.sql',
+        '0023_inventory_stock_count_companion_digest_version.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);

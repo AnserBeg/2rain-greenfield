@@ -32,7 +32,24 @@ import {
 } from './stock-serializer.js';
 import { assertTrustedActorEnvelope } from './trust/trusted-actor-envelope.js';
 
-export const INVENTORY_POSTING_CAPABILITY_VERSION = 1 as const;
+/**
+ * PUR-2b. Version 2, because PUR-2a changed the PUBLIC posting contract for a
+ * stock count: `transactionId` and every line's `transactionLineId` left the
+ * command's key set entirely, so a caller written against version 1 is refused
+ * by `exactKeys` rather than tolerated.
+ *
+ * MEASURED LIMIT, and it is not closed here. This capability version has THREE
+ * encodings and nothing reconciles them: this constant, the frozen contract's
+ * `capabilityVersion` (`packages/domain/src/inventory/contracts.ts`, pinned to
+ * the literal 1 by `packages/compiler/src/conformance.ts`), and the module's
+ * declared `capabilityRequirement.capabilityVersion`
+ * (`packages/domain/src/inventory/definition.ts`), which is what reaches a
+ * release manifest's `capabilityFacts`. `hasValidCapabilityFacts` checks only
+ * `>= 1`, so a release that DECLARES it requires posting v1 while the provider
+ * IMPLEMENTS v2 passes every gate. Both other encodings are outside this
+ * packet's lease; filed as `posting-capability-version-has-three-encodings`.
+ */
+export const INVENTORY_POSTING_CAPABILITY_VERSION = 2 as const;
 export const INVENTORY_POSTING_CAPABILITY_ID =
   'northstar.inventory:capability.posting' as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
@@ -155,22 +172,40 @@ const requestKeyLockDerivationVersion =
 const legacyInventoryPostingInputDigestVersion = 1 as const;
 const standardInventoryPostingInputDigestVersion = 2 as const;
 const stockCountInventoryPostingInputDigestVersion = 3 as const;
+const companionDerivedInventoryPostingInputDigestVersion = 4 as const;
 /**
- * PUR-2a. The stock-count digest INPUT changed here -- the companion ids it
- * covers are now derived by the kernel rather than supplied by the caller --
- * and migration `0016` says a writer keeps its version "until their own digest
- * input changes under a versioned migration."
+ * PUR-2b. The stock-count digest input version, and what it covers.
  *
- * **That migration is NOT in this packet, so this version is knowingly owed.**
- * Adding it was measured to break eleven tests across seven files: the schema
- * snapshot, four independently pinned tail-migration assertions, two
- * exhaustive migration lists, and a range encoded in a test's own title. That
- * is a platform change, not a bridge, and it ships without controls of its own
- * if it is buried here. The complete versioned transition -- command version,
- * capability version, digest version, its migration and its pin surface --
- * belongs to `PUR-2b`. Until then a pre-derivation version-3 receipt replays
- * as an ordinary idempotency conflict, which is loud rather than silent, and
- * that limit is recorded rather than papered over.
+ * PUR-2a changed the stock-count digest INPUT: `transactionId` and every line's
+ * `transactionLineId` used to be values the CALLER sent and are now values the
+ * KERNEL derives. The digest SHAPE did not move, which is why an exemption
+ * looked arguable, but migration `0016`'s rule is about the input -- a writer
+ * "retains the v1 default until their own digest input changes under a
+ * versioned migration" -- and the input changed. That argument is withdrawn.
+ *
+ * Version 4 is that versioned migration's write, and it EXCLUDES the derived
+ * companion ids rather than merely renumbering them (ADR-0063). Two reasons,
+ * and the first is the decisive one:
+ *
+ *  - they add NO discriminating power. Each is a pure function of a value the
+ *    digest already covers -- `transactionId = f(stockCountId)` and
+ *    `transactionLineId = f(stockCountLineId)` -- so two commands cannot differ
+ *    in a derived id without differing in the source id that produced it.
+ *    Excluding them loses nothing a digest is for.
+ *  - they are kernel OUTPUTS. Covering an output couples every stored digest to
+ *    the derivation function, so changing the namespace or either family id
+ *    would silently invalidate receipts that no migration could repair -- the
+ *    input is not stored, so it cannot be recomputed. That is precisely the
+ *    defect this version exists to close, and keeping them re-arms it.
+ *
+ * `idempotencyKey` is already excluded because it is the KEY rather than the
+ * input; the derived ids are excluded for the mirror-image reason.
+ *
+ * A stored version-3 receipt is still DECODED under version 3 -- nothing is
+ * rewritten and nothing is removed. What it may not do is have a fresh version-3
+ * digest computed for it, because the caller-supplied ids that digest covered
+ * are unreachable from a command the kernel now derives. See
+ * `unreconstructibleReceiptVersion`.
  */
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -718,7 +753,7 @@ interface VersionedInputDigest {
   readonly value: string;
   readonly version:
     | typeof standardInventoryPostingInputDigestVersion
-    | typeof stockCountInventoryPostingInputDigestVersion;
+    | typeof companionDerivedInventoryPostingInputDigestVersion;
 }
 
 interface EvidenceIds {
@@ -6625,7 +6660,7 @@ function naturalEffects(
 
 function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
   const version = isStockCountPosting(posting)
-    ? stockCountInventoryPostingInputDigestVersion
+    ? companionDerivedInventoryPostingInputDigestVersion
     : standardInventoryPostingInputDigestVersion;
   return Object.freeze({
     value: digestCommand(posting, version),
@@ -6649,9 +6684,16 @@ function digestCommand(posting: ParsedPosting, version: number): string {
           : unsupportedReceiptVersion(version)
         : version === stockCountInventoryPostingInputDigestVersion
           ? isStockCountPosting(posting)
-            ? { postingRole: posting.postingRole, ...semanticInput }
+            ? unreconstructibleReceiptVersion(version)
             : unsupportedReceiptVersion(version)
-          : unsupportedReceiptVersion(version);
+          : version === companionDerivedInventoryPostingInputDigestVersion
+            ? isStockCountPosting(posting)
+              ? {
+                  postingRole: posting.postingRole,
+                  ...callerStockCountInput(posting.command),
+                }
+              : unsupportedReceiptVersion(version)
+            : unsupportedReceiptVersion(version);
   return createHash('sha256').update(canonicalize(digestInput)).digest('hex');
 }
 
@@ -6662,7 +6704,8 @@ function recordedResultForReplay(
   if (
     version !== legacyInventoryPostingInputDigestVersion &&
     version !== standardInventoryPostingInputDigestVersion &&
-    version !== stockCountInventoryPostingInputDigestVersion
+    version !== stockCountInventoryPostingInputDigestVersion &&
+    version !== companionDerivedInventoryPostingInputDigestVersion
   ) {
     return unsupportedReceiptVersion(version);
   }
@@ -6679,16 +6722,17 @@ function recordedResultForReplay(
     ...receipt.mutation_result,
     movements,
     replayed: true,
-    // Both stock-count versions decode their stored evidence by their own
-    // version. Version 3 is readable here precisely because a stored receipt
-    // must keep decoding under the version it was written with; what version 3
-    // may not do is have a fresh digest computed for it.
-    stockCountEvidence:
-      version === stockCountInventoryPostingInputDigestVersion
-        ? requiredRecordedStockCountEvidence(
-            receipt.mutation_result.stockCountEvidence,
-          )
-        : null,
+    // Every stock-count version decodes its stored evidence by its own version.
+    // Version 3 is readable here precisely because a stored receipt must keep
+    // decoding under the version it was written with; what version 3 may not do
+    // is have a fresh digest computed for it -- see
+    // `unreconstructibleReceiptVersion`. PUR-2b adds version 4 beside it and
+    // removes nothing.
+    stockCountEvidence: isStockCountReceiptVersion(version)
+      ? requiredRecordedStockCountEvidence(
+          receipt.mutation_result.stockCountEvidence,
+        )
+      : null,
   });
 }
 
@@ -6703,7 +6747,7 @@ function requiredRecordedPostingRole(
     return postingRole;
   }
   if (
-    version === stockCountInventoryPostingInputDigestVersion &&
+    isStockCountReceiptVersion(version) &&
     (postingRole === 'count' || postingRole === 'correction')
   ) {
     return postingRole;
@@ -6728,6 +6772,69 @@ function requiredRecordedStockCountEvidence(
   throw postingError(
     'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
     'persisted stock-count receipt has no readable count evidence',
+  );
+}
+
+/**
+ * PUR-2b. Version 4's digest input: the CALLER's stock-count command.
+ *
+ * The idempotency key is dropped because it is the KEY rather than the input.
+ * The kernel-derived companion identities are dropped because they are OUTPUTS
+ * -- `transactionId` and every `transactionLineId`. The return type is the
+ * caller's own command type minus that key, so the exclusion is stated once,
+ * here, in the type rather than in a comment.
+ */
+function callerStockCountInput(
+  command: DerivedStockCountCommand,
+): Omit<InventoryStockCountPostingCommandV2, 'idempotencyKey'> {
+  const { idempotencyKey, transactionId, lines, ...callerInput } = command;
+  void idempotencyKey;
+  void transactionId;
+  return {
+    ...callerInput,
+    lines: lines.map(({ transactionLineId, ...callerLine }) => {
+      void transactionLineId;
+      return callerLine;
+    }),
+  };
+}
+
+/** Receipt versions whose stored evidence is a stock count's. */
+function isStockCountReceiptVersion(version: number): boolean {
+  return (
+    version === stockCountInventoryPostingInputDigestVersion ||
+    version === companionDerivedInventoryPostingInputDigestVersion
+  );
+}
+
+/**
+ * PUR-2b. A stored version-3 stock-count receipt cannot have a FRESH digest
+ * computed for it, and this is the refusal that says so.
+ *
+ * Version 3 covered `transactionId` and each `transactionLineId` as the CALLER
+ * sent them. Since PUR-2a the kernel derives both and a caller cannot send
+ * either -- `exactKeys` refuses the keys outright. Recomputing version 3 over a
+ * current command therefore compares a derived value against a caller-chosen
+ * one and cannot match. Left alone it reports `idempotency key X already names
+ * another posting`, which asserts the caller reused a key for DIFFERENT input;
+ * the input is the same and the kernel changed underneath it. That message
+ * sends an operator to audit a caller that did nothing wrong.
+ *
+ * No migration can repair such a row either: the receipt stores `input_digest`
+ * and `mutation_result` and never the input, so there is nothing to compute a
+ * version-4 digest FROM. Refusing with the real reason is the honest answer,
+ * and the row keeps decoding under version 3 everywhere else.
+ *
+ * ADR-0063 section 4 proves no such receipt can exist in released data: version
+ * 3 is written only by `postStockCount`, and no released application route
+ * reaches it. This refusal is about being correct, not about carrying data that
+ * exists.
+ */
+function unreconstructibleReceiptVersion(version: number): never {
+  throw postingError(
+    'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+    `persisted stock-count receipt uses input digest version ${String(version)}, whose caller-supplied companion identities cannot be reconstructed from a kernel-derived command`,
+    { inputDigestVersion: String(version) },
   );
 }
 
