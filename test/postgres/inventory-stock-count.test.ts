@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -355,7 +355,9 @@ test('stock-count posting preserves three-value evidence and appends correction 
               AND idempotency_key=$3`,
         [tenantId, environmentId, reversal.idempotencyKey],
       );
-      assert.equal(receipt.rows[0]?.input_digest_version, 3);
+      // PUR-2b. Version 4: the caller's semantic input, without the companion
+      // identities the kernel derives.
+      assert.equal(receipt.rows[0]?.input_digest_version, 4);
 
       const persisted = await readPersistedCountChain(
         runtimePool,
@@ -983,6 +985,281 @@ test('stock-count companion derivation: a reviewed count that already names a co
     },
   );
 });
+
+test("PUR-2b: the version-4 digest covers the caller's semantic input and not the identities the kernel derives", async () => {
+  await withCompanionEnvironment(
+    'companion-digest-version',
+    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 5,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      const posted = await service.postStockCount(context, actor, command);
+
+      const receipt = await readReceipt(databasePool, command.idempotencyKey);
+      assert.equal(
+        receipt.inputDigestVersion,
+        4,
+        'a stock-count posting must write the version migration 0023 admits',
+      );
+
+      // PUR-2b. The capability version, asserted as a LITERAL on both sides it
+      // reaches. Every one of its 21 references is symbolic, so a bump is
+      // invisible to every other gate in the matrix: without this the constant
+      // could be moved, or moved back, with nothing observing it. The trust
+      // metadata is the durable half -- an operator auditing a posting reads
+      // the recorded version, not the constant.
+      assert.equal(
+        posted.capabilityVersion,
+        2,
+        'a posting result must declare the capability version that produced it',
+      );
+      assert.equal(
+        await readInvocationCapabilityVersion(
+          databasePool,
+          posted.trust.invocationId,
+        ),
+        2,
+        'the persisted trust invocation must record the capability version',
+      );
+
+      // The expected digest is built from the CALLER's command -- the object
+      // this test authored -- and not from anything the service returned. The
+      // kernel-derived identities are absent because a caller cannot send
+      // them: `exactKeys` refuses both keys outright.
+      const { idempotencyKey, ...callerInput } = command;
+      void idempotencyKey;
+      const callerDigest = createHash('sha256')
+        .update(canonicalize({ postingRole: 'count', ...callerInput }))
+        .digest('hex');
+      assert.equal(
+        receipt.inputDigest,
+        callerDigest,
+        "the version-4 digest must be the digest of the caller's semantic input",
+      );
+
+      // The other half, and without it the assertion above is satisfied by any
+      // implementation that happens to hash something: this is what the digest
+      // would have been had the derived identities been kept and merely
+      // renumbered, and it must NOT be what was stored.
+      const digestWithDerivedIdentities = createHash('sha256')
+        .update(
+          canonicalize({
+            postingRole: 'count',
+            ...callerInput,
+            lines: callerInput.lines.map((line) => ({
+              ...line,
+              transactionLineId: expectedCompanionTransactionLineId(
+                line.stockCountLineId,
+              ),
+            })),
+            transactionId: expectedCompanionTransactionId(command.stockCountId),
+          }),
+        )
+        .digest('hex');
+      assert.notEqual(
+        digestWithDerivedIdentities,
+        callerDigest,
+        'the two candidate digests must differ, or this test discriminates nothing',
+      );
+      assert.notEqual(
+        receipt.inputDigest,
+        digestWithDerivedIdentities,
+        'the stored digest must not cover the identities the kernel derived',
+      );
+
+      // Replay still works, which is the point of a digest: the same caller
+      // input under the same key returns the recorded result rather than
+      // conflicting with it.
+      const replay = await service.postStockCount(context, actor, command);
+      assert.equal(
+        replay.replayed,
+        true,
+        'an unchanged stock-count command must replay under version 4',
+      );
+    },
+  );
+});
+
+test('PUR-2b: a pre-derivation version-3 receipt is refused as unreconstructible, not as a reused idempotency key', async () => {
+  await withCompanionEnvironment(
+    'companion-digest-legacy',
+    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 6,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      await service.postStockCount(context, actor, command);
+
+      // A faithful specimen of the shape every stock-count receipt had before
+      // PUR-2a: version 3, over a command whose companion identities the CALLER
+      // chose. Those identities are unreachable from the derivation, which is
+      // exactly why no migration can recompute this row -- the receipt stores
+      // the digest and the result, never the input.
+      const legacyKey = '62000000-0000-4000-8000-0000000000ff';
+      const callerChosenTransactionId = '64000000-0000-4000-8000-000000000064';
+      const callerChosenLineId = '65000000-0000-4000-8000-000000000065';
+      const { idempotencyKey, ...callerInput } = command;
+      void idempotencyKey;
+      const legacyDigest = createHash('sha256')
+        .update(
+          canonicalize({
+            postingRole: 'count',
+            ...callerInput,
+            lines: callerInput.lines.map((line) => ({
+              ...line,
+              transactionLineId: callerChosenLineId,
+            })),
+            transactionId: callerChosenTransactionId,
+          }),
+        )
+        .digest('hex');
+      await cloneReceiptAsPreDerivationVersion3(
+        databasePool,
+        command.idempotencyKey,
+        legacyKey,
+        legacyDigest,
+      );
+
+      const refusal = await service
+        .postStockCount(context, actor, {
+          ...command,
+          idempotencyKey: legacyKey,
+        })
+        .then(
+          () => null,
+          (reason: unknown) => reason,
+        );
+      assert.ok(
+        refusal instanceof InventoryPostingError,
+        'a version-3 stock-count receipt must be refused rather than replayed unverified',
+      );
+      assert.equal(refusal.code, 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT');
+      // WHICH refusal it is, is the whole finding. Recomputing version 3 over a
+      // derived command cannot match a caller-chosen one, so the untreated code
+      // reports `already names another posting` -- an accusation that the
+      // caller reused a key for DIFFERENT input. The input is identical and the
+      // kernel changed underneath it, so that message sends an operator to
+      // audit a caller that did nothing wrong.
+      assert.match(
+        refusal.message,
+        /cannot be reconstructed from a kernel-derived command/u,
+        'the refusal must name the derivation change as the reason',
+      );
+      assert.doesNotMatch(
+        refusal.message,
+        /already names another posting/u,
+        'the refusal must not accuse the caller of reusing the key for other input',
+      );
+      assert.equal(
+        refusal.details?.inputDigestVersion,
+        '3',
+        'the refusal must name the version it could not reconstruct',
+      );
+
+      // The stored row is untouched: a transition that carried released data by
+      // rewriting or removing a trust record would be a hard delete of business
+      // data, which the platform forbids outright.
+      const stored = await readReceipt(databasePool, legacyKey);
+      assert.deepEqual(
+        {
+          inputDigest: stored.inputDigest,
+          inputDigestVersion: stored.inputDigestVersion,
+        },
+        { inputDigest: legacyDigest, inputDigestVersion: 3 },
+        'the refused receipt must be left exactly as it was found',
+      );
+    },
+  );
+});
+
+async function readInvocationCapabilityVersion(
+  pool: Pool,
+  invocationId: string,
+): Promise<number> {
+  const result = await pool.query<{ capabilityVersion: number }>(
+    `SELECT (metadata -> 'capabilityVersion' ->> 'value')::integer
+              AS "capabilityVersion"
+       FROM platform.trust_action_invocations
+      WHERE tenant_id = $1 AND environment_id = $2 AND invocation_id = $3`,
+    [tenantId, environmentId, invocationId],
+  );
+  assert.equal(result.rows.length, 1, `no trust invocation ${invocationId}`);
+  return result.rows[0]!.capabilityVersion;
+}
+
+async function readReceipt(
+  pool: Pool,
+  idempotencyKey: string,
+): Promise<{ inputDigest: string; inputDigestVersion: number }> {
+  const result = await pool.query<{
+    inputDigest: string;
+    inputDigestVersion: number;
+  }>(
+    `SELECT input_digest AS "inputDigest",
+            input_digest_version AS "inputDigestVersion"
+       FROM platform.semantic_operation_receipts
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND action_id = $3 AND idempotency_key = $4`,
+    [tenantId, environmentId, INVENTORY_POSTING_CAPABILITY_ID, idempotencyKey],
+  );
+  assert.equal(result.rows.length, 1, `no receipt for ${idempotencyKey}`);
+  return result.rows[0]!;
+}
+
+/**
+ * Clones an accepted receipt into a second idempotency key, stamped as the
+ * pre-derivation version 3. Cloning rather than hand-building keeps every trust
+ * reference valid, so the row differs from a real legacy receipt in exactly the
+ * two columns under test.
+ */
+async function cloneReceiptAsPreDerivationVersion3(
+  pool: Pool,
+  sourceIdempotencyKey: string,
+  targetIdempotencyKey: string,
+  legacyDigest: string,
+): Promise<void> {
+  const inserted = await pool.query(
+    `INSERT INTO platform.semantic_operation_receipts (
+       tenant_id, environment_id, principal_id, release_id,
+       release_content_hash, action_id, idempotency_key, input_digest,
+       input_digest_version, mutation_result, invocation_id, correlation_id,
+       change_document_id, domain_event_id, outbox_id, recorded_at
+     )
+     SELECT receipt.tenant_id, receipt.environment_id, receipt.principal_id,
+            receipt.release_id, receipt.release_content_hash, receipt.action_id,
+            $5, $6, 3, receipt.mutation_result,
+            receipt.invocation_id, receipt.correlation_id,
+            receipt.change_document_id, receipt.domain_event_id,
+            receipt.outbox_id, receipt.recorded_at
+       FROM platform.semantic_operation_receipts AS receipt
+      WHERE receipt.tenant_id = $1 AND receipt.environment_id = $2
+        AND receipt.action_id = $3 AND receipt.idempotency_key = $4`,
+    [
+      tenantId,
+      environmentId,
+      INVENTORY_POSTING_CAPABILITY_ID,
+      sourceIdempotencyKey,
+      targetIdempotencyKey,
+      legacyDigest,
+    ],
+  );
+  assert.equal(
+    inserted.rowCount,
+    1,
+    'the specimen must actually be written, or the test proves nothing',
+  );
+}
 
 interface CompanionEnvironment {
   actor: StockCountActor;
