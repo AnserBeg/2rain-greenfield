@@ -73,6 +73,42 @@
           "expected": "a posting result must declare the capability version that produced it"
         }
       ]
+    },
+    {
+      "name": "stock-count-decoder-drops-version-three",
+      "claim": "A stored version-3 stock-count receipt must keep DECODING under the version it was written with, even though it may no longer have a fresh digest computed for it. The two halves are separate and the packet's first four controls protected only the refusal half. Round-1 review named this exact survivor: drop 3 from isStockCountReceiptVersion and all four stay green while a legitimate version-3 receipt stops decoding through findNaturalReplay. This is the subject-absent vector for the RETAINED decoder.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return (\n    version === stockCountInventoryPostingInputDigestVersion ||\n    version === companionDerivedInventoryPostingInputDigestVersion\n  );",
+      "replacement": "  return version === companionDerivedInventoryPostingInputDigestVersion;",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "natural replay"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 stock-count receipt still DECODES through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
+        }
+      ]
+    },
+    {
+      "name": "natural-replay-reconstructs-a-digest",
+      "claim": "findNaturalReplay proves replay from the persisted effects and the recorded principal, so it must NOT reconstruct an input digest. That absence is what lets a version-3 receipt keep replaying while the explicit-key route refuses it, and an absence is invisible to every gate unless something restores it. This mutation routes the natural-replay handoff through validateReceiptReplay, which reconstructs -- and a version-3 receipt then hits the unreconstructible refusal on a route that had independent evidence. Round-1 review asked for a control at this exact handoff because it holds the decoder admission and the intended absence together.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return recordedResultForReplay(row);",
+      "replacement": "  return validateReceiptReplay(row, context, posting, command.idempotencyKey);",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "natural replay"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 stock-count receipt still DECODES through natural replay, with no digest reconstructed",
+          "expected": "cannot be reconstructed from a kernel-derived command"
+        }
+      ]
     }
   ]
 }
