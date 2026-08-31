@@ -295,9 +295,10 @@ matrix sit above it by construction, and it carries a
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-writer-inventory",
   "base": "8bc097cdd6402388d80911db004590e335a6d5c6",
-  "head": "794770527d1e9ea65f37be001a3547e2744a43a0",
+  "head": "771a501c51c530c2c68f8f8f526a5caaafb72228",
   "changedPaths": [
     "packages/postgres-provider/src/inventory-posting-service.ts",
+    "test/architecture/module-press-law.test.ts",
     "test/evidence/posting-writer-inventory.expected-red.json",
     "test/postgres/inventory-posting.test.ts"
   ],
@@ -597,7 +598,8 @@ the useful part.
 
 ## Stops
 
-**ONE, and it is a bridge request rather than a quiet edit.**
+**ONE, and it was a bridge request rather than a quiet edit. GRANTED and
+RESOLVED 2026-08-31 — `test:architecture` is now 178/178.**
 
 `test:architecture` is 177 pass / 1 fail. `test/architecture/module-press-law.test.ts`
 pins a routed PRESS006 coordinate **by line number** at
@@ -607,6 +609,16 @@ no live lane, so the change was not made.
 
 The fix is one integer at `module-press-law.test.ts:484`, plus the move history
 in the comment above it.
+
+**RESOLVED, and the resolution proved the point better than the argument did.**
+The bridge was granted to change `1193` to `1278`. **By the time the grant came
+back the answer was `1311`** — closing a review finding had added a type alias
+and narrowed two comments in the upper half of the same file, moving the
+coordinate again. The measured value was applied rather than the authorised one,
+because applying `1278` would have left the suite red and defeated the grant.
+**The integer went stale inside the round trip that existed solely to update
+it.** A locator that cannot survive the latency of its own repair is not a
+locator, and that is now recorded in the comment above the pin.
 
 **This is the ninth move of that pin, caused by the fourth unrelated packet**
 (`PUR-2a` recorded the eighth, 1132 → 1193). Filed by `PUR-2a` as
