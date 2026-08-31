@@ -529,9 +529,19 @@ export /**
  * A read-back registered against a physical relation, named by REFERENCE so it
  * cannot name something absent. `name` is read off the function object itself.
  */
+/**
+ * A read-back, named by the FUNCTION ITSELF. `{ name: string }` was not enough
+ * and round 2 was right to call it out: a plain object literal satisfies a
+ * name-bearing type, so `{ name: 'assertDraftTransaction' }` would have
+ * recreated the round-1 defect verbatim while typechecking. The type is
+ * callable, so only a real function satisfies it and `.name` comes off that
+ * function rather than out of a string a caller chose.
+ */
+type PostingReadBack = (...parameters: never[]) => unknown;
+
 interface PostingWriterRegistration {
   readonly relation: string;
-  readonly verifiedBy: readonly { readonly name: string }[];
+  readonly verifiedBy: readonly PostingReadBack[];
 }
 
 interface PostingWriterRelation {
@@ -1677,13 +1687,20 @@ function resolvePostingStorage(
 }
 
 /**
- * PUR-2a's root cause, closed. A posting writes more physical relations than
- * it names entities: a partitioned fact routes its row into a partition, an
+ * PUR-2a's root cause, narrowed. A posting writes more physical relations than
+ * it names entities: a partitioned fact routes its row into a partition, and an
  * `AFTER INSERT` trigger the target declares copies it into the effect
- * reservation companion, and a second declared trigger projects it into the
- * browsable balance. Nine review rounds enumerated those consequences BY HAND
- * and each round found one more. The compiled storage target already declares
- * every one of them, so this DERIVES the inventory.
+ * reservation companion. Nine review rounds enumerated those consequences BY
+ * HAND and each round found one more, so this DERIVES them instead.
+ *
+ * **THE TARGET DOES NOT DECLARE EVERY WRITER, and an earlier version of this
+ * comment said it did.** It declares the entity's table, its partitions and its
+ * `factStorage.companion`. It declares NOTHING about the posted-stock balance
+ * edge -- that trigger is a materializer convention reconstructed here, which
+ * is why `triggerProjections` is supplied by the caller rather than read out of
+ * the target. See ADR-0062, which overrides the older premise, and
+ * `module-writer-edges-are-convention-not-declaration`. Do not restore the
+ * stronger sentence: it is the exact claim two review rounds refuted.
  *
  * WHAT IS DERIVED AND WHAT IS NOT -- the boundary of the claim, stated because
  * the difference is the whole point:
@@ -5232,10 +5249,36 @@ async function moduleWriteCounters(
  * independently, which round 1 correctly called the same omission generator one
  * level up (`module-writer-edges-are-convention-not-declaration`).
  *
- * A writer that convention grows and nobody adds to the inventory does not
- * escape here, because this does not ask the target what was written. It asks
- * PostgreSQL, and refuses before commit when the answer contains a relation no
- * read-back is registered for.
+ * This does not ask the target what was written. It asks PostgreSQL, and
+ * refuses before commit when the answer contains a relation no read-back is
+ * registered for.
+ *
+ * WHAT IT COVERS, narrowed after round 2 and NOT to be restated more strongly:
+ * tuple DML -- inserts, updates and deletes -- that has ALREADY EXECUTED on a
+ * module user table at the moment of this snapshot. That is a backstop for
+ * writers the derivation cannot see, and it is not a transaction-complete
+ * write set.
+ *
+ * WHAT IT DOES NOT COVER, and the first one is a real hole in the older claim:
+ *
+ *  - A `CONSTRAINT TRIGGER ... DEFERRABLE INITIALLY DEFERRED` fires at COMMIT,
+ *    AFTER this snapshot. Its writes are invisible here and there is no second
+ *    observation. The movement's own writes keep the observation non-empty, so
+ *    the empty guard does not catch it either. **No such trigger exists in this
+ *    repository today** -- measured: there is no `CREATE CONSTRAINT TRIGGER`
+ *    anywhere, and the `DEFERRABLE INITIALLY DEFERRED` declarations in
+ *    migration 0006 are platform-plane FK and unique CONSTRAINTS, which check
+ *    rather than write. So this is an unclosed vector rather than a live
+ *    defect, and it is filed as
+ *    `posting-write-observation-misses-deferred-triggers` with the control that
+ *    would settle it.
+ *  - Anything that is not tuple DML on a user table.
+ *  - The platform plane, which this query filters out by schema.
+ *
+ * `SET CONSTRAINTS ALL IMMEDIATE` before the snapshot is the candidate repair
+ * for the first bullet. It is NOT applied here because it cannot be verified
+ * without a database and this path is Band A; shipping it unverified would be
+ * worse than stating the limit.
  *
  * SCOPE, and it is the same boundary as everything else in this file: the view
  * is filtered to the MODULE schema. Platform-plane writes -- trust documents,

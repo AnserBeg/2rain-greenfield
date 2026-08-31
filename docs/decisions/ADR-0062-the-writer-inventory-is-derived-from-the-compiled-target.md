@@ -99,8 +99,26 @@ alone for completeness.**
 **Before any trust document or receipt, the posting reads the module-plane write
 set from `pg_stat_xact_user_tables` and requires every relation in it to appear
 in the derived inventory.** It does not ask the compiled target what was
-written; it asks PostgreSQL. A writer grown by a new materializer convention,
-declared nowhere, refuses the posting instead of committing.
+written; it asks PostgreSQL.
+
+**NARROWED AFTER ROUND 2, and the earlier sentence here was too strong.** It
+said a writer grown by a new convention, declared nowhere, refuses. What is
+actually observed is **tuple DML that has already executed at the moment of the
+snapshot**. A `CONSTRAINT TRIGGER ... DEFERRABLE INITIALLY DEFERRED` fires at
+COMMIT, after that snapshot, and there is no second observation — so its writes
+are invisible, and the movement's own writes keep the observation non-empty so
+the empty guard does not catch it either.
+
+**This is an unclosed vector, not a live defect, and the difference is
+measured:** there is no `CREATE CONSTRAINT TRIGGER` anywhere in the repository,
+and the `DEFERRABLE INITIALLY DEFERRED` declarations in migration 0006 are
+platform-plane foreign-key and unique CONSTRAINTS, which check rather than
+write. Filed as `posting-write-observation-misses-deferred-triggers`.
+
+**So the honest statement of what observation buys is:** it is a backstop
+against writers the derivation cannot see, covering already-executed tuple DML
+on module user tables. It is **not** a transaction-complete write set, and this
+ADR must not be restated as one.
 
 **Two things were measured before choosing this, and both changed the design:**
 
