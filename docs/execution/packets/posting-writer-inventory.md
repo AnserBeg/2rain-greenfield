@@ -224,6 +224,54 @@ packet's derivation draws, and a reason
 
 The expected-red manifest mutates only this packet's own verifier.
 
+## Review evidence, and the acceptance ruling
+
+**Two online arms, both BLOCK, both correct, neither argued down.**
+
+| Round | SHA | Verdict | What it found |
+|---|---|---|---|
+| 1 | `942f5fc` | BLOCK | F1 traversal + edge declaration, F2 decorative registration strings, F3 overclaimed evidence |
+| 2 | `134fcd8` | BLOCK | N1 deferred-trigger timing, N2 non-callable verifier type, residual contradicting comment |
+
+**CLOSED across the two rounds:** F1's traversal (transitive worklist, held by a
+chained-writer control), F3 (claims narrowed everywhere), the empty-observation
+refusal (held by an induced observer defect), N2 (callable verifier type —
+**measured** by injecting `{ name: 'assertDraftTransaction' }` and observing
+`TS2353`), and the residual comment.
+
+**STILL OPEN, and stated as limits rather than repaired:** F1's edge declaration
+(`module-writer-edges-are-convention-not-declaration`), the verifier-ran half of
+F2 (`posting-writer-coverage-is-declared-not-observed`), and N1's deferred-trigger
+vector (`posting-write-observation-misses-deferred-triggers`).
+
+### ACCEPTED ON NARROWED CLAIMS, NO THIRD ARM — user ruling, 2026-08-31
+
+The ruling was made on evidence, not on fatigue, and the evidence is worth
+recording because it is the stop criterion this programme keeps relearning:
+
+- **Round 2 found ZERO production defects.** Every finding was a claim outrunning
+  its enforcement. Nothing misbehaves; no wrong row is written.
+- **Severity was converging even though the count was not.** Round 1 found a
+  *shipped* registration naming a function that does not exist. Round 2 found a
+  type that would *permit* recreating that, and a trigger form nothing in the
+  repository uses. Round 3's findings were predictable in kind — non-tuple
+  writes, `TRUNCATE`, DDL — all true, all unreachable, all narrowing the claim
+  further without changing code that runs.
+- **The reviews had stopped finding defects and started finding LIMITS.** That is
+  information about the ambition, not the code, and it converges only by ceasing
+  to promise completeness — which the narrowed claims now do.
+
+**N1 was narrowed rather than fixed, deliberately.** The candidate repair,
+`SET CONSTRAINTS ALL IMMEDIATE` before the snapshot, changes transaction
+semantics on the Critical posting path and would force migration 0006's deferred
+platform-plane constraints to validate early. Docker became unavailable before it
+could be tested. **An untested change to transaction semantics on a Band-A path
+is a worse risk than a vector measured dormant**, so the limit is stated and the
+control that settles it is filed.
+
+**What this packet no longer claims is completeness. That is the correction, not
+a concession.**
+
 ## Record claim
 
 `main` gained `record-claim-fidelity`'s gate while `PUR-2a` ran, and this branch
