@@ -203,3 +203,189 @@ green on `main` and is unchanged here: no tracked release artifact moved.
   ]
 }
 ```
+
+## Pasteable review prompt — arm 1, fresh naive Codex `gpt-5.6-sol` xhigh
+
+The prompt uses `<FROZEN_SHA>` because a commit cannot contain its own identity.
+Replace it with the exact remote SHA in the session report's `git ls-remote` line.
+
+```text
+You are the fresh-naive round-1 reviewer for Critical packet pur-2b in
+/home/rvham/2rain-greenfield.
+
+Review exact remote candidate <FROZEN_SHA> against base
+5e02d09526654b7dcdb36e15de360ef42b5f769f. The remote branch is packet/pur-2b;
+verify the supplied git ls-remote line before reading. Work read-only. Do not
+edit, commit, run the full matrix, invoke another reviewer, or rely on line
+numbers — re-locate every symbol by name.
+
+Return PASS, REVISE, or BLOCK with file/symbol evidence for every material
+finding.
+
+This prompt was written by the lane whose work you are reviewing. **The lane has
+fenced nothing.** Any scope stated here is the orchestrator's, and it stands as a
+claim under test rather than a limit you may not question. Read whatever you
+judge relevant to the decisive questions, say plainly if you think the scope is
+drawn wrongly, and say plainly if the prompt itself is steering you.
+
+TIER: Critical. It changes an idempotency digest and a stored version on an
+already-released contract, and a wrong answer is invisible until a caller
+replays. Evidence band A, declared.
+
+READ FIRST: AGENTS.md sections 5 and 6; .agents/skills/review-tiers/SKILL.md;
+docs/decisions/ADR-0063-a-receipt-digest-covers-the-callers-input.md in full;
+docs/execution/packets/pur-2b.md; the
+stock-count-companion-released-contract-transition row in
+docs/execution/current-plan.md; db/migrations/0016 and 0017 (six lines each).
+Then inspect, by name, in
+packages/postgres-provider/src/inventory-posting-service.ts:
+digestCommand, currentCommandDigest, callerStockCountInput,
+unreconstructibleReceiptVersion, unsupportedReceiptVersion,
+isStockCountReceiptVersion, recordedResultForReplay, requiredRecordedPostingRole,
+validateReceiptReplay, findNaturalReplay, validateStockCountCommand,
+INVENTORY_POSTING_CAPABILITY_VERSION. Then the two tests named PUR-2b in
+test/postgres/inventory-stock-count.test.ts and the four entries in
+test/evidence/pur-2b.expected-red.json.
+
+GATES ALREADY GREEN at <FROZEN_SHA>, so do not re-derive what they prove:
+typecheck, lint, format; test:unit 155/155; test:compiler 157/157;
+test:integration 149/149; test:architecture 189/189; test:postgres 220/220
+(REQUIRED for this packet); check:schema PASS with 23 applied and 23 verified
+plus schema-drift PASS; check:app-release PASS; check:expected-red-controls OK
+with 38 controls; scripts/check-records.sh OK; evidence:expected-red reproduced
+every committed entry across all six manifests. test:browser was NOT run.
+
+WHAT THE PACKET CLAIMS. Each of these is a CLAIM UNDER TEST, and each is stated
+with the derivation that produced it so you can attack the derivation rather
+than the number:
+
+C1. The rule PUR-2a broke is about the digest INPUT, not its shape. Derived by
+    reading migration 0016's header against the pre- and post-PUR-2a bodies of
+    validateStockCountCommand: at 0a1e26a the parsed command's transactionId was
+    parsed.transactionId.toLowerCase() and each line's transactionLineId was
+    line.transactionLineId.toLowerCase(); both are now
+    deriveInventoryPostingCompanionId. digestCommand spreads the DERIVED command
+    either way, so the key set never moved while the provenance and value did.
+
+C2. Version 4 should EXCLUDE the kernel-derived companion identities, and the
+    decisive reason is that they carry no information. Derived from the purity of
+    deriveInventoryPostingCompanionId: transactionId is a function of
+    stockCountId and transactionLineId of stockCountLineId, both already in the
+    digest, so no two commands can differ in a derived id without differing in
+    the source id that produced it. If that reasoning is wrong, the ruling is
+    wrong. Attack it directly.
+
+C3. A stored version-3 stock-count receipt must be refused rather than compared
+    against a freshly computed version-3 digest, and refusing without verifying
+    the input is safer than replaying the stored result. Derived from the fact
+    that a caller cannot resend the old identities (exactKeys refuses both keys)
+    and the receipt stores input_digest and mutation_result but never the input.
+
+C4. Three of the finding's four released-data cases CANNOT EXIST. Derived by
+    reachability, measured in the compiled artifact apps/api loads rather than
+    the authored source: decoding the head release of
+    apps/web/release/app.compiled.json (index 14 of 15, releaseRoot 8476ba3f...)
+    gives eight stock_count operations, all generic record effects with
+    capability: null, and exactly one operation naming
+    northstar.inventory:capability.posting — inventory_transaction_post.
+    apps/api/src/composition-root.ts registers one factory for that capability;
+    that executor calls postAdjustment only. postStockCount has no production
+    caller and is the sole writer of a version-3 receipt. THIS IS THE CLAIM MOST
+    WORTH BREAKING: one reachable route to postStockCount, or one other writer of
+    digest version 3, refutes the whole disposition.
+
+C5. The fourth case is real, is confined to app releases 4 through 13, and this
+    packet structurally cannot carry it. Derived by decoding EVERY release in
+    app.compiled.json for the requiredness of both companion relations: 0-3 have
+    no stock_count entity, 4-13 are required: true, 14 relaxed them. The
+    structural half is that stock_count is module storage and db/migrations/** are
+    platform migrations forbidden module DDL.
+
+WHAT THE LANE DID NOT VERIFY, could not verify, or verified only by its own
+construction — read this before deciding how much of the above to trust:
+
+N1. test:browser did not run. apps/web/test/browser/composed-application.spec.ts
+    imports INVENTORY_POSTING_CAPABILITY_VERSION symbolically, so the lane
+    believes the bump needs no edit there, but that belief is unobserved.
+N2. The version-4 exclusion is type-forced in ONE direction only. A field added
+    to InventoryStockCountPostingCommandV2 enters the digest automatically; a new
+    KERNEL output added to DerivedStockCountCommand would pass through the spread
+    in callerStockCountInput and silently enter the digest. Only a test catches
+    that, not a type.
+N3. The four expected-red entries are self-chosen. review-tiers is explicit that
+    a self-chosen mutation table measures its author's model. The lane measured
+    each red rather than predicting it, but it chose which four to measure.
+N4. The reachability proof in C4 is a static argument over one repository at one
+    SHA. It does not observe a running deployment, and the lane has no access to
+    one. If you think a static proof cannot settle a question about released
+    data, say so — that is exactly the kind of objection this packet needs.
+N5. The lane asserts no released stock count has been POSTED. It does not assert
+    no stock_count ROWS exist; C5 says the opposite.
+N6. The capability version bump's only observation is the packet's own test. The
+    lane wrote both the bump and the thing that watches it.
+
+KNOWN AND DELIBERATE, so you can rule on whether each is acceptable rather than
+rediscover it:
+
+K1. test/postgres/trust-substrate.test.ts's TITLE still says "migrations
+    0006-0022" while its body asserts 0023. Changing it fails
+    evidence:expected-red, because
+    test/evidence/relation-requiredness-relaxation.expected-red.json — an
+    accepted packet's manifest, outside this lease — names that test by title in
+    test.namePattern and kills[0].name, and measurePhase asserts the pattern
+    selects at least one test. The lane left the title stale rather than cross
+    the lease and filed a bridge request. Rule on whether that was right.
+K2. INVENTORY_POSTING_CAPABILITY_VERSION is now 2 while the head compiled
+    release declares the posting capability at capabilityVersion: 1, and
+    hasValidCapabilityFacts checks only >= 1. Filed as
+    posting-capability-version-has-three-encodings; both other encodings are
+    outside the lease. Rule on whether shipping that divergence is acceptable or
+    whether the bump should have been withheld until it could be reconciled.
+
+OUT OF SCOPE per the charter: goods receipt and receipt correction; the
+received-quantity read model (PUR-2c); closing the generic companion writers;
+posting-platform-plane-writes-not-row-complete; packages/compiler/** and
+packages/postgres-provider/src/module-storage-materializer.ts.
+
+THREAT MODEL: accidental and plain violations by honest developers or AI
+writers, not active obfuscation. The realistic adversary is a future packet that
+changes the companion derivation, adds a field to the stock-count command, or
+wires a stock-count posting operation, without noticing what it breaks.
+
+DECISIVE QUESTIONS:
+
+A. Is C4 sound? Find a reachable route from a released application to
+   postStockCount, or any other writer of input_digest_version 3. If one exists,
+   the released-data disposition fails and this is a BLOCK.
+B. Is C2's ruling right, and does ADR-0063 argue it rather than assert it? If
+   keeping the derived identities in the digest would have been better, say why
+   the no-information argument fails.
+C. Does the version-3 refusal in C3 leave any path that still computes a fresh
+   version-3 digest for a stock count, or any path where a version-3 receipt
+   stops decoding? Check findNaturalReplay and recordedResultForReplay
+   specifically — they reach recordedResultForReplay without a digest
+   recomputation, and the lane claims that is correct rather than a leak.
+D. Do the two new tests observe what they claim? In particular, does the
+   version-4 test discriminate between the two candidate rulings rather than
+   merely hash something, and is the legacy-receipt specimen faithful to a real
+   pre-PUR-2a receipt?
+E. Do the four expected-red entries each die ALONE and for the assertion that
+   carries their claim? Name the cheapest one-property survivor that would leave
+   all four green.
+F. Is migration 0023 correct and complete, and is the pin surface fully updated?
+   The lane found nine sites and one outside its lease; find a tenth it missed.
+
+OPEN QUESTION — answer this in your own terms rather than choosing from options:
+this packet decided that a version-3 stock-count receipt should be REFUSED with a
+new reason rather than replayed, migrated, or left to fail as before. Given that
+the lane also argues no such receipt can exist in released data, what is the right
+relationship between a transition's code and data it has proven absent — and does
+this packet get that relationship right?
+```
+
+## Arm 2 — Fable max confirm
+
+Runs on the IDENTICAL SHA only after arm 1 returns PASS, per the `review-tiers`
+Critical row. Its charter is the same, narrowed to the two rulings and the
+reachability proof: whether ADR-0063's arguments hold, whether C4 is sound, and
+whether K1 and K2 were disposed of correctly.
