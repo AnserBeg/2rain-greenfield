@@ -201,6 +201,20 @@ export const STORAGE_COMPATIBILITY_MATRIX: Readonly<
     oldRead: 'compatible',
     oldWrite: 'compatible',
   }),
+  relaxNotNull: Object.freeze({
+    admission: 'additive',
+    newRead: 'compatible',
+    newWrite: 'compatible',
+    // An old reader was compiled against a relation its model calls required,
+    // so it never planned for the absence of a target. Relaxation does not make
+    // it reject -- reads do not reject -- but the moment a NEW writer stores a
+    // null, that old reader observes one where its model says a value is always
+    // present. That is the same shape as `addColumn`'s `newRead`, read from the
+    // other side of the release boundary, and it is the honest cell: the
+    // widening is safe for the DATABASE and not transparent to a live READER.
+    oldRead: 'requiresReadFallback',
+    oldWrite: 'compatible',
+  }),
   tightenNotNull: Object.freeze({
     admission: 'blockingWhileAffectedWritersLive',
     newRead: 'compatible',
@@ -2086,11 +2100,24 @@ export function buildStorageTransitionEnvelope(
   for (const relation of candidate.relations) {
     const previousRelation = previousRelations.get(relation.relationId);
     if (previousRelation) {
-      if (!sameRelationShape(previousRelation, relation)) {
+      const relaxed = relaxesRelationRequiredness(previousRelation, relation);
+      if (!relaxed && !sameRelationShape(previousRelation, relation)) {
         return failureDiagnostic(
           'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED',
           '$.relations',
           relation.relationId,
+        );
+      }
+      if (relaxed) {
+        elements.push(
+          element(
+            'relaxNotNull',
+            relation.relationId,
+            null,
+            relation.relationColumn.physicalName,
+            [],
+            'existing',
+          ),
         );
       }
       const source = candidateEntities.get(relation.sourceEntityId)!;
@@ -2327,6 +2354,21 @@ export function classifyStorageTransitionElement(
           preparationValidity: 'inAttemptOnly',
           semanticEffect: 'none',
         };
+      case 'relaxNotNull':
+        // `ALTER COLUMN ... DROP NOT NULL` rewrites no rows and reads none, so
+        // it is catalogOnly rather than a scan; it takes a brief ACCESS
+        // EXCLUSIVE lock, so the risk is the same bounded catalog lock that
+        // `addColumn` carries. It is `preApprovalInert` for the property that
+        // separates inert from in-attempt everywhere else in this planner: it
+        // can never reject a write. Every `inAttemptOnly` kind either rejects
+        // old writes (`oldWrite: 'mayReject'`) or mutates rows (`backfill`);
+        // relaxation does neither.
+        return {
+          dataEffect: 'catalogOnly',
+          operationalRisk: 'boundedCatalogLock',
+          preparationValidity: 'preApprovalInert',
+          semanticEffect: 'additive',
+        };
       case 'tightenNotNull':
         return {
           dataEffect: 'dataScan',
@@ -2353,7 +2395,8 @@ export function classifyStorageTransitionElement(
   const coexistenceImpact =
     coexistence.oldWrite === 'mayReject'
       ? 'oldWritesMayReject'
-      : coexistence.newRead === 'requiresReadFallback'
+      : coexistence.newRead === 'requiresReadFallback' ||
+          coexistence.oldRead === 'requiresReadFallback'
         ? 'requiresReadFallback'
         : 'none';
   return { classification, coexistence, coexistenceImpact };
@@ -2419,20 +2462,41 @@ export function validatePhysicalMappingRecords(
   return diagnostics;
 }
 
+/**
+ * The renderer allowlist, and it is an ALLOWLIST rather than a denylist since
+ * this packet -- which is the correction, not the original design.
+ *
+ * It used to name six destructive kinds and admit everything else. That fails
+ * OPEN, and it was already failing open before this packet: `rendererStatement`
+ * casts `{ kind: element.kind }` into `StorageRendererStatement`, a union that
+ * carries only seven of the element kinds, so `backfill`, `duplicateScan` and
+ * `tightenNotNull` reached this function as values outside its own declared
+ * type and were admitted by falling through the denylist. Adding `relaxNotNull`
+ * -- an operation whose entire purpose is to REMOVE an enforcement constraint
+ * -- to that fail-open set is what made the standing defect worth closing here.
+ *
+ * The admitted set is DERIVED from `STORAGE_COMPATIBILITY_MATRIX`'s keys rather
+ * than restated. That object is a `Record<StorageTransitionElementKind, ...>`,
+ * so TypeScript forces a new element kind into it, and the allowlist follows
+ * for free. A hand-maintained second list is the `sameRelationShape` defect
+ * this packet already had to correct once; it is not reintroduced here.
+ *
+ * Every genuinely destructive statement kind -- `dropBusinessObject`,
+ * `truncateTable`, `onDeleteCascade`, `removePartition`, `deleteCapableRule`,
+ * `deleteCapableTrigger` -- is by construction NOT an element kind, so each is
+ * refused exactly as before. What changes is that an unrecognised kind is now
+ * refused too, instead of being waved through.
+ */
 export function validateStorageRendererStatements(
   statements: readonly StorageRendererStatement[],
 ): CompilerDiagnostic[] {
-  const destructive = new Set<StorageRendererStatement['kind']>([
-    'deleteCapableRule',
-    'deleteCapableTrigger',
-    'dropBusinessObject',
-    'onDeleteCascade',
-    'removePartition',
-    'truncateTable',
-  ]);
+  const admitted: ReadonlySet<string> = new Set(
+    Object.keys(STORAGE_COMPATIBILITY_MATRIX),
+  );
   return statements.flatMap((statement, index) =>
-    destructive.has(statement.kind)
-      ? [
+    admitted.has(statement.kind)
+      ? []
+      : [
           compilerDiagnostic(
             'COMPILER_DESTRUCTIVE_STORAGE_DDL_UNSUPPORTED',
             'postLoweringValidation',
@@ -2440,8 +2504,7 @@ export function validateStorageRendererStatements(
             statement.kind,
             index,
           ),
-        ]
-      : [],
+        ],
   );
 }
 
@@ -2729,6 +2792,83 @@ function sameRelationShape(
     hashCanonical(
       `${HASH_DOMAINS.projectionSemantic}/storage-relation-shape`,
       physicalShape(candidate),
+    ).digest
+  );
+}
+
+/**
+ * A relation is RELAXED when the previous release carried it as required, the
+ * candidate carries it as optional, and NOTHING ELSE about it moved.
+ * `NOT NULL` -> `NULL` is a widening DDL: it rewrites no rows, cannot reject a
+ * write that used to succeed, and leaves every row that already exists valid.
+ * It is the only direction of requiredness this planner takes.
+ *
+ * **This compares the WHOLE relation, not a projection of it, and that is a
+ * correction rather than a preference.** The first version delegated to
+ * `sameRelationShape`, whose `physicalShape` is a HAND-MAINTAINED SUBSET that
+ * omits `archiveBehavior` -- deliberately, as a legacy bridge for roots that
+ * predate the property. Reusing it made this carve-out inherit the omission, so
+ * `required + archiveBehavior: 'restrict'` -> `optional + 'retainReference'`
+ * was ADMITTED as a pure widening, and the provider then refused the same
+ * release at PREPARE with `LIVE_SET_SHAPE_CONFLICT`. The comment that stood
+ * here claimed a future property would fail closed by construction; against a
+ * hand-maintained subset that claim was FALSE, because a new property is
+ * omitted from the subset too. Comparing the whole object makes it true.
+ *
+ * The legacy `archiveBehavior` tolerance is therefore stated EXPLICITLY and
+ * symmetrically instead of being inherited: when both roots declare it they
+ * must agree, and only when one omits it entirely is it dropped from both.
+ *
+ * **This function is exported and the provider imports it**, because two copies
+ * of this rule already drifted once -- the provider's copy was corrected while
+ * this one was not, and the compiler then accepted a release its own
+ * materializer refuses. One authority is the fix; a second corrected copy is
+ * the same defect waiting.
+ *
+ * `origin: 'field'` relations are excluded, and that exclusion is a
+ * correctness boundary rather than caution. Their physical column is an
+ * ORDINARY ENTITY COLUMN -- `createManagedTable` filters them out of the
+ * relation columns it renders and emits them from `entity.columns`, whose own
+ * `nullable` governs the `NOT NULL`. Planning a relaxation from the relation
+ * side would therefore drop a constraint on an existing tenant that a FRESH
+ * install of the very same release still creates as `NOT NULL`: one release,
+ * two physical shapes, and no gate between them. Requiredness for those columns
+ * has to move through the column path, which refuses it today with
+ * `COMPILER_STORAGE_RETYPE_UNSUPPORTED`.
+ */
+export function relaxesRelationRequiredness(
+  previous: StorageRelationTarget,
+  candidate: StorageRelationTarget,
+): boolean {
+  if (previous.relationColumn.nullable) return false;
+  if (!candidate.relationColumn.nullable) return false;
+  if (
+    previous.relationColumn.origin === 'field' ||
+    candidate.relationColumn.origin === 'field'
+  ) {
+    return false;
+  }
+  const bridgeLegacyArchiveBehavior =
+    !Object.hasOwn(previous, 'archiveBehavior') ||
+    !Object.hasOwn(candidate, 'archiveBehavior');
+  const comparable = (relation: StorageRelationTarget) => {
+    if (!bridgeLegacyArchiveBehavior) return relation;
+    const { archiveBehavior: _archiveBehavior, ...rest } = relation;
+    void _archiveBehavior;
+    return rest;
+  };
+  const widened: StorageRelationTarget = {
+    ...previous,
+    relationColumn: { ...previous.relationColumn, nullable: true },
+  };
+  return (
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-relation-relaxation`,
+      comparable(widened),
+    ).digest ===
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-relation-relaxation`,
+      comparable(candidate),
     ).digest
   );
 }

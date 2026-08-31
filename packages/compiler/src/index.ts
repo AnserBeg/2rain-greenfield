@@ -117,6 +117,7 @@ export {
   lowerStorageTargetV1,
   physicalNameFor,
   postgresqlTypeFor,
+  relaxesRelationRequiredness,
   validatePhysicalMappingRecords,
   validateStorageRendererStatements,
   type StorageTargetPayloadV1,

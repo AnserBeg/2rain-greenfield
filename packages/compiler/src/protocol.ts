@@ -251,6 +251,7 @@ export type StorageTransitionElementKind =
   | 'addAbiFunctionCheck'
   | 'createTable'
   | 'duplicateScan'
+  | 'relaxNotNull'
   | 'tightenNotNull'
   | 'validateConstraint';
 

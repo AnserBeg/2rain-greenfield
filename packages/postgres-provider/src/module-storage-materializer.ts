@@ -13,6 +13,7 @@ import {
   STORAGE_RENDERER_POLICY_VERSION,
   STORAGE_TARGET_PAYLOAD_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
+  relaxesRelationRequiredness,
   type StorageRendererStatement,
   type StorageTargetPayloadV1,
   type StorageTransitionElement,
@@ -1318,6 +1319,30 @@ async function applyDdlElement(
       );
       await client.query(
         `REVOKE REFERENCES ON north_star_module.${quoted(targetEntity.physicalTableName)} FROM north_star_module_materializer`,
+      );
+      return;
+    }
+    case 'relaxNotNull': {
+      const matches = target.relations.filter(
+        (item) =>
+          item.relationColumn.physicalName === element.physicalObjectName &&
+          item.relationColumn.origin !== 'field',
+      );
+      const relation = matches.length === 1 ? matches[0] : undefined;
+      if (!relation) throw failure('ELEMENT_TARGET_MISSING', element.elementId);
+      // The mirror of `addColumn`'s NON_INERT_ADD_COLUMN guard. The target this
+      // element is executed against must itself say the column is optional; if
+      // it does not, the plan and the payload disagree and the safe move is to
+      // refuse rather than to drop a constraint the target still asserts.
+      if (!relation.relationColumn.nullable) {
+        throw failure('NON_WIDENING_RELAX_NOT_NULL', element.elementId);
+      }
+      const source = requiredEntity(target, relation.sourceEntityId);
+      // `DROP NOT NULL` on an already-nullable column succeeds and changes
+      // nothing, so preparation may be replayed without a guard query.
+      await client.query(
+        `ALTER TABLE north_star_module.${quoted(source.physicalTableName)}
+           ALTER COLUMN ${quoted(relation.relationColumn.physicalName)} DROP NOT NULL`,
       );
       return;
     }
@@ -3519,11 +3544,29 @@ function mergeExpectedRelations(
     void _archiveBehavior;
     return shape;
   };
+  // Requiredness relaxation is the one shape difference two live roots may
+  // legitimately hold at once. During PREPARE both the source and the target
+  // root are accounted live against ONE physical column, and the widening DDL
+  // has already run, so the column is nullable and the old root's `NOT NULL`
+  // is no longer a claim it can enforce. Merging to the relaxed value is
+  // therefore reading the physical truth rather than forgiving a conflict.
+  //
+  // The predicate is the COMPILER'S, imported rather than restated. A local
+  // copy of this rule already drifted from the compiler's once: the copy here
+  // was corrected to reject a differing `archiveBehavior` while the planner's
+  // was not, so the compiler emitted a release that this function then refused
+  // with `LIVE_SET_SHAPE_CONFLICT`. Two encodings of one rule is the defect;
+  // one authority is the fix.
+  const relaxes = relaxesRelationRequiredness;
   for (const relation of targets.flatMap((target) => target.relations)) {
     const key = relation.foreignKey.physicalName;
     const existing = result.get(key);
+    const widening =
+      existing !== undefined &&
+      (relaxes(existing, relation) || relaxes(relation, existing));
     if (
       existing &&
+      !widening &&
       (canonicalize(physicalShape(existing)) !==
         canonicalize(physicalShape(relation)) ||
         (Object.hasOwn(existing, 'archiveBehavior') &&
@@ -3534,6 +3577,21 @@ function mergeExpectedRelations(
         'LIVE_SET_SHAPE_CONFLICT',
         `conflicting live roots claim managed relation ${key}`,
       );
+    }
+    if (widening) {
+      // Keep the relaxed member, and keep the `archiveBehavior` rule above:
+      // a root that declares one outranks a legacy root that omits it.
+      const optional = existing.relationColumn.nullable ? existing : relation;
+      const declared = Object.hasOwn(relation, 'archiveBehavior')
+        ? relation
+        : existing;
+      result.set(key, {
+        ...optional,
+        ...(Object.hasOwn(declared, 'archiveBehavior')
+          ? { archiveBehavior: declared.archiveBehavior }
+          : {}),
+      });
+      continue;
     }
     result.set(
       key,

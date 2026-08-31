@@ -682,3 +682,16 @@ column, foreign key and index made the posting provider reject the storage targe
 How to apply: enumerate fields, declared relations and every other authored
 construct family consumed by lowering; qualify every provider-maintained input
 exactly, and explicitly prove that each unpinned construct is benign.
+
+## Bind a control's expected red to the assertion that carries its claim
+Date: 2026-08-26
+Why: `relation-requiredness-relaxation`'s fail-closed control mutated the renderer
+allowlist so it refused EVERY element kind, so the test died on its earlier
+admission assertion (`expected: 0, actual: 14`) and never reached the unknown-kind
+claim; a generic `strictEqual|deepEqual` expected pattern accepted the unrelated
+failure. The control demonstrated the OPPOSITE of the property it was written for,
+and the lane had cited "verify why a red fired" one round earlier.
+How to apply: run every new mutation and read WHICH assertion fails before
+committing it; leave any precondition the test asserts ahead of the claim intact,
+and make `expected` name a token unique to the claimed assertion rather than a
+generic assertion-failure shape. See `docs/execution/packets/relation-requiredness-relaxation.md`.
