@@ -22,6 +22,9 @@ carries the detail. No packet is chartered from this table without a user ruling
 | `5g3-prog` arm 1 | 2026-09-01 | R6 — five ADR status lines (0060–0063, 0065) said proposed after acceptance; swept; the gate for the class is `record-marker-schema`, dormant | [record](program-reviews/2026-09-01-inventory-ledger.md) §2 |
 | `5g3-prog` arm 1 | 2026-09-01 | `5g3-ord` re-measured: migration 0015 still picks the binding movement by `recorded_at, record_id`; reaches only a refusal payload; dismissed as a ledger defect | [record](program-reviews/2026-09-01-inventory-ledger.md) §2 |
 | orchestrator | 2026-09-01 | the `5g3-prog` charter said sixteen inventory ADRs (fourteen) and that digest v4 covers both families (stock count only); corrected in the Fable arm's charter | [record](program-reviews/2026-09-01-inventory-ledger.md) §4 |
+| `posting-kernel-admission` | 2026-09-01 | accepted expected-red manifests and the compiler's contract-release golden pin the exact production text and digest a later chartered change necessarily moves; three were bridged here (pur-2b, posting-writer-inventory, the golden) — a lease that moves pinned text should name its pins | [record](packets/posting-kernel-admission.md) |
+| `posting-kernel-admission` | 2026-09-01 | `compileInventoryContract` has no production caller: the compiler's frozen-contract validation (`validateInventoryContractDefinition`) runs only under tests, so its pins were never reachable from a release build | [record](packets/posting-kernel-admission.md) |
+| `posting-kernel-admission` | 2026-09-01 | the charter counted the definition's posting-version literal twice; one of the two `capabilityVersion: 1` literals binds the content capability, which every module declares at 1, and stays | [record](packets/posting-kernel-admission.md) |
 
 ## TRIAGE — 2026-08-13. Read this before the queue.
 
