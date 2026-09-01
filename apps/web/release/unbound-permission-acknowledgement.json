@@ -1,10 +1,9 @@
 {
-  "schemaVersion": "northstar.compiler:unbound-permission-acknowledgement/v1",
+  "schemaVersion": "northstar.web:unbound-permission-acknowledgement/v1",
   "header": [
-    "THIS LIST MAY ONLY SHRINK. Every permission below is declared by the composed application and bound to NO evaluator: every production CurrentPolicyGateway returns ALLOW (program review 2026-08-20, finding R7). Listing a permission here acknowledges that vacuum by name so the release still builds; it does not authorize anything.",
-    "An entry leaves when queue row 7 (the policy/identity kernel) binds its permission to an evaluator, or when the permission itself leaves the package. Row 7 empties this list, and when the last entry is gone the refusal is absolute: no declared permission compiles without an evaluator binding.",
-    "A permission that is declared and NOT listed refuses the release build by name (COMPILER_PERMISSION_EVALUATOR_UNBOUND). An entry that names a permission the package no longer declares on that resource, or one an evaluator now binds, refuses it too (COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE) — the list cannot rot. Adding an entry is a deliberate act that a reviewer reads; it is never generated.",
-    "Governed packages are exactly the keys of \"packages\". A package not keyed here is ungoverned by this instrument; test/compiler/g2-module-conformance.test.ts pins the composed application as a key and its entries as exactly the declared census, so the key cannot vanish silently."
+    "THIS LIST MAY ONLY SHRINK. Every permission below is declared by the release input beside this file and bound to NO evaluator: every production CurrentPolicyGateway returns ALLOW (program review 2026-08-20, finding R7). Listing a permission here acknowledges that vacuum by name so the release still builds; it does not authorize anything.",
+    "An entry leaves when queue row 7 (the policy/identity kernel) binds its permission to an evaluator, or when the permission itself leaves the package. Row 7 empties this list, and when the last entry is gone the refusal is absolute: no declared permission compiles without an evaluator binding. Shrinking is a review policy over this file; the compiler enforces the snapshot invariant that every entry is true of the package it is handed with.",
+    "The release scripts beside this file read it and hand each package its own entries through CompilerExecutionOptions.unboundPermissionAcknowledgement. A permission that is declared and NOT listed refuses the release build by name (COMPILER_PERMISSION_EVALUATOR_UNBOUND). An entry that names a permission the package no longer declares on that resource, one an evaluator now binds, or a duplicate, refuses it too (COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE). A package with no key here cannot be built by those scripts at all: the loader refuses before compiling. Adding an entry is a deliberate act a reviewer reads; it is never generated."
   ],
   "packages": {
     "northstar.app:package.application": [
@@ -267,6 +266,12 @@
       {
         "permissionId": "northstar.app:permission.stock_count_update",
         "resource": "northstar.app:entity.stock_count"
+      }
+    ],
+    "northstar.shell:package.demo": [
+      {
+        "permissionId": "northstar.shell:permission.workspace_read",
+        "resource": "northstar.shell:entity.workspace"
       }
     ]
   }

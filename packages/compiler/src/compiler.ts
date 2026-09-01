@@ -18,7 +18,10 @@ import {
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
-import { validateModuleConformance } from './conformance.js';
+import {
+  validateModuleConformance,
+  validateUnboundPermissionAcknowledgement,
+} from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
 import {
   canonicalBytes,
@@ -325,7 +328,7 @@ function compileApplicationInternal(
   }
 
   if (conformanceMode === 'current') {
-    const wholeModelDiagnostics = validateWholeModel(packageRevision);
+    const wholeModelDiagnostics = validateWholeModel(packageRevision, options);
     if (wholeModelDiagnostics.length > 0) {
       return failure(wholeModelDiagnostics, maximumDiagnostics);
     }
@@ -1137,8 +1140,22 @@ function typeCheck(
 
 function validateWholeModel(
   packageRevision: VersionedNormalizedApplicationPackage,
+  options: CompilerExecutionOptions,
 ): CompilerDiagnostic[] {
   const diagnostics: CompilerDiagnostic[] = [];
+  // Before the version-gated module-conformance cells, on the versioned
+  // revision itself: the acknowledged-unbound permission rule runs for every
+  // language version the compiler accepts. `validateModuleConformance` returns
+  // nothing below v2 and the dispatch revision projects only v3+ down to v2, so
+  // a rule placed there never saw a v0 or v1 package -- the shell demo is v0.
+  if (options.unboundPermissionAcknowledgement !== undefined) {
+    diagnostics.push(
+      ...validateUnboundPermissionAcknowledgement(
+        packageRevision,
+        options.unboundPermissionAcknowledgement,
+      ),
+    );
+  }
   if (packageRevision.package.provenance !== 'firstParty') {
     diagnostics.push(
       compilerDiagnostic(

@@ -10,8 +10,6 @@ import {
   COMPILER_DIAGNOSTIC_VERSION,
   type CompilerDiagnostic,
 } from './protocol.js';
-import unboundPermissionAcknowledgementSource from './unbound-permission-acknowledgement.json' with { type: 'json' };
-
 const REQUIRED_QUERY_TYPES = Object.freeze(['get', 'list'] as const);
 const REQUIRED_OPERATION_EFFECTS = Object.freeze([
   'archiveRecordEffect',
@@ -213,8 +211,6 @@ const LEGAL_ENTITY_GOVERNED_PACKAGES = Object.freeze([
   'location',
   'party',
 ] as const);
-const UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION =
-  'northstar.compiler:unbound-permission-acknowledgement/v1' as const;
 /**
  * The permissions some evaluator binds. EMPTY BY CONSTRUCTION today: every
  * production `CurrentPolicyGateway` returns ALLOW and nothing in the tree
@@ -1544,65 +1540,13 @@ export function resolvePinnedLegalEntityRelationSemantics(
   );
 }
 
-export interface UnboundPermissionAcknowledgementEntry {
-  readonly permissionId: string;
-  readonly resource: string;
+export interface UnboundPermissionAcknowledgementSubject {
+  readonly package: { readonly packageId: string };
+  readonly permissions: ReadonlyArray<{
+    readonly permissionId: string;
+    readonly resource: { readonly targetId: string };
+  }>;
 }
-
-export type UnboundPermissionAcknowledgement =
-  | {
-      readonly packages: ReadonlyMap<
-        string,
-        readonly UnboundPermissionAcknowledgementEntry[]
-      >;
-      readonly status: 'readable';
-    }
-  | { readonly status: 'unreadable' };
-
-/**
- * Reads the checked-in acknowledgement list. Anything that is not exactly the
- * versioned shape is `unreadable`, and an unreadable list governs EVERY
- * package with an empty acknowledgement -- so a malformed list refuses every
- * compile that declares a permission rather than silently ungoverning them.
- */
-export function readUnboundPermissionAcknowledgement(
-  value: unknown,
-): UnboundPermissionAcknowledgement {
-  if (
-    !isRecord(value) ||
-    value.schemaVersion !== UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION ||
-    !isRecord(value.packages)
-  ) {
-    return { status: 'unreadable' };
-  }
-  const packages = new Map<
-    string,
-    readonly UnboundPermissionAcknowledgementEntry[]
-  >();
-  for (const [packageId, entries] of Object.entries(value.packages)) {
-    if (!Array.isArray(entries)) return { status: 'unreadable' };
-    const parsed: UnboundPermissionAcknowledgementEntry[] = [];
-    for (const entry of entries) {
-      if (
-        !isRecord(entry) ||
-        typeof entry.permissionId !== 'string' ||
-        typeof entry.resource !== 'string'
-      ) {
-        return { status: 'unreadable' };
-      }
-      parsed.push({
-        permissionId: entry.permissionId,
-        resource: entry.resource,
-      });
-    }
-    packages.set(packageId, parsed);
-  }
-  return { packages, status: 'readable' };
-}
-
-const UNBOUND_PERMISSION_ACKNOWLEDGEMENT = readUnboundPermissionAcknowledgement(
-  unboundPermissionAcknowledgementSource,
-);
 
 /**
  * THE ACKNOWLEDGED-UNBOUND RATCHET (program review 2026-08-20, R7 small a).
@@ -1614,54 +1558,81 @@ const UNBOUND_PERMISSION_ACKNOWLEDGEMENT = readUnboundPermissionAcknowledgement(
  * refusing every permission today (every one is unbound, and the release must
  * still build):
  *
- *   - a declared permission that no evaluator binds must appear in the
- *     checked-in acknowledgement list, or the package refuses to compile
- *     (`COMPILER_PERMISSION_EVALUATOR_UNBOUND`, subject = the permission);
- *   - the list can only SHRINK: an entry naming a permission the package no
- *     longer declares on that resource, or one an evaluator now binds, refuses
- *     too (`COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE`).
+ *   - a declared permission that no evaluator binds must be named in the
+ *     acknowledgement the release build hands the compiler, or the package
+ *     refuses to compile (`COMPILER_PERMISSION_EVALUATOR_UNBOUND`, subject =
+ *     the permission);
+ *   - the acknowledgement is a SNAPSHOT INVARIANT over the package it names:
+ *     an entry naming a permission the package does not declare, an entry
+ *     whose resource disagrees with the declaration, an entry for a permission
+ *     an evaluator binds, and a duplicated entry each refuse
+ *     (`COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE`). The policy that the
+ *     checked-in list may only shrink is the release's, enforced by review of
+ *     that file; the compiler enforces that every entry is true of the package
+ *     in front of it right now.
+ *   - the acknowledgement names its subject: `packageId` must equal the
+ *     compiled package's id, and the value must be readable, or the compile
+ *     refuses (`COMPILER_PERMISSION_ACKNOWLEDGEMENT_INVALID`). A mislabelled
+ *     or malformed acknowledgement fails closed; it never ungoverns.
  *
  * Queue row 7 binds evaluators and empties the list; at zero entries the
- * refusal is absolute. The census is read from `packageRevision.permissions`
- * -- the normalized package -- never from source text.
+ * refusal is absolute. The census is `packageRevision.permissions` -- the
+ * normalized package -- never source text, and the rule is called from whole-
+ * model validation in `compiler.ts` for EVERY language version the compiler
+ * accepts, not from the v2-gated module-conformance cells.
  *
- * WHERE THE LIST LIVES, AND WHY IT IS DATA. It is a JSON file beside this one,
- * not a TypeScript constant, and not a field on the canonical permission
- * object. A canonical field would be a language-version event (ADR-0021's
- * rule: adding spellings retroactively widens an immutable language version).
- * A TypeScript constant spelling a module's permission ids inside the generic
- * press would trip PRESS006 once per entry, and rightly: the press must not
- * know module identity (this comment cannot even name one as an example --
- * the law reads comments too, and it caught the first draft of this sentence). The list is not press -- it is a debt register a reviewer reads,
- * in the same family as the routed-debt table in `module-press-law.test.ts`
- * -- and the press law scans no `.json`. Nothing here hashes the list into a
- * release root or a manifest, so the artifact does not move when it changes.
- *
- * SCOPE. Governed packages are exactly the keys of the list; today that is the
- * composed application. A package with no key is ungoverned, so synthetic
- * fixtures keep compiling; `g2-module-conformance.test.ts` pins the composed
- * key and its entries as exactly the declared census. A stale entry is judged
- * only when its resource entity is still present, so a fixture that strips a
- * whole module (entities and permissions together) is not accused of rot --
- * whole-module removal is caught by that same census test, which reads the
- * full composition.
+ * WHY THE LIST IS NOT HERE. The compiler holds no module identity: a field on
+ * the canonical permission object would be a language-version event (ADR-0021's
+ * rule), and a constant or data file naming module permissions inside the
+ * generic press is exactly what PRESS006 exists to refuse -- the first cut of
+ * this packet kept a JSON list beside this file and its review rightly called
+ * that an evasion. The list lives beside the release input it acknowledges,
+ * under `apps/web/release/`, and reaches this rule only through
+ * `CompilerExecutionOptions.unboundPermissionAcknowledgement`.
  */
 export function validateUnboundPermissionAcknowledgement(
-  packageRevision: NormalizedApplicationPackage,
-  acknowledgement: UnboundPermissionAcknowledgement = UNBOUND_PERMISSION_ACKNOWLEDGEMENT,
+  packageRevision: UnboundPermissionAcknowledgementSubject,
+  acknowledgement: unknown,
   boundPermissionIds: ReadonlySet<string> = EVALUATOR_BOUND_PERMISSION_IDS,
 ): CompilerDiagnostic[] {
   const diagnostics: CompilerDiagnostic[] = [];
-  const entries =
-    acknowledgement.status === 'readable'
-      ? acknowledgement.packages.get(packageRevision.package.packageId)
-      : [];
-  if (entries === undefined) return diagnostics;
+  const packageId = packageRevision.package.packageId;
+  const invalid = (path: string): CompilerDiagnostic[] => [
+    compilerDiagnostic(
+      'COMPILER_PERMISSION_ACKNOWLEDGEMENT_INVALID',
+      'wholeModelValidation',
+      path,
+      packageId,
+    ),
+  ];
+  if (
+    !isRecord(acknowledgement) ||
+    typeof acknowledgement.packageId !== 'string' ||
+    !Array.isArray(acknowledgement.entries) ||
+    Object.keys(acknowledgement).length !== 2
+  ) {
+    return invalid('$.options.unboundPermissionAcknowledgement');
+  }
+  if (acknowledgement.packageId !== packageId) {
+    return invalid('$.options.unboundPermissionAcknowledgement.packageId');
+  }
+  const entries: { permissionId: string; resource: string }[] = [];
+  for (const entry of acknowledgement.entries) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.permissionId !== 'string' ||
+      typeof entry.resource !== 'string' ||
+      Object.keys(entry).length !== 2
+    ) {
+      return invalid('$.options.unboundPermissionAcknowledgement.entries');
+    }
+    entries.push({
+      permissionId: entry.permissionId,
+      resource: entry.resource,
+    });
+  }
 
-  const acknowledgedById = new Map<
-    string,
-    UnboundPermissionAcknowledgementEntry
-  >();
+  const acknowledgedById = new Map<string, { resource: string }>();
   for (const entry of entries) {
     if (acknowledgedById.has(entry.permissionId)) {
       // A duplicate is not harmful, but a list that only shrinks does not
@@ -1680,9 +1651,6 @@ export function validateUnboundPermissionAcknowledgement(
   }
   const declaredPermissionIds = new Set<string>(
     packageRevision.permissions.map((permission) => permission.permissionId),
-  );
-  const entityIds = new Set<string>(
-    packageRevision.entities.map((entity) => entity.entityId),
   );
 
   for (const permission of packageRevision.permissions) {
@@ -1711,26 +1679,17 @@ export function validateUnboundPermissionAcknowledgement(
     }
   }
 
-  for (const entry of acknowledgedById.values()) {
-    if (boundPermissionIds.has(entry.permissionId)) {
+  for (const [acknowledgedId] of acknowledgedById) {
+    if (
+      boundPermissionIds.has(acknowledgedId) ||
+      !declaredPermissionIds.has(acknowledgedId)
+    ) {
       diagnostics.push(
         compilerDiagnostic(
           'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
           'wholeModelValidation',
           '$.permissions.permissionId',
-          entry.permissionId,
-        ),
-      );
-      continue;
-    }
-    if (declaredPermissionIds.has(entry.permissionId)) continue;
-    if (entityIds.has(entry.resource)) {
-      diagnostics.push(
-        compilerDiagnostic(
-          'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
-          'wholeModelValidation',
-          '$.permissions.permissionId',
-          entry.permissionId,
+          acknowledgedId,
         ),
       );
     }
@@ -1755,9 +1714,6 @@ export function validateModuleConformance(
   validateRequiredInventoryEntitySet(packageRevision, diagnostics);
   validateRecordedTimeProjectionRetention(packageRevision, diagnostics);
   validatePinnedInventoryCountRelations(packageRevision, diagnostics);
-  diagnostics.push(
-    ...validateUnboundPermissionAcknowledgement(packageRevision),
-  );
   const storageById = new Map(
     packageRevision.storageMappings.map((mapping) => [
       mapping.storageMappingId,

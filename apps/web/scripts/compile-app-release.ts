@@ -20,6 +20,11 @@ import {
 } from '@north-star/compiler';
 import { format } from 'prettier';
 
+import {
+  readUnboundPermissionAcknowledgementFor,
+  type UnboundPermissionAcknowledgementInput,
+} from './unbound-permission-acknowledgement.js';
+
 const root = resolve(import.meta.dirname, '../../..');
 const authoredPath = resolve(
   process.env.NORTH_STAR_APP_AUTHORED_PATH ??
@@ -48,6 +53,31 @@ const authored = parseAuthoredApplicationPackageJson(
   readFileSync(authoredPath),
 );
 const applicationBytes = normalizedBytes(authored);
+// THE ACKNOWLEDGED-UNBOUND GATE. Every CURRENT compile of the authored source
+// -- the serving head under --check, the candidate under build -- is handed the
+// checked-in acknowledgement beside this file for its own package, and the
+// loader throws before compiling if that file has no entry for the package.
+// The bootstrap is the same package with every family emptied, so its honest
+// acknowledgement is explicitly empty. Historical entries are reproduced, not
+// re-judged (reproduceHistoricalApplication skips whole-model validation), and
+// --truncate-invalid-lineage recompiles RECORDED bytes whose permission census
+// is not today's: those compiles carry no acknowledgement, and that limit is
+// stated rather than papered over with today's list.
+function currentAcknowledgement(): UnboundPermissionAcknowledgementInput {
+  return readUnboundPermissionAcknowledgementFor(
+    authoredPath,
+    parseNormalizedApplicationPackageJson(applicationBytes).package.packageId,
+  );
+}
+function emptyAcknowledgement(
+  normalizedDefinitionBytes: Uint8Array,
+): UnboundPermissionAcknowledgementInput {
+  return {
+    entries: [],
+    packageId: parseNormalizedApplicationPackageJson(normalizedDefinitionBytes)
+      .package.packageId,
+  };
+}
 const existing = existsSync(outputPath)
   ? (JSON.parse(readFileSync(outputPath, 'utf8')) as unknown)
   : null;
@@ -70,6 +100,8 @@ if (!authoredIsCurrent && !checkOnly) {
   const candidate = mustCompile(
     applicationBytes,
     expectedActiveReleaseFrom(latest.compiled),
+    undefined,
+    currentAcknowledgement(),
   );
   payload = {
     applications: [
@@ -130,6 +162,7 @@ function longestValidExperimentalLineagePrefix(
     bootstrapBytes,
     null,
     recordedCompilerSemanticProfileVersion(input.bootstrap, 'bootstrap'),
+    emptyAcknowledgement(bootstrapBytes),
   );
   assertSerializedRelease(
     input.bootstrap,
@@ -147,6 +180,9 @@ function longestValidExperimentalLineagePrefix(
       normalizedDefinitionBytes,
       expectedActiveReleaseFrom(previous),
       recordedCompilerSemanticProfileVersion(value, path),
+      equalBytes(normalizedDefinitionBytes, applicationBytes)
+        ? currentAcknowledgement()
+        : undefined,
     );
     if (result.status !== 'compiled') {
       firstInvalidIndex = index;
@@ -237,10 +273,17 @@ function initialLineage(
   const bootstrapBytes = normalizedBytes(
     emptyApplicationDefinition(authoredDefinition),
   );
-  const bootstrap = mustCompile(bootstrapBytes, null);
+  const bootstrap = mustCompile(
+    bootstrapBytes,
+    null,
+    undefined,
+    emptyAcknowledgement(bootstrapBytes),
+  );
   const application = mustCompile(
     applicationBytes,
     expectedActiveReleaseFrom(bootstrap),
+    undefined,
+    currentAcknowledgement(),
   );
   const payload = {
     application: serializedRelease(applicationBytes, application),
@@ -301,6 +344,8 @@ function verifyExistingLineage(
       ? mustCompile(
           normalizedDefinitionBytes,
           expectedActiveReleaseFrom(previous),
+          undefined,
+          currentAcknowledgement(),
         )
       : mustReproduceHistorical(
           normalizedDefinitionBytes,
@@ -420,11 +465,13 @@ function mustCompile(
     typeof compileApplication
   >[0]['expectedActiveRelease'],
   compilerSemanticProfileVersion?: CompilerSemanticProfileVersion,
+  unboundPermissionAcknowledgement?: UnboundPermissionAcknowledgementInput,
 ): CompileSuccess {
   const result = compileNormalizedDefinition(
     normalizedDefinitionBytes,
     expectedActiveRelease,
     compilerSemanticProfileVersion,
+    unboundPermissionAcknowledgement,
   );
   if (result.status !== 'compiled') {
     throw new Error(
@@ -479,24 +526,30 @@ function compileNormalizedDefinition(
   // head. A RECORDED entry must pass its own, or its output is compared against
   // a serialization it was never compiled to produce.
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion = MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion,
+  unboundPermissionAcknowledgement?: UnboundPermissionAcknowledgementInput,
 ): CompileResult {
   const normalizedDefinition = parseNormalizedApplicationPackageJson(
     normalizedDefinitionBytes,
   );
-  return compileApplication({
-    dependencies: [],
-    expectedActiveRelease,
-    kind: 'compilerInput',
-    limits: { ...DEFAULT_COMPILER_LIMITS },
-    normalizedDefinitionBytes,
-    profile: {
-      ...MODULE_COMPILER_PROFILE,
-      compilerSemanticProfileVersion,
-      languageVersion: normalizedDefinition.languageVersion,
-      normalizationProfileVersion:
-        normalizedDefinition.normalizationProfileVersion,
+  return compileApplication(
+    {
+      dependencies: [],
+      expectedActiveRelease,
+      kind: 'compilerInput',
+      limits: { ...DEFAULT_COMPILER_LIMITS },
+      normalizedDefinitionBytes,
+      profile: {
+        ...MODULE_COMPILER_PROFILE,
+        compilerSemanticProfileVersion,
+        languageVersion: normalizedDefinition.languageVersion,
+        normalizationProfileVersion:
+          normalizedDefinition.normalizationProfileVersion,
+      },
     },
-  });
+    unboundPermissionAcknowledgement === undefined
+      ? {}
+      : { unboundPermissionAcknowledgement },
+  );
 }
 
 function serializedRelease(

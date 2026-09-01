@@ -90,6 +90,11 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'restore the recorded normalized bytes and compiled release whose content-addressed root was accepted into the lineage',
     rule: 'historical leniency verifies an already-recorded release root and can never mint a new release',
   },
+  COMPILER_PERMISSION_ACKNOWLEDGEMENT_INVALID: {
+    acceptedAlternative:
+      'hand the compiler a readable acknowledgement whose packageId is the compiled package and whose entries are {permissionId, resource} strings',
+    rule: 'a release build is governed by an acknowledgement that names its own package explicitly; an unreadable or mislabelled one refuses the compile rather than ungoverning it',
+  },
   COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE: {
     acceptedAlternative:
       'remove the entry from the unbound-permission acknowledgement; the list only shrinks, and it never names a permission the package does not declare on that resource or one an evaluator already binds',

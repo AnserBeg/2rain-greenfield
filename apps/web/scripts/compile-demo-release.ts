@@ -17,6 +17,8 @@ import {
   type ProjectionManifestEnvelope,
 } from '@north-star/compiler';
 
+import { readUnboundPermissionAcknowledgementFor } from './unbound-permission-acknowledgement.js';
+
 const root = resolve(import.meta.dirname, '../../..');
 const authoredPath = resolve(root, 'apps/web/release/shell.authored.json');
 const outputPath = resolve(root, 'apps/web/release/shell.compiled.json');
@@ -30,19 +32,30 @@ const normalizedDefinitionBytes = new TextEncoder().encode(
 const normalizedDefinition = parseNormalizedApplicationPackageJson(
   normalizedDefinitionBytes,
 );
-const result = compileApplication({
-  dependencies: [],
-  expectedActiveRelease: null,
-  kind: 'compilerInput',
-  limits: { ...DEFAULT_COMPILER_LIMITS },
-  normalizedDefinitionBytes,
-  profile: {
-    ...DEFAULT_COMPILER_PROFILE,
-    languageVersion: normalizedDefinition.languageVersion,
-    normalizationProfileVersion:
-      normalizedDefinition.normalizationProfileVersion,
+// The shell is a v0 package with one declared permission and, like every
+// release, it is handed its acknowledgement explicitly; the loader refuses
+// before compiling if the checked-in list has no entry for it.
+const result = compileApplication(
+  {
+    dependencies: [],
+    expectedActiveRelease: null,
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes,
+    profile: {
+      ...DEFAULT_COMPILER_PROFILE,
+      languageVersion: normalizedDefinition.languageVersion,
+      normalizationProfileVersion:
+        normalizedDefinition.normalizationProfileVersion,
+    },
   },
-});
+  {
+    unboundPermissionAcknowledgement: readUnboundPermissionAcknowledgementFor(
+      authoredPath,
+      normalizedDefinition.package.packageId,
+    ),
+  },
+);
 
 if (result.status !== 'compiled') {
   throw new Error(
