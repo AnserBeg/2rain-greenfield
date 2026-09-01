@@ -4105,6 +4105,200 @@ test('a released required relation is widened by executed DDL, and a mixed live-
   );
 });
 
+test('an enum-domain CHECK replacement is one statement under ACCESS EXCLUSIVE and leaves no unconstrained window', async () => {
+  // Stop-condition 1 of the ENUM-WIDEN charter, committed rather than left in
+  // a scratch probe. PostgreSQL has no ALTER CONSTRAINT for a CHECK
+  // expression, so replacement is DROP plus ADD -- as two sub-commands of ONE
+  // ALTER TABLE, exactly the statement `widenEnumDomainCheck` renders. This
+  // measures PostgreSQL's transactional DDL under that statement shape against
+  // a populated table: what lock it takes, what concurrent writers of the OLD
+  // and the NEW value observe, what a third session sees in the catalog, and
+  // what a backend killed mid-transaction leaves behind.
+  const oldExpression = `v = ANY (ARRAY['a'::text, 'b'::text])`;
+  const newExpression = `v = ANY (ARRAY['a'::text, 'b'::text, 'c'::text])`;
+  await withEphemeralPostgres(
+    'enum-check-replacement-window',
+    async ({ connection, pool }) => {
+      await pool.query('CREATE TABLE t (id int PRIMARY KEY, v text NOT NULL)');
+      await pool.query(
+        `ALTER TABLE t ADD CONSTRAINT k CHECK (${oldExpression}) NOT VALID`,
+      );
+      await pool.query(
+        `INSERT INTO t
+           SELECT g, CASE WHEN g % 2 = 0 THEN 'a' ELSE 'b' END
+             FROM generate_series(1, 200000) AS g`,
+      );
+      // A lock-free catalog read: `pg_get_constraintdef` opens the relation
+      // and would block behind the replacement, which is itself the lock doing
+      // its job; this reads pg_constraint alone.
+      const catalog = async () =>
+        (
+          await pool.query<{ n: string; oid: string; validated: boolean }>(
+            `SELECT oid::text AS oid, convalidated AS validated,
+                    (SELECT count(*)::text FROM pg_constraint WHERE conname = 'k') AS n
+               FROM pg_constraint WHERE conname = 'k'`,
+          )
+        ).rows;
+      const definition = async () =>
+        (
+          await pool.query<{ definition: string }>(
+            `SELECT pg_get_expr(conbin, conrelid, true) AS definition
+               FROM pg_constraint WHERE conname = 'k'`,
+          )
+        ).rows[0]?.definition;
+      const before = await catalog();
+      assert.equal(before.length, 1);
+      assert.equal(before[0]?.validated, false);
+
+      const replacer = new pg.Client(connection);
+      const oldWriter = new pg.Client(connection);
+      const newWriter = new pg.Client(connection);
+      await Promise.all([
+        replacer.connect(),
+        oldWriter.connect(),
+        newWriter.connect(),
+      ]);
+      try {
+        await replacer.query('BEGIN');
+        const started = performance.now();
+        await replacer.query(
+          `ALTER TABLE t DROP CONSTRAINT k,
+             ADD CONSTRAINT k CHECK (${newExpression}) NOT VALID`,
+        );
+        const statementMilliseconds = performance.now() - started;
+        const replacerPid = (
+          await replacer.query<{ pid: number }>(
+            'SELECT pg_backend_pid() AS pid',
+          )
+        ).rows[0]!.pid;
+        // 1. The lock, read from pg_locks while the transaction is open.
+        const locks = await pool.query<{ granted: boolean; mode: string }>(
+          `SELECT l.mode, l.granted
+             FROM pg_locks AS l
+             JOIN pg_class AS r ON r.oid = l.relation
+            WHERE r.relname = 't' AND l.pid = $1`,
+          [replacerPid],
+        );
+        assert.deepEqual(locks.rows, [
+          { granted: true, mode: 'AccessExclusiveLock' },
+        ]);
+        // 2. A third session sees exactly ONE constraint, the old OID, for the
+        //    whole life of the transaction.
+        assert.deepEqual(await catalog(), before);
+        // 3. Writers of the OLD value and of the NEW value both wait on the
+        //    relation lock. Their wait is observed from pg_stat_activity, not
+        //    inferred from elapsed time.
+        const settled = { new: 'pending', old: 'pending' };
+        const newInsert = newWriter
+          .query(`INSERT INTO t VALUES (900001, 'c')`)
+          .then(
+            () => {
+              settled.new = 'succeeded';
+            },
+            (error: { code?: string }) => {
+              settled.new = `failed ${String(error.code)}`;
+            },
+          );
+        const oldInsert = oldWriter
+          .query(`INSERT INTO t VALUES (900002, 'a')`)
+          .then(
+            () => {
+              settled.old = 'succeeded';
+            },
+            (error: { code?: string }) => {
+              settled.old = `failed ${String(error.code)}`;
+            },
+          );
+        const waitForRelationLockWaiters = async (): Promise<number> => {
+          for (let attempt = 0; attempt < 200; attempt += 1) {
+            const waiting = await pool.query<{ count: string }>(
+              `SELECT count(*)::text AS count
+                 FROM pg_stat_activity
+                WHERE wait_event_type = 'Lock' AND wait_event = 'relation'
+                  AND query LIKE 'INSERT INTO t VALUES (90000%'`,
+            );
+            if (waiting.rows[0]?.count === '2') return 2;
+            await new Promise<void>((resolve) => setTimeout(resolve, 25));
+          }
+          return 0;
+        };
+        assert.equal(await waitForRelationLockWaiters(), 2);
+        assert.deepEqual(settled, { new: 'pending', old: 'pending' });
+        assert.deepEqual(await catalog(), before);
+        await replacer.query('COMMIT');
+        await Promise.all([newInsert, oldInsert]);
+        // 4. After COMMIT both writers succeed -- the new value against the new
+        //    definition, the old value against either -- and the catalog holds
+        //    exactly one constraint again, under a NEW OID, still NOT VALID.
+        assert.deepEqual(settled, { new: 'succeeded', old: 'succeeded' });
+        const after = await catalog();
+        assert.equal(after.length, 1);
+        assert.notEqual(after[0]?.oid, before[0]?.oid);
+        assert.equal(after[0]?.validated, false);
+        assert.equal(await definition(), newExpression);
+        console.log(
+          `enum-widen: CHECK replacement over 200000 rows took ${statementMilliseconds.toFixed(1)} ms under AccessExclusiveLock`,
+        );
+
+        // 5. Crash safety: a backend killed mid-transaction leaves the
+        //    constraint it was replacing, with its OID, and the value it did
+        //    not admit still refused.
+        const doomed = new pg.Client(connection);
+        doomed.on('error', () => undefined);
+        await doomed.connect();
+        await doomed.query('BEGIN');
+        await doomed.query(
+          `ALTER TABLE t DROP CONSTRAINT k,
+             ADD CONSTRAINT k CHECK (v = ANY (ARRAY['a'::text, 'b'::text, 'c'::text, 'd'::text])) NOT VALID`,
+        );
+        const doomedPid = (
+          await doomed.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        ).rows[0]!.pid;
+        await pool.query('SELECT pg_terminate_backend($1)', [doomedPid]);
+        await doomed.end().catch(() => undefined);
+        assert.deepEqual(await catalog(), after);
+        const refused = await pool
+          .query(`INSERT INTO t VALUES (900003, 'd')`)
+          .then(
+            () => null,
+            (error: { code?: string; constraint?: string }) => ({
+              code: error.code,
+              constraint: error.constraint,
+            }),
+          );
+        assert.deepEqual(refused, { code: '23514', constraint: 'k' });
+
+        // 6. Behind a long-open reader the replacement WAITS rather than
+        //    proceeding, and a lock_timeout bounds the wait with 55P03. The
+        //    materializer sets no lock_timeout today; this records what one
+        //    would do.
+        const reader = new pg.Client(connection);
+        await reader.connect();
+        await reader.query('BEGIN');
+        await reader.query('SELECT count(*) FROM t');
+        const bounded = new pg.Client(connection);
+        await bounded.connect();
+        await bounded.query(`SET lock_timeout = '250ms'`);
+        const timedOut = await bounded
+          .query(
+            `ALTER TABLE t DROP CONSTRAINT k,
+               ADD CONSTRAINT k CHECK (v = ANY (ARRAY['a'::text, 'b'::text, 'c'::text, 'e'::text])) NOT VALID`,
+          )
+          .then(
+            () => null,
+            (error: { code?: string }) => error.code,
+          );
+        assert.equal(timedOut, '55P03');
+        await reader.query('COMMIT');
+        assert.deepEqual(await catalog(), after);
+        await Promise.all([reader.end(), bounded.end()]);
+      } finally {
+        await Promise.all([replacer.end(), oldWriter.end(), newWriter.end()]);
+      }
+    },
+  );
+});
+
 test('an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused', () => {
   // Group 1 of the ENUM-WIDEN charter, without a database. `PUR-2c` measured
   // that ANY option-list change presented to the planner as a retype, because
@@ -4140,7 +4334,14 @@ test('an enum-domain widening plans exactly one widenEnumDomain element, and eve
     PROJECTION_FAMILY_IDS.storageTransition,
   );
   // ONE element, and it is the whole plan: no addColumn, no
-  // addNotValidConstraint under the same name, no debt.
+  // addNotValidConstraint under the same name, no debt. The count is asserted
+  // first so a planner that emits nothing dies on this message rather than on
+  // the expected object below reading an element that is not there.
+  assert.equal(
+    transition.elements.length,
+    1,
+    'the widening plans one element and nothing else',
+  );
   assert.deepEqual(
     transition.elements.map(({ elementId, ...entry }) => {
       void elementId;
