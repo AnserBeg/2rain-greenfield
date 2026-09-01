@@ -32,7 +32,7 @@
     },
     {
       "name": "acknowledgement-entry-removed",
-      "claim": "Removing one acknowledgement entry for a permission the composed application still declares (party_create) refuses the unchanged composed application by that permission's name; the admission twin is the same test passing with production restored, which the runner measures before mutating.",
+      "claim": "Removing one acknowledgement entry for a permission the composed application still declares (party_create) refuses the unchanged composed application by that permission's name; the admission twin is the same test passing with production restored, which the runner measures before mutating. The probe test dies with it, for the same reason: the refusal then names two permissions, the probe and party_create, and the probe test requires exactly one.",
       "file": "packages/compiler/src/unbound-permission-acknowledgement.json",
       "original": "      {\n        \"permissionId\": \"northstar.app:permission.party_create\",\n        \"resource\": \"northstar.app:entity.party\"\n      },\n",
       "replacement": "",
@@ -45,12 +45,17 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: the unchanged composed application builds, and the acknowledgement is exactly its declared census",
           "expected": "COMPILER_PERMISSION_EVALUATOR_UNBOUND.*northstar\\.app:permission\\.party_create"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
+          "expected": "the refusal must name exactly the one unacknowledged permission and nothing else"
         }
       ]
     },
     {
       "name": "stale-entry-added",
-      "claim": "An acknowledgement entry naming a permission the composed application does not declare, on a resource it does declare, refuses the unchanged composed application as stale by that entry's name: the list cannot rot.",
+      "claim": "An acknowledgement entry naming a permission the composed application does not declare, on a resource it does declare, refuses the unchanged composed application as stale by that entry's name: the list cannot rot. The probe test dies with it for the same reason: the refusal then carries the stale entry beside the probe, and the probe test requires exactly one diagnostic.",
       "file": "packages/compiler/src/unbound-permission-acknowledgement.json",
       "original": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ]",
       "replacement": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      },\n      {\n        \"permissionId\": \"northstar.app:permission.stock_count_probe_stale\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ]",
@@ -63,6 +68,11 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: the unchanged composed application builds, and the acknowledgement is exactly its declared census",
           "expected": "COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE.*northstar\\.app:permission\\.stock_count_probe_stale"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
+          "expected": "the refusal must name exactly the one unacknowledged permission and nothing else"
         }
       ]
     },

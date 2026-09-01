@@ -1660,13 +1660,17 @@ test('unbound-permission acknowledgement: a permission the composed application 
     'failed',
     'a declared permission that nothing binds and nothing acknowledges must refuse compilation',
   );
-  assert.deepEqual(structuralDiagnostics(result), [
-    {
-      code: 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
-      path: '$.permissions.permissionId',
-      subjectId: probe,
-    },
-  ]);
+  assert.deepEqual(
+    structuralDiagnostics(result),
+    [
+      {
+        code: 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
+        path: '$.permissions.permissionId',
+        subjectId: probe,
+      },
+    ],
+    'the refusal must name exactly the one unacknowledged permission and nothing else',
+  );
 });
 
 test('unbound-permission acknowledgement: removing the acknowledgement of a permission the package still declares refuses it by name', () => {
