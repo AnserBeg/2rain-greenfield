@@ -160,64 +160,55 @@ title rather than to keep advancing it in two files at once.
 
 ## Gates
 
-| gate | result |
-|---|---|
-| `typecheck` | PASS |
-| `lint` | PASS |
-| `format` | PASS |
-| `test:unit` | 155/155 |
-| `test:compiler` | 157/157 |
-| `test:integration` | 149/149 |
-| `test:architecture` | 189/189 |
-| **`test:postgres`** (REQUIRED) | **221/221** |
-| `check:schema` | PASS — 23 applied, 23 verified; schema-drift PASS |
-| `check:app-release` | PASS — green on `main` and unchanged here; no tracked release artifact moved |
-| `check:expected-red` | OK — 61 entries in 6 manifests still name live production text |
-| `evidence:expected-red` | OK — **all 61 reproduced and restored**, this packet's six included |
-| `check:expected-red-controls` | OK — 38 controls |
-| `scripts/check-records.sh` | OK — 136 records, 5 declaring, 42 claimed paths and 68 claimed symbols observed |
-| `test:browser` | **NOT RUN** — see the declared limits |
+**The FULL matrix ran, not a packet-selected subset.** `scripts/run-matrix.sh`
+at `f930bfdd183d59cbd23bba061abb35a193d263f1`, which the run reports as
+`FULL_MATRIX_PASS_SHA`. **Zero `not ok` lines across every suite.**
 
-**Each of this packet's four controls died ALONE.** Every entry reports
-`1 killed` against `1 passing`, so no control takes a bystander with it:
+| suite | result | gate | result |
+|---|---|---|---|
+| `test:unit` | 155 | `format` / `lint` / `typecheck` / `build` | PASS |
+| `test:compiler` | 157 | `check:boundaries` | PASS |
+| `test:integration` | 149 | `check:schema` | 23 applied, 23 verified; drift PASS |
+| `test:architecture` | 189 | `check:demo-release` / `check:app-release` | PASS |
+| **`test:postgres`** (REQUIRED) | **223** | `check:expected-red` | OK — 62 entries in 6 manifests |
+| `test:contracts` | 29 | `check:expected-red-controls` | OK — 38 controls |
+| **`test:browser`** | **93** | `check:language-coverage` | PASS |
+| `test:agent` / `test:locale` / `test:performance` | 3 / 1 / 5 | `check:reachability` | 106/106; 10 producer artifacts |
+
+`evidence:expected-red` is the one gate `run-matrix.sh` does not include; it ran
+separately at the same tree and **reproduced and restored all 62**.
+
+**`test:browser` 93/93 CLOSES the limit this packet declared at rounds 1 and 2.**
+The capability-version bump is now observed by the browser suite rather than
+argued safe from a symbolic import. Nothing in the packet's declared limits still
+rests on an unrun gate.
+
+**On the security scan's `leaks found: 1`, which is the negative control passing
+rather than a leak.** `run-security-scans.sh` runs two scans. The real one is
+clean — `gitleaks-clean.json` is `[]` across 1,732 commits, `cleanSecretScanExitCode: 0`.
+The warning comes from the second, a synthetic `north-star-synthetic-test-secret`
+planted in a throwaway `credential.txt` to prove the scanner is not vacuous;
+`negativeRuleDetected: true` is its pass condition. **Checked rather than
+assumed**, because a leak warning beside a green exit code is exactly the shape
+that gets waved through.
+
+**Each of this packet's SEVEN controls dies with the declared kill set**, and the
+last row is the one that carries round 2's finding:
 
 ```
-migration-does-not-admit-version-four            1 passing -> 1 killed
-version-four-digest-keeps-the-derived-identities 1 passing -> 1 killed
-legacy-version-three-recomputes-a-fresh-digest   1 passing -> 1 killed
-capability-version-not-bumped                    1 passing -> 1 killed
-stock-count-decoder-drops-version-three          1 passing -> 1 killed
-natural-replay-reconstructs-a-digest             1 passing -> 1 killed
+migration-does-not-admit-version-four              1 passing -> 1 killed
+version-four-digest-keeps-the-derived-identities   1 passing -> 1 killed
+legacy-version-three-recomputes-a-fresh-digest     1 passing -> 1 killed
+capability-version-not-bumped                      1 passing -> 1 killed
+stock-count-decoder-drops-version-three            3 passing -> 3 killed
+natural-replay-reconstructs-a-digest               3 passing -> 3 killed
+version-three-decoder-drops-the-correction-role    3 passing -> 2 killed
 ```
 
-**One architecture run failed and is recorded rather than quietly re-run.** The
-first re-run at the freeze returned **188/189**, failing *matrix lock and
-legacy-process waits fail busy at their bounded deadline* with
-`POSTGRES_CONTAINER_CONTAMINATION: refusing to start with north-star-* containers
-present after exclusive lock acquisition`, naming
-`north-star-companion-derivation-41471-7f034a09` at `age_seconds=1678`.
-
-**The cause was this lane's own tooling, not the packet.** An earlier
-`evidence:expected-red` invocation was run in the FOREGROUND, hit a 10-minute
-harness cap and was SIGTERM'd mid-entry; that killed run had
-`test/postgres/inventory-stock-count.test.ts` in flight and its ephemeral
-container outlived the process. The container's creation timestamp matches the
-minute of the kill. The guard behaved exactly as designed — it refused to start
-on a contaminated host and printed its own remediation — so this is the control
-working, not a flake to retry past. After `docker rm --force` of that single
-orphan the suite returned **189/189**. The subsequent `evidence:expected-red` run
-was backgrounded and completed cleanly, restoring the tree.
-
-**Sequencing, round 2.** The round-1 REVISE changed the executable tree, so
-**nothing carried forward**: every suite above re-ran from scratch at `6081ecb`.
-The last executable commit is `9a28824`; narrative commits sit above it, and per
-`AGENTS.md` §6 `test:architecture` and `format` read `docs/**` and re-run at the
-freeze while the rest carry forward on an identical executable tree.
-
-**The round-1 contamination red did not recur.** `evidence:expected-red` was
-backgrounded from the start this time rather than run in the foreground, so
-nothing was SIGTERM'd mid-entry and no container leaked; the host was verified
-free of `north-star-*` containers before and after.
+**2 of 3 is the attribution, not a shortfall.** The narrow mutation withdraws
+only the version-3 x `correction` cell, so the INITIAL specimen must stay GREEN
+while the correction and reversal ones die. A control that killed all three would
+be indistinguishable from `stock-count-decoder-drops-version-three`.
 
 ## Round 1 — REVISE, and the finding was real
 
