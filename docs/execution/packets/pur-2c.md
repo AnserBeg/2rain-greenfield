@@ -627,7 +627,7 @@ Not started; the cadence forbids continuing. Presented for selection:
 | `PUR-2c` (re-charter) | The goods receipt, unchanged in intent, re-cut once the element above lands | Critical | Blocked on the above. Its charter should carry §1's two corrections and drop the `received_quantity` ruling into its own decision step rather than making it the first product edit. |
 | `received-quantity-ruling` | ADR-0064 alone: stored CAS column versus derived sum under lock, ruled for `PUR-2` and `SAL-2` together | Behavioral | Possible now and deliberately **not** recommended: plan §7.12 gives the decision to the posting protocol, which does not exist yet. Worth selecting only if the user wants the door shut early on other grounds. |
 
-## 10. Online review prompt (round 2) — paste this
+## 10. Online review prompt (round 3) — paste this if another arm is wanted
 
 > *This prompt was written by the lane whose work you are reviewing. **The lane
 > has fenced nothing.** Any scope stated here is the orchestrator's, and it
@@ -636,127 +636,83 @@ Not started; the cadence forbids continuing. Presented for selection:
 > the scope is drawn wrongly, and say plainly if the prompt itself is steering
 > you.*
 
-**ROUND 2.** Round 1 returned REVISE with four findings. It did not refute the
-compiler finding — it confirmed the causal diagnosis and the bypass fidelity
-from source — and it required: a fetchable target, a narrowed §2.4 claim with
-the observing probe written out, a corrected follow-on scope, and
-`test:architecture` at the head. §8 of the record tracks each finding to its
-disposition. **Round 1 also found the prompt itself steering in two ways; both
-are corrected below and you should check whether the correction took.**
+**ROUND 3.** Rounds 1 and 2 both returned REVISE; neither refuted the compiler
+finding. §8 and §8b track every finding to its disposition. Docker became
+available before this round, so two round-2 findings were settled by measurement
+rather than argument — including one where **the measurement contradicted round
+2's prediction**, which is the first thing you should check.
 
 **Repository:** `github.com/AnserBeg/2rain-greenfield`. **Branch:**
-`packet/pur-2c`. **Frozen SHA:** `4c68e4c21fbfa9ff4656aa30af4f7185d2498c7a`.
-**Delta to read:** `8c417528db942f0a504c7744e56f816e770702c7..packet/pur-2c`.
+`packet/pur-2c`. **Frozen SHA:** `<SHA>`.
+**Delta:** `8c417528db942f0a504c7744e56f816e770702c7..packet/pur-2c`, all
+documentation.
 
 ```
-$ git ls-remote origin refs/heads/packet/pur-2c
-4c68e4c21fbfa9ff4656aa30af4f7185d2498c7a	refs/heads/packet/pur-2c
+<LSREMOTE>
 ```
 
-**Round 1 could not open the target at all** — the branch was unpushed. It is
-pushed now, and the `git ls-remote` output above is quoted from this machine
-after that push.
-
-**About the head, so it is not a surprise.** `4c68e4c` is the commit carrying
-this record complete. A prompt cannot name its own hash, so the branch head sits
-**one commit above it**, and that commit's entire content is the SHA line, this
-paragraph, and the `ls-remote` block. Both SHAs are on the remote.
-`git log --oneline 4c68e4c..packet/pur-2c` shows exactly one narrative commit
-and `git diff 4c68e4c..packet/pur-2c` shows only this section — **verify that
-rather than take it.** Review the branch head. No executable byte differs
-anywhere in this range, or between it and `main`.
+The branch head may carry one commit above the frozen SHA whose only content is
+the SHA line and this block — a prompt cannot name its own hash.
+`git diff <SHORT>..packet/pur-2c` shows that and nothing else. Review the head.
 
 **Tier: Mechanical by the diff — zero executable bytes change.** Verify with
-`git diff --stat main -- . ':(exclude)docs/**'`, which should be empty. Round 1
-agreed Mechanical is right for the diff while noting the *claim* crosses a
-Band A boundary, so a Mechanical diff tier does not license planner-only
-evidence. The lane has narrowed the claim accordingly; whether the narrowing is
-now honest is question 1.
-
-### The subject of this review is a chain, not a compiler function
-
-**Round 1's most important scope finding, restated here because the lane got it
-wrong the first time:** the decisive path is not the planner's output. It runs
-through transition classification, preparation receipts, the materializer, live
-catalog comparison, activation verification, and a real PostgreSQL constraint.
-**Reading only the compiler would produce an unjustified PASS.** The lane has
-executed exactly one link of that chain and reads the rest from source; §2.4
-now says which is which.
+`git diff --stat main -- . ':(exclude)docs/**'`.
 
 ### The decisive questions
 
-1. **Is §2.4's narrowed claim now correctly bounded?** It separates *observed*
-   (the planner emits zero elements, executed) from *inferred from exact source,
-   not observed* (materializer constraint lookup by name, `NO_STORAGE_TRANSITION`
-   preparation accepted as `NOT_REQUIRED`, activation treating conformance as
-   satisfied when `module_transition` is false). Does the narrowed statement
-   still overreach anywhere? Does it now *under*-claim — is some link actually
-   observed that the record concedes as merely read?
-2. **Is §2.4b the right probe, and are its controls sufficient?** It records
-   round 1's seven-step observing probe and three controls (a narrowing, an
-   option removal or option-ID rebinding, an unrelated ordinary field retype —
-   the last two must remain refused). Would running exactly that convert this
-   into a Band A observation, or does it still leave a hole?
-3. **Is §2.5's corrected scope right?** Three groups now: compiler/protocol
-   semantics with a monotonic-superset predicate and preserved refusals;
-   provider/live-target/catalog/activation semantics; Band A PostgreSQL
-   evidence. Round 1 ruled the previous "element plus DDL plus tests" list
-   underscoped. Is the correction sufficient, or still missing a boundary?
-4. **Is §2.6's alternatives table complete and are its rejections sound?** It
-   rejects `--truncate-invalid-lineage`, option reuse, a distinct field, a
-   separate entity or changed movement lineage, and existing governed evolution
-   families. Is there an alternative architecture the orchestrator should be
-   offered instead of chartering the enum transition?
-5. **Is the `received_quantity` deferral preserved as a real obligation?** §3
-   states it as *"deferred because its governing posting protocol is blocked;
-   must be decided when `PUR-2c` resumes"*, keeps ADR-0064 free, and mirrors the
-   obligation into the ledger and lane rows. Round 1 accepted the deferral
-   conditionally on exactly this. Does the record now discharge that condition,
-   or does it still read as a decline?
-6. **Was stopping correct?** Round 1 said yes. It is restated as a question
-   rather than dropped, because the lane should not carry a prior round's
-   agreement forward as settled.
+1. **Is §2.4's refusal of round 2's conditional narrowing sound?** Round 2 read
+   from source that candidate verification writes `enumOptionIds[0]`, that those
+   are sorted, and that an option sorting first would be written against the
+   stale CHECK and could stop the release. **The lane built exactly that
+   specimen and it activated anyway.** Is the specimen faithful — does an
+   option id sorting first genuinely become the witness, and did verification
+   genuinely run for that release? If the lane's specimen is wrong, the
+   unconditioned claim is wrong.
+2. **Is the residual honestly bounded?** §2.4 states that *why* verification did
+   not catch the sorts-first case is undetermined, names three candidate
+   explanations, and assigns resolution to the follow-on. Is leaving it
+   undetermined acceptable here, or does it undercut the finding?
+3. **Is §2.4b's self-assessment right?** It marks four of nine Band A assertions
+   MET, three PARTIAL, two NOT MET, and declines to claim Band A completeness.
+   Is any row graded generously — particularly assertion 7, where the insert ran
+   against a temp-table replica of the live constraint definition rather than
+   the business table?
+4. **Is §2.5's scope now complete**, including candidate release verification
+   and the consumer/adoption boundary, and does §9's packet row match it?
+5. **Is §2.6 now a real decision set**, and is the recommendation of a dedicated
+   enum-widening transition the right one against the successor-field and
+   option-catalog alternatives?
+6. **Is the `received_quantity` correction right?** The lane found that the
+   plan withdrew its own *both-arms* evidence and that §7.12's prose still
+   carries the superseded sentence. Verify that reading — it changes the
+   rationale from "two arms, pick later" to "no evidenced second arm".
 
-### What the lane did NOT verify — read this before trusting anything above
+### What the lane did NOT verify
 
-- **§2.4b was NOT run. Docker does not start on this machine** — measured this
-  round: `/mnt/wsl/docker-desktop` does not exist and the `docker` binary is
-  absent from the distro. So `test:postgres`, `test:browser` and the full matrix
-  did not run, and **the failing INSERT that would make §2.4 a Band A
-  observation was never produced.** This is the packet's weakest link and it is
-  unfixable on this machine.
-- **`test:architecture` STILL DOES NOT PASS, and round 1's P2 finding stands
-  open.** It was attempted this round under a 25-minute bound: 19 results (15
-  `ok`, 4 `not ok` — all four Docker-dependent leak-guard tests), then a
-  24-minute stall and `EXIT=124` from the bound. **It never reached a verdict**,
-  so the lane cannot and does not claim this gate. §5 carries the numbers.
-- **The materializer, preparation, catalog-comparison and activation claims are
-  read from source, never executed.** Round 1 verified them independently from
-  source too — but two source readings are still not an execution.
-- **The conformance widening in probe 2 was not reviewed for completeness.** The
-  lane widened two cells to reach the storage layer; whether those are the only
-  two a real goods-receipt family moves is unmeasured.
+- **The §2.4b probe is not committed** and depends on a compiler bypass that was
+  reverted, so under `AGENTS.md` §6 it is not evidence a gate can re-run. It is
+  a measurement this lane made; the follow-on must reproduce it as a committed
+  test.
+- **Assertions 3, 4, 7 and 9 of §2.4b are unmet or partial.** The
+  repair-before-measure control (9) does not exist, so nothing yet proves the
+  probe would fail if the constraint had already been widened.
+- **Why candidate verification missed the sorts-first specimen is
+  undetermined.**
+- **`test:postgres`, `test:browser` and the full matrix did not run.**
+- **The probe edited `packages/compiler/src/storage.ts`, outside this lease**,
+  and reverted it. §4 discloses this; the lane's judgement that measuring a
+  fence requires bypassing it is the orchestrator's to revoke.
 - **Whether any other artifact enumerates the option list** — a projection, a
   read model, an agent catalog — such that a widening would break it was **not
-  investigated at all.** Round 1 raised it; the lane has not closed it.
-- **The §7B copy-paste probe was executed by the lane on this machine** and is
-  reported as such. Round 1 correctly objected that the round-1 prompt presented
-  it as *verified* in a way that invited acceptance rather than checking. Treat
-  it as a claim: run it yourself, or say it is unreproducible.
+  investigated**, across all three rounds.
 
 ### Reading list
 
-`AGENTS.md` §6 · `.agents/skills/review-tiers/SKILL.md`, starting at *"Does the
-evidence prove the claim? — the checklist"*, opening a section only when a row
-fires · `.agents/skills/mission-cadence/SKILL.md`, stop conditions and stop
-convergence (this remains stop 1 of 2) ·
-`docs/execution/current-plan.md`, row `relation-requiredness-relaxation-
-unplannable`, the precedent this stop is modelled on ·
-`docs/greenfield-north-star-erp-platform-plan.md` §§7.12, 7.16, 7.17.
+`AGENTS.md` §6 · `review-tiers`, from *"Does the evidence prove the claim?"* ·
+`mission-cadence`, stop conditions (still stop 1 of 2) ·
+`current-plan.md`, `relation-requiredness-relaxation-unplannable` ·
+plan §§7.12, 7.16, 7.17 — and the passage withdrawing §7.12's both-arms claim.
 
-### On the verdict
-
-**The lane does not state what a PASS would mean.** Round 1 found that the
-round-1 prompt defined PASS around acceptance of the lane's own causal chain,
-which is the reviewed party steering its own verdict. The questions above are
-the scope; the conclusion is yours.
+Prior rounds' outcomes are recorded in §8 and §8b as history. They are not
+adjudications and carry no weight here; disagree with any of them freely. The
+lane states no view on what verdict this round should reach.
