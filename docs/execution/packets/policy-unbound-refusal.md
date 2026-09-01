@@ -15,6 +15,21 @@ Program review 2026-08-20, finding **R7, small (a)**. The full authorization
 kernel is queue row `7`, deferred by user ruling, and is NOT this packet.
 Stops: **0** of the 2-stop cap.
 
+**Frozen SHA: `87878a69226957a5ac5a462f8093c1669bd8e8b3`**, the tip that carries the
+matrix result, the ledger, lane and archive rows. Quoted from the remote at
+freeze time:
+
+```
+$ git ls-remote origin refs/heads/packet/policy-unbound-refusal
+87878a69226957a5ac5a462f8093c1669bd8e8b3	refs/heads/packet/policy-unbound-refusal
+```
+
+The branch head is one commit above that SHA; its only content is this block,
+the SHA filled into the rows and the review prompt, and the two gate results
+measured at `87878a6`. `git diff 87878a6..packet/policy-unbound-refusal` shows
+nothing else. The executable freeze is `c9062f5`;
+`FULL_MATRIX_PASS_SHA=c9062f5f68aed64b6b437f9a8519342cf3395997`.
+
 ## The finding
 
 Every production `CurrentPolicyGateway` returns ALLOW — `AllowAllLocalPolicy`
@@ -198,8 +213,8 @@ green at every intermediate commit.
 | full matrix, first attempt (`~/2rain-missions/run-matrix.sh policy`, detached worktree `/home/rvham/2rain-greenfield-pur-matrix` at `c9062f5`) | **FAILED at `test:postgres` 222/223**, every earlier stage green (schema, both releases, unit 155/155, compiler 166/166, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29). The one red is `module-storage-transition.test.ts` › *fold-function drift surfaces the specific diagnostic before a terminal claim mismatch* with `ephemeral PostgreSQL is ready inside its container but its published endpoint is unavailable: ECONNREFUSED 127.0.0.1:51966` — the READINESS manifestation `container-pressure-forges-outcomes` records verbatim from `PUR-2a` round 6. That file is `ENUM-WIDEN`'s and byte-identical to `main` in this tree; nothing in this packet touches a container. Docker held **462 dangling anonymous volumes** (10.3 GB reclaimable) at the time. The lane pruned dangling volumes only (the user's four stopped dev containers were left alone) and re-ran at the same SHA. |
 | full matrix, second attempt (same command, same worktree, same SHA, six seconds after the prune reclaimed 10.2 GB) | **INDETERMINATE at its first stage**, `test:performance` 4/5: `COMPILE_BUDGET_INDETERMINATE: observed CPU idle 57.1% is below required 90.0%; rerun the exclusive gate` — the gate refusing to judge under load rather than a red; the same suite run alone thirty seconds later was 5/5 with the first attempt's cold compile at 1235 ms against a 5000 ms budget. |
 | full matrix, third attempt (same command, same worktree, same SHA) | **PASS — `FULL_MATRIX_PASS_SHA=c9062f5f68aed64b6b437f9a8519342cf3395997`**: performance 5/5, unit 155/155, compiler 166/166, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability producer 11/11, language coverage PASS (2050 obligations), reachability 106/106, security scans passed, schema 23 migrations verified, both release checks green |
-| `test:architecture` and `format` re-run at the narrative head | run after this record was committed; the result is quoted in the pin commit above this one |
-| `scripts/check-records.sh` | green against the draft; re-run after this record was committed, result in the pin commit above |
+| `test:architecture` and `format` re-run at the narrative head `87878a6` | architecture **189/189**, prettier clean — the two suites that read narrative, re-run past the docs commits per `git-workflow`; `git diff --name-only c9062f5 87878a6` outside `docs/` is empty, so every other suite carries forward |
+| `scripts/check-records.sh` at `87878a6` | `records: OK (138 record(s), 6 declaring: 47 claimed path(s) and 73 claimed symbol(s) observed in their frozen trees; 159 ledger row(s), ids unique)` |
 
 Three expected-red rounds were needed before the manifest was honest, and
 each was the runner doing its job: the first found an undeclared victim (the
@@ -322,11 +337,14 @@ Review packet `policy-unbound-refusal` in `/home/rvham/2rain-greenfield` (or any
 
 This prompt was written by the lane whose work you are reviewing. The lane has fenced nothing. Any scope stated here is the orchestrator's, and it stands as a claim under test rather than a limit you may not question. Read whatever you judge relevant to the decisive questions, say plainly if you think the scope is drawn wrongly, and say plainly if the prompt itself is steering you.
 
-TARGET. Branch `packet/policy-unbound-refusal`, frozen at {{FREEZE}}. `git ls-remote origin refs/heads/packet/policy-unbound-refusal` returned:
+TARGET. Branch `packet/policy-unbound-refusal`, frozen at `87878a69226957a5ac5a462f8093c1669bd8e8b3`. `git ls-remote origin refs/heads/packet/policy-unbound-refusal` returned:
 
-{{LS_REMOTE}}
+```
+$ git ls-remote origin refs/heads/packet/policy-unbound-refusal
+87878a69226957a5ac5a462f8093c1669bd8e8b3	refs/heads/packet/policy-unbound-refusal
+```
 
-The last executable commit is `c9062f5f68aed64b6b437f9a8519342cf3395997` (`git diff --name-only `c9062f5f68aed64b6b437f9a8519342cf3395997` {{FREEZE}} -- . ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'` is empty; the commits above it are the packet record, ledger, lanes and archive rows). Read the delta `4218a66..{{FREEZE}}`. Base is `4218a66068041eb04e45e6fff4883c8aa8dfaebf`, `origin/main` at cut. Full matrix: Full matrix **PASS — `FULL_MATRIX_PASS_SHA=c9062f5f68aed64b6b437f9a8519342cf3395997`**: performance 5/5, unit 155/155, compiler 166/166, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability producer 11/11, language coverage PASS (2050 obligations), reachability 106/106, security scans passed, schema 23 migrations verified, both release checks green (third attempt at the same SHA; the first failed one PostgreSQL test on the recorded container-readiness manifestation, the second was indeterminate under post-prune CPU load — both in the record).
+The last executable commit is `c9062f5f68aed64b6b437f9a8519342cf3395997` (`git diff --name-only `c9062f5f68aed64b6b437f9a8519342cf3395997` `87878a69226957a5ac5a462f8093c1669bd8e8b3` -- . ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'` is empty; the commits above it are the packet record, ledger, lanes and archive rows). Read the delta `4218a66..`87878a69226957a5ac5a462f8093c1669bd8e8b3``. Base is `4218a66068041eb04e45e6fff4883c8aa8dfaebf`, `origin/main` at cut. Full matrix: Full matrix **PASS — `FULL_MATRIX_PASS_SHA=c9062f5f68aed64b6b437f9a8519342cf3395997`**: performance 5/5, unit 155/155, compiler 166/166, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability producer 11/11, language coverage PASS (2050 obligations), reachability 106/106, security scans passed, schema 23 migrations verified, both release checks green (third attempt at the same SHA; the first failed one PostgreSQL test on the recorded container-readiness manifestation, the second was indeterminate under post-prune CPU load — both in the record).
 
 TIER. Critical — a compiler refusal placed in the release build's path; wrong in one direction it blocks every release, wrong in the other it certifies the silent vacuum it was built to end. Band B declared: the failure is visible the first time a release is built.
 
