@@ -112,7 +112,7 @@
     },
     {
       "name": "the-observed-write-set-is-never-checked",
-      "claim": "THE BACKSTOP ABSENT ENTIRELY. The compiled target declares nothing about the movement -> balance projection edge, so a writer grown by a new materializer convention appears in no target shape this service reads -- round 1's F1, and a hand-written edge list cannot close it. The backstop stops asking the target and asks PostgreSQL what this transaction wrote. Remove the call and a module relation nothing declares commits silently, which is exactly the failure PUR-2a's nine rounds kept finding one instance of.",
+      "claim": "THE BACKSTOP ABSENT ENTIRELY. The compiled target declares nothing about the movement -> balance projection edge, so a writer grown by a new materializer convention appears in no target shape this service reads -- round 1's F1, and a hand-written edge list cannot close it. The backstop stops asking the target and asks PostgreSQL what this transaction wrote. Remove the call and a module relation nothing declares commits silently, which is exactly the failure PUR-2a's nine rounds kept finding one instance of. UPDATED BY posting-kernel-admission (bridge, disclosed in its record): since that packet, an undeclared writer is ALSO unobserved by any executed verifier, so with this backstop removed the posting no longer commits silently -- it is refused one step later by assertExecutedVerifiersCoverWriteSet, for the weaker reason (no executed verifier observed the relation) rather than the derivation reason this backstop names. The mutation therefore now measures that the backstop is what supplies the derivation diagnosis, and that the runtime comparison still refuses without it; the silent commit this claim originally described is no longer reachable.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "      await assertObservedWriteSetIsDerived(\n        client,\n        this.#binding,\n        writeBaseline,\n      );\n",
       "replacement": "",
@@ -124,7 +124,7 @@
         {
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "posting writer inventory: a module relation nothing declares is caught by observing what the posting wrote",
-          "expected": "a module relation no read-back verifies must refuse the posting"
+          "expected": "wrote module relations no executed verifier observed: nsm_t_pwi_undeclared_writer"
         }
       ]
     },
