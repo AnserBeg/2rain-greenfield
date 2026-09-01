@@ -643,17 +643,18 @@ rather than argument — including one where **the measurement contradicted roun
 2's prediction**, which is the first thing you should check.
 
 **Repository:** `github.com/AnserBeg/2rain-greenfield`. **Branch:**
-`packet/pur-2c`. **Frozen SHA:** `<SHA>`.
+`packet/pur-2c`. **Frozen SHA:** `850fa020c5a40170667002a5208c606a17811639`.
 **Delta:** `8c417528db942f0a504c7744e56f816e770702c7..packet/pur-2c`, all
 documentation.
 
 ```
-<LSREMOTE>
+$ git ls-remote origin refs/heads/packet/pur-2c
+850fa020c5a40170667002a5208c606a17811639	refs/heads/packet/pur-2c
 ```
 
 The branch head may carry one commit above the frozen SHA whose only content is
 the SHA line and this block — a prompt cannot name its own hash.
-`git diff <SHORT>..packet/pur-2c` shows that and nothing else. Review the head.
+`git diff 850fa02..packet/pur-2c` shows that and nothing else. Review the head.
 
 **Tier: Mechanical by the diff — zero executable bytes change.** Verify with
 `git diff --stat main -- . ':(exclude)docs/**'`.
