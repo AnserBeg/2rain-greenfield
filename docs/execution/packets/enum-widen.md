@@ -307,10 +307,10 @@ committed window probe), `8c2d591` (the tautology PostgreSQL round-trips).
 | `check:expected-red-controls` | OK, 38 controls |
 | `evidence:expected-red` | **13/13 of this packet's entries reproduced and restored.** Twelve at `a4bcf21` and the thirteenth (`repair-before-measure`) at `8c2d591`, whose only delta from `a4bcf21` is that entry's replacement text; the full thirteen are re-run inside the freeze pass below |
 | the three enum-widen tests, focused | 3/3 (`node --import tsx --test --test-name-pattern="enum domain|enum-domain" test/postgres/module-storage-transition.test.ts`) |
-| `test:postgres` | <<POSTGRES>> |
-| `test:architecture` | <<ARCHITECTURE>> |
-| `scripts/check-records.sh` | <<RECORDS>> |
-| full matrix (`scripts/run-matrix.sh`) | <<MATRIX>> |
+| `test:postgres` | **226/226** (inside the matrix at `984c65d`, the first narrative commit; executable tree identical to `8c2d591` — `git diff --name-only 8c2d591 984c65d -- . ':!docs'` is empty) |
+| `test:architecture` | **189/189** inside the matrix at `984c65d`, and re-run at the freeze tip because this suite reads `docs/**` — see the checkpoint block |
+| `scripts/check-records.sh` | PASS — `records: OK (137 record(s), 6 declaring …; 158 ledger row(s), ids unique)`, with this record's block resolved against `8c41752..8c2d591` |
+| full matrix (`scripts/run-matrix.sh`) | **PASS, `FULL_MATRIX_PASS_SHA=984c65d6a7780f13d1bb93b252735ebe116f8ab9`** — `scripts/run-matrix.sh enum-widen`: performance 5/5 (`PERFORMANCE_GATE_PASS_SHA` the same), `check:demo-release`, `check:app-release`, unit 155/155, compiler 157/157, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, postgres 226/226, locale 1/1, browser 93/93, observability producer, language coverage PASS (2050 obligations), reachability PASS (106/106 test files executed), dependency audit clean, secret scan clean (the one reported "leak" is the scan's own planted negative-control fixture, `negativeRuleDetected: true`). Log: `/tmp/matrix-enum-widen-984c65d6.log` |
 
 `test:postgres` is REQUIRED here under `AGENTS.md` §6's cross-layer rule — the
 transition envelope gained an element kind — and two of its tests observe the
@@ -417,7 +417,7 @@ the executable candidate — this record, ADR-0064, and the ledger/lane/plan
 rows; `git diff --name-only 8c2d591..packet/enum-widen -- . ':!docs'` is empty.
 Review the head.
 
-<<LSREMOTE>>
+The `git ls-remote origin refs/heads/packet/enum-widen` line is quoted in the one narrative commit above this record's freeze; see the checkpoint block.
 
 **Tier: Critical**, because the diff plans and executes DDL against live
 tenant tables and changes what the compiler admits for a released storage
