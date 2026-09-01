@@ -19,7 +19,7 @@ path lists as *"parallel, now … unblocks step 2's charter"*.
 - **Diff:** narrative only. Per `mission-cadence`, *"a packet whose diff is
   narrative-only declares nothing and owes no block"* — there is no
   `record-claim` block in this record, and that absence is the declaration.
-- **Frozen SHA:** FROZEN_SHA_PENDING
+- **Frozen SHA:** `8924c67579684706634fd33e1e450f6e6538957c` is the content commit (ADR, record, rows); the gates below ran at it, and the commit above it that pins this table is the branch tip, a narrative-only delta of this record, the ledger row and the lane row
 
 ## 1. The stop condition was tested first, and it did NOT fire
 
@@ -77,8 +77,8 @@ Only the two the charter names; a document packet runs nothing else.
 
 | gate | at | result |
 |---|---|---|
-| `scripts/check-records.sh` | FROZEN_SHA_PENDING | RESULT_PENDING |
-| `corepack pnpm test:architecture` (reads `docs/**`; Docker up; exclusive lock free — `ENUM-WIDEN` was not holding it) | FROZEN_SHA_PENDING | RESULT_PENDING |
+| `scripts/check-records.sh` | `8924c67` | `records: OK (138 record(s), 5 declaring: 42 claimed path(s) and 68 claimed symbol(s) observed in their frozen trees; 159 ledger row(s), ids unique)`, `EXIT=0`. This record is the 138th and declares nothing, which is the declaration |
+| `corepack pnpm test:architecture` (reads `docs/**`; Docker up; exclusive lock free — `ENUM-WIDEN` was not holding it) | `8924c67` | RESULT_PENDING |
 
 `pnpm format` was not run: `.prettierignore` excludes `docs/`, so a narrative
 packet cannot make it red.
