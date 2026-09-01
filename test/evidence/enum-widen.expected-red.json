@@ -220,10 +220,10 @@
     },
     {
       "name": "repair-before-measure",
-      "claim": "AGENTS.md section 6's subject-repaired-before-measured vector, and PUR-2c section 2.4b's assertion 9. The previous release's CHECK must REJECT the option it does not declare, as SQLSTATE 23514 from that constraint, BEFORE the widening is measured. A constraint that constrains nothing makes every post-transition acceptance vacuous, and the catalog verifier agrees with itself either way; only the pre-state rejection observes it.",
+      "claim": "AGENTS.md section 6's subject-repaired-before-measured vector, and PUR-2c section 2.4b's assertion 9. The previous release's CHECK must REJECT the option it does not declare, as SQLSTATE 23514 from that constraint, BEFORE the widening is measured. A constraint that constrains nothing makes every post-transition acceptance vacuous, and the catalog verifier agrees with itself either way; only the pre-state rejection observes it. The tautology is `col = col` because PostgreSQL re-renders `IS NOT DISTINCT FROM` as `NOT ... IS DISTINCT FROM` and the catalog verifier would then drift at the first prepare, for a reason that is not this one.",
       "file": "packages/postgres-provider/src/module-storage-materializer.ts",
       "original": "  return `${quoted(column.physicalName)} = ANY (ARRAY[${check.enumOptionIds\n    .map(sqlTextLiteral)\n    .join(', ')}])`;\n",
-      "replacement": "  return `${quoted(column.physicalName)} IS NOT DISTINCT FROM ${quoted(column.physicalName)}`;\n",
+      "replacement": "  return `${quoted(column.physicalName)} = ${quoted(column.physicalName)}`;\n",
       "test": {
         "files": ["test/postgres/module-storage-transition.test.ts"],
         "namePattern": "released enum domain is widened by one atomic CHECK replacement"
