@@ -273,6 +273,71 @@ describe browser behaviour as freshly observed: `test:browser` is recorded as NO
 RUN, and the carry-forward argument covers the executable tree, not a fresh
 browser observation.
 
+## Round 2 — REVISE, and it found a survivor against all six
+
+Reviewed `c1557374314b49cf75bc826775be03bad6b7efa9` as a narrow confirm. It
+verified the narrow-scope premise independently (production byte-identical to
+the round-1 candidate) and found **another one-property survivor**, which is the
+answer the arm was asked for.
+
+**The finding.** `requiredRecordedPostingRole` decodes a **2x2** — `{version 3,
+version 4}` x `{count, correction}` — and `postStockCount` maps kind `initial`
+to role `count` while mapping **both** `correction` and `reversal` to role
+`correction`. Every PUR-2b specimen was an `initial` count, so the **version-3 x
+`correction` cell was reachable by no control**. Withdrawing only that cell left
+all six entries green while a legitimate correction or reversal receipt stopped
+decoding through natural replay. **Measured and confirmed**: the mutation kills
+the CORRECTION and REVERSAL specimens and leaves the INITIAL one green.
+
+**Why the round-1 fix did not cover it.** Round 1 closed the *route* (explicit
+key vs natural replay) and this is the same obligation partitioned one level
+further, by recorded role. That is an ENUMERATING correction in `review-tiers`'
+sense — the second fix sits beside the first rather than subsuming it — and the
+packet says so rather than presenting it as convergence. **What makes it
+defensible to continue rather than route the class is that the partition is
+CLOSED and now exhausted**: the decoder has exactly two versions and two roles,
+all four cells are reachable by a specimen, and the three stock-count kinds are
+all exercised. There is no third level to partition.
+
+**What was added.** The single natural-replay test became **three per-kind
+tests**, because the expected-red runner accounts for every regression a
+mutation produces and separate tests give the two decoder mutations **different
+kill sets**:
+
+| control | kills |
+|---|---|
+| `stock-count-decoder-drops-version-three` | all three (3 of 3) |
+| `natural-replay-reconstructs-a-digest` | all three (3 of 3) |
+| `version-three-decoder-drops-the-correction-role` | **2 of 3 — INITIAL stays green** |
+
+One combined test would have made the narrower mutation indistinguishable from
+the broader one, since both raise the same message.
+
+**The specimen-coherence correction, and where the reviewer's suggestion was
+wrong.** Round 2 also found the specimen claimed more than it was: the clone
+carried the current posting's effects while its digest was computed over
+unrelated hard-coded identities, so the row combined the digest of one command
+with the effects of another, and it recorded capability version 2 where a
+version-3 writer recorded 1. **The capability version is now rewritten to 1 in
+the clone and asserted on replay** — history is not rewritten, and a replayed
+legacy receipt reports the version that produced it.
+
+**But applying the digest half uniformly destroyed a control, and the gate caught
+it rather than a reviewer.** Computing the legacy digest over the DERIVED
+identities is right for the natural-replay specimens, where the digest is never
+read. On the explicit-key route it makes
+`legacy-version-three-recomputes-a-fresh-digest` vacuous: that mutation restores
+a fresh version-3 recomputation, and a fresh recomputation over a derived command
+produces exactly that coherent digest — the digests MATCH, the replay succeeds,
+and the mutation stops producing a refusal at all. `evidence:expected-red`
+reported *failed for a different reason than the one declared for it*. The
+explicit-key specimen therefore keeps caller-chosen identities that DIFFER from
+the derivation, which is also the realistic legacy case — a caller whose ids
+coincided with a derivation that did not yet exist is the one case needing no
+refusal — and an assertion now pins that the specimen is the non-degenerate one.
+**That is the same shape as round 1's finding, arriving from the opposite
+direction: a change that leaves everything green while removing protection.**
+
 ## The declared range
 
 ```record-claim
@@ -280,7 +345,7 @@ browser observation.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "pur-2b",
   "base": "5e02d09526654b7dcdb36e15de360ef42b5f769f",
-  "head": "9a28824fcb7ad26f5e274dd2e7be462ca2bd4c60",
+  "head": "ROUND3_HEAD",
   "changedPaths": [
     "db/migrations/0023_inventory_stock_count_companion_digest_version.sql",
     "db/schema.snapshot.json",
