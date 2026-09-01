@@ -444,7 +444,7 @@ executable gates are inherited. These were run:
 | `pnpm typecheck` | **PASS** |
 | `check:app-release` | **PASS**, measured red under both probes and green before and after each |
 | `scripts/check-records.sh` | **PASS** — `records: OK (137 records, 158 ledger rows, ids unique)` |
-| `test:architecture` | **PASS — 189/189, `EXIT=0`**, at `e6bceef` |
+| `test:architecture` | **PASS — 189/189, `EXIT=0`**, at `e6bceef` and again at `f1de3ad` |
 
 ### `test:architecture` — now green, and the earlier stall explained
 
@@ -464,10 +464,16 @@ directions**: it does not "never fail and wait forever" (it fails four tests by
 name), and it does not fail fast (it then stalls without a summary). With Docker
 it passes clean.
 
-**Because this suite reads `docs/**`, the run above is green for the tree at
-`e6bceef` and every commit that followed it changed documentation.** The
-packet-completion report names the final head and carries its re-run; a green at
-a parent narrative commit is not carried forward as a green at the head.
+**Because this suite reads `docs/**`, it was re-run after the round-3 revisions
+rather than carried forward: green at `e6bceef` (189/189) and green again at
+`f1de3ad` (189/189), the head carrying the complete round-3 record and prompt.**
+
+**The one commit above `f1de3ad` is this line**, recording that result. A record
+of a gate is written after the gate, so the terminal commit necessarily post-dates
+its own measurement — the same construction `mission-cadence` describes when it
+says a packet's declared head is its last EXECUTABLE commit with narrative sitting
+above it. **Nothing executable differs between `f1de3ad` and the head**, and the
+packet-completion report names both. This is stated rather than quietly skipped.
 
 ```bash
 corepack pnpm test:architecture
