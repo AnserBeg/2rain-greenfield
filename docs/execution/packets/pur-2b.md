@@ -169,11 +169,11 @@ title rather than to keep advancing it in two files at once.
 | `test:compiler` | 157/157 |
 | `test:integration` | 149/149 |
 | `test:architecture` | 189/189 |
-| **`test:postgres`** (REQUIRED) | **220/220** |
+| **`test:postgres`** (REQUIRED) | **221/221** |
 | `check:schema` | PASS — 23 applied, 23 verified; schema-drift PASS |
 | `check:app-release` | PASS — green on `main` and unchanged here; no tracked release artifact moved |
-| `check:expected-red` | OK — 59 entries in 6 manifests still name live production text |
-| `evidence:expected-red` | OK — **all 59 reproduced and restored**, this packet's four included |
+| `check:expected-red` | OK — 61 entries in 6 manifests still name live production text |
+| `evidence:expected-red` | OK — **all 61 reproduced and restored**, this packet's six included |
 | `check:expected-red-controls` | OK — 38 controls |
 | `scripts/check-records.sh` | OK — 136 records, 5 declaring, 42 claimed paths and 68 claimed symbols observed |
 | `test:browser` | **NOT RUN** — see the declared limits |
@@ -186,6 +186,8 @@ migration-does-not-admit-version-four            1 passing -> 1 killed
 version-four-digest-keeps-the-derived-identities 1 passing -> 1 killed
 legacy-version-three-recomputes-a-fresh-digest   1 passing -> 1 killed
 capability-version-not-bumped                    1 passing -> 1 killed
+stock-count-decoder-drops-version-three          1 passing -> 1 killed
+natural-replay-reconstructs-a-digest             1 passing -> 1 killed
 ```
 
 **One architecture run failed and is recorded rather than quietly re-run.** The
@@ -206,12 +208,16 @@ working, not a flake to retry past. After `docker rm --force` of that single
 orphan the suite returned **189/189**. The subsequent `evidence:expected-red` run
 was backgrounded and completed cleanly, restoring the tree.
 
-**Sequencing.** `test:postgres` and the other suites ran at `0ec2ed2`. Three
-narrative commits sit above the last executable commit `fbfc295`. Per `AGENTS.md`
-§6, `test:architecture` and `format` read `docs/**` and were re-run at the freeze;
-every other suite carries forward, because
-`git diff --name-only fbfc295 <freeze> -- . ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'`
-is empty.
+**Sequencing, round 2.** The round-1 REVISE changed the executable tree, so
+**nothing carried forward**: every suite above re-ran from scratch at `6081ecb`.
+The last executable commit is `9a28824`; narrative commits sit above it, and per
+`AGENTS.md` §6 `test:architecture` and `format` read `docs/**` and re-run at the
+freeze while the rest carry forward on an identical executable tree.
+
+**The round-1 contamination red did not recur.** `evidence:expected-red` was
+backgrounded from the start this time rather than run in the foreground, so
+nothing was SIGTERM'd mid-entry and no container leaked; the host was verified
+free of `north-star-*` containers before and after.
 
 ## Round 1 — REVISE, and the finding was real
 
