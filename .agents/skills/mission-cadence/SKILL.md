@@ -67,6 +67,14 @@ A packet must have all of:
 - **Tier** — Mechanical / Behavioral / Critical (per `review-tiers`).
 - **Owned paths** — exact; nothing outside them may change.
 - **Out of scope** — named explicitly, so drift is detectable.
+- **Evidence band declared per family, in the charter, before the first arm —
+  MANDATORY from 2026-09-01 (`5g3-prog`, both arms).** Band A for silent stored
+  values and balances, B for refusals and forms an operator meets on use, C for
+  what is visible on read (`review-tiers`, "Evidence depth follows FAILURE
+  OBSERVABILITY"). **An undeclared band is a charter defect**, not a lane
+  default: measured, `posting-writer-inventory`'s record declared none and the
+  default made it Band A by luck, while `posting-error-shape` spent six arms at
+  Band A on a one-line guard that was Band B.
 - **Gates** — the exact commands that must pass.
 - **Runnable exit** — the repo builds and runs when the packet ends, even if
   the feature is partial. Stop at a safe boundary rather than overrun.
