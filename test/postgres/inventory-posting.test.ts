@@ -3876,7 +3876,9 @@ test('posting kernel admission: the unchanged kernel admits a posting whose ever
     assert.equal(
       outcome.status,
       'fulfilled',
-      `the unchanged kernel must admit an ordinary posting: ${JSON.stringify(outcome)}`,
+      `the unchanged kernel must admit an ordinary posting: ${
+        outcome.status === 'rejected' ? String(outcome.reason) : ''
+      } ${JSON.stringify(outcome)}`,
     );
     if (outcome.status !== 'fulfilled') return;
     assert.equal(outcome.value.movements.length, 1);
