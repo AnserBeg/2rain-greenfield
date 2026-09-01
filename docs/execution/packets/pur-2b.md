@@ -345,7 +345,7 @@ direction: a change that leaves everything green while removing protection.**
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "pur-2b",
   "base": "5e02d09526654b7dcdb36e15de360ef42b5f769f",
-  "head": "ROUND3_HEAD",
+  "head": "ad0c9c4b722a763a5d392c98e96901eb0d9a514e",
   "changedPaths": [
     "db/migrations/0023_inventory_stock_count_companion_digest_version.sql",
     "db/schema.snapshot.json",
