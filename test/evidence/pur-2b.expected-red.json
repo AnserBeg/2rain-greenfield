@@ -87,7 +87,17 @@
       "kills": [
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
-          "name": "PUR-2b: a version-3 stock-count receipt still DECODES through natural replay, with no digest reconstructed",
+          "name": "PUR-2b: a version-3 INITIAL count decodes through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 CORRECTION decodes through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 REVERSAL decodes through natural replay, with no digest reconstructed",
           "expected": "persisted posting receipt has no valid posting role"
         }
       ]
@@ -105,8 +115,41 @@
       "kills": [
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
-          "name": "PUR-2b: a version-3 stock-count receipt still DECODES through natural replay, with no digest reconstructed",
+          "name": "PUR-2b: a version-3 INITIAL count decodes through natural replay, with no digest reconstructed",
           "expected": "cannot be reconstructed from a kernel-derived command"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 CORRECTION decodes through natural replay, with no digest reconstructed",
+          "expected": "cannot be reconstructed from a kernel-derived command"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 REVERSAL decodes through natural replay, with no digest reconstructed",
+          "expected": "cannot be reconstructed from a kernel-derived command"
+        }
+      ]
+    },
+    {
+      "name": "version-three-decoder-drops-the-correction-role",
+      "claim": "The version-3 decoder is a 2x2 -- {version 3, version 4} x {count, correction} -- and BOTH version-3 cells must keep decoding. postStockCount maps kind `initial` to role `count` and BOTH `correction` and `reversal` to role `correction`, so a control population made only of initial counts cannot reach the version-3 x correction cell. Round 2 found exactly that survivor: withdraw only that one cell and all six earlier entries stay green while a legitimate correction or reversal receipt stops decoding through natural replay. This entry is deliberately NARROWER than stock-count-decoder-drops-version-three, and its kill set is what distinguishes them -- it must leave the INITIAL specimen green while killing the correction and reversal ones. Two entries that killed the same tests with the same message would not be two controls.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  if (\n    isStockCountReceiptVersion(version) &&\n    (postingRole === 'count' || postingRole === 'correction')\n  ) {\n    return postingRole;\n  }",
+      "replacement": "  if (\n    (version === stockCountInventoryPostingInputDigestVersion &&\n      postingRole === 'count') ||\n    (version === companionDerivedInventoryPostingInputDigestVersion &&\n      (postingRole === 'count' || postingRole === 'correction'))\n  ) {\n    return postingRole;\n  }",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "natural replay"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 CORRECTION decodes through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 REVERSAL decodes through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
         }
       ]
     }
