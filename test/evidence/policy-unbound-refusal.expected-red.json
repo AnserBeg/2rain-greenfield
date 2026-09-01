@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "packet": "policy-unbound-refusal",
+  "entries": [
+    {
+      "name": "unbound-check-removed",
+      "claim": "The rule's unbound half is what refuses a declared permission nothing acknowledges: comparing the acknowledgement lookup against null instead of undefined makes the branch unreachable, and a permission declared on the composed application with no acknowledgement then compiles silently -- the exact vacuum R7 named.",
+      "file": "packages/compiler/src/conformance.ts",
+      "original": "    if (acknowledged === undefined) {\n      diagnostics.push(\n        compilerDiagnostic(\n          'COMPILER_PERMISSION_EVALUATOR_UNBOUND',",
+      "replacement": "    if (acknowledged === null) {\n      diagnostics.push(\n        compilerDiagnostic(\n          'COMPILER_PERMISSION_EVALUATOR_UNBOUND',",
+      "test": {
+        "files": ["test/compiler/g2-module-conformance.test.ts"],
+        "namePattern": "unbound-permission acknowledgement"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
+          "expected": "a declared permission that nothing binds and nothing acknowledges must refuse compilation"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: removing the acknowledgement of a permission the package still declares refuses it by name",
+          "expected": "a declared permission whose acknowledgement was removed must be refused by name"
+        }
+      ]
+    },
+    {
+      "name": "acknowledgement-entry-removed",
+      "claim": "Removing one acknowledgement entry for a permission the composed application still declares (party_create) refuses the unchanged composed application by that permission's name; the admission twin is the same test passing with production restored, which the runner measures before mutating.",
+      "file": "packages/compiler/src/unbound-permission-acknowledgement.json",
+      "original": "      {\n        \"permissionId\": \"northstar.app:permission.party_create\",\n        \"resource\": \"northstar.app:entity.party\"\n      },\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/compiler/g2-module-conformance.test.ts"],
+        "namePattern": "unbound-permission acknowledgement"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the unchanged composed application builds, and the acknowledgement is exactly its declared census",
+          "expected": "COMPILER_PERMISSION_EVALUATOR_UNBOUND.*northstar\\.app:permission\\.party_create"
+        }
+      ]
+    },
+    {
+      "name": "stale-entry-added",
+      "claim": "An acknowledgement entry naming a permission the composed application does not declare, on a resource it does declare, refuses the unchanged composed application as stale by that entry's name: the list cannot rot.",
+      "file": "packages/compiler/src/unbound-permission-acknowledgement.json",
+      "original": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ]",
+      "replacement": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      },\n      {\n        \"permissionId\": \"northstar.app:permission.stock_count_probe_stale\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ]",
+      "test": {
+        "files": ["test/compiler/g2-module-conformance.test.ts"],
+        "namePattern": "unbound-permission acknowledgement"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the unchanged composed application builds, and the acknowledgement is exactly its declared census",
+          "expected": "COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE.*northstar\\.app:permission\\.stock_count_probe_stale"
+        }
+      ]
+    },
+    {
+      "name": "stale-check-removed",
+      "claim": "The rule's stale half is what refuses an entry naming a permission the package no longer declares while its resource is still present: keying the presence check on the permission id (never an entity id) instead of the entry's resource makes the branch unreachable, and a stale entry then survives compilation.",
+      "file": "packages/compiler/src/conformance.ts",
+      "original": "    if (entityIds.has(entry.resource)) {",
+      "replacement": "    if (entityIds.has(entry.permissionId)) {",
+      "test": {
+        "files": ["test/compiler/g2-module-conformance.test.ts"],
+        "namePattern": "unbound-permission acknowledgement"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: an entry naming a permission the package no longer declares is stale while its resource is present",
+          "expected": "an acknowledgement naming a permission the package does not declare must be refused as stale"
+        }
+      ]
+    },
+    {
+      "name": "governed-package-key-renamed",
+      "claim": "Governance is keyed by package id and the composed application's key is load-bearing: renaming it leaves the composed application ungoverned, so the release compiles with an unacknowledged permission and the census test finds no governed package -- the subject-absent vacuity vector, closed by the census test rather than by the rule.",
+      "file": "packages/compiler/src/unbound-permission-acknowledgement.json",
+      "original": "    \"northstar.app:package.application\": [",
+      "replacement": "    \"northstar.app:package.applicatio\": [",
+      "test": {
+        "files": ["test/compiler/g2-module-conformance.test.ts"],
+        "namePattern": "unbound-permission acknowledgement"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the unchanged composed application builds, and the acknowledgement is exactly its declared census",
+          "expected": "the composed application package must be governed by the unbound-permission acknowledgement"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
+          "expected": "a declared permission that nothing binds and nothing acknowledges must refuse compilation"
+        }
+      ]
+    }
+  ]
+}

@@ -44,6 +44,16 @@ import {
 } from '../fixtures/g2/module-conformance/definitions.js';
 import { registerInventoryContractCases } from './inventory-contract.cases.js';
 import { V3_AGGREGATE_IDS, v3AggregateModule } from './v3-definition.js';
+import {
+  readUnboundPermissionAcknowledgement,
+  validateUnboundPermissionAcknowledgement,
+  type UnboundPermissionAcknowledgement,
+  type UnboundPermissionAcknowledgementEntry,
+} from '../../packages/compiler/src/conformance.js';
+import {
+  APPLICATION_NAMESPACE,
+  composedApplicationDefinition,
+} from '../../packages/domain/src/app/builder.js';
 
 registerInventoryContractCases((name, run) => test(name, run));
 
@@ -1574,4 +1584,358 @@ function structuralShape(value: unknown): unknown {
     );
   }
   return typeof value;
+}
+
+// ---------------------------------------------------------------------------
+// The acknowledged-unbound permission ratchet (program review R7, small a).
+// Every test name carries the prefix `unbound-permission acknowledgement`, which
+// is the name pattern test/evidence/policy-unbound-refusal.expected-red.json
+// runs its mutations against.
+// ---------------------------------------------------------------------------
+
+const COMPOSED_PACKAGE_ID = `${APPLICATION_NAMESPACE}:package.application`;
+const PARTY_ENTITY_ID = `${APPLICATION_NAMESPACE}:entity.party`;
+const PARTY_ROLE_ENTITY_ID = `${APPLICATION_NAMESPACE}:entity.party_role`;
+const PARTY_CREATE_PERMISSION_ID = `${APPLICATION_NAMESPACE}:permission.party_create`;
+
+test('unbound-permission acknowledgement: the unchanged composed application builds, and the acknowledgement is exactly its declared census', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const result = compileApplication(inputNormalized(normalized));
+  assert.equal(
+    result.status,
+    'compiled',
+    `the unchanged composed application must build with every declared permission acknowledged: ${JSON.stringify(
+      result.status === 'failed' ? result.diagnostics : [],
+    )}`,
+  );
+
+  // Read from the tracked file rather than imported: this test directory
+  // typechecks as CommonJS, where an import attribute is refused, and the
+  // bytes on disk are what the compiler package itself imports.
+  const acknowledgement = readUnboundPermissionAcknowledgement(
+    JSON.parse(
+      readFileSync(
+        'packages/compiler/src/unbound-permission-acknowledgement.json',
+        'utf8',
+      ),
+    ),
+  );
+  assert.equal(acknowledgement.status, 'readable');
+  const acknowledged =
+    acknowledgement.status === 'readable'
+      ? acknowledgement.packages.get(COMPOSED_PACKAGE_ID)
+      : undefined;
+  assert.ok(
+    acknowledged,
+    'the composed application package must be governed by the unbound-permission acknowledgement',
+  );
+  // One entry per declared permission, no more, no less, none twice. This is
+  // the rot check the compiler rule cannot make on its own: a stale entry whose
+  // whole entity left the package is skipped there (partial compositions), so
+  // the full composition is read HERE and compared exactly.
+  const declared = composedPermissionCensus(normalized);
+  assert.deepEqual(
+    [...acknowledged].sort(byPermissionId),
+    declared,
+    'the acknowledgement must name exactly the permissions the composed application declares, each on its declared resource',
+  );
+  assert.equal(
+    new Set(acknowledged.map((entry) => entry.permissionId)).size,
+    acknowledged.length,
+  );
+  assert.ok(declared.length > 0);
+});
+
+test('unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name', () => {
+  const definition = composedApplicationDefinition() as {
+    permissions: unknown[];
+  } & Record<string, unknown>;
+  const probe = `${APPLICATION_NAMESPACE}:permission.party_probe_unbound`;
+  definition.permissions.push(composedPermission(probe, PARTY_ENTITY_ID));
+  const result = compileApplication(input(definition));
+  assert.equal(
+    result.status,
+    'failed',
+    'a declared permission that nothing binds and nothing acknowledges must refuse compilation',
+  );
+  assert.deepEqual(structuralDiagnostics(result), [
+    {
+      code: 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
+      path: '$.permissions.permissionId',
+      subjectId: probe,
+    },
+  ]);
+});
+
+test('unbound-permission acknowledgement: removing the acknowledgement of a permission the package still declares refuses it by name', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const census = composedPermissionCensus(normalized);
+  const withoutPartyCreate = census.filter(
+    (entry) => entry.permissionId !== PARTY_CREATE_PERMISSION_ID,
+  );
+  assert.equal(withoutPartyCreate.length, census.length - 1);
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging(withoutPartyCreate),
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
+        path: '$.permissions.permissionId',
+        subjectId: PARTY_CREATE_PERMISSION_ID,
+      },
+    ],
+    'a declared permission whose acknowledgement was removed must be refused by name',
+  );
+});
+
+test('unbound-permission acknowledgement: an entry naming a permission the package no longer declares is stale while its resource is present', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const census = composedPermissionCensus(normalized);
+  const stale = `${APPLICATION_NAMESPACE}:permission.party_probe_stale`;
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging([
+          ...census,
+          { permissionId: stale, resource: PARTY_ENTITY_ID },
+        ]),
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.permissionId',
+        subjectId: stale,
+      },
+    ],
+    'an acknowledgement naming a permission the package does not declare must be refused as stale',
+  );
+});
+
+test('unbound-permission acknowledgement: an entry whose resource entity is absent is not judged, because a partial composition is not rot', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const census = composedPermissionCensus(normalized);
+  assert.deepEqual(
+    validateUnboundPermissionAcknowledgement(
+      normalized,
+      acknowledging([
+        ...census,
+        {
+          permissionId: `${APPLICATION_NAMESPACE}:permission.absent_probe_read`,
+          resource: `${APPLICATION_NAMESPACE}:entity.absent_probe`,
+        },
+      ]),
+    ),
+    [],
+  );
+});
+
+test('unbound-permission acknowledgement: an entry whose resource disagrees with the declaration is stale', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const census = composedPermissionCensus(normalized).map((entry) =>
+    entry.permissionId === PARTY_CREATE_PERMISSION_ID
+      ? { ...entry, resource: PARTY_ROLE_ENTITY_ID }
+      : entry,
+  );
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging(census),
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.resource',
+        subjectId: PARTY_CREATE_PERMISSION_ID,
+      },
+    ],
+  );
+});
+
+test('unbound-permission acknowledgement: a permission an evaluator binds leaves the list, and stays listed only as rot', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const census = composedPermissionCensus(normalized);
+  const bound = new Set([PARTY_CREATE_PERMISSION_ID]);
+  // Bound and still acknowledged: the list did not shrink.
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging(census),
+        bound,
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.permissionId',
+        subjectId: PARTY_CREATE_PERMISSION_ID,
+      },
+    ],
+  );
+  // Bound and no longer acknowledged: exactly the shape row 7 leaves behind.
+  assert.deepEqual(
+    validateUnboundPermissionAcknowledgement(
+      normalized,
+      acknowledging(
+        census.filter(
+          (entry) => entry.permissionId !== PARTY_CREATE_PERMISSION_ID,
+        ),
+      ),
+      bound,
+    ),
+    [],
+  );
+});
+
+test('unbound-permission acknowledgement: a duplicated entry is stale', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const census = composedPermissionCensus(normalized);
+  const duplicate = census.find(
+    (entry) => entry.permissionId === PARTY_CREATE_PERMISSION_ID,
+  )!;
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging([...census, duplicate]),
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.permissionId',
+        subjectId: PARTY_CREATE_PERMISSION_ID,
+      },
+    ],
+  );
+});
+
+test('unbound-permission acknowledgement: a package the list does not key is ungoverned, and an unreadable list fails closed over every declared permission', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  assert.deepEqual(
+    validateUnboundPermissionAcknowledgement(normalized, {
+      packages: new Map(),
+      status: 'readable',
+    }),
+    [],
+  );
+  const unreadable = validateUnboundPermissionAcknowledgement(normalized, {
+    status: 'unreadable',
+  });
+  assert.equal(unreadable.length, normalized.permissions.length);
+  assert.ok(unreadable.length > 0);
+  assert.ok(
+    unreadable.every(
+      (diagnostic) =>
+        diagnostic.code === 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
+    ),
+  );
+  for (const malformed of [
+    undefined,
+    null,
+    {},
+    {
+      packages: {},
+      schemaVersion: 'northstar.compiler:unbound-permission-acknowledgement/v0',
+    },
+    {
+      packages: { [COMPOSED_PACKAGE_ID]: [{ permissionId: 1 }] },
+      schemaVersion: 'northstar.compiler:unbound-permission-acknowledgement/v1',
+    },
+  ]) {
+    assert.equal(
+      readUnboundPermissionAcknowledgement(malformed).status,
+      'unreadable',
+    );
+  }
+});
+
+function composedPermission(
+  permissionId: string,
+  resource: string,
+): Record<string, unknown> {
+  return {
+    action: 'read',
+    kind: 'permissionDefinition',
+    label: 'probe permission',
+    permissionId,
+    resource: {
+      kind: 'entityReference',
+      schemaVersion: 'v5',
+      targetId: resource,
+    },
+    schemaVersion: 'v5',
+  };
+}
+
+function composedPermissionCensus(normalized: {
+  permissions: ReadonlyArray<{
+    permissionId: string;
+    resource: { targetId: string };
+  }>;
+}): UnboundPermissionAcknowledgementEntry[] {
+  return normalized.permissions
+    .map((permission) => ({
+      permissionId: permission.permissionId,
+      resource: permission.resource.targetId,
+    }))
+    .sort(byPermissionId);
+}
+
+function acknowledging(
+  entries: readonly UnboundPermissionAcknowledgementEntry[],
+): UnboundPermissionAcknowledgement {
+  return {
+    packages: new Map([[COMPOSED_PACKAGE_ID, entries]]),
+    status: 'readable',
+  };
+}
+
+function byPermissionId(
+  left: UnboundPermissionAcknowledgementEntry,
+  right: UnboundPermissionAcknowledgementEntry,
+): number {
+  return left.permissionId < right.permissionId
+    ? -1
+    : left.permissionId > right.permissionId
+      ? 1
+      : 0;
+}
+
+function structuralOf(
+  diagnostics: ReadonlyArray<{
+    code: string;
+    path: string;
+    subjectId: string | null;
+  }>,
+): Array<{ code: string; path: string; subjectId: string | null }> {
+  return diagnostics.map(({ code, path, subjectId }) => ({
+    code,
+    path,
+    subjectId,
+  }));
 }
