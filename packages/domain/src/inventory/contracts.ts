@@ -256,7 +256,7 @@ export interface InventoryContractDefinitionV1 {
     readonly operationContract: 'namedBaseUnitChange';
   };
   readonly capabilityId: 'northstar.inventory:capability.posting';
-  readonly capabilityVersion: 1;
+  readonly capabilityVersion: 2;
   readonly compiledArtifacts: readonly {
     readonly artifactId: string;
     readonly outputSemantic: 'fact' | 'quantity' | 'time' | 'text';
@@ -579,7 +579,15 @@ export const INVENTORY_CONTRACT_V1 = Object.freeze({
     operationContract: 'namedBaseUnitChange',
   },
   capabilityId: 'northstar.inventory:capability.posting',
-  capabilityVersion: 1,
+  // posting-kernel-admission. THE ONE AUTHORITY for the posting capability
+  // version. The module definition reads it into the capability requirement
+  // that becomes a release's capability fact, and the PostgreSQL provider
+  // imports it as the version it implements; nothing else spells the number.
+  // 2 because PUR-2a changed the PUBLIC stock-count command's key set
+  // (ADR-0063, decision 3): a caller written against 1 is refused by
+  // `exactKeys`, which is what a major version means. There is no minor axis,
+  // so a declared fact is satisfied by exactly this version and no other.
+  capabilityVersion: 2,
   compiledArtifacts: [
     {
       artifactId: 'northstar.inventory:artifact.movement_read_back',

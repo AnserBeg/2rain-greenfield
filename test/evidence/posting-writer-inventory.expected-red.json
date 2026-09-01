@@ -6,7 +6,7 @@
       "name": "effect-reservation-never-observed",
       "claim": "THE SUBJECT ABSENT ENTIRELY. Every movement insert fires the trigger the compiled target declares as `factStorage.companion.reservationTriggerName`, which copies the movement into the effect-reservation companion. That companion's PRIMARY KEY omits `business_period` and `record_id` and is the ONLY natural-effect guard in the system -- the movement's own `effectIdentityUnique` carries a freshly minted `record_id` and can never collide between two postings. The foreign key runs companion -> movement ON DELETE RESTRICT, so a movement with NO reservation row violates no constraint. Remove the read-back and a posting whose reservation never happened commits silently, leaving the 23505 raced-replay refusal unreachable for that effect. Kill is measured in the reservation test this command runs.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "      await assertMovementEffectReservations(\n        client,\n        this.#binding,\n        context,\n        parsed.legalEntityId,\n        ordered,\n      );\n",
+      "original": "      await assertMovementEffectReservations(\n        client,\n        this.#binding,\n        context,\n        parsed.legalEntityId,\n        ordered,\n        coverage,\n      );\n",
       "replacement": "",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],

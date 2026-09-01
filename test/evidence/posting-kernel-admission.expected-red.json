@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "packet": "posting-kernel-admission",
+  "entries": [
+    {
+      "name": "verifier-call-deleted-registration-intact",
+      "claim": "THE SURVIVOR THE REVIEW NAMED, and the first mutation run. Delete one verifier CALL from #post and leave its registration intact: construction still proves a read-back is registered for the effect-reservation companion, and assertObservedWriteSetIsDerived still finds the written relation derived, so before this packet the posting committed with the reservation never observed. The reservation IS written (by the trigger the compiled target declares), so the executed-verifier comparison finds a written relation with no token and refuses before commit, naming the relation. This is the subject-absent vector for R3, held on the exact registration whose verifier the writer inventory already pins.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      await assertMovementEffectReservations(\n        client,\n        this.#binding,\n        context,\n        parsed.legalEntityId,\n        ordered,\n        coverage,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the unchanged kernel admits"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed",
+          "expected": "wrote module relations no executed verifier observed: nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq"
+        }
+      ]
+    },
+    {
+      "name": "verifier-returns-without-observing",
+      "claim": "A VERIFIER THAT RETURNS WITHOUT OBSERVING ITS RELATION. The call is present and the registration is intact; the posted-stock balance verifier simply returns before reading a row, which is what a call-site-only mechanism would count as executed. A token is minted from a row PostgreSQL returned, never from the function having been entered, so no token exists for the balance relation the trigger wrote and the posting refuses naming it. Distinct from the deleted-call entry by relation: this red names the balance table, that one names the reservation table.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const identities = affectedStockIdentities(movements);\n  for (const identity of identities) {\n",
+      "replacement": "  const identities = affectedStockIdentities(movements);\n  if (identities.length > 0) return;\n  for (const identity of identities) {\n",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the unchanged kernel admits"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed",
+          "expected": "wrote module relations no executed verifier observed: nsm_t_eiuo2pcfb2jatsjh32vdf2bjuseilmq32yuiorrfe35fahtycnfa"
+        }
+      ]
+    },
+    {
+      "name": "coverage-comparison-absent",
+      "claim": "THE COMPARISON ABSENT ENTIRELY. Remove the one call that compares the token ledger with the observed write set and every verifier still mints, every registration still holds, and the derived-relation-written-on-an-unverified-path control commits: the transaction line written by a trigger on the adjustment path is derived and registered, and nothing asks whether its verifier ran.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      await assertExecutedVerifiersCoverWriteSet(\n        client,\n        this.#binding,\n        writeBaseline,\n        coverage,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "whose verifier did not run"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: a derived relation written on a path whose verifier did not run is refused before commit, naming the relation",
+          "expected": "a written relation no executed verifier observed must refuse the posting before commit"
+        }
+      ]
+    },
+    {
+      "name": "coverage-read-from-the-registry-not-the-tokens",
+      "claim": "A PROXY SATISFIED WHILE THE FACT DOES NOT HOLD. The comparison keeps running but reads coverage off the construction-time REGISTRY restricted to the written relations -- a relation counts as verified because a read-back is registered for it -- which is exactly the pre-packet state this row was opened against. Both directions of the set comparison are then trivially equal and the unverified-path control commits.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const executed = coverage.tokens;\n",
+      "replacement": "  const executed = new Map(\n    [...binding.writerVerifiers].filter(([relation]) => written.has(relation)),\n  );\n",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "whose verifier did not run"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: a derived relation written on a path whose verifier did not run is refused before commit, naming the relation",
+          "expected": "a written relation no executed verifier observed must refuse the posting before commit"
+        }
+      ]
+    },
+    {
+      "name": "token-minted-for-an-unwritten-relation",
+      "claim": "THE SECOND DIRECTION. A token is a claim about this transaction's writes, and the comparison is an EQUALITY, so a verifier claiming a relation the posting did not write is refused rather than read as extra coverage. The movement read-back is registered for the partitioned PARENT as well as its partitions, and PostgreSQL counts a routed insert on the leaf only (measured), so minting the parent from the registration -- a relation the verifier is registered for but no row came back from -- is a token for an unwritten relation. Without this direction a verifier could cover a relation by naming it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    coverage.observed(readBackMovements, row.observedRelation);\n",
+      "replacement": "    coverage.observed(readBackMovements, row.observedRelation);\n    coverage.observed(readBackMovements, binding.movement.tableName);\n",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the unchanged kernel admits"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed",
+          "expected": "verifiers executed for module relations this posting did not write: nsm_t_ktdpvib7oomhgxkzzv5morfey2npfz7bbvufk2gva23k5rwla2gq"
+        }
+      ]
+    },
+    {
+      "name": "token-minted-by-an-unregistered-verifier",
+      "claim": "COVERAGE MAY ONLY BE CLAIMED BY THE READ-BACK CONSTRUCTION PROVED FOR THE RELATION. The reservation rows are minted under the movement read-back's name, so the reservation relation carries a token from a verifier the registry does not bind to it. The ledger is checked against the same registry construction proved complete, and a token from the wrong verifier refuses; otherwise any verifier that happened to read a relation could stand in for the one that compares its columns.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    coverage.observed(assertMovementEffectReservations, row.observedRelation);\n",
+      "replacement": "    coverage.observed(readBackMovements, row.observedRelation);\n",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the unchanged kernel admits"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed",
+          "expected": "not registered against: nsm_t_ipzadmibr7q4oxpzxl6mpqmgun67xezijmchzquayzoygk6hnqqq by readBackMovements"
+        }
+      ]
+    },
+    {
+      "name": "version-four-digest-covers-the-derived-role",
+      "claim": "5g3-prog R2. Version 4 covers exactly the caller's input. This mutation restores the derived postingRole to the version-4 input -- the one kernel-derived value PUR-2b left in it -- and the stored digest becomes the role twin the test computes independently, which it must not be. The role is a pure function of the covered kind, so ADR-0063's own exclusion argument covers it; the test asserts the twin FIRST so this red is its own rather than the caller's-input red PUR-2b's identities control already owns.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "              ? callerStockCountInput(posting.command)\n",
+      "replacement": "              ? { postingRole: posting.postingRole, ...callerStockCountInput(posting.command) }\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "version-4 digest"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: the version-4 digest covers the caller's semantic input and not the identities the kernel derives",
+          "expected": "the stored digest must not cover the posting role the kernel derives from the kind"
+        }
+      ]
+    },
+    {
+      "name": "active-release-fact-never-read",
+      "claim": "5g3-prog R1, THE SUBJECT ABSENT. Remove the call that reads the active release's posting capability fact and a release declaring version 1 posts through a provider implementing 2 exactly as it did before this packet: validateRegistration compares the registration to the constant it was built from, and nothing else looks.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  await assertActiveReleaseDeclaresRegisteredCapabilityVersion(\n    client,\n    registration,\n  );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the provider does not implement is refused"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: a release declaring a posting capability version the provider does not implement is refused on posting",
+          "expected": "a release declaring version 1 must be refused by a provider implementing 2"
+        }
+      ]
+    },
+    {
+      "name": "active-release-fact-compared-as-a-floor",
+      "claim": "THE FLOOR RESTORED. hasValidCapabilityFacts accepts any version >= 1, and the round-1 reviewer of PUR-2b warned that a consumer could compare as exact what validation treats as a bound. This mutation makes the provider's own comparison that floor: the fact is read, it is a positive integer, and a release declaring 1 is served by a provider implementing 2. ADR-0063 decision 3 makes the number a major version with no minor axis, so the only correct rule is equality, and this is the proxy-satisfied vector for it.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  if (declared !== registration.capabilityVersion) {\n",
+      "replacement": "  if (!(Number(declared) >= 1)) {\n",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the provider does not implement is refused"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: a release declaring a posting capability version the provider does not implement is refused on posting",
+          "expected": "a release declaring version 1 must be refused by a provider implementing 2"
+        }
+      ]
+    },
+    {
+      "name": "active-release-fact-lookup-finds-nothing",
+      "claim": "THE CHECK READING ZERO INPUT. The manifest lookup is sent looking for a content hash that cannot exist, keeping the bound parameter referenced, so the fact query returns no row. An observer that finds nothing must refuse rather than pass, and this holds that refusal together with the lookup: an ordinary posting dies for the could-not-be-read reason instead of committing.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "        AND content_hash = $2`,\n    [registration.releaseId, registration.releaseContentHash],",
+      "replacement": "        AND content_hash = $2 || '_absent'`,\n    [registration.releaseId, registration.releaseContentHash],",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the unchanged kernel admits"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed",
+          "expected": "the active release manifest could not be read to check its posting capability fact"
+        }
+      ]
+    },
+    {
+      "name": "definition-detached-from-the-contract",
+      "claim": "THE DEFINITION STOPS READING THE CONTRACT. The module definition spells the posting capability version as a literal again, at the value it carried for three encodings' worth of drift. The posting fixture is compiled from the live definition, so its release declares 1 while the provider -- which imports the contract -- implements 2, and every posting refuses at the active-release check. This is the control that proves ONE authority: with the definition detached, the runtime observes the split on the first posting instead of every gate staying green.",
+      "file": "packages/domain/src/inventory/definition.ts",
+      "original": "        capabilityVersion: INVENTORY_CONTRACT_V1.capabilityVersion,\n",
+      "replacement": "        capabilityVersion: 1,\n",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "the unchanged kernel admits"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed",
+          "expected": "declares posting capability version 1 while the registered provider implements version 2"
+        }
+      ]
+    }
+  ]
+}

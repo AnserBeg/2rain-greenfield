@@ -2,6 +2,8 @@
 // application-wide by `LANG-ADOPT-v5`. This is unrelated to Inventory
 // dependency-set v4, which versions the posting capability inputs and does not
 // move with the language.
+import { INVENTORY_CONTRACT_V1 } from './contracts.js';
+
 const version = 'v5' as const;
 const normalizationProfileVersion = 'northstar.normalization/v5' as const;
 
@@ -217,7 +219,11 @@ export function inventoryModuleDefinition(
       },
       {
         capabilityId: definitionIds.postingCapabilityId,
-        capabilityVersion: 1,
+        // Read from the frozen contract, never spelled here: this is the value
+        // `buildCapabilityFacts` carries into a release manifest, and the
+        // provider refuses to post against a release whose fact differs from
+        // the version it implements (posting-kernel-admission).
+        capabilityVersion: INVENTORY_CONTRACT_V1.capabilityVersion,
         declaredEffects: ['appendFact'],
         kind: 'capabilityRequirement',
         requiredProjections: ['operation', 'surface', 'verification'],

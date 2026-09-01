@@ -715,6 +715,20 @@ function verifyReleaseManifestEnvelope(
   }
 }
 
+/**
+ * A SHAPE check on the declared facts, deliberately not a version check.
+ *
+ * posting-kernel-admission (5g3-prog R1) measured why the floor stays here:
+ * `createComposedApplicationRuntime` STAGES every lineage entry through
+ * `verifyCompiledRelease` on every boot, and eleven of the shipped lineage's
+ * entries declare the posting capability at the version the provider
+ * implemented when they were compiled. History must stay storable, and this
+ * generic repository knows capability IDs only, never which provider version
+ * is registered (see `capability-operation-executor-factory.ts`). The exact
+ * comparison -- a release's declared fact against the version the provider
+ * implements -- is made by the provider where it binds to the ACTIVE release,
+ * on every posting: `assertActiveRelease` in `inventory-posting-service.ts`.
+ */
 function hasValidCapabilityFacts(value: unknown): boolean {
   return (
     Array.isArray(value) &&

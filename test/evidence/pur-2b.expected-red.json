@@ -58,10 +58,10 @@
     },
     {
       "name": "capability-version-not-bumped",
-      "claim": "INVENTORY_POSTING_CAPABILITY_VERSION is 2 because PUR-2a changed the PUBLIC stock-count command's key set. All 21 of its references are symbolic, so nothing else in the matrix observes its VALUE and the constant could be moved back with every other gate green. This closes the subject-absent vector for the capability half: it is the only red in the repository that dies on the number itself.",
+      "claim": "INVENTORY_POSTING_CAPABILITY_VERSION is 2 because PUR-2a changed the PUBLIC stock-count command's key set. All 21 of its references are symbolic, so nothing else in the matrix observes its VALUE and the constant could be moved back with every other gate green. This closes the subject-absent vector for the capability half: it is the only red in the repository that dies on the number itself. UPDATED BY posting-kernel-admission (bridge, disclosed in its record): the constant is now imported from the frozen contract, so the mutation detaches the provider to a literal 1, and the red moved EARLIER -- the provider now refuses to post against a release declaring 2 before any result exists -- which is the same claim observed one layer sooner.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "export const INVENTORY_POSTING_CAPABILITY_VERSION = 2 as const;",
-      "replacement": "export const INVENTORY_POSTING_CAPABILITY_VERSION = 1 as const;",
+      "original": "export const INVENTORY_POSTING_CAPABILITY_VERSION =\n  INVENTORY_CONTRACT_V1.capabilityVersion;\n",
+      "replacement": "export const INVENTORY_POSTING_CAPABILITY_VERSION = 1 as const;\n",
       "test": {
         "files": ["test/postgres/inventory-stock-count.test.ts"],
         "namePattern": "version-4 digest"
@@ -70,7 +70,7 @@
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "PUR-2b: the version-4 digest covers the caller's semantic input and not the identities the kernel derives",
-          "expected": "a posting result must declare the capability version that produced it"
+          "expected": "declares posting capability version 2 while the registered provider implements version 1"
         }
       ]
     },

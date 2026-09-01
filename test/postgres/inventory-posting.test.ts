@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 
@@ -3843,6 +3844,270 @@ async function movementCount(database: PostingDatabase): Promise<number> {
   );
   return Number(result.rows[0]?.count ?? '-1');
 }
+
+// ---------------------------------------------------------------------------
+// posting-kernel-admission (5g3-prog R1 + R3). The cross-layer admission map
+// for the posting kernel: the version a release DECLARES is checked against
+// the version the provider IMPLEMENTS on every posting, and the verifiers that
+// EXECUTED are compared exactly with the relations the transaction WROTE.
+// ---------------------------------------------------------------------------
+
+/**
+ * The admission twin for everything below: an unchanged kernel admits a
+ * posting whose every written relation was observed by an executed verifier,
+ * and whose active release declares exactly the version the provider
+ * implements. Every mutation in the packet's expected-red manifest that turns
+ * a green posting red kills THIS test, so its name is the manifest's pattern.
+ */
+test('posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed', async () => {
+  await withPostingDatabase(async (database) => {
+    const posting = command({
+      legalEntityId: legalReject,
+      sourceId: 'admission-twin',
+    });
+    await seedDraft(database, posting);
+    const outcome = await settlePosting(
+      database.service.postAdjustment(
+        database.context,
+        database.actor,
+        posting,
+      ),
+    );
+    assert.equal(
+      outcome.status,
+      'fulfilled',
+      `the unchanged kernel must admit an ordinary posting: ${JSON.stringify(outcome)}`,
+    );
+    if (outcome.status !== 'fulfilled') return;
+    assert.equal(outcome.value.movements.length, 1);
+    assert.equal(
+      outcome.value.capabilityVersion,
+      INVENTORY_POSTING_CAPABILITY_VERSION,
+    );
+    assert.equal(await movementCountBySource(database, posting.sourceId), 1);
+    assert.equal(await receiptCountByKey(database, posting.idempotencyKey), 1);
+  });
+});
+
+/**
+ * R3, the survivor the review named. `assertObservedWriteSetIsDerived` asks
+ * only whether a written relation is DERIVED, and construction asks only
+ * whether a derived relation has a verifier REGISTERED. A relation that is
+ * derived and registered but written on a path whose verifier does not run
+ * satisfies both. The transaction LINE is exactly that on the adjustment path:
+ * its registered verifier is `assertCompanionIdentitiesPersisted`, which runs
+ * only for a companion-origin family. A trigger the target knows nothing about
+ * writes it on the movement insert, and the posting must refuse before commit,
+ * naming the relation.
+ */
+test(
+  'posting kernel admission: a derived relation written on a path whose verifier did not run is refused before commit, naming the relation',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      const posting = command({
+        legalEntityId: legalReject,
+        sourceId: 'unverified-line-writer',
+      });
+      await seedDraft(database, posting);
+      const lineTable = table(
+        database.binding,
+        database.binding.transactionLine,
+      );
+      const revision = quoted(database.binding.transactionLine.revisionColumn);
+      await database.adminPool.query(
+        `CREATE FUNCTION public.pka_unverified_line_writer()
+           RETURNS trigger LANGUAGE plpgsql AS $body$
+           BEGIN
+             UPDATE ${lineTable} SET ${revision} = ${revision}
+              WHERE tenant_id = NEW.tenant_id
+                AND environment_id = NEW.environment_id;
+             RETURN NEW;
+           END
+           $body$;
+         CREATE TRIGGER pka_unverified_line_writer
+           AFTER INSERT ON ${table(database.binding, database.binding.movement)}
+           FOR EACH ROW EXECUTE FUNCTION public.pka_unverified_line_writer()`,
+      );
+      let outcome: PostingOutcome;
+      try {
+        outcome = await settlePosting(
+          database.service.postAdjustment(
+            database.context,
+            database.actor,
+            posting,
+          ),
+        );
+      } finally {
+        await database.adminPool.query(
+          `DROP TRIGGER IF EXISTS pka_unverified_line_writer
+             ON ${table(database.binding, database.binding.movement)};
+           DROP FUNCTION IF EXISTS public.pka_unverified_line_writer()`,
+        );
+      }
+      assert.equal(
+        outcome.status,
+        'rejected',
+        `a written relation no executed verifier observed must refuse the posting before commit: ${JSON.stringify(outcome)}`,
+      );
+      assertRejectedPosting(
+        testContext,
+        'unverified-line-writer',
+        outcome,
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+      );
+      const reason = String(
+        outcome.status === 'rejected' ? outcome.reason : '',
+      );
+      assert.match(
+        reason,
+        /wrote module relations no executed verifier observed/u,
+      );
+      // Named, so an operator learns WHICH relation rather than that one exists.
+      assert.match(
+        reason,
+        new RegExp(database.binding.transactionLine.tableName, 'u'),
+      );
+      // Nothing committed: refused before the trust document and the receipt.
+      assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+      assert.equal(
+        await receiptCountByKey(database, posting.idempotencyKey),
+        0,
+      );
+    });
+  },
+);
+
+/**
+ * R1, the refusing direction. A release compiled from a definition that
+ * declares the posting capability at version 1 -- consistent with itself, so
+ * the compiler admits it -- is refused by a provider implementing version 2,
+ * on the first posting, before configuration is even loaded. The admitting
+ * direction is every other posting test in this file: the fixture release
+ * declares what the provider implements, because both read the contract.
+ */
+test(
+  'posting kernel admission: a release declaring a posting capability version the provider does not implement is refused on posting',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      const fixture = await compiledFixture();
+      const declaredVersionOne = structuredClone(fixture.inventoryDefinition);
+      const requirements = declaredVersionOne.capabilityRequirements;
+      assert.ok(Array.isArray(requirements));
+      const posting = requirements.find(
+        (requirement) =>
+          isRecord(requirement) &&
+          requirement.capabilityId === postingCapabilityId,
+      );
+      assert.ok(
+        isRecord(posting),
+        'the fixture declares the posting capability',
+      );
+      assert.equal(
+        posting.capabilityVersion,
+        INVENTORY_POSTING_CAPABILITY_VERSION,
+        'the fixture definition must declare what the provider implements, because both read the contract',
+      );
+      posting.capabilityVersion = 1;
+      const compiled = mustCompile(
+        moduleInput(
+          declaredVersionOne,
+          expectedActiveReleaseFrom(fixture.inventory),
+        ),
+      );
+      const declaredFact = compiled.bundle.releaseManifest.capabilityFacts.find(
+        (fact) => fact.capabilityId === postingCapabilityId,
+      );
+      assert.equal(declaredFact?.capabilityVersion, 1);
+      const [releaseId] = await persistSequence(
+        database.runtimePool,
+        database.context,
+        [[compiled, declaredVersionOne]],
+      );
+      assert.ok(releaseId);
+      await setPointer(database.adminPool, releaseId);
+      const service = new PostgresInventoryPostingService(
+        database.runtimePool,
+        {
+          ...database.registration,
+          releaseContentHash: compiled.releaseRoot,
+          releaseId,
+        },
+        { currentInstant: () => recordedAt },
+      );
+      const draft = command({
+        legalEntityId: legalReject,
+        sourceId: 'declared-version-one',
+      });
+      await seedDraft(database, draft);
+      const outcome = await settlePosting(
+        service.postAdjustment(database.context, database.actor, draft),
+      );
+      assert.equal(
+        outcome.status,
+        'rejected',
+        `a release declaring version 1 must be refused by a provider implementing ${String(INVENTORY_POSTING_CAPABILITY_VERSION)}: ${JSON.stringify(outcome)}`,
+      );
+      assertRejectedPosting(
+        testContext,
+        'declared-version-one',
+        outcome,
+        'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      );
+      const reason = String(
+        outcome.status === 'rejected' ? outcome.reason : '',
+      );
+      assert.match(
+        reason,
+        new RegExp(
+          `declares posting capability version 1 while the registered provider implements version ${String(INVENTORY_POSTING_CAPABILITY_VERSION)}`,
+          'u',
+        ),
+      );
+      assert.equal(await movementCountBySource(database, draft.sourceId), 0);
+      assert.equal(await receiptCountByKey(database, draft.idempotencyKey), 0);
+    });
+  },
+);
+
+/**
+ * R1, the shipped artifact. The head release the runtime loads must declare
+ * the version this provider implements. This is the deterministic half of the
+ * admission map: the runtime check above refuses a stale artifact on the first
+ * posting, and this reds the matrix the moment the artifact is stale, before
+ * anything is deployed. PUR-2b measured the head release saying 1 while the
+ * provider said 2, and every gate stayed green.
+ */
+test('posting kernel admission: the shipped head release declares the posting capability version the provider implements', async () => {
+  const artifact = JSON.parse(
+    await readFile(resolve('apps/web/release/app.compiled.json'), 'utf8'),
+  ) as {
+    applications: Array<{
+      releaseManifest: {
+        capabilityFacts: Array<{
+          capabilityId: string;
+          capabilityVersion: number;
+        }>;
+      };
+    }>;
+  };
+  const head = artifact.applications.at(-1);
+  assert.ok(head, 'the compiled artifact has a head release');
+  const facts = head.releaseManifest.capabilityFacts.filter(
+    (fact) => fact.capabilityId === postingCapabilityId,
+  );
+  assert.equal(
+    facts.length,
+    1,
+    'the head release declares the posting capability exactly once',
+  );
+  assert.equal(
+    facts[0]!.capabilityVersion,
+    INVENTORY_POSTING_CAPABILITY_VERSION,
+    'the shipped head release must declare the posting capability version the provider implements; regenerate apps/web/release/** when the contract moves',
+  );
+});
 
 async function companionCount(database: PostingDatabase): Promise<number> {
   const result = await database.adminPool.query<{ count: string }>(
