@@ -133,12 +133,12 @@
       "replacement": "",
       "test": {
         "files": ["test/postgres/trust-substrate.test.ts"],
-        "namePattern": "migrations 0006-0022 upgrade accepted G1"
+        "namePattern": "migrations upgrade accepted G1"
       },
       "kills": [
         {
           "file": "test/postgres/trust-substrate.test.ts",
-          "name": "migrations 0006-0022 upgrade accepted G1 and converge with the checked-in snapshot",
+          "name": "migrations upgrade accepted G1 and converge with the checked-in snapshot",
           "expected": "physical schema differs from schema\\.snapshot\\.json"
         }
       ]

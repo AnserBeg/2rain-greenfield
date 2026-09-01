@@ -229,6 +229,18 @@ export const STORAGE_COMPATIBILITY_MATRIX: Readonly<
     oldRead: 'compatible',
     oldWrite: 'compatible',
   }),
+  widenEnumDomain: Object.freeze({
+    admission: 'additive',
+    newRead: 'compatible',
+    newWrite: 'compatible',
+    // The same cell as `relaxNotNull`, for the same reason. A reader compiled
+    // against the previous release models the field as one of N options; the
+    // moment a NEW writer stores the (N+1)th, that old reader observes a value
+    // its model does not name. Reads do not reject, so this is not
+    // `mayReject` -- it is the fallback burden on the OLD side.
+    oldRead: 'requiresReadFallback',
+    oldWrite: 'compatible',
+  }),
 });
 
 export interface StorageTargetPayloadV1 {
@@ -1867,8 +1879,11 @@ export function buildStorageTransitionEnvelope(
     const oldFields = new Map(
       oldEntity.columns.map((field) => [field.canonicalFieldId, field]),
     );
-    const oldChecks = new Set(
-      (oldEntity.checkConstraints ?? []).map((check) => check.physicalName),
+    const oldChecks = new Map(
+      (oldEntity.checkConstraints ?? []).map((check) => [
+        check.physicalName,
+        check,
+      ]),
     );
     const newFields = new Map(
       entity.columns.map((field) => [field.canonicalFieldId, field]),
@@ -1899,7 +1914,8 @@ export function buildStorageTransitionEnvelope(
       if (
         oldField &&
         oldField.shapeFingerprint !== field.shapeFingerprint &&
-        !isAdditiveSearchMappingTransition(oldField, field)
+        !isAdditiveSearchMappingTransition(oldField, field) &&
+        !isAdditiveEnumDomainTransition(oldField, field)
       ) {
         return failureDiagnostic(
           'COMPILER_STORAGE_RETYPE_UNSUPPORTED',
@@ -1997,7 +2013,48 @@ export function buildStorageTransitionEnvelope(
       }
     }
     for (const check of entity.checkConstraints) {
-      if (oldChecks.has(check.physicalName)) continue;
+      const oldCheck = oldChecks.get(check.physicalName);
+      if (oldCheck) {
+        // The physical name derives from the field id alone, so a constraint
+        // whose DEFINITION moved still matches by name. Matching by name only
+        // is the gap `PUR-2c` measured: a widened option list compiled,
+        // prepared and activated with zero elements, and the live CHECK kept
+        // refusing the option the release advertised. Compare the definition.
+        if (
+          hashCanonical(
+            `${HASH_DOMAINS.projectionSemantic}/storage-check-transition-shape`,
+            oldCheck,
+          ).digest ===
+          hashCanonical(
+            `${HASH_DOMAINS.projectionSemantic}/storage-check-transition-shape`,
+            check,
+          ).digest
+        ) {
+          continue;
+        }
+        if (widensEnumDomain(oldCheck, check)) {
+          elements.push(
+            element(
+              'widenEnumDomain',
+              entity.entityId,
+              check.canonicalFieldId,
+              check.physicalName,
+              [],
+              'existing',
+            ),
+          );
+          continue;
+        }
+        // Any other definition change on a released constraint is refused.
+        // The column predicate above already refuses every non-widening
+        // option-list change, so this branch is a second, independent fence
+        // for a check whose column somehow passed -- it fails closed.
+        return failureDiagnostic(
+          'COMPILER_STORAGE_RETYPE_UNSUPPORTED',
+          '$.fields.fieldType',
+          check.canonicalFieldId,
+        );
+      }
       elements.push(
         element(
           'addNotValidConstraint',
@@ -2263,6 +2320,110 @@ function isAdditiveSearchMappingTransition(
   );
 }
 
+/**
+ * A released enum field whose option list grew, and NOTHING ELSE moved.
+ *
+ * `lowerColumn` hashes `shapeFingerprint` over `fieldType` wholesale, and an
+ * enum's `fieldType` carries its options, so every option-list change presents
+ * to the planner as a retype. The physical column is `text` before and after.
+ * This predicate admits exactly the monotonic superset: every previous option
+ * id is still present, at least one is new, and the column compared without
+ * its option list and its fingerprint is identical. A narrowing, a rebinding
+ * (one id replaced by another, count constant), a label-only change (equal
+ * sets) and a widening combined with any other column change all return
+ * false and keep `COMPILER_STORAGE_RETYPE_UNSUPPORTED`.
+ *
+ * A previous target lowered before field contracts existed carries no
+ * `fieldContract`; such a pair is not a widening this predicate can judge and
+ * it returns false rather than guessing.
+ */
+function isAdditiveEnumDomainTransition(
+  previous: StorageColumnTarget,
+  candidate: StorageColumnTarget,
+): boolean {
+  if (
+    !Object.hasOwn(previous, 'fieldContract') ||
+    !Object.hasOwn(candidate, 'fieldContract') ||
+    previous.fieldContract.fieldKind !== 'enumFieldType' ||
+    candidate.fieldContract.fieldKind !== 'enumFieldType'
+  ) {
+    return false;
+  }
+  if (
+    !isStrictOptionSuperset(
+      previous.fieldContract.enumOptionIds,
+      candidate.fieldContract.enumOptionIds,
+    )
+  ) {
+    return false;
+  }
+  const comparableShape = (column: StorageColumnTarget) => {
+    const {
+      fieldContract: { enumOptionIds: _enumOptionIds, ...contract },
+      shapeFingerprint: _shapeFingerprint,
+      ...rest
+    } = column;
+    void _enumOptionIds;
+    void _shapeFingerprint;
+    return { ...rest, fieldContract: contract };
+  };
+  return (
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-column-transition-shape`,
+      comparableShape(previous),
+    ).digest ===
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-column-transition-shape`,
+      comparableShape(candidate),
+    ).digest
+  );
+}
+
+/**
+ * The same monotonic-superset rule, stated on the enum-domain CHECK itself.
+ *
+ * **Exported because the provider imports it**, for the reason
+ * `relaxesRelationRequiredness` gives above: the materializer must recognise
+ * the same widening when two accounted live roots disagree about one
+ * constraint's option list, and a second copy of this rule is the drift that
+ * already happened once. Both members must be the SAME constraint -- same
+ * field, same physical name, same kind, both `NOT VALID` -- and the candidate's
+ * option set must strictly contain the previous one.
+ */
+export function widensEnumDomain(
+  previous: StorageCheckConstraintTarget,
+  candidate: StorageCheckConstraintTarget,
+): boolean {
+  return (
+    previous.canonicalFieldId === candidate.canonicalFieldId &&
+    previous.physicalName === candidate.physicalName &&
+    previous.checkKind === 'enumDomain' &&
+    candidate.checkKind === 'enumDomain' &&
+    previous.validated === false &&
+    candidate.validated === false &&
+    isStrictOptionSuperset(previous.enumOptionIds, candidate.enumOptionIds)
+  );
+}
+
+function isStrictOptionSuperset(
+  previous: readonly string[],
+  candidate: readonly string[],
+): boolean {
+  const previousSet = new Set(previous);
+  const candidateSet = new Set(candidate);
+  if (
+    previousSet.size !== previous.length ||
+    candidateSet.size !== candidate.length
+  ) {
+    return false;
+  }
+  if (candidateSet.size <= previousSet.size) return false;
+  for (const optionId of previousSet) {
+    if (!candidateSet.has(optionId)) return false;
+  }
+  return true;
+}
+
 export function classifyStorageTransitionElement(
   kind: StorageTransitionElementKind,
   objectOrigin: 'samePlan' | 'existing',
@@ -2375,6 +2536,21 @@ export function classifyStorageTransitionElement(
           operationalRisk: 'longRunning',
           preparationValidity: 'deferredTightening',
           semanticEffect: 'tightening',
+        };
+      case 'widenEnumDomain':
+        // The enum-domain CHECK is replaced by a superset of itself, NOT VALID
+        // before and after, so PostgreSQL scans no rows and rewrites none:
+        // catalogOnly. The replacement is one `ALTER TABLE ... DROP CONSTRAINT,
+        // ADD CONSTRAINT` statement under ACCESS EXCLUSIVE, measured at
+        // milliseconds against 200k rows -- the same bounded catalog lock as
+        // `addColumn`. It is `preApprovalInert` by the planner's own rule: it
+        // can never reject a write, because every value the old constraint
+        // admitted is admitted by the new one.
+        return {
+          dataEffect: 'catalogOnly',
+          operationalRisk: 'boundedCatalogLock',
+          preparationValidity: 'preApprovalInert',
+          semanticEffect: 'additive',
         };
     }
   })();

@@ -14,6 +14,7 @@ import {
   STORAGE_TARGET_PAYLOAD_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   relaxesRelationRequiredness,
+  widensEnumDomain,
   type StorageRendererStatement,
   type StorageTargetPayloadV1,
   type StorageTransitionElement,
@@ -1354,6 +1355,12 @@ async function applyDdlElement(
         await ensureEnumCheckConstraint(client, located.entity, located.check);
       }
       return;
+    case 'widenEnumDomain':
+      {
+        const located = locateCheckConstraint(target, element);
+        await widenEnumDomainCheck(client, located.entity, located.check);
+      }
+      return;
     case 'duplicateScan':
     case 'tightenNotNull':
     case 'validateConstraint':
@@ -2470,6 +2477,97 @@ async function ensureEnumCheckConstraint(
   if (exists.rows[0]?.present) return;
   await client.query(
     `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)}
+       ADD CONSTRAINT ${quoted(check.physicalName)}
+       CHECK (${enumCheckExpression(entity, check)}) NOT VALID`,
+  );
+}
+
+/**
+ * Replace the enum-domain CHECK with a superset of itself, in ONE statement.
+ *
+ * `ALTER TABLE ... DROP CONSTRAINT k, ADD CONSTRAINT k CHECK (...) NOT VALID`
+ * is a single ALTER TABLE, so the two sub-commands commit together with the
+ * enclosing prepare transaction or not at all. Measured against a 200k-row
+ * table: 6 ms, ACCESS EXCLUSIVE for the transaction's remaining life, no row
+ * scan (NOT VALID before and after), concurrent writers of old AND new values
+ * block on the relation lock and then succeed, a lock-free catalog read from a
+ * third session sees exactly one constraint throughout, and a backend killed
+ * mid-transaction leaves the old constraint with its old OID. There is no
+ * interval in which the table carries no membership constraint.
+ *
+ * Three dispositions, decided against the LIVE definition rather than against
+ * the source root, because the managed tables are tenant-shared and another
+ * tenant may already have widened further:
+ *   - absent               -> added NOT VALID (recovery of a missing check);
+ *   - target ⊆ live        -> nothing to do (replay, or a wider sibling root);
+ *   - live ⊂ target        -> replaced;
+ *   - anything else        -> refused. This element never narrows.
+ *
+ * The live option set is read back from `pg_get_expr` by extracting the text
+ * literals this materializer itself renders, and the extraction is checked by
+ * ROUND TRIP: re-rendering the extracted set must reproduce the live
+ * definition exactly, or the definition is not one this code wrote and it
+ * refuses rather than guesses.
+ */
+async function widenEnumDomainCheck(
+  client: PoolClient,
+  entity: StorageEntityTarget,
+  check: StorageEntityTarget['checkConstraints'][number],
+): Promise<void> {
+  const live = await client.query<{ definition: string; validated: boolean }>(
+    `SELECT pg_get_expr(
+              constraint_record.conbin,
+              constraint_record.conrelid,
+              true
+            ) AS definition,
+            constraint_record.convalidated AS validated
+       FROM pg_constraint AS constraint_record
+       JOIN pg_class AS relation_record
+         ON relation_record.oid = constraint_record.conrelid
+       JOIN pg_namespace AS namespace_record
+         ON namespace_record.oid = relation_record.relnamespace
+      WHERE namespace_record.nspname = 'north_star_module'
+        AND relation_record.relname = $1
+        AND constraint_record.conname = $2
+        AND constraint_record.contype = 'c'`,
+    [entity.physicalTableName, check.physicalName],
+  );
+  const current = live.rows[0];
+  if (!current) {
+    await ensureEnumCheckConstraint(client, entity, check);
+    return;
+  }
+  const liveDefinition = normalizeSqlExpressionRequired(current.definition);
+  const liveOptionIds = [
+    ...current.definition.matchAll(/'((?:[^']|'')*)'::text/gu),
+  ].map((match) => match[1]!.replaceAll("''", "'"));
+  const roundTrip = normalizeSqlExpressionRequired(
+    enumCheckExpression(entity, { ...check, enumOptionIds: liveOptionIds }),
+  );
+  if (roundTrip !== liveDefinition) {
+    throw failure(
+      'ENUM_DOMAIN_DEFINITION_UNRECOGNIZED',
+      `${entity.physicalTableName}.${check.physicalName} does not carry a definition this materializer renders: ${current.definition}`,
+    );
+  }
+  const liveSet = new Set(liveOptionIds);
+  const targetSet = new Set(check.enumOptionIds);
+  const targetWithinLive = [...targetSet].every((optionId) =>
+    liveSet.has(optionId),
+  );
+  if (targetWithinLive) return;
+  const liveWithinTarget = [...liveSet].every((optionId) =>
+    targetSet.has(optionId),
+  );
+  if (!liveWithinTarget) {
+    throw failure(
+      'ENUM_DOMAIN_NARROWING_REJECTED',
+      `${entity.physicalTableName}.${check.physicalName} admits options the target does not; this element only widens`,
+    );
+  }
+  await client.query(
+    `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)}
+       DROP CONSTRAINT ${quoted(check.physicalName)},
        ADD CONSTRAINT ${quoted(check.physicalName)}
        CHECK (${enumCheckExpression(entity, check)}) NOT VALID`,
   );
@@ -4865,6 +4963,35 @@ async function loadAccountedLiveTargets(
   return targets;
 }
 
+/**
+ * A column's field contract, viewed as the enum-domain CHECK it implies, so the
+ * compiler's one widening rule can judge both. The physical name is fixed to a
+ * placeholder because the rule compares the two members against each other,
+ * not against the catalog.
+ */
+function enumDomainShadow(
+  column: StorageEntityTarget['columns'][number],
+): StorageEntityTarget['checkConstraints'][number] {
+  return {
+    canonicalFieldId: column.canonicalFieldId,
+    checkKind: 'enumDomain',
+    enumOptionIds: column.fieldContract.enumOptionIds,
+    physicalName: column.physicalName,
+    validated: false,
+  };
+}
+
+function withoutOptionIds(
+  contract: StorageEntityTarget['columns'][number]['fieldContract'],
+): Omit<
+  StorageEntityTarget['columns'][number]['fieldContract'],
+  'enumOptionIds'
+> {
+  const { enumOptionIds: _enumOptionIds, ...rest } = contract;
+  void _enumOptionIds;
+  return rest;
+}
+
 function mergeExpectedTables(
   targets: readonly StorageTargetPayloadV1[],
 ): Map<string, StorageEntityTarget> {
@@ -4936,6 +5063,38 @@ function mergeCompatibleEntity(
       name(leftValue).localeCompare(name(rightValue)),
     );
   };
+  // Two accounted live roots may disagree about ONE enum-domain CHECK's option
+  // list, and only by a widening. The physical constraint is the wider one --
+  // the widening DDL has already run against the shared table -- so the
+  // expected shape is the superset, and every other divergence still
+  // conflicts. The rule is the compiler's, imported rather than restated.
+  const mergeCheckConstraints = (): StorageEntityTarget['checkConstraints'] => {
+    const values = new Map(
+      (prior.checkConstraints ?? []).map((check) => [
+        check.physicalName,
+        check,
+      ]),
+    );
+    for (const check of next.checkConstraints ?? []) {
+      const existing = values.get(check.physicalName);
+      if (!existing || canonicalize(existing) === canonicalize(check)) {
+        values.set(check.physicalName, check);
+        continue;
+      }
+      if (widensEnumDomain(existing, check)) {
+        values.set(check.physicalName, check);
+        continue;
+      }
+      if (widensEnumDomain(check, existing)) continue;
+      throw failure(
+        'LIVE_SET_SHAPE_CONFLICT',
+        `conflicting live roots claim ${next.physicalTableName}.${check.physicalName}`,
+      );
+    }
+    return [...values.values()].toSorted((left, right) =>
+      left.physicalName.localeCompare(right.physicalName),
+    );
+  };
   const mergeColumns = (): StorageEntityTarget['columns'] => {
     const values = new Map(
       prior.columns.map((column) => [column.physicalName, column]),
@@ -4973,6 +5132,22 @@ function mergeCompatibleEntity(
         new Set([existing.searchMapping, column.searchMapping]).has(
           'normalizedTextIndex',
         );
+      // A field contract whose option list widened is the column-side shadow
+      // of the CHECK tolerance above: same contract otherwise, and one option
+      // set strictly containing the other, in either direction.
+      const enumDomainWidened =
+        Object.hasOwn(existing, 'fieldContract') &&
+        Object.hasOwn(column, 'fieldContract') &&
+        (widensEnumDomain(
+          enumDomainShadow(existing),
+          enumDomainShadow(column),
+        ) ||
+          widensEnumDomain(
+            enumDomainShadow(column),
+            enumDomainShadow(existing),
+          )) &&
+        canonicalize(withoutOptionIds(existing.fieldContract)) ===
+          canonicalize(withoutOptionIds(column.fieldContract));
       const contractsMatch =
         !Object.hasOwn(existing, 'fieldContract') ||
         !Object.hasOwn(column, 'fieldContract') ||
@@ -4983,8 +5158,28 @@ function mergeCompatibleEntity(
         contractsMatch &&
         canonicalize(withoutSearchMetadata(existing)) ===
           canonicalize(withoutSearchMetadata(column));
+      // `shapeFingerprint` covers `fieldType` wholesale and therefore moves
+      // with the option list, so the widened pair is compared without it --
+      // the same exclusion the additive search-mapping pair already needs.
+      const withoutContractAndFingerprint = (
+        value: StorageEntityTarget['columns'][number],
+      ) => {
+        const {
+          fieldContract: _fieldContract,
+          shapeFingerprint: _shapeFingerprint,
+          ...shape
+        } = value;
+        void _fieldContract;
+        void _shapeFingerprint;
+        return shape;
+      };
+      const enumDomainWideningIsCompatible =
+        enumDomainWidened &&
+        canonicalize(withoutContractAndFingerprint(existing)) ===
+          canonicalize(withoutContractAndFingerprint(column));
       if (
         !additiveSearchMappingIsCompatible &&
+        !enumDomainWideningIsCompatible &&
         (canonicalize(withoutContract(existing)) !==
           canonicalize(withoutContract(column)) ||
           !contractsMatch)
@@ -4993,6 +5188,14 @@ function mergeCompatibleEntity(
           'LIVE_SET_SHAPE_CONFLICT',
           `conflicting live roots claim ${next.physicalTableName}.${column.physicalName}`,
         );
+      }
+      // The wider contract is the physical truth; a narrower sibling root does
+      // not replace it.
+      if (
+        enumDomainWideningIsCompatible &&
+        widensEnumDomain(enumDomainShadow(column), enumDomainShadow(existing))
+      ) {
+        continue;
       }
       if (
         Object.hasOwn(column, 'fieldContract') &&
@@ -5080,11 +5283,7 @@ function mergeCompatibleEntity(
       next.abiFunctionChecks ?? [],
       (value) => value.physicalName,
     ),
-    checkConstraints: mergeNamed(
-      prior.checkConstraints ?? [],
-      next.checkConstraints ?? [],
-      (value) => value.physicalName,
-    ),
+    checkConstraints: mergeCheckConstraints(),
     columns: mergeColumns(),
     derivedStateFields: mergeNamed(
       prior.derivedStateFields,
