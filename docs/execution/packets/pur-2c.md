@@ -514,17 +514,26 @@ disposition. **Round 1 also found the prompt itself steering in two ways; both
 are corrected below and you should check whether the correction took.**
 
 **Repository:** `github.com/AnserBeg/2rain-greenfield`. **Branch:**
-`packet/pur-2c`. **Frozen SHA:** `<FROZEN_SHA>`.
+`packet/pur-2c`. **Frozen SHA:** `4c68e4c21fbfa9ff4656aa30af4f7185d2498c7a`.
 **Delta to read:** `8c417528db942f0a504c7744e56f816e770702c7..packet/pur-2c`.
 
 ```
-<LS_REMOTE>
+$ git ls-remote origin refs/heads/packet/pur-2c
+4c68e4c21fbfa9ff4656aa30af4f7185d2498c7a	refs/heads/packet/pur-2c
 ```
 
 **Round 1 could not open the target at all** — the branch was unpushed. It is
-pushed now, and the `git ls-remote` output above is quoted from this machine.
-Confirm the SHA resolves for you before starting; if it does not, stop and say
-so rather than reviewing a different object.
+pushed now, and the `git ls-remote` output above is quoted from this machine
+after that push.
+
+**About the head, so it is not a surprise.** `4c68e4c` is the commit carrying
+this record complete. A prompt cannot name its own hash, so the branch head sits
+**one commit above it**, and that commit's entire content is the SHA line, this
+paragraph, and the `ls-remote` block. Both SHAs are on the remote.
+`git log --oneline 4c68e4c..packet/pur-2c` shows exactly one narrative commit
+and `git diff 4c68e4c..packet/pur-2c` shows only this section — **verify that
+rather than take it.** Review the branch head. No executable byte differs
+anywhere in this range, or between it and `main`.
 
 **Tier: Mechanical by the diff — zero executable bytes change.** Verify with
 `git diff --stat main -- . ':(exclude)docs/**'`, which should be empty. Round 1
