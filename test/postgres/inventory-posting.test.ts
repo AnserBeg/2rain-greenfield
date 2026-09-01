@@ -4029,6 +4029,18 @@ test(
       );
       assert.ok(releaseId);
       await setPointer(database.adminPool, releaseId);
+      // The scope's configuration is re-pointed at the declared-1 release so
+      // that the ONLY thing standing between this posting and a commit is the
+      // capability-fact check: without this, a kernel with the check deleted
+      // would still be refused one step later by the configuration's
+      // release-root comparison, and the control would observe nothing.
+      const repointed = await database.adminPool.query(
+        `UPDATE platform.inventory_posting_configurations
+            SET contract_release_root = $4
+          WHERE tenant_id = $1 AND environment_id = $2 AND legal_entity_id = $3`,
+        [tenantId, environmentId, legalReject, compiled.releaseRoot],
+      );
+      assert.equal(repointed.rowCount, 1);
       const service = new PostgresInventoryPostingService(
         database.runtimePool,
         {
