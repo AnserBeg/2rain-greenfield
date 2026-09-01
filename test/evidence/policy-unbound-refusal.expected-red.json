@@ -4,10 +4,10 @@
   "entries": [
     {
       "name": "unbound-check-removed",
-      "claim": "The rule's unbound half is what refuses a declared permission nothing acknowledges: comparing the acknowledgement lookup against null instead of undefined makes the branch unreachable, and a permission declared on the composed application with no acknowledgement then compiles silently -- the exact vacuum R7 named. The fail-closed shape rides the same branch: an unreadable list refuses every declared permission only because this branch fires, so it dies with them.",
+      "claim": "The rule's unbound half is what refuses a declared permission nothing acknowledges: skipping the branch body with a bare continue leaves a permission declared on the composed application with no acknowledgement compiling silently -- the exact vacuum R7 named, with nothing thrown and nothing emitted. The fail-closed shape rides the same branch: an unreadable list refuses every declared permission only because this branch fires, so it dies with them.",
       "file": "packages/compiler/src/conformance.ts",
       "original": "    if (acknowledged === undefined) {\n      diagnostics.push(\n        compilerDiagnostic(\n          'COMPILER_PERMISSION_EVALUATOR_UNBOUND',",
-      "replacement": "    if (acknowledged === null) {\n      diagnostics.push(\n        compilerDiagnostic(\n          'COMPILER_PERMISSION_EVALUATOR_UNBOUND',",
+      "replacement": "    if (acknowledged === undefined) {\n      continue;\n      diagnostics.push(\n        compilerDiagnostic(\n          'COMPILER_PERMISSION_EVALUATOR_UNBOUND',",
       "test": {
         "files": ["test/compiler/g2-module-conformance.test.ts"],
         "namePattern": "unbound-permission acknowledgement"
