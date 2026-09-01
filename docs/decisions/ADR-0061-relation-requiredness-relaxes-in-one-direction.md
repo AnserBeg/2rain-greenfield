@@ -1,7 +1,7 @@
 # ADR-0061: Relation requiredness relaxes, in one direction, at prepare time
 
 Date: 2026-08-26
-Status: proposed
+Status: accepted (packet `relation-requiredness-relaxation`, merge `0a1e26a`, 2026-08-31; status line swept 2026-09-01 on `5g3-prog` R6)
 Tier: Critical (review per `review-tiers`)
 
 **Numbered 0061, not 0060, on purpose.** `packet/pur-2a` — the unmerged packet

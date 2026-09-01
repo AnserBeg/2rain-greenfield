@@ -1,7 +1,7 @@
 # ADR-0062: The writer inventory is derived from the compiled storage target
 
 Date: 2026-08-26
-Status: PROPOSED
+Status: accepted (packet `posting-writer-inventory`, merge `379acfe`, 2026-08-31 on narrowed claims by user ruling; status line swept 2026-09-01 on `5g3-prog` R6)
 Tier: Critical (review per `review-tiers`)
 
 Written after construction and measurement, in the sequencing

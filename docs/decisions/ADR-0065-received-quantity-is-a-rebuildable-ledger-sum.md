@@ -1,8 +1,10 @@
 # ADR-0065: Received quantity is a rebuildable ledger sum, and over-receipt is refused inside the posting transaction
 
 Date: 2026-09-01
-Status: proposed (packet `received-quantity-ruling`; a document packet, so the
-human read is the review)
+Status: accepted (packet `received-quantity-ruling`, merge `4fe5589`, 2026-09-01; a
+document packet, so the human read is the review — the lane recorded acceptance
+itself; the orchestrator's full read against the tree is recorded as a
+`local-confirm` in `docs/execution/program-reviews/2026-09-01-inventory-ledger.md` §6)
 Tier: Behavioral (the packet ships one ADR and its record and touches no
 executable path; the packets that BUILD against it are Critical)
 

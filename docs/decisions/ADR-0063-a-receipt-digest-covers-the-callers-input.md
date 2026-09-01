@@ -1,7 +1,7 @@
 # ADR-0063: A receipt digest covers the caller's input, and versions when that input changes
 
 Date: 2026-08-31
-Status: proposed
+Status: accepted (packet `PUR-2b`, merge `2e85696`, 2026-09-01; status line swept the same day on `5g3-prog` R6). **Amendment owed by `posting-kernel-admission`:** `5g3-prog` R2 measured that the version-4 digest input includes the derived `postingRole`, which this ADR's own exclusion argument covers; the packet corrects the input and amends the text.
 Tier: Critical (review per `review-tiers`)
 
 Extends [ADR-0060](ADR-0060-a-posting-family-declares-whether-the-kernel-writes-its-companion.md),

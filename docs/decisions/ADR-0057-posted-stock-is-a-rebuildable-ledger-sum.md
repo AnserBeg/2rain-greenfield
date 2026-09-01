@@ -189,3 +189,23 @@ stock count before the Posted stock list has a row to show.
 - [ADR-0015](ADR-0015-legal-entity-business-dimension.md)
 - [ADR-0016](ADR-0016-stock-identity-dimension-set.md)
 - [ADR-0047 §5](ADR-0047-the-compiler-semantic-profile-is-the-projection-evolution-axis.md)
+
+## Amendment 2026-09-01 — a transaction-snapshot projection is not an as-of balance
+
+Recorded by the orchestrator on `5g3-prog` finding R5, which measured that
+[ADR-0018](ADR-0018-temporal-authority.md) requires *"a materialized balance
+records the `recordedAt` horizon it was computed at"* while `posted_stock_balance`
+carries no horizon field. The code is coherent; the record was ambiguous, and this
+section removes the ambiguity without changing either decision.
+
+- `posted_stock_balance` is a **transaction-snapshot projection**: the sum of every
+  movement posted at the committed database snapshot that reads it. Its horizon is
+  the reader's snapshot, which is why it stores none — storing one would name a
+  horizon the row does not actually honour across concurrent readers.
+- ADR-0018's horizon clause binds **as-of materializations**: any stored balance
+  that claims to answer *"as of instant T"* must carry the `recordedAt` horizon it
+  was computed at. No such materialization exists today; the bitemporal aggregate
+  lookup answers as-of questions live and stores nothing.
+- A projection in this ADR's shape must say which of the two it is in its ADR and
+  in its surface label. ADR-0065's received-quantity row is the snapshot kind and
+  inherits this distinction.

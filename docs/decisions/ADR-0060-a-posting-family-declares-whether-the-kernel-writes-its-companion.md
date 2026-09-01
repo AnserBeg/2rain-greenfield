@@ -1,7 +1,7 @@
 # ADR-0060: A posting family declares whether the kernel writes its companion
 
 Date: 2026-08-23
-Status: PROPOSED — blocked on the released-contract transition below
+Status: accepted (packet `PUR-2a`, merge `379acfe`, accepted 2026-08-31 by user ruling; the released-contract transition this line was blocked on closed with `PUR-2b`, merge `2e85696`). Status line swept 2026-09-01 by the orchestrator on `5g3-prog` R6 — it had read PROPOSED for nine days after acceptance
 Tier: Critical (review per `review-tiers`)
 
 Written after the vertical was built and measured, not before it. That
