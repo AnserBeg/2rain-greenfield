@@ -1099,31 +1099,22 @@ test('PUR-2b: a pre-derivation version-3 receipt is refused as unreconstructible
         varianceQuantity: '5',
       });
       await seedReviewedCount(runtimePool, context, binding, command);
-      await service.postStockCount(context, actor, command);
+      const posted = await service.postStockCount(context, actor, command);
 
-      // A faithful specimen of the shape every stock-count receipt had before
-      // PUR-2a: version 3, over a command whose companion identities the CALLER
-      // chose. Those identities are unreachable from the derivation, which is
-      // exactly why no migration can recompute this row -- the receipt stores
-      // the digest and the result, never the input.
+      // A specimen of the shape every stock-count receipt had before PUR-2a:
+      // version 3, recording capability version 1, over a command whose
+      // companion identities the CALLER supplied. No migration can recompute
+      // such a row -- the receipt stores the digest and the result, never the
+      // input -- which is the fact the refusal below rests on.
       const legacyKey = '62000000-0000-4000-8000-0000000000ff';
-      const callerChosenTransactionId = '64000000-0000-4000-8000-000000000064';
-      const callerChosenLineId = '65000000-0000-4000-8000-000000000065';
-      const { idempotencyKey, ...callerInput } = command;
-      void idempotencyKey;
-      const legacyDigest = createHash('sha256')
-        .update(
-          canonicalize({
-            postingRole: 'count',
-            ...callerInput,
-            lines: callerInput.lines.map((line) => ({
-              ...line,
-              transactionLineId: callerChosenLineId,
-            })),
-            transactionId: callerChosenTransactionId,
-          }),
-        )
-        .digest('hex');
+      // Round 2: computed over the identities the accepted posting actually
+      // wrote, so the digest and the cloned effects describe ONE command. The
+      // earlier version used unrelated hard-coded ids, which combined the digest
+      // of one command with the effects of another. The refusal below does not
+      // depend on the value either way -- it fires on the VERSION, before any
+      // comparison -- which is exactly why the incoherence was free to persist
+      // unnoticed.
+      const legacyDigest = preDerivationDigestOf(command, posted);
       await cloneReceiptAsPreDerivationVersion3(
         databasePool,
         command.idempotencyKey,
@@ -1182,11 +1173,27 @@ test('PUR-2b: a pre-derivation version-3 receipt is refused as unreconstructible
     },
   );
 });
-
-test('PUR-2b: a version-3 stock-count receipt still DECODES through natural replay, with no digest reconstructed', async () => {
+// PUR-2b, ROUND-2 REVIEW FINDING. The version-3 decoder is a 2x2, not a
+// switch, and the round-1 correction only covered half of it.
+//
+// `requiredRecordedPostingRole` decodes {version 3, version 4} x {count,
+// correction}, and `postStockCount` maps kind `initial` to role `count` while
+// mapping BOTH `correction` and `reversal` to role `correction`. Every PUR-2b
+// specimen was an `initial` count, so no control reached the version-3 x
+// `correction` cell: a mutation withdrawing only that cell left all six green
+// while a legitimate correction or reversal receipt stopped decoding.
+//
+// These are THREE tests rather than one parameterised test on purpose. The
+// expected-red runner accounts for every regression a mutation produces, so
+// separate tests give the two decoder mutations DIFFERENT kill sets --
+// withdrawing all of version 3 kills all three, withdrawing only the
+// `correction` cell kills two and must leave the `initial` one GREEN. One
+// combined test would make the narrower mutation indistinguishable from the
+// broader one, since both raise the same message.
+test('PUR-2b: a version-3 INITIAL count decodes through natural replay, with no digest reconstructed', async () => {
   await withCompanionEnvironment(
-    'companion-digest-natural',
-    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+    'companion-digest-natural-initial',
+    async (environment) => {
       const command = countCommand({
         countedQuantity: '5',
         expectedQuantity: '0',
@@ -1195,111 +1202,320 @@ test('PUR-2b: a version-3 stock-count receipt still DECODES through natural repl
         supersedesStockCountId: null,
         varianceQuantity: '5',
       });
-      await seedReviewedCount(runtimePool, context, binding, command);
-      const posted = await service.postStockCount(context, actor, command);
-
-      // THE SPECIMEN, and its shape is forced rather than chosen. Receipts are
-      // immutable -- migration 0009 rejects UPDATE and DELETE by RULE -- so a
-      // version-3 row cannot be made by rewriting the accepted one. It is added
-      // BESIDE it with an earlier `recorded_at`, which is what
-      // `findNaturalReplay`'s `ORDER BY receipt.recorded_at LIMIT 1` selects.
-      // Two receipts sharing one outbox_id is a real shape, not a contrivance:
-      // `persistAdditionalReceipt` writes exactly that on every natural replay.
-      const legacyKey = '62000000-0000-4000-8000-0000000000fe';
-      const { idempotencyKey, ...callerInput } = command;
-      void idempotencyKey;
-      const legacyDigest = createHash('sha256')
-        .update(
-          canonicalize({
-            postingRole: 'count',
-            ...callerInput,
-            lines: callerInput.lines.map((line) => ({
-              ...line,
-              transactionLineId: '65000000-0000-4000-8000-000000000065',
-            })),
-            transactionId: '64000000-0000-4000-8000-000000000064',
-          }),
-        )
-        .digest('hex');
-      await cloneReceiptAsPreDerivationVersion3(
-        databasePool,
-        command.idempotencyKey,
-        legacyKey,
-        legacyDigest,
-        { earlier: true },
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        command,
       );
-
-      // A DIFFERENT idempotency key, so the explicit-key lookup finds nothing
-      // and the posting reaches `findNaturalReplay`. That route proves replay
-      // from the persisted effects and the recorded principal, so it must NOT
-      // reconstruct a digest -- and a version-3 receipt must still decode.
-      const freshKey = '62000000-0000-4000-8000-0000000000fd';
-      const replay = await service.postStockCount(context, actor, {
-        ...command,
-        idempotencyKey: freshKey,
+      const posted = await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        command,
+      );
+      await assertVersionThreeDecodesThroughNaturalReplay({
+        command,
+        environment,
+        expectedRole: 'count',
+        freshKey: '62000000-0000-4000-8000-0000000000fd',
+        legacyKey: '62000000-0000-4000-8000-0000000000fe',
+        posted,
       });
-
-      assert.equal(
-        replay.replayed,
-        true,
-        'an identical count under a new key must replay from its natural effects',
-      );
-      // THE ASSERTION THAT CARRIES THE CLAIM. Decoding a version-3 receipt goes
-      // through the stock-count version predicate twice: once for each recorded
-      // movement's posting role, once for the count evidence. Drop 3 from that
-      // predicate and the role fails to decode, so this call throws instead of
-      // returning -- which is the point. Version 3 must keep decoding under the
-      // version it was written with.
-      assert.deepEqual(
-        replay.stockCountEvidence,
-        posted.stockCountEvidence,
-        'a version-3 receipt must still decode its stored count evidence',
-      );
-      assert.deepEqual(
-        replay.movements.map((movement) => movement.postingRole),
-        posted.movements.map((movement) => movement.postingRole),
-        'a version-3 receipt must still decode its recorded posting roles',
-      );
-      // And it must not have gone anywhere near `digestCommand`: reconstructing
-      // a version-3 digest here would raise the unreconstructible refusal, so a
-      // successful replay is the observation that no reconstruction happened.
-      assert.deepEqual(
-        replay.movements.map((movement) => movement.movementId),
-        posted.movements.map((movement) => movement.movementId),
-        'natural replay must return the recorded movements, not new ones',
-      );
-
-      const after = await readCompanionState(runtimePool, context, binding);
-      assert.equal(
-        after.movements.length,
-        posted.movements.length,
-        'a replay must not post a second time',
-      );
-      assert.equal(
-        after.transactions.length,
-        1,
-        'a replay must not write a second companion transaction',
-      );
-
-      // The carry-forward receipt for the new key is written at the CURRENT
-      // version, so the transition moves forward without touching the old row.
-      assert.equal(
-        (await readReceipt(databasePool, freshKey)).inputDigestVersion,
-        4,
-        'the receipt a natural replay adds must be written at version 4',
-      );
-      const specimen = await readReceipt(databasePool, legacyKey);
-      assert.deepEqual(
-        {
-          inputDigest: specimen.inputDigest,
-          inputDigestVersion: specimen.inputDigestVersion,
-        },
-        { inputDigest: legacyDigest, inputDigestVersion: 3 },
-        'the version-3 receipt must be left exactly as it was found',
-      );
     },
   );
 });
+
+test('PUR-2b: a version-3 CORRECTION decodes through natural replay, with no digest reconstructed', async () => {
+  await withCompanionEnvironment(
+    'companion-digest-natural-correction',
+    async (environment) => {
+      const opening = countCommand({
+        countedQuantity: '6',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 8,
+        supersedesStockCountId: null,
+        varianceQuantity: '6',
+      });
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        opening,
+      );
+      await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        opening,
+      );
+
+      const command = countCommand({
+        countedQuantity: '2',
+        expectedQuantity: '6',
+        kind: 'correction',
+        sequence: 9,
+        supersedesStockCountId: opening.stockCountId,
+        varianceQuantity: '-4',
+      });
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        command,
+      );
+      const posted = await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        command,
+      );
+      // The cell round 2 found unreachable. A correction records role
+      // `correction`, so this is the specimen that dies when version 3 loses
+      // that cell alone.
+      assert.equal(
+        posted.movements[0]?.postingRole,
+        'correction',
+        'a correction must post under the correction role, or this specimen tests the wrong cell',
+      );
+      await assertVersionThreeDecodesThroughNaturalReplay({
+        command,
+        environment,
+        expectedRole: 'correction',
+        freshKey: '62000000-0000-4000-8000-0000000000fb',
+        legacyKey: '62000000-0000-4000-8000-0000000000fc',
+        posted,
+      });
+    },
+  );
+});
+
+test('PUR-2b: a version-3 REVERSAL decodes through natural replay, with no digest reconstructed', async () => {
+  await withCompanionEnvironment(
+    'companion-digest-natural-reversal',
+    async (environment) => {
+      const opening = countCommand({
+        countedQuantity: '6',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 10,
+        supersedesStockCountId: null,
+        varianceQuantity: '6',
+      });
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        opening,
+      );
+      const openingResult = await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        opening,
+      );
+
+      // A reversal must be the EXACT inverse of the movement it reverses, so
+      // the opening's +6 forces -6 here.
+      const command = countCommand({
+        countedQuantity: '0',
+        expectedQuantity: '6',
+        kind: 'reversal',
+        reversalOfMovementId: openingResult.movements[0]!.movementId,
+        sequence: 11,
+        supersedesStockCountId: opening.stockCountId,
+        varianceQuantity: '-6',
+      });
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        command,
+      );
+      const posted = await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        command,
+      );
+      // A reversal shares the `correction` ROLE with a correction but carries a
+      // distinct evidence KIND, so it exercises
+      // `requiredRecordedStockCountEvidence`'s kind vocabulary as well as the
+      // role cell. Round 2 asked for all three kinds for exactly this reason.
+      assert.deepEqual(
+        {
+          kind: posted.stockCountEvidence?.kind,
+          role: posted.movements[0]?.postingRole,
+        },
+        { kind: 'reversal', role: 'correction' },
+        'a reversal must post under the correction role with reversal evidence',
+      );
+      await assertVersionThreeDecodesThroughNaturalReplay({
+        command,
+        environment,
+        expectedRole: 'correction',
+        freshKey: '62000000-0000-4000-8000-0000000000f9',
+        legacyKey: '62000000-0000-4000-8000-0000000000fa',
+        posted,
+      });
+    },
+  );
+});
+
+/**
+ * One version-3 natural replay, for one stock-count kind.
+ *
+ * THE SPECIMEN'S SHAPE IS FORCED, NOT CHOSEN. Receipts are immutable --
+ * migration 0009 rejects UPDATE and DELETE by RULE -- so a version-3 row cannot
+ * be made by rewriting the accepted one. It is added BESIDE it with an earlier
+ * `recorded_at`, which is what `findNaturalReplay`'s
+ * `ORDER BY receipt.recorded_at LIMIT 1` selects. Two receipts under one
+ * `outbox_id` is the mechanism's own shape: `persistAdditionalReceipt` writes
+ * exactly that on every natural replay, `insertReceipt` persists
+ * `result.trust.outboxId`, and the schema neither makes `outbox_id` unique nor
+ * admits an update.
+ *
+ * WHERE IT IS STILL NOT A REAL LEGACY RECEIPT, stated because round 2 caught
+ * the earlier version claiming more than it was. The clone carries the CURRENT
+ * posting's effects, whose companion identities are kernel-derived. The legacy
+ * digest is therefore computed over THOSE identities -- an old caller whose
+ * chosen ids happened to coincide with the derivation -- rather than over
+ * unrelated ids, which would combine the digest of one command with the effects
+ * of another. The realistic legacy case, where the ids DIFFER, is not
+ * representable in a cloned row without fabricating the whole result, and it
+ * does not need to be: neither route under test reads the digest. Natural
+ * replay never inspects it, and the explicit-key refusal fires on the VERSION
+ * before any comparison. The clone also rewrites the recorded capability
+ * version to 1, because a version-3 writer recorded 1, and that difference is
+ * asserted below rather than left implicit.
+ */
+async function assertVersionThreeDecodesThroughNaturalReplay(input: {
+  readonly command: InventoryStockCountPostingCommandV2;
+  readonly environment: CompanionEnvironment;
+  readonly expectedRole: 'correction' | 'count';
+  readonly freshKey: string;
+  readonly legacyKey: string;
+  readonly posted: Awaited<
+    ReturnType<PostgresInventoryPostingService['postStockCount']>
+  >;
+}): Promise<void> {
+  const { command, environment, expectedRole, freshKey, legacyKey, posted } =
+    input;
+  const { actor, binding, context, databasePool, runtimePool, service } =
+    environment;
+
+  const legacyDigest = preDerivationDigestOf(command, posted);
+  await cloneReceiptAsPreDerivationVersion3(
+    databasePool,
+    command.idempotencyKey,
+    legacyKey,
+    legacyDigest,
+    { earlier: true },
+  );
+
+  // A DIFFERENT idempotency key, so the explicit-key lookup finds nothing and
+  // the posting reaches `findNaturalReplay`. That route proves equivalence from
+  // the recorded principal and the complete persisted effects, so it must NOT
+  // reconstruct a digest -- and a version-3 receipt must still decode.
+  const replay = await service.postStockCount(context, actor, {
+    ...command,
+    idempotencyKey: freshKey,
+  });
+
+  assert.equal(
+    replay.replayed,
+    true,
+    'an identical count under a new key must replay from its natural effects',
+  );
+  // THE ASSERTIONS THAT CARRY THE CLAIM. Decoding a version-3 receipt passes
+  // through the stock-count version predicate once per recorded movement role
+  // and once for the count evidence. Withdraw version 3 from either -- wholly,
+  // or only for this role -- and these throw instead of returning.
+  assert.deepEqual(
+    replay.movements.map((movement) => movement.postingRole),
+    posted.movements.map(() => expectedRole),
+    'a version-3 receipt must still decode its recorded posting roles',
+  );
+  assert.deepEqual(
+    replay.stockCountEvidence,
+    posted.stockCountEvidence,
+    'a version-3 receipt must still decode its stored count evidence',
+  );
+  // Reconstructing a digest here would raise the unreconstructible refusal, so
+  // returning the recorded movements at all is the observation that no
+  // reconstruction happened.
+  assert.deepEqual(
+    replay.movements.map((movement) => movement.movementId),
+    posted.movements.map((movement) => movement.movementId),
+    'natural replay must return the recorded movements, not new ones',
+  );
+  // History is not rewritten: the replay reports the capability version that
+  // PRODUCED the receipt, not the one running now.
+  assert.equal(
+    replay.capabilityVersion,
+    1,
+    'a version-3 receipt must replay under the capability version it recorded',
+  );
+
+  const after = await readCompanionState(runtimePool, context, binding);
+  assert.equal(
+    after.movements.filter(
+      (movement) =>
+        String(movement.transactionId).toLowerCase() ===
+        String(posted.transactionId).toLowerCase(),
+    ).length,
+    posted.movements.length,
+    'a replay must not post a second time',
+  );
+
+  // The carry-forward receipt for the new key is written at the CURRENT
+  // version, so the transition moves forward without touching the old row.
+  assert.equal(
+    (await readReceipt(databasePool, freshKey)).inputDigestVersion,
+    4,
+    'the receipt a natural replay adds must be written at version 4',
+  );
+  const specimen = await readReceipt(databasePool, legacyKey);
+  assert.deepEqual(
+    {
+      inputDigest: specimen.inputDigest,
+      inputDigestVersion: specimen.inputDigestVersion,
+    },
+    { inputDigest: legacyDigest, inputDigestVersion: 3 },
+    'the version-3 receipt must be left exactly as it was found',
+  );
+}
+
+/**
+ * The version-3 digest of a command, computed the way the pre-PUR-2a writer
+ * computed it: over the caller's command with the companion identities spread
+ * in. The identities used are the ones the accepted posting actually wrote, so
+ * the digest and the cloned effects describe ONE command rather than two.
+ */
+function preDerivationDigestOf(
+  command: InventoryStockCountPostingCommandV2,
+  posted: Awaited<
+    ReturnType<PostgresInventoryPostingService['postStockCount']>
+  >,
+): string {
+  const { idempotencyKey, ...callerInput } = command;
+  void idempotencyKey;
+  const lineIdBySourceLine = new Map(
+    posted.movements.map((movement) => [
+      movement.sourceLine,
+      movement.transactionLineId,
+    ]),
+  );
+  return createHash('sha256')
+    .update(
+      canonicalize({
+        postingRole: posted.movements[0]!.postingRole,
+        ...callerInput,
+        lines: callerInput.lines.map((line) => ({
+          ...line,
+          transactionLineId: lineIdBySourceLine.get(line.sourceLine)!,
+        })),
+        transactionId: posted.transactionId,
+      }),
+    )
+    .digest('hex');
+}
 
 async function readInvocationCapabilityVersion(
   pool: Pool,
@@ -1337,9 +1553,19 @@ async function readReceipt(
 
 /**
  * Clones an accepted receipt into a second idempotency key, stamped as the
- * pre-derivation version 3. Cloning rather than hand-building keeps every trust
- * reference valid, so the row differs from a real legacy receipt in exactly the
- * two columns under test.
+ * pre-derivation version 3 and carrying the capability version a version-3
+ * writer recorded.
+ *
+ * Cloning rather than hand-building keeps every trust reference valid. Round 2
+ * corrected the claim this comment used to make -- that the row "differs from a
+ * real legacy receipt in exactly the two columns under test" -- which was false:
+ * the clone carries the CURRENT posting's effects, so its companion identities
+ * are kernel-derived. The callers compute the legacy digest over those same
+ * identities so the digest and the effects describe one command, and
+ * `capabilityVersion` is rewritten to 1 here rather than left at the current 2.
+ * What remains is that a real pre-PUR-2a receipt's caller-chosen ids would
+ * generally DIFFER from the derivation; that is not representable in a cloned
+ * row, and neither route under test reads the digest.
  */
 async function cloneReceiptAsPreDerivationVersion3(
   pool: Pool,
@@ -1357,7 +1583,13 @@ async function cloneReceiptAsPreDerivationVersion3(
      )
      SELECT receipt.tenant_id, receipt.environment_id, receipt.principal_id,
             receipt.release_id, receipt.release_content_hash, receipt.action_id,
-            $5, $6, 3, receipt.mutation_result,
+            $5, $6, 3,
+            jsonb_set(
+              receipt.mutation_result,
+              '{capabilityVersion}',
+              '1'::jsonb,
+              false
+            ),
             receipt.invocation_id, receipt.correlation_id,
             receipt.change_document_id, receipt.domain_event_id,
             receipt.outbox_id,
