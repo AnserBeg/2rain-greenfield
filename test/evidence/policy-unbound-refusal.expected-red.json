@@ -4,7 +4,7 @@
   "entries": [
     {
       "name": "unbound-check-removed",
-      "claim": "The rule's unbound half is what refuses a declared permission nothing acknowledges: comparing the acknowledgement lookup against null instead of undefined makes the branch unreachable, and a permission declared on the composed application with no acknowledgement then compiles silently -- the exact vacuum R7 named.",
+      "claim": "The rule's unbound half is what refuses a declared permission nothing acknowledges: comparing the acknowledgement lookup against null instead of undefined makes the branch unreachable, and a permission declared on the composed application with no acknowledgement then compiles silently -- the exact vacuum R7 named. The fail-closed shape rides the same branch: an unreadable list refuses every declared permission only because this branch fires, so it dies with them.",
       "file": "packages/compiler/src/conformance.ts",
       "original": "    if (acknowledged === undefined) {\n      diagnostics.push(\n        compilerDiagnostic(\n          'COMPILER_PERMISSION_EVALUATOR_UNBOUND',",
       "replacement": "    if (acknowledged === null) {\n      diagnostics.push(\n        compilerDiagnostic(\n          'COMPILER_PERMISSION_EVALUATOR_UNBOUND',",
@@ -22,6 +22,11 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: removing the acknowledgement of a permission the package still declares refuses it by name",
           "expected": "a declared permission whose acknowledgement was removed must be refused by name"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a package the list does not key is ungoverned, and an unreadable list fails closed over every declared permission",
+          "expected": "an unreadable acknowledgement must refuse every declared permission"
         }
       ]
     },

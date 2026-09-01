@@ -1629,9 +1629,10 @@ const UNBOUND_PERMISSION_ACKNOWLEDGEMENT = readUnboundPermissionAcknowledgement(
  * not a TypeScript constant, and not a field on the canonical permission
  * object. A canonical field would be a language-version event (ADR-0021's
  * rule: adding spellings retroactively widens an immutable language version).
- * A TypeScript constant naming `party_create` inside the generic press would
- * trip PRESS006 sixty-five times, and rightly: the press must not know module
- * identity. The list is not press -- it is a debt register a reviewer reads,
+ * A TypeScript constant spelling a module's permission ids inside the generic
+ * press would trip PRESS006 once per entry, and rightly: the press must not
+ * know module identity (this comment cannot even name one as an example --
+ * the law reads comments too, and it caught the first draft of this sentence). The list is not press -- it is a debt register a reviewer reads,
  * in the same family as the routed-debt table in `module-press-law.test.ts`
  * -- and the press law scans no `.json`. Nothing here hashes the list into a
  * release root or a manifest, so the artifact does not move when it changes.

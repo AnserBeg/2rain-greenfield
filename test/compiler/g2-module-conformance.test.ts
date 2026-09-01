@@ -1846,7 +1846,11 @@ test('unbound-permission acknowledgement: a package the list does not key is ung
   const unreadable = validateUnboundPermissionAcknowledgement(normalized, {
     status: 'unreadable',
   });
-  assert.equal(unreadable.length, normalized.permissions.length);
+  assert.equal(
+    unreadable.length,
+    normalized.permissions.length,
+    'an unreadable acknowledgement must refuse every declared permission',
+  );
   assert.ok(unreadable.length > 0);
   assert.ok(
     unreadable.every(
