@@ -8,6 +8,12 @@ Written 2026-07-28 with `main` at `f3d3085`, 68 packets accepted.
 
 ---
 
+> **2026-09-01 — THE QUEUE IS FROZEN.** Read `current-plan.md` from its top
+> (*QUEUE FREEZE*, *DIAL B*, *The critical path*). The TRIAGE and the 190-row
+> queue this file and the 2026-08-13 handoff tell you to read moved verbatim to
+> `current-plan-archive.md` and are dormant. Review convergence changed the same
+> day: a round with zero production defects converges (`review-tiers`).
+
 ## 1. Read these first, in this order
 
   1. `AGENTS.md` — the single operating doctrine. Section 6 (gates) is the one

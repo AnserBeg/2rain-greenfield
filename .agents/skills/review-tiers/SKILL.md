@@ -295,6 +295,39 @@ fixes side by side.**
   going. Label ordering does not earn a fourth arm; route it. Tier the
   continuation by what being wrong costs, not by how interesting the finding is.
 
+### Zero production defects → CONVERGED — binding 2026-09-01, user ruling
+
+**A review round that finds no defect in production code converges the review.
+No further arm of any kind is owed** — not round N+1, not the Fable confirm — and
+the packet proceeds to integration once that round's findings are closed and the
+gates that read what changed have been re-run at the new head.
+
+**Production means** `packages/**`, `apps/**` (excluding the regenerated
+`apps/web/release/**`) and `db/**`. Findings in tests, evidence manifests,
+controls, records, prompts or prose are not production defects. Closing them is
+still mandatory — STOP never means ship it broken — and where the finding is a
+missing or vacuous control, the lane records the replacement control's **measured
+kill** before reporting the round closed. No arm re-reads that closure.
+
+**Why this is doctrine rather than an override.** It was applied by user ruling
+to `posting-error-shape` (2026-08-23: five rounds, none on production),
+`posting-writer-inventory` (2026-08-31: round 2 found zero production defects)
+and `PUR-2b` (2026-09-01: two rounds, both evidence gaps). Each time the
+orchestrator recommended another arm and was overruled, and each time the
+overrule was right: the reviews had stopped finding defects and started finding
+limits. Writing it here removes that negotiation from every remaining packet.
+
+**Two overrides still beat it, unchanged from above:** a regression introduced by
+the previous round's own fix → continue, with a control for the fix; and blast
+radius — a Band A silent-failure claim whose only control the round found
+vacuous is not converged until the replacement control's kill is observed, though
+no new arm is owed for observing it.
+
+**What this does not change.** The FIRST arm is still owed on every
+non-Mechanical packet, still fresh-naive, still user-run. A round that finds a
+production defect still continues per the three questions above. A packet whose
+first arm finds nothing at all is converged at round one.
+
 ### What STOP means — it is never "ship it broken"
 
 **Route the class to a queue row, narrow the claim to what was actually

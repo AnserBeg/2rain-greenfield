@@ -314,3 +314,17 @@ structure rather than line by line.
 **This record is a two-arm converged review.** Fable's arm noted correctly that a
 single-arm report must not be recorded as converged; both arms are present here, and the
 orchestrator's independent tree verifications are marked VERIFIED.
+
+---
+
+## Disposition of the Dial B tripwire — 2026-09-01
+
+The tripwire in §1 (*">4 → the goal question reopens at the next review"*) tripped on
+`main` on 2026-09-01 at six platform packets since `PUR-1`, before `SAL-1` was chartered.
+It was answered by user ruling the same day rather than carried: **the goal is KEPT and
+the claim is NARROWED to this review's own fallback** — ordinary modules are data;
+specialized classes (posting families, storage transitions, release verification,
+authorization) are governed, compiler-visible platform work extended once as a reusable
+capability. The count, the ruling, its consequences and the re-armed tripwire are recorded
+in `current-plan.md`, section *DIAL B — the factory tripwire tripped*. `5g3-prog` inherits
+the narrowed claim as its Dial B starting position and asks the approach question only.
