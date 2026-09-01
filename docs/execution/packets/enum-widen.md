@@ -417,7 +417,16 @@ the executable candidate — this record, ADR-0064, and the ledger/lane/plan
 rows; `git diff --name-only 8c2d591..packet/enum-widen -- . ':!docs'` is empty.
 Review the head.
 
-The `git ls-remote origin refs/heads/packet/enum-widen` line is quoted in the one narrative commit above this record's freeze; see the checkpoint block.
+**Frozen SHA: `f07f9e7d0ea91f057ba32a71212551b0af7a32e5`**, the tip that carries the
+matrix result. Quoted from the remote at freeze time:
+
+```
+$ git ls-remote origin refs/heads/packet/enum-widen
+f07f9e7d0ea91f057ba32a71212551b0af7a32e5	refs/heads/packet/enum-widen
+```
+
+The branch head is one commit above that SHA, and its only content is this
+block. `git diff f07f9e7..packet/enum-widen` shows it and nothing else.
 
 **Tier: Critical**, because the diff plans and executes DDL against live
 tenant tables and changes what the compiler admits for a released storage
