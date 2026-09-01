@@ -336,9 +336,17 @@ Not started; the cadence forbids continuing. Presented for selection:
 > you.*
 
 **Repository:** `2rain-greenfield`. **Branch:** `packet/pur-2c`.
-**Frozen SHA:** `a68fdeaa56fcf911c1527785627cc86b4753fcb0`.
-**Delta to read:** `8c417528db942f0a504c7744e56f816e770702c7..a68fdeaa56fcf911c1527785627cc86b4753fcb0`
-— a single commit.
+**Frozen SHA:** `9e22cf77122edc47666e218d0ebc7e572c063a4e`.
+**Delta to read:** `8c417528db942f0a504c7744e56f816e770702c7..packet/pur-2c` — two
+commits, both narrative.
+
+**One thing about the SHA, so it is not a surprise.** `9e22cf7` is the commit
+that first contains this record complete, prompt included. The branch head may
+sit **one commit above it**, and if it does, that commit's entire content is
+this paragraph and the SHA line above it — a prompt cannot name its own hash.
+`git diff 9e22cf7..packet/pur-2c` shows you exactly that and nothing else;
+**verify it rather than take it.** Review the branch head. No executable byte
+differs anywhere in this range, or between it and `main`.
 
 **FETCHABILITY, stated rather than assumed.** `mission-cadence` requires this
 prompt to quote `git ls-remote` output so you never open on an unfetchable
