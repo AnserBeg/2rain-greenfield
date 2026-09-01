@@ -17,6 +17,7 @@ carries the detail. No packet is chartered from this table without a user ruling
 
 | packet | date | finding (one sentence) | record |
 |---|---|---|---|
+| `policy-unbound-refusal` | 2026-09-01 | Row `7` inherits a data-shape decision: the compiler's evaluator-bound permission set is an internal constant it cannot populate from the runtime's evaluator registry (dependency boundaries), so binding evaluators will have to reach the compiler as checked-in data or a compiler input the same way the acknowledgement does. | [packets/policy-unbound-refusal.md](packets/policy-unbound-refusal.md) |
 
 ## TRIAGE — 2026-08-13. Read this before the queue.
 
