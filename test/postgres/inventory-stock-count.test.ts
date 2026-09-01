@@ -1107,14 +1107,47 @@ test('PUR-2b: a pre-derivation version-3 receipt is refused as unreconstructible
       // such a row -- the receipt stores the digest and the result, never the
       // input -- which is the fact the refusal below rests on.
       const legacyKey = '62000000-0000-4000-8000-0000000000ff';
-      // Round 2: computed over the identities the accepted posting actually
-      // wrote, so the digest and the cloned effects describe ONE command. The
-      // earlier version used unrelated hard-coded ids, which combined the digest
-      // of one command with the effects of another. The refusal below does not
-      // depend on the value either way -- it fires on the VERSION, before any
-      // comparison -- which is exactly why the incoherence was free to persist
-      // unnoticed.
-      const legacyDigest = preDerivationDigestOf(command, posted);
+      // ROUND 2 SUGGESTED COHERENCE HERE AND IT IS THE WRONG TRADE ON THIS
+      // ROUTE, which the expected-red gate caught rather than a reviewer.
+      //
+      // Computing this digest over the identities the posting actually DERIVED
+      // makes the row internally coherent, and it is what the natural-replay
+      // specimens do, because there the digest is never read. On THIS route it
+      // destroys the control: `legacy-version-three-recomputes-a-fresh-digest`
+      // restores a fresh version-3 recomputation, and a fresh recomputation
+      // over the derived command produces exactly that coherent digest -- so
+      // the digests MATCH, the replay succeeds, and the mutation stops
+      // producing a refusal at all.
+      //
+      // The caller-chosen identities therefore DIFFER from the derivation here,
+      // which is also the realistic legacy case: a caller whose ids coincided
+      // with a derivation that did not yet exist is the one case that needs no
+      // refusal. The residual incoherence is stated rather than removed -- the
+      // cloned effects carry derived ids while this digest is over different
+      // ones -- and it is immaterial on this route, which refuses on the
+      // VERSION before reading either.
+      const callerChosenTransactionId = '64000000-0000-4000-8000-000000000064';
+      const callerChosenLineId = '65000000-0000-4000-8000-000000000065';
+      assert.notEqual(
+        callerChosenTransactionId,
+        posted.transactionId,
+        'the specimen must be the case that needs the refusal: caller-chosen ids UNREACHABLE from the derivation',
+      );
+      const { idempotencyKey, ...callerInput } = command;
+      void idempotencyKey;
+      const legacyDigest = createHash('sha256')
+        .update(
+          canonicalize({
+            postingRole: 'count',
+            ...callerInput,
+            lines: callerInput.lines.map((line) => ({
+              ...line,
+              transactionLineId: callerChosenLineId,
+            })),
+            transactionId: callerChosenTransactionId,
+          }),
+        )
+        .digest('hex');
       await cloneReceiptAsPreDerivationVersion3(
         databasePool,
         command.idempotencyKey,
