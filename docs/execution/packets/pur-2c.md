@@ -325,3 +325,123 @@ Not started; the cadence forbids continuing. Presented for selection:
 | `enum-option-widening` | The missing storage-transition element for an additive enum widening: the fingerprint predicate, the CHECK-replacement element, its materializer DDL, and the control proving the constraint actually widened in a live database | Critical | **Recommended.** It is the strict prerequisite for `PUR-2c` and for every future family. It also closes a latent silent divergence that exists today independently of purchasing. Wants Docker for its Band A control. |
 | `PUR-2c` (re-charter) | The goods receipt, unchanged in intent, re-cut once the element above lands | Critical | Blocked on the above. Its charter should carry §1's two corrections and drop the `received_quantity` ruling into its own decision step rather than making it the first product edit. |
 | `received-quantity-ruling` | ADR-0064 alone: stored CAS column versus derived sum under lock, ruled for `PUR-2` and `SAL-2` together | Behavioral | Possible now and deliberately **not** recommended: plan §7.12 gives the decision to the posting protocol, which does not exist yet. Worth selecting only if the user wants the door shut early on other grounds. |
+
+## 9. Online review prompt — paste this
+
+> *This prompt was written by the lane whose work you are reviewing. **The lane
+> has fenced nothing.** Any scope stated here is the orchestrator's, and it
+> stands as a claim under test rather than a limit you may not question. Read
+> whatever you judge relevant to the decisive questions, say plainly if you think
+> the scope is drawn wrongly, and say plainly if the prompt itself is steering
+> you.*
+
+**Repository:** `2rain-greenfield`. **Branch:** `packet/pur-2c`.
+**Frozen SHA:** `a68fdeaa56fcf911c1527785627cc86b4753fcb0`.
+**Delta to read:** `8c417528db942f0a504c7744e56f816e770702c7..a68fdeaa56fcf911c1527785627cc86b4753fcb0`
+— a single commit.
+
+**FETCHABILITY, stated rather than assumed.** `mission-cadence` requires this
+prompt to quote `git ls-remote` output so you never open on an unfetchable
+target. **At the time of writing, the branch is NOT pushed** — `git ls-remote
+origin refs/heads/packet/pur-2c` returns empty. Pushing is outward-facing and
+was not part of the charter, so the lane left it to the user. **Confirm the SHA
+resolves before you start**; if it does not, the push has not happened yet and
+this review cannot proceed.
+
+**Tier: Mechanical by the diff, and the lane thinks that classification is the
+interesting question rather than a formality.** `review-tiers` says tier is set
+by what the final diff *does*. This diff changes four narrative files and zero
+executable bytes — `git diff --stat main -- . ':(exclude)docs/**'` is empty,
+which you should verify rather than take. But the diff's *content* is a
+measurement that will scope a Critical compiler packet and that asserts a latent
+silent divergence in a released storage contract. **If the measurement is wrong,
+the follow-on charter is wrong.** The lane's view is that this makes the review
+a measurement-correctness review at Mechanical diff risk; you may judge that the
+consequence warrants more, and the orchestrator, not the lane, rules it.
+
+### The decisive questions
+
+1. **Is the refusal real and correctly attributed?** The record claims
+   `COMPILER_STORAGE_RETYPE_UNSUPPORTED` fires because `lowerColumn` hashes
+   `shapeFingerprint` over a record including `fieldType` wholesale, and an
+   enum's `fieldType` carries `options`. Reproduce it (§7B is a verified
+   copy-paste) or refute the attribution.
+2. **Is §2.4 right that relaxing the fence alone would silently diverge?** This
+   is the finding the whole packet rests on. The claim is that the `enumDomain`
+   CHECK constraint's physical name derives from the field id alone, that the
+   planner's check loop skips on matching name, and that
+   `buildStorageTransitionEnvelope` therefore emits **zero** elements for a
+   widened enum. **The lane measured this by patching a lowered target in
+   memory to bypass only the retype fence.** Is that bypass faithful — does
+   patching `shapeFingerprint` on the previous target change anything else the
+   planner reads? If it does, the zero-element result is an artifact and the
+   finding is wrong.
+3. **Was stopping correct, or could the packet have proceeded?** The charter
+   said stop if it refuses. It refused. But is there a path the lane missed —
+   a governed evolution family, `--truncate-invalid-lineage`, a new field
+   rather than a widened enum, a family that reuses existing options? The lane
+   considered and rejected reusing existing options (a goods receipt is not an
+   adjustment) but did not exhaustively search for alternatives.
+4. **Is declining the `received_quantity` ruling right?** §3 argues plan §7.12
+   gives that decision to the posting protocol, which is the blocked thing, so
+   ruling it now would shut a one-way door with less information than `PUR-1`
+   chose to wait for. The charter called it "the point of the packet". **The
+   lane declined a charter instruction and that deserves scrutiny, not
+   deference.**
+5. **Are the three owed deliverables in §2.5 the right three**, and is routing
+   this as its own Critical charter (rather than a bridge) proportionate?
+
+### What the lane did NOT verify — read this before trusting anything above
+
+- **No suite was run except `check:app-release`, `pnpm format` and
+  `pnpm typecheck`.** Docker does not start on this machine.
+  `test:postgres`, `test:browser`, `test:architecture` and the full matrix were
+  **not run**. `test:architecture` reads `docs/**`, so it is the one suite this
+  narrative diff actually perturbs, and it is **OWED and unrun**. No green was
+  carried forward from any suite the lane did not run.
+- **The zero-element result in §2.4 was measured against the planner, never
+  against a real database.** No PostgreSQL instance was reachable, so the claim
+  that the old CHECK constraint would survive and reject the new option is
+  **inferred from the planner emitting nothing**, not observed as a failing
+  INSERT. That is the weakest link in the packet and the lane knows it.
+- **The `INVENTORY_POSTING_ROLES` / conformance widening in probe 2 was not
+  reviewed for completeness.** The lane widened two cells to get past the
+  conformance guard and reach the storage layer. Whether those are the *only*
+  two cells a real goods-receipt family would move is unmeasured — the probe
+  needed only enough to reach the refusal underneath.
+- **The claim that the compiler's inventory fences at `conformance.ts` early-
+  return for a purchasing package carrying `goods_receipt` was re-read but not
+  exercised**, because no purchasing package carrying `goods_receipt` was ever
+  built. The charter asked for re-verification before relying on it; the lane
+  did not rely on it.
+- **`enumCheckExpression` was read, not executed.** The claim that the option
+  list becomes a physical `= ANY (ARRAY[...])` CHECK rests on reading
+  `module-storage-materializer.ts`.
+- **Whether an option-widening is safe against *existing rows* was not
+  considered at all.** Widening a CHECK cannot invalidate stored rows, so the
+  lane treated it as trivially safe — but it did not verify that no other
+  artifact (a projection, a read model, an agent catalog) enumerates the option
+  list in a way that a widening would break.
+
+### Reading list
+
+- `AGENTS.md` §6 (gates, negative controls, the observe-not-proxy rule).
+- `.agents/skills/review-tiers/SKILL.md` — start at *"Does the evidence prove
+  the claim? — the checklist"* and open a section only when a row fires. Note
+  the band calibration: this packet declares **Band A** for its subject, and
+  §2.4's claim is the one to run the checklist against.
+- `.agents/skills/mission-cadence/SKILL.md` — stop conditions and stop
+  convergence. This is stop 1 of 2.
+- `docs/execution/current-plan.md`, row `relation-requiredness-relaxation-
+  unplannable` — the precedent this stop is modelled on, found the same way by
+  `PUR-2a`.
+- `docs/greenfield-north-star-erp-platform-plan.md` §§7.12, 7.16, 7.17 — what
+  the packet was supposed to rule and did not.
+
+### What a PASS would mean here
+
+That the measurement is sound, the stop was correct, the follow-on scope is
+right, and declining the `received_quantity` ruling was defensible. **It would
+not mean the goods receipt is designed** — nothing was designed. A REVISE that
+says the lane should have ruled `received_quantity` anyway, or that the §2.4
+bypass is unfaithful, is the most useful outcome this review can produce.
