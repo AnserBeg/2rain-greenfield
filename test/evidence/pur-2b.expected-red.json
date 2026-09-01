@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "packet": "pur-2b",
+  "entries": [
+    {
+      "name": "migration-does-not-admit-version-four",
+      "claim": "Migration 0023 is what admits input digest version 4 to platform.semantic_operation_receipts. Migration 0016's rule -- a receipt writer 'retains the v1 default until their own digest input changes under a versioned migration' -- is the rule PUR-2a broke and this migration pays. Without the widened CHECK a stock-count posting cannot store its receipt at all, so this closes the subject-absent vector for the migration half of the packet.",
+      "file": "db/migrations/0023_inventory_stock_count_companion_digest_version.sql",
+      "original": "  CHECK (input_digest_version IN (1, 2, 3, 4));",
+      "replacement": "  CHECK (input_digest_version IN (1, 2, 3));",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "version-4 digest"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: the version-4 digest covers the caller's semantic input and not the identities the kernel derives",
+          "expected": "PostgreSQL rejected inventory posting \\(23514\\)"
+        }
+      ]
+    },
+    {
+      "name": "version-four-digest-keeps-the-derived-identities",
+      "claim": "ADR-0063's first ruling: version 4 covers the CALLER's semantic input and excludes the companion identities the kernel derives. This mutation takes the discarded alternative -- keep them and merely renumber the version -- and the digest must change, because a digest that is unmoved by putting a kernel output back into it was never excluding one. This is the proxy-satisfied vector: the untreated code still hashes something and still stores a version-4 receipt.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  void transactionId;\n  return {\n    ...callerInput,",
+      "replacement": "  return {\n    ...callerInput,\n    transactionId,",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "version-4 digest"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: the version-4 digest covers the caller's semantic input and not the identities the kernel derives",
+          "expected": "the version-4 digest must be the digest of the caller's semantic input"
+        }
+      ]
+    },
+    {
+      "name": "legacy-version-three-recomputes-a-fresh-digest",
+      "claim": "A stored version-3 stock-count receipt must be refused for the reason it is unreconstructible, not compared against a freshly computed version-3 digest. This mutation restores exactly the pre-PUR-2b behaviour: recomputing version 3 over a kernel-derived command, which cannot match a caller-chosen one and so reports 'already names another posting' -- an accusation that the caller reused an idempotency key for different input, when the input is identical and the kernel changed underneath it. This is the proxy-satisfied vector for the refusal: a refusal still happens, with the wrong identity.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            ? unreconstructibleReceiptVersion(version)",
+      "replacement": "            ? { postingRole: posting.postingRole, ...semanticInput }",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "pre-derivation version-3"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a pre-derivation version-3 receipt is refused as unreconstructible, not as a reused idempotency key",
+          "expected": "the refusal must name the derivation change as the reason"
+        }
+      ]
+    },
+    {
+      "name": "capability-version-not-bumped",
+      "claim": "INVENTORY_POSTING_CAPABILITY_VERSION is 2 because PUR-2a changed the PUBLIC stock-count command's key set. All 21 of its references are symbolic, so nothing else in the matrix observes its VALUE and the constant could be moved back with every other gate green. This closes the subject-absent vector for the capability half: it is the only red in the repository that dies on the number itself.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "export const INVENTORY_POSTING_CAPABILITY_VERSION = 2 as const;",
+      "replacement": "export const INVENTORY_POSTING_CAPABILITY_VERSION = 1 as const;",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "version-4 digest"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: the version-4 digest covers the caller's semantic input and not the identities the kernel derives",
+          "expected": "a posting result must declare the capability version that produced it"
+        }
+      ]
+    },
+    {
+      "name": "stock-count-decoder-drops-version-three",
+      "claim": "A stored version-3 stock-count receipt must keep DECODING under the version it was written with, even though it may no longer have a fresh digest computed for it. The two halves are separate and the packet's first four controls protected only the refusal half. Round-1 review named this exact survivor: drop 3 from isStockCountReceiptVersion and all four stay green while a legitimate version-3 receipt stops decoding through findNaturalReplay. This is the subject-absent vector for the RETAINED decoder.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return (\n    version === stockCountInventoryPostingInputDigestVersion ||\n    version === companionDerivedInventoryPostingInputDigestVersion\n  );",
+      "replacement": "  return version === companionDerivedInventoryPostingInputDigestVersion;",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "natural replay"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 INITIAL count decodes through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 CORRECTION decodes through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 REVERSAL decodes through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
+        }
+      ]
+    },
+    {
+      "name": "natural-replay-reconstructs-a-digest",
+      "claim": "findNaturalReplay proves replay from the persisted effects and the recorded principal, so it must NOT reconstruct an input digest. That absence is what lets a version-3 receipt keep replaying while the explicit-key route refuses it, and an absence is invisible to every gate unless something restores it. This mutation routes the natural-replay handoff through validateReceiptReplay, which reconstructs -- and a version-3 receipt then hits the unreconstructible refusal on a route that had independent evidence. Round-1 review asked for a control at this exact handoff because it holds the decoder admission and the intended absence together.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  return recordedResultForReplay(row);",
+      "replacement": "  return validateReceiptReplay(row, context, posting, command.idempotencyKey);",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "natural replay"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 INITIAL count decodes through natural replay, with no digest reconstructed",
+          "expected": "cannot be reconstructed from a kernel-derived command"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 CORRECTION decodes through natural replay, with no digest reconstructed",
+          "expected": "cannot be reconstructed from a kernel-derived command"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 REVERSAL decodes through natural replay, with no digest reconstructed",
+          "expected": "cannot be reconstructed from a kernel-derived command"
+        }
+      ]
+    },
+    {
+      "name": "version-three-decoder-drops-the-correction-role",
+      "claim": "The version-3 decoder is a 2x2 -- {version 3, version 4} x {count, correction} -- and BOTH version-3 cells must keep decoding. postStockCount maps kind `initial` to role `count` and BOTH `correction` and `reversal` to role `correction`, so a control population made only of initial counts cannot reach the version-3 x correction cell. Round 2 found exactly that survivor: withdraw only that one cell and all six earlier entries stay green while a legitimate correction or reversal receipt stops decoding through natural replay. This entry is deliberately NARROWER than stock-count-decoder-drops-version-three, and its kill set is what distinguishes them -- it must leave the INITIAL specimen green while killing the correction and reversal ones. Two entries that killed the same tests with the same message would not be two controls.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  if (\n    isStockCountReceiptVersion(version) &&\n    (postingRole === 'count' || postingRole === 'correction')\n  ) {\n    return postingRole;\n  }",
+      "replacement": "  if (\n    (version === stockCountInventoryPostingInputDigestVersion &&\n      postingRole === 'count') ||\n    (version === companionDerivedInventoryPostingInputDigestVersion &&\n      (postingRole === 'count' || postingRole === 'correction'))\n  ) {\n    return postingRole;\n  }",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "natural replay"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 CORRECTION decodes through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
+        },
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "PUR-2b: a version-3 REVERSAL decodes through natural replay, with no digest reconstructed",
+          "expected": "persisted posting receipt has no valid posting role"
+        }
+      ]
+    }
+  ]
+}

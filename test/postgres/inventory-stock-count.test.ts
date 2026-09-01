@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -355,7 +355,9 @@ test('stock-count posting preserves three-value evidence and appends correction 
               AND idempotency_key=$3`,
         [tenantId, environmentId, reversal.idempotencyKey],
       );
-      assert.equal(receipt.rows[0]?.input_digest_version, 3);
+      // PUR-2b. Version 4: the caller's semantic input, without the companion
+      // identities the kernel derives.
+      assert.equal(receipt.rows[0]?.input_digest_version, 4);
 
       const persisted = await readPersistedCountChain(
         runtimePool,
@@ -983,6 +985,667 @@ test('stock-count companion derivation: a reviewed count that already names a co
     },
   );
 });
+
+test("PUR-2b: the version-4 digest covers the caller's semantic input and not the identities the kernel derives", async () => {
+  await withCompanionEnvironment(
+    'companion-digest-version',
+    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 5,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      const posted = await service.postStockCount(context, actor, command);
+
+      const receipt = await readReceipt(databasePool, command.idempotencyKey);
+      assert.equal(
+        receipt.inputDigestVersion,
+        4,
+        'a stock-count posting must write the version migration 0023 admits',
+      );
+
+      // PUR-2b. The capability version, asserted as a LITERAL on both sides it
+      // reaches. Every one of its 21 references is symbolic, so a bump is
+      // invisible to every other gate in the matrix: without this the constant
+      // could be moved, or moved back, with nothing observing it. The trust
+      // metadata is the durable half -- an operator auditing a posting reads
+      // the recorded version, not the constant.
+      assert.equal(
+        posted.capabilityVersion,
+        2,
+        'a posting result must declare the capability version that produced it',
+      );
+      assert.equal(
+        await readInvocationCapabilityVersion(
+          databasePool,
+          posted.trust.invocationId,
+        ),
+        2,
+        'the persisted trust invocation must record the capability version',
+      );
+
+      // The expected digest is built from the CALLER's command -- the object
+      // this test authored -- and not from anything the service returned. The
+      // kernel-derived identities are absent because a caller cannot send
+      // them: `exactKeys` refuses both keys outright.
+      const { idempotencyKey, ...callerInput } = command;
+      void idempotencyKey;
+      const callerDigest = createHash('sha256')
+        .update(canonicalize({ postingRole: 'count', ...callerInput }))
+        .digest('hex');
+      assert.equal(
+        receipt.inputDigest,
+        callerDigest,
+        "the version-4 digest must be the digest of the caller's semantic input",
+      );
+
+      // The other half, and without it the assertion above is satisfied by any
+      // implementation that happens to hash something: this is what the digest
+      // would have been had the derived identities been kept and merely
+      // renumbered, and it must NOT be what was stored.
+      const digestWithDerivedIdentities = createHash('sha256')
+        .update(
+          canonicalize({
+            postingRole: 'count',
+            ...callerInput,
+            lines: callerInput.lines.map((line) => ({
+              ...line,
+              transactionLineId: expectedCompanionTransactionLineId(
+                line.stockCountLineId,
+              ),
+            })),
+            transactionId: expectedCompanionTransactionId(command.stockCountId),
+          }),
+        )
+        .digest('hex');
+      assert.notEqual(
+        digestWithDerivedIdentities,
+        callerDigest,
+        'the two candidate digests must differ, or this test discriminates nothing',
+      );
+      assert.notEqual(
+        receipt.inputDigest,
+        digestWithDerivedIdentities,
+        'the stored digest must not cover the identities the kernel derived',
+      );
+
+      // Replay still works, which is the point of a digest: the same caller
+      // input under the same key returns the recorded result rather than
+      // conflicting with it.
+      const replay = await service.postStockCount(context, actor, command);
+      assert.equal(
+        replay.replayed,
+        true,
+        'an unchanged stock-count command must replay under version 4',
+      );
+    },
+  );
+});
+
+test('PUR-2b: a pre-derivation version-3 receipt is refused as unreconstructible, not as a reused idempotency key', async () => {
+  await withCompanionEnvironment(
+    'companion-digest-legacy',
+    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 6,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      const posted = await service.postStockCount(context, actor, command);
+
+      // A specimen of the shape every stock-count receipt had before PUR-2a:
+      // version 3, recording capability version 1, over a command whose
+      // companion identities the CALLER supplied. No migration can recompute
+      // such a row -- the receipt stores the digest and the result, never the
+      // input -- which is the fact the refusal below rests on.
+      const legacyKey = '62000000-0000-4000-8000-0000000000ff';
+      // ROUND 2 SUGGESTED COHERENCE HERE AND IT IS THE WRONG TRADE ON THIS
+      // ROUTE, which the expected-red gate caught rather than a reviewer.
+      //
+      // Computing this digest over the identities the posting actually DERIVED
+      // makes the row internally coherent, and it is what the natural-replay
+      // specimens do, because there the digest is never read. On THIS route it
+      // destroys the control: `legacy-version-three-recomputes-a-fresh-digest`
+      // restores a fresh version-3 recomputation, and a fresh recomputation
+      // over the derived command produces exactly that coherent digest -- so
+      // the digests MATCH, the replay succeeds, and the mutation stops
+      // producing a refusal at all.
+      //
+      // The caller-chosen identities therefore DIFFER from the derivation here,
+      // which is also the realistic legacy case: a caller whose ids coincided
+      // with a derivation that did not yet exist is the one case that needs no
+      // refusal. The residual incoherence is stated rather than removed -- the
+      // cloned effects carry derived ids while this digest is over different
+      // ones -- and it is immaterial on this route, which refuses on the
+      // VERSION before reading either.
+      const callerChosenTransactionId = '64000000-0000-4000-8000-000000000064';
+      const callerChosenLineId = '65000000-0000-4000-8000-000000000065';
+      assert.notEqual(
+        callerChosenTransactionId,
+        posted.transactionId,
+        'the specimen must be the case that needs the refusal: caller-chosen ids UNREACHABLE from the derivation',
+      );
+      const { idempotencyKey, ...callerInput } = command;
+      void idempotencyKey;
+      const legacyDigest = createHash('sha256')
+        .update(
+          canonicalize({
+            postingRole: 'count',
+            ...callerInput,
+            lines: callerInput.lines.map((line) => ({
+              ...line,
+              transactionLineId: callerChosenLineId,
+            })),
+            transactionId: callerChosenTransactionId,
+          }),
+        )
+        .digest('hex');
+      await cloneReceiptAsPreDerivationVersion3(
+        databasePool,
+        command.idempotencyKey,
+        legacyKey,
+        legacyDigest,
+      );
+
+      const refusal = await service
+        .postStockCount(context, actor, {
+          ...command,
+          idempotencyKey: legacyKey,
+        })
+        .then(
+          () => null,
+          (reason: unknown) => reason,
+        );
+      assert.ok(
+        refusal instanceof InventoryPostingError,
+        'a version-3 stock-count receipt must be refused rather than replayed unverified',
+      );
+      assert.equal(refusal.code, 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT');
+      // WHICH refusal it is, is the whole finding. Recomputing version 3 over a
+      // derived command cannot match a caller-chosen one, so the untreated code
+      // reports `already names another posting` -- an accusation that the
+      // caller reused a key for DIFFERENT input. The input is identical and the
+      // kernel changed underneath it, so that message sends an operator to
+      // audit a caller that did nothing wrong.
+      assert.match(
+        refusal.message,
+        /cannot be reconstructed from a kernel-derived command/u,
+        'the refusal must name the derivation change as the reason',
+      );
+      assert.doesNotMatch(
+        refusal.message,
+        /already names another posting/u,
+        'the refusal must not accuse the caller of reusing the key for other input',
+      );
+      assert.equal(
+        refusal.details?.inputDigestVersion,
+        '3',
+        'the refusal must name the version it could not reconstruct',
+      );
+
+      // The stored row is untouched: a transition that carried released data by
+      // rewriting or removing a trust record would be a hard delete of business
+      // data, which the platform forbids outright.
+      const stored = await readReceipt(databasePool, legacyKey);
+      assert.deepEqual(
+        {
+          inputDigest: stored.inputDigest,
+          inputDigestVersion: stored.inputDigestVersion,
+        },
+        { inputDigest: legacyDigest, inputDigestVersion: 3 },
+        'the refused receipt must be left exactly as it was found',
+      );
+    },
+  );
+});
+// PUR-2b, ROUND-2 REVIEW FINDING. The version-3 decoder is a 2x2, not a
+// switch, and the round-1 correction only covered half of it.
+//
+// `requiredRecordedPostingRole` decodes {version 3, version 4} x {count,
+// correction}, and `postStockCount` maps kind `initial` to role `count` while
+// mapping BOTH `correction` and `reversal` to role `correction`. Every PUR-2b
+// specimen was an `initial` count, so no control reached the version-3 x
+// `correction` cell: a mutation withdrawing only that cell left all six green
+// while a legitimate correction or reversal receipt stopped decoding.
+//
+// These are THREE tests rather than one parameterised test on purpose. The
+// expected-red runner accounts for every regression a mutation produces, so
+// separate tests give the two decoder mutations DIFFERENT kill sets --
+// withdrawing all of version 3 kills all three, withdrawing only the
+// `correction` cell kills two and must leave the `initial` one GREEN. One
+// combined test would make the narrower mutation indistinguishable from the
+// broader one, since both raise the same message.
+test('PUR-2b: a version-3 INITIAL count decodes through natural replay, with no digest reconstructed', async () => {
+  await withCompanionEnvironment(
+    'companion-digest-natural-initial',
+    async (environment) => {
+      const command = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 7,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        command,
+      );
+      const posted = await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        command,
+      );
+      await assertVersionThreeDecodesThroughNaturalReplay({
+        command,
+        environment,
+        expectedRole: 'count',
+        freshKey: '62000000-0000-4000-8000-0000000000fd',
+        legacyKey: '62000000-0000-4000-8000-0000000000fe',
+        posted,
+      });
+    },
+  );
+});
+
+test('PUR-2b: a version-3 CORRECTION decodes through natural replay, with no digest reconstructed', async () => {
+  await withCompanionEnvironment(
+    'companion-digest-natural-correction',
+    async (environment) => {
+      const opening = countCommand({
+        countedQuantity: '6',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 8,
+        supersedesStockCountId: null,
+        varianceQuantity: '6',
+      });
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        opening,
+      );
+      await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        opening,
+      );
+
+      const command = countCommand({
+        countedQuantity: '2',
+        expectedQuantity: '6',
+        kind: 'correction',
+        sequence: 9,
+        supersedesStockCountId: opening.stockCountId,
+        varianceQuantity: '-4',
+      });
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        command,
+      );
+      const posted = await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        command,
+      );
+      // The cell round 2 found unreachable. A correction records role
+      // `correction`, so this is the specimen that dies when version 3 loses
+      // that cell alone.
+      assert.equal(
+        posted.movements[0]?.postingRole,
+        'correction',
+        'a correction must post under the correction role, or this specimen tests the wrong cell',
+      );
+      await assertVersionThreeDecodesThroughNaturalReplay({
+        command,
+        environment,
+        expectedRole: 'correction',
+        freshKey: '62000000-0000-4000-8000-0000000000fb',
+        legacyKey: '62000000-0000-4000-8000-0000000000fc',
+        posted,
+      });
+    },
+  );
+});
+
+test('PUR-2b: a version-3 REVERSAL decodes through natural replay, with no digest reconstructed', async () => {
+  await withCompanionEnvironment(
+    'companion-digest-natural-reversal',
+    async (environment) => {
+      const opening = countCommand({
+        countedQuantity: '6',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 10,
+        supersedesStockCountId: null,
+        varianceQuantity: '6',
+      });
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        opening,
+      );
+      const openingResult = await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        opening,
+      );
+
+      // A reversal must be the EXACT inverse of the movement it reverses, so
+      // the opening's +6 forces -6 here.
+      const command = countCommand({
+        countedQuantity: '0',
+        expectedQuantity: '6',
+        kind: 'reversal',
+        reversalOfMovementId: openingResult.movements[0]!.movementId,
+        sequence: 11,
+        supersedesStockCountId: opening.stockCountId,
+        varianceQuantity: '-6',
+      });
+      await seedReviewedCount(
+        environment.runtimePool,
+        environment.context,
+        environment.binding,
+        command,
+      );
+      const posted = await environment.service.postStockCount(
+        environment.context,
+        environment.actor,
+        command,
+      );
+      // A reversal shares the `correction` ROLE with a correction but carries a
+      // distinct evidence KIND, so it exercises
+      // `requiredRecordedStockCountEvidence`'s kind vocabulary as well as the
+      // role cell. Round 2 asked for all three kinds for exactly this reason.
+      assert.deepEqual(
+        {
+          kind: posted.stockCountEvidence?.kind,
+          role: posted.movements[0]?.postingRole,
+        },
+        { kind: 'reversal', role: 'correction' },
+        'a reversal must post under the correction role with reversal evidence',
+      );
+      await assertVersionThreeDecodesThroughNaturalReplay({
+        command,
+        environment,
+        expectedRole: 'correction',
+        freshKey: '62000000-0000-4000-8000-0000000000f9',
+        legacyKey: '62000000-0000-4000-8000-0000000000fa',
+        posted,
+      });
+    },
+  );
+});
+
+/**
+ * One version-3 natural replay, for one stock-count kind.
+ *
+ * THE SPECIMEN'S SHAPE IS FORCED, NOT CHOSEN. Receipts are immutable --
+ * migration 0009 rejects UPDATE and DELETE by RULE -- so a version-3 row cannot
+ * be made by rewriting the accepted one. It is added BESIDE it with an earlier
+ * `recorded_at`, which is what `findNaturalReplay`'s
+ * `ORDER BY receipt.recorded_at LIMIT 1` selects. Two receipts under one
+ * `outbox_id` is the mechanism's own shape: `persistAdditionalReceipt` writes
+ * exactly that on every natural replay, `insertReceipt` persists
+ * `result.trust.outboxId`, and the schema neither makes `outbox_id` unique nor
+ * admits an update.
+ *
+ * WHERE IT IS STILL NOT A REAL LEGACY RECEIPT, stated because round 2 caught
+ * the earlier version claiming more than it was. The clone carries the CURRENT
+ * posting's effects, whose companion identities are kernel-derived. The legacy
+ * digest is therefore computed over THOSE identities -- an old caller whose
+ * chosen ids happened to coincide with the derivation -- rather than over
+ * unrelated ids, which would combine the digest of one command with the effects
+ * of another. The realistic legacy case, where the ids DIFFER, is not
+ * representable in a cloned row without fabricating the whole result, and it
+ * does not need to be: neither route under test reads the digest. Natural
+ * replay never inspects it, and the explicit-key refusal fires on the VERSION
+ * before any comparison. The clone also rewrites the recorded capability
+ * version to 1, because a version-3 writer recorded 1, and that difference is
+ * asserted below rather than left implicit.
+ */
+async function assertVersionThreeDecodesThroughNaturalReplay(input: {
+  readonly command: InventoryStockCountPostingCommandV2;
+  readonly environment: CompanionEnvironment;
+  readonly expectedRole: 'correction' | 'count';
+  readonly freshKey: string;
+  readonly legacyKey: string;
+  readonly posted: Awaited<
+    ReturnType<PostgresInventoryPostingService['postStockCount']>
+  >;
+}): Promise<void> {
+  const { command, environment, expectedRole, freshKey, legacyKey, posted } =
+    input;
+  const { actor, binding, context, databasePool, runtimePool, service } =
+    environment;
+
+  const legacyDigest = preDerivationDigestOf(command, posted);
+  await cloneReceiptAsPreDerivationVersion3(
+    databasePool,
+    command.idempotencyKey,
+    legacyKey,
+    legacyDigest,
+    { earlier: true },
+  );
+
+  // A DIFFERENT idempotency key, so the explicit-key lookup finds nothing and
+  // the posting reaches `findNaturalReplay`. That route proves equivalence from
+  // the recorded principal and the complete persisted effects, so it must NOT
+  // reconstruct a digest -- and a version-3 receipt must still decode.
+  const replay = await service.postStockCount(context, actor, {
+    ...command,
+    idempotencyKey: freshKey,
+  });
+
+  assert.equal(
+    replay.replayed,
+    true,
+    'an identical count under a new key must replay from its natural effects',
+  );
+  // THE ASSERTIONS THAT CARRY THE CLAIM. Decoding a version-3 receipt passes
+  // through the stock-count version predicate once per recorded movement role
+  // and once for the count evidence. Withdraw version 3 from either -- wholly,
+  // or only for this role -- and these throw instead of returning.
+  assert.deepEqual(
+    replay.movements.map((movement) => movement.postingRole),
+    posted.movements.map(() => expectedRole),
+    'a version-3 receipt must still decode its recorded posting roles',
+  );
+  assert.deepEqual(
+    replay.stockCountEvidence,
+    posted.stockCountEvidence,
+    'a version-3 receipt must still decode its stored count evidence',
+  );
+  // Reconstructing a digest here would raise the unreconstructible refusal, so
+  // returning the recorded movements at all is the observation that no
+  // reconstruction happened.
+  assert.deepEqual(
+    replay.movements.map((movement) => movement.movementId),
+    posted.movements.map((movement) => movement.movementId),
+    'natural replay must return the recorded movements, not new ones',
+  );
+  // History is not rewritten: the replay reports the capability version that
+  // PRODUCED the receipt, not the one running now.
+  assert.equal(
+    replay.capabilityVersion,
+    1,
+    'a version-3 receipt must replay under the capability version it recorded',
+  );
+
+  const after = await readCompanionState(runtimePool, context, binding);
+  assert.equal(
+    after.movements.filter(
+      (movement) =>
+        String(movement.transactionId).toLowerCase() ===
+        String(posted.transactionId).toLowerCase(),
+    ).length,
+    posted.movements.length,
+    'a replay must not post a second time',
+  );
+
+  // The carry-forward receipt for the new key is written at the CURRENT
+  // version, so the transition moves forward without touching the old row.
+  assert.equal(
+    (await readReceipt(databasePool, freshKey)).inputDigestVersion,
+    4,
+    'the receipt a natural replay adds must be written at version 4',
+  );
+  const specimen = await readReceipt(databasePool, legacyKey);
+  assert.deepEqual(
+    {
+      inputDigest: specimen.inputDigest,
+      inputDigestVersion: specimen.inputDigestVersion,
+    },
+    { inputDigest: legacyDigest, inputDigestVersion: 3 },
+    'the version-3 receipt must be left exactly as it was found',
+  );
+}
+
+/**
+ * The version-3 digest of a command, computed the way the pre-PUR-2a writer
+ * computed it: over the caller's command with the companion identities spread
+ * in. The identities used are the ones the accepted posting actually wrote, so
+ * the digest and the cloned effects describe ONE command rather than two.
+ */
+function preDerivationDigestOf(
+  command: InventoryStockCountPostingCommandV2,
+  posted: Awaited<
+    ReturnType<PostgresInventoryPostingService['postStockCount']>
+  >,
+): string {
+  const { idempotencyKey, ...callerInput } = command;
+  void idempotencyKey;
+  const lineIdBySourceLine = new Map(
+    posted.movements.map((movement) => [
+      movement.sourceLine,
+      movement.transactionLineId,
+    ]),
+  );
+  return createHash('sha256')
+    .update(
+      canonicalize({
+        postingRole: posted.movements[0]!.postingRole,
+        ...callerInput,
+        lines: callerInput.lines.map((line) => ({
+          ...line,
+          transactionLineId: lineIdBySourceLine.get(line.sourceLine)!,
+        })),
+        transactionId: posted.transactionId,
+      }),
+    )
+    .digest('hex');
+}
+
+async function readInvocationCapabilityVersion(
+  pool: Pool,
+  invocationId: string,
+): Promise<number> {
+  const result = await pool.query<{ capabilityVersion: number }>(
+    `SELECT (metadata -> 'capabilityVersion' ->> 'value')::integer
+              AS "capabilityVersion"
+       FROM platform.trust_action_invocations
+      WHERE tenant_id = $1 AND environment_id = $2 AND invocation_id = $3`,
+    [tenantId, environmentId, invocationId],
+  );
+  assert.equal(result.rows.length, 1, `no trust invocation ${invocationId}`);
+  return result.rows[0]!.capabilityVersion;
+}
+
+async function readReceipt(
+  pool: Pool,
+  idempotencyKey: string,
+): Promise<{ inputDigest: string; inputDigestVersion: number }> {
+  const result = await pool.query<{
+    inputDigest: string;
+    inputDigestVersion: number;
+  }>(
+    `SELECT input_digest AS "inputDigest",
+            input_digest_version AS "inputDigestVersion"
+       FROM platform.semantic_operation_receipts
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND action_id = $3 AND idempotency_key = $4`,
+    [tenantId, environmentId, INVENTORY_POSTING_CAPABILITY_ID, idempotencyKey],
+  );
+  assert.equal(result.rows.length, 1, `no receipt for ${idempotencyKey}`);
+  return result.rows[0]!;
+}
+
+/**
+ * Clones an accepted receipt into a second idempotency key, stamped as the
+ * pre-derivation version 3 and carrying the capability version a version-3
+ * writer recorded.
+ *
+ * Cloning rather than hand-building keeps every trust reference valid. Round 2
+ * corrected the claim this comment used to make -- that the row "differs from a
+ * real legacy receipt in exactly the two columns under test" -- which was false:
+ * the clone carries the CURRENT posting's effects, so its companion identities
+ * are kernel-derived. The callers compute the legacy digest over those same
+ * identities so the digest and the effects describe one command, and
+ * `capabilityVersion` is rewritten to 1 here rather than left at the current 2.
+ * What remains is that a real pre-PUR-2a receipt's caller-chosen ids would
+ * generally DIFFER from the derivation; that is not representable in a cloned
+ * row, and neither route under test reads the digest.
+ */
+async function cloneReceiptAsPreDerivationVersion3(
+  pool: Pool,
+  sourceIdempotencyKey: string,
+  targetIdempotencyKey: string,
+  legacyDigest: string,
+  { earlier = false }: { earlier?: boolean } = {},
+): Promise<void> {
+  const inserted = await pool.query(
+    `INSERT INTO platform.semantic_operation_receipts (
+       tenant_id, environment_id, principal_id, release_id,
+       release_content_hash, action_id, idempotency_key, input_digest,
+       input_digest_version, mutation_result, invocation_id, correlation_id,
+       change_document_id, domain_event_id, outbox_id, recorded_at
+     )
+     SELECT receipt.tenant_id, receipt.environment_id, receipt.principal_id,
+            receipt.release_id, receipt.release_content_hash, receipt.action_id,
+            $5, $6, 3,
+            jsonb_set(
+              receipt.mutation_result,
+              '{capabilityVersion}',
+              '1'::jsonb,
+              false
+            ),
+            receipt.invocation_id, receipt.correlation_id,
+            receipt.change_document_id, receipt.domain_event_id,
+            receipt.outbox_id,
+            receipt.recorded_at - $7::interval
+       FROM platform.semantic_operation_receipts AS receipt
+      WHERE receipt.tenant_id = $1 AND receipt.environment_id = $2
+        AND receipt.action_id = $3 AND receipt.idempotency_key = $4`,
+    [
+      tenantId,
+      environmentId,
+      INVENTORY_POSTING_CAPABILITY_ID,
+      sourceIdempotencyKey,
+      targetIdempotencyKey,
+      legacyDigest,
+      earlier ? '1 second' : '0 seconds',
+    ],
+  );
+  assert.equal(
+    inserted.rowCount,
+    1,
+    'the specimen must actually be written, or the test proves nothing',
+  );
+}
 
 interface CompanionEnvironment {
   actor: StockCountActor;
