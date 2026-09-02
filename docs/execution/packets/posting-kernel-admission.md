@@ -243,7 +243,63 @@ disclosed here rather than folded in silently.
 
 ## Gates
 
-PENDING: the full matrix and `evidence:expected-red` run at the frozen candidate; this section is filled from their output.
+**Two full matrices ran, both green, and the record of the second is partial —
+stated rather than smoothed over.**
+
+**Matrix 1, at `5350ae32aa0da6806e869a40127115176d08b9f5`** (the first frozen
+candidate, whose executable tree differs from the final one by one manifest
+entry's `expected` and `claim` strings in `posting-writer-inventory.expected-red.json`):
+`scripts/run-matrix.sh` reported **`FULL_MATRIX_PASS_SHA=5350ae32aa0da6806e869a40127115176d08b9f5`**,
+zero `not ok` lines.
+
+| suite | result | gate | result |
+|---|---|---|---|
+| `test:unit` | 155 | `format` / `lint` / `typecheck` / `build` | PASS |
+| `test:compiler` | 157 | `check:boundaries` | PASS (164 files) |
+| `test:integration` | 149 | `check:schema` | drift PASS |
+| `test:architecture` | 189 | `check:demo-release` / `check:app-release` | PASS |
+| **`test:postgres`** (REQUIRED) | **227** | `check:expected-red` | OK — 73 entries in 7 manifests |
+| `test:contracts` | 29 | `check:expected-red-controls` | OK — 38 controls |
+| **`test:browser`** | **93** | `check:language-coverage` | PASS (2050 obligations) |
+| `test:agent` / `test:locale` / `test:performance` | 3 / 1 / 5 | `check:reachability` | 106/106; 10 producer artifacts |
+
+The security scan's `leaks found: 1` is the planted negative control passing;
+`gitleaks-clean.json` is `[]` across 1,773 commits.
+
+**Matrix 2, at the frozen head `f968775d5c79106c88c002afb4cdb4557ac8a420`**,
+run after the fourth bridge edit. Its console log lived in `/tmp` and a
+session restart wiped `/tmp` before the lane read it, so **the
+`FULL_MATRIX_PASS_SHA` line for this run is lost.** What survives is the
+per-suite evidence the matrix writes into the worktree: every suite's
+`test-results/reachability/<suite>.json` for `runId: admission2-f968775d`
+records `suiteSucceeded: true` — unit, compiler, integration, agent,
+architecture, contracts, postgres, browser, performance and observability —
+timestamped 18:03–18:34 on 2026-09-01, and the security evidence at 18:35 shows
+the run reached its final step. The `check:*` gates print only to the console
+and have no surviving evidence for this run beyond the first matrix, where
+each passed on a tree whose only difference is the manifest strings above.
+**The lane does not claim `FULL_MATRIX_PASS_SHA` for `f968775`.** The
+suite-evidence files are what it claims, and it says so in the ledger.
+
+**`evidence:expected-red`, in full:** the first full run at `5350ae3`
+reproduced 24 entries and stopped at `the-observed-write-set-is-never-checked`
+— the real finding recorded under bridges. After the correction, that entry was
+reproduced alone at `10eebfb`. The second full run at `f968775` completed (its
+journal was cleared on exit), but its verdict was in the same wiped log.
+**The lane claims: all thirteen owned or bridged entries plus the corrected
+backstop entry reproduced individually at their SHAs, and 24 of 73 reproduced
+in one full run at `5350ae3`; it does not claim a full 73-entry run at the
+frozen head.**
+
+**Owed when Docker returns** (down after the restart; no suite that needs a
+container can run, and `test:architecture` hangs without one): one
+`scripts/run-matrix.sh` at `f968775` to retain the pass line, and one full
+`evidence:expected-red`. Both are re-runs of what the evidence files say
+already passed, at the same tree; neither changes the candidate.
+
+**At the final head** (this record commit, narrative-only above `10eebfb`):
+`format` PASS, `scripts/check-records.sh` OK; `test:architecture` reads
+`docs/**` and is owed at this head with the re-run above.
 
 ## The declared range
 
