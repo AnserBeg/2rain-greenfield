@@ -535,23 +535,24 @@ live definition. If you disagree with anything one-way in this packet, it is
 
 **Repository:** `github.com/AnserBeg/2rain-greenfield`. **Branch:**
 `packet/enum-widen`, cut from `main` at
-`8c417528db942f0a504c7744e56f816e770702c7`. **Executable candidate:**
-`8c2d5912b792c38d730fe14173f828bc204ce131`. **Delta to read:**
+`8c417528db942f0a504c7744e56f816e770702c7`. **Round-2 executable candidate:**
+`00f9c5bcd4dc7842a7b4b471caf2bb67a008029b` (round 1's was `8c2d591`, reviewed BLOCK). **Delta to read:**
 `8c417528..packet/enum-widen`. The branch head carries narrative commits above
 the executable candidate — this record, ADR-0064, and the ledger/lane/plan
-rows; `git diff --name-only 8c2d591..packet/enum-widen -- . ':!docs'` is empty.
+rows; `git diff --name-only 00f9c5b..packet/enum-widen -- . ':!docs'` is empty.
 Review the head.
 
-**Frozen SHA: `f07f9e7d0ea91f057ba32a71212551b0af7a32e5`**, the tip that carries the
-matrix result. Quoted from the remote at freeze time:
+**Round-2 frozen SHA: `ad3c22366fd9e7d55a017758e640b9d79d8a27b5`**, the tip that carries the round-2
+suite results (round 1's frozen SHA was `f07f9e7d0ea91f057ba32a71212551b0af7a32e5`).
+Quoted from the remote at freeze time:
 
 ```
 $ git ls-remote origin refs/heads/packet/enum-widen
-f07f9e7d0ea91f057ba32a71212551b0af7a32e5	refs/heads/packet/enum-widen
+ad3c22366fd9e7d55a017758e640b9d79d8a27b5	refs/heads/packet/enum-widen
 ```
 
 The branch head is one commit above that SHA, and its only content is this
-block. `git diff f07f9e7..packet/enum-widen` shows it and nothing else.
+block. `git diff ad3c223..packet/enum-widen` shows it and nothing else.
 
 **Tier: Critical**, because the diff plans and executes DDL against live
 tenant tables and changes what the compiler admits for a released storage
