@@ -6,7 +6,7 @@
       "name": "widening-is-never-recognised",
       "claim": "A candidate release that adds an option to an already-released enum field is PLANNED, as one widenEnumDomain element, rather than refused with COMPILER_STORAGE_RETYPE_UNSUPPORTED. This is the fence PUR-2c measured; a planner that never recognises the widening refuses every option-list change as a retype.",
       "file": "packages/compiler/src/storage.ts",
-      "original": "        !isAdditiveEnumDomainTransition(oldField, field)\n",
+      "original": "        !isAdditiveEnumDomainTransition(oldField, field, sourceField)\n",
       "replacement": "        true\n",
       "test": {
         "files": ["test/postgres/module-storage-transition.test.ts"],
