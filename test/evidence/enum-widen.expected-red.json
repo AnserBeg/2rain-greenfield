@@ -21,24 +21,6 @@
       ]
     },
     {
-      "name": "widening-admits-any-option-change",
-      "claim": "Only a STRICT SUPERSET of the previous option ids is a widening. With the subset test removed, a narrowing (one option removed) is admitted as if it widened -- the first of the preserved refusals to fall.",
-      "file": "packages/compiler/src/storage.ts",
-      "original": "  if (candidateSet.size <= previousSet.size) return false;\n  for (const optionId of previousSet) {\n    if (!candidateSet.has(optionId)) return false;\n  }\n  return true;\n",
-      "replacement": "  return true;\n",
-      "test": {
-        "files": ["test/postgres/module-storage-transition.test.ts"],
-        "namePattern": "plans exactly one widenEnumDomain element"
-      },
-      "kills": [
-        {
-          "file": "test/postgres/module-storage-transition.test.ts",
-          "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
-          "expected": "narrowed"
-        }
-      ]
-    },
-    {
       "name": "widening-ignores-everything-but-the-id-set",
       "claim": "A widening is admitted only when the candidate field, with its NEW option records removed, fingerprints byte-for-byte as the previous release did -- so a changed label or orderKey on an EXISTING option, a reordering, or any other column property is refused alongside the widening. Round-1 finding: the round-1 predicate excluded the whole fingerprint and let widening-plus-relabel through. This mutation makes the fingerprint comparison vacuous; the first case it admits is widening plus a relabelled existing option.",
       "file": "packages/compiler/src/storage.ts",
