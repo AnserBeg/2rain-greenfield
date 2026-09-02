@@ -154,7 +154,7 @@ Bridged (see below): `pur-2b/capability-version-not-bumped` now kills the
 version-4 test with the provider's mismatch refusal;
 `posting-writer-inventory/effect-reservation-never-observed` keeps its kill.
 
-**Every one of the thirteen reds reproduced and restored** (`check-expected-red.sh --run`, the survivor first and alone, then the other twelve; the last executable commit is `c8c5e47a48cca7b0daa4f0269f6622d6f8c3aabd`). Each entry: 1 passing → 1 killed, with the declared message.
+**Every one of the thirteen reds reproduced and restored** (`check-expected-red.sh --run`, the survivor first and alone, then the other twelve; the last executable commit is `10eebfb42570cfc01edd72b888ab13f3dd8f5fcd`). Each entry: 1 passing → 1 killed, with the declared message.
 
 ```
 verifier-call-deleted-registration-intact       1 passing -> 1 killed   (run first, alone)
@@ -184,7 +184,7 @@ reason; the test now points the configuration at the declared-1 release, so the
 fact check is the only guard between that posting and a commit — which is what
 the control claims.
 
-## Bridges taken — three, all mechanical, all the orchestrator's to revoke
+## Bridges taken — four edits in three accepted artifacts, all mechanical, all the orchestrator's to revoke
 
 Each is an accepted packet's artifact that pins the exact production text or
 digest this packet was chartered to move. None was named in the charter; each
@@ -199,9 +199,19 @@ disclosed here rather than folded in silently.
    moves to the provider's mismatch refusal, because the provider now refuses a
    release declaring 2 before any result exists — the same claim, observed one
    layer earlier. The claim text records the update.
-2. `test/evidence/posting-writer-inventory.expected-red.json`, entry
+2. `test/evidence/posting-writer-inventory.expected-red.json`, two entries.
    `effect-reservation-never-observed`: its `original` is the reservation call,
-   which gains one argument. Kill unchanged.
+   which gains one argument; kill unchanged. `the-observed-write-set-is-never-checked`:
+   **found by the full `evidence:expected-red` run at the first frozen
+   candidate, not predicted.** With the derived-write-set backstop deleted, the
+   undeclared-writer test no longer commits silently — the executed-verifier
+   comparison refuses it one step later, for the weaker reason (no executed
+   verifier observed `nsm_t_pwi_undeclared_writer`) rather than the derivation
+   reason. An undeclared relation is by construction also unobserved, so the
+   backstop's refusal is subsumed at posting time; what it still supplies is
+   the derivation diagnosis. The entry's `expected` moves to the new message
+   and its claim says so; the silent commit it originally described is no
+   longer reachable. The backstop stays, because it names the cause.
 3. `test/compiler/inventory-contract.release.golden.json`: the compiled
    contract release root moved with the contract's version. Re-derived, not
    picked — the root was recomputed from `compileInventoryContract`, exactly one
@@ -242,7 +252,7 @@ PENDING: the full matrix and `evidence:expected-red` run at the frozen candidate
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-kernel-admission",
   "base": "3b7b6dab2ddb790b33b7b641c68773c62db18e9a",
-  "head": "c8c5e47a48cca7b0daa4f0269f6622d6f8c3aabd",
+  "head": "10eebfb42570cfc01edd72b888ab13f3dd8f5fcd",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -337,7 +347,7 @@ posting-kernel-admission in /home/rvham/2rain-greenfield.
 Review exact remote candidate <FROZEN_SHA> against base
 3b7b6dab2ddb790b33b7b641c68773c62db18e9a. The remote branch is
 packet/posting-kernel-admission; verify the supplied git ls-remote line before
-reading. The last EXECUTABLE commit is c8c5e47a48cca7b0daa4f0269f6622d6f8c3aabd;
+reading. The last EXECUTABLE commit is 10eebfb42570cfc01edd72b888ab13f3dd8f5fcd;
 everything above it is narrative (the packet record, ledger, lanes, archive,
 current-plan, and the ADR-0063 amendment). Work read-only. Do not edit, commit,
 run the full matrix, invoke another reviewer, or rely on line numbers --
