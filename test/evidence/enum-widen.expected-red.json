@@ -39,11 +39,11 @@
       ]
     },
     {
-      "name": "widening-admits-unrelated-column-changes",
-      "claim": "The widening is admitted only when NOTHING ELSE about the column moved. With the comparable-shape equality forced true, a widening combined with a search-mapping flip -- which neither additive exception matches alone -- rides through as a widening.",
+      "name": "widening-ignores-everything-but-the-id-set",
+      "claim": "A widening is admitted only when the candidate field, with its NEW option records removed, fingerprints byte-for-byte as the previous release did -- so a changed label or orderKey on an EXISTING option, a reordering, or any other column property is refused alongside the widening. Round-1 finding: the round-1 predicate excluded the whole fingerprint and let widening-plus-relabel through. This mutation makes the fingerprint comparison vacuous; the first case it admits is widening plus a relabelled existing option.",
       "file": "packages/compiler/src/storage.ts",
-      "original": "  return (\n    hashCanonical(\n      `${HASH_DOMAINS.projectionSemantic}/storage-column-transition-shape`,\n      comparableShape(previous),\n    ).digest ===\n    hashCanonical(\n      `${HASH_DOMAINS.projectionSemantic}/storage-column-transition-shape`,\n      comparableShape(candidate),\n    ).digest\n  );\n}\n\n/**\n * The same monotonic-superset rule, stated on the enum-domain CHECK itself.",
-      "replacement": "  return true;\n}\n\n/**\n * The same monotonic-superset rule, stated on the enum-domain CHECK itself.",
+      "original": "  return (\n    columnShapeFingerprint(\n      withoutNewOptions,\n      candidate.requiredAfterTightening,\n    ) === previous.shapeFingerprint\n  );\n}\n",
+      "replacement": "  void withoutNewOptions;\n  return true;\n}\n",
       "test": {
         "files": ["test/postgres/module-storage-transition.test.ts"],
         "namePattern": "plans exactly one widenEnumDomain element"
@@ -52,7 +52,7 @@
         {
           "file": "test/postgres/module-storage-transition.test.ts",
           "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
-          "expected": "widenedAndSearchable"
+          "expected": "widenedAndRelabelled"
         }
       ]
     },
@@ -233,6 +233,24 @@
           "file": "test/postgres/module-storage-transition.test.ts",
           "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
           "expected": "the previous release CHECK must reject the option it does not declare"
+        }
+      ]
+    },
+    {
+      "name": "missing-check-is-repaired-not-refused",
+      "claim": "An ABSENT released enum-domain CHECK is refused as catalog drift (ENUM_DOMAIN_CHECK_MISSING), never added. Round-1 finding: adding the target constraint NOT VALID when the table admitted everything is a pre-approval TIGHTENING that can newly refuse an update to a drifted row, and it repairs the drift before catalog verification measures it. With the refusal replaced by the round-1 repair, the drifted tenant's prepare succeeds and the verifier never sees the missing constraint.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "    throw failure(\n      'ENUM_DOMAIN_CHECK_MISSING',\n      `${entity.physicalTableName}.${check.physicalName} is absent from the live catalog; widenEnumDomain only widens an existing constraint`,\n    );\n",
+      "replacement": "    await ensureEnumCheckConstraint(client, entity, check);\n    return;\n",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "released enum domain is widened by one atomic CHECK replacement"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
+          "expected": "Missing expected rejection"
         }
       ]
     }

@@ -2498,7 +2498,7 @@ async function ensureEnumCheckConstraint(
  * Three dispositions, decided against the LIVE definition rather than against
  * the source root, because the managed tables are tenant-shared and another
  * tenant may already have widened further:
- *   - absent               -> added NOT VALID (recovery of a missing check);
+ *   - absent               -> REFUSED (catalog drift; adding it would tighten);
  *   - target ⊆ live        -> nothing to do (replay, or a wider sibling root);
  *   - live ⊂ target        -> replaced;
  *   - anything else        -> refused. This element never narrows.
@@ -2506,14 +2506,24 @@ async function ensureEnumCheckConstraint(
  * The live option set is read back from `pg_get_expr` by extracting the text
  * literals this materializer itself renders, and the extraction is checked by
  * ROUND TRIP: re-rendering the extracted set must reproduce the live
- * definition exactly, or the definition is not one this code wrote and it
- * refuses rather than guesses.
+ * definition exactly, or the definition is not of a shape this code renders
+ * and it refuses rather than guesses. The round trip proves the SHAPE, not
+ * authorship: a definition written by someone else that deparses to the same
+ * expression is accepted, and that is correct, because it is the expression
+ * that constrains the rows.
  */
 async function widenEnumDomainCheck(
   client: PoolClient,
   entity: StorageEntityTarget,
   check: StorageEntityTarget['checkConstraints'][number],
 ): Promise<void> {
+  // The live definition is read UNDER a lock that excludes concurrent DDL on
+  // the table (SHARE UPDATE EXCLUSIVE conflicts with every ALTER TABLE and
+  // with itself, not with DML), so the decision below and the ALTER that acts
+  // on it see one catalog. The replacing ALTER escalates to ACCESS EXCLUSIVE.
+  await client.query(
+    `LOCK TABLE north_star_module.${quoted(entity.physicalTableName)} IN SHARE UPDATE EXCLUSIVE MODE`,
+  );
   const live = await client.query<{ definition: string; validated: boolean }>(
     `SELECT pg_get_expr(
               constraint_record.conbin,
@@ -2534,8 +2544,17 @@ async function widenEnumDomainCheck(
   );
   const current = live.rows[0];
   if (!current) {
-    await ensureEnumCheckConstraint(client, entity, check);
-    return;
+    // Round-1 finding. Adding the target CHECK here is NOT a widening: the
+    // live table admitted everything while the constraint was absent, so a
+    // NOT VALID add is a pre-approval TIGHTENING that can newly refuse an
+    // update to a drifted row. An absent released constraint is catalog
+    // drift, and this element refuses rather than repairs it -- repairing
+    // before catalog verification runs is exactly the subject-repaired-before-
+    // measured vector. Every path this element executes is therefore inert.
+    throw failure(
+      'ENUM_DOMAIN_CHECK_MISSING',
+      `${entity.physicalTableName}.${check.physicalName} is absent from the live catalog; widenEnumDomain only widens an existing constraint`,
+    );
   }
   const liveDefinition = normalizeSqlExpressionRequired(current.definition);
   const liveOptionIds = [
@@ -2547,7 +2566,7 @@ async function widenEnumDomainCheck(
   if (roundTrip !== liveDefinition) {
     throw failure(
       'ENUM_DOMAIN_DEFINITION_UNRECOGNIZED',
-      `${entity.physicalTableName}.${check.physicalName} does not carry a definition this materializer renders: ${current.definition}`,
+      `${entity.physicalTableName}.${check.physicalName} does not carry a definition of the shape this materializer renders: ${current.definition}`,
     );
   }
   const liveSet = new Set(liveOptionIds);

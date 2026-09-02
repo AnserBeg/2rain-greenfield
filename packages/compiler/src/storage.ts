@@ -1911,11 +1911,14 @@ export function buildStorageTransitionEnvelope(
     }
     for (const [fieldId, field] of newFields) {
       const oldField = oldFields.get(fieldId);
+      const sourceField = packageRevision.fields.find(
+        (entry) => entry.fieldId === fieldId,
+      )!;
       if (
         oldField &&
         oldField.shapeFingerprint !== field.shapeFingerprint &&
         !isAdditiveSearchMappingTransition(oldField, field) &&
-        !isAdditiveEnumDomainTransition(oldField, field)
+        !isAdditiveEnumDomainTransition(oldField, field, sourceField)
       ) {
         return failureDiagnostic(
           'COMPILER_STORAGE_RETYPE_UNSUPPORTED',
@@ -1924,9 +1927,6 @@ export function buildStorageTransitionEnvelope(
         );
       }
       if (oldField) continue;
-      const sourceField = packageRevision.fields.find(
-        (entry) => entry.fieldId === fieldId,
-      )!;
       if (
         sourceField.storageEvolution?.residualReadSemantics ===
         'requiresCompleteness'
@@ -2324,14 +2324,22 @@ function isAdditiveSearchMappingTransition(
  * A released enum field whose option list grew, and NOTHING ELSE moved.
  *
  * `lowerColumn` hashes `shapeFingerprint` over `fieldType` wholesale, and an
- * enum's `fieldType` carries its options, so every option-list change presents
- * to the planner as a retype. The physical column is `text` before and after.
- * This predicate admits exactly the monotonic superset: every previous option
- * id is still present, at least one is new, and the column compared without
- * its option list and its fingerprint is identical. A narrowing, a rebinding
- * (one id replaced by another, count constant), a label-only change (equal
- * sets) and a widening combined with any other column change all return
- * false and keep `COMPILER_STORAGE_RETYPE_UNSUPPORTED`.
+ * enum's `fieldType` carries its option RECORDS -- id, label, orderKey -- so
+ * every option-list change presents to the planner as a retype. The physical
+ * column is `text` before and after.
+ *
+ * "Nothing else moved" is tested EXACTLY rather than by exclusion. Round 1
+ * compared the two lowered columns with the option ids and the fingerprint
+ * removed, which let a widening that ALSO relabelled or reordered an existing
+ * option through, because labels and orderKeys exist only inside the excluded
+ * fingerprint (round-1 finding). Instead: take the candidate's SOURCE field,
+ * drop every option record whose id the previous release did not carry, and
+ * fingerprint what remains the way `lowerColumn` would have. It must equal the
+ * previous release's stored fingerprint byte for byte. That admits exactly one
+ * kind of change -- new option records appended -- and refuses a changed
+ * label, a changed orderKey, a reordering, a narrowing, a rebinding, a
+ * relabelling with an equal id set, and any other column property, all under
+ * `COMPILER_STORAGE_RETYPE_UNSUPPORTED`.
  *
  * A previous target lowered before field contracts existed carries no
  * `fieldContract`; such a pair is not a widening this predicate can judge and
@@ -2340,42 +2348,35 @@ function isAdditiveSearchMappingTransition(
 function isAdditiveEnumDomainTransition(
   previous: StorageColumnTarget,
   candidate: StorageColumnTarget,
+  candidateField: Field,
 ): boolean {
   if (
     !Object.hasOwn(previous, 'fieldContract') ||
-    !Object.hasOwn(candidate, 'fieldContract') ||
     previous.fieldContract.fieldKind !== 'enumFieldType' ||
-    candidate.fieldContract.fieldKind !== 'enumFieldType'
+    candidateField.fieldType.kind !== 'enumFieldType'
   ) {
     return false;
   }
-  if (
-    !isStrictOptionSuperset(
-      previous.fieldContract.enumOptionIds,
-      candidate.fieldContract.enumOptionIds,
-    )
-  ) {
-    return false;
-  }
-  const comparableShape = (column: StorageColumnTarget) => {
-    const {
-      fieldContract: { enumOptionIds: _enumOptionIds, ...contract },
-      shapeFingerprint: _shapeFingerprint,
-      ...rest
-    } = column;
-    void _enumOptionIds;
-    void _shapeFingerprint;
-    return { ...rest, fieldContract: contract };
+  const previousIds = previous.fieldContract.enumOptionIds;
+  const candidateIds = candidateField.fieldType.options
+    .map((option) => option.optionId)
+    .sort(compare);
+  if (!isStrictOptionSuperset(previousIds, candidateIds)) return false;
+  const previousSet = new Set(previousIds);
+  const withoutNewOptions: Field = {
+    ...candidateField,
+    fieldType: {
+      ...candidateField.fieldType,
+      options: candidateField.fieldType.options.filter((option) =>
+        previousSet.has(option.optionId),
+      ),
+    },
   };
   return (
-    hashCanonical(
-      `${HASH_DOMAINS.projectionSemantic}/storage-column-transition-shape`,
-      comparableShape(previous),
-    ).digest ===
-    hashCanonical(
-      `${HASH_DOMAINS.projectionSemantic}/storage-column-transition-shape`,
-      comparableShape(candidate),
-    ).digest
+    columnShapeFingerprint(
+      withoutNewOptions,
+      candidate.requiredAfterTightening,
+    ) === previous.shapeFingerprint
   );
 }
 
@@ -2745,23 +2746,37 @@ function lowerColumn(
     searchMapping: field.searchable
       ? ('normalizedTextIndex' as const)
       : ('none' as const),
-    shapeFingerprint: hashCanonical(
-      `${HASH_DOMAINS.projectionSemantic}/storage-column`,
-      {
-        businessKey: field.businessKey ?? 'none',
-        collation: field.collation ?? 'binary',
-        defaultSemantics,
-        defaultValue: field.defaultValue ?? null,
-        fieldType: field.fieldType,
-        nullable: field.presence !== 'required' || deferRequiredTightening,
-        presence: field.presence,
-        requiredAfterTightening: deferRequiredTightening,
-        searchable: field.searchable,
-      },
-    ).digest,
+    shapeFingerprint: columnShapeFingerprint(field, deferRequiredTightening),
   };
   addMapping(mappings, 'column', field.fieldId, physicalName, value);
   return value;
+}
+
+/**
+ * The column fingerprint, over the FULL field -- `fieldType` wholesale, so an
+ * enum's option records (id, label, orderKey) are all inside it. Factored out
+ * of `lowerColumn` so `isAdditiveEnumDomainTransition` can recompute what a
+ * candidate field would have fingerprinted as WITHOUT its new options and
+ * compare that against the previous release's stored fingerprint exactly.
+ */
+function columnShapeFingerprint(
+  field: Field,
+  deferRequiredTightening: boolean,
+): string {
+  const defaultSemantics =
+    field.defaultSemantics ??
+    (field.presence === 'optional' ? 'nullable' : 'none');
+  return hashCanonical(`${HASH_DOMAINS.projectionSemantic}/storage-column`, {
+    businessKey: field.businessKey ?? 'none',
+    collation: field.collation ?? 'binary',
+    defaultSemantics,
+    defaultValue: field.defaultValue ?? null,
+    fieldType: field.fieldType,
+    nullable: field.presence !== 'required' || deferRequiredTightening,
+    presence: field.presence,
+    requiredAfterTightening: deferRequiredTightening,
+    searchable: field.searchable,
+  }).digest;
 }
 
 function fieldContract(field: Field): ModuleFieldContract {

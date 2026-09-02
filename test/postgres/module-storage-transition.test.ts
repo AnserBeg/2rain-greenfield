@@ -4383,13 +4383,20 @@ test('an enum-domain widening plans exactly one widenEnumDomain element, and eve
 
   // The preserved refusals. `narrowed` removes one option; `rebound` replaces
   // one option id with another at constant count; `relabelled` changes a label
-  // and no id (equal sets are not a widening); `widenedAndSearchable` widens
-  // AND flips search mapping, so neither additive exception alone matches;
-  // `widenedAndRetype` widens AND retypes an unrelated column.
+  // and no id (equal sets are not a widening); `widenedAndRelabelled` and
+  // `widenedAndReordered` widen AND change an existing option's label or
+  // orderKey; `widenedAndSearchable` widens AND flips search mapping, so
+  // neither additive exception alone matches; `widenedAndRetype` widens AND
+  // retypes an unrelated column.
+  // `widenedAndRelabelled` and `widenedAndReordered` are the round-1 finding:
+  // a strict id superset whose EXISTING option records also moved. They come
+  // before `widenedAndSearchable` so the exactness mutation dies on them.
   for (const variant of [
     'narrowed',
     'rebound',
     'relabelled',
+    'widenedAndRelabelled',
+    'widenedAndReordered',
     'widenedAndSearchable',
   ] as const) {
     const result = compileApplication(
@@ -4766,17 +4773,81 @@ test('a released enum domain is widened by one atomic CHECK replacement, observe
           );
 
           // THE TRANSITION. Tenant A prepares the widened release while tenant
-          // B is still accounted on the previous root.
+          // B is still accounted on the previous root -- and while a business
+          // writer holds an open transaction on the table. This is the lock
+          // measured through the COMPOSED prepare path rather than on a raw
+          // statement (round-1 finding): the materializer is observed in
+          // pg_stat_activity waiting on the relation lock behind that writer,
+          // the prepare does not resolve until the writer commits, and the
+          // widening lands afterwards.
           const generationId = randomUUID();
           const preparationId = randomUUID();
-          const prepared = await materializer.prepare({
-            context: contexts.a,
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            generationId,
-            initiatedBy: principalA,
-            preparationId,
-            targetReleaseId: next.target,
-          });
+          const writerAhead = await pool.connect();
+          let preparedState: 'pending' | 'resolved' = 'pending';
+          let prepared: Awaited<
+            ReturnType<PostgresModuleStorageMaterializer['prepare']>
+          >;
+          try {
+            await writerAhead.query('BEGIN');
+            await insertModuleRecord(
+              writerAhead,
+              contexts.a,
+              widenedTarget,
+              parent.entityId,
+              { [tierColumn.physicalName]: FIXTURE_IDS.optionIds.premium },
+            );
+            const preparing = materializer
+              .prepare({
+                context: contexts.a,
+                expiresAt: new Date(Date.now() + 60_000).toISOString(),
+                generationId,
+                initiatedBy: principalA,
+                preparationId,
+                targetReleaseId: next.target,
+              })
+              .then((result) => {
+                preparedState = 'resolved';
+                return result;
+              });
+            const waitForMaterializerLockWait = async (): Promise<boolean> => {
+              for (let attempt = 0; attempt < 400; attempt += 1) {
+                const waiting = await pool.query<{ count: string }>(
+                  `SELECT count(*)::text AS count
+                     FROM pg_stat_activity
+                    WHERE usename = 'north_star_module_materializer'
+                      AND wait_event_type = 'Lock'
+                      AND wait_event = 'relation'`,
+                );
+                if (waiting.rows[0]?.count === '1') return true;
+                await new Promise<void>((resolve) => setTimeout(resolve, 25));
+              }
+              return false;
+            };
+            assert.equal(
+              await waitForMaterializerLockWait(),
+              true,
+              'the composed prepare must be observed waiting on the relation lock behind an open writer',
+            );
+            assert.equal(preparedState, 'pending');
+            // Lock-free: `pg_get_expr` would open the relation and queue
+            // behind the materializer's pending ACCESS EXCLUSIVE request,
+            // deadlocking this test against its own writer.
+            const oidWhileWaiting = await pool.query<{ oid: string }>(
+              `SELECT constraint_record.oid::text AS oid
+                 FROM pg_constraint AS constraint_record
+                 JOIN pg_class AS relation_record
+                   ON relation_record.oid = constraint_record.conrelid
+                WHERE relation_record.relname = $1
+                  AND constraint_record.conname = $2`,
+              [tableName, check.physicalName],
+            );
+            assert.equal(oidWhileWaiting.rows[0]?.oid, before.oid);
+            await writerAhead.query('COMMIT');
+            prepared = await preparing;
+          } finally {
+            writerAhead.release();
+          }
+          assert.equal(preparedState, 'resolved');
           // Assertion 3: the preparation receipt is for THIS candidate and the
           // element is APPLIED at PREPARE, before any approval exists.
           assert.equal(prepared.targetReleaseId, next.target);
@@ -5009,6 +5080,39 @@ test('a released enum domain is widened by one atomic CHECK replacement, observe
             (await readEnumDomainCheck(pool, tableName, check.physicalName))
               ?.oid,
             after.oid,
+          );
+
+          // Round-1 finding: an ABSENT released CHECK is catalog drift, not a
+          // widening. Adding the target constraint NOT VALID would be a
+          // pre-approval tightening -- the table admitted everything while
+          // the constraint was gone -- and it would repair the drift before
+          // catalog verification measured it. The element refuses, and the
+          // constraint stays absent for the verifier to find.
+          await pool.query(
+            `ALTER TABLE north_star_module.${quoteTestIdentifier(tableName)}
+               DROP CONSTRAINT ${quoteTestIdentifier(check.physicalName)}`,
+          );
+          await assert.rejects(
+            materializer.prepare({
+              context: contexts.b,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              generationId: randomUUID(),
+              initiatedBy: principalB,
+              preparationId: randomUUID(),
+              targetReleaseId: nextB.target,
+            }),
+            (error: unknown) =>
+              error instanceof ModuleStorageMaterializationError &&
+              error.code === 'ENUM_DOMAIN_CHECK_MISSING',
+          );
+          assert.equal(
+            await readEnumDomainCheck(pool, tableName, check.physicalName),
+            null,
+          );
+          await assertCatalogDrift(
+            materializer,
+            contexts.b,
+            /missing managed constraint/u,
           );
         } finally {
           client.release();
@@ -6282,6 +6386,8 @@ function tierModule(
     | 'rebound'
     | 'relabelled'
     | 'widened'
+    | 'widenedAndRelabelled'
+    | 'widenedAndReordered'
     | 'widenedAndRetype'
     | 'widenedAndSearchable'
     | 'widenedPlusColumn',
@@ -6291,7 +6397,11 @@ function tierModule(
       fieldId: string;
       fieldType: {
         maximumLength?: number;
-        options?: Array<Record<string, unknown>>;
+        options?: Array<{
+          label?: string;
+          optionId?: string;
+          orderKey?: number;
+        }>;
       };
       searchable?: boolean;
     }>;
@@ -6320,6 +6430,16 @@ function tierModule(
       break;
     case 'relabelled':
       options[1]!.label = 'Premium plus';
+      break;
+    case 'widenedAndRelabelled':
+      // Round-1 finding: labels live only inside the column fingerprint, so a
+      // predicate that excludes the fingerprint let this through.
+      options[1]!.label = 'Premium plus';
+      options.unshift(basic);
+      break;
+    case 'widenedAndReordered':
+      options[1]!.orderKey = 30;
+      options.unshift(basic);
       break;
     case 'widenedAndSearchable':
       options.unshift(basic);
