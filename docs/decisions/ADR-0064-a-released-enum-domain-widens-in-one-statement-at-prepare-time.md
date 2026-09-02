@@ -69,12 +69,19 @@ fired:
 **1. A `widenEnumDomain` element exists, and a widening plans as exactly one.**
 When the previous release carries an enum-domain CHECK under the same physical
 name, the candidate's option-id set is a STRICT SUPERSET of the previous one,
-and NOTHING ELSE about the column moved, the planner emits one
-`widenEnumDomain` element instead of refusing. The column-side predicate
-compares the two lowered columns with `fieldContract.enumOptionIds` and
-`shapeFingerprint` removed; the check-side predicate `widensEnumDomain`
-requires the same field, the same physical name, `enumDomain` kind, `NOT VALID`
-on both sides, and the strict superset. The check-side rule is exported and the
+and NOTHING ELSE about the field moved, the planner emits one
+`widenEnumDomain` element instead of refusing. "Nothing else moved" is tested
+EXACTLY, not by exclusion (**corrected at round 2** — the round-1 predicate
+removed the whole column fingerprint from the comparison, which is the only
+place an enum's option labels and orderKeys live, so a widening that also
+relabelled or reordered an existing option passed): the candidate's SOURCE
+field, with every option record the previous release did not carry removed,
+must fingerprint byte-for-byte as the previous release's stored column
+fingerprint. That admits exactly one kind of change — new option records — and
+refuses a changed label, a changed orderKey, a reordering, and every other
+column property. The check-side predicate `widensEnumDomain` requires the same
+field, the same physical name, `enumDomain` kind, `NOT VALID` on both sides,
+and the strict superset. The check-side rule is exported and the
 provider imports it, for the reason ADR-0061 gave: one authority, because two
 copies of a rule already drifted once.
 
@@ -106,13 +113,21 @@ ALONE. Combining them is refused, deliberately: one property per transition is
 the rule that keeps each predicate's evidence attributable.
 
 **4. The provider replaces the constraint in ONE statement, decided against the
-LIVE definition.** `widenEnumDomainCheck` reads the live CHECK back from
-`pg_constraint`, extracts the option ids it itself rendered, and checks the
-extraction by ROUND TRIP — re-rendering the extracted set must reproduce the
-live definition exactly, or it refuses with
-`ENUM_DOMAIN_DEFINITION_UNRECOGNIZED` rather than guessing. Then:
+LIVE definition.** `widenEnumDomainCheck` takes `LOCK TABLE … IN SHARE UPDATE
+EXCLUSIVE MODE` (excludes every other `ALTER TABLE`, admits DML), reads the
+live CHECK back from `pg_constraint` under that lock, extracts the option ids of
+the shape it renders, and checks the extraction by ROUND TRIP — re-rendering
+the extracted set must reproduce the live definition exactly, or it refuses
+with `ENUM_DOMAIN_DEFINITION_UNRECOGNIZED` rather than guessing. The round trip
+proves the expression's SHAPE, not its authorship. Then:
 
-- constraint absent → added `NOT VALID` (recovery of a missing check);
+- constraint absent → **REFUSED** with `ENUM_DOMAIN_CHECK_MISSING` (**corrected
+  at round 2**: round 1 added the target constraint `NOT VALID` here, which is
+  not a widening at all — the table admitted everything while the constraint
+  was absent, so the add is a pre-approval TIGHTENING that can newly refuse an
+  update to a drifted row, and it repairs the drift before the catalog verifier
+  measures it. An absent released constraint is drift, and the verifier finds
+  it as `missing managed constraint`);
 - target ⊆ live → nothing to do (a replay, or a sibling root already wider);
 - live ⊂ target → `ALTER TABLE … DROP CONSTRAINT k, ADD CONSTRAINT k CHECK (…)
   NOT VALID`, one statement;
@@ -123,7 +138,9 @@ live definition exactly, or it refuses with
 Deciding against the live definition rather than the source root is what makes
 the element idempotent and order-independent across tenants: a second tenant
 preparing the same widened release after the first finds the constraint
-already wide enough and applies the element with no DDL.
+already wide enough and applies the element with no DDL. Every path the
+element executes is now inert — no-op, or subset-to-superset replacement —
+which is what `preApprovalInert` requires of it.
 
 **5. Two accounted live roots may disagree about one enum-domain CHECK — and
 its column's field contract — only by a widening, and the expected shape is the
@@ -134,8 +151,13 @@ tenant widened, every other tenant's prepare would have been refused. The merge
 now takes the wider member when `widensEnumDomain` holds in either direction,
 and the column merge tolerates a field contract that differs only by that
 widening (with `shapeFingerprint` excluded from the comparison, as it already
-is for the additive search-mapping pair). Every other divergence still
-conflicts.
+is for the additive search-mapping pair). Every other storage-visible
+divergence still conflicts. **Stated as a limit rather than hidden:** the
+provider cannot re-run the compiler's exact test, because option labels and
+orderKeys exist only in the compiler's INPUT and reach the provider solely
+inside the fingerprint it must exclude. The provider's tolerance is therefore
+bounded by what the compiler admitted for each root; a root that widened AND
+relabelled cannot be compiled, and a forged one is a forged release artifact.
 
 **6. Activation reports conformance from the catalog receipt that observed the
 widened definition.** Nothing new is added here, and that is the point: the
@@ -164,7 +186,11 @@ database; the only writers a wider CHECK newly admits are the new release's.
 
 **Lock.** The replacement holds `AccessExclusiveLock` on the business table
 from the statement until the prepare transaction commits — the same class as
-`addColumn`, which the prepare path already takes. A long-open reader ahead of
+`addColumn`, which the prepare path already takes — and this is observed
+through the COMPOSED prepare path, not only on a raw statement: the committed
+test holds a business writer's transaction open, watches the materializer wait
+on the relation lock in `pg_stat_activity`, and sees the prepare resolve only
+after the writer commits. A long-open reader ahead of
 it queues the statement AND every writer behind it. The materializer sets no
 `lock_timeout` today; that is a pre-existing property of every bounded-catalog
 lock in the prepare path and is filed rather than changed here.

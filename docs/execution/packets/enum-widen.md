@@ -14,9 +14,13 @@ A evidence from existing rows through activation on the real business table.
 - **Branch:** `packet/enum-widen`, cut from `main` at
   `8c417528db942f0a504c7744e56f816e770702c7` (verified by `git rev-parse main`
   at cut time, not taken from the charter).
-- **Stops:** 0 of 2. Both charter stop conditions were tested first and neither
-  fired (§1). Three lease crossings were taken and are disclosed in §4; the
-  orchestrator may revoke any of them.
+- **Stops: 1 of 2 — at round 2, on the round-1 reviewer's ruling that the
+  verifier's one-witness coverage is a release-gate stop condition** (§13).
+  Both charter stop conditions were tested first and neither fired at round 1
+  (§1); the round-1 reviewer read §1.2's disposition as a stop the lane should
+  have taken, and the lane is now taking it rather than arguing it. Three lease
+  crossings were taken and are disclosed in §4; their disposition is the second
+  decision requested in §13.
 - **ADR:** [ADR-0064](../../decisions/ADR-0064-a-released-enum-domain-widens-in-one-statement-at-prepare-time.md),
   taken because two things were ruled one-way: the element never narrows, and
   the physical constraint is the superset of every accounted live root.
@@ -88,26 +92,40 @@ write is rolled back before the constraint. **None of the three is it.**
    it. After the widening is prepared the same verification admits the
    candidate, and the release activates.
 
-**Disposition:** verification is not defective and no release gate is
-weakened. What remains is a SCOPE LIMIT — the scenario probes one witness, the
-first-declared option, so a widening whose new option is declared anywhere
-else is invisible to it — and it is filed as a queue row (§7) rather than
-fixed here, because the enumReject scenario's contract is a verification-plan
-change outside this lease. With this packet's element applied at PREPARE, and
-the composed runtime preparing before it verifies, the limit no longer sits in
-front of a hole.
+**Disposition, as corrected at round 2.** The round-1 record called the
+remaining one-witness limit a scope row. The round-1 reviewer ruled that a
+verifier which writes one witness — the first-declared option — exercises
+behaviour common to both releases for every ordinary widening and does not
+test the newly admitted value at all, so its coverage is insufficient as a
+release gate for enum-domain changes, and that under the charter this is the
+STOP-AND-REPORT case rather than a queue row. **The lane accepts that reading
+and is stopped on it** (§13): candidate SELECTION is not defective and
+`PUR-2c`'s specimen was wrong, but the verifier's COVERAGE is, and the fix —
+writing every candidate option, or every option absent from the previous
+release, in `#enumReject` — lives in `release-verification-service.ts` and
+`verification.ts`, outside this lease. With this packet's element applied at
+PREPARE and the composed runtime preparing before it verifies, the widened
+constraint is present when the witness is written; that ordering is what keeps
+the limit from sitting in front of a hole today, and it is an ordering, not a
+gate.
 
 ## 2. What was built — three groups, and fewer than three was the unsafe outcome
 
 ### 2.1 Compiler and protocol semantics (`packages/compiler/src/storage.ts`, plus two one-line crossings)
 
-- `isAdditiveEnumDomainTransition(previousColumn, candidateColumn)` — both
-  columns carry an enum field contract, the previous option-id set is a STRICT
-  subset of the candidate's, and the columns compared with
-  `fieldContract.enumOptionIds` and `shapeFingerprint` removed are identical.
-  It sits beside `isAdditiveSearchMappingTransition` as the second additive
-  exception to the retype fence, and the two do not compose: a widening
-  combined with a search flip is refused.
+- `isAdditiveEnumDomainTransition(previousColumn, candidateColumn,
+  candidateField)` — the previous column carries an enum field contract whose
+  option-id set is a STRICT subset of the candidate field's, and the candidate
+  SOURCE field with the new option records removed fingerprints byte-for-byte
+  as the previous release's stored column fingerprint (`columnShapeFingerprint`,
+  factored out of `lowerColumn`). **Corrected at round 2:** round 1 compared
+  the two lowered columns with the option ids and the whole fingerprint
+  excluded, and the fingerprint is the only place labels and orderKeys live, so
+  a widening plus a relabelled or reordered existing option passed. The exact
+  test admits only new option records. It sits beside
+  `isAdditiveSearchMappingTransition` as the second additive exception to the
+  retype fence, and the two do not compose: a widening combined with a search
+  flip is refused.
 - `widensEnumDomain(previousCheck, candidateCheck)` — the same rule on the
   enum-domain CHECK: same field, same physical name, `enumDomain`, `NOT VALID`
   both sides, strict superset. **Exported and imported by the provider**, so
@@ -125,22 +143,28 @@ front of a hole.
   `preApprovalInert` / `additive`). The renderer allowlist derives from the
   matrix and admits it for free.
 - **Preserved refusals, each one property:** narrowing (an option removed),
-  rebinding (one id swapped at constant count), relabelling (equal id sets —
-  labels are not storage, but the fingerprint moves and the sets are not a
-  strict superset, so it stays a retype), widening + search flip, widening +
-  an unrelated retype. All five are asserted in the Postgres-free compiler test.
+  rebinding (one id swapped at constant count), relabelling (equal id sets),
+  **widening + a relabelled existing option, widening + a reordered existing
+  option** (both added at round 2), widening + search flip, widening + an
+  unrelated retype. All seven are asserted in the Postgres-free compiler test.
 
 ### 2.2 Provider, live-target, catalog, verification and activation semantics (`packages/postgres-provider/src/module-storage-materializer.ts`)
 
 - `applyDdlElement` gains a `widenEnumDomain` case calling
-  `widenEnumDomainCheck`, which reads the LIVE definition from `pg_constraint`,
-  extracts the text literals this materializer itself renders, and checks the
-  extraction by ROUND TRIP (re-rendering must reproduce the live definition
-  exactly, else `ENUM_DOMAIN_DEFINITION_UNRECOGNIZED`). Then: absent → add `NOT
-  VALID`; target ⊆ live → no-op; live ⊂ target → ONE `ALTER TABLE … DROP
-  CONSTRAINT k, ADD CONSTRAINT k CHECK (…) NOT VALID`; otherwise →
+  `widenEnumDomainCheck`, which takes `LOCK TABLE … IN SHARE UPDATE EXCLUSIVE
+  MODE` (added at round 2 so the read and the ALTER see one catalog), reads
+  the LIVE definition from `pg_constraint`, extracts the text literals of the
+  shape this materializer renders, and checks the extraction by ROUND TRIP
+  (re-rendering must reproduce the live definition exactly, else
+  `ENUM_DOMAIN_DEFINITION_UNRECOGNIZED`; the round trip proves shape, not
+  authorship). Then: **absent → `ENUM_DOMAIN_CHECK_MISSING`, refused
+  (corrected at round 2 — round 1 added the constraint `NOT VALID`, a
+  pre-approval tightening that also repaired drift ahead of the verifier)**;
+  target ⊆ live → no-op; live ⊂ target → ONE `ALTER TABLE … DROP CONSTRAINT k,
+  ADD CONSTRAINT k CHECK (…) NOT VALID`; otherwise →
   `ENUM_DOMAIN_NARROWING_REJECTED`. Decided against the live definition, not the
-  source root, because the managed tables are tenant-shared.
+  source root, because the managed tables are tenant-shared. Every executed
+  path is now inert, which is what the `preApprovalInert` cell requires.
 - **Idempotency, retry, recovery, stated as behaviours the test observes.** A
   replay finds the target within the live set and applies the element with no
   DDL (the OID does not move). A prepare that fails after the DDL rolls the DDL
@@ -167,7 +191,8 @@ front of a hole.
 
 ### 2.3 Band A PostgreSQL evidence (`test/postgres/module-storage-transition.test.ts`, `test/evidence/enum-widen.expected-red.json`)
 
-Three tests and thirteen reds. The subject is `ordinaryModuleV2`'s
+Three tests and thirteen reds (fourteen were written across two rounds; one
+round-1 entry was withdrawn at round 2 as over-determined, §9). The subject is `ordinaryModuleV2`'s
 `master_tier` enumeration (`standard`, `premium`) widened with `basic`,
 declared FIRST so the verification witness is the new option. The mechanism is
 proved on that controlled fixture; the real inventory fields are untouched
@@ -242,6 +267,12 @@ division unworkable.
 
 ## 6. What is NOT proven, stated narrowly
 
+- **The provider's merge tolerance is bounded by the compiler's admission, not
+  by its own test.** Option labels and orderKeys reach the provider only inside
+  the column fingerprint it must exclude, so `mergeCompatibleEntity` cannot
+  re-run the compiler's exact-fingerprint test (round-1 finding 1, provider
+  half). The two roots it merges are compiled releases the fixed compiler
+  admitted; a forged root is a forged release artifact. Stated in ADR-0064.
 - **The round-trip guard is unobserved.** `ENUM_DOMAIN_DEFINITION_UNRECOGNIZED`
   fires only for a live definition this materializer did not render, which no
   committed path produces. A hand-altered constraint would be caught as
@@ -264,10 +295,16 @@ division unworkable.
 - **Two successive widenings of one field share an `elementId`.** Consistent by
   construction (ADR-0064 consequences), exercised only in the single-widening
   and replay forms here.
-- **Lock behaviour is measured on a raw table with the exact statement shape,
-  not through the materializer**, whose prepare transaction holds the same lock
-  longer (across registration, DDL and catalog verification). The 4–6 ms is
-  the statement; the lock's duration is the transaction's.
+- **Lock behaviour is measured both ways, and only one direction through the
+  composed path.** The raw-statement test measures what writers see behind the
+  replacement. The composed-path observation (added at round 2) holds a
+  business writer's transaction open, watches the materializer's prepare wait
+  on the relation lock in `pg_stat_activity`, and sees it resolve only after
+  the writer commits. What is NOT observed through the composed path is a
+  writer queued BEHIND the prepare for the transaction's remaining life
+  (registration, catalog verification, commit) — that interval is real, it is
+  the same interval `addColumn` already imposes, and its bound is the filed
+  `lock_timeout` row (§7).
 
 ## 7. Findings raised — routed, not fixed
 
@@ -275,6 +312,7 @@ division unworkable.
 |---|---|---|
 | `enum-reject-witness-is-the-first-declared-option` | Behavioral | Candidate verification's `enumReject` scenario writes one witness, `enumOptionIds[0]` of the operation catalog (declaration order), so a widening whose new option is declared anywhere but first is invisible to it. `PUR-2c`'s specimen read the sorted storage list. With this element applied at PREPARE the limit sits behind no hole; a scenario that probes every candidate option, or at least every option absent from the previous release, would close it. Verification plan and `#enumReject` are outside this lease. |
 | `zero-element-transition-skips-catalog-verification` | Critical | `composed-application-runtime.ts` routes an empty envelope to the no-transition path with no catalog check and `module_transition = false`, so a release whose storage target differs from its source but whose envelope is empty activates unverified — the exact shape of `PUR-2c`'s bypass. The compiler never emits it for any planned transition, so this is a defence-in-depth gap: assert `fromStorageTargetSemanticDigest === toStorageTargetSemanticDigest` on that branch, or run catalog verification there. |
+| `vocabulary-migration-reds-are-superseded-by-restating-migrations` | Behavioral | `north_star_internal.module_storage_elements_shape` can only be restated whole, so a migration admitting a new element kind (`0022`, now `0024`) re-creates the constraint with the full list and makes every earlier migration's expected red on that list vacuous. Measured: `relation-requiredness-relaxation`'s `migration-does-not-admit-the-new-kind` survives at this packet's SHA. Owed: repoint such entries at the migration currently carrying the vocabulary whenever a restating migration lands, or derive the vocabulary CHECK from one source so no restating migration exists. |
 | `materializer-prepare-sets-no-lock-timeout` | Behavioral | Every bounded-catalog-lock element in the prepare path (`addColumn`, `relaxNotNull`, now `widenEnumDomain`) queues behind a long-open reader with no bound, and every writer queues behind it. Measured: `55P03` at 250 ms under `lock_timeout`; unbounded without. A `SET LOCAL lock_timeout` for the DDL phase, with a defined retry, is one edit in one file. |
 
 `migration-range-encoded-in-a-test-title` is CLOSED by this packet (§4).
@@ -312,6 +350,23 @@ committed window probe), `8c2d591` (the tautology PostgreSQL round-trips).
 | `scripts/check-records.sh` | PASS — `records: OK (137 record(s), 6 declaring …; 158 ledger row(s), ids unique)`, with this record's block resolved against `8c41752..8c2d591` |
 | full matrix (`scripts/run-matrix.sh`) | **PASS, `FULL_MATRIX_PASS_SHA=984c65d6a7780f13d1bb93b252735ebe116f8ab9`** — `scripts/run-matrix.sh enum-widen`: performance 5/5 (`PERFORMANCE_GATE_PASS_SHA` the same), `check:demo-release`, `check:app-release`, unit 155/155, compiler 157/157, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, postgres 226/226, locale 1/1, browser 93/93, observability producer, language coverage PASS (2050 obligations), reachability PASS (106/106 test files executed), dependency audit clean, secret scan clean (the one reported "leak" is the scan's own planted negative-control fixture, `negativeRuleDetected: true`). Log: `/tmp/matrix-enum-widen-984c65d6.log` |
 
+**Round 2, measured at `00f9c5bcd4dc7842a7b4b471caf2bb67a008029b` (the round-2 executable candidate; the
+round-1 matrix above is VOID for it, per `AGENTS.md` §4):**
+
+| gate | round 2 |
+|---|---|
+| `typecheck` / `lint` / `format` / `build` | PASS |
+| `test:unit` | 155/155 |
+| `test:compiler` | 157/157 (seven preserved refusals, two new) |
+| `check:app-release` | PASS — artifact unchanged |
+| `check:expected-red` (static) | OK, 75 entries in 7 manifests |
+| `evidence:expected-red`, this packet | **13/13 reproduced and restored** at `00f9c5b` (`widening-admits-any-option-change` withdrawn as over-determined, §9) |
+| `evidence:expected-red`, `relation-requiredness-relaxation`'s `migration-does-not-admit-the-new-kind` | **SURVIVOR at `00f9c5b`** — migration `0024` restates the whole element vocabulary, `relaxNotNull` included, so removing `relaxNotNull` from `0022` no longer changes the final schema. An accepted packet's red made vacuous by a later migration; decision 3 in §13 |
+| the three enum-widen tests, focused | 3/3, including the composed-path lock observation and the absent-CHECK refusal |
+| `test:postgres` | <<POSTGRES2>> |
+| `test:architecture` / `check-records` | <<ARCH2>> |
+| full matrix | NOT re-run at round 2 — the packet is STOPPED on three decisions (§13); the matrix runs once at the SHA that will integrate, per `git-workflow` |
+
 `test:postgres` is REQUIRED here under `AGENTS.md` §6's cross-layer rule — the
 transition envelope gained an element kind — and two of its tests observe the
 new DDL rather than merely tolerating it.
@@ -327,8 +382,7 @@ re-run.
 | entry | one property varied | kills |
 |---|---|---|
 | `widening-is-never-recognised` | the column predicate call replaced by `true` | the compiler test — the widening refuses `COMPILER_STORAGE_RETYPE_UNSUPPORTED` |
-| `widening-admits-any-option-change` | the strict-superset core returns `true` | the compiler test — `narrowed` compiles |
-| `widening-admits-unrelated-column-changes` | the comparable-shape equality returns `true` | the compiler test — `widenedAndSearchable` compiles |
+| `widening-ignores-everything-but-the-id-set` | the exact-fingerprint comparison returns `true` (round 2; replaces round 1's `widening-admits-unrelated-column-changes`) | the compiler test — `widenedAndRelabelled` compiles |
 | `checks-are-matched-by-name-only` | the definition comparison always matches (the `PUR-2c` hole restored) | the compiler test — zero elements planned |
 | `old-readers-are-told-widening-is-transparent` | the cell's `oldRead` flattened to `compatible` | the compiler test — the planned element's cell |
 | `migration-0024-does-not-admit-widen-enum-domain` | the kind removed from `0024`'s CHECK | `trust-substrate` — schema drift against the snapshot, on a live database |
@@ -339,10 +393,81 @@ re-run.
 | `catalog-expects-the-narrower-check` | the merge keeps the narrower member | the Postgres test — the tampered transition verifies CLEAN (`Missing expected rejection`), which is `PUR-2c`'s activation reconstructed |
 | `column-merge-refuses-the-widened-contract` | the column tolerance removed | the Postgres test — `LIVE_SET_SHAPE_CONFLICT` on the column |
 | `repair-before-measure` | every enum CHECK rendered as a tautology | the Postgres test — `the previous release CHECK must reject the option it does not declare` |
+| `missing-check-is-repaired-not-refused` | the `ENUM_DOMAIN_CHECK_MISSING` refusal replaced by round 1's `NOT VALID` add (round 2) | the Postgres test — the drifted tenant's prepare succeeds (`Missing expected rejection`) |
+
+**One round-1 entry is WITHDRAWN at round 2, and the claim it carried is
+over-determined rather than unproved.** `widening-admits-any-option-change`
+made the strict-superset core return `true` and expected `narrowed` to
+compile. After the exact-fingerprint correction a narrowing or rebinding is
+refused by that comparison BEFORE the superset core is consulted, and a true
+widening reaches the check-side rule only after the column stage admitted it,
+so the mutation changes no observable outcome: it became a SURVIVOR. The core
+still guards `widensEnumDomain`, the rule the provider merge shares, and its
+merge role is what `catalog-expects-the-narrower-check` kills. Narrowing
+therefore has no single-property killer — two independent fences refuse it —
+which is the same shape `relation-requiredness-relaxation` recorded for
+one-wayness, and it is stated here rather than kept as a red that proves
+nothing.
 
 Three claims share one kill message (`conflicting live roots claim`) because
 three different mutations reach the same refusal from three places; each is a
 distinct mutation of a distinct line and each is reproduced separately.
+
+## 13. Round 2 — the BLOCK verdict, what each finding changed, and the stop
+
+Round 1 returned **BLOCK** with two executable defects, one release-evidence
+ruling and one process finding. Both defects were real. Each disposition:
+
+| # | Finding | Disposition |
+|---|---|---|
+| P1 | **Widening + relabel/reorder of an EXISTING option passed both fences and the merge.** The round-1 predicate excluded the whole column fingerprint, the only place labels and orderKeys live. | **FIXED, exactly rather than by exclusion.** `isAdditiveEnumDomainTransition` now takes the candidate's SOURCE field, drops the option records the previous release did not carry, fingerprints what remains exactly as `lowerColumn` would (`columnShapeFingerprint`, factored out), and requires byte equality with the previous release's stored fingerprint. `widenedAndRelabelled` and `widenedAndReordered` are refused and asserted; the red `widening-ignores-everything-but-the-id-set` makes the comparison vacuous and dies on `widenedAndRelabelled`. The round-1 red `widening-admits-any-option-change` is withdrawn as over-determined by this fix (§9). **The provider half is a stated limit, not a fix:** labels and orderKeys reach the provider only inside the fingerprint it must exclude, so the merge cannot re-run the compiler's test; it is bounded by what the fixed compiler admitted (§6, ADR-0064). The lane says so as a claim and lets the reviewer disagree. |
+| P1 | **The missing-live-CHECK branch was a pre-approval tightening, not an inert widening**, and it repaired drift ahead of the verifier. | **FIXED, fail closed.** `widenEnumDomainCheck` refuses with `ENUM_DOMAIN_CHECK_MISSING`; the Postgres test drops the constraint by hand, sees the refusal, sees the constraint still absent, and sees `verifyLiveCatalog` report `missing managed constraint`. The red `missing-check-is-repaired-not-refused` restores round 1's add and dies on the drifted tenant's prepare succeeding. Every executed path is now no-op or subset-to-superset, so the `preApprovalInert` cell holds for all of them. |
+| P1 (release evidence) | **The verifier's one-witness coverage is a release-gate defect and the charter said STOP.** | **ACCEPTED, and the lane is STOPPED on it — stop 1 of 2.** §1.2 is corrected: candidate selection is sound and `PUR-2c`'s specimen was wrong, but one witness does not test the newly admitted value for an ordinary widening. The fix is outside this lease (`#enumReject` in `release-verification-service.ts`, the plan shapes in `verification.ts`). **Decision requested** — see below. |
+| P2 (process) | **The three crossings were disclosed, minimal, and not authorized.** | **ACCEPTED as stated.** The lane should have issued one batched bridge request before the first crossing. **Retrospective disposition requested** — see below. Nothing in the crossings changed at round 2. |
+| — | The round trip proves shape, not authorship; no relation lock covered read-then-ALTER. | **BOTH CORRECTED.** The comment now says shape; `widenEnumDomainCheck` takes `LOCK TABLE … IN SHARE UPDATE EXCLUSIVE MODE` before reading, so no concurrent DDL can change the definition between the read and the ALTER (the replacing ALTER escalates to ACCESS EXCLUSIVE). |
+| — | Raw-statement lock timing is not Band A evidence for the composed prepare. | **CORRECTED by measurement, in the direction the test can make deterministic.** The Postgres test now holds a business writer's transaction open, starts the real prepare, observes the materializer waiting on the relation lock in `pg_stat_activity`, asserts the prepare unresolved and the OID unmoved, commits the writer, and sees the prepare resolve and the widening land. The other direction — a writer queued behind the prepare's remaining transaction — is stated as unobserved through the composed path (§6). |
+| — | The prompt steered: it pre-asserted "verification was never the gap", pre-defended a non-local kill, characterised the crossings before asking, and grouped the repair path with the widening. | **ACCEPTED.** The round-2 prompt below states each of those as a question or a claim under test, and §1.2 no longer says the sentence. |
+
+**Two decisions only the orchestrator can make, and the lane is stopped on
+both:**
+
+1. **The verifier's coverage.** Options the lane can see: (a) grant a bridge
+   into `packages/postgres-provider/src/release-verification-service.ts`
+   (`#enumReject`) and, if the result shape changes, `packages/compiler/src/verification.ts`,
+   so the positive probe writes EVERY candidate option rather than
+   `enumOptionIds[0]` — closes the gate inside this packet, at the cost of a
+   verification-evidence shape change on a DEPLOY-lane path; (b) route it as
+   its own packet (`enum-reject-witness-is-the-first-declared-option`, already
+   filed) and narrow this packet's claim to what it measures — the element is
+   applied at PREPARE, before verification runs, so the widened constraint is
+   present when the witness is written; (c) something the lane has not seen.
+   **The lane recommends (b)** because the verification plan is a persisted,
+   digested artifact whose shape change deserves its own evidence, and because
+   this packet's element does not depend on the verifier to be safe — but it
+   is the orchestrator's ruling, and the reviewer's point that a Critical lane
+   should not carry an insufficient release gate as a footnote stands either
+   way.
+2. **The three crossings** (`protocol.ts` union literal, `index.ts` export,
+   the closed-matrix pin in `g2-module-storage.test.ts`): grant retrospectively,
+   or revoke and instruct. Revoking the union literal is revoking the element.
+3. **An accepted packet's red is now vacuous, and the fix is a crossing.**
+   Measured at round 2 by running the repointed
+   `relation-requiredness-relaxation` entry alongside this packet's: its
+   `migration-does-not-admit-the-new-kind` removes `'relaxNotNull'` from
+   migration `0022` and expects snapshot drift — but migration `0024` drops
+   and re-creates `module_storage_elements_shape` with the FULL vocabulary,
+   `relaxNotNull` included, so the final schema is identical and the mutation
+   is a **SURVIVOR**. This is structural: the vocabulary CHECK can only be
+   restated whole, so every restating migration supersedes every earlier
+   migration's red on it. The honest fix is to repoint that entry's `file` to
+   `0024_module_storage_enum_domain_widening.sql` (where the vocabulary now
+   lives) — a one-property edit, but to an accepted packet's manifest beyond
+   the two title strings this charter granted, so the lane has NOT made it.
+   Options: (a) grant that crossing; (b) route it (`vocabulary-migration-reds-are-superseded-by-restating-migrations`,
+   filed in `current-plan.md`) and accept that `evidence:expected-red` over
+   the whole population is red at this packet's SHA until it lands.
+
+**Round-2 gates** are in §8. **Stops: 1.**
 
 ## 10. Test it yourself
 
@@ -406,7 +531,7 @@ live definition. If you disagree with anything one-way in this packet, it is
 > the scope is drawn wrongly, and say plainly if the prompt itself is steering
 > you.*
 
-**ROUND 1.** No prior review.
+**ROUND 2.** Round 1 returned BLOCK; §13 tracks every finding to its disposition. Two are fixed in production, one is a STOP awaiting the orchestrator's decision, one is a process disposition awaiting the same. Rounds are fresh: nothing here is adjudicated, and the round-1 verdict carries no weight beyond the history in §13.
 
 **Repository:** `github.com/AnserBeg/2rain-greenfield`. **Branch:**
 `packet/enum-widen`, cut from `main` at
@@ -444,29 +569,36 @@ packet, and the rows in §8 for `test:postgres`, `test:architecture`,
 
 ### The lane's claims, written as claims to be tested
 
-1. **Only a strict option-id superset with nothing else moved is admitted**
-   (`isAdditiveEnumDomainTransition`, `widensEnumDomain` in
-   `packages/compiler/src/storage.ts`). Narrowing, rebinding, relabelling,
-   widening-plus-search and widening-plus-retype keep
-   `COMPILER_STORAGE_RETYPE_UNSUPPORTED`.
+1. **Only new option records are admitted; every other change to the field is
+   refused.** `isAdditiveEnumDomainTransition` fingerprints the candidate
+   source field without its new options and requires equality with the
+   previous release's stored fingerprint. Narrowing, rebinding, relabelling,
+   widening-plus-relabel, widening-plus-reorder, widening-plus-search and
+   widening-plus-retype keep `COMPILER_STORAGE_RETYPE_UNSUPPORTED`.
 2. **A same-named CHECK is compared by definition before it is skipped**, and a
    changed non-widening definition is refused even if the column stage passed.
 3. **The replacement is one statement with no unconstrained window**, decided
-   against the LIVE definition (absent → add; target ⊆ live → no-op; live ⊂
-   target → replace; else `ENUM_DOMAIN_NARROWING_REJECTED`), with the live
-   option set read back by round trip (`widenEnumDomainCheck`).
+   against the LIVE definition read under `SHARE UPDATE EXCLUSIVE` (absent →
+   `ENUM_DOMAIN_CHECK_MISSING`; target ⊆ live → no-op; live ⊂ target →
+   replace; else `ENUM_DOMAIN_NARROWING_REJECTED`), with the live option set
+   read back by round trip (`widenEnumDomainCheck`). Every executed path is a
+   no-op or a subset-to-superset replacement.
 4. **Two accounted live roots may differ on an enum-domain CHECK and its
    column contract only by a widening, and the expected shape is the superset**
    (`mergeCompatibleEntity`).
-5. **Candidate verification was never the gap.** `PUR-2c`'s sorts-first
-   specimen read the storage contract's SORTED list; the witness is the
-   operation catalog's first DECLARED option. Declared first, the new option
+5. **Candidate SELECTION is sound and `PUR-2c`'s specimen was wrong; the
+   verifier's one-witness COVERAGE is not sufficient for an ordinary widening,
+   and the lane is stopped on that** (§13, decision 1). The witness is the
+   operation catalog's first DECLARED option; declared first, the new option
    trips `MODULE_PROVIDER_FAILURE (sqlstate=23514 …)` before the widening and is
    admitted after it.
 6. **The nine `PUR-2c` §2.4b assertions are all met directly** (§3), including
    SQLSTATE `23514` from the exact constraint on the real business table, the
    receipt and activation facts read from their rows, and the
    repair-before-measure control.
+7. **The provider's merge tolerance cannot re-run the compiler's exact test and
+   is bounded by it** (§6). This is stated as a limit; the lane does not know a
+   way for the provider to see option labels.
 
 ### The decisive questions
 
@@ -486,23 +618,23 @@ packet, and the rows in §8 for `test:postgres`, `test:architecture`,
    `shapeFingerprint` for the widened pair, as it already did for the search
    pair. Does excluding it let a non-widening column difference through when
    the option list ALSO widened?
-4. **Are the thirteen reds discriminating, and is any claim over-determined?**
-   Three entries share the kill message `conflicting live roots claim`.
-   `element-narrows-a-divergent-live-constraint` is killed by a different
-   refusal than the one it removes — is that acceptable evidence that the guard
-   fires first when present, or does it only prove something else catches the
-   forged target? The lane thinks it is acceptable and says so as a claim.
-5. **Is §1.2's disposition of `PUR-2c`'s residual right?** The lane says the
-   specimen was wrong (sort order versus declaration order), verification is
-   not defective, and the remaining one-witness limit is a scope row rather
-   than a stop. If you think it is a defect in a release gate, say so — the
-   charter's instruction was to STOP on that, and the lane did not.
-6. **Are the three lease crossings (§4) correctly disclosed and minimal, and
-   should any of them have been a stop instead?**
-7. **Is `oldRead: requiresReadFallback` the right cell, and is
-   `preApprovalInert` right** — is there any write the widened constraint
-   could newly reject, or any reader the residue after an abandoned
-   preparation could harm?
+4. **Are the thirteen reds discriminating?** Three entries share the kill
+   message `conflicting live roots claim`. `element-narrows-a-divergent-live-constraint`
+   is killed by a later refusal than the guard it removes; the green test's
+   exact-code assertion is the direct-path evidence. Is the new
+   `widening-ignores-everything-but-the-id-set` mutation the right
+   one-property control for the exactness claim, and is the withdrawal of
+   `widening-admits-any-option-change` as over-determined (§9) honest?
+5. **Is the corrected §1.2 and the stop in §13 right?** The lane now says the
+   specimen was wrong, selection is sound, coverage is insufficient, and the
+   fix is out of lease; it recommends routing (option b) and is stopped for the
+   ruling. Say whether the packet's own safety depends on that ruling.
+6. **Is the provider's merge tolerance acceptable as a bounded claim** (claim
+   7), given the provider cannot see option metadata, or does it need a
+   different shape?
+7. **With the absent-CHECK path now refusing, is `preApprovalInert` right for
+   every path the element executes**, and is `oldRead: requiresReadFallback`
+   the right cell?
 
 ### What the lane did NOT verify
 
@@ -522,6 +654,11 @@ packet, and the rows in §8 for `test:postgres`, `test:architecture`,
 - Real inventory fields are untouched by design (division (i)); nothing here
   proves the conformance pins on `inventory_transaction_type` and
   `inventory_posting_role` will move cleanly for resumed `PUR-2c`.
+- The provider merge admits a widened pair on storage-visible shape alone; a
+  root that also relabelled an existing option cannot be compiled, and the lane
+  has no provider-side observation of that (§6).
+- A writer queued BEHIND the composed prepare, for the transaction's remaining
+  life, is not observed through the composed path — only ahead of it (§6).
 
 ### Reading list
 
@@ -530,7 +667,7 @@ OBSERVABILITY" · `mission-cadence`, "The lane writes its own review prompt" ·
 `docs/execution/packets/pur-2c.md` §2.3–§2.6 and §8b · this record §1–§7 ·
 ADR-0064 · ADR-0061 for the precedent element and its merge tolerance ·
 `test/postgres/module-storage-transition.test.ts`, the three tests whose titles
-contain `enum domain` / `enum-domain` · `test/evidence/enum-widen.expected-red.json`.
+contain `enum domain` / `enum-domain` · `test/evidence/enum-widen.expected-red.json` · the round-1 verdict as history, in §13.
 
 The lane states no view on what verdict this round should reach.
 
@@ -549,7 +686,7 @@ The lane states no view on what verdict this round should reach.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "enum-widen",
   "base": "8c417528db942f0a504c7744e56f816e770702c7",
-  "head": "8c2d5912b792c38d730fe14173f828bc204ce131",
+  "head": "00f9c5bcd4dc7842a7b4b471caf2bb67a008029b",
   "changedPaths": [
     "db/migrations/0024_module_storage_enum_domain_widening.sql",
     "db/schema.snapshot.json",
@@ -574,6 +711,10 @@ The lane states no view on what verdict this round should reach.
     {
       "path": "packages/compiler/src/storage.ts",
       "name": "isAdditiveEnumDomainTransition"
+    },
+    {
+      "path": "packages/compiler/src/storage.ts",
+      "name": "columnShapeFingerprint"
     },
     {
       "path": "packages/compiler/src/storage.ts",
