@@ -363,8 +363,8 @@ round-1 matrix above is VOID for it, per `AGENTS.md` §4):**
 | `evidence:expected-red`, this packet | **13/13 reproduced and restored** at `00f9c5b` (`widening-admits-any-option-change` withdrawn as over-determined, §9) |
 | `evidence:expected-red`, `relation-requiredness-relaxation`'s `migration-does-not-admit-the-new-kind` | **SURVIVOR at `00f9c5b`** — migration `0024` restates the whole element vocabulary, `relaxNotNull` included, so removing `relaxNotNull` from `0022` no longer changes the final schema. An accepted packet's red made vacuous by a later migration; decision 3 in §13 |
 | the three enum-widen tests, focused | 3/3, including the composed-path lock observation and the absent-CHECK refusal |
-| `test:postgres` | <<POSTGRES2>> |
-| `test:architecture` / `check-records` | <<ARCH2>> |
+| `test:postgres` | **226/226** at `d7e8882` (executable tree identical to `00f9c5b`). Stated rather than hidden: a first run at the same tree, concurrent with another lane's full matrix on this machine, returned 225/226 with `a pre-existing relation index executes as atomic locking DDL and rejects invalid declared shape` red — a test that measures a locking window and is not this packet's; it passed in isolation and the full re-run above is clean. The lane does not know whether the `SHARE UPDATE EXCLUSIVE` read added at round 2 can interact with that test under load, and says so |
+| `test:architecture` / `check-records` | `test:architecture` 189/189 at `d7e8882`; `check-records` OK with this block's head at `00f9c5b`; both re-run at the freeze tip — see the checkpoint block |
 | full matrix | NOT re-run at round 2 — the packet is STOPPED on three decisions (§13); the matrix runs once at the SHA that will integrate, per `git-workflow` |
 
 `test:postgres` is REQUIRED here under `AGENTS.md` §6's cross-layer rule — the
