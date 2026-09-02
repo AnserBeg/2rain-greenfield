@@ -1954,6 +1954,7 @@ test('unbound-permission acknowledgement: the checked-in document is read strict
     readAcknowledgementDocument(document, path).packages.has(
       COMPOSED_PACKAGE_ID,
     ),
+    'the checked-in list must key the composed application package',
   );
   assert.throws(
     () =>

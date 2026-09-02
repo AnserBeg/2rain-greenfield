@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -33,6 +33,10 @@ import {
   mustCompile,
   normalizedBytes,
 } from './helpers.js';
+import {
+  UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE,
+  UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
+} from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 
 const LINEAGE_PATH = 'apps/web/release/app.compiled.json';
 
@@ -470,6 +474,24 @@ function buildV0LineageWithInvalidSuffix(
   const invalidBytes = fixtureBytes('partial-lowering');
 
   writeFileSync(authoredPath, JSON.stringify(authored));
+  // A release-input directory carries its acknowledgement of every declared
+  // permission no evaluator binds; the release script refuses to compile the
+  // head without one (policy-unbound-refusal). This fixture's is derived from
+  // its own census, written beside its authored file exactly as the real one is.
+  const census = parseNormalizedApplicationPackageJson(applicationBytes);
+  writeFileSync(
+    join(dirname(authoredPath), UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE),
+    JSON.stringify({
+      header: ['truncation fixture: every declared permission acknowledged'],
+      packages: {
+        [census.package.packageId]: census.permissions.map((permission) => ({
+          permissionId: permission.permissionId,
+          resource: permission.resource.targetId,
+        })),
+      },
+      schemaVersion: UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
+    }),
+  );
   writeFileSync(
     compiledPath,
     JSON.stringify({

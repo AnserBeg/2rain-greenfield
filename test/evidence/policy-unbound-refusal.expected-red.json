@@ -169,7 +169,7 @@
         {
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: the checked-in document is read strictly and a package with no key is refused before any compile",
-          "expected": "names no entries for package northstar\\.app:package\\.application;"
+          "expected": "the checked-in list must key the composed application package"
         }
       ]
     }
