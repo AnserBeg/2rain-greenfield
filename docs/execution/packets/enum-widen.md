@@ -14,8 +14,11 @@ A evidence from existing rows through activation on the real business table.
 - **Branch:** `packet/enum-widen`, cut from `main` at
   `8c417528db942f0a504c7744e56f816e770702c7` (verified by `git rev-parse main`
   at cut time, not taken from the charter).
-- **Stops: 1 of 2 — at round 2, on the round-1 reviewer's ruling that the
-  verifier's one-witness coverage is a release-gate stop condition** (§13).
+- **Stops: 1 of 2, and it is RESOLVED.** The stop was taken at round 2 on the
+  round-1 reviewer's ruling that the verifier's one-witness coverage is a
+  release-gate stop condition; the user delegated all three open decisions back
+  to the lane ("make your best judgement"), and §13 records how each was ruled
+  and what the ruling cost. The packet is freezable, not stopped.
   Both charter stop conditions were tested first and neither fired at round 1
   (§1); the round-1 reviewer read §1.2's disposition as a stop the lane should
   have taken, and the lane is now taking it rather than arguing it. Three lease
@@ -219,7 +222,14 @@ applies with no DDL; the tampered transition is refused at prepare; the
 failed-then-retried prepare restores the original OID; and a forged divergent
 target is refused with `ENUM_DOMAIN_NARROWING_REJECTED` before any DDL.
 
-## 4. Lease crossings, disclosed — the orchestrator's to revoke
+## 4. Lease crossings — four, disclosed, and granted under delegation
+
+**Three were taken during round 1 and one during round 3, and all four are
+GRANTED — by the lane, under the user's explicit delegation of the
+orchestrator's ruling (§13).** That is an unusual authority and it is stated
+here rather than buried: the reviewed party ruled on its own crossings because
+the orchestrator asked it to, and a reviewer should weigh the rulings knowing
+that.
 
 The charter's lease omitted three paths its own precedent lists in its claim
 block, and each is one line. All three were taken rather than stopped on,
@@ -233,6 +243,7 @@ edits whose necessity is mechanical:
 | `packages/compiler/src/protocol.ts` | `'widenEnumDomain'` added to `StorageTransitionElementKind` | the union is closed and `STORAGE_COMPATIBILITY_MATRIX` is `Record<StorageTransitionElementKind, …>`; TypeScript refuses a new kind anywhere else, and a cast-around would reintroduce the hand-maintained second list the precedent already corrected once |
 | `packages/compiler/src/index.ts` | `widensEnumDomain` exported | the provider imports from `@north-star/compiler`, whose only export is `index.ts`; a private copy of the rule is the drift ADR-0061 records |
 | `test/compiler/g2-module-storage.test.ts` | the closed-matrix pin lists the new kind; the `oldRead` emptiness loop skips it | the pin enumerates every key by hand and reds on a new one |
+| `test/evidence/relation-requiredness-relaxation.expected-red.json` — the `file` and `claim` fields of ONE entry, beyond the two title strings the charter granted (**round 3**) | `migration-does-not-admit-the-new-kind`'s subject moves from migration `0022` to `0024` | **this packet caused the defect.** `0024` restates the whole element vocabulary, so removing the option from `0022` no longer changes the final schema and that accepted packet's control SURVIVED — measured, §13 decision 3. Leaving it ships a dead Band A control on `main` and an `evidence:expected-red` gate that is red over the population. The claim it defends is unchanged |
 
 Every other path is inside the lease. `test/compiler/**` was not otherwise
 touched: the compiler-level assertions live in the leased Postgres file as a
@@ -365,6 +376,7 @@ round-1 matrix above is VOID for it, per `AGENTS.md` §4):**
 | the three enum-widen tests, focused | 3/3, including the composed-path lock observation and the absent-CHECK refusal |
 | `test:postgres` | **226/226** at `d7e8882` (executable tree identical to `00f9c5b`). Stated rather than hidden: a first run at the same tree, concurrent with another lane's full matrix on this machine, returned 225/226 with `a pre-existing relation index executes as atomic locking DDL and rejects invalid declared shape` red — a test that measures a locking window and is not this packet's; it passed in isolation and the full re-run above is clean. The lane does not know whether the `SHARE UPDATE EXCLUSIVE` read added at round 2 can interact with that test under load, and says so |
 | `test:architecture` / `check-records` | `test:architecture` 189/189 at `d7e8882`; `check-records` OK with this block's head at `00f9c5b`; both re-run at the freeze tip — see the checkpoint block |
+| `evidence:expected-red`, WHOLE population | **OK — all 75 entries in 7 manifests reproduced and restored** at `4a1103a`. This is the gate that was RED at round 2 (§13 decision 3), and it covers every committed manifest, not only this packet's |
 | full matrix | NOT re-run at round 2 — the packet is STOPPED on three decisions (§13); the matrix runs once at the SHA that will integrate, per `git-workflow` |
 
 `test:postgres` is REQUIRED here under `AGENTS.md` §6's cross-layer rule — the
@@ -428,46 +440,80 @@ ruling and one process finding. Both defects were real. Each disposition:
 | — | Raw-statement lock timing is not Band A evidence for the composed prepare. | **CORRECTED by measurement, in the direction the test can make deterministic.** The Postgres test now holds a business writer's transaction open, starts the real prepare, observes the materializer waiting on the relation lock in `pg_stat_activity`, asserts the prepare unresolved and the OID unmoved, commits the writer, and sees the prepare resolve and the widening land. The other direction — a writer queued behind the prepare's remaining transaction — is stated as unobserved through the composed path (§6). |
 | — | The prompt steered: it pre-asserted "verification was never the gap", pre-defended a non-local kill, characterised the crossings before asking, and grouped the repair path with the widening. | **ACCEPTED.** The round-2 prompt below states each of those as a question or a claim under test, and §1.2 no longer says the sentence. |
 
-**Two decisions only the orchestrator can make, and the lane is stopped on
-both:**
+**The three decisions, RULED — and by whom, because that matters.** The lane
+stopped and asked. The user answered *"make your best judgement"*, delegating
+the orchestrator's ruling to the reviewed party. Each ruling below is therefore
+the lane's, made under that delegation, with its reasoning exposed so a
+reviewer can overturn it on the merits rather than on the authority.
 
-1. **The verifier's coverage.** Options the lane can see: (a) grant a bridge
-   into `packages/postgres-provider/src/release-verification-service.ts`
-   (`#enumReject`) and, if the result shape changes, `packages/compiler/src/verification.ts`,
-   so the positive probe writes EVERY candidate option rather than
-   `enumOptionIds[0]` — closes the gate inside this packet, at the cost of a
-   verification-evidence shape change on a DEPLOY-lane path; (b) route it as
-   its own packet (`enum-reject-witness-is-the-first-declared-option`, already
-   filed) and narrow this packet's claim to what it measures — the element is
-   applied at PREPARE, before verification runs, so the widened constraint is
-   present when the witness is written; (c) something the lane has not seen.
-   **The lane recommends (b)** because the verification plan is a persisted,
-   digested artifact whose shape change deserves its own evidence, and because
-   this packet's element does not depend on the verifier to be safe — but it
-   is the orchestrator's ruling, and the reviewer's point that a Critical lane
-   should not carry an insufficient release gate as a footnote stands either
-   way.
-2. **The three crossings** (`protocol.ts` union literal, `index.ts` export,
-   the closed-matrix pin in `g2-module-storage.test.ts`): grant retrospectively,
-   or revoke and instruct. Revoking the union literal is revoking the element.
-3. **An accepted packet's red is now vacuous, and the fix is a crossing.**
-   Measured at round 2 by running the repointed
-   `relation-requiredness-relaxation` entry alongside this packet's: its
-   `migration-does-not-admit-the-new-kind` removes `'relaxNotNull'` from
-   migration `0022` and expects snapshot drift — but migration `0024` drops
-   and re-creates `module_storage_elements_shape` with the FULL vocabulary,
-   `relaxNotNull` included, so the final schema is identical and the mutation
-   is a **SURVIVOR**. This is structural: the vocabulary CHECK can only be
-   restated whole, so every restating migration supersedes every earlier
-   migration's red on it. The honest fix is to repoint that entry's `file` to
-   `0024_module_storage_enum_domain_widening.sql` (where the vocabulary now
-   lives) — a one-property edit, but to an accepted packet's manifest beyond
-   the two title strings this charter granted, so the lane has NOT made it.
-   Options: (a) grant that crossing; (b) route it (`vocabulary-migration-reds-are-superseded-by-restating-migrations`,
-   filed in `current-plan.md`) and accept that `evidence:expected-red` over
-   the whole population is red at this packet's SHA until it lands.
+**Decision 1 — the verifier's one-witness coverage: ROUTED, not fixed here.**
 
-**Round-2 gates** are in §8. **Stops: 1.**
+The reviewer is right that one witness is insufficient as a release gate for
+enum-domain changes: writing `enumOptionIds[0]` exercises behaviour common to
+both releases whenever the new option is not declared first. The fix is to
+probe every option the previous release did not carry. **It is not taken in
+this packet**, for three reasons and one of them is decisive:
+
+- **The path belongs to a named lane, not merely to nobody.** `lanes.md`'s
+  partition table assigns `packages/postgres-provider/src/release-*.ts` and
+  `packages/compiler/src/verification.ts` to **DEPLOY**. That is a stronger
+  bar than "outside this lease", and the lane will not quietly take another
+  lane's assigned surface for a change it did not measure the blast radius of.
+- **It changes a persisted, digested artifact.** `#enumReject`'s return feeds
+  `digestProof` → `scenarioFingerprint`/`resultSetDigest` → rows in
+  `platform.release_verification_results`. Changing the positive probe from one
+  value to many changes those digests, so previously persisted evidence stops
+  re-deriving. That is a release-evidence compatibility question with its own
+  migration-shaped consequences, and it deserves its own charter and its own
+  Band A evidence rather than a bridge inside a compiler-and-provider packet.
+- **This packet's safety does not rest on it.** The element is
+  `preApprovalInert` and applies at PREPARE; the composed runtime prepares
+  before it verifies. By the time any witness is written the widened
+  constraint is physically present. The failure the verifier would catch —
+  a release whose target advertises an option its envelope never installs —
+  is now caught *earlier and unconditionally* by the planner (it always emits
+  the element when the definition moved) and by catalog verification at
+  prepare (the tampered-transition control). The verifier is defence in depth
+  here, not the load-bearing gate.
+
+**Against the ruling, stated because it is the strongest counter:** a Critical
+packet that touches enum domains and leaves the enum-domain release gate
+insufficient is asking a later reader to notice a limitation in a queue row.
+`review-tiers` says a stopped packet must *"narrow the claim to what was
+actually measured and declare the limit where a reader will hit it"* — so the
+claim is narrowed in §1.2, the limit is declared in §6, and the row
+`enum-reject-witness-is-the-first-declared-option` is sharpened in
+`current-plan.md` with the digest consequence named. **If the reviewer thinks
+routing is wrong, the packet should be BLOCKed on that** — the lane has taken
+the position it can defend, not the position that is cheapest.
+
+**Decision 2 — the three round-1 crossings: GRANTED retrospectively.** Each is
+one line, each is structurally forced (a closed union TypeScript will not let
+you extend elsewhere, the package's only export barrel, a hand-enumerated pin),
+each is listed in the precedent packet's own claim block, and revoking the
+union literal is revoking the element. The process finding is nonetheless
+**accepted as correct**: one batched bridge request before the first crossing
+was owed and was not made. `lanes.md`'s partition table now records the grant,
+so the next lane reads ownership rather than inferring it.
+
+**Decision 3 — the vacuous vocabulary red: the repoint is TAKEN.** This is the
+one where the lane changed its round-2 position. Round 2 filed it and declined
+to cross. That was wrong on the facts: **this packet caused the vacuity**, and
+declining left two live defects on the tree — an accepted packet's Band A
+control that certifies nothing, and `evidence:expected-red` **red over the
+whole population at this packet's SHA**. `AGENTS.md` §6 does not let a packet
+ship a red gate with an explanation, and a control that survives its own
+mutation is precisely what the gate exists to catch. The subject moves to the
+migration that currently carries the vocabulary; the claim it defends is
+unchanged; the whole population now reproduces (§8). The durable fix — one
+derived source for the element vocabulary, so no restating migration exists —
+remains filed as
+`vocabulary-migration-reds-are-superseded-by-restating-migrations`, and it is a
+real design row rather than a placeholder: **every future element kind repeats
+this**, and the next one will silently supersede *this* packet's red the same
+way.
+
+**Round-3 gates** are in §8. **Stops: 1, resolved.**
 
 ## 10. Test it yourself
 
@@ -531,28 +577,18 @@ live definition. If you disagree with anything one-way in this packet, it is
 > the scope is drawn wrongly, and say plainly if the prompt itself is steering
 > you.*
 
-**ROUND 2.** Round 1 returned BLOCK; §13 tracks every finding to its disposition. Two are fixed in production, one is a STOP awaiting the orchestrator's decision, one is a process disposition awaiting the same. Rounds are fresh: nothing here is adjudicated, and the round-1 verdict carries no weight beyond the history in §13.
+**ROUND 3.** Round 1 returned BLOCK on two production defects; both are fixed and §13 tracks every finding to its disposition. Round 2 stopped on three decisions; the user delegated them back to the lane, so **the reviewed party ruled on its own scope and its own lease crossings** — §13 says which way and why, and that delegation is itself something to weigh. Rounds are fresh: nothing here is adjudicated, and neither prior verdict carries weight beyond the history in §13.
 
 **Repository:** `github.com/AnserBeg/2rain-greenfield`. **Branch:**
 `packet/enum-widen`, cut from `main` at
-`8c417528db942f0a504c7744e56f816e770702c7`. **Round-2 executable candidate:**
-`00f9c5bcd4dc7842a7b4b471caf2bb67a008029b` (round 1's was `8c2d591`, reviewed BLOCK). **Delta to read:**
+`8c417528db942f0a504c7744e56f816e770702c7`. **Round-3 executable candidate:**
+`4a1103a28cb017546f6287f833f4729083af62d1` (round 1's `8c2d591` was BLOCKed; round 2's `00f9c5b` was never reviewed). **Delta to read:**
 `8c417528..packet/enum-widen`. The branch head carries narrative commits above
 the executable candidate — this record, ADR-0064, and the ledger/lane/plan
-rows; `git diff --name-only 00f9c5b..packet/enum-widen -- . ':!docs'` is empty.
+rows; `git diff --name-only 4a1103a..packet/enum-widen -- . ':!docs'` is empty.
 Review the head.
 
-**Round-2 frozen SHA: `ad3c22366fd9e7d55a017758e640b9d79d8a27b5`**, the tip that carries the round-2
-suite results (round 1's frozen SHA was `f07f9e7d0ea91f057ba32a71212551b0af7a32e5`).
-Quoted from the remote at freeze time:
-
-```
-$ git ls-remote origin refs/heads/packet/enum-widen
-ad3c22366fd9e7d55a017758e640b9d79d8a27b5	refs/heads/packet/enum-widen
-```
-
-The branch head is one commit above that SHA, and its only content is this
-block. `git diff ad3c223..packet/enum-widen` shows it and nothing else.
+<<LSREMOTE3>>
 
 **Tier: Critical**, because the diff plans and executes DDL against live
 tenant tables and changes what the compiler admits for a released storage
@@ -626,13 +662,20 @@ packet, and the rows in §8 for `test:postgres`, `test:architecture`,
    `widening-ignores-everything-but-the-id-set` mutation the right
    one-property control for the exactness claim, and is the withdrawal of
    `widening-admits-any-option-change` as over-determined (§9) honest?
-5. **Is the corrected §1.2 and the stop in §13 right?** The lane now says the
-   specimen was wrong, selection is sound, coverage is insufficient, and the
-   fix is out of lease; it recommends routing (option b) and is stopped for the
-   ruling. Say whether the packet's own safety depends on that ruling.
+5. **Is ROUTING the verifier gap right, or should this packet have closed it?**
+   §13 decision 1 rules it routed on three grounds — the path is DEPLOY's by
+   the partition table, the change moves a persisted verification digest, and
+   the element is inert at PREPARE so the widened constraint precedes any
+   witness. The counter is stated there too. **The lane ruled its own scope
+   under delegation; overturn it if the reasoning does not hold.**
 6. **Is the provider's merge tolerance acceptable as a bounded claim** (claim
    7), given the provider cannot see option metadata, or does it need a
    different shape?
+   **6b. Is the round-3 crossing into an accepted packet's manifest right?**
+   §13 decision 3 repoints `relation-requiredness-relaxation`'s vocabulary red
+   from migration `0022` to `0024` because this packet's migration made it a
+   SURVIVOR. Is repointing the subject the honest fix, or does that entry now
+   claim something its packet never reviewed?
 7. **With the absent-CHECK path now refusing, is `preApprovalInert` right for
    every path the element executes**, and is `oldRead: requiresReadFallback`
    the right cell?
@@ -660,6 +703,14 @@ packet, and the rows in §8 for `test:postgres`, `test:architecture`,
   has no provider-side observation of that (§6).
 - A writer queued BEHIND the composed prepare, for the transaction's remaining
   life, is not observed through the composed path — only ahead of it (§6).
+- **The full matrix has not been re-run since round 1** (`984c65d`). Rounds 2
+  and 3 changed executable content, so that matrix is VOID for this candidate;
+  §8 lists the suites that WERE re-run and the ones that were not. Under
+  `git-workflow` the matrix runs once at the SHA that integrates, and this
+  candidate is not yet reviewed.
+- **The lane ruled on its own scope and its own lease crossings** (§13), under
+  the user's delegation. Nothing was fenced, but the authority was not the
+  orchestrator's own.
 
 ### Reading list
 
@@ -687,7 +738,7 @@ The lane states no view on what verdict this round should reach.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "enum-widen",
   "base": "8c417528db942f0a504c7744e56f816e770702c7",
-  "head": "00f9c5bcd4dc7842a7b4b471caf2bb67a008029b",
+  "head": "4a1103a28cb017546f6287f833f4729083af62d1",
   "changedPaths": [
     "db/migrations/0024_module_storage_enum_domain_widening.sql",
     "db/schema.snapshot.json",
