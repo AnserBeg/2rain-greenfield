@@ -588,7 +588,17 @@ the executable candidate — this record, ADR-0064, and the ledger/lane/plan
 rows; `git diff --name-only 4a1103a..packet/enum-widen -- . ':!docs'` is empty.
 Review the head.
 
-<<LSREMOTE3>>
+**Round-3 frozen SHA: `a60eab4addc84193af61142278ca298fd486a475`**, the tip that carries
+the rulings in §13 (round 2 froze `ad3c223`, unreviewed; round 1 froze
+`f07f9e7` and was BLOCKed). Quoted from the remote at freeze time:
+
+```
+$ git ls-remote origin refs/heads/packet/enum-widen
+a60eab4addc84193af61142278ca298fd486a475	refs/heads/packet/enum-widen
+```
+
+The branch head is one commit above that SHA, and its only content is this
+block. `git diff a60eab4..packet/enum-widen` shows it and nothing else.
 
 **Tier: Critical**, because the diff plans and executes DDL against live
 tenant tables and changes what the compiler admits for a released storage
