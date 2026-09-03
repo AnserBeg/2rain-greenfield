@@ -373,7 +373,7 @@ already passed, at the same tree; neither changes the candidate.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-kernel-admission",
   "base": "3b7b6dab2ddb790b33b7b641c68773c62db18e9a",
-  "head": "10eebfb42570cfc01edd72b888ab13f3dd8f5fcd",
+  "head": "d00fdb78d463bd3ebd2fcdf3b8d7b2ff141c5d93",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -408,7 +408,7 @@ already passed, at the same tree; neither changes the candidate.
     },
     {
       "path": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "name": "assertActiveReleaseDeclaresRegisteredCapabilityVersion"
+      "name": "assertRegisteredCapabilityVersionIsDeclared"
     },
     {
       "path": "packages/postgres-provider/src/inventory-posting-service.ts",
