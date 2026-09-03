@@ -958,6 +958,18 @@ export class PostgresInventoryPostingService {
         this.registration.capabilityId,
         parsed.idempotencyKey,
       );
+      // posting-kernel-admission, corrected on round-1 review. This precedes
+      // the receipt lookup because a STORED RECEIPT RETURNS WITHOUT REACHING
+      // `assertActiveRelease`: `findReceipt` keys on tenant, environment,
+      // capability and idempotency key only, and `validateReceiptReplay`
+      // compares the principal and the digest. Placed after that lookup, the
+      // check was skipped on exactly the path that serves a result recorded
+      // under a DIFFERENT release -- which is the mismatch this packet exists
+      // to refuse, so the first round's "checked on every posting" was false.
+      await assertRegisteredCapabilityVersionIsDeclared(
+        client,
+        this.registration,
+      );
 
       const receipt = await findReceipt(
         client,
@@ -3027,31 +3039,41 @@ async function assertActiveRelease(
       { storageTargetContentHash: registration.storageTargetContentHash },
     );
   }
-  await assertActiveReleaseDeclaresRegisteredCapabilityVersion(
-    client,
-    registration,
-  );
 }
 
 /**
- * posting-kernel-admission (5g3-prog R1). The release this posting runs under
- * must DECLARE the capability version this provider IMPLEMENTS -- exactly.
+ * posting-kernel-admission (5g3-prog R1). The release this provider is
+ * REGISTERED against must DECLARE the capability version this provider
+ * IMPLEMENTS -- exactly, on every entry into `#post`, before any path can
+ * return.
+ *
+ * WHAT THIS PROVES AND WHERE THE OTHER HALF LIVES, because the split matters
+ * and the first round of this packet got it wrong. This function binds the
+ * REGISTRATION to its own release's declared fact. `assertActiveRelease`
+ * separately binds that registration to the ACTIVE pointer and to the exact
+ * persisted storage artifact -- but only on a fresh posting, because a stored
+ * receipt returns before it. So the composed guarantee is: every posting,
+ * replay included, is served by a provider whose version the release it is
+ * registered against declares; and every posting that actually writes is
+ * additionally proved to be running on the active release. Hoisting this one
+ * check is what makes the first half true; moving the pointer and artifact
+ * binding earlier would re-adjudicate PUR-2a's replay design, which is not
+ * this packet's to change.
  *
  * The fact is read from the persisted release manifest, the artifact whose
  * content hash IS the release root, so what is compared is what the release
  * kernel verified and stored rather than anything the caller or the compiled
  * projection in memory says. Exact, not a floor: ADR-0063 decision 3 defines
  * the number as a major version with no minor axis, so a release declaring 1
- * is not served by a provider implementing 2 and vice versa. This is the
- * point where the provider meets the release, and it is checked on every
- * posting because admission cannot see it: the shipped head release was
+ * is not served by a provider implementing 2 and vice versa. It is checked at
+ * posting time because admission cannot see it: the shipped head release was
  * admitted declaring 1, and PUR-2b moved the provider to 2 underneath it
  * without any gate noticing.
  *
  * A manifest with no fact for this capability, or with more than one, refuses
  * as well: an observer that finds nothing must not pass.
  */
-async function assertActiveReleaseDeclaresRegisteredCapabilityVersion(
+async function assertRegisteredCapabilityVersionIsDeclared(
   client: PoolClient,
   registration: InventoryPostingRegistrationV1,
 ): Promise<void> {
@@ -3066,7 +3088,7 @@ async function assertActiveReleaseDeclaresRegisteredCapabilityVersion(
   if (manifest.rows.length !== 1 || !bytes) {
     throw postingError(
       'INVENTORY_POSTING_CAPABILITY_MISMATCH',
-      'the active release manifest could not be read to check its posting capability fact',
+      'the release manifest for this posting could not be read to check its posting capability fact',
       { releaseContentHash: registration.releaseContentHash },
     );
   }
@@ -3084,7 +3106,7 @@ async function assertActiveReleaseDeclaresRegisteredCapabilityVersion(
   if (facts.length !== 1) {
     throw postingError(
       'INVENTORY_POSTING_CAPABILITY_MISMATCH',
-      `the active release declares ${String(facts.length)} facts for the posting capability, so its version cannot be checked`,
+      `the release this posting is registered against declares ${String(facts.length)} facts for the posting capability, so its version cannot be checked`,
       { capabilityId: registration.capabilityId },
     );
   }
@@ -3092,7 +3114,7 @@ async function assertActiveReleaseDeclaresRegisteredCapabilityVersion(
   if (declared !== registration.capabilityVersion) {
     throw postingError(
       'INVENTORY_POSTING_CAPABILITY_MISMATCH',
-      `the active release declares posting capability version ${String(declared)} while the registered provider implements version ${String(registration.capabilityVersion)}`,
+      `the release declares posting capability version ${String(declared)} while the registered provider implements version ${String(registration.capabilityVersion)}`,
       {
         declaredCapabilityVersion: String(declared),
         registeredCapabilityVersion: String(registration.capabilityVersion),

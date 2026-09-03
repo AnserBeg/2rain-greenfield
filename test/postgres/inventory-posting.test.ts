@@ -3993,63 +3993,7 @@ test(
   { timeout: 180_000 },
   async (testContext) => {
     await withPostingDatabase(async (database) => {
-      const fixture = await compiledFixture();
-      const declaredVersionOne = structuredClone(fixture.inventoryDefinition);
-      const requirements = declaredVersionOne.capabilityRequirements;
-      assert.ok(Array.isArray(requirements));
-      const posting = requirements.find(
-        (requirement) =>
-          isRecord(requirement) &&
-          requirement.capabilityId === postingCapabilityId,
-      );
-      assert.ok(
-        isRecord(posting),
-        'the fixture declares the posting capability',
-      );
-      assert.equal(
-        posting.capabilityVersion,
-        INVENTORY_POSTING_CAPABILITY_VERSION,
-        'the fixture definition must declare what the provider implements, because both read the contract',
-      );
-      posting.capabilityVersion = 1;
-      const compiled = mustCompile(
-        moduleInput(
-          declaredVersionOne,
-          expectedActiveReleaseFrom(fixture.inventory),
-        ),
-      );
-      const declaredFact = compiled.bundle.releaseManifest.capabilityFacts.find(
-        (fact) => fact.capabilityId === postingCapabilityId,
-      );
-      assert.equal(declaredFact?.capabilityVersion, 1);
-      const [releaseId] = await persistSequence(
-        database.runtimePool,
-        database.context,
-        [[compiled, declaredVersionOne]],
-      );
-      assert.ok(releaseId);
-      await setPointer(database.adminPool, releaseId);
-      // The scope's configuration is re-pointed at the declared-1 release so
-      // that the ONLY thing standing between this posting and a commit is the
-      // capability-fact check: without this, a kernel with the check deleted
-      // would still be refused one step later by the configuration's
-      // release-root comparison, and the control would observe nothing.
-      const repointed = await database.adminPool.query(
-        `UPDATE platform.inventory_posting_configurations
-            SET contract_release_root = $4
-          WHERE tenant_id = $1 AND environment_id = $2 AND legal_entity_id = $3`,
-        [tenantId, environmentId, legalReject, compiled.releaseRoot],
-      );
-      assert.equal(repointed.rowCount, 1);
-      const service = new PostgresInventoryPostingService(
-        database.runtimePool,
-        {
-          ...database.registration,
-          releaseContentHash: compiled.releaseRoot,
-          releaseId,
-        },
-        { currentInstant: () => recordedAt },
-      );
+      const service = await serveDeclaredVersionOneRelease(database);
       const draft = command({
         legalEntityId: legalReject,
         sourceId: 'declared-version-one',
@@ -4122,6 +4066,159 @@ test('posting kernel admission: the shipped head release declares the posting ca
     'the shipped head release must declare the posting capability version the provider implements; regenerate apps/web/release/** when the contract moves',
   );
 });
+
+/**
+ * Compile, persist, activate and serve a release that declares the posting
+ * capability at version 1 while the provider implements what the contract
+ * says. The definition is the live one with a single field changed, so the
+ * release is internally consistent and the compiler admits it -- which is what
+ * makes it the right specimen: nothing but the provider's own check stands
+ * between it and a posting.
+ *
+ * The scope configuration is re-pointed at it too, so a kernel with the
+ * capability check removed is not refused one step later by the
+ * configuration's release-root comparison; the control would then observe
+ * nothing.
+ */
+async function serveDeclaredVersionOneRelease(
+  database: PostingDatabase,
+): Promise<PostgresInventoryPostingService> {
+  const fixture = await compiledFixture();
+  const declaredVersionOne = structuredClone(fixture.inventoryDefinition);
+  const requirements = declaredVersionOne.capabilityRequirements;
+  assert.ok(Array.isArray(requirements));
+  const posting = requirements.find(
+    (requirement) =>
+      isRecord(requirement) && requirement.capabilityId === postingCapabilityId,
+  );
+  assert.ok(isRecord(posting), 'the fixture declares the posting capability');
+  assert.equal(
+    posting.capabilityVersion,
+    INVENTORY_POSTING_CAPABILITY_VERSION,
+    'the fixture definition must declare what the provider implements, because both read the contract',
+  );
+  posting.capabilityVersion = 1;
+  const compiled = mustCompile(
+    moduleInput(
+      declaredVersionOne,
+      expectedActiveReleaseFrom(fixture.inventory),
+    ),
+  );
+  const declaredFact = compiled.bundle.releaseManifest.capabilityFacts.find(
+    (fact) => fact.capabilityId === postingCapabilityId,
+  );
+  assert.equal(declaredFact?.capabilityVersion, 1);
+  const [releaseId] = await persistSequence(
+    database.runtimePool,
+    database.context,
+    [[compiled, declaredVersionOne]],
+  );
+  assert.ok(releaseId);
+  await setPointer(database.adminPool, releaseId);
+  const repointed = await database.adminPool.query(
+    `UPDATE platform.inventory_posting_configurations
+        SET contract_release_root = $4
+      WHERE tenant_id = $1 AND environment_id = $2 AND legal_entity_id = $3`,
+    [tenantId, environmentId, legalReject, compiled.releaseRoot],
+  );
+  assert.equal(repointed.rowCount, 1);
+  return new PostgresInventoryPostingService(
+    database.runtimePool,
+    {
+      ...database.registration,
+      releaseContentHash: compiled.releaseRoot,
+      releaseId,
+    },
+    { currentInstant: () => recordedAt },
+  );
+}
+
+/**
+ * ROUND-1 REVIEW FINDING, and the reason the first candidate was BLOCKed: a
+ * STORED RECEIPT RETURNS BEFORE `assertActiveRelease`.
+ *
+ * `findReceipt` keys on tenant, environment, capability and idempotency key
+ * only -- never on the release the receipt was recorded under -- and
+ * `validateReceiptReplay` compares the principal and the digest. So with the
+ * capability check placed inside `assertActiveRelease`, an operator on a
+ * release declaring version 1 could replay a key recorded under version 2 and
+ * receive that version-2 result, with no mismatch announced. The packet's own
+ * claim was that the check runs on EVERY posting; on this path it did not.
+ *
+ * The check is now made before the receipt is looked up, so this replay
+ * refuses. The recorded result must not be served, and the receipt must not be
+ * disturbed.
+ */
+test(
+  'posting kernel admission: a stored receipt is not replayed across a release that declares a different capability version',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      // 1. An ordinary posting under the release that declares what the
+      //    provider implements. This records the receipt.
+      const posting = command({
+        legalEntityId: legalReject,
+        sourceId: 'cross-release-replay',
+      });
+      await seedDraft(database, posting);
+      const first = await settlePosting(
+        database.service.postAdjustment(
+          database.context,
+          database.actor,
+          posting,
+        ),
+      );
+      assert.equal(
+        first.status,
+        'fulfilled',
+        `the first posting must succeed: ${
+          first.status === 'rejected' ? String(first.reason) : ''
+        }`,
+      );
+      assert.equal(
+        await receiptCountByKey(database, posting.idempotencyKey),
+        1,
+        'the first posting recorded exactly one receipt to replay',
+      );
+
+      // 2. The same key, replayed by a provider registered against a release
+      //    that declares version 1. Under the reviewed candidate this returned
+      //    the recorded version-2 result.
+      const service = await serveDeclaredVersionOneRelease(database);
+      const outcome = await settlePosting(
+        service.postAdjustment(database.context, database.actor, posting),
+      );
+      assert.equal(
+        outcome.status,
+        'rejected',
+        `a recorded result must not be replayed under a release declaring a different capability version: ${JSON.stringify(outcome)}`,
+      );
+      assertRejectedPosting(
+        testContext,
+        'cross-release-replay',
+        outcome,
+        'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      );
+      const reason = String(
+        outcome.status === 'rejected' ? outcome.reason : '',
+      );
+      assert.match(
+        reason,
+        new RegExp(
+          `declares posting capability version 1 while the registered provider implements version ${String(INVENTORY_POSTING_CAPABILITY_VERSION)}`,
+          'u',
+        ),
+      );
+      // The refusal is a refusal, not a rewrite: the recorded receipt and the
+      // movement it names are untouched.
+      assert.equal(
+        await receiptCountByKey(database, posting.idempotencyKey),
+        1,
+      );
+      assert.equal(await movementCountBySource(database, posting.sourceId), 1);
+    });
+  },
+);
 
 async function companionCount(database: PostingDatabase): Promise<number> {
   const result = await database.adminPool.query<{ count: string }>(

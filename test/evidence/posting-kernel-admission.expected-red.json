@@ -130,9 +130,9 @@
     },
     {
       "name": "active-release-fact-never-read",
-      "claim": "5g3-prog R1, THE SUBJECT ABSENT. Remove the call that reads the active release's posting capability fact and a release declaring version 1 posts through a provider implementing 2 exactly as it did before this packet: validateRegistration compares the registration to the constant it was built from, and nothing else looks.",
+      "claim": "5g3-prog R1, THE SUBJECT ABSENT. Remove the one call that reads the release's posting capability fact and a release declaring version 1 posts through a provider implementing 2 exactly as it did before this packet: validateRegistration compares the registration to the constant it was built from, and nothing else looks. Round 1 placed this call inside assertActiveRelease; it is now hoisted ahead of the receipt lookup, and this entry follows it.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "  await assertActiveReleaseDeclaresRegisteredCapabilityVersion(\n    client,\n    registration,\n  );\n",
+      "original": "      await assertRegisteredCapabilityVersionIsDeclared(\n        client,\n        this.registration,\n      );\n",
       "replacement": "",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],
@@ -178,7 +178,7 @@
         {
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed",
-          "expected": "the active release manifest could not be read to check its posting capability fact"
+          "expected": "the release manifest for this posting could not be read to check its posting capability fact"
         }
       ]
     },
@@ -197,6 +197,24 @@
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed",
           "expected": "declares posting capability version 1 while the registered provider implements version 2"
+        }
+      ]
+    },
+    {
+      "name": "active-release-fact-checked-after-the-receipt-lookup",
+      "claim": "ROUND-1 REVIEW FINDING, and the reason the first candidate was BLOCKed. This restores the reviewed candidate's PLACEMENT exactly: the capability-fact check is moved back to after the stored-receipt lookup and its replay return. Nothing is deleted -- a fresh posting is still checked, so the declared-version-one control stays GREEN -- and the one property that varies is WHEN the check runs. `findReceipt` keys on tenant, environment, capability and idempotency key only, never on the release a receipt was recorded under, so with the check placed later an operator on a release declaring version 1 replays a key recorded under version 2 and is served that version-2 result with no mismatch announced. This entry and `active-release-fact-never-read` are the discriminating pair the review asked for: that one proves the check exists, this one proves it runs before anything can return.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      await assertRegisteredCapabilityVersionIsDeclared(\n        client,\n        this.registration,\n      );\n\n      const receipt = await findReceipt(\n        client,\n        context,\n        this.registration.capabilityId,\n        parsed.idempotencyKey,\n      );\n      if (receipt) {\n        const replay = validateReceiptReplay(\n          receipt,\n          context,\n          posting,\n          parsed.idempotencyKey,\n        );\n        await client.query('COMMIT');\n        transactionOpen = false;\n        return replay;\n      }\n",
+      "replacement": "      const receipt = await findReceipt(\n        client,\n        context,\n        this.registration.capabilityId,\n        parsed.idempotencyKey,\n      );\n      if (receipt) {\n        const replay = validateReceiptReplay(\n          receipt,\n          context,\n          posting,\n          parsed.idempotencyKey,\n        );\n        await client.query('COMMIT');\n        transactionOpen = false;\n        return replay;\n      }\n      await assertRegisteredCapabilityVersionIsDeclared(\n        client,\n        this.registration,\n      );\n",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "stored receipt is not replayed across a release"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: a stored receipt is not replayed across a release that declares a different capability version",
+          "expected": "a recorded result must not be replayed under a release declaring a different capability version"
         }
       ]
     }
