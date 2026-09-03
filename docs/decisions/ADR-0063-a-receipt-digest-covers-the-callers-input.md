@@ -258,20 +258,44 @@ encodings in decision 3's table are reduced to one:
 | `INVENTORY_POSTING_CAPABILITY_VERSION` (provider) | imports the contract |
 | the `capabilityVersion` cell in `packages/compiler/src/conformance.ts` | no longer a second spelling: the compiler cannot import the domain, and the cell's only input is the contract itself, so it admits the version the contract carries as a positive integer |
 
-**The rule is EXACT, and the provider checks it on every posting.** A capability
+**The rule is EXACT, and where each half of it is checked was corrected on
+review.** A capability
 fact a release declares is satisfied by the provider only when the provider's
 version equals it. This number is a major version by this ADR's own decision 3
 — a caller written against one version is refused by the next — and there is
 no minor axis to be compatible along, so a floor (`>= 1`, which
 `hasValidCapabilityFacts` still checks as a shape) would let a release declaring
 1 be served by a provider implementing 2, which is precisely the state `PUR-2b`
-left the shipped head release in. The comparison is made by
-`assertActiveRelease` in the provider, reading the fact from the persisted
-release manifest of the active release, because that is where the provider
-meets the release and because the two earlier candidates were measured and
-rejected: staging cannot be exact (the runtime stages every lineage entry on
-every boot, and eleven shipped entries legitimately declare 1), and admission
-cannot see it (the head release was admitted declaring 1 and the provider moved
-underneath it; a rollback target is admitted already). The shipped artifact is
-also pinned deterministically: a test reds the matrix when the head release's
-fact differs from the provider's version.
+left the shipped head release in. The comparison reads the fact from the
+persisted release manifest — the artifact whose content hash is the release
+root — because that is what the release kernel verified and stored. Two earlier
+placements were measured and rejected: staging cannot be exact (the runtime
+stages every lineage entry on every boot, and eleven shipped entries
+legitimately declare 1), and admission cannot see it (the head release was
+admitted declaring 1 and the provider moved underneath it; a rollback target is
+admitted already).
+
+**The check runs on entry to `#post`, before the stored-receipt lookup, and the
+first candidate of `posting-kernel-admission` had it in the wrong place.** That
+candidate put it inside `assertActiveRelease`, which a stored receipt never
+reaches: `findReceipt` keys on tenant, environment, capability and idempotency
+key only — never on the release a receipt was recorded under — and
+`validateReceiptReplay` compares the principal and the digest before returning
+the recorded result. So a replay under a release declaring 1 was served a
+result recorded under 2, unannounced, which is the mismatch this rule exists to
+refuse. The round-1 reviewer found it and the candidate was BLOCKed. **The
+claim "checked on every posting" was false as written and is now true because
+the check was moved, not because the sentence was softened.**
+
+**The two halves, stated separately so neither is over-claimed:**
+
+- **Every posting, replay included:** the release this provider is REGISTERED
+  against declares exactly the version the provider implements.
+- **Every posting that writes:** that registration is additionally the ACTIVE
+  release pointer, and its storage target is the exact persisted artifact —
+  `assertActiveRelease`, which a stored-receipt replay still returns before.
+  Moving THAT binding earlier would re-adjudicate `PUR-2a`'s replay design and
+  is deliberately not done here.
+
+The shipped artifact is also pinned deterministically: a test reds the matrix
+when the head release's fact differs from the provider's version.

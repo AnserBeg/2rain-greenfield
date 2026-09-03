@@ -44,15 +44,26 @@ gate green.
 **What changed.**
 
 - `INVENTORY_CONTRACT_V1.capabilityVersion` is **2** and is the authority.
+  **Precisely** (the round-1 reviewer was right that the first draft overstated
+  this): the number is spelled twice inside `contracts.ts`, once in the
+  `InventoryContractDefinitionV1` type and once in the frozen value. They are
+  compile-time coupled in one artifact and fail closed together, so they are one
+  authority rather than two that can drift; "nothing else spells the number" was
+  literally wrong and is corrected here.
 - `definition.ts` reads it: `capabilityVersion: INVENTORY_CONTRACT_V1.capabilityVersion`.
 - `INVENTORY_POSTING_CAPABILITY_VERSION = INVENTORY_CONTRACT_V1.capabilityVersion`
   in the provider. `validateRegistration` stays exact against it.
-- `assertActiveRelease` calls `assertActiveReleaseDeclaresRegisteredCapabilityVersion`:
-  it reads the active release's persisted manifest (`read_tenant_release_artifacts`,
-  kind `releaseManifest`, content hash = the release root), requires exactly one
-  fact for the posting capability, and refuses `INVENTORY_POSTING_CAPABILITY_MISMATCH`
-  unless `fact.capabilityVersion === registration.capabilityVersion`. No fact,
-  more than one, or an unreadable manifest refuses too.
+- `assertRegisteredCapabilityVersionIsDeclared` runs on entry to `#post`,
+  **before the stored-receipt lookup** (corrected on round-1 review — see below):
+  it reads the registered release's persisted manifest
+  (`read_tenant_release_artifacts`, kind `releaseManifest`, content hash = the
+  release root), requires exactly one fact for the posting capability, and
+  refuses `INVENTORY_POSTING_CAPABILITY_MISMATCH` unless
+  `fact.capabilityVersion === registration.capabilityVersion`. No fact, more
+  than one, or an unreadable manifest refuses too. `assertActiveRelease` keeps
+  the pointer and storage-artifact binding it already had, still after the
+  receipt lookup, because moving that would re-adjudicate `PUR-2a`'s replay
+  design.
 - The compiler cell: the literal `1` is gone. The cell's only input IS the
   contract, and the compiler cannot import the domain, so what it checks is that
   the contract carries a positive integer. The record says plainly that this
@@ -183,6 +194,60 @@ release-root comparison refused the posting one step later for a different
 reason; the test now points the configuration at the declared-1 release, so the
 fact check is the only guard between that posting and a commit — which is what
 the control claims.
+
+## Round 1 — BLOCK, and the finding was a real production defect
+
+Reviewed `b25d4844175dd7c5cee4e60f84629958dc50c5cc` (fresh naive, read-only on
+the pushed branch). **Verdict BLOCK on C1**, PASS on C2, and C3 accepted as the
+narrow read-coverage claim it declares.
+
+**The finding, confirmed in the tree before anything was changed.** `#post`
+looks the stored receipt up BEFORE `assertActiveRelease`, and returns from it:
+`findReceipt` keys on tenant, environment, capability and idempotency key only
+— never on the release the receipt was recorded under — and
+`validateReceiptReplay` compares the principal and the recomputed digest, then
+commits and returns the recorded result. The capability-fact check sat inside
+`assertActiveRelease`, which that path never reaches. So an operator on a
+release declaring version 1 could replay a key recorded under version 2 and be
+served the version-2 result with no mismatch announced. **The packet's own
+claim — and ADR-0063's amended text — said the check runs on every posting. On
+that path it did not.** The declared-version-1 test used a fresh key, so it
+missed the gap entirely.
+
+**The correction.** `assertRegisteredCapabilityVersionIsDeclared` is hoisted to
+run immediately after the request-key lock and **before** `findReceipt`, so no
+path returns without it. `assertActiveRelease` keeps the pointer and
+storage-artifact binding exactly where it was. The reviewer's suggested
+alternative — moving all of `assertActiveRelease` ahead of the receipt lookup —
+was considered and not taken: it would change when `PUR-2a`'s release-mismatch
+and storage-artifact refusals fire on the replay path, which is a design this
+packet was not chartered to re-open. The rule is now stated as two halves in
+ADR-0063 rather than as one over-broad sentence.
+
+**The control the reviewer asked for, and its discriminating twin.** New test
+*"a stored receipt is not replayed across a release that declares a different
+capability version"*: post successfully under the release declaring 2, then
+replay the same command and key through a provider registered against a release
+declaring 1. It must refuse `INVENTORY_POSTING_CAPABILITY_MISMATCH`, and the
+recorded receipt and its movement must both survive untouched. New manifest
+entry `active-release-fact-checked-after-the-receipt-lookup` restores the
+reviewed candidate's PLACEMENT exactly — nothing deleted, the check moved back
+below the replay return — so it kills the replay test while
+`active-release-fact-never-read` (the same call deleted) kills the fresh-posting
+test instead. **That pair is the point: one proves the check exists, the other
+proves it runs before anything can return.**
+
+**The reviewer's other dispositions, recorded rather than argued with.** The
+duplicate `2` inside `contracts.ts` is corrected above as wording. Removing the
+compiler's pinned number was judged not a material loss, and
+`hasValidCapabilityFacts` was judged correct to leave as a generic shape check —
+both matching what this record already claimed, so nothing changed. The
+verifier that reads a row and then compares nothing is confirmed as a real
+one-property survivor of the token mechanism and NOT a current production
+defect; it stays declared as a limit, and C3 continues to be described as
+relation-read coverage rather than proof that every predicate inside every
+verifier held. The reviewer also judged this prompt to be steering; the next
+one drops the placement rationale and the pre-adjudications.
 
 ## Bridges taken — four edits in three accepted artifacts, all mechanical, all the orchestrator's to revoke
 
