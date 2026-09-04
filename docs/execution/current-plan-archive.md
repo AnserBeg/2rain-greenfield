@@ -34,6 +34,8 @@ carries the detail. No packet is chartered from this table without a user ruling
 | `posting-kernel-admission` | 2026-09-01 | the charter counted the definition's posting-version literal twice; one of the two `capabilityVersion: 1` literals binds the content capability, which every module declares at 1, and stays | [record](packets/posting-kernel-admission.md) |
 | `posting-kernel-admission` | 2026-09-02 | a per-posting check placed after `#post`'s stored-receipt lookup does not run on a replay: `findReceipt` keys on the idempotency key and never on the release a receipt was recorded under, so "on every posting" needs the check above every early return | [record](packets/posting-kernel-admission.md) |
 | `posting-kernel-admission` | 2026-09-02 | runtime verifier-coverage makes older "remove this verifier and it commits silently" controls red earlier and for a different reason; two accepted manifests needed their claims narrowed, and future verifier packets should expect the same | [record](packets/posting-kernel-admission.md) |
+| `posting-kernel-admission` | 2026-09-04 | a queue row widened after a packet is chartered does not reach the running lane: the branch worked the R1-R3 charter for two rounds while `main` had added A2 and A3 at convergence, and only a reviewer reading `main` caught it | [record](packets/posting-kernel-admission.md) |
+| `posting-kernel-admission` | 2026-09-04 | an expected-red entry pointed at a large composite test can red through an earlier unrelated failure, so the control certifies nothing: A2's sort mutation needed the assertion extracted into a test of its own | [record](packets/posting-kernel-admission.md) |
 
 ## TRIAGE — 2026-08-13. Read this before the queue.
 
