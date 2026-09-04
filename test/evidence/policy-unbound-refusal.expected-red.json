@@ -228,19 +228,45 @@
     },
     {
       "name": "recorded-revision-narrowing-removed",
-      "claim": "Narrowing the checked-in list to a recorded revision's own census is what lets --truncate-invalid-lineage govern historical entries at all: returning the list unnarrowed reports every newer entry as stale against an older revision, and the narrowing control observes that the helper no longer restricts to the declared set.",
+      "claim": "Narrowing the checked-in list to a recorded revision's own census is what lets --truncate-invalid-lineage govern historical entries at all: returning the list unnarrowed reports every newer entry as stale against an older revision, and the narrowing control observes that the helper no longer restricts to the declared set. Measured at the ROUTE too, not only at the helper: the discriminating truncation specimen reds, because an older revision is then judged against a permission it never declared and the lineage loses its valid prefix.",
       "file": "apps/web/scripts/unbound-permission-acknowledgement.ts",
       "original": "    entries: acknowledgement.entries.filter((entry) =>\n      declaredPermissionIds.has(entry.permissionId),\n    ),",
       "replacement": "    entries: acknowledgement.entries,",
       "test": {
-        "files": ["test/compiler/g2-module-conformance.test.ts"],
-        "namePattern": "unbound-permission acknowledgement"
+        "files": [
+          "test/compiler/g2-module-conformance.test.ts",
+          "test/compiler/compiler-semantic-profile.test.ts"
+        ],
+        "namePattern": "unbound-permission acknowledgement|truncate-invalid-lineage"
       },
       "kills": [
         {
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it",
           "expected": "narrowing keeps exactly the permissions the revision declares"
+        },
+        {
+          "file": "test/compiler/compiler-semantic-profile.test.ts",
+          "name": "--truncate-invalid-lineage governs recorded revisions: it narrows to each revision census and drops one declaring an unacknowledged permission",
+          "expected": "truncation failed"
+        }
+      ]
+    },
+    {
+      "name": "truncation-acknowledgement-self-certified",
+      "claim": "Truncation must govern a recorded revision against the CHECKED-IN list narrowed to that revision, never against evidence derived from the revision itself. Deriving it from the revision's own census satisfies the required parameter tautologically and admits a recorded release declaring a permission nothing ever acknowledged -- the self-certifying shape round 3's review named as a live limit. This entry is the route-level proof that the limit is closed for truncation specifically.",
+      "file": "apps/web/scripts/compile-app-release.ts",
+      "original": "  return narrowAcknowledgementToDeclared(\n    readRetainableAcknowledgementFor(authoredPath, recorded.package.packageId),\n    new Set(recorded.permissions.map((permission) => permission.permissionId)),\n  );",
+      "replacement": "  return {\n    entries: recorded.permissions.map((permission) => ({\n      permissionId: permission.permissionId,\n      resource: permission.resource.targetId,\n    })),\n    packageId: recorded.package.packageId,\n  };",
+      "test": {
+        "files": ["test/compiler/compiler-semantic-profile.test.ts"],
+        "namePattern": "truncate-invalid-lineage"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/compiler-semantic-profile.test.ts",
+          "name": "--truncate-invalid-lineage governs recorded revisions: it narrows to each revision census and drops one declaring an unacknowledged permission",
+          "expected": "the narrowed revision must be retained and the unacknowledged one dropped"
         }
       ]
     }

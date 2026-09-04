@@ -20,6 +20,7 @@ import {
   MODULE_COMPILER_PROFILE,
   SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   compileApplication,
+  compileApplicationRelease,
   expectedActiveReleaseFrom,
   reproduceHistoricalApplication,
   selectAdoptedProfileVersion,
@@ -455,6 +456,249 @@ function compileAt(fixture: string, version: CompilerSemanticProfileVersion) {
  * serialized-release expression is copied verbatim from that script because
  * truncation exact-compares against it, key order included.
  */
+/**
+ * THE DISCRIMINATING TRUNCATION SPECIMEN.
+ *
+ * The v0-prefix control above executes `--truncate-invalid-lineage`, but it
+ * cannot tell you anything about permission governance on that route: its
+ * retained revision's acknowledgement is generated from its own complete
+ * census, so narrowing has nothing to remove, and its invalid suffix declares
+ * zero permissions and fails a different rule, so it would be dropped with or
+ * without governance. Round 3's review said exactly that, and it was right.
+ *
+ * This specimen is built so that BOTH properties are load-bearing:
+ *
+ *   - RETAINED entry: plain `vertical-v1`, five permissions, while the
+ *     checked-in list carries SIX. Narrowing must drop the sixth, or the entry
+ *     is judged stale against a permission it never declared and the whole
+ *     lineage loses its valid prefix.
+ *   - DROPPED entry: `vertical-v1` plus one permission the list does NOT name.
+ *     It must be refused as unbound. The test first proves this entry compiles
+ *     cleanly WHEN acknowledged, so its refusal can only be governance and not
+ *     some unrelated conformance rule.
+ *
+ * Remove narrowing and the retained entry dies; remove governance and the
+ * dropped entry survives. Either way this test fails, which is what the
+ * pre-existing control could not do.
+ */
+test('--truncate-invalid-lineage governs recorded revisions: it narrows to each revision census and drops one declaring an unacknowledged permission', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'northstar-truncate-governed-'));
+  try {
+    const authoredPath = join(workspace, 'app.authored.json');
+    const compiledPath = join(workspace, 'app.compiled.json');
+
+    const retainedAuthored = authoredFixture('vertical-v1');
+    const listedExtra = permissionOn(
+      'northstar.bootstrap:permission.item_listed_extra',
+      'read',
+    );
+    const unacknowledged = permissionOn(
+      'northstar.bootstrap:permission.item_unacknowledged',
+      'read',
+    );
+
+    // The HEAD declares six; the checked-in list acknowledges those six.
+    const headAuthored = withPermissions(retainedAuthored, [listedExtra]);
+    // The DROPPED revision declares a seventh the list never names.
+    const droppedAuthored = withPermissions(retainedAuthored, [unacknowledged]);
+
+    const retainedBytes = normalizedBytes(retainedAuthored);
+    const droppedBytes = normalizedBytes(droppedAuthored);
+    const bootstrapBytes = normalizedBytes(
+      emptyApplicationDefinition(retainedAuthored),
+    );
+
+    const bootstrap = compileFixtureAtV0(bootstrapBytes, null);
+    const retained = compileFixtureAtV0(
+      retainedBytes,
+      expectedActiveReleaseFrom(bootstrap),
+    );
+
+    const headCensus = parseNormalizedApplicationPackageJson(
+      normalizedBytes(headAuthored),
+    );
+    const listEntries = headCensus.permissions.map((permission) => ({
+      permissionId: permission.permissionId,
+      resource: permission.resource.targetId,
+    }));
+    assert.equal(listEntries.length, 6);
+    assert.ok(
+      listEntries.some(
+        (entry) =>
+          entry.permissionId ===
+          'northstar.bootstrap:permission.item_listed_extra',
+      ),
+    );
+    assert.ok(
+      !listEntries.some(
+        (entry) =>
+          entry.permissionId ===
+          'northstar.bootstrap:permission.item_unacknowledged',
+      ),
+    );
+
+    // The dropped revision is otherwise VALID: acknowledged in full it
+    // compiles, so its refusal below is governance and nothing else.
+    const droppedCensus = parseNormalizedApplicationPackageJson(droppedBytes);
+    const acknowledgedInFull = compileApplicationRelease(
+      compilerInputAtV0(droppedBytes, expectedActiveReleaseFrom(retained)),
+      {
+        entries: droppedCensus.permissions.map((permission) => ({
+          permissionId: permission.permissionId,
+          resource: permission.resource.targetId,
+        })),
+        packageId: droppedCensus.package.packageId,
+      },
+    );
+    assert.equal(
+      acknowledgedInFull.status,
+      'compiled',
+      `the dropped revision must be valid apart from governance: ${JSON.stringify(
+        acknowledgedInFull.status === 'failed'
+          ? acknowledgedInFull.diagnostics
+          : [],
+      )}`,
+    );
+
+    writeFileSync(authoredPath, JSON.stringify(headAuthored));
+    writeFileSync(
+      join(workspace, UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE),
+      JSON.stringify({
+        header: ['discriminating truncation specimen'],
+        packages: { [headCensus.package.packageId]: listEntries },
+        schemaVersion: UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
+      }),
+    );
+    writeFileSync(
+      compiledPath,
+      JSON.stringify({
+        applications: [
+          serializeRelease(retainedBytes, retained),
+          {
+            attestation: {
+              compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_VERSION,
+            },
+            normalizedDefinitionBytesBase64:
+              Buffer.from(droppedBytes).toString('base64'),
+            outputProtocolVersion: 'northstar.compiler-output/v0-experimental',
+            releaseRoot: '0'.repeat(64),
+          },
+        ],
+        bootstrap: serializeRelease(bootstrapBytes, bootstrap),
+        schemaVersion: 'northstar.web:compiled-application-release/v2',
+      }),
+    );
+
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        'apps/web/scripts/compile-app-release.ts',
+        '--truncate-invalid-lineage',
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          NORTH_STAR_APP_AUTHORED_PATH: authoredPath,
+          NORTH_STAR_APP_COMPILED_PATH: compiledPath,
+        },
+      },
+    );
+    assert.equal(
+      run.status,
+      0,
+      `truncation failed: ${run.stderr || run.stdout}`,
+    );
+    assert.match(
+      run.stdout,
+      /TRUNCATED_INVALID_LINEAGE kept=1 dropped=1 firstInvalid=1/u,
+      'the narrowed revision must be retained and the unacknowledged one dropped',
+    );
+
+    // Truncation drops the invalid suffix and then mints the current head, so
+    // the rewritten lineage is [retained, head] -- two entries, and the
+    // unacknowledged revision is not one of them. Its root is known because
+    // the pre-check above compiled it WITH a full acknowledgement.
+    const rewritten = JSON.parse(readFileSync(compiledPath, 'utf8')) as {
+      applications: { releaseRoot: string }[];
+    };
+    const roots = rewritten.applications.map((entry) => entry.releaseRoot);
+    assert.equal(
+      roots[0],
+      retained.releaseRoot,
+      'the narrowed revision is retained',
+    );
+    assert.equal(
+      roots.length,
+      2,
+      'the head is minted after the suffix is dropped',
+    );
+    assert.ok(
+      acknowledgedInFull.status === 'compiled' &&
+        !roots.includes(acknowledgedInFull.releaseRoot),
+      'the revision declaring an unacknowledged permission must not survive truncation',
+    );
+  } finally {
+    rmSync(workspace, { force: true, recursive: true });
+  }
+});
+
+function permissionOn(
+  permissionId: string,
+  action: string,
+): Record<string, unknown> {
+  return {
+    action,
+    kind: 'permissionDefinition',
+    label: 'probe permission',
+    permissionId,
+    resource: {
+      kind: 'entityReference',
+      schemaVersion: 'v3',
+      targetId: 'northstar.bootstrap:entity.item',
+    },
+    schemaVersion: 'v3',
+  };
+}
+
+function withPermissions(
+  authored: Record<string, unknown>,
+  extra: readonly Record<string, unknown>[],
+): Record<string, unknown> {
+  const next = structuredClone(authored);
+  const permissions = next.permissions;
+  assert.ok(Array.isArray(permissions));
+  next.permissions = [...permissions, ...extra];
+  return next;
+}
+
+function compilerInputAtV0(
+  normalizedDefinitionBytes: Uint8Array,
+  expectedActiveRelease: Parameters<
+    typeof compileApplicationRelease
+  >[0]['expectedActiveRelease'],
+) {
+  const normalizedDefinition = parseNormalizedApplicationPackageJson(
+    normalizedDefinitionBytes,
+  );
+  return {
+    dependencies: [],
+    expectedActiveRelease,
+    kind: 'compilerInput' as const,
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes,
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_VERSION,
+      languageVersion: normalizedDefinition.languageVersion,
+      normalizationProfileVersion:
+        normalizedDefinition.normalizationProfileVersion,
+    },
+  };
+}
+
 function buildV0LineageWithInvalidSuffix(
   authoredPath: string,
   compiledPath: string,
