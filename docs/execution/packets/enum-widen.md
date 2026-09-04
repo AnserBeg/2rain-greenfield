@@ -385,10 +385,9 @@ round-1 matrix above is VOID for it, per `AGENTS.md` §4):**
 | `test:postgres` | **226/226** at `d7e8882` (executable tree identical to `00f9c5b`). Stated rather than hidden: a first run at the same tree, concurrent with another lane's full matrix on this machine, returned 225/226 with `a pre-existing relation index executes as atomic locking DDL and rejects invalid declared shape` red — a test that measures a locking window and is not this packet's; it passed in isolation and the full re-run above is clean. The lane does not know whether the `SHARE UPDATE EXCLUSIVE` read added at round 2 can interact with that test under load, and says so |
 | `test:architecture` / `check-records` | `test:architecture` 189/189 at `d7e8882`; `check-records` OK with this block's head at `00f9c5b`; both re-run at the freeze tip — see the checkpoint block |
 | `evidence:expected-red`, WHOLE population | **OK — all 75 entries in 7 manifests reproduced and restored** at `4a1103a`. This is the gate that was RED at round 2 (§13 decision 3), and it covers every committed manifest, not only this packet's |
-| **full matrix at the integrating SHA `cd58572`** | **OWED and BLOCKED — `POSTGRES_CONTAINER_GUARD_FAILED: docker ps failed`.** Docker Desktop's WSL integration dropped mid-session; `docker` is not on `PATH` in this distro. Re-run when Docker is back. See §14 |
-| Docker-free gates re-run at `cd58572` (post-merge, post-record) | `typecheck` PASS · `lint` PASS · `format` PASS · `build` PASS · `test:unit` 155/155 · `test:compiler` 157/157 · `check:expected-red` OK (75 entries, 7 manifests) · `check-records` OK (139 records, 161 ledger rows) |
-| `test:architecture` at `cd58572` | **NOT RUN — cannot be.** Without Docker this suite stalls rather than failing (`PUR-2c` §5). It last ran 189/189 at `f9cb760`, before the `main` merge; the merge changed `docs/**` substantially, which is this suite's input |
-| full matrix | NOT re-run at round 2 — the packet is STOPPED on three decisions (§13); the matrix runs once at the SHA that will integrate, per `git-workflow` |
+| **full matrix at the integrating SHA** | **PASS — `FULL_MATRIX_PASS_SHA=5e37c29db7c2906936cdde52fc174073b9f4212f`**, `EXIT=0`, run by `scripts/run-matrix.sh enum-widen` at the tip that carries the `main` merge and every record. performance 5/5 (`PERFORMANCE_GATE_PASS_SHA` the same) · unit 155/155 · compiler 157/157 · integration 149/149 · agent 3/3 · **architecture 189/189** · contracts 29/29 · **postgres 226/226** · locale 1/1 · observability 11/11 · **browser 93/93** · `check:demo-release` · `check:app-release` · language coverage PASS (2050 obligations) · reachability PASS (106/106 test files) · secret scan clean with its planted negative control detected · **dependency audit 0/0/0/0/0** |
+| two earlier matrix attempts, both red for environment rather than code — stated rather than dropped | The first refused before any suite: `POSTGRES_CONTAINER_GUARD_FAILED: docker ps failed`. Docker Desktop was running and configured (`IntegratedWslDistros = ['Ubuntu']`), but WSL could not spawn new processes into this distro — `wsl.exe -d Ubuntu -- true` returned `Wsl/Service/E_UNEXPECTED` — so Docker Desktop's integration step could never create `/var/run/docker.sock`. A `wsl --shutdown` cleared it. The second reached the performance gate one minute later and **declined to certify**: `COMPILE_BUDGET_INDETERMINATE: observed CPU idle 42.3% is below required 90.0%; rerun the exclusive gate`, with its own saturation control passing beside it. The third passed every suite and failed only `pnpm audit` with `"fetch failed"` — WSL networking still cold; the audit returned 0 vulnerabilities at every severity on retry, and this packet changes no `package.json` or lockfile. **The green above is one unbroken run, not those three stitched together.** |
+| round-1 full matrix (`984c65d`) | VOID for this candidate — rounds 2 and 3 changed executable content. Superseded by the run above. Not re-run at round 2 — the packet is STOPPED on three decisions (§13); the matrix runs once at the SHA that will integrate, per `git-workflow` |
 
 `test:postgres` is REQUIRED here under `AGENTS.md` §6's cross-layer rule — the
 transition envelope gained an element kind — and two of its tests observe the
@@ -819,26 +818,17 @@ no regression was introduced by a previous round's fix, and no control was
 found vacuous by this round (the one withdrawn control was withdrawn by the
 lane at round 2 and the arm endorsed the withdrawal).
 
-**The second gate is real, is owed, and is BLOCKED — stated plainly rather
-than explained away.** The full matrix at the integrating SHA has NOT run.
-Attempted at `cd58572` (this tree) and refused before any suite:
-`POSTGRES_CONTAINER_GUARD_FAILED: docker ps failed` — Docker Desktop's WSL
-integration went away mid-session and `docker` is no longer on `PATH` in this
-distro, so no ephemeral PostgreSQL can start. That blocks `test:postgres`,
-`test:browser`, `test:integration`, `test:contracts`, `test:agent`,
-`test:locale`, `test:performance`, `check:reachability`, the security scans —
-and `test:architecture`, which does not fail without Docker but **stalls
-forever** (`PUR-2c` §5 measured that precisely: 19 results, four leak-guard
-failures, then no summary).
-
-**What that leaves genuinely uncovered at the integrating SHA, named rather
-than inferred:** the whole-matrix run as a single pass, and `test:architecture`
-against the merged `docs/**` — which matters more than usual here, because the
-merge brought in `main`'s 21-commit narrative advance and
-`record-claim-fidelity` reads every packet record and the ledger. Everything
-Docker-free was re-run at this tree and is in §8. **The packet is not
-acceptable until that matrix is green**, per `AGENTS.md` §6; the review being
-converged does not substitute for it, and this record does not claim it does.
+**The second gate is real and it is now GREEN.**
+`FULL_MATRIX_PASS_SHA=5e37c29db7c2906936cdde52fc174073b9f4212f`, `EXIT=0`, at
+the tip carrying the `main` merge and every record — §8 has the per-suite
+counts. It took four attempts and **the three failures were all the
+environment, never the code**, which is worth recording because two of them are
+gates behaving exactly as designed: Docker Desktop could not reach this WSL
+distro at all (`Wsl/Service/E_UNEXPECTED` on any new exec into it, cleared by
+`wsl --shutdown`); then the performance gate refused to certify a number on a
+42.3%-idle machine rather than emit one it could not stand behind; then
+`pnpm audit` hit `"fetch failed"` on cold networking and returned a clean
+0/0/0/0/0 on retry. The recorded green is one unbroken run.
 
 **`main` moved 21 commits during the review and is merged in at `5b7def4`.**
 Its advance is docs-only — the `PUR-2c` merge, `received-quantity-ruling`
