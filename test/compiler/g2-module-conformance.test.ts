@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  cpSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -21,6 +30,7 @@ import {
   MODULE_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
   compileApplication,
+  compileApplicationRelease,
   diffCompiledReleases,
   executeVerificationPlan,
   expectedActiveReleaseFrom,
@@ -44,6 +54,21 @@ import {
 } from '../fixtures/g2/module-conformance/definitions.js';
 import { registerInventoryContractCases } from './inventory-contract.cases.js';
 import { V3_AGGREGATE_IDS, v3AggregateModule } from './v3-definition.js';
+import {
+  validateUnboundPermissionAcknowledgement,
+  type UnboundPermissionAcknowledgementSubject,
+} from '../../packages/compiler/src/conformance.js';
+import type { CompilerExecutionOptions } from '../../packages/compiler/src/protocol.js';
+import {
+  APPLICATION_NAMESPACE,
+  composedApplicationDefinition,
+} from '../../packages/domain/src/app/builder.js';
+import {
+  narrowAcknowledgementToDeclared,
+  readAcknowledgementDocument,
+  readRetainableAcknowledgementFor,
+  readUnboundPermissionAcknowledgementFor,
+} from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 
 registerInventoryContractCases((name, run) => test(name, run));
 
@@ -1574,4 +1599,694 @@ function structuralShape(value: unknown): unknown {
     );
   }
   return typeof value;
+}
+
+// ---------------------------------------------------------------------------
+// The acknowledged-unbound permission ratchet (program review R7, small a).
+// Rule-level and compiler-level tests carry the prefix
+// `unbound-permission acknowledgement:`; the two that spawn the real release
+// script carry `unbound-permission release script:`. Those prefixes are the
+// name patterns test/evidence/policy-unbound-refusal.expected-red.json runs.
+// ---------------------------------------------------------------------------
+
+const COMPOSED_PACKAGE_ID = `${APPLICATION_NAMESPACE}:package.application`;
+const PARTY_ENTITY_ID = `${APPLICATION_NAMESPACE}:entity.party`;
+const PARTY_ROLE_ENTITY_ID = `${APPLICATION_NAMESPACE}:entity.party_role`;
+const PARTY_CREATE_PERMISSION_ID = `${APPLICATION_NAMESPACE}:permission.party_create`;
+const APP_AUTHORED_PATH = 'apps/web/release/app.authored.json';
+const SHELL_AUTHORED_PATH = 'apps/web/release/shell.authored.json';
+const RELEASE_SCRIPT = 'apps/web/scripts/compile-app-release.ts';
+
+type AcknowledgementEntry = { permissionId: string; resource: string };
+
+test('unbound-permission acknowledgement: the unchanged composed application builds under its acknowledgement, which is exactly its declared census', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  // The loader refuses before any compile when the checked-in list has no
+  // entry for the package; on the unchanged tree it must return the entries.
+  const acknowledgement = readUnboundPermissionAcknowledgementFor(
+    APP_AUTHORED_PATH,
+    COMPOSED_PACKAGE_ID,
+  );
+  assert.equal(acknowledgement.packageId, COMPOSED_PACKAGE_ID);
+  const result = compileApplication(inputNormalized(normalized), {
+    unboundPermissionAcknowledgement: acknowledgement,
+  });
+  assert.equal(
+    result.status,
+    'compiled',
+    `the unchanged composed application must build with every declared permission acknowledged: ${JSON.stringify(
+      result.status === 'failed' ? result.diagnostics : [],
+    )}`,
+  );
+  // One entry per declared permission, no more, no less, none twice.
+  const declared = composedPermissionCensus(normalized);
+  assert.deepEqual(
+    [...acknowledgement.entries].sort(byPermissionId),
+    declared,
+    'the acknowledgement must name exactly the permissions the composed application declares, each on its declared resource',
+  );
+  assert.equal(
+    new Set(acknowledgement.entries.map((entry) => entry.permissionId)).size,
+    acknowledgement.entries.length,
+  );
+  assert.ok(declared.length > 0);
+  // `compileApplication` is the FIXTURE entry point and is ungoverned unless a
+  // caller supplies an acknowledgement; that is what keeps synthetic packages
+  // compiling. It is not reachable from a release path -- see the two controls
+  // below, which are round 3's answer to round 2's review.
+  assert.equal(
+    compileApplication(inputNormalized(normalized)).status,
+    'compiled',
+  );
+});
+
+test('unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned', () => {
+  const normalized = composedNormalized();
+  // The parameter is required, so omitting it is a TYPE error: a release path
+  // cannot reach an ungoverned compile by forgetting an argument. This control
+  // covers the only way past the type -- a cast -- and proves the runtime
+  // refuses it too, by the package's own name.
+  for (const forced of [undefined, null, {}]) {
+    const result = compileApplicationRelease(
+      inputNormalized(normalized),
+      forced as unknown as Parameters<typeof compileApplicationRelease>[1],
+    );
+    assert.equal(
+      result.status,
+      'failed',
+      `a release compile handed ${JSON.stringify(forced)} must be refused, never ungoverned`,
+    );
+    assert.deepEqual(structuralDiagnostics(result), [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_INVALID',
+        path: '$.options.unboundPermissionAcknowledgement',
+        subjectId: COMPOSED_PACKAGE_ID,
+      },
+    ]);
+  }
+  // And the same entry point admits the real thing.
+  assert.equal(
+    compileApplicationRelease(
+      inputNormalized(normalized),
+      readUnboundPermissionAcknowledgementFor(
+        APP_AUTHORED_PATH,
+        COMPOSED_PACKAGE_ID,
+      ),
+    ).status,
+    'compiled',
+  );
+});
+
+test('unbound-permission acknowledgement: a recorded revision from an unlisted package is judged unretainable, not crashed on', () => {
+  // Truncation must be able to JUDGE a recorded entry to decide whether to drop
+  // it. The head loader throws for an unlisted package -- that is what stops a
+  // build -- but the retainable reader returns an empty acknowledgement, which
+  // is stricter at that entry: every permission the revision declares is then
+  // unbound, the compile is refused, and truncation drops it.
+  assert.throws(
+    () =>
+      readUnboundPermissionAcknowledgementFor(
+        APP_AUTHORED_PATH,
+        'northstar.unlisted:package.fixture',
+      ),
+    /names no entries for package northstar\.unlisted:package\.fixture;/u,
+    'the head loader must still stop a build whose package is unlisted',
+  );
+  const retainable = readRetainableAcknowledgementFor(
+    APP_AUTHORED_PATH,
+    'northstar.unlisted:package.fixture',
+  );
+  assert.deepEqual(retainable, {
+    entries: [],
+    packageId: 'northstar.unlisted:package.fixture',
+  });
+  // Empty is not permissive: a package declaring a permission under it is
+  // refused as unbound, which is what makes the entry unretainable.
+  const normalized = composedNormalized();
+  const refused = validateUnboundPermissionAcknowledgement(normalized, {
+    entries: [],
+    packageId: COMPOSED_PACKAGE_ID,
+  });
+  assert.equal(
+    refused.length,
+    normalized.permissions.length,
+    'an empty acknowledgement refuses every declared permission by name',
+  );
+  assert.ok(
+    refused.every(
+      (diagnostic) =>
+        diagnostic.code === 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
+    ),
+    'an empty acknowledgement refuses every declared permission by name',
+  );
+});
+
+test('unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it', () => {
+  const acknowledgement = readUnboundPermissionAcknowledgementFor(
+    APP_AUTHORED_PATH,
+    COMPOSED_PACKAGE_ID,
+  );
+  const declared = new Set([PARTY_CREATE_PERMISSION_ID]);
+  const narrowed = narrowAcknowledgementToDeclared(acknowledgement, declared);
+  assert.equal(narrowed.packageId, COMPOSED_PACKAGE_ID);
+  assert.deepEqual(
+    narrowed.entries.map((entry) => entry.permissionId),
+    [PARTY_CREATE_PERMISSION_ID],
+    'narrowing keeps exactly the permissions the revision declares',
+  );
+  // It can only remove. A permission the revision declares that the checked-in
+  // list does not name stays ABSENT, so the compiler refuses it as unbound --
+  // which is the correct outcome for a recorded release that declared a
+  // permission nothing ever acknowledged.
+  const invented = narrowAcknowledgementToDeclared(acknowledgement, {
+    has: () => true,
+  } as unknown as ReadonlySet<string>);
+  assert.equal(invented.entries.length, acknowledgement.entries.length);
+  assert.ok(
+    !invented.entries.some(
+      (entry) =>
+        entry.permissionId ===
+        `${APPLICATION_NAMESPACE}:permission.never_declared`,
+    ),
+    'narrowing never invents an entry, so it cannot certify a revision against itself',
+  );
+});
+
+test('unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name', () => {
+  const definition = composedApplicationDefinition() as {
+    permissions: unknown[];
+  } & Record<string, unknown>;
+  const probe = `${APPLICATION_NAMESPACE}:permission.party_probe_unbound`;
+  definition.permissions.push(composedPermission(probe, PARTY_ENTITY_ID));
+  const result = compileApplication(input(definition), {
+    unboundPermissionAcknowledgement: readUnboundPermissionAcknowledgementFor(
+      APP_AUTHORED_PATH,
+      COMPOSED_PACKAGE_ID,
+    ),
+  });
+  assert.equal(
+    result.status,
+    'failed',
+    'a declared permission that nothing binds and nothing acknowledges must refuse compilation',
+  );
+  assert.deepEqual(
+    structuralDiagnostics(result),
+    [
+      {
+        code: 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
+        path: '$.permissions.permissionId',
+        subjectId: probe,
+      },
+    ],
+    'the refusal must name exactly the one unacknowledged permission and nothing else',
+  );
+});
+
+test('unbound-permission acknowledgement: the rule runs at language v0 too — the shell demo builds under its acknowledgement and refuses an unacknowledged permission by name', () => {
+  const authored = parseAuthoredShell();
+  const normalized = normalizeApplicationPackage(authored);
+  assert.equal(normalized.languageVersion, 'v0-experimental');
+  const acknowledgement = readUnboundPermissionAcknowledgementFor(
+    SHELL_AUTHORED_PATH,
+    normalized.package.packageId,
+  );
+  assert.equal(
+    compileApplication(inputNormalized(normalized), {
+      unboundPermissionAcknowledgement: acknowledgement,
+    }).status,
+    'compiled',
+  );
+  const probe = 'northstar.shell:permission.workspace_probe_unbound';
+  (authored.permissions as unknown[]).push({
+    action: 'read',
+    kind: 'permissionDefinition',
+    label: 'workspace probe',
+    permissionId: probe,
+    resource: {
+      kind: 'entityReference',
+      schemaVersion: 'v0-experimental',
+      targetId: 'northstar.shell:entity.workspace',
+    },
+    schemaVersion: 'v0-experimental',
+  });
+  const refused = compileApplication(input(authored), {
+    unboundPermissionAcknowledgement: acknowledgement,
+  });
+  assert.equal(
+    refused.status,
+    'failed',
+    'a v0 package declaring an unacknowledged permission must refuse compilation',
+  );
+  assert.deepEqual(structuralDiagnostics(refused), [
+    {
+      code: 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
+      path: '$.permissions.permissionId',
+      subjectId: probe,
+    },
+  ]);
+});
+
+test('unbound-permission acknowledgement: removing the acknowledgement of a permission the package still declares refuses it by name', () => {
+  const normalized = composedNormalized();
+  const census = composedPermissionCensus(normalized);
+  const withoutPartyCreate = census.filter(
+    (entry) => entry.permissionId !== PARTY_CREATE_PERMISSION_ID,
+  );
+  assert.equal(withoutPartyCreate.length, census.length - 1);
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging(withoutPartyCreate),
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
+        path: '$.permissions.permissionId',
+        subjectId: PARTY_CREATE_PERMISSION_ID,
+      },
+    ],
+    'a declared permission whose acknowledgement was removed must be refused by name',
+  );
+});
+
+test('unbound-permission acknowledgement: an entry naming a permission the package does not declare is stale, whether or not its resource exists', () => {
+  const normalized = composedNormalized();
+  const census = composedPermissionCensus(normalized);
+  const stale = `${APPLICATION_NAMESPACE}:permission.party_probe_stale`;
+  const gone = `${APPLICATION_NAMESPACE}:permission.absent_probe_read`;
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging([
+          ...census,
+          { permissionId: stale, resource: PARTY_ENTITY_ID },
+          {
+            permissionId: gone,
+            resource: `${APPLICATION_NAMESPACE}:entity.absent_probe`,
+          },
+        ]),
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.permissionId',
+        subjectId: stale,
+      },
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.permissionId',
+        subjectId: gone,
+      },
+    ],
+    'an acknowledgement naming a permission the package does not declare must be refused as stale',
+  );
+});
+
+test('unbound-permission acknowledgement: an entry whose resource disagrees with the declaration is stale', () => {
+  const normalized = composedNormalized();
+  const census = composedPermissionCensus(normalized).map((entry) =>
+    entry.permissionId === PARTY_CREATE_PERMISSION_ID
+      ? { ...entry, resource: PARTY_ROLE_ENTITY_ID }
+      : entry,
+  );
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging(census),
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.resource',
+        subjectId: PARTY_CREATE_PERMISSION_ID,
+      },
+    ],
+  );
+});
+
+test('unbound-permission acknowledgement: a permission an evaluator binds leaves the list, and stays listed only as rot', () => {
+  const normalized = composedNormalized();
+  const census = composedPermissionCensus(normalized);
+  const bound = new Set([PARTY_CREATE_PERMISSION_ID]);
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging(census),
+        bound,
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.permissionId',
+        subjectId: PARTY_CREATE_PERMISSION_ID,
+      },
+    ],
+  );
+  assert.deepEqual(
+    validateUnboundPermissionAcknowledgement(
+      normalized,
+      acknowledging(
+        census.filter(
+          (entry) => entry.permissionId !== PARTY_CREATE_PERMISSION_ID,
+        ),
+      ),
+      bound,
+    ),
+    [],
+  );
+});
+
+test('unbound-permission acknowledgement: a duplicated entry is stale', () => {
+  const normalized = composedNormalized();
+  const census = composedPermissionCensus(normalized);
+  const duplicate = census.find(
+    (entry) => entry.permissionId === PARTY_CREATE_PERMISSION_ID,
+  )!;
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging([...census, duplicate]),
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.permissionId',
+        subjectId: PARTY_CREATE_PERMISSION_ID,
+      },
+    ],
+  );
+});
+
+test('unbound-permission acknowledgement: an acknowledgement for another package, or an unreadable one, fails closed rather than ungoverning', () => {
+  const normalized = composedNormalized();
+  const census = composedPermissionCensus(normalized);
+  // The subject is explicit: a mislabelled acknowledgement is refused by the
+  // package's name, never read as "this package is not governed".
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(
+        normalized,
+        acknowledging(census, `${APPLICATION_NAMESPACE}:package.applicatio`),
+      ),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_INVALID',
+        path: '$.options.unboundPermissionAcknowledgement.packageId',
+        subjectId: COMPOSED_PACKAGE_ID,
+      },
+    ],
+    'an acknowledgement naming another package must refuse this one by name',
+  );
+  const mismatched = compileApplication(inputNormalized(normalized), {
+    unboundPermissionAcknowledgement: acknowledging(
+      census,
+      `${APPLICATION_NAMESPACE}:package.applicatio`,
+    ),
+  });
+  assert.equal(
+    mismatched.status,
+    'failed',
+    'a mislabelled acknowledgement must refuse the compile rather than ungovern it',
+  );
+  for (const malformed of [
+    undefined,
+    null,
+    {},
+    { packageId: COMPOSED_PACKAGE_ID },
+    { entries: census },
+    { entries: census, packageId: COMPOSED_PACKAGE_ID, extra: true },
+    {
+      entries: [{ permissionId: PARTY_CREATE_PERMISSION_ID }],
+      packageId: COMPOSED_PACKAGE_ID,
+    },
+    {
+      entries: [{ permissionId: PARTY_CREATE_PERMISSION_ID, resource: 7 }],
+      packageId: COMPOSED_PACKAGE_ID,
+    },
+    {
+      entries: [
+        {
+          permissionId: PARTY_CREATE_PERMISSION_ID,
+          resource: PARTY_ENTITY_ID,
+          note: 'x',
+        },
+      ],
+      packageId: COMPOSED_PACKAGE_ID,
+    },
+  ]) {
+    const diagnostics = validateUnboundPermissionAcknowledgement(
+      normalized,
+      malformed,
+    );
+    assert.equal(diagnostics.length, 1, JSON.stringify(malformed));
+    assert.equal(
+      diagnostics[0]?.code,
+      'COMPILER_PERMISSION_ACKNOWLEDGEMENT_INVALID',
+    );
+    assert.equal(diagnostics[0]?.subjectId, COMPOSED_PACKAGE_ID);
+  }
+});
+
+test('unbound-permission acknowledgement: the checked-in document is read strictly and a package with no key is refused before any compile', () => {
+  const path = 'apps/web/release/unbound-permission-acknowledgement.json';
+  const document = JSON.parse(readFileSync(path, 'utf8')) as Record<
+    string,
+    unknown
+  >;
+  assert.ok(
+    readAcknowledgementDocument(document, path).packages.has(
+      COMPOSED_PACKAGE_ID,
+    ),
+    'the checked-in list must key the composed application package',
+  );
+  assert.throws(
+    () =>
+      readUnboundPermissionAcknowledgementFor(
+        APP_AUTHORED_PATH,
+        `${APPLICATION_NAMESPACE}:package.applicatio`,
+      ),
+    /names no entries for package northstar\.app:package\.applicatio;/u,
+  );
+  const packages = document.packages as Record<string, unknown[]>;
+  const composed = packages[COMPOSED_PACKAGE_ID]!;
+  for (const [label, broken] of [
+    ['missing header', { ...document, header: undefined }],
+    ['empty header', { ...document, header: [] }],
+    ['extra top-level key', { ...document, note: 'x' }],
+    [
+      'other schemaVersion',
+      {
+        ...document,
+        schemaVersion: 'northstar.web:unbound-permission-acknowledgement/v0',
+      },
+    ],
+    ['packages not an object', { ...document, packages: [] }],
+    [
+      'entries not an array',
+      { ...document, packages: { [COMPOSED_PACKAGE_ID]: {} } },
+    ],
+    [
+      'entry with an extra key',
+      {
+        ...document,
+        packages: {
+          [COMPOSED_PACKAGE_ID]: [{ ...(composed[0] as object), note: 'x' }],
+        },
+      },
+    ],
+    [
+      'entry with a non-string resource',
+      {
+        ...document,
+        packages: {
+          [COMPOSED_PACKAGE_ID]: [
+            { permissionId: PARTY_CREATE_PERMISSION_ID, resource: 7 },
+          ],
+        },
+      },
+    ],
+    [
+      'entry with an empty permission id',
+      {
+        ...document,
+        packages: {
+          [COMPOSED_PACKAGE_ID]: [
+            { permissionId: '', resource: PARTY_ENTITY_ID },
+          ],
+        },
+      },
+    ],
+  ] as const) {
+    assert.throws(
+      () => readAcknowledgementDocument(broken, path),
+      /is not the versioned shape/u,
+      label,
+    );
+  }
+});
+
+test('unbound-permission release script: check:app-release on an untouched copy of the release inputs is green', () => {
+  const copy = releaseInputsCopy();
+  try {
+    const run = runReleaseScriptCheck(copy);
+    assert.equal(
+      run.status,
+      0,
+      `the untouched release inputs must pass --check under their acknowledgement:\n${run.stderr.slice(-2000)}`,
+    );
+  } finally {
+    rmSync(copy, { force: true, recursive: true });
+  }
+});
+
+test('unbound-permission release script: a list with no key for the composed package makes check:app-release refuse before compiling', () => {
+  const copy = releaseInputsCopy();
+  try {
+    const listPath = join(copy, 'unbound-permission-acknowledgement.json');
+    const document = JSON.parse(readFileSync(listPath, 'utf8')) as {
+      packages: Record<string, unknown>;
+    };
+    const entries = document.packages[COMPOSED_PACKAGE_ID];
+    delete document.packages[COMPOSED_PACKAGE_ID];
+    document.packages[`${APPLICATION_NAMESPACE}:package.applicatio`] = entries;
+    writeFileSync(listPath, JSON.stringify(document, null, 2));
+    const run = runReleaseScriptCheck(copy);
+    assert.notEqual(run.status, 0, 'the release script must refuse');
+    assert.match(
+      run.stderr,
+      /names no entries for package northstar\.app:package\.application;/u,
+      'the release script must refuse for the missing subject, not for anything else',
+    );
+  } finally {
+    rmSync(copy, { force: true, recursive: true });
+  }
+});
+
+function releaseInputsCopy(): string {
+  const directory = mkdtempSync(join(tmpdir(), 'unbound-permission-release-'));
+  for (const file of [
+    'app.authored.json',
+    'app.compiled.json',
+    'unbound-permission-acknowledgement.json',
+  ]) {
+    cpSync(resolve('apps/web/release', file), join(directory, file));
+  }
+  return directory;
+}
+
+function runReleaseScriptCheck(directory: string): {
+  status: number | null;
+  stderr: string;
+} {
+  const run = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', RELEASE_SCRIPT, '--check'],
+    {
+      cwd: resolve('.'),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        NORTH_STAR_APP_AUTHORED_PATH: join(directory, 'app.authored.json'),
+        NORTH_STAR_APP_COMPILED_PATH: join(directory, 'app.compiled.json'),
+      },
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
+  return { status: run.status, stderr: `${run.stdout}\n${run.stderr}` };
+}
+
+function parseAuthoredShell(): Record<string, unknown> & {
+  permissions: unknown[];
+} {
+  const authored = JSON.parse(
+    readFileSync(SHELL_AUTHORED_PATH, 'utf8'),
+  ) as Record<string, unknown> & { permissions: unknown[] };
+  assert.ok(Array.isArray(authored.permissions));
+  return authored;
+}
+
+function composedNormalized(): UnboundPermissionAcknowledgementSubject & {
+  permissions: ReadonlyArray<{
+    permissionId: string;
+    resource: { targetId: string };
+  }>;
+} {
+  return normalizeApplicationPackage(composedApplicationDefinition());
+}
+
+function composedPermission(
+  permissionId: string,
+  resource: string,
+): Record<string, unknown> {
+  return {
+    action: 'read',
+    kind: 'permissionDefinition',
+    label: 'probe permission',
+    permissionId,
+    resource: {
+      kind: 'entityReference',
+      schemaVersion: 'v5',
+      targetId: resource,
+    },
+    schemaVersion: 'v5',
+  };
+}
+
+function composedPermissionCensus(normalized: {
+  permissions: ReadonlyArray<{
+    permissionId: string;
+    resource: { targetId: string };
+  }>;
+}): AcknowledgementEntry[] {
+  return normalized.permissions
+    .map((permission) => ({
+      permissionId: permission.permissionId,
+      resource: permission.resource.targetId,
+    }))
+    .sort(byPermissionId);
+}
+
+function acknowledging(
+  entries: readonly AcknowledgementEntry[],
+  packageId: string = COMPOSED_PACKAGE_ID,
+): NonNullable<CompilerExecutionOptions['unboundPermissionAcknowledgement']> {
+  return { entries, packageId };
+}
+
+function byPermissionId(
+  left: AcknowledgementEntry,
+  right: AcknowledgementEntry,
+): number {
+  return left.permissionId < right.permissionId
+    ? -1
+    : left.permissionId > right.permissionId
+      ? 1
+      : 0;
+}
+
+function structuralOf(
+  diagnostics: ReadonlyArray<{
+    code: string;
+    path: string;
+    subjectId: string | null;
+  }>,
+): Array<{ code: string; path: string; subjectId: string | null }> {
+  return diagnostics.map(({ code, path, subjectId }) => ({
+    code,
+    path,
+    subjectId,
+  }));
 }

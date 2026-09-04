@@ -11,7 +11,7 @@ import {
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
-  compileApplication,
+  compileApplicationRelease,
   expectedActiveReleaseFrom,
   reproduceHistoricalApplication,
   type CompileResult,
@@ -19,6 +19,13 @@ import {
   type CompileSuccess,
 } from '@north-star/compiler';
 import { format } from 'prettier';
+
+import {
+  narrowAcknowledgementToDeclared,
+  readRetainableAcknowledgementFor,
+  readUnboundPermissionAcknowledgementFor,
+  type UnboundPermissionAcknowledgementInput,
+} from './unbound-permission-acknowledgement.js';
 
 const root = resolve(import.meta.dirname, '../../..');
 const authoredPath = resolve(
@@ -48,6 +55,55 @@ const authored = parseAuthoredApplicationPackageJson(
   readFileSync(authoredPath),
 );
 const applicationBytes = normalizedBytes(authored);
+// THE ACKNOWLEDGED-UNBOUND GATE. EVERY current compile in this script goes
+// through `compileApplicationRelease`, whose acknowledgement is a required
+// parameter -- there is no call here that could omit governance, and adding one
+// would not compile. The loader throws before any compile if the checked-in
+// file has no entry for the package.
+//
+// Three kinds of compile, three honest acknowledgements:
+//   - the authored head (candidate under build, serving head under --check):
+//     the checked-in list for this package, unnarrowed, so its census must be
+//     complete;
+//   - the bootstrap: the same package with every family emptied, so its honest
+//     acknowledgement is explicitly empty;
+//   - a RECORDED revision recompiled by --truncate-invalid-lineage: the
+//     checked-in list narrowed to what that revision declares (see
+//     `narrowAcknowledgementToDeclared`). Round 2 passed these NOTHING and
+//     recorded that as a stated limit; its review was right that naming a live
+//     bypass does not make the invariant true.
+//
+// Historical entries under `verifyExistingLineage` are reproduced rather than
+// re-judged -- `reproduceHistoricalApplication` skips whole-model validation
+// altogether, by design, because it can only verify an already-recorded root.
+function currentAcknowledgement(): UnboundPermissionAcknowledgementInput {
+  return readUnboundPermissionAcknowledgementFor(
+    authoredPath,
+    parseNormalizedApplicationPackageJson(applicationBytes).package.packageId,
+  );
+}
+function emptyAcknowledgement(
+  normalizedDefinitionBytes: Uint8Array,
+): UnboundPermissionAcknowledgementInput {
+  return {
+    entries: [],
+    packageId: parseNormalizedApplicationPackageJson(normalizedDefinitionBytes)
+      .package.packageId,
+  };
+}
+
+/** The checked-in list narrowed to one recorded revision's own census. */
+function recordedAcknowledgement(
+  normalizedDefinitionBytes: Uint8Array,
+): UnboundPermissionAcknowledgementInput {
+  const recorded = parseNormalizedApplicationPackageJson(
+    normalizedDefinitionBytes,
+  );
+  return narrowAcknowledgementToDeclared(
+    readRetainableAcknowledgementFor(authoredPath, recorded.package.packageId),
+    new Set(recorded.permissions.map((permission) => permission.permissionId)),
+  );
+}
 const existing = existsSync(outputPath)
   ? (JSON.parse(readFileSync(outputPath, 'utf8')) as unknown)
   : null;
@@ -70,6 +126,8 @@ if (!authoredIsCurrent && !checkOnly) {
   const candidate = mustCompile(
     applicationBytes,
     expectedActiveReleaseFrom(latest.compiled),
+    undefined,
+    currentAcknowledgement(),
   );
   payload = {
     applications: [
@@ -130,6 +188,7 @@ function longestValidExperimentalLineagePrefix(
     bootstrapBytes,
     null,
     recordedCompilerSemanticProfileVersion(input.bootstrap, 'bootstrap'),
+    emptyAcknowledgement(bootstrapBytes),
   );
   assertSerializedRelease(
     input.bootstrap,
@@ -147,6 +206,9 @@ function longestValidExperimentalLineagePrefix(
       normalizedDefinitionBytes,
       expectedActiveReleaseFrom(previous),
       recordedCompilerSemanticProfileVersion(value, path),
+      equalBytes(normalizedDefinitionBytes, applicationBytes)
+        ? currentAcknowledgement()
+        : recordedAcknowledgement(normalizedDefinitionBytes),
     );
     if (result.status !== 'compiled') {
       firstInvalidIndex = index;
@@ -237,10 +299,17 @@ function initialLineage(
   const bootstrapBytes = normalizedBytes(
     emptyApplicationDefinition(authoredDefinition),
   );
-  const bootstrap = mustCompile(bootstrapBytes, null);
+  const bootstrap = mustCompile(
+    bootstrapBytes,
+    null,
+    undefined,
+    emptyAcknowledgement(bootstrapBytes),
+  );
   const application = mustCompile(
     applicationBytes,
     expectedActiveReleaseFrom(bootstrap),
+    undefined,
+    currentAcknowledgement(),
   );
   const payload = {
     application: serializedRelease(applicationBytes, application),
@@ -301,6 +370,8 @@ function verifyExistingLineage(
       ? mustCompile(
           normalizedDefinitionBytes,
           expectedActiveReleaseFrom(previous),
+          undefined,
+          currentAcknowledgement(),
         )
       : mustReproduceHistorical(
           normalizedDefinitionBytes,
@@ -417,14 +488,16 @@ function normalizedBytes(definition: unknown): Uint8Array {
 function mustCompile(
   normalizedDefinitionBytes: Uint8Array,
   expectedActiveRelease: Parameters<
-    typeof compileApplication
+    typeof compileApplicationRelease
   >[0]['expectedActiveRelease'],
-  compilerSemanticProfileVersion?: CompilerSemanticProfileVersion,
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion | undefined,
+  unboundPermissionAcknowledgement: UnboundPermissionAcknowledgementInput,
 ): CompileSuccess {
   const result = compileNormalizedDefinition(
     normalizedDefinitionBytes,
     expectedActiveRelease,
     compilerSemanticProfileVersion,
+    unboundPermissionAcknowledgement,
   );
   if (result.status !== 'compiled') {
     throw new Error(
@@ -437,7 +510,7 @@ function mustCompile(
 function mustReproduceHistorical(
   normalizedDefinitionBytes: Uint8Array,
   expectedActiveRelease: Parameters<
-    typeof compileApplication
+    typeof compileApplicationRelease
   >[0]['expectedActiveRelease'],
   recordedReleaseRoot: string,
   recordedProfileVersion: CompilerSemanticProfileVersion,
@@ -473,30 +546,36 @@ function mustReproduceHistorical(
 function compileNormalizedDefinition(
   normalizedDefinitionBytes: Uint8Array,
   expectedActiveRelease: Parameters<
-    typeof compileApplication
+    typeof compileApplicationRelease
   >[0]['expectedActiveRelease'],
   // Defaults to today's adopted profile, which is correct for a freshly minted
   // head. A RECORDED entry must pass its own, or its output is compared against
   // a serialization it was never compiled to produce.
-  compilerSemanticProfileVersion: CompilerSemanticProfileVersion = MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion,
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion | undefined,
+  unboundPermissionAcknowledgement: UnboundPermissionAcknowledgementInput,
 ): CompileResult {
   const normalizedDefinition = parseNormalizedApplicationPackageJson(
     normalizedDefinitionBytes,
   );
-  return compileApplication({
-    dependencies: [],
-    expectedActiveRelease,
-    kind: 'compilerInput',
-    limits: { ...DEFAULT_COMPILER_LIMITS },
-    normalizedDefinitionBytes,
-    profile: {
-      ...MODULE_COMPILER_PROFILE,
-      compilerSemanticProfileVersion,
-      languageVersion: normalizedDefinition.languageVersion,
-      normalizationProfileVersion:
-        normalizedDefinition.normalizationProfileVersion,
+  return compileApplicationRelease(
+    {
+      dependencies: [],
+      expectedActiveRelease,
+      kind: 'compilerInput',
+      limits: { ...DEFAULT_COMPILER_LIMITS },
+      normalizedDefinitionBytes,
+      profile: {
+        ...MODULE_COMPILER_PROFILE,
+        compilerSemanticProfileVersion:
+          compilerSemanticProfileVersion ??
+          MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion,
+        languageVersion: normalizedDefinition.languageVersion,
+        normalizationProfileVersion:
+          normalizedDefinition.normalizationProfileVersion,
+      },
     },
-  });
+    unboundPermissionAcknowledgement,
+  );
 }
 
 function serializedRelease(

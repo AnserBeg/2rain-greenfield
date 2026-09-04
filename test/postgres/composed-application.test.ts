@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { promisify } from 'node:util';
 
@@ -81,10 +81,50 @@ import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/s
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import {
+  UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE,
+  UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
+} from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 
 const compiledArtifactPath = resolve('apps/web/release/app.compiled.json');
 const authoredArtifactPath = resolve('apps/web/release/app.authored.json');
 const compileScriptPath = resolve('apps/web/scripts/compile-app-release.ts');
+
+/**
+ * A release-input directory carries its acknowledgement of every declared
+ * permission no evaluator binds; the release script refuses to compile a head
+ * whose directory has none (policy-unbound-refusal). Each workspace below
+ * derives its acknowledgement from the definition it writes, exactly as the
+ * checked-in one is derived from the composed application, so the script
+ * reaches the compiler and the compiler's own refusals stay observable.
+ */
+async function writeAcknowledgementBeside(
+  authoredPath: string,
+  definition: unknown,
+): Promise<void> {
+  const authored = definition as {
+    package: { packageId: string };
+    permissions: ReadonlyArray<{
+      permissionId: string;
+      resource: { targetId: string };
+    }>;
+  };
+  await writeFile(
+    resolve(dirname(authoredPath), UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE),
+    JSON.stringify({
+      header: ['test workspace: every declared permission acknowledged'],
+      packages: {
+        [authored.package.packageId]: authored.permissions.map(
+          (permission) => ({
+            permissionId: permission.permissionId,
+            resource: permission.resource.targetId,
+          }),
+        ),
+      },
+      schemaVersion: UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
+    }),
+  );
+}
 const migrationsDirectory = resolve('db/migrations');
 const fullReplaySchemaSnapshotPath = resolve(
   'test/postgres/fresh-tenant-full-replay-schema.snapshot.json',
@@ -124,6 +164,7 @@ test('historical reproduction cannot admit a non-conformant freshly compiled hea
     await Promise.all([
       writeFile(authoredPath, JSON.stringify(nonConformantHead)),
       writeFile(compiledPath, JSON.stringify(compiledApplication)),
+      writeAcknowledgementBeside(authoredPath, nonConformantHead),
     ]);
     await assert.rejects(
       execFileAsync(process.execPath, ['--import', 'tsx', compileScriptPath], {
@@ -5370,6 +5411,7 @@ async function compileCandidateEnvelope(
     await Promise.all([
       writeFile(authoredPath, JSON.stringify(candidateDefinition)),
       writeFile(compiledPath, JSON.stringify(compiledApplication)),
+      writeAcknowledgementBeside(authoredPath, candidateDefinition),
     ]);
     const environment = {
       ...process.env,
