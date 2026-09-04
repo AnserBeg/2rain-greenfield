@@ -336,14 +336,26 @@ self-certify; empty-for-unlisted is genuinely stricter.
    tautologically, absorbing every new permission without a list change anyone
    reads. **Two committed fixtures implement exactly that pattern**, which is
    how ordinary it is.
-3. **The truncation route runs but does not discriminate.** The pre-existing
-   v0-prefix control executes `--truncate-invalid-lineage`, but its retained
-   revision's acknowledgement is generated from its own complete census and its
-   invalid suffix declares zero permissions and fails a different rule — so
-   removing governance or narrowing would not change its outcome. The narrowing
-   helper is controlled directly; **its call-site wiring is not.** An earlier
-   version of this record and its review prompt presented that control as
-   end-to-end evidence. It is not, and that presentation is withdrawn.
+3. ~~**The truncation route runs but does not discriminate.**~~ **CLOSED after
+   the stop, and the finding was correct before it was closed.** The
+   pre-existing v0-prefix control could not speak to permission governance: its
+   retained revision was acknowledged from its own complete census and its
+   invalid suffix declares zero permissions and fails a different rule, so
+   neither governance nor narrowing changed its outcome. A **discriminating
+   specimen** now exists in `compiler-semantic-profile.test.ts`: the retained
+   revision declares five permissions while the checked-in list carries six, so
+   narrowing must drop the sixth; the dropped revision declares one the list
+   never names, and **the test first proves that revision compiles cleanly when
+   acknowledged**, so its refusal can only be governance. Two committed reds
+   hold it, both measured rather than predicted:
+   `recorded-revision-narrowing-removed` (now killing the helper test *and* the
+   route specimen) and `truncation-acknowledgement-self-certified`, whose
+   observable consequence is that the revision governance should have refused
+   instead **compiles** and is caught a step later as `applications[1] does not
+   match its current compiler output`. **The honest limit that remains:** the
+   specimen does **not** discriminate the release entry point's `required` mode,
+   because truncation always supplies a value — measured, not assumed; that mode
+   is covered by its own entry.
 
 **Also true and unchanged:** it authorizes nothing (row `7` is the kernel); a
 FIXTURE compile of a permission-bearing package is ungoverned by design; the
