@@ -42,7 +42,18 @@ again, the charter is wrong and the class must be routed.
 
 Round 3's executable freeze is `17529cf8c8b80e97f287545a3b80782e95600fb9`.
 
-{{FREEZE_BLOCK}}
+**Frozen SHA: `543b90c471f7cda231beefe106d23ddaa48b3215`**, the tip that carries the
+matrix result, the ledger and lane rows. Quoted from the remote at freeze time:
+
+```
+$ git ls-remote origin refs/heads/packet/policy-unbound-refusal
+543b90c471f7cda231beefe106d23ddaa48b3215	refs/heads/packet/policy-unbound-refusal
+```
+
+The branch head is one commit above that SHA; its only content is this block,
+the SHA filled into the rows and the review prompt, and the two gate results
+measured at `543b90c`. The executable freeze is `17529cf`;
+`FULL_MATRIX_PASS_SHA=17529cf8c8b80e97f287545a3b80782e95600fb9`.
 
 ## The finding
 
@@ -245,15 +256,15 @@ varying one property.
 
 | entry | mutation | measured |
 |---|---|---|
-| `unbound-check-removed` | `conformance.ts`: a bare `continue` at the top of the unbound branch | {{RED1}} |
-| `governance-wiring-removed` | `compiler.ts`: the whole-model condition inverted, defeating both the `required` arm and the supplied arm | {{RED2}} |
-| **`release-governance-made-optional`** | `compiler.ts`: `compileApplicationRelease` downgraded to the caller-supplied contract — **round 2's exact fail-open defect, restored on purpose** | {{RED8}} |
-| **`recorded-revision-narrowing-removed`** | the loader: narrowing returns the list unnarrowed, so a recorded revision is judged against today's census | {{RED9}} |
-| `subject-check-removed` | `conformance.ts`: the subject compared against itself | {{RED3}} |
-| `stale-check-removed` | `conformance.ts`: the stale membership test keyed on the acknowledgement instead of the declared census | {{RED4}} |
-| `acknowledgement-entry-removed` | the list: the `party_create` entry deleted | {{RED5}} |
-| `stale-entry-added` | the list: an entry for `stock_count_probe_stale` appended | {{RED6}} |
-| `governed-package-key-renamed` | the list: the composed package key misspelled by one character | {{RED7}} |
+| `unbound-check-removed` | `conformance.ts`: a bare `continue` at the top of the unbound branch | 4 killed at `17529cf` |
+| `governance-wiring-removed` | `compiler.ts`: the whole-model condition made unreachable, defeating both the `required` arm and the supplied arm without touching fixture semantics | 4 killed at `17529cf` |
+| **`release-governance-made-optional`** | `compiler.ts`: `compileApplicationRelease` downgraded to the caller-supplied contract — **round 2's exact fail-open defect, restored on purpose** | 1 killed at `17529cf` |
+| **`recorded-revision-narrowing-removed`** | the loader: narrowing returns the list unnarrowed, so a recorded revision is judged against today's census | 1 killed at `17529cf` |
+| `subject-check-removed` | `conformance.ts`: the subject compared against itself | 1 killed at `17529cf` |
+| `stale-check-removed` | `conformance.ts`: the stale membership test keyed on the acknowledgement instead of the declared census | 1 killed at `17529cf` |
+| `acknowledgement-entry-removed` | the list: the `party_create` entry deleted | 4 killed at `17529cf` |
+| `stale-entry-added` | the list: an entry for `stock_count_probe_stale` appended | 3 killed at `17529cf` |
+| `governed-package-key-renamed` | the list: the composed package key misspelled by one character | 6 killed at `17529cf` |
 
 The admission twin is measured by the runner itself: every entry's population
 must pass with production restored before the mutation is applied.
@@ -363,8 +374,8 @@ at `afe67f7` and is superseded.
 | `check:expected-red` | OK, 71 entries in 7 manifests |
 | `evidence:expected-red` (this packet's nine entries, `--run`, exclusive lock, detached worktree) | OK, 9 expected reds reproduced and restored at `17529cf`; 14 tests passing with production restored before each mutation; kill counts 4, 4, 1, 1, 4, 3, 6, 1, 1 |
 | full matrix (`run-matrix.sh policy14`, detached worktree at `17529cf`) | **PASS — `FULL_MATRIX_PASS_SHA=17529cf8c8b80e97f287545a3b80782e95600fb9`**, first attempt: performance 5/5, unit 155/155, compiler 173/173, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability producer 11/11, language coverage PASS (2050 obligations), reachability 106/106, security scans passed, schema 23 migrations verified, both release checks green, expected-red validation and its 38 self-test controls green as matrix stages |
-| `test:architecture` and `format` re-run at the narrative head | run after this record was committed; the result is quoted in the pin commit above this one |
-| `scripts/check-records.sh` | green at every executable SHA of this round; re-run after this record was committed, result in the pin commit above |
+| `test:architecture` and `format` re-run at the narrative head `543b90c` | architecture **189/189**, prettier clean — the two suites that read narrative, re-run past the docs commit per `git-workflow`; `git diff --name-only 17529cf 543b90c` outside `docs/` is empty, so every other suite carries forward |
+| `scripts/check-records.sh` at `543b90c` | `records: OK (138 record(s), 6 declaring: 55 claimed path(s) and 79 claimed symbol(s) observed in their frozen trees; 159 ledger row(s), ids unique)` |
 
 **Five intermediate reds are recorded rather than hidden, because every one was
 an instrument doing its job.** At `87496a9` the `governance-wiring-removed`
@@ -542,11 +553,14 @@ This prompt was written by the lane whose work you are reviewing. The lane has f
 
 **Two prior rounds returned BLOCK, and the round-2 reviewer said its prompt steered.** Round 1 was blocked because a missing key in a list left a release ungoverned; round 2 because a missing execution option did. Both were the same defect — absence read as permission. Round 2's prompt framed compiler-level absence as acceptable and its two release scripts as the only callers that mattered, while one mode of one of those scripts took the bypass; that framing is withdrawn. **Do not accept this prompt's boundary either. Question B below asks you to attack it.**
 
-TARGET. Branch `packet/policy-unbound-refusal`, frozen at {{FREEZE}}. `git ls-remote origin refs/heads/packet/policy-unbound-refusal` returned, at freeze time:
+TARGET. Branch `packet/policy-unbound-refusal`, frozen at `543b90c471f7cda231beefe106d23ddaa48b3215`. `git ls-remote origin refs/heads/packet/policy-unbound-refusal` returned, at freeze time:
 
-{{LS_REMOTE}}
+```
+$ git ls-remote origin refs/heads/packet/policy-unbound-refusal
+543b90c471f7cda231beefe106d23ddaa48b3215	refs/heads/packet/policy-unbound-refusal
+```
 
-The last executable commit is `17529cf8c8b80e97f287545a3b80782e95600fb9`; the commits above it are narrative, and `git diff --name-only 17529cf {{FREEZE_SHORT}} -- . ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'` is empty. Base is `4218a66068041eb04e45e6fff4883c8aa8dfaebf`, `origin/main` at cut. Read the whole delta `4218a66..{{FREEZE_SHORT}}`. Round 1's tree is preserved at `87878a6`, round 2's at `af1d603`; both reviews' findings are dispositioned in the record. Full matrix: Full matrix **PASS — `FULL_MATRIX_PASS_SHA=17529cf8c8b80e97f287545a3b80782e95600fb9`**, first attempt: performance 5/5, unit 155/155, compiler 173/173, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability producer 11/11, language coverage PASS (2050 obligations), reachability 106/106, security scans passed, schema 23 migrations verified, both release checks green, expected-red validation and its 38 self-test controls green as matrix stages.
+The last executable commit is `17529cf8c8b80e97f287545a3b80782e95600fb9`; the commits above it are narrative, and `git diff --name-only 17529cf 543b90c -- . ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'` is empty. Base is `4218a66068041eb04e45e6fff4883c8aa8dfaebf`, `origin/main` at cut. Read the whole delta `4218a66..543b90c`. Round 1's tree is preserved at `87878a6`, round 2's at `af1d603`; both reviews' findings are dispositioned in the record. Full matrix: Full matrix **PASS — `FULL_MATRIX_PASS_SHA=17529cf8c8b80e97f287545a3b80782e95600fb9`**, first attempt: performance 5/5, unit 155/155, compiler 173/173, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability producer 11/11, language coverage PASS (2050 obligations), reachability 106/106, security scans passed, schema 23 migrations verified, both release checks green, expected-red validation and its 38 self-test controls green as matrix stages.
 
 TIER. Critical — a compiler refusal on the release build's path. Band B declared.
 
