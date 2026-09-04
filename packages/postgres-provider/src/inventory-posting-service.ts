@@ -8,6 +8,7 @@ import {
 } from '@north-star/runtime';
 import type { Pool, PoolClient } from 'pg';
 
+import { INVENTORY_CONTRACT_V1 } from '../../domain/src/inventory/contracts.js';
 import {
   ACTION_INVOCATION_VERSION,
   BUSINESS_CHANGE_DOCUMENT_VERSION,
@@ -33,23 +34,25 @@ import {
 import { assertTrustedActorEnvelope } from './trust/trusted-actor-envelope.js';
 
 /**
- * PUR-2b. Version 2, because PUR-2a changed the PUBLIC posting contract for a
- * stock count: `transactionId` and every line's `transactionLineId` left the
- * command's key set entirely, so a caller written against version 1 is refused
- * by `exactKeys` rather than tolerated.
- *
- * MEASURED LIMIT, and it is not closed here. This capability version has THREE
- * encodings and nothing reconciles them: this constant, the frozen contract's
- * `capabilityVersion` (`packages/domain/src/inventory/contracts.ts`, pinned to
- * the literal 1 by `packages/compiler/src/conformance.ts`), and the module's
- * declared `capabilityRequirement.capabilityVersion`
- * (`packages/domain/src/inventory/definition.ts`), which is what reaches a
- * release manifest's `capabilityFacts`. `hasValidCapabilityFacts` checks only
- * `>= 1`, so a release that DECLARES it requires posting v1 while the provider
- * IMPLEMENTS v2 passes every gate. Both other encodings are outside this
- * packet's lease; filed as `posting-capability-version-has-three-encodings`.
+ * The version this provider IMPLEMENTS, imported from the frozen contract that
+ * is its one authority (posting-kernel-admission, 5g3-prog R1). PUR-2b bumped
+ * it to 2 because PUR-2a changed the PUBLIC stock-count command's key set, and
+ * left three encodings that nothing reconciled: this constant, the contract's
+ * `capabilityVersion`, and the module definition's `capabilityRequirement`
+ * that `buildCapabilityFacts` carries into a release manifest. The definition
+ * now reads the contract, this constant now is the contract's value, and
+ * `assertRegisteredCapabilityVersionIsDeclared` -- which runs on entry to
+ * `#post`, ahead of the stored-receipt lookup, so that no path can return
+ * without it -- refuses a release whose declared fact is not exactly this
+ * version. Exact, because ADR-0063 decision 3 defines the number as a MAJOR
+ * version with no minor axis: a caller written against one version is refused
+ * by another, so no other version satisfies a fact. `assertActiveRelease` is a
+ * SEPARATE later check that binds the active pointer and the exact storage
+ * artifact, and a stored-receipt replay returns before reaching it; the two
+ * halves are stated in ADR-0063's amendment and must not be conflated.
  */
-export const INVENTORY_POSTING_CAPABILITY_VERSION = 2 as const;
+export const INVENTORY_POSTING_CAPABILITY_VERSION =
+  INVENTORY_CONTRACT_V1.capabilityVersion;
 export const INVENTORY_POSTING_CAPABILITY_ID =
   'northstar.inventory:capability.posting' as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
@@ -200,6 +203,16 @@ const companionDerivedInventoryPostingInputDigestVersion = 4 as const;
  *
  * `idempotencyKey` is already excluded because it is the KEY rather than the
  * input; the derived ids are excluded for the mirror-image reason.
+ *
+ * posting-kernel-admission (5g3-prog R2): the derived `postingRole` is
+ * excluded for the same reason. `postStockCount` sets it to `count` for kind
+ * `initial` and `correction` otherwise -- a pure function of `kind`, which the
+ * input already covers -- so it carried no information, and it was the one
+ * kernel-derived value still in the version-4 input. Corrected IN PLACE at
+ * version 4 rather than cut as version 5, because ADR-0063 section 4 proves
+ * no version-4 receipt exists in released data: `postStockCount` has no
+ * production caller. The standard version 2 keeps its role, because version 2
+ * receipts ARE released data.
  *
  * A stored version-3 receipt is still DECODED under version 3 -- nothing is
  * rewritten and nothing is removed. What it may not do is have a fresh version-3
@@ -485,6 +498,7 @@ export type InventoryPostingErrorCode =
   | 'INVENTORY_POSTING_RELEASE_MISMATCH'
   | 'INVENTORY_POSTING_STORAGE_INVALID'
   | 'INVENTORY_POSTING_STORAGE_REJECTED'
+  | 'INVENTORY_RECORDED_AT_REGRESSION'
   | 'INVENTORY_STOCK_NEGATIVE'
   | 'INVENTORY_TRANSFER_APPROVAL_REQUIRED'
   | 'INVENTORY_TRANSFER_REASON_REQUIRED'
@@ -586,6 +600,45 @@ interface PostingWriterRelation {
 }
 
 /**
+ * posting-kernel-admission (5g3-prog R3). What a verifier RAN against, as a
+ * ledger of tokens each naming the physical relation PostgreSQL says the
+ * verifier read a row from.
+ *
+ * `assertPostingWriterInventoryRegistered` proves at construction that every
+ * derived relation has a verifier REGISTERED. It cannot prove the verifier
+ * runs on the path a given posting takes: a family could omit the call and
+ * satisfy both the registry and the observed-write-set backstop, because the
+ * backstop asks only whether a written relation is DERIVED. This ledger is the
+ * runtime half. A verifier mints a token only from a row it actually read --
+ * the relation name comes off the row's `tableoid`, resolved by PostgreSQL,
+ * never from a string the verifier chose -- and before commit
+ * `assertExecutedVerifiersCoverWriteSet` compares the token set EXACTLY with
+ * the observed write set, in both directions, through no code the verifiers
+ * share.
+ */
+class ExecutedVerifierCoverage {
+  readonly #tokens = new Map<string, Set<string>>();
+
+  observed(verifier: PostingReadBack, observedRelation: unknown): void {
+    const relation = String(observedRelation);
+    if (!identifierPattern.test(relation)) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        'a verifier recorded coverage for a relation PostgreSQL did not name',
+        { relation, verifier: verifier.name },
+      );
+    }
+    const verifiers = this.#tokens.get(relation) ?? new Set<string>();
+    verifiers.add(verifier.name);
+    this.#tokens.set(relation, verifiers);
+  }
+
+  get tokens(): ReadonlyMap<string, ReadonlySet<string>> {
+    return this.#tokens;
+  }
+}
+
+/**
  * A relation some OTHER relation's insert trigger writes, as the compiled
  * target declares the pair. Listed for both the projection a posting does
  * reach and the one it does not, so the exclusion is derived rather than
@@ -675,6 +728,10 @@ interface PostingStorageBinding {
   // Every physical relation a posting writes, DERIVED from the compiled
   // storage target rather than enumerated. Keyed by physical relation name.
   writerInventory: ReadonlyMap<string, PostingWriterRelation>;
+  // The verifier NAMES registered against each derived relation, kept so the
+  // runtime coverage ledger can be checked against the same registry that
+  // construction proved complete (posting-kernel-admission).
+  writerVerifiers: ReadonlyMap<string, ReadonlySet<string>>;
   stockCount: EntityBinding;
   stockCountActorColumn: string;
   stockCountCountedAtColumn: string;
@@ -886,6 +943,10 @@ export class PostgresInventoryPostingService {
       // because these counters are not reset at transaction boundaries and the
       // pool hands out reused connections; see `moduleWriteCounters`.
       const writeBaseline = await moduleWriteCounters(client, this.#binding);
+      // posting-kernel-admission. The runtime coverage ledger for THIS posting.
+      // Every verifier below mints into it from rows it read; the comparison
+      // before commit is the only reader.
+      const coverage = new ExecutedVerifierCoverage();
       // Transaction-local so the bounded wait cannot leak through the pool.
       // This precedes every lock acquisition and caller savepoint, preserving
       // the serializer's top-level transaction placement contract.
@@ -902,6 +963,18 @@ export class PostgresInventoryPostingService {
         context,
         this.registration.capabilityId,
         parsed.idempotencyKey,
+      );
+      // posting-kernel-admission, corrected on round-1 review. This precedes
+      // the receipt lookup because a STORED RECEIPT RETURNS WITHOUT REACHING
+      // `assertActiveRelease`: `findReceipt` keys on tenant, environment,
+      // capability and idempotency key only, and `validateReceiptReplay`
+      // compares the principal and the digest. Placed after that lookup, the
+      // check was skipped on exactly the path that serves a result recorded
+      // under a DIFFERENT release -- which is the mismatch this packet exists
+      // to refuse, so the first round's "checked on every posting" was false.
+      await assertRegisteredCapabilityVersionIsDeclared(
+        client,
+        this.registration,
       );
 
       const receipt = await findReceipt(
@@ -1114,6 +1187,7 @@ export class PostgresInventoryPostingService {
             parsed,
             transactionRevision,
             authoredHeaderPriorRow!,
+            coverage,
           );
         }
         if (isStockCountPosting(posting)) {
@@ -1143,6 +1217,7 @@ export class PostgresInventoryPostingService {
               recordedAt,
               sourceLineRevisions,
               countEvidence!,
+              coverage,
             );
           }
         }
@@ -1186,6 +1261,7 @@ export class PostgresInventoryPostingService {
         ordered,
         posting,
         actorEnvelope.actor.executionPrincipal.principalId,
+        coverage,
       );
       // What this posting ACTUALLY wrote, counted by PostgreSQL rather than
       // derived. This is the backstop for the one expansion the compiled target
@@ -1207,6 +1283,7 @@ export class PostgresInventoryPostingService {
         context,
         parsed.legalEntityId,
         ordered,
+        coverage,
       );
       // The trigger-written half of this posting's effect, observed before any
       // evidence or receipt is persisted. A balance that does not equal the
@@ -1221,6 +1298,7 @@ export class PostgresInventoryPostingService {
           parsed.legalEntityId,
           ordered,
           priorBalances,
+          coverage,
         );
       }
       const stockCountEvidence = isStockCountPosting(posting)
@@ -1230,8 +1308,20 @@ export class PostgresInventoryPostingService {
             context,
             posting,
             persistedMovements,
+            coverage,
           )
         : null;
+      // posting-kernel-admission. Every verifier has now run that is going to
+      // run. What they OBSERVED is compared exactly with what this transaction
+      // WROTE, before any trust document or receipt exists: a written relation
+      // no executed verifier read refuses, and so does a verifier claiming a
+      // relation this posting never wrote.
+      await assertExecutedVerifiersCoverWriteSet(
+        client,
+        this.#binding,
+        writeBaseline,
+        coverage,
+      );
       await resetModuleRole(client);
       const ids = mintEvidenceIds(this.mintUuid);
       const resultWithoutTrust = {
@@ -1525,48 +1615,53 @@ function resolvePostingStorage(
   );
   // Each registration names the read-back that observes the relation
   // column-for-column through `assertPersistedRowVerified`.
-  assertPostingWriterInventoryRegistered(writerInventory, [
-    { relation: movement.tableName, verifiedBy: [readBackMovements] },
-    // A routed row is observed by reading the PARTITIONED PARENT, which is the
-    // only correct way to read one: reading a partition directly would mean
-    // re-deriving the partition hash here. Detaching a partition makes the
-    // parent read-back return an incomplete set, which it refuses.
-    ...movementEntity.factStorage.partitioning.partitions.map((partition) => ({
-      relation: partition.physicalTableName,
-      verifiedBy: [readBackMovements],
-    })),
-    {
-      relation: movementEffectReservation.tableName,
-      verifiedBy: [assertMovementEffectReservations],
-    },
-    {
-      relation: stockCount.tableName,
-      verifiedBy: [readBackStockCountEvidence],
-    },
-    {
-      relation: stockCountLine.tableName,
-      verifiedBy: [readBackStockCountEvidence],
-    },
-    {
-      relation: transaction.tableName,
-      verifiedBy: [
-        assertCompanionIdentitiesPersisted,
-        assertAuthoredTransactionPersisted,
-      ],
-    },
-    {
-      relation: transactionLine.tableName,
-      verifiedBy: [assertCompanionIdentitiesPersisted],
-    },
-    ...(postedStockBalanceEntity
-      ? [
-          {
-            relation: postedStockBalanceEntity.physicalTableName,
-            verifiedBy: [assertPostedStockBalancesReconcile],
-          },
-        ]
-      : []),
-  ]);
+  const writerVerifiers = assertPostingWriterInventoryRegistered(
+    writerInventory,
+    [
+      { relation: movement.tableName, verifiedBy: [readBackMovements] },
+      // A routed row is observed by reading the PARTITIONED PARENT, which is the
+      // only correct way to read one: reading a partition directly would mean
+      // re-deriving the partition hash here. Detaching a partition makes the
+      // parent read-back return an incomplete set, which it refuses.
+      ...movementEntity.factStorage.partitioning.partitions.map(
+        (partition) => ({
+          relation: partition.physicalTableName,
+          verifiedBy: [readBackMovements],
+        }),
+      ),
+      {
+        relation: movementEffectReservation.tableName,
+        verifiedBy: [assertMovementEffectReservations],
+      },
+      {
+        relation: stockCount.tableName,
+        verifiedBy: [readBackStockCountEvidence],
+      },
+      {
+        relation: stockCountLine.tableName,
+        verifiedBy: [readBackStockCountEvidence],
+      },
+      {
+        relation: transaction.tableName,
+        verifiedBy: [
+          assertCompanionIdentitiesPersisted,
+          assertAuthoredTransactionPersisted,
+        ],
+      },
+      {
+        relation: transactionLine.tableName,
+        verifiedBy: [assertCompanionIdentitiesPersisted],
+      },
+      ...(postedStockBalanceEntity
+        ? [
+            {
+              relation: postedStockBalanceEntity.physicalTableName,
+              verifiedBy: [assertPostedStockBalancesReconcile],
+            },
+          ]
+        : []),
+    ],
+  );
   return Object.freeze({
     families,
     movementPostingRoleByOption,
@@ -1718,6 +1813,7 @@ function resolvePostingStorage(
       'stock_count_line_variance_quantity',
     ).name,
     writerInventory,
+    writerVerifiers,
   });
 }
 
@@ -1875,8 +1971,9 @@ function derivePostingWriterInventory(
 function assertPostingWriterInventoryRegistered(
   inventory: ReadonlyMap<string, PostingWriterRelation>,
   registrations: readonly PostingWriterRegistration[],
-): void {
+): ReadonlyMap<string, ReadonlySet<string>> {
   const registered = new Map<string, string>();
+  const verifiersByRelation = new Map<string, ReadonlySet<string>>();
   for (const registration of registrations) {
     // A registration names its verifier by passing the FUNCTION, and the id is
     // read off that function object. Corrected after review: this was an
@@ -1886,9 +1983,13 @@ function assertPostingWriterInventoryRegistered(
     // cannot name a verifier that is absent, because deleting or renaming one
     // fails to compile.
     //
-    // WHAT THIS STILL DOES NOT PROVE, stated because the gap is the point: that
-    // the named verifier RUNS for that relation on the path a given posting
-    // takes. See `posting-writer-coverage-is-declared-not-observed`.
+    // WHAT THIS DOES NOT PROVE: that the named verifier RUNS for that relation
+    // on the path a given posting takes. That half is runtime, not
+    // construction -- `ExecutedVerifierCoverage` and
+    // `assertExecutedVerifiersCoverWriteSet`, which compare what actually ran
+    // with what was actually written, before commit, on every posting
+    // (posting-kernel-admission, closing
+    // `posting-writer-coverage-is-declared-not-observed`).
     if (registration.verifiedBy.length === 0) {
       throw postingError(
         'INVENTORY_POSTING_STORAGE_INVALID',
@@ -1912,6 +2013,10 @@ function assertPostingWriterInventoryRegistered(
       );
     }
     registered.set(registration.relation, verifierId);
+    verifiersByRelation.set(
+      registration.relation,
+      new Set(registration.verifiedBy.map((verifier) => verifier.name)),
+    );
   }
   const unverified = [...inventory.values()]
     .filter((relation) => !registered.has(relation.relation))
@@ -1932,6 +2037,7 @@ function assertPostingWriterInventoryRegistered(
       `read-backs are registered for physical relations this posting does not write: ${stale.join(', ')}`,
     );
   }
+  return verifiersByRelation;
 }
 
 /**
@@ -2941,6 +3047,88 @@ async function assertActiveRelease(
   }
 }
 
+/**
+ * posting-kernel-admission (5g3-prog R1). The release this provider is
+ * REGISTERED against must DECLARE the capability version this provider
+ * IMPLEMENTS -- exactly, on every entry into `#post`, before any path can
+ * return.
+ *
+ * WHAT THIS PROVES AND WHERE THE OTHER HALF LIVES, because the split matters
+ * and the first round of this packet got it wrong. This function binds the
+ * REGISTRATION to its own release's declared fact. `assertActiveRelease`
+ * separately binds that registration to the ACTIVE pointer and to the exact
+ * persisted storage artifact -- but only on a fresh posting, because a stored
+ * receipt returns before it. So the composed guarantee is: every posting,
+ * replay included, is served by a provider whose version the release it is
+ * registered against declares; and every posting that actually writes is
+ * additionally proved to be running on the active release. Hoisting this one
+ * check is what makes the first half true; moving the pointer and artifact
+ * binding earlier would re-adjudicate PUR-2a's replay design, which is not
+ * this packet's to change.
+ *
+ * The fact is read from the persisted release manifest, the artifact whose
+ * content hash IS the release root, so what is compared is what the release
+ * kernel verified and stored rather than anything the caller or the compiled
+ * projection in memory says. Exact, not a floor: ADR-0063 decision 3 defines
+ * the number as a major version with no minor axis, so a release declaring 1
+ * is not served by a provider implementing 2 and vice versa. It is checked at
+ * posting time because admission cannot see it: the shipped head release was
+ * admitted declaring 1, and PUR-2b moved the provider to 2 underneath it
+ * without any gate noticing.
+ *
+ * A manifest with no fact for this capability, or with more than one, refuses
+ * as well: an observer that finds nothing must not pass.
+ */
+async function assertRegisteredCapabilityVersionIsDeclared(
+  client: PoolClient,
+  registration: InventoryPostingRegistrationV1,
+): Promise<void> {
+  const manifest = await client.query<{ canonical_bytes: Buffer }>(
+    `SELECT canonical_bytes
+       FROM platform.read_tenant_release_artifacts($1)
+      WHERE artifact_kind = 'releaseManifest'
+        AND content_hash = $2`,
+    [registration.releaseId, registration.releaseContentHash],
+  );
+  const bytes = manifest.rows[0]?.canonical_bytes;
+  if (manifest.rows.length !== 1 || !bytes) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      'the release manifest for this posting could not be read to check its posting capability fact',
+      { releaseContentHash: registration.releaseContentHash },
+    );
+  }
+  const parsed: unknown = JSON.parse(Buffer.from(bytes).toString('utf8'));
+  const isJsonRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+  const facts =
+    isJsonRecord(parsed) && Array.isArray(parsed.capabilityFacts)
+      ? parsed.capabilityFacts.filter(
+          (fact: unknown): fact is Record<string, unknown> =>
+            isJsonRecord(fact) &&
+            fact.capabilityId === registration.capabilityId,
+        )
+      : [];
+  if (facts.length !== 1) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `the release this posting is registered against declares ${String(facts.length)} facts for the posting capability, so its version cannot be checked`,
+      { capabilityId: registration.capabilityId },
+    );
+  }
+  const declared = facts[0]!.capabilityVersion;
+  if (declared !== registration.capabilityVersion) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `the release declares posting capability version ${String(declared)} while the registered provider implements version ${String(registration.capabilityVersion)}`,
+      {
+        declaredCapabilityVersion: String(declared),
+        registeredCapabilityVersion: String(registration.capabilityVersion),
+      },
+    );
+  }
+}
+
 async function businessPeriodFor(
   client: PoolClient,
   tenantId: string,
@@ -3196,6 +3384,71 @@ async function enforceNegativeStock(
         identity.locationId,
       ],
     );
+    // posting-kernel-admission, `5g3-prog` A3. THE MONOTONIC FLOOR ON
+    // `recordedAt`, per stock identity, under the locks this posting already
+    // holds.
+    //
+    // SCOPE, NARROWED ON ROUND-3 REVIEW AND NOT TO BE RESTATED MORE STRONGLY:
+    // this runs on the path that APPENDS movements. `findNaturalReplay`
+    // returns above it, so a request that matches an already-accepted natural
+    // effect is not floored. That is deliberate and harmless rather than a
+    // hole: such a request appends no movement, and `persistAdditionalReceipt`
+    // stores the REPLAYED result -- whose `recordedAt` is the instant the
+    // original posting recorded -- so the regressed sample reaches no row.
+    // The invariant this enforces is therefore: BEFORE APPENDING, the sampled
+    // instant is at least the newest already persisted for every affected
+    // identity. The 23505 raced-replay branch is below this check and does
+    // pass it.
+    //
+    // `recordedAt` is sampled once per posting from a WALL CLOCK, and
+    // `AGENTS.md` section 7 records that this machine steps its clock backward
+    // ~2s under CPU load. The comparator orders by `effectiveAt` FIRST and only
+    // then by `recordedAt`, so a backward step is invisible to the negative
+    // check below: a +10 recorded at 10:00 with an earlier effective time and a
+    // -5 recorded at 09:00 with a later effective time sort as (+10, -5) and
+    // never project a negative prefix. Admission is satisfied -- and yet an
+    // as-of read whose recorded-time horizon falls between 09:00 and 10:00 sees
+    // ONLY the -5 and returns a negative balance, under a policy that refuses
+    // negative stock. The kernel would have published a balance it never
+    // admitted, which is silent until someone reads history.
+    //
+    // REFUSED rather than clamped, and the alternative was real: the review
+    // sanctioned either. Clamping the sample up to the floor keeps the posting
+    // alive and removes the window too, but it stores an instant the clock
+    // never produced -- a falsified fact in the trust substrate and in every
+    // receipt derived from it. This platform refuses rather than rewrites
+    // business data, and a clock that ran backward is an environment fault an
+    // operator needs to SEE. The cost is stated in the packet record: a
+    // posting can fail on a machine whose clock regresses.
+    //
+    // EQUALITY IS ADMITTED, and that is load-bearing rather than incidental --
+    // two postings inside one clock tick, and every test with a fixed instant
+    // authority, record the same instant. Only a STRICTLY earlier instant
+    // refuses; the remaining tuple fields order the tie deterministically.
+    //
+    // Both sides are fixed-width canonical UTC (`YYYY-MM-DDTHH:MM:SS.mmmZ`), so
+    // lexicographic order is chronological order -- the same property the
+    // comparator already depends on. No extra query: the persisted rows are the
+    // ones already read for the negative check.
+    const plannedRecordedAt = identityMovements
+      .map((movement) => movement.recordedAt)
+      .toSorted()[0]!;
+    const recordedAtFloor = persisted.rows
+      .map((row) => row.recordedAt)
+      .toSorted()
+      .at(-1);
+    if (recordedAtFloor !== undefined && plannedRecordedAt < recordedAtFloor) {
+      throw postingError(
+        'INVENTORY_RECORDED_AT_REGRESSION',
+        `this posting records ${plannedRecordedAt}, earlier than ${recordedAtFloor} already recorded for the same stock identity, so an as-of read between the two could show a balance this posting never admitted`,
+        {
+          itemId: identity.itemId,
+          locationId: identity.locationId,
+          plannedRecordedAt,
+          recordedAtFloor,
+        },
+      );
+    }
     const ordered = [
       ...persisted.rows.map((row) => ({
         ...row,
@@ -3736,6 +3989,7 @@ async function assertCompanionIdentitiesPersisted(
   expectedRecordedAt: string,
   sourceLineRevisions: ReadonlyMap<string, number>,
   evidence: StockCountEvidenceCapture,
+  coverage: ExecutedVerifierCoverage,
 ): Promise<void> {
   const { command } = posting;
   const companion = family.companion;
@@ -3772,7 +4026,8 @@ async function assertCompanionIdentitiesPersisted(
             companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_reason_narrative').name)} AS "companionReasonNarrative",
             companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_actor_id').name)} AS "companionActorId",
             to_char(companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_effective_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "companionEffectiveAt",
-            to_char(companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_recorded_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "companionRecordedAt"
+            to_char(companion.${quoted(requiredField(binding.transaction, 'inventory_transaction_recorded_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "companionRecordedAt",
+            (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = companion.tableoid) AS "observedCompanionRelation"
        FROM ${table(binding, binding.stockCount)} AS source
        JOIN ${table(binding, binding.transaction)} AS companion
          ON companion.tenant_id = source.tenant_id
@@ -3799,6 +4054,12 @@ async function assertCompanionIdentitiesPersisted(
       { stockCountId: command.stockCountId },
     );
   }
+  // This verifier is registered for the COMPANION relations it projects; the
+  // source it joins is `readBackStockCountEvidence`'s to cover.
+  coverage.observed(
+    assertCompanionIdentitiesPersisted,
+    row.observedCompanionRelation,
+  );
   const derivedCompanionId = deriveInventoryPostingCompanionId({
     capabilityId: family.capabilityId,
     companionFamilyId: companion.companionEntityId,
@@ -3999,6 +4260,7 @@ async function assertCompanionIdentitiesPersisted(
             companion.${quoted(binding.transactionLineFromLocationColumn)}::text AS "companionFromLocationId",
             companion.${quoted(binding.transactionLineToLocationColumn)}::text AS "companionToLocationId",
             companion.${quoted(binding.transactionLine.revisionColumn)}::integer AS "companionRevision",
+            (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = companion.tableoid) AS "observedCompanionRelation",
             to_jsonb(source) AS "sourcePersistedRow",
             to_jsonb(companion) AS "companionPersistedRow"
        FROM ${table(binding, binding.stockCountLine)} AS source
@@ -4032,6 +4294,10 @@ async function assertCompanionIdentitiesPersisted(
   const lineDerived = 'does not carry the derived companion line identity';
   const lineRevisions = 'does not carry the revisions its writes require';
   for (const line of lines.rows) {
+    coverage.observed(
+      assertCompanionIdentitiesPersisted,
+      line.observedCompanionRelation,
+    );
     const sourceRecordId = String(line.sourceRecordId).toLowerCase();
     const expected = commandLines.get(sourceRecordId);
     const priorLineRow = evidence.priorLineRows.get(sourceRecordId);
@@ -4898,13 +5164,15 @@ async function readBackStockCountEvidence(
   context: TrustedRequestContext,
   posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
   movements: readonly PostedInventoryMovementV1[],
+  coverage: ExecutedVerifierCoverage,
 ): Promise<PostedStockCountEvidenceV1> {
   const { command } = posting;
   const session = await client.query<Record<string, unknown>>(
     `SELECT ${quoted(binding.stockCountKindColumn)} AS kind,
             ${quoted(binding.stockCountLocationColumn)}::text AS "locationId",
-            ${quoted(binding.stockCountSupersedesColumn)}::text AS "supersedesStockCountId"
-       FROM ${table(binding, binding.stockCount)}
+            ${quoted(binding.stockCountSupersedesColumn)}::text AS "supersedesStockCountId",
+            (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = session.tableoid) AS "observedRelation"
+       FROM ${table(binding, binding.stockCount)} AS session
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
         AND ${quoted(binding.stockCount.recordIdColumn)} = $4
@@ -4924,6 +5192,10 @@ async function readBackStockCountEvidence(
       'stock-count session read-back did not return the posted session',
     );
   }
+  coverage.observed(
+    readBackStockCountEvidence,
+    session.rows[0]!.observedRelation,
+  );
   const lines = await client.query<Record<string, unknown>>(
     `SELECT ${quoted(binding.stockCountLine.recordIdColumn)}::text AS "stockCountLineId",
             ${quoted(binding.stockCountLineItemColumn)}::text AS "itemId",
@@ -4933,8 +5205,9 @@ async function readBackStockCountEvidence(
             ${quoted(binding.stockCountLineVarianceColumn)}::text AS "varianceQuantity",
             ${quoted(binding.stockCountLineUnitColumn)} AS "unitId",
             ${quoted(binding.stockCountLineReversalColumn)}::text AS "reversalOfMovementId",
-            ${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "transactionLineId"
-       FROM ${table(binding, binding.stockCountLine)}
+            ${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "transactionLineId",
+            (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = line.tableoid) AS "observedRelation"
+       FROM ${table(binding, binding.stockCountLine)} AS line
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
         AND ${quoted(binding.stockCountLineRelationToSessionColumn)} = $4
@@ -4952,6 +5225,9 @@ async function readBackStockCountEvidence(
       'INVENTORY_POSTING_STORAGE_REJECTED',
       'stock-count line read-back did not return the complete evidence set',
     );
+  }
+  for (const line of lines.rows) {
+    coverage.observed(readBackStockCountEvidence, line.observedRelation);
   }
   const movementByLine = new Map(
     movements.map((movement) => [movement.transactionLineId, movement]),
@@ -5010,11 +5286,13 @@ async function assertAuthoredTransactionPersisted(
   command: DerivedPostingCommand,
   expectedRevision: number,
   priorRow: Readonly<Record<string, unknown>>,
+  coverage: ExecutedVerifierCoverage,
 ): Promise<void> {
   const persisted = await client.query<Record<string, unknown>>(
     `SELECT ${quoted(binding.transactionStateColumn)} AS state,
             ${quoted(binding.transaction.revisionColumn)}::integer AS revision,
-            to_jsonb(header) AS "persistedRow"
+            to_jsonb(header) AS "persistedRow",
+            (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = header.tableoid) AS "observedRelation"
        FROM ${table(binding, binding.transaction)} AS header
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.transaction.legalEntityColumn!)} = $3
@@ -5035,6 +5313,7 @@ async function assertAuthoredTransactionPersisted(
       { transactionId: command.transactionId },
     );
   }
+  coverage.observed(assertAuthoredTransactionPersisted, row.observedRelation);
   const persistedRow = persistedRowObject(row.persistedRow);
   const wrote = 'did not persist the posted state its transition wrote';
   // The authored transition writes exactly two columns. Round 7 accounted for
@@ -5300,11 +5579,17 @@ async function moduleWriteCounters(
  *    AFTER this snapshot. Its writes are invisible here and there is no second
  *    observation. The movement's own writes keep the observation non-empty, so
  *    the empty guard does not catch it either. **No such trigger exists in this
- *    repository today** -- measured: there is no `CREATE CONSTRAINT TRIGGER`
- *    anywhere, and the `DEFERRABLE INITIALLY DEFERRED` declarations in
- *    migration 0006 are platform-plane FK and unique CONSTRAINTS, which check
- *    rather than write. So this is an unclosed vector rather than a live
- *    defect, and it is filed as
+ *    repository today** -- measured, and CORRECTED by
+ *    `posting-kernel-admission` under `5g3-prog` A6, because the sentence that
+ *    stood here was false: it said there is no `CREATE CONSTRAINT TRIGGER`
+ *    anywhere, and `db/migrations/0005_release_activation_kernel.sql` creates
+ *    FOUR. They are PLATFORM-plane, on release-activation tables this query
+ *    filters out by schema, so no such trigger writes a MODULE relation and the
+ *    vector below stays dormant -- but the reason is the plane, not their
+ *    absence. The `DEFERRABLE INITIALLY DEFERRED` declarations in migration
+ *    0006 are platform-plane FK and unique CONSTRAINTS, which check rather than
+ *    write. So this is an unclosed vector rather than a live defect, and it is
+ *    filed as
  *    `posting-write-observation-misses-deferred-triggers` with the control that
  *    would settle it.
  *  - Anything that is not tuple DML on a user table.
@@ -5354,12 +5639,97 @@ async function assertObservedWriteSetIsDerived(
   }
 }
 
+/**
+ * posting-kernel-admission (5g3-prog R3). The executed verifiers, compared
+ * EXACTLY with the observed write set, before commit.
+ *
+ * Both sides are observations. The write set is PostgreSQL's per-transaction
+ * tuple counters, snapshotted fresh here as a delta against the baseline taken
+ * at BEGIN -- the same instrument `assertObservedWriteSetIsDerived` uses, and
+ * deliberately not its result, so that this check reads the counters after the
+ * last verifier ran. The executed set is the token ledger, where each token was
+ * minted by a verifier from the `tableoid` of a row it read.
+ *
+ * Four refusals, each its own vacuity vector:
+ *
+ *  - an empty write set: an observer that sees nothing passes everything;
+ *  - a token whose verifier is not REGISTERED for that relation: coverage may
+ *    only be claimed by the read-back construction proved for it;
+ *  - a written relation with no executed verifier: the survivor the review
+ *    named -- delete one verifier CALL and the registry is still satisfied;
+ *  - an executed verifier for a relation this posting did not write: a token
+ *    is a claim about this transaction's writes, and a wrong claim is refused
+ *    rather than read as extra coverage.
+ *
+ * This function calls no verifier and no verifier calls it; it repairs
+ * nothing (AGENTS.md section 6, repair-before-measure). The partitioned movement
+ * parent never appears on either side -- measured: an insert routed through it
+ * counts on the leaf partition only, and a row read through it carries the
+ * partition's `tableoid` -- so the parent's registration is construction-time
+ * only.
+ */
+async function assertExecutedVerifiersCoverWriteSet(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  baseline: ReadonlyMap<string, bigint>,
+  coverage: ExecutedVerifierCoverage,
+): Promise<void> {
+  const current = await moduleWriteCounters(client, binding);
+  const written = new Set(
+    [...current.entries()]
+      .filter(([relation, count]) => count > (baseline.get(relation) ?? 0n))
+      .map(([relation]) => relation),
+  );
+  if (written.size === 0) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      'the module write set observed before commit is empty, so verifier coverage was compared against nothing',
+      { schema: binding.schemaName },
+    );
+  }
+  const executed = coverage.tokens;
+  for (const [relation, verifiers] of executed) {
+    const registered = binding.writerVerifiers.get(relation);
+    const unregistered = [...verifiers]
+      .filter((verifier) => !registered?.has(verifier))
+      .sort();
+    if (unregistered.length > 0) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        `verifiers recorded coverage for a module relation they are not registered against: ${relation} by ${unregistered.join(', ')}`,
+        { relation },
+      );
+    }
+  }
+  const unobserved = [...written]
+    .filter((relation) => !executed.has(relation))
+    .sort();
+  if (unobserved.length > 0) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      `this posting wrote module relations no executed verifier observed: ${unobserved.join(', ')}`,
+      { observed: [...written].sort().join(', ') },
+    );
+  }
+  const unwritten = [...executed.keys()]
+    .filter((relation) => !written.has(relation))
+    .sort();
+  if (unwritten.length > 0) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      `verifiers executed for module relations this posting did not write: ${unwritten.join(', ')}`,
+      { observed: [...written].sort().join(', ') },
+    );
+  }
+}
+
 async function assertMovementEffectReservations(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
   legalEntityId: string,
   movements: readonly PlannedMovement[],
+  coverage: ExecutedVerifierCoverage,
 ): Promise<void> {
   const reservation = binding.movementEffectReservation;
   const ids = movements.map((movement) => movement.movementId);
@@ -5374,7 +5744,8 @@ async function assertMovementEffectReservations(
             reservation.${quoted(reservation.effectTuple.sourceLine)} AS "sourceLine",
             reservation.${quoted(reservation.effectTuple.sourceRevision)}::integer AS "sourceRevision",
             reservation.${quoted(reservation.effectTuple.postingRole)} AS "postingRole",
-            to_jsonb(reservation) AS "persistedRow"
+            to_jsonb(reservation) AS "persistedRow",
+            (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = reservation.tableoid) AS "observedRelation"
        FROM ${quoted(binding.schemaName)}.${quoted(reservation.tableName)} AS reservation
       WHERE reservation.${quoted(reservation.tenantColumn)} = $1
         AND reservation.${quoted(reservation.environmentColumn)} = $2
@@ -5397,6 +5768,7 @@ async function assertMovementEffectReservations(
   }
   const byId = new Map<string, Record<string, unknown>>();
   for (const row of result.rows) {
+    coverage.observed(assertMovementEffectReservations, row.observedRelation);
     const movementId = String(row.movementId).toLowerCase();
     if (byId.has(movementId)) {
       throw postingError(
@@ -5496,6 +5868,7 @@ async function readBackMovements(
   movements: readonly PlannedMovement[],
   posting: ParsedPosting,
   expectedActorId: string,
+  coverage: ExecutedVerifierCoverage,
 ): Promise<readonly PostedInventoryMovementV1[]> {
   const ids = movements.map((movement) => movement.movementId);
   const result = await client.query<Record<string, unknown>>(
@@ -5525,7 +5898,8 @@ async function readBackMovements(
             movement.${quoted(binding.movement.revisionColumn)}::integer AS "revision",
             movement.${quoted(binding.movement.archiveColumn)}::text AS "archivedAt",
             to_jsonb(movement) AS "persistedRow",
-            companion_line.${quoted(binding.transactionLineRelationToTransactionColumn)}::text AS "lineParentTransactionId"
+            companion_line.${quoted(binding.transactionLineRelationToTransactionColumn)}::text AS "lineParentTransactionId",
+            (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = movement.tableoid) AS "observedRelation"
        FROM ${table(binding, binding.movement)} AS movement
        JOIN ${table(binding, binding.transactionLine)} AS companion_line
          ON companion_line.tenant_id = movement.tenant_id
@@ -5542,6 +5916,11 @@ async function readBackMovements(
       'INVENTORY_POSTING_STORAGE_REJECTED',
       'movement read-back did not return the complete committed set',
     );
+  }
+  // Coverage is minted from the PARTITION each row came back from, which is
+  // the relation PostgreSQL counted the insert on.
+  for (const row of result.rows) {
+    coverage.observed(readBackMovements, row.observedRelation);
   }
   const { command } = posting;
   const byId = new Map(result.rows.map((row) => [String(row.movementId), row]));
@@ -5900,6 +6279,7 @@ async function assertPostedStockBalancesReconcile(
   legalEntityId: string,
   movements: readonly PlannedMovement[],
   capture: PostedStockBalanceCapture,
+  coverage: ExecutedVerifierCoverage,
 ): Promise<void> {
   const identities = affectedStockIdentities(movements);
   for (const identity of identities) {
@@ -5960,7 +6340,8 @@ async function assertPostedStockBalancesReconcile(
               balance.${quoted(projection.locationColumn)}::text AS "locationId",
               balance.${quoted(projection.quantityColumn)}::text AS quantity,
               balance.${quoted(projection.unitColumn)}::text AS "unitId",
-              ${postedStockBalanceIdentitySql('$6', '$7', '$8', '$9', '$10')} AS "derivedRecordId"
+              ${postedStockBalanceIdentitySql('$6', '$7', '$8', '$9', '$10')} AS "derivedRecordId",
+              (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = balance.tableoid) AS "observedRelation"
          FROM ${table(binding, projection.entity)} AS balance
         WHERE balance.tenant_id = $1 AND balance.environment_id = $2
           AND balance.${quoted(projection.entity.legalEntityColumn!)} = $3
@@ -5985,6 +6366,12 @@ async function assertPostedStockBalancesReconcile(
       ],
     );
     const row = persisted.rows[0];
+    if (persisted.rows.length === 1 && row) {
+      coverage.observed(
+        assertPostedStockBalancesReconcile,
+        row.observedRelation,
+      );
+    }
     if (persisted.rows.length !== 1 || !row) {
       throw postingError(
         'INVENTORY_POSTING_STORAGE_REJECTED',
@@ -6688,10 +7075,7 @@ function digestCommand(posting: ParsedPosting, version: number): string {
             : unsupportedReceiptVersion(version)
           : version === companionDerivedInventoryPostingInputDigestVersion
             ? isStockCountPosting(posting)
-              ? {
-                  postingRole: posting.postingRole,
-                  ...callerStockCountInput(posting.command),
-                }
+              ? callerStockCountInput(posting.command)
               : unsupportedReceiptVersion(version)
             : unsupportedReceiptVersion(version);
   return createHash('sha256').update(canonicalize(digestInput)).digest('hex');

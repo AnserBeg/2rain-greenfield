@@ -2535,7 +2535,28 @@ function validateInventoryContractDefinition(
     ['capabilityId'],
     'northstar.inventory:capability.posting',
   );
-  expectInventoryLiteral(diagnostics, definition, ['capabilityVersion'], 1);
+  // posting-kernel-admission (5g3-prog R1). The capability version is the
+  // CONTRACT's to state, and this cell no longer holds a second spelling of
+  // it. The compiler cannot import the domain package (BND001), and this
+  // function's only input IS the contract, so a pin "from the contract" here
+  // can only be the contract's own value: what is checked is that it carries
+  // one, as a positive integer. The encoding a release carries is derived from
+  // the same contract by the module definition, and the provider that
+  // implements the capability refuses to post against a release whose fact
+  // differs from the version it imports from that contract.
+  const capabilityVersion = nestedValue(definition, ['capabilityVersion']);
+  if (
+    !Number.isSafeInteger(capabilityVersion) ||
+    (capabilityVersion as number) < 1
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.capabilityVersion',
+        'capabilityVersion',
+      ),
+    );
+  }
 
   validateLegalEntityContract(diagnostics, definition);
   validateProviderWrittenReadModelContract(diagnostics, definition);

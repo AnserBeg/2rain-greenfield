@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 
@@ -3843,6 +3844,523 @@ async function movementCount(database: PostingDatabase): Promise<number> {
   );
   return Number(result.rows[0]?.count ?? '-1');
 }
+
+// ---------------------------------------------------------------------------
+// posting-kernel-admission (5g3-prog R1 + R3). The cross-layer admission map
+// for the posting kernel: the version a release DECLARES is checked against
+// the version the provider IMPLEMENTS on every posting, and the verifiers that
+// EXECUTED are compared exactly with the relations the transaction WROTE.
+// ---------------------------------------------------------------------------
+
+/**
+ * The admission twin for everything below: an unchanged kernel admits a
+ * posting whose every written relation was observed by an executed verifier,
+ * and whose active release declares exactly the version the provider
+ * implements. Every mutation in the packet's expected-red manifest that turns
+ * a green posting red kills THIS test, so its name is the manifest's pattern.
+ */
+test('posting kernel admission: the unchanged kernel admits a posting whose every written relation an executed verifier observed', async () => {
+  await withPostingDatabase(async (database) => {
+    const posting = command({
+      legalEntityId: legalReject,
+      sourceId: 'admission-twin',
+    });
+    await seedDraft(database, posting);
+    const outcome = await settlePosting(
+      database.service.postAdjustment(
+        database.context,
+        database.actor,
+        posting,
+      ),
+    );
+    assert.equal(
+      outcome.status,
+      'fulfilled',
+      `the unchanged kernel must admit an ordinary posting: ${
+        outcome.status === 'rejected' ? String(outcome.reason) : ''
+      } ${JSON.stringify(outcome)}`,
+    );
+    if (outcome.status !== 'fulfilled') return;
+    assert.equal(outcome.value.movements.length, 1);
+    assert.equal(
+      outcome.value.capabilityVersion,
+      INVENTORY_POSTING_CAPABILITY_VERSION,
+    );
+    assert.equal(await movementCountBySource(database, posting.sourceId), 1);
+    assert.equal(await receiptCountByKey(database, posting.idempotencyKey), 1);
+  });
+});
+
+/**
+ * R3, the survivor the review named. `assertObservedWriteSetIsDerived` asks
+ * only whether a written relation is DERIVED, and construction asks only
+ * whether a derived relation has a verifier REGISTERED. A relation that is
+ * derived and registered but written on a path whose verifier does not run
+ * satisfies both. The transaction LINE is exactly that on the adjustment path:
+ * its registered verifier is `assertCompanionIdentitiesPersisted`, which runs
+ * only for a companion-origin family. A trigger the target knows nothing about
+ * writes it on the movement insert, and the posting must refuse before commit,
+ * naming the relation.
+ */
+test(
+  'posting kernel admission: a derived relation written on a path whose verifier did not run is refused before commit, naming the relation',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      const posting = command({
+        legalEntityId: legalReject,
+        sourceId: 'unverified-line-writer',
+      });
+      await seedDraft(database, posting);
+      const lineTable = table(
+        database.binding,
+        database.binding.transactionLine,
+      );
+      const revision = quoted(database.binding.transactionLine.revisionColumn);
+      await database.adminPool.query(
+        `CREATE FUNCTION public.pka_unverified_line_writer()
+           RETURNS trigger LANGUAGE plpgsql AS $body$
+           BEGIN
+             UPDATE ${lineTable} SET ${revision} = ${revision}
+              WHERE tenant_id = NEW.tenant_id
+                AND environment_id = NEW.environment_id;
+             RETURN NEW;
+           END
+           $body$;
+         CREATE TRIGGER pka_unverified_line_writer
+           AFTER INSERT ON ${table(database.binding, database.binding.movement)}
+           FOR EACH ROW EXECUTE FUNCTION public.pka_unverified_line_writer()`,
+      );
+      let outcome: PostingOutcome;
+      try {
+        outcome = await settlePosting(
+          database.service.postAdjustment(
+            database.context,
+            database.actor,
+            posting,
+          ),
+        );
+      } finally {
+        await database.adminPool.query(
+          `DROP TRIGGER IF EXISTS pka_unverified_line_writer
+             ON ${table(database.binding, database.binding.movement)};
+           DROP FUNCTION IF EXISTS public.pka_unverified_line_writer()`,
+        );
+      }
+      assert.equal(
+        outcome.status,
+        'rejected',
+        `a written relation no executed verifier observed must refuse the posting before commit: ${JSON.stringify(outcome)}`,
+      );
+      assertRejectedPosting(
+        testContext,
+        'unverified-line-writer',
+        outcome,
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+      );
+      const reason = String(
+        outcome.status === 'rejected' ? outcome.reason : '',
+      );
+      assert.match(
+        reason,
+        /wrote module relations no executed verifier observed/u,
+      );
+      // Named, so an operator learns WHICH relation rather than that one exists.
+      assert.match(
+        reason,
+        new RegExp(database.binding.transactionLine.tableName, 'u'),
+      );
+      // Nothing committed: refused before the trust document and the receipt.
+      assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+      assert.equal(
+        await receiptCountByKey(database, posting.idempotencyKey),
+        0,
+      );
+    });
+  },
+);
+
+/**
+ * R1, the refusing direction. A release compiled from a definition that
+ * declares the posting capability at version 1 -- consistent with itself, so
+ * the compiler admits it -- is refused by a provider implementing version 2,
+ * on the first posting, before configuration is even loaded. The admitting
+ * direction is every other posting test in this file: the fixture release
+ * declares what the provider implements, because both read the contract.
+ */
+test(
+  'posting kernel admission: a release declaring a posting capability version the provider does not implement is refused on posting',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      const service = await serveDeclaredVersionOneRelease(database);
+      const draft = command({
+        legalEntityId: legalReject,
+        sourceId: 'declared-version-one',
+      });
+      await seedDraft(database, draft);
+      const outcome = await settlePosting(
+        service.postAdjustment(database.context, database.actor, draft),
+      );
+      assert.equal(
+        outcome.status,
+        'rejected',
+        `a release declaring version 1 must be refused by a provider implementing ${String(INVENTORY_POSTING_CAPABILITY_VERSION)}: ${JSON.stringify(outcome)}`,
+      );
+      assertRejectedPosting(
+        testContext,
+        'declared-version-one',
+        outcome,
+        'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      );
+      const reason = String(
+        outcome.status === 'rejected' ? outcome.reason : '',
+      );
+      assert.match(
+        reason,
+        new RegExp(
+          `declares posting capability version 1 while the registered provider implements version ${String(INVENTORY_POSTING_CAPABILITY_VERSION)}`,
+          'u',
+        ),
+      );
+      assert.equal(await movementCountBySource(database, draft.sourceId), 0);
+      assert.equal(await receiptCountByKey(database, draft.idempotencyKey), 0);
+    });
+  },
+);
+
+/**
+ * R1, the shipped artifact. The head release the runtime loads must declare
+ * the version this provider implements. This is the deterministic half of the
+ * admission map: the runtime check above refuses a stale artifact on the first
+ * posting, and this reds the matrix the moment the artifact is stale, before
+ * anything is deployed. PUR-2b measured the head release saying 1 while the
+ * provider said 2, and every gate stayed green.
+ */
+test('posting kernel admission: the shipped head release declares the posting capability version the provider implements', async () => {
+  const artifact = JSON.parse(
+    await readFile(resolve('apps/web/release/app.compiled.json'), 'utf8'),
+  ) as {
+    applications: Array<{
+      releaseManifest: {
+        capabilityFacts: Array<{
+          capabilityId: string;
+          capabilityVersion: number;
+        }>;
+      };
+    }>;
+  };
+  const head = artifact.applications.at(-1);
+  assert.ok(head, 'the compiled artifact has a head release');
+  const facts = head.releaseManifest.capabilityFacts.filter(
+    (fact) => fact.capabilityId === postingCapabilityId,
+  );
+  assert.equal(
+    facts.length,
+    1,
+    'the head release declares the posting capability exactly once',
+  );
+  assert.equal(
+    facts[0]!.capabilityVersion,
+    INVENTORY_POSTING_CAPABILITY_VERSION,
+    'the shipped head release must declare the posting capability version the provider implements; regenerate apps/web/release/** when the contract moves',
+  );
+});
+
+/**
+ * Compile, persist, activate and serve a release that declares the posting
+ * capability at version 1 while the provider implements what the contract
+ * says. The definition is the live one with a single field changed, so the
+ * release is internally consistent and the compiler admits it -- which is what
+ * makes it the right specimen: nothing but the provider's own check stands
+ * between it and a posting.
+ *
+ * The scope configuration is re-pointed at it too, so a kernel with the
+ * capability check removed is not refused one step later by the
+ * configuration's release-root comparison; the control would then observe
+ * nothing.
+ */
+/**
+ * `5g3-prog` A2, second entry, given a test of its OWN.
+ *
+ * `assertPersistedPlannedOrderIsDecisive` already ran inside the composite
+ * one-way-doors test, and that is where its kill evidence lived as prose.
+ * Measured while writing the control: removing the combined sort reds that
+ * composite test through an EARLIER, unrelated spurious refusal, so the
+ * mutation could not be attributed to the property it is about. Here the
+ * property stands alone -- a planned debit that must sort before a persisted
+ * credit at an identical instant -- so the mutation's red is the missing
+ * rejection and nothing else.
+ */
+test(
+  'posting kernel admission: the negative-stock check orders persisted and planned movements together',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      await assertPersistedPlannedOrderIsDecisive(testContext, database);
+    });
+  },
+);
+
+/**
+ * `5g3-prog` A3. THE MONOTONIC FLOOR ON `recordedAt`, per stock identity.
+ *
+ * `recordedAt` is a wall-clock sample and `AGENTS.md` section 7 records that
+ * this machine steps its clock backward under load. The comparator orders by
+ * `effectiveAt` FIRST, so a backward step is invisible to the negative-stock
+ * check: the two postings below sort as (+10, -5) by effective time and never
+ * project a negative prefix, so admission is satisfied. But their RECORDED
+ * times run backward, and an as-of read whose recorded-time horizon falls
+ * between them sees only the -5 -- a negative balance under `reject`, which the
+ * kernel never admitted and which nothing surfaces until someone reads history.
+ *
+ * The clock is INJECTED, never slept on (`AGENTS.md` section 6). The first
+ * posting is what makes the second one's sample a regression, so the pair is
+ * the specimen; a single posting cannot express this.
+ *
+ * SCOPE, NARROWED ON ROUND-3 REVIEW: the subject is a posting that APPENDS
+ * movements. Each posting here carries its own `sourceId`, so neither matches
+ * an already-accepted natural effect and neither returns through
+ * `findNaturalReplay`, which sits above the floor. A natural-effect replay
+ * under a regressed clock is NOT refused, and is harmless for the reason
+ * stated beside the floor: it appends nothing and its receipt carries the
+ * original posting's `recordedAt`.
+ */
+test(
+  'posting kernel admission: a posting that appends movements with a recorded time running backward against the same stock identity is refused',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      const laterRecordedAt = '2026-07-29T13:00:05.000Z';
+      const earlierRecordedAt = '2026-07-29T13:00:03.000Z';
+      let currentInstant = laterRecordedAt;
+      const service = new PostgresInventoryPostingService(
+        database.runtimePool,
+        database.registration,
+        { currentInstant: () => currentInstant },
+      );
+
+      // Recorded LATER, effective EARLIER.
+      const credit = command({
+        effectiveAt: '2026-07-29T12:00:00.000Z',
+        legalEntityId: legalReject,
+        locationId: locationRace,
+        quantityDelta: '10',
+        sourceId: 'recorded-at-floor-credit',
+      });
+      await seedDraft(database, credit);
+      const first = await settlePosting(
+        service.postAdjustment(database.context, database.actor, credit),
+      );
+      assert.equal(
+        first.status,
+        'fulfilled',
+        `the first posting must succeed: ${
+          first.status === 'rejected' ? String(first.reason) : ''
+        }`,
+      );
+
+      // The clock steps BACK. Recorded EARLIER, effective LATER: by effective
+      // time this is (+10, -5) and never negative, so only the floor refuses it.
+      currentInstant = earlierRecordedAt;
+      const debit = command({
+        effectiveAt: '2026-07-29T12:30:00.000Z',
+        legalEntityId: legalReject,
+        locationId: locationRace,
+        quantityDelta: '-5',
+        sourceId: 'recorded-at-floor-debit',
+      });
+      await seedDraft(database, debit);
+      const outcome = await settlePosting(
+        service.postAdjustment(database.context, database.actor, debit),
+      );
+      assert.equal(
+        outcome.status,
+        'rejected',
+        `a posting recorded earlier than the same stock identity's latest movement must be refused: ${JSON.stringify(outcome)}`,
+      );
+      assertRejectedPosting(
+        testContext,
+        'recorded-at-floor',
+        outcome,
+        'INVENTORY_RECORDED_AT_REGRESSION',
+      );
+      const reason = String(
+        outcome.status === 'rejected' ? outcome.reason : '',
+      );
+      // Both instants are named, so an operator reads the clock regression
+      // rather than a bare refusal.
+      assert.match(reason, new RegExp(earlierRecordedAt, 'u'));
+      assert.match(reason, new RegExp(laterRecordedAt, 'u'));
+      assert.equal(await movementCountBySource(database, debit.sourceId), 0);
+      assert.equal(await receiptCountByKey(database, debit.idempotencyKey), 0);
+
+      // EQUALITY IS ADMITTED, and this half is what keeps the refusal from
+      // being a blunt "any repeat posting fails": the same instant as the
+      // floor still posts, which is the ordinary case for two postings inside
+      // one clock tick and for every fixed-clock test in this suite.
+      currentInstant = laterRecordedAt;
+      const equal = command({
+        effectiveAt: '2026-07-29T12:30:00.000Z',
+        legalEntityId: legalReject,
+        locationId: locationRace,
+        quantityDelta: '-5',
+        sourceId: 'recorded-at-floor-equal',
+      });
+      await seedDraft(database, equal);
+      const admitted = await settlePosting(
+        service.postAdjustment(database.context, database.actor, equal),
+      );
+      assert.equal(
+        admitted.status,
+        'fulfilled',
+        `a posting recorded at exactly the floor must be admitted: ${
+          admitted.status === 'rejected' ? String(admitted.reason) : ''
+        }`,
+      );
+    });
+  },
+);
+
+async function serveDeclaredVersionOneRelease(
+  database: PostingDatabase,
+): Promise<PostgresInventoryPostingService> {
+  const fixture = await compiledFixture();
+  const declaredVersionOne = structuredClone(fixture.inventoryDefinition);
+  const requirements = declaredVersionOne.capabilityRequirements;
+  assert.ok(Array.isArray(requirements));
+  const posting = requirements.find(
+    (requirement) =>
+      isRecord(requirement) && requirement.capabilityId === postingCapabilityId,
+  );
+  assert.ok(isRecord(posting), 'the fixture declares the posting capability');
+  assert.equal(
+    posting.capabilityVersion,
+    INVENTORY_POSTING_CAPABILITY_VERSION,
+    'the fixture definition must declare what the provider implements, because both read the contract',
+  );
+  posting.capabilityVersion = 1;
+  const compiled = mustCompile(
+    moduleInput(
+      declaredVersionOne,
+      expectedActiveReleaseFrom(fixture.inventory),
+    ),
+  );
+  const declaredFact = compiled.bundle.releaseManifest.capabilityFacts.find(
+    (fact) => fact.capabilityId === postingCapabilityId,
+  );
+  assert.equal(declaredFact?.capabilityVersion, 1);
+  const [releaseId] = await persistSequence(
+    database.runtimePool,
+    database.context,
+    [[compiled, declaredVersionOne]],
+  );
+  assert.ok(releaseId);
+  await setPointer(database.adminPool, releaseId);
+  const repointed = await database.adminPool.query(
+    `UPDATE platform.inventory_posting_configurations
+        SET contract_release_root = $4
+      WHERE tenant_id = $1 AND environment_id = $2 AND legal_entity_id = $3`,
+    [tenantId, environmentId, legalReject, compiled.releaseRoot],
+  );
+  assert.equal(repointed.rowCount, 1);
+  return new PostgresInventoryPostingService(
+    database.runtimePool,
+    {
+      ...database.registration,
+      releaseContentHash: compiled.releaseRoot,
+      releaseId,
+    },
+    { currentInstant: () => recordedAt },
+  );
+}
+
+/**
+ * ROUND-1 REVIEW FINDING, and the reason the first candidate was BLOCKed: a
+ * STORED RECEIPT RETURNS BEFORE `assertActiveRelease`.
+ *
+ * `findReceipt` keys on tenant, environment, capability and idempotency key
+ * only -- never on the release the receipt was recorded under -- and
+ * `validateReceiptReplay` compares the principal and the digest. So with the
+ * capability check placed inside `assertActiveRelease`, an operator on a
+ * release declaring version 1 could replay a key recorded under version 2 and
+ * receive that version-2 result, with no mismatch announced. The packet's own
+ * claim was that the check runs on EVERY posting; on this path it did not.
+ *
+ * The check is now made before the receipt is looked up, so this replay
+ * refuses. The recorded result must not be served, and the receipt must not be
+ * disturbed.
+ */
+test(
+  'posting kernel admission: a stored receipt is not replayed across a release that declares a different capability version',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      // 1. An ordinary posting under the release that declares what the
+      //    provider implements. This records the receipt.
+      const posting = command({
+        legalEntityId: legalReject,
+        sourceId: 'cross-release-replay',
+      });
+      await seedDraft(database, posting);
+      const first = await settlePosting(
+        database.service.postAdjustment(
+          database.context,
+          database.actor,
+          posting,
+        ),
+      );
+      assert.equal(
+        first.status,
+        'fulfilled',
+        `the first posting must succeed: ${
+          first.status === 'rejected' ? String(first.reason) : ''
+        }`,
+      );
+      assert.equal(
+        await receiptCountByKey(database, posting.idempotencyKey),
+        1,
+        'the first posting recorded exactly one receipt to replay',
+      );
+
+      // 2. The same key, replayed by a provider registered against a release
+      //    that declares version 1. Under the reviewed candidate this returned
+      //    the recorded version-2 result.
+      const service = await serveDeclaredVersionOneRelease(database);
+      const outcome = await settlePosting(
+        service.postAdjustment(database.context, database.actor, posting),
+      );
+      assert.equal(
+        outcome.status,
+        'rejected',
+        `a recorded result must not be replayed under a release declaring a different capability version: ${JSON.stringify(outcome)}`,
+      );
+      assertRejectedPosting(
+        testContext,
+        'cross-release-replay',
+        outcome,
+        'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      );
+      const reason = String(
+        outcome.status === 'rejected' ? outcome.reason : '',
+      );
+      assert.match(
+        reason,
+        new RegExp(
+          `declares posting capability version 1 while the registered provider implements version ${String(INVENTORY_POSTING_CAPABILITY_VERSION)}`,
+          'u',
+        ),
+      );
+      // The refusal is a refusal, not a rewrite: the recorded receipt and the
+      // movement it names are untouched.
+      assert.equal(
+        await receiptCountByKey(database, posting.idempotencyKey),
+        1,
+      );
+      assert.equal(await movementCountBySource(database, posting.sourceId), 1);
+    });
+  },
+);
 
 async function companionCount(database: PostingDatabase): Promise<number> {
   const result = await database.adminPool.query<{ count: string }>(

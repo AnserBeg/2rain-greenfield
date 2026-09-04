@@ -1031,12 +1031,35 @@ test("PUR-2b: the version-4 digest covers the caller's semantic input and not th
       // The expected digest is built from the CALLER's command -- the object
       // this test authored -- and not from anything the service returned. The
       // kernel-derived identities are absent because a caller cannot send
-      // them: `exactKeys` refuses both keys outright.
+      // them: `exactKeys` refuses both keys outright. posting-kernel-admission
+      // (5g3-prog R2): the derived posting role is absent too. It is
+      // `count` for kind `initial` and `correction` otherwise -- a pure
+      // function of the `kind` the input already covers -- so the digest is
+      // exactly the caller's command minus its key, and nothing else.
       const { idempotencyKey, ...callerInput } = command;
       void idempotencyKey;
       const callerDigest = createHash('sha256')
+        .update(canonicalize(callerInput))
+        .digest('hex');
+
+      // The role twin, asserted FIRST so that restoring the role produces its
+      // own red rather than the caller's-input one: what the digest would be
+      // had the derived role been kept. It must differ from the caller digest
+      // -- or this discriminates nothing -- and the stored digest must not be
+      // it.
+      const digestWithDerivedRole = createHash('sha256')
         .update(canonicalize({ postingRole: 'count', ...callerInput }))
         .digest('hex');
+      assert.notEqual(
+        digestWithDerivedRole,
+        callerDigest,
+        'the role twin must differ from the caller digest, or this test discriminates nothing',
+      );
+      assert.notEqual(
+        receipt.inputDigest,
+        digestWithDerivedRole,
+        'the stored digest must not cover the posting role the kernel derives from the kind',
+      );
       assert.equal(
         receipt.inputDigest,
         callerDigest,
