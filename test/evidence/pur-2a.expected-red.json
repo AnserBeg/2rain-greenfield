@@ -452,7 +452,7 @@
     },
     {
       "name": "posted-balance-verification-removed-at-the-binding",
-      "claim": "That the posted-stock observation is REACHED, not merely written. The projection binding resolves to null when the active release carries no balance entity, and a posting then has no trigger write to observe; this mutation makes it resolve to null unconditionally, so the verification is skipped on a release that does carry one. Every value the posting writes stays correct and every other assertion still passes -- which is the point: before round 8 nothing in the suite observed the balance at post time, so a skipped verification was indistinguishable from a passing one. The declared red is the ABSENCE of a refusal: with the verification skipped the posting succeeds, so the control test fails with a missing rejection rather than with a refusal message. SCOPE: the kill is measured in the single `posted-stock projection` test this command runs.",
+      "claim": "That the posted-stock observation is REACHED, not merely written. The projection binding resolves to null when the active release carries no balance entity, and a posting then has no trigger write to observe; this mutation makes it resolve to null unconditionally, so the verification is skipped on a release that does carry one. Every value the posting writes stays correct and every other assertion still passes -- which is the point: before round 8 nothing in the suite observed the balance at post time, so a skipped verification was indistinguishable from a passing one. The declared red is the ABSENCE of a refusal: with the verification skipped the posting succeeds, so the control test fails with a missing rejection rather than with a refusal message. SCOPE: the kill is measured in the single `posted-stock projection` test this command runs. UPDATED BY posting-kernel-admission (bridge, disclosed in its record): the declared red is NO LONGER an absent refusal. Since that packet every verifier mints a coverage token from a row it read, and the posted-stock balance relation is still written by its trigger, so nulling the binding now means a written relation carries no token and `assertExecutedVerifiersCoverWriteSet` refuses the posting before commit. The mutation therefore still reds this test, and reds it EARLIER and more specifically -- the refusal names the balance relation -- but for coverage rather than for a missing rejection. What this entry proves is correspondingly narrower: that the binding is load-bearing, not that a skipped balance verification would otherwise commit silently. That the persisted balance EQUALS the ledger is proved by this packet's positive path and by the column-level entries beside this one, which are unaffected.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "    postedStockProjection: postedStockBalanceEntity\n      ? postedStockProjectionBinding(bindEntity(postedStockBalanceEntity))\n      : null,\n",
       "replacement": "    postedStockProjection: null,\n",
@@ -464,7 +464,7 @@
         {
           "file": "test/postgres/inventory-stock-count.test.ts",
           "name": "stock-count posted-stock projection: a balance that does not equal the movement ledger refuses the posting",
-          "expected": "Missing expected rejection: a balance already divergent from the ledger must refuse the posting that adds to it"
+          "expected": "no executed verifier observed"
         }
       ]
     },
