@@ -1790,7 +1790,11 @@ test('unbound-permission acknowledgement: a recorded revision from an unlisted p
     entries: [],
     packageId: COMPOSED_PACKAGE_ID,
   });
-  assert.equal(refused.length, normalized.permissions.length);
+  assert.equal(
+    refused.length,
+    normalized.permissions.length,
+    'an empty acknowledgement refuses every declared permission by name',
+  );
   assert.ok(
     refused.every(
       (diagnostic) =>
