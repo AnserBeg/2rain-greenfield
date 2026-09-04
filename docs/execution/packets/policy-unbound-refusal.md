@@ -679,12 +679,16 @@ This prompt was written by the lane whose work you are reviewing. The lane has f
 
 **The decisive question is narrower: does the record now claim exactly what the tree supports — no more, and no less?**
 
-TARGET. Branch `packet/policy-unbound-refusal`, frozen at `07c4d3017c6ea316054271b001fd88ccfc1ee49e`. `git ls-remote origin refs/heads/packet/policy-unbound-refusal` returned, at freeze time:
+TARGET. Branch `packet/policy-unbound-refusal` on `origin`. **The frozen tree for this arm is `07c4d3017c6ea316054271b001fd88ccfc1ee49e`.**
+
+A quoted `git ls-remote` line would be stale before you read it: every pin commit moves the head, and this record has been re-pinned twice. So verify it yourself instead, which is stronger:
 
 ```
-$ git ls-remote origin refs/heads/packet/policy-unbound-refusal
-07c4d3017c6ea316054271b001fd88ccfc1ee49e	refs/heads/packet/policy-unbound-refusal
+git fetch origin
+git diff --name-only 07c4d30..origin/packet/policy-unbound-refusal
 ```
+
+That must list **only** `docs/execution/packets/policy-unbound-refusal.md` — every commit above the frozen SHA contains this record's pin text and nothing else. If it lists anything more, the freeze is not what this prompt says it is, and that itself is a finding.
 
 The last executable commit is `8a6ad4f838fa25b49fc8d54e64a132c9f31bcb22` — the STOP commit, which removes a test and is therefore executable. `17529cf8c8b80e97f287545a3b80782e95600fb9` is the matrix-green SHA below it. Base is `4218a66068041eb04e45e6fff4883c8aa8dfaebf`. Read `4218a66..07c4d30`, and read the round-3 review's findings as dispositioned in the record. Rounds 1, 2 and 3 are preserved at `87878a6`, `af1d603` and `543b90c`.
 
