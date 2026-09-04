@@ -106,7 +106,7 @@
     },
     {
       "name": "acknowledgement-entry-removed",
-      "claim": "Removing one acknowledgement entry for a permission the composed application still declares (party_create) refuses the unchanged composed application by that permission's name; the admission twin is the same test passing with production restored, which the runner measures before mutating. The probe test dies with it: the refusal then names two permissions and the probe test requires exactly one.",
+      "claim": "Removing one acknowledgement entry for a permission the composed application still declares (party_create) refuses the unchanged composed application by that permission's name; the admission twin is the same test passing with production restored, which the runner measures before mutating. The probe test dies with it: the refusal then names two permissions and the probe test requires exactly one. Three more controls die with it, all for the same removal: the release entry point's admission assertion (the real list no longer admits the real package), and the narrowing control, whose expected narrowed set is exactly that entry.",
       "file": "apps/web/release/unbound-permission-acknowledgement.json",
       "original": "      {\n        \"permissionId\": \"northstar.app:permission.party_create\",\n        \"resource\": \"northstar.app:entity.party\"\n      },\n",
       "replacement": "",
@@ -124,12 +124,22 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
           "expected": "the refusal must name exactly the one unacknowledged permission and nothing else"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned",
+          "expected": "compiled"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it",
+          "expected": "narrowing keeps exactly the permissions the revision declares"
         }
       ]
     },
     {
       "name": "stale-entry-added",
-      "claim": "An acknowledgement entry naming a permission the composed application does not declare refuses the unchanged composed application as stale by that entry's name: the list cannot rot. The probe test dies with it for the same two-diagnostics reason.",
+      "claim": "An acknowledgement entry naming a permission the composed application does not declare refuses the unchanged composed application as stale by that entry's name: the list cannot rot. The probe test dies with it for the same two-diagnostics reason. The release entry point's admission assertion dies with it: the real list no longer admits the real package once it carries an entry the package does not declare.",
       "file": "apps/web/release/unbound-permission-acknowledgement.json",
       "original": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ],",
       "replacement": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      },\n      {\n        \"permissionId\": \"northstar.app:permission.stock_count_probe_stale\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ],",
@@ -147,12 +157,17 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
           "expected": "the refusal must name exactly the one unacknowledged permission and nothing else"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned",
+          "expected": "compiled"
         }
       ]
     },
     {
       "name": "governed-package-key-renamed",
-      "claim": "A one-character typo in the checked-in list's package key must stop the release build itself, not only a later test: the loader refuses before compiling, so the real release script's --check on an untouched copy of the inputs goes red, and every test that reads the composed package's entries through the loader dies with it.",
+      "claim": "A one-character typo in the checked-in list's package key must stop the release build itself, not only a later test: the loader refuses before compiling, so the real release script's --check on an untouched copy of the inputs goes red, and every test that reads the composed package's entries through the loader dies with it. Every control that reads the composed package's entries through the loader dies with it, including the release entry point's admission assertion and the narrowing control.",
       "file": "apps/web/release/unbound-permission-acknowledgement.json",
       "original": "    \"northstar.app:package.application\": [",
       "replacement": "    \"northstar.app:package.applicatio\": [",
@@ -180,6 +195,16 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: the checked-in document is read strictly and a package with no key is refused before any compile",
           "expected": "the checked-in list must key the composed application package"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned",
+          "expected": "names no entries for package northstar\\.app:package\\.application;"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it",
+          "expected": "names no entries for package northstar\\.app:package\\.application;"
         }
       ]
     },
