@@ -502,9 +502,9 @@ texts rather than only the reds.**
 ## Gates
 
 **The full matrix and the complete expected-red set are both green at the
-frozen head `663bc292e41a48023cdea26448b1a06dd41d72de`.**
+frozen head `4668f6e2dd3084f1c9864bd7b4c787260d060210`.**
 
-`scripts/run-matrix.sh` reported **`FULL_MATRIX_PASS_SHA=663bc292e41a48023cdea26448b1a06dd41d72de`**
+`scripts/run-matrix.sh` reported **`FULL_MATRIX_PASS_SHA=4668f6e2dd3084f1c9864bd7b4c787260d060210`**
 and **zero `not ok` lines across every suite**.
 
 | suite | result | gate | result |
@@ -548,7 +548,25 @@ posting-writer-inventory/the-observed-write-set-is-never-checked 1 passing -> 1 
 pur-2a/posted-balance-verification-removed-at-the-binding        1 passing -> 1 killed  (bridged)
 ```
 
-**One flake across three rounds, disclosed rather than smoothed.** A round-2
+**Two gate failures on the way to this run, both disclosed, one of them mine.**
+The narrowing round's first matrix and evidence run BOTH failed, and neither was
+a suite failure — every suite passed in both.
+
+*Mine, and the gate was right to refuse:* renaming the A3 test to name the
+append path left that entry's `namePattern` matching nothing, so the mutated run
+executed no test. `evidence:expected-red` reported *"the mutated run executed no
+test, so its exit code says nothing"* rather than counting it a pass, which is
+precisely the vacuity it exists to catch — **a renamed test silently detaches
+its own control.** The pattern is repointed and the entry reproduces.
+
+*Environmental:* `pnpm audit` returned `{"error":{"code":"pnpm","message":"fetch
+failed"}}` — the registry was unreachable — and the security step fails closed on
+a non-zero audit, which failed the matrix after every suite and check gate had
+passed. **Verified rather than assumed:** re-run, the audit reports zero
+vulnerabilities across 159 dependencies, and the matrix above is green including
+that step. It would have failed identically on `main`.
+
+**One flake across the earlier rounds, disclosed rather than smoothed.** A round-2
 matrix at `0ca1330` failed `migrations.test.ts`, *"a failed stream rolls back
 schema and migration history together"*, with
 `ephemeral PostgreSQL is ready inside its container but its published endpoint
@@ -573,7 +591,7 @@ both read narrative.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-kernel-admission",
   "base": "3b7b6dab2ddb790b33b7b641c68773c62db18e9a",
-  "head": "675b94fb243861b3abdbe720d056e92a3bd7048c",
+  "head": "4668f6e2dd3084f1c9864bd7b4c787260d060210",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
