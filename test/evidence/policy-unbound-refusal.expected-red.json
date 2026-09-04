@@ -4,7 +4,7 @@
   "entries": [
     {
       "name": "unbound-check-removed",
-      "claim": "The rule's unbound half is what refuses a declared permission nothing acknowledges: skipping the branch body with a bare continue leaves a permission declared on the composed application, or on the v0 shell, with no acknowledgement compiling silently -- the exact vacuum R7 named, with nothing thrown and nothing emitted.",
+      "claim": "The rule's unbound half is what refuses a declared permission nothing acknowledges: skipping the branch body with a bare continue leaves a permission declared on the composed application, or on the v0 shell, with no acknowledgement compiling silently -- the exact vacuum R7 named, with nothing thrown and nothing emitted. The unretainable-package control dies with it for the same reason: an empty acknowledgement is only strict because this branch fires, so defeating it makes 'empty refuses everything' false.",
       "file": "packages/compiler/src/conformance.ts",
       "original": "    if (acknowledged === undefined) {\n      diagnostics.push(\n        compilerDiagnostic(\n          'COMPILER_PERMISSION_EVALUATOR_UNBOUND',",
       "replacement": "    if (acknowledged === undefined) {\n      continue;\n      diagnostics.push(\n        compilerDiagnostic(\n          'COMPILER_PERMISSION_EVALUATOR_UNBOUND',",
@@ -27,6 +27,11 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: removing the acknowledgement of a permission the package still declares refuses it by name",
           "expected": "a declared permission whose acknowledgement was removed must be refused by name"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a recorded revision from an unlisted package is judged unretainable, not crashed on",
+          "expected": "an empty acknowledgement refuses every declared permission by name"
         }
       ]
     },
