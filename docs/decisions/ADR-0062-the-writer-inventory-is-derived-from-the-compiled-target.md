@@ -110,7 +110,7 @@ are invisible, and the movement's own writes keep the observation non-empty so
 the empty guard does not catch it either.
 
 **This is an unclosed vector, not a live defect, and the difference is
-measured:** there is no `CREATE CONSTRAINT TRIGGER` anywhere in the repository,
+measured:** there is no `CREATE CONSTRAINT TRIGGER` on any MODULE-plane table — **corrected 2026-09-01 (`5g3-prog` A6): `db/migrations/0005_release_activation_kernel.sql` creates four, all platform-plane, writing no module table, so the vector stays dormant while the earlier "anywhere in the repository" was false as written; the same sentence in the production comment beside `assertObservedWriteSetIsDerived` is `posting-kernel-admission`'s to correct** —
 and the `DEFERRABLE INITIALLY DEFERRED` declarations in migration 0006 are
 platform-plane foreign-key and unique CONSTRAINTS, which check rather than
 write. Filed as `posting-write-observation-misses-deferred-triggers`.
