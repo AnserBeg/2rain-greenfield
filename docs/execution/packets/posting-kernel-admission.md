@@ -23,7 +23,7 @@ case — the failure is invisible until something else reconciles it:
 | R1 capability-version admission | A | a release served by the wrong provider version produces results that look ordinary until a replay or an audit compares them |
 | R2 version-4 digest input | A | a digest that stops matching is invisible until a caller replays, and then reports the wrong reason |
 | R3 executed-verifier coverage | A | an unrun verifier commits a wrong row that only reconciliation finds |
-| A3 `recordedAt` monotonic floor | A | the negative balance appears only to an as-of read at a horizon between two postings |
+| A3 `recordedAt` monotonic floor (append path) | A | the negative balance appears only to an as-of read at a horizon between two postings |
 | A2 ordering controls | A | the subject is the global movement order, whose divergence changes an admission decision silently |
 
 No family here is Band B or C, so nothing is relaxed. Stating it per family is
@@ -174,13 +174,30 @@ prefix, and are admitted under `negativeStock: 'reject'`. An as-of read whose
 recorded-time horizon falls between the two instants then sees only the -5 and
 returns a negative balance the kernel never admitted.
 
-**The fix.** Inside `enforceNegativeStock`, per stock identity, under the locks
-the posting already holds: the sampled instant must be **≥** the newest
+**The fix, stated at exactly the width it holds** (narrowed on round-3 review —
+the first wording said "any posting", which was broader than the path the check
+runs on). **Before a posting APPENDS movements**, per stock identity, under the
+locks it already holds: the sampled instant must be **≥** the newest
 `recordedAt` already persisted for that identity, or the posting is refused with
 the new typed code `INVENTORY_RECORDED_AT_REGRESSION` naming both instants. No
 extra query — the persisted rows are the ones already read for the negative
 check. Both sides are fixed-width canonical UTC, so lexicographic order is
 chronological order, which is the property the comparator already relies on.
+
+**The one path the floor does NOT run on, and why that is correct rather than a
+hole.** `findNaturalReplay` returns above `enforceNegativeStock`, so a request
+whose natural effect was already accepted — a retry under a fresh idempotency
+key — is not floored even under a regressed clock. Three facts, each verified
+against the tree, make that harmless: it appends no movement;
+`persistAdditionalReceipt` stores the REPLAYED result, and `insertReceipt`
+writes `result.recordedAt`, which is the instant the ORIGINAL posting recorded,
+so the regressed sample reaches no row; and the `23505` raced-replay branch sits
+BELOW the floor and does pass it. So exactly one return path skips the check and
+it persists no timestamp of its own. **The reviewer's alternative — sampling the
+clock below natural-replay detection so a replay has no sample at all — is a
+broader refactor than the evidence requires and is not taken.** What is taken is
+the narrowing: the claim now says "before appending", which is what the code
+does.
 
 **Refused rather than clamped, and the alternative was genuinely open** — the
 review sanctioned either. Clamping the sample up to the floor also closes the
@@ -224,7 +241,7 @@ the round-2 reviewer and both mine: the provider header and the
 `assertActiveRelease` and called it active-release validation on every posting,
 which the round-1 hoist had made false in two ways at once.
 
-## Controls — fourteen entries, each dying alone, plus bridged
+## Controls — fifteen entries, each dying alone, plus bridged
 
 `test/evidence/posting-kernel-admission.expected-red.json`. Kill targets are the
 four new posting tests (T0 the admission twin, T1 the unverified-path refusal,
@@ -366,6 +383,38 @@ ADR-0063 and here.
 **What it correctly declined to let pass:** that a green matrix at `dd93462`
 could discharge controls that were never written. It could not, and the matrix
 below is a fresh one at a tree that contains them.
+
+## Round 3 — REVISE, and no production defect
+
+Reviewed `f5987d3e0db09a838ccb339521c10f9cc1d6118f`. **REVISE** with one
+material finding; **R1, R2, A2 and A6 PASS**, and R3 passes at its declared
+limit after the reviewer independently inspected every registered verifier for
+a read-then-return-before-comparing path and found none.
+
+**The finding was that A3's CLAIM exceeded the path its check runs on**, not
+that the check is wrong. `findNaturalReplay` returns above
+`enforceNegativeStock`, so a retry of an already-accepted natural effect under a
+fresh idempotency key is not floored. Verified before acting, and the reviewer's
+reading of the consequence was right in every step: no movement is appended, and
+the receipt written on that path carries the replayed result's `recordedAt` —
+the original posting's instant — so nothing regressed is persisted. The
+correction is therefore to narrow the sentence, and the reviewer said so
+explicitly: *"Do not make a harmless natural-effect replay fail merely to
+preserve the original universal sentence."*
+
+**What changed:** the production comment beside the floor, the test's name
+(`a posting` → `a posting that appends movements`), its doc comment, the
+manifest entry's claim, and this record. **Production behaviour is
+byte-identical to the reviewed candidate** — the executable delta is a comment,
+a test name and a manifest claim string.
+
+**It also confirmed the scope is now drawn right**, transcribing `main`'s queue
+row and the converged review independently, which is what round 2 blocked on.
+
+**On this round's own steering:** the reviewer flagged *"Assume a third thing
+exists"* in the prompt as steering and recorded that it treated the line as a
+search hypothesis rather than a requirement to produce a finding. That is the
+right call and the phrasing does not survive into any further prompt.
 
 ## Bridges taken — five edits in four accepted artifacts, all the orchestrator's to revoke
 
@@ -524,7 +573,7 @@ both read narrative.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-kernel-admission",
   "base": "3b7b6dab2ddb790b33b7b641c68773c62db18e9a",
-  "head": "663bc292e41a48023cdea26448b1a06dd41d72de",
+  "head": "675b94fb243861b3abdbe720d056e92a3bd7048c",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -607,105 +656,73 @@ Optional, R1 in one look: `git show HEAD:apps/web/release/app.authored.json | gr
 shows the posting requirement at 2; the provider constant is
 `INVENTORY_CONTRACT_V1.capabilityVersion`.
 
-## Pasteable review prompt — round 3, fresh naive, xhigh
+## Where the review stands, and what is owed
 
-Rounds 1 and 2 both returned BLOCK: one on a production defect, one on a stale
-charter. Round 2 also judged round 1's prompt to be steering, so this one states
-the scope from `main`'s queue row rather than from the lane's reading of it, and
-supplies no preferred dispositions.
+**Three arms, three verdicts: BLOCK, BLOCK, REVISE — and the trend is the
+point.** Round 1 found a production defect in this packet's own new code. Round
+2 found that the charter had moved and A3 was a live defect. **Round 3 found no
+production defect at all**: one claim/evidence mismatch, four PASSes, and R3
+upheld at its declared limit after an independent sweep of every verifier for
+the read-then-return survivor.
+
+`review-tiers`' convergence rule is *zero production defects → CONVERGED*. Round
+3 is that round. The correction it did produce changed a comment, a test name
+and a manifest claim; **production behaviour is byte-identical to the reviewed
+candidate**, and the executable diff between them is:
+
+```
+packages/postgres-provider/src/inventory-posting-service.ts   (one comment block)
+test/postgres/inventory-posting.test.ts                       (one test name, one doc comment)
+test/evidence/posting-kernel-admission.expected-red.json      (one claim string, one kill name)
+```
+
+**The lane's read, offered as a recommendation the orchestrator rules on:** a
+fourth fresh-naive arm is not worth its cost. It would review a tree whose
+behaviour no arm has found fault with, and `review-tiers` warns that a review
+which keeps finding the same class is a mis-scoped charter rather than broken
+code — here the classes were different each time and have now been closed in
+turn. **What the lane cannot do is certify its own work**, so if the
+orchestrator wants the byte-identity claim checked by someone other than its
+author, the proportionate instrument is a NARROW CONFIRM on that one question —
+the precedent is `PUR-2b` round 2 — and the prompt is below. It is not a fresh
+naive arm and must not be run as one.
+
+## Pasteable narrow-confirm prompt, if the orchestrator wants one
 
 ```text
-You are the fresh-naive round-3 reviewer for Critical packet
-posting-kernel-admission in /home/rvham/2rain-greenfield.
+You are a NARROW CONFIRM reviewer for Critical packet posting-kernel-admission
+in /home/rvham/2rain-greenfield. This is not a fresh-naive arm and its scope is
+one question.
 
-Review exact remote candidate <FROZEN_SHA> against base
-3b7b6dab2ddb790b33b7b641c68773c62db18e9a. The remote branch is
-packet/posting-kernel-admission; verify the supplied git ls-remote line before
-reading. The last EXECUTABLE commit is 663bc292e41a48023cdea26448b1a06dd41d72de;
-commits above it are narrative and one docs-only merge of `main`. Work
-read-only. Do not edit, commit, run the full matrix, invoke another reviewer, or
-rely on line numbers -- re-locate every symbol by name.
+Round 3 reviewed <ROUND_3_SHA> and returned REVISE on a single claim/evidence
+mismatch: A3's wording claimed every posting is floored, while the floor runs on
+the path that appends movements and `findNaturalReplay` returns above it. The
+correction was to narrow the claim rather than change behaviour.
 
-Return PASS, REVISE, or BLOCK with file/symbol evidence for every material
-finding.
+Confirm exactly this: that the correction is wording only, and that the narrowed
+statement is true of the code.
 
-This prompt was written by the lane whose work you are reviewing. **The lane has
-fenced nothing.** Any scope stated here is the orchestrator's, and it stands as a
-claim under test rather than a limit you may not question. Read whatever you
-judge relevant to the decisive questions, say plainly if you think the scope is
-drawn wrongly, and say plainly if the prompt itself is steering you.
+Review <FROZEN_SHA> against <ROUND_3_SHA>; verify the supplied git ls-remote
+line first. Work read-only; do not run the matrix or invoke another reviewer.
 
-TIER: Critical. Evidence band A, declared per family in the record.
+THE TWO QUESTIONS:
 
-SCOPE, QUOTED FROM `main`'s QUEUE ROW rather than paraphrased -- verify it
-yourself against docs/execution/current-plan.md on `main` and against
-docs/execution/program-reviews/2026-09-01-inventory-ledger.md, and say so if the
-packet's scope is still drawn wrongly:
+1. Is production BEHAVIOUR byte-identical between the two trees? The lane claims
+   the executable delta is one comment block in inventory-posting-service.ts,
+   one test name plus one doc comment in inventory-posting.test.ts, and one
+   claim string plus one kill name in the packet's expected-red manifest. Check
+   the diff yourself and say plainly if anything else moved.
 
-  `5g3-prog` R1 + R2 + R3 + A2 (two ordering manifest entries) + A3 (a monotonic
-  floor on `recordedAt` in `enforceNegativeStock`, one control), one packet
+2. Is the narrowed claim TRUE? It now reads: before a posting appends
+   inventory movements, its sampled `recordedAt` is at least the newest
+   persisted `recordedAt` for every affected stock identity. The lane also
+   asserts three supporting facts -- a natural-effect replay appends no
+   movement; `insertReceipt` writes the replayed result's `recordedAt`, which is
+   the original posting's instant; and the 23505 raced-replay branch is below
+   the floor and does pass it. Test each.
 
-plus A6's production comment, routed to this packet by A6's disposition in the
-converged review.
-
-BOTH PRIOR ROUNDS FOUND SOMETHING THE LANE HAD NOT. Round 1: a stored-receipt
-replay returned before the capability check ran, so a claim of "every posting"
-was false. Round 2: the branch was implementing a charter that `main` had
-widened, and A3 was a live defect. Assume a third thing exists.
-
-THE SIX CLAIMS, as claims to be tested:
-
-R1. The posting capability version has one authority, and a release whose
-declared fact differs from the version the provider implements cannot serve a
-posting. Test where the comparison runs, on which return paths, what it reads,
-and whether exact is right.
-
-R2. The version-4 receipt digest covers exactly the caller's input.
-
-R3. Every module relation this transaction writes was observed by a verifier
-that actually executed, compared before commit.
-
-A3. A posting whose sampled `recordedAt` is earlier than the newest already
-recorded for an affected stock identity is refused. Test the comparison, what it
-is compared against, whether per-identity is the right granularity, whether
-equality must be admitted, and whether refusing rather than clamping is the
-right call -- the review sanctioned either and the lane chose to refuse.
-
-A2. The two ordering mutations are now executable controls that die alone.
-
-A6. The corrected production comments say what is true.
-
-WHAT THE LANE DID NOT VERIFY, COULD NOT VERIFY, OR VERIFIED ONLY BY ITS OWN
-CONSTRUCTION:
-
-- Coverage tokens prove a row was READ from a relation, not that the verifier's
-  comparisons ran. A verifier that reads its rows then returns before comparing
-  keeps its token. Declared as a limit, not closed.
-- `assertActiveRelease` still binds the active pointer and the exact storage
-  artifact AFTER the receipt lookup, so a stored-receipt replay is proved only
-  against the release it is registered against, not against the active pointer.
-- A3 refuses rather than clamps, so on a machine whose clock regresses a second
-  posting on one stock identity inside the window now FAILS. That availability
-  cost is deliberate and is the orchestrator's to overrule.
-- A3's floor is per stock identity and compares against movements of that
-  identity only; a regression that touches no shared identity is not refused.
-- The compiler no longer pins the version NUMBER and no control was added for
-  its shape check (test/compiler is outside the lease).
-- `hasValidCapabilityFacts` is unchanged in code.
-- FIVE bridge edits in four accepted artifacts, disclosed in the record's
-  bridges section; two were found by gates rather than predicted, and two are
-  cases where this packet's coverage check made an older control's declared red
-  arrive earlier and for a different reason.
-- `main` was merged docs-only; the two conflicting record files were resolved
-  onto `main`'s rows with this packet's status layered on.
-- Per-posting cost of the added manifest read was not measured against a budget.
-
-EVIDENCE THE LANE CLAIMS:
-FULL_MATRIX_PASS_SHA=663bc292e41a48023cdea26448b1a06dd41d72de, zero not-ok,
-postgres 230, browser 93, architecture 189; evidence:expected-red OK across all
-77 entries in the repository.
-
-DELTA TO READ: git diff 3b7b6dab2ddb790b33b7b641c68773c62db18e9a..<FROZEN_SHA>.
-The seven new tests are in test/postgres/inventory-posting.test.ts under the
-prefix "posting kernel admission:".
+Return PASS or REVISE. You are NOT asked to re-review R1, R2, R3, A2 or A6 --
+three arms have. If you nonetheless see something material in them, say so; the
+lane has fenced nothing and this narrowing is the orchestrator's scope, not a
+limit you may not question.
 ```
