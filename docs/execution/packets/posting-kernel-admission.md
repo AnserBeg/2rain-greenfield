@@ -282,6 +282,28 @@ disclosed here rather than folded in silently.
    picked — the root was recomputed from `compileInventoryContract`, exactly one
    field moved, and the test's deep-equal over the whole summary is what verifies
    nothing else did.
+4. `test/evidence/pur-2a.expected-red.json`, entry
+   `posted-balance-verification-removed-at-the-binding`: **found by the complete
+   `evidence:expected-red` run at round 2**, not predicted. Its declared red was
+   an ABSENT refusal — null the projection binding and the balance verification
+   is skipped, so the posting commits and the test fails for a missing rejection.
+   It now reds earlier and more specifically: the balance relation is still
+   written by its trigger, so with the verifier gone no token covers it and the
+   coverage comparison refuses, naming the relation. Expected and claim updated.
+
+**The general consequence, stated once rather than as a run of coincidences.**
+Two accepted controls (this one and the undeclared-writer backstop above) had
+declared reds of the form *"remove this verifier and the posting commits
+silently"*. **That sentence is no longer true of any relation whose write this
+transaction can observe, which is the whole point of R3** — the coverage
+comparison subsumes the "verifier not reached" vector generically, so those
+mutations now red on coverage instead of on a missing refusal. Both entries are
+correspondingly NARROWER than they were: each still proves its subject is
+load-bearing, and neither still proves that skipping it would otherwise commit
+unnoticed. What each verifier actually COMPARES is still proved by its own
+column-level entries, which are untouched. **A reviewer should expect this shape
+again in any future packet that adds a verifier here, and should check the claim
+texts rather than only the reds.**
 
 ## Declared limits
 
@@ -308,14 +330,13 @@ disclosed here rather than folded in silently.
 
 ## Gates
 
-**Two full matrices ran, both green, and the record of the second is partial —
-stated rather than smoothed over.**
+**The full matrix and the complete expected-red set are both green at the
+frozen head `dd93462b513eedea5229c05d2b88c036032094ea`.** This is the evidence
+round 1's second finding said was owed and unproven; it is now measured rather
+than argued.
 
-**Matrix 1, at `5350ae32aa0da6806e869a40127115176d08b9f5`** (the first frozen
-candidate, whose executable tree differs from the final one by one manifest
-entry's `expected` and `claim` strings in `posting-writer-inventory.expected-red.json`):
-`scripts/run-matrix.sh` reported **`FULL_MATRIX_PASS_SHA=5350ae32aa0da6806e869a40127115176d08b9f5`**,
-zero `not ok` lines.
+`scripts/run-matrix.sh` reported **`FULL_MATRIX_PASS_SHA=dd93462b513eedea5229c05d2b88c036032094ea`**
+and **zero `not ok` lines across every suite**.
 
 | suite | result | gate | result |
 |---|---|---|---|
@@ -323,48 +344,51 @@ zero `not ok` lines.
 | `test:compiler` | 157 | `check:boundaries` | PASS (164 files) |
 | `test:integration` | 149 | `check:schema` | drift PASS |
 | `test:architecture` | 189 | `check:demo-release` / `check:app-release` | PASS |
-| **`test:postgres`** (REQUIRED) | **227** | `check:expected-red` | OK — 73 entries in 7 manifests |
+| **`test:postgres`** (REQUIRED) | **228** | `check:expected-red` | OK — 74 entries in 7 manifests |
 | `test:contracts` | 29 | `check:expected-red-controls` | OK — 38 controls |
 | **`test:browser`** | **93** | `check:language-coverage` | PASS (2050 obligations) |
 | `test:agent` / `test:locale` / `test:performance` | 3 / 1 / 5 | `check:reachability` | 106/106; 10 producer artifacts |
 
-The security scan's `leaks found: 1` is the planted negative control passing;
-`gitleaks-clean.json` is `[]` across 1,773 commits.
+`test:postgres` is 228 rather than round 1's 227 because of this round's new
+cross-release replay control. The security scan's `leaks found: 1` is the
+planted negative control passing; the real scan is clean.
 
-**Matrix 2, at the frozen head `f968775d5c79106c88c002afb4cdb4557ac8a420`**,
-run after the fourth bridge edit. Its console log lived in `/tmp` and a
-session restart wiped `/tmp` before the lane read it, so **the
-`FULL_MATRIX_PASS_SHA` line for this run is lost.** What survives is the
-per-suite evidence the matrix writes into the worktree: every suite's
-`test-results/reachability/<suite>.json` for `runId: admission2-f968775d`
-records `suiteSucceeded: true` — unit, compiler, integration, agent,
-architecture, contracts, postgres, browser, performance and observability —
-timestamped 18:03–18:34 on 2026-09-01, and the security evidence at 18:35 shows
-the run reached its final step. The `check:*` gates print only to the console
-and have no surviving evidence for this run beyond the first matrix, where
-each passed on a tree whose only difference is the manifest strings above.
-**The lane does not claim `FULL_MATRIX_PASS_SHA` for `f968775`.** The
-suite-evidence files are what it claims, and it says so in the ledger.
+**`evidence:expected-red`: OK — all 74 entries reproduced and restored**, the
+whole repository's set rather than this packet's subset. The fifteen owned and
+bridged entries were additionally run individually, the review's discriminating
+pair first and alone:
 
-**`evidence:expected-red`, in full:** the first full run at `5350ae3`
-reproduced 24 entries and stopped at `the-observed-write-set-is-never-checked`
-— the real finding recorded under bridges. After the correction, that entry was
-reproduced alone at `10eebfb`. The second full run at `f968775` completed (its
-journal was cleared on exit), but its verdict was in the same wiped log.
-**The lane claims: all thirteen owned or bridged entries plus the corrected
-backstop entry reproduced individually at their SHAs, and 24 of 73 reproduced
-in one full run at `5350ae3`; it does not claim a full 73-entry run at the
-frozen head.**
+```
+active-release-fact-checked-after-the-receipt-lookup  1 passing -> 1 killed  (placement; kills the REPLAY test)
+active-release-fact-never-read                        1 passing -> 1 killed  (absence;  kills the FRESH-POST test)
+verifier-call-deleted-registration-intact             1 passing -> 1 killed
+verifier-returns-without-observing                    1 passing -> 1 killed
+coverage-comparison-absent                            1 passing -> 1 killed
+coverage-read-from-the-registry-not-the-tokens        1 passing -> 1 killed
+token-minted-for-an-unwritten-relation                1 passing -> 1 killed
+token-minted-by-an-unregistered-verifier              1 passing -> 1 killed
+version-four-digest-covers-the-derived-role           1 passing -> 1 killed
+active-release-fact-compared-as-a-floor               1 passing -> 1 killed
+active-release-fact-lookup-finds-nothing              1 passing -> 1 killed
+definition-detached-from-the-contract                 1 passing -> 1 killed
+pur-2b/capability-version-not-bumped                  1 passing -> 1 killed  (bridged)
+posting-writer-inventory/effect-reservation-never-observed        1 passing -> 1 killed  (bridged)
+posting-writer-inventory/the-observed-write-set-is-never-checked  1 passing -> 1 killed  (bridged)
+```
 
-**Owed when Docker returns** (down after the restart; no suite that needs a
-container can run, and `test:architecture` hangs without one): one
-`scripts/run-matrix.sh` at `f968775` to retain the pass line, and one full
-`evidence:expected-red`. Both are re-runs of what the evidence files say
-already passed, at the same tree; neither changes the candidate.
+**One flake, disclosed rather than smoothed.** An earlier round-2 matrix at
+`0ca1330` failed one test — `migrations.test.ts`, *"a failed stream rolls back
+schema and migration history together"* — with
+`ephemeral PostgreSQL is ready inside its container but its published endpoint
+is unavailable: ECONNREFUSED`. That is the container-endpoint class already on
+the queue as `container-pressure-forges-outcomes`, not a defect in this packet,
+which cuts no migration. **Verified rather than assumed:** the test was re-run
+alone and passed, and the matrix above reproduces zero failures. The earlier run
+is superseded, not hidden.
 
-**At the final head** (this record commit, narrative-only above `10eebfb`):
-`format` PASS, `scripts/check-records.sh` OK; `test:architecture` reads
-`docs/**` and is owed at this head with the re-run above.
+**At the final head** (this record commit, narrative-only above `dd93462`):
+`pnpm format` and `test:architecture` re-run per `git-workflow`, because both
+read `docs/**`.
 
 ## The declared range
 
@@ -373,7 +397,7 @@ already passed, at the same tree; neither changes the candidate.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "posting-kernel-admission",
   "base": "3b7b6dab2ddb790b33b7b641c68773c62db18e9a",
-  "head": "d00fdb78d463bd3ebd2fcdf3b8d7b2ff141c5d93",
+  "head": "dd93462b513eedea5229c05d2b88c036032094ea",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -385,6 +409,7 @@ already passed, at the same tree; neither changes the candidate.
     "test/compiler/inventory-contract.release.golden.json",
     "test/evidence/posting-kernel-admission.expected-red.json",
     "test/evidence/posting-writer-inventory.expected-red.json",
+    "test/evidence/pur-2a.expected-red.json",
     "test/evidence/pur-2b.expected-red.json",
     "test/postgres/inventory-posting.test.ts",
     "test/postgres/inventory-stock-count.test.ts"
@@ -455,24 +480,24 @@ Optional, R1 in one look: `git show HEAD:apps/web/release/app.authored.json | gr
 shows the posting requirement at 2; the provider constant is
 `INVENTORY_CONTRACT_V1.capabilityVersion`.
 
-## Pasteable review prompt — arm 1, fresh naive Codex, xhigh
+## Pasteable review prompt — round 2, fresh naive, xhigh
 
-The prompt uses `<FROZEN_SHA>` because a commit cannot contain its own
-identity. Replace it with the exact remote SHA in the session report's
-`git ls-remote` line.
+Round 1 returned BLOCK on a real defect. This prompt is deliberately flatter
+than round 1's: the reviewer judged that one to be steering — it argued the
+lane's preferred placement and pre-adjudicated several gaps — so the rationale
+and the pre-dispositions are gone and the questions are left open.
 
 ```text
-You are the fresh-naive round-1 reviewer for Critical packet
+You are the fresh-naive round-2 reviewer for Critical packet
 posting-kernel-admission in /home/rvham/2rain-greenfield.
 
 Review exact remote candidate <FROZEN_SHA> against base
 3b7b6dab2ddb790b33b7b641c68773c62db18e9a. The remote branch is
 packet/posting-kernel-admission; verify the supplied git ls-remote line before
-reading. The last EXECUTABLE commit is 10eebfb42570cfc01edd72b888ab13f3dd8f5fcd;
-everything above it is narrative (the packet record, ledger, lanes, archive,
-current-plan, and the ADR-0063 amendment). Work read-only. Do not edit, commit,
-run the full matrix, invoke another reviewer, or rely on line numbers --
-re-locate every symbol by name.
+reading. The last EXECUTABLE commit is dd93462b513eedea5229c05d2b88c036032094ea;
+commits above it are narrative. Work read-only. Do not edit, commit, run the
+full matrix, invoke another reviewer, or rely on line numbers -- re-locate every
+symbol by name.
 
 Return PASS, REVISE, or BLOCK with file/symbol evidence for every material
 finding.
@@ -483,94 +508,79 @@ claim under test rather than a limit you may not question. Read whatever you
 judge relevant to the decisive questions, say plainly if you think the scope is
 drawn wrongly, and say plainly if the prompt itself is steering you.
 
-TIER: Critical, because it changes an idempotency digest on a released posting
-protocol, the version admission between a release and the provider that serves
-it, and the pre-commit verification of every inventory posting. Evidence band A,
-declared: a wrong digest or an unrun verifier is silent until a replay or a
-reconciliation exposes it.
+TIER: Critical. It changes an idempotency digest on a released posting protocol,
+the version admission between a release and the provider that serves it, and the
+pre-commit verification of every inventory posting. Evidence band A, declared.
 
-READ FIRST: docs/execution/packets/posting-kernel-admission.md (the record),
-docs/decisions/ADR-0063-*.md (the amendment at the end), and
-docs/execution/program-reviews/2026-09-01-inventory-ledger.md (R1, R2, R3 --
-this packet is their disposition). Then .agents/skills/review-tiers/SKILL.md
-and AGENTS.md section 6.
+READ FIRST: docs/execution/packets/posting-kernel-admission.md (the record,
+including its "Round 1 -- BLOCK" section), docs/decisions/ADR-0063-*.md (the
+amendment at the end), and
+docs/execution/program-reviews/2026-09-01-inventory-ledger.md (R1, R2, R3, which
+this packet disposes of). Then .agents/skills/review-tiers/SKILL.md and
+AGENTS.md section 6.
 
-THE THREE CLAIMS, written as claims to be tested:
+ROUND 1 FOUND A REAL DEFECT AND YOU SHOULD ASSUME MORE OF ITS CLASS EXIST. It
+was: `#post` returns a stored-receipt replay before reaching the code that
+checked the release's declared capability version, so that check did not run on
+the replay path, and the packet's claim that it ran on every posting was false.
+The fix moves `assertRegisteredCapabilityVersionIsDeclared` ahead of
+`findReceipt`. **The class is "a path that returns before a check the packet
+claims is universal."** `#post` has several such returns -- the stored-receipt
+replay, the natural-effect replay, the 23505 raced-replay branch, and the error
+path. Decide independently whether every claim this packet makes holds on every
+one of them.
 
-C1 (R1, one authority). INVENTORY_CONTRACT_V1.capabilityVersion in
-packages/domain/src/inventory/contracts.ts is the only spelling of the posting
-capability version. The inventory module definition reads it; the provider's
-INVENTORY_POSTING_CAPABILITY_VERSION imports it; the compiler's conformance
-cell no longer holds a literal. assertActiveReleaseDeclaresRegisteredCapabilityVersion
-(called from assertActiveRelease, on every posting) reads the ACTIVE release's
-persisted manifest and refuses INVENTORY_POSTING_CAPABILITY_MISMATCH unless the
-posting fact equals the registered version, EXACTLY. The lane claims exact is
-the only correct rule because ADR-0063 decision 3 defines the number as a major
-version with no minor axis, and claims that stage-time and admission-time
-placements were measured and rejected (the record's R1 table). Test whether the
-placement is right, whether the read of the manifest is the artifact the release
-kernel verified, and whether any path serves a release without passing through
-assertActiveRelease.
+THE THREE CLAIMS, as claims to be tested:
 
-C2 (R2, the digest). digestCommand's version-4 branch hashes
-callerStockCountInput(command) and nothing else; the derived postingRole is
-gone from the input. The lane claims this is correct in place at version 4
-because no version-4 receipt exists in released data (ADR-0063 section 4,
-re-verified on the base: postStockCount has no production caller). Test the
-re-verification, and test that the version-3 decode path and PUR-2b's seven
-controls are untouched.
+C1. The posting capability version has ONE authority
+(INVENTORY_CONTRACT_V1.capabilityVersion), and a release whose declared
+capability fact differs from the version the provider implements cannot serve a
+posting. Test where that comparison is made, on which paths it runs, what it
+reads it from, and whether "exact" is the right rule.
 
-C3 (R3, executed verifiers). ExecutedVerifierCoverage is a per-posting ledger;
-each verifier mints a token from the tableoid of a row it read;
-assertExecutedVerifiersCoverWriteSet compares the ledger EXACTLY with a fresh
-pg_stat_xact_user_tables delta before commit, in both directions, and checks
-each token against the construction-time registry. The lane claims the
-comparison shares no code path with the verifiers and repairs nothing.
+C2. The version-4 receipt digest covers exactly the caller's input. Test what
+is in it, whether correcting it in place at version 4 rather than cutting
+version 5 is safe, and whether the version-3 decode path moved.
 
-THE SURVIVOR THE REVIEW PREDICTED, and the first mutation the lane ran: delete
-one verifier CALL from #post with its registration intact. The manifest entry
-verifier-call-deleted-registration-intact reproduces the refusal naming the
-effect-reservation companion. Decide whether the twelve other entries close the
-remaining vacuity vectors, and look for the one-property survivor the lane did
-not think of -- in particular a verifier that reads a row from its relation and
-then compares nothing, which the token would still cover (the lane declares
-that limit).
+C3. Every module relation this transaction writes was observed by a verifier
+that actually executed, compared before commit. Test what the tokens prove,
+whether the comparison can be satisfied without the verifier doing its work,
+and whether the two sides are independently observed.
 
 WHAT THE LANE DID NOT VERIFY, COULD NOT VERIFY, OR VERIFIED ONLY BY ITS OWN
 CONSTRUCTION:
 
-- The compiler no longer pins the NUMBER. compileInventoryContract has no
-  production caller (measured: only tests call it), the compiler may not import
-  the domain package, and the cell's only input is the contract itself. The
-  lane replaced the literal with a positive-integer check and added no control
-  for it (test/compiler is outside its lease). Decide whether removing the
-  compiler's opinion on the number is a loss.
-- hasValidCapabilityFacts is unchanged in code; the lane documented at the site
-  why the floor stays a shape check. The lease named it for change. Decide
-  whether an admission-time refusal is also owed, and whether that needs the
-  executor-factory interface to carry a version (outside the lease).
-- Three bridges into accepted artifacts, taken rather than stopped for, all
-  disclosed in the record: pur-2b's manifest entry capability-version-not-bumped
-  (original, replacement and expected all changed), posting-writer-inventory's
-  effect-reservation-never-observed (original gains one argument), and the
-  compiler golden test/compiler/inventory-contract.release.golden.json (one
-  field, re-derived). The lane believes each is mechanical and inside the
-  charter's intent; the orchestrator may revoke any of them.
-- The tokens prove a row was READ from a relation, not that the verifier's
-  comparison held; that half is assertPersistedRowVerified, unchanged.
-- The deferred-trigger vector is unclosed for the fresh snapshot exactly as for
-  the first.
-- The runtime cost of the manifest read per posting was not measured against a
-  budget.
-- The artifact regeneration mints lineage entry 16; the lane did not run the
-  browser suite outside the full matrix.
-- The lane's test for the declared-1 refusal re-points the scope configuration
-  at the declared-1 release by an admin UPDATE, so that the fact check is the
-  only guard between that posting and a commit. Decide whether that fixture
-  proves what the control claims.
+- Coverage tokens prove a row was READ from a relation, not that the verifier's
+  comparisons ran. A verifier that reads its rows and then returns before
+  comparing keeps its token. Round 1 confirmed this as a real one-property
+  survivor of the mechanism and not a current production defect; it is declared
+  as a limit rather than closed.
+- `assertActiveRelease` still binds the active pointer and the storage artifact
+  AFTER the receipt lookup, so a stored-receipt replay is not proved to run on
+  the active release -- only that the release it is registered against declares
+  the right version. The lane judged moving that binding to be PUR-2a's design
+  to re-open, not this packet's. Decide whether that split is defensible.
+- The compiler no longer pins the version NUMBER; its cell checks the shape of
+  what the contract carries. `compileInventoryContract` has no production
+  caller. No control was added for that check (test/compiler is outside the
+  lease).
+- `hasValidCapabilityFacts` is unchanged in code and documented as a shape
+  check. The lease named it for change.
+- FIVE bridge edits in four accepted artifacts, all disclosed in the record's
+  bridges section: two expected-red entries whose "the posting commits silently"
+  claims this packet made false, one whose mutation subject gained an argument,
+  one capability-version mutation retargeted, and one compiler golden
+  re-derived. Two of the five were found by gates rather than predicted. The
+  orchestrator may revoke any of them.
+- Per-posting cost of the added manifest read was not measured against a budget.
+- The artifact regeneration mints lineage entry 16 in apps/web/release/**.
+
+EVIDENCE THE LANE CLAIMS: FULL_MATRIX_PASS_SHA=dd93462b513eedea5229c05d2b88c036032094ea,
+zero not-ok, postgres 228, browser 93, architecture 189; evidence:expected-red
+OK across all 74 entries in the repository. One earlier matrix at 0ca1330 hit a
+container-endpoint flake in migrations.test.ts, re-run alone and passed.
 
 DELTA TO READ: git diff 3b7b6dab2ddb790b33b7b641c68773c62db18e9a..<FROZEN_SHA>.
-The four new tests are in test/postgres/inventory-posting.test.ts under the
-prefix "posting kernel admission:"; the corrected digest test is PUR-2b's
-version-4 test in test/postgres/inventory-stock-count.test.ts.
+The five new tests are in test/postgres/inventory-posting.test.ts under the
+prefix "posting kernel admission:".
 ```
