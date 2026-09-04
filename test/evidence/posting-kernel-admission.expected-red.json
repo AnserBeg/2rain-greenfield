@@ -220,7 +220,7 @@
     },
     {
       "name": "recorded-at-floor-absent",
-      "claim": "`5g3-prog` A3, THE SUBJECT ABSENT. `recordedAt` is a wall-clock sample and this machine steps its clock backward under load; the comparator orders by `effectiveAt` first, so a backward step is invisible to the negative-stock check. Remove the floor and the specimen posting -- recorded earlier than the movement already on its stock identity, effective later -- is ADMITTED, exactly as before this packet: by effective time the prefix is (+10, -5) and never negative. What the admission then publishes is an as-of read, at a recorded-time horizon between the two, showing -5 under a policy that refuses negative stock. Silent until someone reads history, which is why it is Band A rather than visible-on-use.",
+      "claim": "`5g3-prog` A3, THE SUBJECT ABSENT. `recordedAt` is a wall-clock sample and this machine steps its clock backward under load; the comparator orders by `effectiveAt` first, so a backward step is invisible to the negative-stock check. Remove the floor and the specimen posting -- recorded earlier than the movement already on its stock identity, effective later -- is ADMITTED, exactly as before this packet: by effective time the prefix is (+10, -5) and never negative. What the admission then publishes is an as-of read, at a recorded-time horizon between the two, showing -5 under a policy that refuses negative stock. Silent until someone reads history, which is why it is Band A rather than visible-on-use. SCOPE, NARROWED ON ROUND-3 REVIEW: the subject is the APPEND path. `findNaturalReplay` returns above the floor, so a request matching an already-accepted natural effect is not floored -- harmlessly, because it appends no movement and its receipt carries the original posting's `recordedAt`. This entry's specimen appends, which is what the floor governs.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "    if (recordedAtFloor !== undefined && plannedRecordedAt < recordedAtFloor) {\n      throw postingError(\n        'INVENTORY_RECORDED_AT_REGRESSION',\n        `this posting records ${plannedRecordedAt}, earlier than ${recordedAtFloor} already recorded for the same stock identity, so an as-of read between the two could show a balance this posting never admitted`,\n        {\n          itemId: identity.itemId,\n          locationId: identity.locationId,\n          plannedRecordedAt,\n          recordedAtFloor,\n        },\n      );\n    }\n",
       "replacement": "",
@@ -231,7 +231,7 @@
       "kills": [
         {
           "file": "test/postgres/inventory-posting.test.ts",
-          "name": "posting kernel admission: a posting whose recorded time runs backward against the same stock identity is refused",
+          "name": "posting kernel admission: a posting that appends movements with a recorded time running backward against the same stock identity is refused",
           "expected": "must be refused"
         }
       ]

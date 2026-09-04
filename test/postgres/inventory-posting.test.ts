@@ -4117,9 +4117,17 @@ test(
  * The clock is INJECTED, never slept on (`AGENTS.md` section 6). The first
  * posting is what makes the second one's sample a regression, so the pair is
  * the specimen; a single posting cannot express this.
+ *
+ * SCOPE, NARROWED ON ROUND-3 REVIEW: the subject is a posting that APPENDS
+ * movements. Each posting here carries its own `sourceId`, so neither matches
+ * an already-accepted natural effect and neither returns through
+ * `findNaturalReplay`, which sits above the floor. A natural-effect replay
+ * under a regressed clock is NOT refused, and is harmless for the reason
+ * stated beside the floor: it appends nothing and its receipt carries the
+ * original posting's `recordedAt`.
  */
 test(
-  'posting kernel admission: a posting whose recorded time runs backward against the same stock identity is refused',
+  'posting kernel admission: a posting that appends movements with a recorded time running backward against the same stock identity is refused',
   { timeout: 180_000 },
   async (testContext) => {
     await withPostingDatabase(async (database) => {

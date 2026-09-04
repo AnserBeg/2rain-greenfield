@@ -3388,6 +3388,18 @@ async function enforceNegativeStock(
     // `recordedAt`, per stock identity, under the locks this posting already
     // holds.
     //
+    // SCOPE, NARROWED ON ROUND-3 REVIEW AND NOT TO BE RESTATED MORE STRONGLY:
+    // this runs on the path that APPENDS movements. `findNaturalReplay`
+    // returns above it, so a request that matches an already-accepted natural
+    // effect is not floored. That is deliberate and harmless rather than a
+    // hole: such a request appends no movement, and `persistAdditionalReceipt`
+    // stores the REPLAYED result -- whose `recordedAt` is the instant the
+    // original posting recorded -- so the regressed sample reaches no row.
+    // The invariant this enforces is therefore: BEFORE APPENDING, the sampled
+    // instant is at least the newest already persisted for every affected
+    // identity. The 23505 raced-replay branch is below this check and does
+    // pass it.
+    //
     // `recordedAt` is sampled once per posting from a WALL CLOCK, and
     // `AGENTS.md` section 7 records that this machine steps its clock backward
     // ~2s under CPU load. The comparator orders by `effectiveAt` FIRST and only
