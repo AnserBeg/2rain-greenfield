@@ -4,6 +4,7 @@ export {
   DEFAULT_COMPILER_PROFILE,
   MODULE_COMPILER_PROFILE,
   compileApplication,
+  compileApplicationRelease,
   expectedActiveReleaseFrom,
   reproduceHistoricalApplication,
   languageUsesModuleProjectionShape,

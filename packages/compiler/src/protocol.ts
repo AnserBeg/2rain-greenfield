@@ -235,8 +235,33 @@ export interface CompilerInput {
   profile: CompilerSemanticProfile;
 }
 
+/**
+ * One acknowledged-unbound permission: a permission the package declares on
+ * `resource` that no evaluator binds, named so a release may still build.
+ */
+export interface UnboundPermissionAcknowledgementEntry {
+  readonly permissionId: string;
+  readonly resource: string;
+}
+
+/**
+ * The acknowledgement a RELEASE BUILD hands the compiler, for exactly one
+ * package. It is not part of `CompilerInput` and is hashed into nothing: it is
+ * a build-time admission gate, not an artifact fact. The subject is explicit --
+ * `packageId` must equal the compiled package's id, or the compile refuses --
+ * so a mislabelled acknowledgement can never silently ungovern a release.
+ * Absent, the compile is a fixture or standalone compile and the rule does not
+ * run; the release scripts always pass it and fail before compiling when their
+ * checked-in list has no entry for their package.
+ */
+export interface UnboundPermissionAcknowledgementInput {
+  readonly entries: readonly UnboundPermissionAcknowledgementEntry[];
+  readonly packageId: string;
+}
+
 export interface CompilerExecutionOptions {
   projectionSchedule?: 'canonical' | 'interleaved' | 'reverse';
+  unboundPermissionAcknowledgement?: UnboundPermissionAcknowledgementInput;
 }
 
 export type StorageTransitionElementKind =
