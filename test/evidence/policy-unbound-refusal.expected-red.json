@@ -254,7 +254,7 @@
     },
     {
       "name": "truncation-acknowledgement-self-certified",
-      "claim": "Truncation must govern a recorded revision against the CHECKED-IN list narrowed to that revision, never against evidence derived from the revision itself. Deriving it from the revision's own census satisfies the required parameter tautologically and admits a recorded release declaring a permission nothing ever acknowledged -- the self-certifying shape round 3's review named as a live limit. This entry is the route-level proof that the limit is closed for truncation specifically. Its observable consequence is precise: with the revision certifying itself the suffix compiles, truncation finds nothing invalid to drop, and the script refuses with `no invalid suffix to truncate` \u2014 which is the reason declared here.",
+      "claim": "Truncation must govern a recorded revision against the CHECKED-IN list narrowed to that revision, never against evidence derived from the revision itself. Deriving it from the revision's own census satisfies the required parameter tautologically and admits a recorded release declaring a permission nothing ever acknowledged -- the self-certifying shape round 3's review named as a live limit. The observable consequence is exact and is what this entry declares: the revision that governance should have refused instead COMPILES, and is then caught one step later by the serialization comparison as `applications[1] does not match its current compiler output`. The red therefore proves governance was defeated on this route, not merely that something went wrong.",
       "file": "apps/web/scripts/compile-app-release.ts",
       "original": "  return narrowAcknowledgementToDeclared(\n    readRetainableAcknowledgementFor(authoredPath, recorded.package.packageId),\n    new Set(recorded.permissions.map((permission) => permission.permissionId)),\n  );",
       "replacement": "  return {\n    entries: recorded.permissions.map((permission) => ({\n      permissionId: permission.permissionId,\n      resource: permission.resource.targetId,\n    })),\n    packageId: recorded.package.packageId,\n  };",
@@ -266,7 +266,7 @@
         {
           "file": "test/compiler/compiler-semantic-profile.test.ts",
           "name": "--truncate-invalid-lineage governs recorded revisions: it narrows to each revision census and drops one declaring an unacknowledged permission",
-          "expected": "no invalid suffix to truncate"
+          "expected": "applications\\[1\\] does not match its current compiler output"
         }
       ]
     }
