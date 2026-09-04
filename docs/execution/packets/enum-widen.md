@@ -608,11 +608,14 @@ band: A.**
 ### Gates already green
 
 `typecheck`, `lint`, `format`, `build`, `test:unit` 155/155, `test:compiler`
-157/157, `check:app-release` (artifact unchanged), `check:expected-red`,
-`check:expected-red-controls` (38), `evidence:expected-red` 13/13 for this
-packet, and the rows in §8 for `test:postgres`, `test:architecture`,
-`check-records` and the full matrix. Do not re-derive what those prove; read
-§8 for exactly where each was measured.
+157/157, `test:postgres` 226/226, `test:architecture` 189/189,
+`check:app-release` (artifact unchanged), `check:expected-red`,
+`check:expected-red-controls` (38), `check-records`, and
+**`evidence:expected-red` OK over all 75 entries in 7 manifests** — the whole
+committed population, not only this packet's 13. Do not re-derive what those
+prove; §8 says exactly where each was measured and which suites carry forward
+from round 2. **The full matrix is NOT in that list**: rounds 2 and 3 changed
+executable content, so round 1's matrix is void for this candidate.
 
 ### The lane's claims, written as claims to be tested
 
@@ -635,7 +638,8 @@ packet, and the rows in §8 for `test:postgres`, `test:architecture`,
    (`mergeCompatibleEntity`).
 5. **Candidate SELECTION is sound and `PUR-2c`'s specimen was wrong; the
    verifier's one-witness COVERAGE is not sufficient for an ordinary widening,
-   and the lane is stopped on that** (§13, decision 1). The witness is the
+   and that gap is ROUTED rather than closed here** (§13, decision 1 — the
+   round-2 stop was taken on it and then ruled). The witness is the
    operation catalog's first DECLARED option; declared first, the new option
    trips `MODULE_PROVIDER_FAILURE (sqlstate=23514 …)` before the widening and is
    admitted after it.
@@ -650,10 +654,14 @@ packet, and the rows in §8 for `test:postgres`, `test:architecture`,
 ### The decisive questions
 
 1. **Is the predicate exactly the monotonic superset and nothing wider?** Read
-   `isAdditiveEnumDomainTransition` and `widensEnumDomain` against the five
-   preserved refusals in the compiler test. Is there an option-list change that
-   is not a strict superset and still passes — or a column change other than
-   the option list that the comparable-shape exclusion hides?
+   `isAdditiveEnumDomainTransition` and `widensEnumDomain` against the seven
+   preserved refusals in the compiler test. The round-1 predicate compared the
+   two lowered columns with the option ids and the whole fingerprint excluded,
+   and that exclusion was the defect; it now re-fingerprints the candidate
+   source field WITHOUT its new option records and requires equality with the
+   previous release's stored fingerprint. Is there an option-list change that
+   is not a strict superset and still passes, or a change to the field that
+   survives that re-fingerprint?
 2. **Is deciding the DDL against the LIVE definition right, and is the round
    trip a sufficient guard?** `widenEnumDomainCheck` parses `pg_get_expr` by
    regex and accepts the parse only if re-rendering reproduces it. Can a
@@ -703,16 +711,17 @@ packet, and the rows in §8 for `test:postgres`, `test:architecture`,
   option; `oldRead` is a ruling.
 - Two successive widenings of one field share an `elementId`; only the single
   widening and the replay are exercised.
-- Lock behaviour is measured on a raw table with the exact statement shape,
-  not through the materializer's longer prepare transaction.
+- Lock behaviour is measured in both directions but only one of them through
+  the composed path: the raw-statement test measures what writers see behind
+  the replacement, and the round-2 composed-path observation watches the real
+  prepare wait behind an open business writer. A writer queued BEHIND the
+  prepare, for its transaction's remaining life, is not observed (§6).
 - Real inventory fields are untouched by design (division (i)); nothing here
   proves the conformance pins on `inventory_transaction_type` and
   `inventory_posting_role` will move cleanly for resumed `PUR-2c`.
 - The provider merge admits a widened pair on storage-visible shape alone; a
   root that also relabelled an existing option cannot be compiled, and the lane
   has no provider-side observation of that (§6).
-- A writer queued BEHIND the composed prepare, for the transaction's remaining
-  life, is not observed through the composed path — only ahead of it (§6).
 - **The full matrix has not been re-run since round 1** (`984c65d`). Rounds 2
   and 3 changed executable content, so that matrix is VOID for this candidate;
   §8 lists the suites that WERE re-run and the ones that were not. Under
