@@ -4,7 +4,6 @@ import {
   cpSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -1698,66 +1697,6 @@ test('unbound-permission acknowledgement: the release entry point governs uncond
     ).status,
     'compiled',
   );
-});
-
-test('unbound-permission acknowledgement: no production source calls the ungoverned compiler entry point', () => {
-  // The structural half of round 3. `compileApplication` cannot govern what it
-  // is not told about, so the guarantee is that no code which mints a served
-  // release can call it: every production caller must use
-  // `compileApplicationRelease`, whose acknowledgement is required. This scan
-  // is what makes "a third release script cannot forget" a fact rather than a
-  // promise -- forgetting is a type error, and reaching for the ungoverned
-  // entry point instead fails here.
-  const roots = ['apps', 'packages'];
-  const offenders: string[] = [];
-  let scanned = 0;
-  const walk = (directory: string): void => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        if (
-          entry.name === 'node_modules' ||
-          entry.name === 'test' ||
-          entry.name === 'dist' ||
-          entry.name === 'release'
-        ) {
-          continue;
-        }
-        walk(path);
-        continue;
-      }
-      if (!entry.name.endsWith('.ts') && !entry.name.endsWith('.tsx')) continue;
-      // The compiler package DEFINES both entry points; it is not a caller.
-      if (path.startsWith(join('packages', 'compiler', 'src'))) continue;
-      scanned += 1;
-      const source = readFileSync(path, 'utf8');
-      if (/(?<!Release)\bcompileApplication\s*\(/u.test(source)) {
-        offenders.push(path);
-      }
-    }
-  };
-  for (const root of roots) walk(root);
-  assert.ok(
-    scanned > 50,
-    `the scan must read production sources, read ${String(scanned)}`,
-  );
-  assert.deepEqual(
-    offenders,
-    [],
-    'a production source calls the ungoverned compileApplication; a release path must use compileApplicationRelease, whose acknowledgement is required',
-  );
-  // The scan is not vacuous: it does find the governed entry point in the two
-  // release scripts, so a deletion of that call would be visible here.
-  const governedCallers = [
-    'apps/web/scripts/compile-app-release.ts',
-    'apps/web/scripts/compile-demo-release.ts',
-  ].filter((path) =>
-    /\bcompileApplicationRelease\s*\(/u.test(readFileSync(path, 'utf8')),
-  );
-  assert.deepEqual(governedCallers, [
-    'apps/web/scripts/compile-app-release.ts',
-    'apps/web/scripts/compile-demo-release.ts',
-  ]);
 });
 
 test('unbound-permission acknowledgement: a recorded revision from an unlisted package is judged unretainable, not crashed on', () => {

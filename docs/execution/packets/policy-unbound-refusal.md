@@ -17,28 +17,52 @@ kernel is queue row `7`, deferred by user ruling, and is NOT this packet.
 Stops: **1** of the 2-stop cap — the bridge request after round 1's BLOCK,
 granted by the user.
 
-**ROUND 3 — re-frozen after a second BLOCK, and this round SUBSUMES rather
-than sits beside.** Round 1 froze at `87878a6` and was blocked on two
-production findings; round 2 froze at `af1d603` (executable `afe67f7`, matrix
-green) and was blocked on one. **Both blocks were the same defect wearing a
-different coat: an absent admission input silently meant "not governed".**
-Round 1 read a missing key in a list that way; round 2 read a missing execution
-option that way, and its own `--truncate-invalid-lineage` path took the bypass
-on every recorded revision. The lane's round-2 record named that bypass as a
-limit, and the reviewer was right that naming a live bypass does not make the
-invariant true.
+**STOPPED AND ROUTED after a THIRD BLOCK on the same class. This packet does
+not proceed to round 4, and that is the correct outcome rather than a failure
+of nerve.**
 
-**The criterion that licenses a third round, named as `review-tiers` requires
-from round three onward.** Question 1: the defect is **in production** →
-CONTINUE. Question 3 is the honest one: rounds 1 → 2 were **ENUMERATING**, and
-that alone would say STOP and route the class. Two things override it. The
-first is `review-tiers`' own blast-radius override, which names this exact
-class — *"a permission that is declared and unreachable … keep going."* The
-second is that round 3's fix is **subsuming and terminal**, not another
-instance: it does not move absence somewhere new, it makes absence
-**unrepresentable** on the path that mints. `review-tiers`, "prefer
-unrepresentable to detectable." If a fourth round finds absence-means-ungoverned
-again, the charter is wrong and the class must be routed.
+Three rounds, three BLOCKs, one defect wearing three coats — **absence read as
+permission**:
+
+| round | frozen | where absence lived | how it was read |
+|---|---|---|---|
+| 1 | `87878a6` | a missing **key** in the acknowledgement list | package not governed |
+| 2 | `af1d603` | a missing **execution option** | compile not governed |
+| 3 | `543b90c` | a missing **choice between two public entry points** | caller may select the ungoverned one |
+
+**Round 3's own review named the routing condition this record wrote into its
+prompt, and it was met.** The prompt said: *"If you find absence-means-ungoverned
+a third time, say so plainly — that is the signal to route the class rather than
+write round 4."* The reviewer found it, said so, and the lane is honouring its own
+pre-commitment. `review-tiers` question 3 (**enumerating, not subsuming →
+STOP and route**) and `mission-cadence`'s two-stop cap both point the same way.
+Round 3's claim that its fix *subsumed* is **withdrawn**: it moved absence from
+an option to an API choice, which is one level up, not one level out.
+
+**The two findings that survive, verified by the lane before accepting them:**
+
+1. **The ungoverned constructor is public.** `compileApplication` is exported
+   from the package root, returns the same `CompileResult`, and an ordinary
+   aliased import — `import { compileApplication as compileCurrent }` — mints a
+   servable result ungoverned. **Measured:** the committed scan's regex does not
+   match that call site, and does not match the import line either.
+2. **The scan control was vacuous.** **Measured:** deleting its decisive
+   `offenders.push(path)` line leaves the test **passing**. It violated
+   `review-tiers`' "a committed control must die alone", so it is **removed
+   rather than weakened** — a false instrument in the tree is worse than none.
+   Its claim is withdrawn with it.
+
+A third finding is accepted and not disputed: **the required acknowledgement is
+structurally self-certifying.** Nothing in the contract distinguishes the
+reviewed checked-in list from entries derived from the package's own census, and
+two committed fixtures do exactly that derivation. "Required parameter" proves a
+value was passed, never that it was *reviewed*.
+
+**What is NOT withdrawn, because the reviewer verified it independently:** the
+two checked-in release scripts *are* governed in their current forms, truncation
+included, and no current-mode bypass exists in either. That is the increment
+this packet actually earned, and it is real: today a declared permission absent
+from the list refuses the release build by name.
 
 Round 3's executable freeze is `17529cf8c8b80e97f287545a3b80782e95600fb9`.
 
@@ -138,16 +162,17 @@ them is the whole of round 3.**
 | nullish via a cast | n/a | refused, `COMPILER_PERMISSION_ACKNOWLEDGEMENT_INVALID` |
 | who may call it | tests and fixtures only, asserted by a committed control | the release scripts |
 
-**Why this is terminal where round 2 was not.** Round 2's contract could be
+**Why this was CLAIMED terminal, and why that claim is withdrawn.** Round 2's contract could be
 satisfied by *saying nothing*, and saying nothing is what a forgetful caller
 does. Round 3's release contract cannot be satisfied by saying nothing: there
 is no value of "omitted" for a required parameter, so a new release path that
-forgets governance **fails to compile** rather than building green. The one
-remaining way to reach an ungoverned compile — calling `compileApplication`
-from production — is closed by a committed control that scans every source
-under `apps/` and `packages/` (excluding the compiler package, which defines
-both) and fails if any of them calls it. Forgetting is a type error; reaching
-for the ungoverned door is a red test.
+forgets governance **fails to compile** rather than building green. **But the door beside it is still open, and that is what the third review
+blocked on:** `compileApplication` is exported from the package root and an
+ordinary aliased import reaches it. The scan that was supposed to close this is
+removed — it matched an identifier spelling rather than a resolved binding, and
+it passed with its own decisive line deleted. **So the accurate statement is:
+a caller that has chosen `compileApplicationRelease` cannot forget governance;
+nothing prevents a caller from choosing the other function.**
 
 **Why `compileApplication` keeps its optional option, stated as a cost rather
 than a virtue.** It is the fixture entry point. Making governance mandatory for
@@ -225,8 +250,9 @@ acknowledgement with the input.
 
 ## Controls
 
-Sixteen tests in `test/compiler/g2-module-conformance.test.ts`. Fourteen carry
-the prefix `unbound-permission acknowledgement:`, two carry `unbound-permission
+Fifteen tests in `test/compiler/g2-module-conformance.test.ts` (the sixteenth,
+the production-caller scan, was **removed at the stop** — it was vacuous under
+deletion). Thirteen carry the prefix `unbound-permission acknowledgement:`, two carry `unbound-permission
 release script:` and spawn the real `compile-app-release.ts --check` against a
 temp copy of the release inputs.
 
@@ -234,7 +260,6 @@ temp copy of the release inputs.
 |---|---|
 | the unchanged composed application builds under its acknowledgement, which is exactly its declared census | admission twin through the real loader and compiler; entries equal the declared census with no duplicates |
 | **the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned** | **round 2's finding closed at the compiler:** `undefined`, `null` and `{}` forced past the type each refuse by the package's name, and the real acknowledgement still admits |
-| **no production source calls the ungoverned compiler entry point** | **the structural half:** every `.ts` under `apps/` and `packages/` (excluding the compiler package) is scanned; a production caller of `compileApplication` fails the suite, and the scan is shown non-vacuous by finding both governed callers |
 | **a recorded revision is governed by the list narrowed to its own census, which can only shrink it** | truncation decided rather than excepted; narrowing never invents an entry |
 | **a recorded revision from an unlisted package is judged unretainable, not crashed on** | the head loader still throws; the retainable reader returns empty, and an empty acknowledgement refuses every declared permission by name |
 | a permission the composed application declares and nothing acknowledges refuses the release by name | the core refusal, through the real compiler on the real composition |
@@ -283,33 +308,86 @@ are tested, not mutated; Band B is one discriminating red per claim, not per
 branch. (d) The truncation path's end-to-end behaviour is not exercised by any
 test — only its narrowing helper is. Stated, not hidden.
 
-## What this packet does NOT claim
+## What this packet does NOT claim — rewritten at the stop
 
-- It does not authorize anything. Every principal still holds every declared
-  permission; row `7` is the kernel and this packet is the announcement.
-- **A FIXTURE compile of a permission-bearing package is still ungoverned**, by
-  design and at measured cost (see the mechanism section). The guarantee is not
-  "no compile is ever ungoverned"; it is "**no compile that mints a served
-  release can be ungoverned, and no production code can reach the ungoverned
-  entry point**". Those are different claims and the second is the one the
-  evidence supports.
-- The `platform` module is not mounted in any release; when it is, its
-  permissions enter the composed census and refuse by name.
-- The acknowledgement is not hashed into any artifact. A list change alone
-  mints no lineage entry and moves no root; a release root says nothing about
-  the list it was built under.
-- Recorded lineage entries under `verifyExistingLineage` are reproduced by
-  `reproduceHistoricalApplication`, which skips whole-model validation
-  altogether by design — it can only verify an already-recorded root and can
-  never mint.
-- `check:app-release` on **changed** authored source refuses as *stale* before
-  any candidate compile; the permission diagnostic comes from
-  `build:app-release` (and from `--check` on unchanged source, which recompiles
-  the serving head).
-- **What row `7` inherits:** the bound set is a compiler-internal constant. The
-  runtime's evaluator registry cannot be imported by the compiler (dependency
-  boundaries), so the binding census will have to reach the compiler as data the
-  same way the acknowledgement now does.
+**Narrowed to what was measured, per `review-tiers`' stop procedure. Every
+sentence a reviewer refuted is withdrawn rather than softened.**
+
+**WHAT IT DOES CLAIM, and what the third reviewer independently confirmed:**
+the two checked-in release scripts are governed in their current forms —
+`compile-app-release.ts` in all four modes and `compile-demo-release.ts` — and
+**no current-mode bypass exists in either**. A declared permission absent from
+`apps/web/release/unbound-permission-acknowledgement.json` refuses the release
+build by name, today, and `check:app-release` refuses a list with no key for its
+package before compiling. Narrowing for recorded revisions is sound and cannot
+self-certify; empty-for-unlisted is genuinely stricter.
+
+**THE THREE LIMITS, stated where a reader will hit them:**
+
+1. **The ungoverned constructor is public and reachable by ordinary code.**
+   `compileApplication` is a package-root export returning the same
+   `CompileResult`. `import { compileApplication as compileCurrent }` mints a
+   servable result with no acknowledgement, needing no cast and no trickery.
+   **Nothing in the tree prevents or detects this** — the control that claimed
+   to was removed at the stop for being vacuous.
+2. **The required parameter proves a value was passed, never that it was
+   reviewed.** The acknowledgement is a plain structural object, so a release
+   path can derive it from the package's own census and satisfy the contract
+   tautologically, absorbing every new permission without a list change anyone
+   reads. **Two committed fixtures implement exactly that pattern**, which is
+   how ordinary it is.
+3. **The truncation route runs but does not discriminate.** The pre-existing
+   v0-prefix control executes `--truncate-invalid-lineage`, but its retained
+   revision's acknowledgement is generated from its own complete census and its
+   invalid suffix declares zero permissions and fails a different rule — so
+   removing governance or narrowing would not change its outcome. The narrowing
+   helper is controlled directly; **its call-site wiring is not.** An earlier
+   version of this record and its review prompt presented that control as
+   end-to-end evidence. It is not, and that presentation is withdrawn.
+
+**Also true and unchanged:** it authorizes nothing (row `7` is the kernel); a
+FIXTURE compile of a permission-bearing package is ungoverned by design; the
+`platform` module is unmounted; the acknowledgement is hashed into no artifact;
+`historicalReproduction` skips whole-model validation by design; and
+`check:app-release` on changed source refuses as *stale* before any candidate
+compile.
+
+**`release-governance-made-optional` proves runtime fail-closed behaviour, not
+type-level requiredness.** Making the parameter optional while leaving the
+internal mode `required` would keep every committed test green. The claim is
+narrowed accordingly.
+
+## THE ROUTED CLASS — what a successor charter must own
+
+**Filed as one line in the archive's *Filed during the freeze* table; promotion
+to a critical-path row is the user's ruling, not the lane's.** The class is not
+"add another scanner case". It is a boundary the reviewer stated, and it is
+recorded here verbatim as the design criterion a successor must satisfy:
+
+> Production code cannot obtain a servable current `CompileSuccess` through any
+> package-exported operation unless it presents **non-self-certifying**
+> governance; fixture compilation is unavailable through production imports.
+> Symbol-aware controls and alias/wrapper negative specimens may verify that
+> boundary, but **they must not be the boundary**.
+
+**What that implies, so the successor does not rediscover it:** the seam is the
+compiler package's **public export surface** and the **provenance** of an
+acknowledgement — not the current caller list. Candidate shapes the lane
+considered and did not attempt, each with its measured cost:
+
+- **Stop exporting the ungoverned constructor** from the package root, leaving
+  fixtures to import it by deep path. Touches how ~46 test files import; the
+  measurement that made this packet choose otherwise is that mandatory
+  governance for every current-mode compile reds **85/174** compiler and
+  **27/155** unit tests.
+- **Give the acknowledgement provenance the compiler can check** — a digest of
+  the reviewed document carried into the input — so a census-derived object no
+  longer satisfies it. This is the honest answer to limit 2 and it is a real
+  design question, not a patch.
+- **Discriminating truncation evidence:** an older permission-bearing revision
+  whose census is a strict subset of today's list, followed by an otherwise-valid
+  revision adding one permission the list omits. The reviewer wrote this
+  specimen out; it belongs in the successor.
 
 ## Round 2 review and what changed
 
@@ -545,55 +623,33 @@ The lane ran this exact sequence at `c9062f5` (round 1) and again at `209e3fc` (
    northstar.app:package.application; a release build cannot proceed
    ungoverned`. Restore with `git checkout -- apps/web/release/`.
 
-## Review prompt — round 3; paste as written; the lane fenced nothing
+## No round-4 review prompt is written, and that is deliberate
 
-Review packet `policy-unbound-refusal`, ROUND 3, in `/home/rvham/2rain-greenfield` (or any fresh clone of `origin`). Read `AGENTS.md`, then `.agents/skills/review-tiers/SKILL.md` — "Evidence depth follows FAILURE OBSERVABILITY", "Does the evidence prove the claim?", "A negative control must vary one property", "Convergence", "Write the claim from the measurement, and prefer unrepresentable to detectable" — then `docs/execution/packets/policy-unbound-refusal.md` in full, then the diff.
+`mission-cadence` requires a lane to emit a pasteable prompt **whenever a freeze
+wants an online review arm**. This freeze does not. Three arms have converged on
+one class and the third named the routing condition; a fourth arm would be asked
+to re-examine a boundary the lane has already conceded is wrong, which is the
+spiral `review-tiers` exists to prevent.
 
-This prompt was written by the lane whose work you are reviewing. The lane has fenced nothing. Any scope stated here is the orchestrator's, and it stands as a claim under test rather than a limit you may not question. Read whatever you judge relevant to the decisive questions, say plainly if you think the scope is drawn wrongly, and say plainly if the prompt itself is steering you.
+**What is owed instead is a user ruling**, and the lane states the options
+without recommending its way out of a stop:
 
-**Two prior rounds returned BLOCK, and the round-2 reviewer said its prompt steered.** Round 1 was blocked because a missing key in a list left a release ungoverned; round 2 because a missing execution option did. Both were the same defect — absence read as permission. Round 2's prompt framed compiler-level absence as acceptable and its two release scripts as the only callers that mattered, while one mode of one of those scripts took the bypass; that framing is withdrawn. **Do not accept this prompt's boundary either. Question B below asks you to attack it.**
+1. **Integrate the narrowed increment.** The executable content is matrix-green
+   at `17529cf`, the two release scripts are governed, and the record now claims
+   only that. The three limits ship as declared limits and the routed class
+   carries the rest. Integration owes a fresh matrix at the integrated SHA
+   because the stop commit changes executable content (one test removed).
+2. **Hold the branch** until the routed charter is designed, and land both
+   together as one boundary.
+3. **Discard** and let the successor start from `main` with this record as its
+   input.
 
-TARGET. Branch `packet/policy-unbound-refusal`, frozen at `543b90c471f7cda231beefe106d23ddaa48b3215`. `git ls-remote origin refs/heads/packet/policy-unbound-refusal` returned, at freeze time:
+**The lane's own reading, offered as information rather than as a
+recommendation:** option 1 ships a real refusal that works today and states
+exactly what it does not cover; option 2 avoids shipping a partial boundary that
+a reader might over-trust. The record has been written so that either is honest.
 
-```
-$ git ls-remote origin refs/heads/packet/policy-unbound-refusal
-543b90c471f7cda231beefe106d23ddaa48b3215	refs/heads/packet/policy-unbound-refusal
-```
-
-The last executable commit is `17529cf8c8b80e97f287545a3b80782e95600fb9`; the commits above it are narrative, and `git diff --name-only 17529cf 543b90c -- . ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'` is empty. Base is `4218a66068041eb04e45e6fff4883c8aa8dfaebf`, `origin/main` at cut. Read the whole delta `4218a66..543b90c`. Round 1's tree is preserved at `87878a6`, round 2's at `af1d603`; both reviews' findings are dispositioned in the record. Full matrix: Full matrix **PASS — `FULL_MATRIX_PASS_SHA=17529cf8c8b80e97f287545a3b80782e95600fb9`**, first attempt: performance 5/5, unit 155/155, compiler 173/173, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability producer 11/11, language coverage PASS (2050 obligations), reachability 106/106, security scans passed, schema 23 migrations verified, both release checks green, expected-red validation and its 38 self-test controls green as matrix stages.
-
-TIER. Critical — a compiler refusal on the release build's path. Band B declared.
-
-THE CHARTER AND THE BRIDGE (claims under test, not fences). Program review R7 small (a): a declared permission with no evaluator binding must announce itself at compile time; the authorization kernel is queue row 7 and is not this packet. The original lease was `conformance.ts`, `diagnostics.ts`, the list, `test/compiler/**`, the manifest and narrative. After round 1's BLOCK the user granted a bridge verbatim ("do whatever you need to to fix this") and reaffirmed it after round 2's. Round 3 therefore also changes `packages/compiler/src/compiler.ts`, `protocol.ts`, `index.ts`, `apps/web/scripts/*`, and two pre-existing fixtures in `test/compiler/compiler-semantic-profile.test.ts` and `test/postgres/composed-application.test.ts`. `packages/canonical-model/**`, `packages/domain/**` and `storage.ts` are untouched. **`index.ts` and `protocol.ts` are also in ENUM-WIDEN's live diff, at other lines.**
-
-THE LANE'S CLAIMS, WRITTEN TO BE TESTED.
-1. `compileApplicationRelease` takes the acknowledgement as a REQUIRED positional parameter, so a release path that omits governance does not typecheck; and it asserts governance unconditionally, so casting around the type and passing nullish is refused rather than admitted.
-2. `compileApplication` remains the fixture entry point and is ungoverned when no option is supplied. The lane claims this is safe ONLY because no production source can call it, and a committed control scans every `.ts` under `apps/` and `packages/` (excluding the compiler package) to enforce that.
-3. Together, 1 and 2 mean absence is unrepresentable on the path that mints: forgetting is a type error, and reaching for the ungoverned door is a red test. The lane claims this SUBSUMES rounds 1 and 2 rather than sitting beside them.
-4. Truncation is decided, not excepted: a recorded revision is governed by the checked-in list narrowed to its own census, narrowing can only remove and never invent, and a recorded entry from an unlisted package gets an empty acknowledgement — stricter, because every permission it declares is then unbound and the entry is dropped.
-5. The rule still governs every language version, still refuses unbound/stale/mislabelled/malformed, and the v0 shell is governed.
-6. Nothing reaches the artifact; both compiled artifacts rebuild identical.
-7. Nine expected reds each vary one property and kill exactly their declared victims.
-
-WHAT THE LANE DID NOT VERIFY, COULD NOT VERIFY, OR VERIFIED ONLY BY ITS OWN CONSTRUCTION.
-- **The fixture gap is real and deliberate.** A test compiling a permission-bearing package with no acknowledgement is ungoverned. The lane measured the alternative — mandatory governance for every current-mode compile reds 85/174 compiler and 27/155 unit tests, ~46 files across several live leases — and chose the required-parameter design instead. That is a judgement about cost, and you may rule it wrong.
-- The production-caller scan is a source scan, not a type-level guarantee: it would not stop a production file that constructed the call dynamically, and it has no mutation control (the record explains why a one-property mutation cannot simulate the realistic defect without reddening for a `ReferenceError` instead).
-- The truncation path's end-to-end behaviour is exercised only by the pre-existing v0-prefix control; the narrowing and retainable readers are tested directly.
-- The `protocol.ts` and `index.ts` edits sit in a file another live lane holds; the lane verified the hunks do not overlap but cannot verify merge order.
-- Two fixtures outside the original lease were changed to satisfy the new contract; both were found by suites, not designed for.
-- All controls are self-chosen.
-
-DECISIVE QUESTIONS.
-A. Is there any path — `compile-app-release.ts` in all four modes, `compile-demo-release.ts`, or any other production source — by which a first-party permission reaches a compiled release without the rule running against a correct acknowledgement?
-B. **Attack the boundary.** Does "required parameter on the release entry point plus a source scan forbidding the fixture entry point in production" actually make absence unrepresentable where it matters, or is it round 1 and round 2's defect a third time in a new place? If you can construct a plausible, accidental route to an ungoverned served release, this is a BLOCK.
-C. Do the nine reds each vary exactly one property and kill exactly their declared victims? Does every branch of the rule, the loader's two readers, and the narrowing helper die alone under deletion?
-D. Is the truncation semantics correct — is narrowing sound (never self-certifying), and is empty-for-unlisted genuinely stricter rather than a hole?
-E. Does the bridged diff exceed what the fix needed, and does the record claim more than the evidence proves? The record now states the fixture gap as a cost; check that it does not understate it.
-
-CONVERGENCE. This is round 3 and `review-tiers` requires the criterion to be named: the defect was in production (continue), the blast-radius override names this exact class, and round 3's fix is claimed to be subsuming rather than another instance. **If you find absence-means-ungoverned a third time, say so plainly — that is the signal to route the class rather than write round 4.**
-
-OUT OF SCOPE PER THE ORCHESTRATOR'S CHARTER (claims, not fences): the authorization kernel (row 7); RLS on `module_storage_backfill_checkpoints`; binding the compiler's bound set to a runtime evaluator registry; `packages/canonical-model/**` and `packages/domain/**`.
-
-THREAT MODEL. Foundation stage: accidental and plain omissions by honest developers or AI writers — a new release path forgetting governance, a typo in the list, a module removed — not an adversary deliberately editing the acknowledgement to hide a permission.
-
-VERDICT FORMAT. PASS, REVISE or BLOCK, then findings ranked by severity, each with file and line at the frozen SHA, what you observed versus what the record claims, and whether the defect is in production, in a control, or in the claim's prose. A round with zero production defects converges the review (ruled 2026-09-01).
+**No review arm should be launched against this SHA for the routed class.** If
+an arm is wanted, it should review the *narrowed record* against the tree — that
+the claims now match the measurements — which is a different and much smaller
+question.
