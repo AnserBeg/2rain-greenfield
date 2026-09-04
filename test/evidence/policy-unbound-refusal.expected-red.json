@@ -32,10 +32,10 @@
     },
     {
       "name": "governance-wiring-removed",
-      "claim": "The whole-model wiring in compiler.ts is the only path by which an acknowledgement reaches the rule, and the `required` arm is what makes the RELEASE entry point govern unconditionally: defeating the condition leaves every release compile ungoverned, so an unacknowledged permission compiles on the composed application and on the v0 shell, a mislabelled acknowledgement no longer refuses, and a caller that casts around the required parameter is admitted -- round 2's exact defect, restored.",
+      "claim": "The whole-model wiring in compiler.ts is the only path by which an acknowledgement reaches the rule: making the condition unreachable leaves every governed compile ungoverned, so an unacknowledged permission compiles on the composed application and on the v0 shell, a mislabelled acknowledgement no longer refuses, and a release compile handed nullish is admitted. It varies ONE property -- whether the wiring fires -- and deliberately leaves the fixture path's behaviour (no acknowledgement, no governance) unchanged, so the census control survives and the kill set is exactly the governed claims.",
       "file": "packages/compiler/src/compiler.ts",
       "original": "  if (\n    permissionGovernance === 'required' ||\n    options.unboundPermissionAcknowledgement !== undefined\n  ) {",
-      "replacement": "  if (\n    permissionGovernance === 'neverMatches' ||\n    options.unboundPermissionAcknowledgement === undefined\n  ) {",
+      "replacement": "  if (\n    false &&\n    (permissionGovernance === 'required' ||\n      options.unboundPermissionAcknowledgement !== undefined)\n  ) {",
       "test": {
         "files": ["test/compiler/g2-module-conformance.test.ts"],
         "namePattern": "unbound-permission acknowledgement"
