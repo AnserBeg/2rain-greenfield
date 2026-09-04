@@ -226,7 +226,7 @@
       "replacement": "",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],
-        "namePattern": "recorded time runs backward"
+        "namePattern": "recorded time running backward"
       },
       "kills": [
         {
