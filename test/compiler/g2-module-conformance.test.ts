@@ -67,6 +67,7 @@ import {
 import {
   narrowAcknowledgementToDeclared,
   readAcknowledgementDocument,
+  readRetainableAcknowledgementFor,
   readUnboundPermissionAcknowledgementFor,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 
@@ -1757,6 +1758,46 @@ test('unbound-permission acknowledgement: no production source calls the ungover
     'apps/web/scripts/compile-app-release.ts',
     'apps/web/scripts/compile-demo-release.ts',
   ]);
+});
+
+test('unbound-permission acknowledgement: a recorded revision from an unlisted package is judged unretainable, not crashed on', () => {
+  // Truncation must be able to JUDGE a recorded entry to decide whether to drop
+  // it. The head loader throws for an unlisted package -- that is what stops a
+  // build -- but the retainable reader returns an empty acknowledgement, which
+  // is stricter at that entry: every permission the revision declares is then
+  // unbound, the compile is refused, and truncation drops it.
+  assert.throws(
+    () =>
+      readUnboundPermissionAcknowledgementFor(
+        APP_AUTHORED_PATH,
+        'northstar.unlisted:package.fixture',
+      ),
+    /names no entries for package northstar\.unlisted:package\.fixture;/u,
+    'the head loader must still stop a build whose package is unlisted',
+  );
+  const retainable = readRetainableAcknowledgementFor(
+    APP_AUTHORED_PATH,
+    'northstar.unlisted:package.fixture',
+  );
+  assert.deepEqual(retainable, {
+    entries: [],
+    packageId: 'northstar.unlisted:package.fixture',
+  });
+  // Empty is not permissive: a package declaring a permission under it is
+  // refused as unbound, which is what makes the entry unretainable.
+  const normalized = composedNormalized();
+  const refused = validateUnboundPermissionAcknowledgement(normalized, {
+    entries: [],
+    packageId: COMPOSED_PACKAGE_ID,
+  });
+  assert.equal(refused.length, normalized.permissions.length);
+  assert.ok(
+    refused.every(
+      (diagnostic) =>
+        diagnostic.code === 'COMPILER_PERMISSION_EVALUATOR_UNBOUND',
+    ),
+    'an empty acknowledgement refuses every declared permission by name',
+  );
 });
 
 test('unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it', () => {

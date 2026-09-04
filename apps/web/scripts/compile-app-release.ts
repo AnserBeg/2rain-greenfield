@@ -22,6 +22,7 @@ import { format } from 'prettier';
 
 import {
   narrowAcknowledgementToDeclared,
+  readRetainableAcknowledgementFor,
   readUnboundPermissionAcknowledgementFor,
   type UnboundPermissionAcknowledgementInput,
 } from './unbound-permission-acknowledgement.js';
@@ -99,10 +100,7 @@ function recordedAcknowledgement(
     normalizedDefinitionBytes,
   );
   return narrowAcknowledgementToDeclared(
-    readUnboundPermissionAcknowledgementFor(
-      authoredPath,
-      recorded.package.packageId,
-    ),
+    readRetainableAcknowledgementFor(authoredPath, recorded.package.packageId),
     new Set(recorded.permissions.map((permission) => permission.permissionId)),
   );
 }

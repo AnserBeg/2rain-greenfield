@@ -126,6 +126,40 @@ export function readAcknowledgementDocument(
 }
 
 /**
+ * The acknowledgement for a package that MAY NOT BE GOVERNED AT ALL, used only
+ * for a recorded revision inside `--truncate-invalid-lineage`.
+ *
+ * Truncation must be able to JUDGE a recorded entry in order to decide whether
+ * to drop it, so a recorded revision belonging to a package the checked-in list
+ * does not key must not crash the script -- that would remove the ADR-0043
+ * recovery mechanism entirely. It returns an EMPTY acknowledgement instead,
+ * which is strictly stricter than throwing would be at that entry: every
+ * permission the revision declares is then unacknowledged, the compile is
+ * refused as unbound, and truncation drops that entry and everything after it.
+ * A revision declaring no permissions is retained, which is correct.
+ *
+ * The head path never uses this: `readUnboundPermissionAcknowledgementFor`
+ * still throws, because a head whose package is unlisted must stop the build
+ * rather than be judged against nothing.
+ */
+export function readRetainableAcknowledgementFor(
+  releaseInputPath: string,
+  packageId: string,
+): UnboundPermissionAcknowledgementInput {
+  try {
+    return readUnboundPermissionAcknowledgementFor(releaseInputPath, packageId);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes('names no entries for package')
+    ) {
+      return { entries: [], packageId };
+    }
+    throw error;
+  }
+}
+
+/**
  * The acknowledgement for ONE RECORDED revision of a lineage.
  *
  * A recorded entry declares the permission census it declared when it was
