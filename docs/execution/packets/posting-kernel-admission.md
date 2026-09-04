@@ -386,9 +386,10 @@ which cuts no migration. **Verified rather than assumed:** the test was re-run
 alone and passed, and the matrix above reproduces zero failures. The earlier run
 is superseded, not hidden.
 
-**At the final head** (this record commit, narrative-only above `dd93462`):
-`pnpm format` and `test:architecture` re-run per `git-workflow`, because both
-read `docs/**`.
+**At the final head** (narrative-only above `dd93462`): `pnpm format` PASS,
+`test:architecture` **189/189**, `scripts/check-records.sh` OK — all three
+re-run there because `git-workflow` requires it of the two gates that read
+`docs/**`, and the record layer is what the last commits changed.
 
 ## The declared range
 
