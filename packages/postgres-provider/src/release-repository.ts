@@ -726,8 +726,15 @@ function verifyReleaseManifestEnvelope(
  * generic repository knows capability IDs only, never which provider version
  * is registered (see `capability-operation-executor-factory.ts`). The exact
  * comparison -- a release's declared fact against the version the provider
- * implements -- is made by the provider where it binds to the ACTIVE release,
- * on every posting: `assertActiveRelease` in `inventory-posting-service.ts`.
+ * implements -- is made by the provider, in
+ * `assertRegisteredCapabilityVersionIsDeclared`
+ * (`inventory-posting-service.ts`), on entry to `#post` and ahead of the
+ * stored-receipt lookup so that no path returns without it. It binds the
+ * REGISTERED release's persisted manifest; `assertActiveRelease` separately
+ * binds the active pointer and the exact storage artifact on every path that
+ * can commit a module effect. Corrected on review: this comment previously
+ * attributed the version check to `assertActiveRelease` and called it
+ * active-release validation on every posting, which was true of neither.
  */
 function hasValidCapabilityFacts(value: unknown): boolean {
   return (

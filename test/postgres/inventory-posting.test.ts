@@ -4080,6 +4080,118 @@ test('posting kernel admission: the shipped head release declares the posting ca
  * configuration's release-root comparison; the control would then observe
  * nothing.
  */
+/**
+ * `5g3-prog` A3. THE MONOTONIC FLOOR ON `recordedAt`, per stock identity.
+ *
+ * `recordedAt` is a wall-clock sample and `AGENTS.md` section 7 records that
+ * this machine steps its clock backward under load. The comparator orders by
+ * `effectiveAt` FIRST, so a backward step is invisible to the negative-stock
+ * check: the two postings below sort as (+10, -5) by effective time and never
+ * project a negative prefix, so admission is satisfied. But their RECORDED
+ * times run backward, and an as-of read whose recorded-time horizon falls
+ * between them sees only the -5 -- a negative balance under `reject`, which the
+ * kernel never admitted and which nothing surfaces until someone reads history.
+ *
+ * The clock is INJECTED, never slept on (`AGENTS.md` section 6). The first
+ * posting is what makes the second one's sample a regression, so the pair is
+ * the specimen; a single posting cannot express this.
+ */
+test(
+  'posting kernel admission: a posting whose recorded time runs backward against the same stock identity is refused',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      const laterRecordedAt = '2026-07-29T13:00:05.000Z';
+      const earlierRecordedAt = '2026-07-29T13:00:03.000Z';
+      let currentInstant = laterRecordedAt;
+      const service = new PostgresInventoryPostingService(
+        database.runtimePool,
+        database.registration,
+        { currentInstant: () => currentInstant },
+      );
+
+      // Recorded LATER, effective EARLIER.
+      const credit = command({
+        effectiveAt: '2026-07-29T12:00:00.000Z',
+        legalEntityId: legalReject,
+        locationId: locationRace,
+        quantityDelta: '10',
+        sourceId: 'recorded-at-floor-credit',
+      });
+      await seedDraft(database, credit);
+      const first = await settlePosting(
+        service.postAdjustment(database.context, database.actor, credit),
+      );
+      assert.equal(
+        first.status,
+        'fulfilled',
+        `the first posting must succeed: ${
+          first.status === 'rejected' ? String(first.reason) : ''
+        }`,
+      );
+
+      // The clock steps BACK. Recorded EARLIER, effective LATER: by effective
+      // time this is (+10, -5) and never negative, so only the floor refuses it.
+      currentInstant = earlierRecordedAt;
+      const debit = command({
+        effectiveAt: '2026-07-29T12:30:00.000Z',
+        legalEntityId: legalReject,
+        locationId: locationRace,
+        quantityDelta: '-5',
+        sourceId: 'recorded-at-floor-debit',
+      });
+      await seedDraft(database, debit);
+      const outcome = await settlePosting(
+        service.postAdjustment(database.context, database.actor, debit),
+      );
+      assert.equal(
+        outcome.status,
+        'rejected',
+        `a posting recorded earlier than the same stock identity's latest movement must be refused: ${JSON.stringify(outcome)}`,
+      );
+      assertRejectedPosting(
+        testContext,
+        'recorded-at-floor',
+        outcome,
+        'INVENTORY_RECORDED_AT_REGRESSION',
+      );
+      const reason = String(
+        outcome.status === 'rejected' ? outcome.reason : '',
+      );
+      // Both instants are named, so an operator reads the clock regression
+      // rather than a bare refusal.
+      assert.match(reason, new RegExp(earlierRecordedAt, 'u'));
+      assert.match(reason, new RegExp(laterRecordedAt, 'u'));
+      assert.equal(await movementCountBySource(database, debit.sourceId), 0);
+      assert.equal(await receiptCountByKey(database, debit.idempotencyKey), 0);
+
+      // EQUALITY IS ADMITTED, and this half is what keeps the refusal from
+      // being a blunt "any repeat posting fails": the same instant as the
+      // floor still posts, which is the ordinary case for two postings inside
+      // one clock tick and for every fixed-clock test in this suite.
+      currentInstant = laterRecordedAt;
+      const equal = command({
+        effectiveAt: '2026-07-29T12:30:00.000Z',
+        legalEntityId: legalReject,
+        locationId: locationRace,
+        quantityDelta: '-5',
+        sourceId: 'recorded-at-floor-equal',
+      });
+      await seedDraft(database, equal);
+      const admitted = await settlePosting(
+        service.postAdjustment(database.context, database.actor, equal),
+      );
+      assert.equal(
+        admitted.status,
+        'fulfilled',
+        `a posting recorded at exactly the floor must be admitted: ${
+          admitted.status === 'rejected' ? String(admitted.reason) : ''
+        }`,
+      );
+    });
+  },
+);
+
 async function serveDeclaredVersionOneRelease(
   database: PostingDatabase,
 ): Promise<PostgresInventoryPostingService> {

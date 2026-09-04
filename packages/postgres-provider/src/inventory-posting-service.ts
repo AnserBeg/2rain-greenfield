@@ -41,10 +41,15 @@ import { assertTrustedActorEnvelope } from './trust/trusted-actor-envelope.js';
  * `capabilityVersion`, and the module definition's `capabilityRequirement`
  * that `buildCapabilityFacts` carries into a release manifest. The definition
  * now reads the contract, this constant now is the contract's value, and
- * `assertActiveRelease` refuses to post against a release whose declared fact
- * is not exactly this version -- exact, because ADR-0063 decision 3 defines
- * the number as a MAJOR version with no minor axis: a caller written against
- * one version is refused by another, so no other version satisfies a fact.
+ * `assertRegisteredCapabilityVersionIsDeclared` -- which runs on entry to
+ * `#post`, ahead of the stored-receipt lookup, so that no path can return
+ * without it -- refuses a release whose declared fact is not exactly this
+ * version. Exact, because ADR-0063 decision 3 defines the number as a MAJOR
+ * version with no minor axis: a caller written against one version is refused
+ * by another, so no other version satisfies a fact. `assertActiveRelease` is a
+ * SEPARATE later check that binds the active pointer and the exact storage
+ * artifact, and a stored-receipt replay returns before reaching it; the two
+ * halves are stated in ADR-0063's amendment and must not be conflated.
  */
 export const INVENTORY_POSTING_CAPABILITY_VERSION =
   INVENTORY_CONTRACT_V1.capabilityVersion;
@@ -493,6 +498,7 @@ export type InventoryPostingErrorCode =
   | 'INVENTORY_POSTING_RELEASE_MISMATCH'
   | 'INVENTORY_POSTING_STORAGE_INVALID'
   | 'INVENTORY_POSTING_STORAGE_REJECTED'
+  | 'INVENTORY_RECORDED_AT_REGRESSION'
   | 'INVENTORY_STOCK_NEGATIVE'
   | 'INVENTORY_TRANSFER_APPROVAL_REQUIRED'
   | 'INVENTORY_TRANSFER_REASON_REQUIRED'
@@ -3378,6 +3384,59 @@ async function enforceNegativeStock(
         identity.locationId,
       ],
     );
+    // posting-kernel-admission, `5g3-prog` A3. THE MONOTONIC FLOOR ON
+    // `recordedAt`, per stock identity, under the locks this posting already
+    // holds.
+    //
+    // `recordedAt` is sampled once per posting from a WALL CLOCK, and
+    // `AGENTS.md` section 7 records that this machine steps its clock backward
+    // ~2s under CPU load. The comparator orders by `effectiveAt` FIRST and only
+    // then by `recordedAt`, so a backward step is invisible to the negative
+    // check below: a +10 recorded at 10:00 with an earlier effective time and a
+    // -5 recorded at 09:00 with a later effective time sort as (+10, -5) and
+    // never project a negative prefix. Admission is satisfied -- and yet an
+    // as-of read whose recorded-time horizon falls between 09:00 and 10:00 sees
+    // ONLY the -5 and returns a negative balance, under a policy that refuses
+    // negative stock. The kernel would have published a balance it never
+    // admitted, which is silent until someone reads history.
+    //
+    // REFUSED rather than clamped, and the alternative was real: the review
+    // sanctioned either. Clamping the sample up to the floor keeps the posting
+    // alive and removes the window too, but it stores an instant the clock
+    // never produced -- a falsified fact in the trust substrate and in every
+    // receipt derived from it. This platform refuses rather than rewrites
+    // business data, and a clock that ran backward is an environment fault an
+    // operator needs to SEE. The cost is stated in the packet record: a
+    // posting can fail on a machine whose clock regresses.
+    //
+    // EQUALITY IS ADMITTED, and that is load-bearing rather than incidental --
+    // two postings inside one clock tick, and every test with a fixed instant
+    // authority, record the same instant. Only a STRICTLY earlier instant
+    // refuses; the remaining tuple fields order the tie deterministically.
+    //
+    // Both sides are fixed-width canonical UTC (`YYYY-MM-DDTHH:MM:SS.mmmZ`), so
+    // lexicographic order is chronological order -- the same property the
+    // comparator already depends on. No extra query: the persisted rows are the
+    // ones already read for the negative check.
+    const plannedRecordedAt = identityMovements
+      .map((movement) => movement.recordedAt)
+      .toSorted()[0]!;
+    const recordedAtFloor = persisted.rows
+      .map((row) => row.recordedAt)
+      .toSorted()
+      .at(-1);
+    if (recordedAtFloor !== undefined && plannedRecordedAt < recordedAtFloor) {
+      throw postingError(
+        'INVENTORY_RECORDED_AT_REGRESSION',
+        `this posting records ${plannedRecordedAt}, earlier than ${recordedAtFloor} already recorded for the same stock identity, so an as-of read between the two could show a balance this posting never admitted`,
+        {
+          itemId: identity.itemId,
+          locationId: identity.locationId,
+          plannedRecordedAt,
+          recordedAtFloor,
+        },
+      );
+    }
     const ordered = [
       ...persisted.rows.map((row) => ({
         ...row,
@@ -5508,11 +5567,17 @@ async function moduleWriteCounters(
  *    AFTER this snapshot. Its writes are invisible here and there is no second
  *    observation. The movement's own writes keep the observation non-empty, so
  *    the empty guard does not catch it either. **No such trigger exists in this
- *    repository today** -- measured: there is no `CREATE CONSTRAINT TRIGGER`
- *    anywhere, and the `DEFERRABLE INITIALLY DEFERRED` declarations in
- *    migration 0006 are platform-plane FK and unique CONSTRAINTS, which check
- *    rather than write. So this is an unclosed vector rather than a live
- *    defect, and it is filed as
+ *    repository today** -- measured, and CORRECTED by
+ *    `posting-kernel-admission` under `5g3-prog` A6, because the sentence that
+ *    stood here was false: it said there is no `CREATE CONSTRAINT TRIGGER`
+ *    anywhere, and `db/migrations/0005_release_activation_kernel.sql` creates
+ *    FOUR. They are PLATFORM-plane, on release-activation tables this query
+ *    filters out by schema, so no such trigger writes a MODULE relation and the
+ *    vector below stays dormant -- but the reason is the plane, not their
+ *    absence. The `DEFERRABLE INITIALLY DEFERRED` declarations in migration
+ *    0006 are platform-plane FK and unique CONSTRAINTS, which check rather than
+ *    write. So this is an unclosed vector rather than a live defect, and it is
+ *    filed as
  *    `posting-write-observation-misses-deferred-triggers` with the control that
  *    would settle it.
  *  - Anything that is not tuple DML on a user table.

@@ -217,6 +217,60 @@
           "expected": "a recorded result must not be replayed under a release declaring a different capability version"
         }
       ]
+    },
+    {
+      "name": "recorded-at-floor-absent",
+      "claim": "`5g3-prog` A3, THE SUBJECT ABSENT. `recordedAt` is a wall-clock sample and this machine steps its clock backward under load; the comparator orders by `effectiveAt` first, so a backward step is invisible to the negative-stock check. Remove the floor and the specimen posting -- recorded earlier than the movement already on its stock identity, effective later -- is ADMITTED, exactly as before this packet: by effective time the prefix is (+10, -5) and never negative. What the admission then publishes is an as-of read, at a recorded-time horizon between the two, showing -5 under a policy that refuses negative stock. Silent until someone reads history, which is why it is Band A rather than visible-on-use.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    if (recordedAtFloor !== undefined && plannedRecordedAt < recordedAtFloor) {\n      throw postingError(\n        'INVENTORY_RECORDED_AT_REGRESSION',\n        `this posting records ${plannedRecordedAt}, earlier than ${recordedAtFloor} already recorded for the same stock identity, so an as-of read between the two could show a balance this posting never admitted`,\n        {\n          itemId: identity.itemId,\n          locationId: identity.locationId,\n          plannedRecordedAt,\n          recordedAtFloor,\n        },\n      );\n    }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "recorded time runs backward"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "posting kernel admission: a posting whose recorded time runs backward against the same stock identity is refused",
+          "expected": "must be refused"
+        }
+      ]
+    },
+    {
+      "name": "comparator-drops-the-movement-id-tie-break",
+      "claim": "`5g3-prog` A2, and the finding was that this kill existed only as PROSE: ADR-0027's table and the test's own assertion message named the mutation, and no manifest entry ran it. The global movement order is a seven-field tuple whose LAST discriminator is `movementId`; without it two movements identical in all six other fields compare EQUAL, `toSorted` is stable, and the order becomes an artifact of input sequence rather than a total order. That is what makes a posting's admission decision reproducible, so an unstable tie-break is a silent divergence between two runs over the same facts.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    [left.movementId, right.movementId],\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "same-instant order"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "the global same-instant order reaches its movementId tie-break",
+          "expected": "removing the production comparator movementId branch must reverse this verdict"
+        }
+      ]
+    },
+    {
+      "name": "negative-stock-stops-sorting-persisted-with-planned",
+      "claim": "`5g3-prog` A2, second entry, and a DIFFERENT property from the comparator one: that the negative-stock check orders the persisted movements TOGETHER WITH the planned ones under that comparator, rather than checking the planned ones after the persisted ones. Remove the combined sort and the two sets stay in concatenation order -- every persisted row first -- so a planned debit that must sort BEFORE a persisted credit at the same instant is evaluated after it, the running prefix never goes negative, and a posting that has to be refused COMMITS. The specimen is built to discriminate exactly this: `sourceId` `a-planned-debit` sorts before `z-persisted-credit` at an identical effectiveAt and recordedAt.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    ].toSorted(compareInventoryMovementOrderEntries);\n",
+      "replacement": "    ];\n",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "one-way doors"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "the Inventory posting capability closes the first-movement one-way doors",
+          "expected": "Missing expected rejection"
+        }
+      ]
     }
   ]
 }
