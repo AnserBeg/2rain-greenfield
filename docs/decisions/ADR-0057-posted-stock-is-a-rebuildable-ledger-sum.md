@@ -102,7 +102,7 @@ onto every row would itself be a false freshness claim.
 ### Rebuild replaces only derived rows without hard deletion
 
 The materializer exposes a trusted-scope rebuild and also runs it when the
-projection is first materialized. Rebuild:
+projection is first materialized — and, **measured 2026-09-01 by `5g3-prog` arm 2, on EVERY prepared storage transition**: `ensurePostedStockBalanceProjection` sits in the transition apply path and calls the rebuild unconditionally, overwriting without comparison (amendment below, A1; owned by `posted-stock-honesty`). Rebuild:
 
 1. takes the existing posting-generation advisory lock exclusively;
 2. refuses a tuple whose ledger movements carry more than one base unit;
@@ -141,7 +141,7 @@ stock count before the Posted stock list has a row to show.
 - Browsing answers current posted-ledger stock with an explicit temporal limit;
   historical/as-of questions continue through the bitemporal aggregate lookup.
 - Projection loss is recoverable from business truth, and drift is named rather
-  than silently healed by reconciliation.
+  than silently healed by reconciliation — **true of `reconcile`, and not yet true of the system** (`5g3-prog` A1, 2026-09-01): the transition-time rebuild overwrites a drifted row without naming it, and `reconcile` has no production caller. `posted-stock-honesty` closes both.
 - Direct projection writes remain unsupported even though the provider must
   hold narrow trigger and rebuild privileges.
 - The new authored entity changes compiled output and therefore mints one new
@@ -189,3 +189,26 @@ stock count before the Posted stock list has a row to show.
 - [ADR-0015](ADR-0015-legal-entity-business-dimension.md)
 - [ADR-0016](ADR-0016-stock-identity-dimension-set.md)
 - [ADR-0047 §5](ADR-0047-the-compiler-semantic-profile-is-the-projection-evolution-axis.md)
+
+## Amendment 2026-09-01 — the row's own horizon, and what was mis-stated on the first attempt
+
+Recorded by the orchestrator on `5g3-prog`: arm 1's R5 measured that
+[ADR-0018](ADR-0018-temporal-authority.md) requires *"a materialized balance
+records the `recordedAt` horizon it was computed at"* while `posted_stock_balance`
+carries no horizon; arm 2's A5 corrected the orchestrator's first amendment, which
+had argued a stored horizon would be a false freshness claim under concurrent
+readers. **That argument is right about a GLOBAL generation stamp and wrong about
+the row's OWN horizon**, which this ADR never considered:
+
+- Each `posted_stock_balance` row is the sum of a definite set of movements. The
+  maximum `recordedAt` over that set is exact, is what ADR-0018 asks the row to
+  state, and costs `greatest(...)` in the trigger and `MAX(...)` in the rebuild.
+- Until that column exists, this ADR departs from ADR-0018's launch invariant and
+  says so here rather than by omission. **The column lands with the next
+  posted-stock change** — `SAL-2`'s read models are the natural owner — and adding
+  it is a rebuild, which is this ADR's own property working in the right direction.
+- The distinction arm 1 asked for stands: this row is a **transaction-snapshot
+  projection** (the sum of everything posted at the reader's committed snapshot),
+  not an **as-of balance**; as-of questions go through the bitemporal aggregate
+  lookup. ADR-0065's received-quantity row is the snapshot kind and inherits both
+  this distinction and the own-horizon obligation.

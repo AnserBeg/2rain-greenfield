@@ -132,7 +132,7 @@ era boundary that nobody declared.
 ## Enforcement
 
 - Compiler: read models and queries over inventory lower against the declared dimension set;
-  a hardcoded `(item, location)` tuple in a compiled projection fails closed. An item
+  a hardcoded `(item, location)` tuple in a compiled projection fails closed — **corrected 2026-09-01 (`5g3-prog` A6): no such general rule exists in `packages/compiler/src/conformance.ts`; the one shipped projection is pinned by the posted-stock ABI conformance ADR-0057 installed, and the general rule is owed by whichever packet next compiles a stock projection.** An item
   definition that permits base-unit mutation fails a stable diagnostic.
 - Provider: `stockDimensionSetVersion` is `NOT NULL` on every posted movement; a base-unit
   update against an item with any movement fails closed.

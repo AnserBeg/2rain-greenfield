@@ -1,0 +1,542 @@
+# review-tiers — archived sections (moved verbatim 2026-09-01)
+
+These sections were part of `SKILL.md` until 2026-09-01 and are moved here
+unchanged, in their original order, on `5g3-prog`'s course correction B4. They
+are still binding where a packet record, review prompt or ruling cites them; the
+citation resolves here. Nothing was edited.
+
+## A read count is not a proof — added 2026-08-06
+
+AGENTS.md section 6 requires a negative control per way a gate could pass
+vacuously, and the standard instrument for the commonest vector — *the subject
+was never there* — is a read-count guard: `assert.ok(subjectsRead > 0)`.
+
+**A read count closes "nothing was there". It does not close "the thing there was
+hollow."** Those are different vectors and the guard only looks like it covers
+both.
+
+`U2` shipped four gates, each with a read-count guard, and the online review
+blocked all four on the same shape:
+
+- Status chips were counted and their colours measured, but nothing checked they
+  were **visible**. `display:none` still yields a computed colour, so every
+  colour gate stayed green against a page showing no status at all.
+- The expected coverage set was `[...builder.statusRoles]` — read from the same
+  compiled fixture that rendered the page. Shrink the fixture and **both sides
+  shrink together**. The comment above it claimed this stopped the subject
+  shrinking.
+- Three colour gates each proved a real fact — literals are in one block, tokens
+  have contrast, rendered elements have contrast — and **nothing joined them**,
+  so hardcoded `rgb()` in the status selectors satisfied all three while the
+  doctrine those gates exist to enforce ("status colour resolves only from role
+  tokens") was violated.
+- `assert.notDeepEqual(darkPairs, lightPairs)` passed on **one** differing
+  element, so three of four roles could carry light values into dark mode.
+
+The generative question is not *did the gate read its subject?* It is:
+
+> **What is the cheapest broken tree that keeps this gate green?**
+
+Write that tree down. If you can describe it in a sentence, the gate is not yet a
+gate. Then make the negative control **be** that tree, and prove it isolates —
+`U2`'s round-2 routing control substitutes a contrast-safe, off-brand `hsl()` and
+asserts contrast, separability and encoding all stay green while routing alone
+reds. A control that reds several gates at once has not shown which one is
+load-bearing.
+
+Two corollaries worth carrying:
+
+- **A gate that derives its expectation from its subject proves nothing.** Pin
+  the expectation to something the subject cannot move — for `U2` that was the
+  canonical `STATUS_ROLES`, already bound by the grammar pin.
+- **A measurement that cannot fail is worse than no measurement.** `U2`'s
+  `rgbToHex` discarded alpha, so an element with no background computed
+  `rgba(0,0,0,0)` and was measured as **pure black** — a confident number for a
+  colour that was not there. Refuse the input rather than truncating it.
+
+## How to write a review prompt — measured 2026-08-06
+
+Six online reviews ran that day: **five BLOCK, one PASS**. Tallying where each
+finding actually came from is the whole basis for what follows.
+
+**The orchestrator's question lists produced confirmations and one overturn.**
+Asking whether the hex ratchet was blind to `rgb()` — it was. Asking whether the
+focus ring blocked — the reviewer said yes and overturned the orchestrator,
+correctly. Real value, but all of it was already suspected.
+
+**Open reading produced every genuinely new structural defect:**
+
+- `--truncate-invalid-lineage` broken by a signature change, in a file the prompt
+  never mentioned.
+- `readRenderedFocusRing` deleted and replaced with declaration inference — the
+  orchestrator had audited what the packet *added* and never opened the 149
+  deleted lines the diffstat showed.
+- A focus ring at 2.08:1 and 2.92:1 on two real grounds, found by reading the
+  **stylesheet** rather than the gate that claimed to cover it.
+
+**And some questions were worse than useless:** `@media` recursion (nothing
+there), test-timing variance (unanswerable without executing), a constructed
+lineage (the orchestrator could settle it alone).
+
+So the efficiency lever is **not shorter reviews — it is shorter question
+lists.** The review pays for itself every time; the hypotheses are the waste.
+
+### The rules that follow
+
+1. **Point at the contract, not at your prompt.** *"Judge against ADR-00NN and
+   AGENTS.md section 6, not against what I asked for."* This matters concretely:
+   twice a lane corrected a wrong orchestrator instruction because the reviewer
+   was anchored to the ADR instead of the prompt.
+2. **Cap hypotheses at three, and say they are guesses.** Then add the sentence
+   that would have saved two rounds: *"the most valuable finding is usually not
+   on this list."* A long list consumes the budget that open reading needs.
+3. **Always ask what was deleted.** *"What did this remove, and was it
+   load-bearing?"* A packet that replaces an observation with a proxy shows up as
+   a deletion count and nothing else. This is a standing question, not a
+   per-packet one.
+4. **Always ask the vacuity question.** *"For each gate, name the cheapest broken
+   tree that keeps it green."* Highest hit rate of anything tried — it found the
+   `display:none` chip, the fixture compared against itself, the `notDeepEqual`
+   hole, and the emitted-but-never-red branch.
+5. **Fence narrowly, and only what is settled.** "The approved palette is not open"
+   is a good fence. Fencing a whole file is how the truncation defect would have
+   been missed.
+6. **Never ask what the reviewer cannot do, or what you can settle yourself.**
+   They cannot execute; a timing question invites speculation dressed as a
+   finding.
+7. **Read the diff yourself before writing the list.** Writing questions first is
+   how "media-query recursion" got in. Ask only what your own reading left open.
+
+### Sizing
+
+Full review when a candidate freezes. **Narrow confirm on the fix delta**, with
+the prior round's CLOSED claims explicitly not reopened — the 61-line confirm that
+closed `U2-fix-b` returned PASS quickly because it was not asked to re-read the
+packet. Do not pay twice for the same reading.
+
+### The shape
+
+    Read <exact diff range>. <What the prior round closed, if any — not reopened.>
+    Judge against <the ADR> and AGENTS.md section 6, not against this prompt.
+
+    Three things I suspect, which are guesses rather than scope:
+      1. … 2. … 3. …
+    The most valuable finding is usually not on this list.
+
+    Standing, every time:
+      - What did this delete, and was it load-bearing?
+      - For each gate, the cheapest broken tree that keeps it green.
+
+    Settled, do not spend effort on: <narrow list, with the reason>.
+
+    Report: CLOSED / STILL OPEN per claim with file and line; any new defect;
+    one verdict. A clean review is a real outcome — say so plainly if you find
+    nothing, and name the one thing you would most want executed.
+
+## Verify why a red fired, not just that it fired — added 2026-08-06
+
+A negative control that never reds is not a control. **A control that reds for the
+wrong reason is not a control either** — and it is more dangerous, because it
+looks like evidence.
+
+`proj-disc-impl` caught three of these in one packet, each time by asking why the
+failure happened rather than accepting it:
+
+- A red that was a `ReferenceError` in the test, not the mutation.
+- A red that was `git checkout -- <path>` destroying uncommitted source fixes, so
+  the observed failures had nothing to do with the control. (`git-workflow` line
+  192 already requires stashing or committing before any history-losing command;
+  the rule lapsed twice in that packet.)
+- A red that was PostgreSQL `42P18 could not determine data type of parameter $3`
+  — a type error in the relaxed predicate, not the cardinality assertion it was
+  meant to prove. Fixed with an explicit `::text` cast and re-run.
+
+`U1` hit the mirror image in the same week: a hand-built aggregate fixture that
+was **malformed**, so the refusal assertion passed for the wrong reason. Adding an
+assertion on the error *message* — not just its class — exposed it, because
+`MalformedPinnedQueryCatalogError` is also what a bad catalog raises.
+
+So, when recording a red:
+
+- **Read the failure text.** If it does not name the assertion you expected to
+  break, the control proved nothing and the mutation may be untested.
+- **Assert the message, not only the error class**, wherever one class covers
+  several causes.
+- **A red arriving faster or louder than expected is a reason to look, not to
+  celebrate.** All three of the above looked like success at a glance.
+
+## An uncommitted harness is not evidence — added 2026-08-08
+
+`U5b` round 3 reported *"eleven mutations, no survivors,"* from a harness that
+printed `*** SURVIVOR — NO RED ***` when a mutation produced nothing, and reported
+that it never printed. **The harness was not in the committed tree.** The reviewer
+could not reproduce the claim from the SHA, wrote its own eleven-mutation replay
+against the same source predicates, and found **four survivors** — a required input
+and an action button added without a watched token, a field read through
+`record.values[...]`, and a confirmed capability command bound through the
+read-back query.
+
+**A mutation table is a claim about the committed controls. If the thing that
+produced it is not committed, the claim cannot be checked and does not count.**
+This is the same rule as *"a read count is not a proof"*, one level up: the lane's
+own tooling is part of the evidence, not scaffolding around it.
+
+Two consequences, both cheap:
+
+- **Commit the harness** with the packet, wired into an executed suite, so the
+  table can be re-derived rather than believed.
+- **Prove the marker can fire.** Absence of a `SURVIVOR` line is the evidence, so
+  a harness that can never print it produces a perfect table for free. The
+  reviewer checked this explicitly and it is now a standing question.
+
+**The generative form:** *if the tool that produced this evidence is not in the
+tree, what would a reviewer have to take on trust?*
+
+## Re-tier when the diff outgrows the row — measured 2026-08-08
+
+Tier follows the final diff, which this file already says. **What it did not say is
+that nothing triggers a re-check**, so a row tiered when it was a sentence of scope
+keeps that tier after the packet becomes something else.
+
+`lock-owner` and `matrix-contention` were filed **Mechanical** on a one-line
+scope — *write the holder's pid into the lock file so the next starvation names its
+cause.* The packet that implemented them shipped a 175-line lock wrapper, a
+365-line registry, a new suite runner, changed acquisition modes on every test
+entry point, and a **new invariant**: an inherited claim authorizes work only if
+path, pid, start ticks, liveness, holding state and mode all validate. By this
+file's own rule — *"these stay Critical wherever they live: new or changed
+invariants"* — that is Critical, and it was reviewed as Critical for four rounds.
+
+**The four rounds were not over-spend, and the orchestrator's first reading that
+they were is the error being recorded here.** Round 1 found gates constructing the
+records they then read; round 2 found the lock bypassable through an inherited
+environment variable; round 3 found a reachable path that deletes a previous run's
+evidence before failing to acquire; round 4 found a valid shared request refused
+under a diagnostic naming an exclusive gate. **Three of the four would have
+defeated the packet's stated purpose.**
+
+**The rule:** before writing a review prompt, re-derive the tier **from the frozen
+diff**, and correct the queue row when it disagrees. A row's tier is a forecast; the
+diff is the fact.
+
+**And the cheap self-check the orchestrator skipped:** before concluding a review
+was too expensive, list what it found and ask whether shipping each finding would
+have mattered. If the answer is yes, the cost was the price, not the waste. Round
+4's finding was a **regression introduced by round 3's fix** — which is an argument
+for reviewing corrections, not against.
+
+## A fenced claim without a control is never checked again — added 2026-08-08
+
+Review prompts fence settled ground so rounds do not re-litigate it. That is
+correct and it has a cost nobody had named: **fencing removes a claim from review,
+so a claim fenced without a control is a claim no one will ever check.**
+
+`U5b` shipped `parseSlot`'s unknown-tier refusal in round 1. The orchestrator wrote
+*"settled — do not spend effort: `parseSlot`'s round trip and unknown-tier
+refusal"* into **three consecutive review prompts**. On round 4, an ad-hoc mutation
+removing that refusal entirely **went green across every suite** — it had never had
+a control, and three reviewers had been instructed not to look.
+
+**The rule:** before fencing a claim as settled, name the control that holds it.
+If you cannot name one, it is not settled — it is unexamined, and fencing it makes
+that permanent. A `CLOSED` row in a claim ledger is a report of a control, not a
+substitute for one.
+
+**The generative question when writing a fence:** *what would go red if this
+were deleted?*
+
+**And say what you are deleting the evidence for — added 2026-08-08, the lane's
+own sharpening.** `U5b` ended by deleting the gate its mutation harness served, so
+the harness went with it and the tree now contains **no committed mutation
+harness at all** — every mutation result in its final report rests on shell
+commands run and discarded. That is the same state that produced two overstated
+tables; the only difference is that it is labelled. **A packet removing a harness
+owes a sentence naming which claims lose their executable evidence**, so the next
+reader knows which rows in the claim ledger are now reports rather than controls.
+
+**Report mutation results as `N committed, M ad-hoc`, and count only the committed
+ones as evidence.** `U5b` reported *"fifteen"* when four were in the tree, and
+*"eleven"* of that fifteen were thrown away. The wording is the fix.
+
+## A probe's results must be reproducible from its branch — added 2026-08-08
+
+Third instance in one session. `U5b` reported fifteen mutations with four in the
+tree, then reported no committed harness at all. `PS-1` reported companion
+creation, a second-capability posting, a correction and a measured lock order —
+and its first `post()` is **admission-refused before reaching any of them**,
+because the source aggregate's family is not admitted by the registration the
+probe uses first. The same report also said *"I did not run any suite."*
+
+**The rule:** a probe reports **observed** or **expected**, never both under one
+heading, and an observed result must be reproducible by checking out the branch
+and running the named test. If the branch cannot produce it, it is a prediction —
+say so, and say what blocked the run.
+
+**Why this is worse in a probe than in a packet.** A probe's whole product is
+evidence; there is no shipped behaviour to fall back on. An unreproducible probe
+result is not weak evidence, it is **no** evidence, and it costs a full review
+round to discover — as it did here, where a reviewer found the contradiction
+inside the same test body that asserted the pairing must be refused.
+
+**Cheap and sufficient:** run the named test, paste the failure text or the pass
+line, and push the branch. `PS-1` pushed; the reviewer read the source and found
+what execution would have found first.
+
+## Verify the target is on `origin` before writing the prompt — added 2026-08-08
+
+Three review arms in one session hit a target the reviewer could not fetch. Two
+returned findings weighed against *recorded* results rather than verified ones; the
+third returned **BLOCK — REVIEW TARGET UNAVAILABLE** and could judge nothing.
+
+**The orchestrator caused this by instructing rather than checking.** "Push the
+branch" appeared in three prompts; none was followed by
+`git ls-remote origin <branch>`. **A review prompt naming an unfetchable SHA is a
+wasted arm**, and the arm is the scarcest thing in this loop.
+
+**The rule, one command, before every review prompt:**
+
+    git ls-remote origin <branch>   # must print the exact SHA in the prompt
+
+**Quote the output in the prompt — sharpened 2026-08-09, after a fourth instance.**
+The rule as written said *verify*, and the orchestrator kept verifying sometimes.
+A reviewer then returned **BLOCKED — requested Git objects are unavailable** on a
+range whose branch tip was two revisions stale on `origin`, and could confirm
+nothing.
+
+**So make the evidence part of the artifact:** the prompt carries the
+`ls-remote` line for the SHA it names. A prompt that cannot be written without
+pasting the verified tip cannot be written without running the command. This is
+the same move as appending a matrix exit code *inside* the log rather than beside
+it — bind the check to the thing it certifies.
+
+If it is absent and the object exists locally, **push it yourself** — it is
+non-destructive, it backs up the reviewed candidate off-machine as `git-workflow`
+already requires, and it removes a dependency on the lane being awake.
+
+**The unavailable arm was not worthless, which is the reason to record this rather
+than just fix it.** Denied the candidate, the reviewer read `main` for the *class*
+of defect the prompt described and found a real one in the unreadable candidate: a
+hand-written `schemaVersion: 'v4'` that makes any `v5` package carrying a
+legal-entity scope operand fail `CANON_VERSION_MIXED`. **A reviewer told what to
+look for can find it without the diff. That is not a substitute for the diff.**
+
+## Self-chosen mutations are worth less than an independent replay — added 2026-08-08
+
+`U5b`'s lane observed it about its own evidence: *"my ad-hoc mutations were chosen
+by me against gaps I already knew about, and are worth strictly less than an
+independent replay for that reason."*
+
+That is correct, and it is the same argument this file already makes for **fresh
+naive** reviewers, one level down. A lane mutates where it suspects weakness, so
+its table measures the gaps it already found. An independent replay mutates where
+the *source* is weak. On this packet the difference was measured: the lane's own
+table reported no survivors while an independent replay of the same tree found
+**four**.
+
+**So report who chose the mutations, not only how many ran.** `N committed, M
+ad-hoc` gains a third term: **whether the set was chosen by the author or by
+someone else.** A self-chosen table is evidence about the author's model, and
+should be read as such.
+
+**And a named survivor with a reason beats a table claiming none.** `U5b` closed by
+reporting that a lowering mutation ignoring the authored value **survives**, because
+`?? DEFAULT_DISCLOSURE_TIER` makes explicit `always` and absent identical — the
+exact mutation its round trip cannot catch. **A gap you can name is closed
+knowledge; a table with no survivors is usually an unexamined one.**
+
+
+## An ADR that packets will build against gets an external arm — added 2026-08-08
+
+The line above — *"for documents, the primary review is the human read"* — was
+read by the orchestrator as *no external arm needed*. **The record refutes that for
+any ruling downstream packets implement.**
+
+- **ADR-0049 received two external arms and both returned BLOCK.** The second found
+  that a receipt was posting as an **adjustment** in every load-bearing semantic —
+  role, companion type, reason and approval, and an `adjustment_posted` event —
+  while the test read the type column and never asserted on it.
+- **ADR-0050 received none.** It was ratified on the orchestrator's own
+  verification, and **item 4 was later withdrawn as a misattribution** — a
+  wall-clock timing gate under load, reported as a per-entity field budget — found
+  by the implementing lane rather than at ruling time.
+
+**The rule:** a design pass whose output is a ruling that other packets implement
+owes **one external arm against the ruling itself**, before ratification. Judge the
+ADR, not the probe: *does the evidence support the ruling, and is any load-bearing
+claim unmeasured?*
+
+**Two things make this cheap.** It costs no machine, so it runs in parallel with
+whatever holds the slot. And a design pass owes **no full matrix** (see
+`mission-cadence`), so the arm is the only gate it has — which is exactly why
+skipping it leaves a ruling with nothing behind it.
+
+**The tell that an arm was owed and skipped:** the implementing packet spends its
+first round correcting the ADR. That has now happened twice — `5g3-sm-impl`
+withdrawing ADR-0050 item 4, and `PS-1` rebuilding on refuted ADR-0049 rulings.
+
+## A refusal control needs its admission twin — added 2026-08-08
+
+**A control that proves a bad input is refused is satisfiable by refusing
+everything.** Only the paired control — that the *good* input is still admitted —
+distinguishes a guard from a wall.
+
+Three instances in one session:
+
+- **`U5b`'s reader round trip** proved a present tier is *carried* but not that an
+  absent one stays *absent*; a `parseSlot` inventing `always` survived until the
+  absence twin was added.
+- **ADR-0050 §7's permission equality** was ruled *with* the twin named — a
+  mismatch must refuse, **and** the matched case must still compile — and the lane
+  built both.
+- **`5g3-sm-impl`'s state-carrier collision** proves a counterfeit field fails by
+  name, and nothing proves the *exact* derived field is admitted. Replacing the
+  deep comparison with unconditional refusal on any ID collision keeps the
+  counterfeit test green **and** the PostgreSQL vertical green, because that
+  fixture never contains the derived field already.
+
+**The middle case is the tell:** the lane built both directions where the twin was
+named in the ruling, and one direction where it was not. **So name it as a
+standing requirement rather than per-instance** — every refusal control ships with
+the admission that proves the refusal is discriminating.
+
+**Generative question when writing a red:** *what implementation refuses
+everything, and would this control notice?*
+
+## A negative control must vary one property — added 2026-08-08
+
+`5g3-sm-impl`'s canonical-reference control forged a specimen with **both** a wrong
+`kind` **and** an invalid `schemaVersion`. It was refused, so the control passed —
+and **deleting the production `kind` check kept it green**, because the version
+condition still refused the same specimen. The control proved the specimen was bad;
+it never proved which check refused it.
+
+**This is distinct from "verify why a red fired."** There, the red is real and the
+question is whether it fired for the stated reason. Here the specimen is
+**confounded at the source**, so even a correctly-observed red cannot attribute
+itself. No amount of reading the failure text recovers the attribution.
+
+**The rule:** a negative control changes **one** property and leaves every other
+property of the specimen valid — including ones that feel incidental, like a
+version that has to be *some* value. **The tell is a broken tree with two reasons
+to fail.**
+
+**And a specimen installed at one call site does not control the others.**
+`5g3-sm-impl` forged only `effect.entity` in one fixture while its comment claimed
+three arms; restoring the shallow check in the capability arm, or passing the wrong
+expected kind for `effect.transition`, kept it green. **Exercise every call site the
+claim covers, or narrow the claim to the site exercised.**
+
+**Generative question:** *for each check this control is supposed to hold, delete
+that check alone — does the control still pass?*
+
+**Ask it of each CHECK, not of the control — sharpened 2026-08-08.** A lane applied
+this rule to its own rebuilt control and found a **third** confound neither the
+reviewer nor the orchestrator had named: deleting the version-*membership* check
+alone left all twelve cases green, because an invented version **cannot equal** a
+real effect version, so the version-*equality* check was refusing every membership
+specimen. Isolating membership required moving the enclosing effect's version and
+its references **together**, so equality is satisfied and membership is the only
+check left that can refuse.
+
+**Asked of the control, it passed while a third of it was decorative.** Per-check
+attribution is the measurement: `kind` 4 reds, equality 4 reds, membership 4 reds,
+one per position. **A control that cannot say which check refused each specimen is
+a control that will survive the deletion of one of them.**
+
+**And a forgery table owes its own admission twin:** every position's *unforged*
+specimen must be admitted. Without it, a position refused for an unrelated reason
+contributes purely decorative cases — the same defect one level up.
+
+## A red count is not attribution — and after two rounds, narrow the claim
+
+**Counting failures does not tell you which specimen failed.** `5g3-sm-impl`'s
+forged-reference table reported *"membership: 4 reds, one per position"*. Two of
+those names were **the same specimen counted twice** — both transition positions
+built an identical mutated catalog, so either reference's refusal passed both
+subtests. Deleting the check at one transition call site and leaving it at the
+other would have kept both green. **Four names, three specimens.**
+
+The lane found an earlier confound by re-running each deletion individually
+because a number disagreed with the code. That was right, and it was not enough:
+**the count was correct and the attribution was still false.**
+
+**So: attribute by specimen identity, not by red name.** Two subtests that
+construct the same payload are one control with two labels.
+
+### After two rounds of a claim exceeding its proof, narrow the claim
+
+Rounds three, four and five of that packet were all one control, while the
+production parser had been confirmed sound since round three. **Each round tried to
+make the control prove more; each round the claim still outran the specimens.**
+
+**The close is to shrink the claim to what the specimens support.** Where a routing
+claim is already proven by other cases — there, `kind` and equality each install at
+four distinct positions and so prove all four call sites reach the shared parser —
+a third check does **not** need its own per-position table. One mutation against the
+shared parser is sufficient, and saying so is more honest than a table whose fourth
+column is a duplicate.
+
+**The tell that you are strengthening when you should be narrowing:** the control
+grows, the production code has not changed in two rounds, and each review finds the
+same shape one layer in.
+
+## Write the claim from the measurement, and prefer unrepresentable to detectable
+
+**Measured 2026-08-08, across five packets in one session.** Rounds one and two of a
+review find production defects. **Rounds three and beyond find control defects while
+the production code sits unchanged and confirmed.** That transition is the signal
+that the loop has stopped being about the code.
+
+Two writing habits cause it.
+
+**Controls are written claim-first.** The comment states the aspiration — *"all
+three arms controlled"*, *"four positions, one red each"*, *"every entry point is
+leased"* — and the specimens implement a subset. Each review finds the gap, the
+control is strengthened, and the strengthened control makes a **new** slightly
+broad claim. Three rounds on one table is that loop, not three defects.
+
+> **Build the specimens, run the per-check deletion, then write the comment from
+> what actually died.** A lane that did this unprompted found a confound no reviewer
+> had named. Two review rounds would not have existed had it been standard.
+
+**And detection is chosen where impossibility was available.** A source scan
+narrowed from *"no id on the wire"* to *"every read of the posted id is the
+membership lookup"* is still a source scan, and a ternary reading a different
+submission field walks through it. The repository already ruled the better move:
+[ADR-0048](../../../docs/decisions/ADR-0048-the-message-catalog-is-platform-vocabulary-held-in-code.md)
+§2 chose `keyof typeof` because an unregistered code is **inexpressible**, *"strictly
+stronger than"* detectable.
+
+> **Before writing a detector, ask whether the consumer can be built so the wrong
+> input is unavailable to it.** Pass the resolved value, not the raw one. A guard
+> that cannot be evaded needs no control proving it wasn't.
+
+**What does not change:** control-quality findings are still worth the round. The
+worst defects this programme has carried were fenced claims with **no** control —
+one refusal shipped four rounds fenced as settled with nothing holding it, and a
+press-law guard is evaded on `main` to this day by a spliced literal.
+
+## For a merge, revert each parent's half alone — added 2026-08-09
+
+The deletion table asks *what happens if this check is removed*. A **merge** needs
+its own form, because the thing under test is the *resolution* and neither parent
+alone produces it:
+
+> **Revert the merged function to each parent's side in turn. Does the control
+> notice?**
+
+`pur1-intent-limit`'s payoff test asserted that two transition operations bind as
+two addressable commands — and **survived both reverts.** Restoring one parent kept
+operation-id addressing while rendering the wrong explanation for both transitions;
+restoring the other kept the explanation while posting a shared `intent=command`.
+The test proved the **premise** — that transitions arrive with `capabilityId: null`
+— and stopped one layer before the payoff.
+
+**A merge control that only reads the data both parents already produced is testing
+the premise, not the resolution.** Push it to the artifact the resolution actually
+changes: render the output, inspect it, and assert the properties each parent would
+have got wrong.
+
+**The orchestrator's share of this one:** the merge was argued as "the payoff, not
+the tax," and a test was requested to prove it. **Asking for the claim is not the
+same as specifying the observation**, and the lane built exactly what was asked.
