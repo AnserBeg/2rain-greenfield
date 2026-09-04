@@ -11,7 +11,7 @@ import {
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
-  compileApplication,
+  compileApplicationRelease,
   type CompileSuccess,
   type ProjectionFamilyId,
   type ProjectionManifestEnvelope,
@@ -35,7 +35,7 @@ const normalizedDefinition = parseNormalizedApplicationPackageJson(
 // The shell is a v0 package with one declared permission and, like every
 // release, it is handed its acknowledgement explicitly; the loader refuses
 // before compiling if the checked-in list has no entry for it.
-const result = compileApplication(
+const result = compileApplicationRelease(
   {
     dependencies: [],
     expectedActiveRelease: null,
@@ -49,12 +49,10 @@ const result = compileApplication(
         normalizedDefinition.normalizationProfileVersion,
     },
   },
-  {
-    unboundPermissionAcknowledgement: readUnboundPermissionAcknowledgementFor(
-      authoredPath,
-      normalizedDefinition.package.packageId,
-    ),
-  },
+  readUnboundPermissionAcknowledgementFor(
+    authoredPath,
+    normalizedDefinition.package.packageId,
+  ),
 );
 
 if (result.status !== 'compiled') {

@@ -4,6 +4,7 @@ import {
   cpSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -30,6 +31,7 @@ import {
   MODULE_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
   compileApplication,
+  compileApplicationRelease,
   diffCompiledReleases,
   executeVerificationPlan,
   expectedActiveReleaseFrom,
@@ -63,6 +65,7 @@ import {
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
 import {
+  narrowAcknowledgementToDeclared,
   readAcknowledgementDocument,
   readUnboundPermissionAcknowledgementFor,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -1649,12 +1652,141 @@ test('unbound-permission acknowledgement: the unchanged composed application bui
     acknowledgement.entries.length,
   );
   assert.ok(declared.length > 0);
-  // A compile handed NO acknowledgement is a fixture or standalone compile and
-  // is not governed. That is a fact about the caller's code, not about a
-  // mutable list, and the release scripts never compile without one.
+  // `compileApplication` is the FIXTURE entry point and is ungoverned unless a
+  // caller supplies an acknowledgement; that is what keeps synthetic packages
+  // compiling. It is not reachable from a release path -- see the two controls
+  // below, which are round 3's answer to round 2's review.
   assert.equal(
     compileApplication(inputNormalized(normalized)).status,
     'compiled',
+  );
+});
+
+test('unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned', () => {
+  const normalized = composedNormalized();
+  // The parameter is required, so omitting it is a TYPE error: a release path
+  // cannot reach an ungoverned compile by forgetting an argument. This control
+  // covers the only way past the type -- a cast -- and proves the runtime
+  // refuses it too, by the package's own name.
+  for (const forced of [undefined, null, {}]) {
+    const result = compileApplicationRelease(
+      inputNormalized(normalized),
+      forced as unknown as Parameters<typeof compileApplicationRelease>[1],
+    );
+    assert.equal(
+      result.status,
+      'failed',
+      `a release compile handed ${JSON.stringify(forced)} must be refused, never ungoverned`,
+    );
+    assert.deepEqual(structuralDiagnostics(result), [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_INVALID',
+        path: '$.options.unboundPermissionAcknowledgement',
+        subjectId: COMPOSED_PACKAGE_ID,
+      },
+    ]);
+  }
+  // And the same entry point admits the real thing.
+  assert.equal(
+    compileApplicationRelease(
+      inputNormalized(normalized),
+      readUnboundPermissionAcknowledgementFor(
+        APP_AUTHORED_PATH,
+        COMPOSED_PACKAGE_ID,
+      ),
+    ).status,
+    'compiled',
+  );
+});
+
+test('unbound-permission acknowledgement: no production source calls the ungoverned compiler entry point', () => {
+  // The structural half of round 3. `compileApplication` cannot govern what it
+  // is not told about, so the guarantee is that no code which mints a served
+  // release can call it: every production caller must use
+  // `compileApplicationRelease`, whose acknowledgement is required. This scan
+  // is what makes "a third release script cannot forget" a fact rather than a
+  // promise -- forgetting is a type error, and reaching for the ungoverned
+  // entry point instead fails here.
+  const roots = ['apps', 'packages'];
+  const offenders: string[] = [];
+  let scanned = 0;
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (
+          entry.name === 'node_modules' ||
+          entry.name === 'test' ||
+          entry.name === 'dist' ||
+          entry.name === 'release'
+        ) {
+          continue;
+        }
+        walk(path);
+        continue;
+      }
+      if (!entry.name.endsWith('.ts') && !entry.name.endsWith('.tsx')) continue;
+      // The compiler package DEFINES both entry points; it is not a caller.
+      if (path.startsWith(join('packages', 'compiler', 'src'))) continue;
+      scanned += 1;
+      const source = readFileSync(path, 'utf8');
+      if (/(?<!Release)\bcompileApplication\s*\(/u.test(source)) {
+        offenders.push(path);
+      }
+    }
+  };
+  for (const root of roots) walk(root);
+  assert.ok(
+    scanned > 50,
+    `the scan must read production sources, read ${String(scanned)}`,
+  );
+  assert.deepEqual(
+    offenders,
+    [],
+    'a production source calls the ungoverned compileApplication; a release path must use compileApplicationRelease, whose acknowledgement is required',
+  );
+  // The scan is not vacuous: it does find the governed entry point in the two
+  // release scripts, so a deletion of that call would be visible here.
+  const governedCallers = [
+    'apps/web/scripts/compile-app-release.ts',
+    'apps/web/scripts/compile-demo-release.ts',
+  ].filter((path) =>
+    /\bcompileApplicationRelease\s*\(/u.test(readFileSync(path, 'utf8')),
+  );
+  assert.deepEqual(governedCallers, [
+    'apps/web/scripts/compile-app-release.ts',
+    'apps/web/scripts/compile-demo-release.ts',
+  ]);
+});
+
+test('unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it', () => {
+  const acknowledgement = readUnboundPermissionAcknowledgementFor(
+    APP_AUTHORED_PATH,
+    COMPOSED_PACKAGE_ID,
+  );
+  const declared = new Set([PARTY_CREATE_PERMISSION_ID]);
+  const narrowed = narrowAcknowledgementToDeclared(acknowledgement, declared);
+  assert.equal(narrowed.packageId, COMPOSED_PACKAGE_ID);
+  assert.deepEqual(
+    narrowed.entries.map((entry) => entry.permissionId),
+    [PARTY_CREATE_PERMISSION_ID],
+    'narrowing keeps exactly the permissions the revision declares',
+  );
+  // It can only remove. A permission the revision declares that the checked-in
+  // list does not name stays ABSENT, so the compiler refuses it as unbound --
+  // which is the correct outcome for a recorded release that declared a
+  // permission nothing ever acknowledged.
+  const invented = narrowAcknowledgementToDeclared(acknowledgement, {
+    has: () => true,
+  } as unknown as ReadonlySet<string>);
+  assert.equal(invented.entries.length, acknowledgement.entries.length);
+  assert.ok(
+    !invented.entries.some(
+      (entry) =>
+        entry.permissionId ===
+        `${APPLICATION_NAMESPACE}:permission.never_declared`,
+    ),
+    'narrowing never invents an entry, so it cannot certify a revision against itself',
   );
 });
 

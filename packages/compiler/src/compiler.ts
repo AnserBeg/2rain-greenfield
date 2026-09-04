@@ -78,6 +78,7 @@ import {
   type CompilerDependency,
   type CompilerDiagnostic,
   type CompilerExecutionOptions,
+  type UnboundPermissionAcknowledgementInput,
   type CompilerInput,
   type CompilerLimits,
   type CompilerSemanticProfile,
@@ -203,11 +204,61 @@ export interface HistoricalApplicationReproductionExpectation {
   readonly releaseRoot: string;
 }
 
+/**
+ * Compiles a package WITHOUT asserting permission governance unless the caller
+ * supplies an acknowledgement. This is the fixture and standalone entry point:
+ * it mints nothing that is served, and a test compiling a synthetic package
+ * owes no acknowledgement of a vacuum it does not ship.
+ *
+ * **A release build must not use this.** Use `compileApplicationRelease`, whose
+ * acknowledgement is a REQUIRED parameter, so a release path cannot omit
+ * governance by forgetting an argument -- omission is a type error rather than
+ * a silent green build. `test/compiler/g2-module-conformance.test.ts` asserts
+ * that no production source under `apps/` or `packages/` calls this function.
+ */
 export function compileApplication(
   input: CompilerInput,
   options: CompilerExecutionOptions = {},
 ): CompileResult {
-  return compileApplicationInternal(input, options, 'current');
+  return compileApplicationInternal(
+    input,
+    options,
+    'current',
+    'callerSupplied',
+  );
+}
+
+/**
+ * The RELEASE entry point: current conformance with permission governance
+ * REQUIRED rather than optional.
+ *
+ * `unboundPermissionAcknowledgement` is a required positional parameter, so a
+ * caller cannot reach a governed compile without stating what it acknowledges.
+ * Governance is also asserted unconditionally here -- a caller that casts
+ * around the type and passes a nullish or malformed value is refused with
+ * `COMPILER_PERMISSION_ACKNOWLEDGEMENT_INVALID` rather than ungoverned.
+ *
+ * This exists because round 2 of `policy-unbound-refusal` made the
+ * acknowledgement an OPTIONAL execution option, and its review found the
+ * defect that made round 1's: an absent admission input silently meant "not
+ * governed", so any new release path could compile a permission-bearing
+ * package green by forgetting one argument. Absence is no longer a choice a
+ * release path can express.
+ */
+export function compileApplicationRelease(
+  input: CompilerInput,
+  unboundPermissionAcknowledgement: UnboundPermissionAcknowledgementInput,
+  options: Omit<
+    CompilerExecutionOptions,
+    'unboundPermissionAcknowledgement'
+  > = {},
+): CompileResult {
+  return compileApplicationInternal(
+    { ...input },
+    { ...options, unboundPermissionAcknowledgement },
+    'current',
+    'required',
+  );
 }
 
 /**
@@ -240,6 +291,7 @@ export function reproduceHistoricalApplication(
     input,
     options,
     'historicalReproduction',
+    'callerSupplied',
   );
   if (result.status === 'failed') return result;
   if (result.releaseRoot !== expectation.releaseRoot) {
@@ -263,6 +315,10 @@ function compileApplicationInternal(
   input: CompilerInput,
   options: CompilerExecutionOptions,
   conformanceMode: 'current' | 'historicalReproduction',
+  // `required` is the release contract: assert governance even when the
+  // supplied acknowledgement is nullish, so casting around the required
+  // parameter is refused instead of silently ungoverning the release.
+  permissionGovernance: 'required' | 'callerSupplied',
 ): CompileResult {
   const maximumDiagnostics = validDiagnosticLimit(input?.limits)
     ? input.limits.maximumDiagnostics
@@ -328,7 +384,11 @@ function compileApplicationInternal(
   }
 
   if (conformanceMode === 'current') {
-    const wholeModelDiagnostics = validateWholeModel(packageRevision, options);
+    const wholeModelDiagnostics = validateWholeModel(
+      packageRevision,
+      options,
+      permissionGovernance,
+    );
     if (wholeModelDiagnostics.length > 0) {
       return failure(wholeModelDiagnostics, maximumDiagnostics);
     }
@@ -1141,6 +1201,7 @@ function typeCheck(
 function validateWholeModel(
   packageRevision: VersionedNormalizedApplicationPackage,
   options: CompilerExecutionOptions,
+  permissionGovernance: 'required' | 'callerSupplied',
 ): CompilerDiagnostic[] {
   const diagnostics: CompilerDiagnostic[] = [];
   // Before the version-gated module-conformance cells, on the versioned
@@ -1148,7 +1209,10 @@ function validateWholeModel(
   // language version the compiler accepts. `validateModuleConformance` returns
   // nothing below v2 and the dispatch revision projects only v3+ down to v2, so
   // a rule placed there never saw a v0 or v1 package -- the shell demo is v0.
-  if (options.unboundPermissionAcknowledgement !== undefined) {
+  if (
+    permissionGovernance === 'required' ||
+    options.unboundPermissionAcknowledgement !== undefined
+  ) {
     diagnostics.push(
       ...validateUnboundPermissionAcknowledgement(
         packageRevision,

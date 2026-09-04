@@ -32,10 +32,10 @@
     },
     {
       "name": "governance-wiring-removed",
-      "claim": "The whole-model wiring in compiler.ts is the only path by which an acknowledgement reaches the rule: guarding the call with a constant false leaves every release compile ungoverned, so an unacknowledged permission compiles on the composed application and on the v0 shell, and a mislabelled acknowledgement no longer refuses.",
+      "claim": "The whole-model wiring in compiler.ts is the only path by which an acknowledgement reaches the rule, and the `required` arm is what makes the RELEASE entry point govern unconditionally: defeating the condition leaves every release compile ungoverned, so an unacknowledged permission compiles on the composed application and on the v0 shell, a mislabelled acknowledgement no longer refuses, and a caller that casts around the required parameter is admitted -- round 2's exact defect, restored.",
       "file": "packages/compiler/src/compiler.ts",
-      "original": "  if (options.unboundPermissionAcknowledgement !== undefined) {\n    diagnostics.push(\n      ...validateUnboundPermissionAcknowledgement(",
-      "replacement": "  if (false && options.unboundPermissionAcknowledgement !== undefined) {\n    diagnostics.push(\n      ...validateUnboundPermissionAcknowledgement(",
+      "original": "  if (\n    permissionGovernance === 'required' ||\n    options.unboundPermissionAcknowledgement !== undefined\n  ) {",
+      "replacement": "  if (\n    permissionGovernance === 'neverMatches' ||\n    options.unboundPermissionAcknowledgement === undefined\n  ) {",
       "test": {
         "files": ["test/compiler/g2-module-conformance.test.ts"],
         "namePattern": "unbound-permission acknowledgement"
@@ -55,6 +55,11 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: an acknowledgement for another package, or an unreadable one, fails closed rather than ungoverning",
           "expected": "a mislabelled acknowledgement must refuse the compile rather than ungovern it"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned",
+          "expected": "must be refused, never ungoverned"
         }
       ]
     },
@@ -170,6 +175,42 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: the checked-in document is read strictly and a package with no key is refused before any compile",
           "expected": "the checked-in list must key the composed application package"
+        }
+      ]
+    },
+    {
+      "name": "release-governance-made-optional",
+      "claim": "The RELEASE entry point's `required` governance is what closes round 2's fail-open defect: downgrading compileApplicationRelease to the caller-supplied contract makes a release compile handed a nullish acknowledgement compile green instead of refusing, which is exactly the absent-admission-input bypass the round-2 review blocked on.",
+      "file": "packages/compiler/src/compiler.ts",
+      "original": "    { ...options, unboundPermissionAcknowledgement },\n    'current',\n    'required',",
+      "replacement": "    { ...options, unboundPermissionAcknowledgement },\n    'current',\n    'callerSupplied',",
+      "test": {
+        "files": ["test/compiler/g2-module-conformance.test.ts"],
+        "namePattern": "unbound-permission acknowledgement"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned",
+          "expected": "must be refused, never ungoverned"
+        }
+      ]
+    },
+    {
+      "name": "recorded-revision-narrowing-removed",
+      "claim": "Narrowing the checked-in list to a recorded revision's own census is what lets --truncate-invalid-lineage govern historical entries at all: returning the list unnarrowed reports every newer entry as stale against an older revision, and the narrowing control observes that the helper no longer restricts to the declared set.",
+      "file": "apps/web/scripts/unbound-permission-acknowledgement.ts",
+      "original": "    entries: acknowledgement.entries.filter((entry) =>\n      declaredPermissionIds.has(entry.permissionId),\n    ),",
+      "replacement": "    entries: acknowledgement.entries,",
+      "test": {
+        "files": ["test/compiler/g2-module-conformance.test.ts"],
+        "namePattern": "unbound-permission acknowledgement"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it",
+          "expected": "narrowing keeps exactly the permissions the revision declares"
         }
       ]
     }

@@ -125,6 +125,34 @@ export function readAcknowledgementDocument(
   return { packages };
 }
 
+/**
+ * The acknowledgement for ONE RECORDED revision of a lineage.
+ *
+ * A recorded entry declares the permission census it declared when it was
+ * written, which is not today's. Handing it today's whole list would report
+ * every newer entry as stale; handing it nothing would ungovern it, which is
+ * the defect round 3 exists to remove. So the checked-in list is NARROWED to
+ * the permissions that revision actually declares.
+ *
+ * This can only ever REMOVE entries, never invent one, so it cannot certify a
+ * revision against itself: a permission that revision declares and the
+ * checked-in list does not name is simply absent from the result, and the
+ * compiler refuses that entry as unbound. That is the correct answer -- it
+ * means a recorded release declared a permission nothing ever acknowledged,
+ * and a recovery truncation must not retain it silently.
+ */
+export function narrowAcknowledgementToDeclared(
+  acknowledgement: UnboundPermissionAcknowledgementInput,
+  declaredPermissionIds: ReadonlySet<string>,
+): UnboundPermissionAcknowledgementInput {
+  return {
+    entries: acknowledgement.entries.filter((entry) =>
+      declaredPermissionIds.has(entry.permissionId),
+    ),
+    packageId: acknowledgement.packageId,
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
