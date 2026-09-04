@@ -688,7 +688,7 @@ The last executable commit is `8a6ad4f838fa25b49fc8d54e64a132c9f31bcb22` — the
 WHAT THE LANE MEASURED AT THE STOP, each offered for you to reproduce.
 1. The removed control was vacuous: deleting its `offenders.push(path)` line left the test PASSING.
 2. Its scan missed an ordinary alias: the regex matched neither `compileCurrent(...)` after `import { compileApplication as compileCurrent }`, nor the import line.
-3. The nine expected reds still reproduce at the stop SHA with their exact kill sets: 4, 4, 1, 1, 4, 3, 6, 1, 1 killed respectively, {{REDS_VERDICT}}.
+3. The nine expected reds still reproduce at the stop SHA with their exact kill sets: 4, 4, 1, 1, 4, 3, 6, 1, 1 killed respectively, `expected-red: OK (9 expected red(s) reproduced and restored)` at `389a8d4`, on a clean tree.
 4. `test:compiler` is 172/172 at the stop SHA; format, lint, typecheck, `check:expected-red` and `check-records.sh` are green.
 5. A trial merge onto current `main` conflicts in three narrative files only; no executable conflict.
 
