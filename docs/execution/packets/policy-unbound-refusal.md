@@ -473,8 +473,9 @@ it is the reason this packet's kill sets are exact rather than approximate.**
 
 ## Declaration
 
-The last executable commit is `17529cf8c8b80e97f287545a3b80782e95600fb9`; the commits
-above it are narrative. Round 3's executable commits are `87496a9` (the release
+The last executable commit is `8a6ad4f838fa25b49fc8d54e64a132c9f31bcb22` — **the STOP commit**,
+which removes the vacuous control and is therefore executable, not narrative.
+`17529cf` is the matrix-green SHA below it and the one the ledger records. Round 3's executable commits are `87496a9` (the release
 entry point, the production-caller scan, narrowing), `f099fbb` (the wiring
 mutation narrowed to one property) `68eaa2a` (truncation judges an
 unlisted recorded package instead of crashing), `e1eed38`, `9d3f488` and
@@ -488,7 +489,7 @@ existed only between `1f6eca2` and `209e3fc` and is in no path of this range.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "policy-unbound-refusal",
   "base": "4218a66068041eb04e45e6fff4883c8aa8dfaebf",
-  "head": "17529cf8c8b80e97f287545a3b80782e95600fb9",
+  "head": "8a6ad4f838fa25b49fc8d54e64a132c9f31bcb22",
   "changedPaths": [
     "apps/web/release/unbound-permission-acknowledgement.json",
     "apps/web/scripts/compile-app-release.ts",
