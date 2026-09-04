@@ -290,7 +290,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "8da1a94ba5962be8cf91bd17dc64782acafe2427521f101067731bb906f00373",
+  "releaseRoot": "920858077ea568b4b93ec11d7e11d82643915692650f062c60f4fe208789a117",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

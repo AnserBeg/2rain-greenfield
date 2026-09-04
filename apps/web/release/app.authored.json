@@ -392,7 +392,7 @@
     },
     {
       "capabilityId": "northstar.inventory:capability.posting",
-      "capabilityVersion": 1,
+      "capabilityVersion": 2,
       "declaredEffects": ["appendFact"],
       "kind": "capabilityRequirement",
       "requiredProjections": ["operation", "surface", "verification"],
