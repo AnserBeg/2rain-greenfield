@@ -452,8 +452,8 @@ at `afe67f7` and is superseded.
 | `check:expected-red` | OK, 71 entries in 7 manifests |
 | `evidence:expected-red` (this packet's nine entries, `--run`, exclusive lock) | OK, 9 expected reds reproduced and restored at `17529cf`; 14 tests passing with production restored before each mutation; kill counts 4, 4, 1, 1, 4, 3, 6, 1, 1 |
 | full matrix (`run-matrix.sh policy14`, detached worktree at `17529cf`) | **PASS — `FULL_MATRIX_PASS_SHA=17529cf8c8b80e97f287545a3b80782e95600fb9`**, first attempt: performance 5/5, unit 155/155, compiler 173/173, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability producer 11/11, language coverage PASS (2050 obligations), reachability 106/106, security scans passed, schema 23 migrations verified, both release checks green, expected-red validation and its 38 self-test controls green as matrix stages |
-| `test:architecture` and `format` re-run at the narrative head `543b90c` | architecture **189/189**, prettier clean — the two suites that read narrative, re-run past the docs commit per `git-workflow`; `git diff --name-only 17529cf 543b90c` outside `docs/` is empty, so every other suite carries forward |
-| `scripts/check-records.sh` at `543b90c` | `records: OK (138 record(s), 6 declaring: 55 claimed path(s) and 79 claimed symbol(s) observed in their frozen trees; 159 ledger row(s), ids unique)` |
+| `test:architecture` and `format` re-run at the narrative head, round 3 `543b90c` and again at the STOP `07c4d30` | architecture **189/189**, prettier clean — the two suites that read narrative, re-run past the docs commit per `git-workflow`; `git diff --name-only 17529cf 543b90c` outside `docs/` is empty, so every other suite carries forward |
+| `scripts/check-records.sh` at `543b90c` and at the STOP `07c4d30` | `records: OK (138 record(s), 6 declaring: 55 claimed path(s) and 79 claimed symbol(s) observed in their frozen trees; 159 ledger row(s), ids unique)` |
 
 **Five intermediate reds are recorded rather than hidden, because every one was
 an instrument doing its job.** At `87496a9` the `governance-wiring-removed`
@@ -679,11 +679,14 @@ This prompt was written by the lane whose work you are reviewing. The lane has f
 
 **The decisive question is narrower: does the record now claim exactly what the tree supports — no more, and no less?**
 
-TARGET. Branch `packet/policy-unbound-refusal`, frozen at {{FREEZE}}. `git ls-remote origin refs/heads/packet/policy-unbound-refusal` returned, at freeze time:
+TARGET. Branch `packet/policy-unbound-refusal`, frozen at `07c4d3017c6ea316054271b001fd88ccfc1ee49e`. `git ls-remote origin refs/heads/packet/policy-unbound-refusal` returned, at freeze time:
 
-{{LS_REMOTE}}
+```
+$ git ls-remote origin refs/heads/packet/policy-unbound-refusal
+07c4d3017c6ea316054271b001fd88ccfc1ee49e	refs/heads/packet/policy-unbound-refusal
+```
 
-The last executable commit is `8a6ad4f838fa25b49fc8d54e64a132c9f31bcb22` — the STOP commit, which removes a test and is therefore executable. `17529cf8c8b80e97f287545a3b80782e95600fb9` is the matrix-green SHA below it. Base is `4218a66068041eb04e45e6fff4883c8aa8dfaebf`. Read `4218a66..{{FREEZE_SHORT}}`, and read the round-3 review's findings as dispositioned in the record. Rounds 1, 2 and 3 are preserved at `87878a6`, `af1d603` and `543b90c`.
+The last executable commit is `8a6ad4f838fa25b49fc8d54e64a132c9f31bcb22` — the STOP commit, which removes a test and is therefore executable. `17529cf8c8b80e97f287545a3b80782e95600fb9` is the matrix-green SHA below it. Base is `4218a66068041eb04e45e6fff4883c8aa8dfaebf`. Read `4218a66..07c4d30`, and read the round-3 review's findings as dispositioned in the record. Rounds 1, 2 and 3 are preserved at `87878a6`, `af1d603` and `543b90c`.
 
 WHAT THE LANE MEASURED AT THE STOP, each offered for you to reproduce.
 1. The removed control was vacuous: deleting its `offenders.push(path)` line left the test PASSING.
