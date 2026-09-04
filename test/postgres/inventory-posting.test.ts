@@ -4081,6 +4081,28 @@ test('posting kernel admission: the shipped head release declares the posting ca
  * nothing.
  */
 /**
+ * `5g3-prog` A2, second entry, given a test of its OWN.
+ *
+ * `assertPersistedPlannedOrderIsDecisive` already ran inside the composite
+ * one-way-doors test, and that is where its kill evidence lived as prose.
+ * Measured while writing the control: removing the combined sort reds that
+ * composite test through an EARLIER, unrelated spurious refusal, so the
+ * mutation could not be attributed to the property it is about. Here the
+ * property stands alone -- a planned debit that must sort before a persisted
+ * credit at an identical instant -- so the mutation's red is the missing
+ * rejection and nothing else.
+ */
+test(
+  'posting kernel admission: the negative-stock check orders persisted and planned movements together',
+  { timeout: 180_000 },
+  async (testContext) => {
+    await withPostingDatabase(async (database) => {
+      await assertPersistedPlannedOrderIsDecisive(testContext, database);
+    });
+  },
+);
+
+/**
  * `5g3-prog` A3. THE MONOTONIC FLOOR ON `recordedAt`, per stock identity.
  *
  * `recordedAt` is a wall-clock sample and `AGENTS.md` section 7 records that

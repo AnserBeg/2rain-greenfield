@@ -256,18 +256,18 @@
     },
     {
       "name": "negative-stock-stops-sorting-persisted-with-planned",
-      "claim": "`5g3-prog` A2, second entry, and a DIFFERENT property from the comparator one: that the negative-stock check orders the persisted movements TOGETHER WITH the planned ones under that comparator, rather than checking the planned ones after the persisted ones. Remove the combined sort and the two sets stay in concatenation order -- every persisted row first -- so a planned debit that must sort BEFORE a persisted credit at the same instant is evaluated after it, the running prefix never goes negative, and a posting that has to be refused COMMITS. The specimen is built to discriminate exactly this: `sourceId` `a-planned-debit` sorts before `z-persisted-credit` at an identical effectiveAt and recordedAt.",
+      "claim": "`5g3-prog` A2, second entry, and a DIFFERENT property from the comparator one: that the negative-stock check orders the persisted movements TOGETHER WITH the planned ones under that comparator, rather than checking the planned ones after the persisted ones. Remove the combined sort and the two sets stay in concatenation order -- every persisted row first -- so a planned debit that must sort BEFORE a persisted credit at the same instant is evaluated after it, the running prefix never goes negative, and a posting that has to be refused COMMITS. The specimen is built to discriminate exactly this: `sourceId` `a-planned-debit` sorts before `z-persisted-credit` at an identical effectiveAt and recordedAt. MEASURED WHILE WRITING THIS CONTROL: pointed at the composite one-way-doors test, the same mutation reds through an EARLIER spurious `INVENTORY_STOCK_NEGATIVE` refusal -- a posting that should succeed is refused once the persisted rows are no longer interleaved -- so the red could not be attributed to this property. The decisive-order assertion therefore gets a test of its own, and this entry kills that one.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "    ].toSorted(compareInventoryMovementOrderEntries);\n",
       "replacement": "    ];\n",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],
-        "namePattern": "one-way doors"
+        "namePattern": "orders persisted and planned movements together"
       },
       "kills": [
         {
           "file": "test/postgres/inventory-posting.test.ts",
-          "name": "the Inventory posting capability closes the first-movement one-way doors",
+          "name": "posting kernel admission: the negative-stock check orders persisted and planned movements together",
           "expected": "Missing expected rejection"
         }
       ]
