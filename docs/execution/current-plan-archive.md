@@ -17,6 +17,7 @@ carries the detail. No packet is chartered from this table without a user ruling
 
 | packet | date | finding (one sentence) | record |
 |---|---|---|---|
+| `policy-unbound-refusal` | 2026-09-04 | **ROUTED CLASS after three BLOCKs on one defect:** production must not be able to obtain a servable current `CompileSuccess` through any package-exported compiler operation without presenting non-self-certifying governance, and fixture compilation must be unavailable through production imports — a symbol-aware scanner may verify that boundary but must not BE it. | [packets/policy-unbound-refusal.md](packets/policy-unbound-refusal.md) |
 | `5g3-prog` arm 1 | 2026-09-01 | R4 — platform-plane writes (trust documents, semantic receipt, outbox, generation state) still get no column-by-column read-back; already row `posting-platform-plane-writes-not-row-complete`, stays dormant | [record](program-reviews/2026-09-01-inventory-ledger.md) §2 |
 | `5g3-prog` arm 1 | 2026-09-01 | R5 — ADR-0018's horizon clause versus ADR-0057's snapshot projection: record fixed by the ADR-0057 amendment, no code change | [record](program-reviews/2026-09-01-inventory-ledger.md) §2 |
 | `5g3-prog` arm 1 | 2026-09-01 | R6 — five ADR status lines (0060–0063, 0065) said proposed after acceptance; swept; the gate for the class is `record-marker-schema`, dormant | [record](program-reviews/2026-09-01-inventory-ledger.md) §2 |
