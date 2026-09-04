@@ -319,6 +319,14 @@ division unworkable.
 
 ## 7. Findings raised — routed, not fixed
 
+**Filed as one line each in `current-plan-archive.md`'s *Filed during the
+freeze* table, not as rows in `current-plan.md`.** The QUEUE FREEZE ruled on
+`main` 2026-09-01 — after this branch was cut — says a finding that does not
+block a critical-path step gets one archive line plus the detail in the packet
+record, and that a packet's record layer is its record, ledger row, lane row
+and review-log rows. None of these four blocks the goods receipt. This table is
+that detail.
+
 | row | tier | what |
 |---|---|---|
 | `enum-reject-witness-is-the-first-declared-option` | Behavioral | Candidate verification's `enumReject` scenario writes one witness, `enumOptionIds[0]` of the operation catalog (declaration order), so a widening whose new option is declared anywhere but first is invisible to it. `PUR-2c`'s specimen read the sorted storage list. With this element applied at PREPARE the limit sits behind no hole; a scenario that probes every candidate option, or at least every option absent from the previous release, would close it. Verification plan and `#enumReject` are outside this lease. |
@@ -747,9 +755,80 @@ The lane states no view on what verdict this round should reach.
 
 | ID | Outcome | Tier | Why |
 |---|---|---|---|
-| `PUR-2c` (resume) | The goods receipt and its posting, on this element: widen `inventory_transaction_type` and `inventory_posting_role`, move the conformance pins, run the consumer census, then the receipt | Critical | Unblocked by this packet. Its re-charter should carry `PUR-2c` §1's two corrections, the `received_quantity` decision as its own step with ADR-0065 (ADR-0064 is now taken), and §5's division (i) |
-| `zero-element-transition-skips-catalog-verification` | Assert source/target storage digests agree on the no-transition branch | Critical, small | Closes the runtime half of the `PUR-2c` hole as defence in depth |
-| `enum-reject-witness-is-the-first-declared-option` | Probe every option absent from the previous release, not one witness | Behavioral | Makes candidate verification able to catch a stale CHECK on its own |
+**Superseded by the frozen critical path on `main`** (`current-plan.md`, "The
+critical path — frozen 2026-09-01"), which this packet merged in and which
+already sequences what follows. Recorded against that table rather than beside
+it:
+
+| what the frozen path says next | this packet's bearing on it |
+|---|---|
+| **3a `posted-stock-honesty`** — *after ENUM-WIDEN lands, before step 2*, because it edits `module-storage-materializer.ts` | That file is this packet's lease. It is released on acceptance, and `widenEnumDomainCheck` plus the check/column merge tolerance in `mergeCompatibleEntity` are the new surface that lane will read |
+| **2 `PUR-2c` (resume)** — goods receipt through `PUR-2a`'s binding | Unblocked by this element. It owns widening `inventory_transaction_type` and `inventory_posting_role` for real, the conformance pins that fence those two fields ahead of the storage fence, and the consumer census — §5's division (i). `received_quantity` is already ruled: **ADR-0065 landed on `main` in `received-quantity-ruling`** while this packet was in review, so the round-1 record's "with ADR-0065" suggestion is discharged, not owed |
+| **Enabler WIP cap** — after `ENUM-WIDEN` and `posting-kernel-admission`, the next accepted merge carries goods-receipt production code | This packet is the last enabler but one. It should not grow |
+
+The two runtime findings above (`zero-element-transition-skips-catalog-verification`,
+`enum-reject-witness-is-the-first-declared-option`) are archive lines under the
+freeze and are **not** proposed as packets here; chartering either needs a user
+ruling written into the critical-path table first (QUEUE FREEZE rule 1).
+
+## 14. Round 3 — PASS, and the review is CONVERGED
+
+Round 3 returned **PASS, with no BLOCK or REVISE findings.** The arm reviewed
+the branch head rather than only the nominal frozen SHA, confirmed the head sat
+directly above it and changed only the packet record, and read the executable
+candidate as `4a1103a`. It answered all seven decisive questions in the
+packet's favour on the merits, and it recorded explicitly that it gave the
+lane's self-rulings **no authority** and reached the same conclusions
+independently — which is the right way to read a prompt whose rulings the
+reviewed party wrote.
+
+What it settled that the lane had put as claims:
+
+- the admitted transition is the monotonic strict superset and nothing wider,
+  with the round-1 exclusion defect closed by the reconstructed fingerprint;
+- the live-definition decision and the round trip are sound, and the quote and
+  embedded-`::text` counterexamples are **unreachable** because option ids use
+  the canonical-id grammar, which excludes quotes and a second colon — a
+  stronger result than the lane had claimed;
+- no storage-visible non-widening column difference passes the merge, and
+  claim 7's bounded form is the correct shape rather than a weakness;
+- the thirteen reds are independently attributable, and withdrawing
+  `widening-admits-any-option-change` was honest because it combined two guards;
+- ROUTING the verifier gap is upheld **on the merits**, with the condition that
+  the route stay live and that no later work cite the current verifier as proof
+  every newly added option was exercised — recorded here so that condition is
+  not lost;
+- the manifest repoint is honest and preserves the original invariant;
+- `preApprovalInert` and `oldRead: requiresReadFallback` are both right.
+
+**The review is CONVERGED, and no confirm arm is owed.** The round-3 arm closed
+by naming two remaining gates: an independent confirm on the identical head,
+and a green full matrix at the integrating SHA. **The first is not owed, and
+the reason is a doctrine change the arm could not have seen.** `review-tiers`
+gained *Zero production defects → CONVERGED* on 2026-09-01 by user ruling:
+*"A review round that finds no defect in production code converges the review.
+No further arm of any kind is owed — not round N+1, not the Fable confirm."*
+That ruling landed on `main` **after this branch was cut**, so neither the
+branch nor the prompt carried it, and the arm applied the Critical chain as it
+stood in the tree it was given. Round 3 found zero production defects — indeed
+zero findings — so the rule applies at its strongest. Its two overrides do not:
+no regression was introduced by a previous round's fix, and no control was
+found vacuous by this round (the one withdrawn control was withdrawn by the
+lane at round 2 and the arm endorsed the withdrawal).
+
+**The second gate is real and is owed**, and §8 records it.
+
+**`main` moved 21 commits during the review and is merged in at `5b7def4`.**
+Its advance is docs-only — the `PUR-2c` merge, `received-quantity-ruling`
+(ADR-0065), the `5g3-prog` program review, and the QUEUE FREEZE — verified
+empty under `git diff --name-only 8c41752 origin/main -- . ':!docs' ':!.agents'
+':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'`, and the merge moves no
+executable content here either (`git diff --name-only 4a1103a HEAD -- . ':!docs'
+…` is empty). Three narrative files conflicted because `main` restructured
+what this packet had edited; each was **re-derived into the new structure
+rather than resolved by picking a side**, and the merge commit says how. The
+consequences for this record are in §7 (findings move to the archive) and §12
+(the frozen critical path supersedes the proposed-packets table).
 
 ## The declared range
 
