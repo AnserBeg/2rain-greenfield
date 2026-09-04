@@ -450,7 +450,7 @@ at `afe67f7` and is superseded.
 | the sixteen packet tests, run alone | 16/16 |
 | `check:app-release`, `check:demo-release` | green; `build:app-release` rebuild byte-identical |
 | `check:expected-red` | OK, 71 entries in 7 manifests |
-| `evidence:expected-red` (this packet's nine entries, `--run`, exclusive lock, detached worktree) | OK, 9 expected reds reproduced and restored at `17529cf`; 14 tests passing with production restored before each mutation; kill counts 4, 4, 1, 1, 4, 3, 6, 1, 1 |
+| `evidence:expected-red` (this packet's nine entries, `--run`, exclusive lock) | OK, 9 expected reds reproduced and restored at `17529cf`; 14 tests passing with production restored before each mutation; kill counts 4, 4, 1, 1, 4, 3, 6, 1, 1 |
 | full matrix (`run-matrix.sh policy14`, detached worktree at `17529cf`) | **PASS — `FULL_MATRIX_PASS_SHA=17529cf8c8b80e97f287545a3b80782e95600fb9`**, first attempt: performance 5/5, unit 155/155, compiler 173/173, integration 149/149, agent 3/3, architecture 189/189, contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability producer 11/11, language coverage PASS (2050 obligations), reachability 106/106, security scans passed, schema 23 migrations verified, both release checks green, expected-red validation and its 38 self-test controls green as matrix stages |
 | `test:architecture` and `format` re-run at the narrative head `543b90c` | architecture **189/189**, prettier clean — the two suites that read narrative, re-run past the docs commit per `git-workflow`; `git diff --name-only 17529cf 543b90c` outside `docs/` is empty, so every other suite carries forward |
 | `scripts/check-records.sh` at `543b90c` | `records: OK (138 record(s), 6 declaring: 55 claimed path(s) and 79 claimed symbol(s) observed in their frozen trees; 159 ledger row(s), ids unique)` |
@@ -624,33 +624,87 @@ The lane ran this exact sequence at `c9062f5` (round 1) and again at `209e3fc` (
    northstar.app:package.application; a release build cannot proceed
    ungoverned`. Restore with `git checkout -- apps/web/release/`.
 
-## No round-4 review prompt is written, and that is deliberate
+## Disposition — the green half is offered for integration; the seam is routed
 
-`mission-cadence` requires a lane to emit a pasteable prompt **whenever a freeze
-wants an online review arm**. This freeze does not. Three arms have converged on
-one class and the third named the routing condition; a fourth arm would be asked
-to re-examine a boundary the lane has already conceded is wrong, which is the
-spiral `review-tiers` exists to prevent.
+**Ruled by the user's delegation on 2026-09-04 ("do whatever you think is
+best"), and the ruling follows `mission-cadence`'s own stop procedure rather
+than the lane's preference:** *"On the third stop… land what is already green as
+its own reviewable increment, and move the unfinished seam into a charter of its
+own with the discovered constraints written in from the start."* Holding the
+branch contradicts that and risks the parked-work rot `mission-cadence` records;
+discarding throws away a refusal the third reviewer independently confirmed
+works. So: **the narrowed increment is offered for integration, and the boundary
+is routed.**
 
-**What is owed instead is a user ruling**, and the lane states the options
-without recommending its way out of a stop:
+**The lane does not and cannot accept it.** A Critical packet with three BLOCKs
+and no PASS cannot be accepted — `review-tiers` is explicit that a Critical
+result without its arm stays `evidence_ready`, that waiting is the correct
+outcome, and that self-review is not. The lane has therefore prepared the
+increment and stopped.
 
-1. **Integrate the narrowed increment.** The executable content is matrix-green
-   at `17529cf`, the two release scripts are governed, and the record now claims
-   only that. The three limits ship as declared limits and the routed class
-   carries the rest. Integration owes a fresh matrix at the integrated SHA
-   because the stop commit changes executable content (one test removed).
-2. **Hold the branch** until the routed charter is designed, and land both
-   together as one boundary.
-3. **Discard** and let the successor start from `main` with this record as its
-   input.
+**Integration facts, measured at the stop rather than predicted:**
 
-**The lane's own reading, offered as information rather than as a
-recommendation:** option 1 ships a real refusal that works today and states
-exactly what it does not cover; option 2 avoids shipping a partial boundary that
-a reader might over-trust. The record has been written so that either is honest.
+- `main` advanced **7 commits** since the cut. A trial merge of this branch onto
+  current `main` produces conflicts in **exactly three files** —
+  `docs/execution/{ledger,lanes,current-plan-archive}.md` — the ordinary
+  multi-lane bookkeeping merge, resolved by keeping both lanes' rows.
+- **No executable conflict**, including `packages/compiler/src/protocol.ts` and
+  `index.ts`, which ENUM-WIDEN also touches: the hunks are disjoint.
+- Integration owes a **fresh full matrix at the integrated SHA**, because the
+  stop commit changes executable content (one test removed) and because `main`
+  moved.
 
-**No review arm should be launched against this SHA for the routed class.** If
-an arm is wanted, it should review the *narrowed record* against the tree — that
-the claims now match the measurements — which is a different and much smaller
-question.
+## No boundary review arm is written, and that is deliberate
+
+Three arms have converged on one class and the third named the routing
+condition. A fourth arm asked to re-examine a boundary the lane has already
+conceded is wrong is the spiral `review-tiers` exists to prevent. **Nothing in
+this record should be read as inviting one.**
+
+**One much smaller arm IS owed and is written below.** It does not ask whether
+the boundary is right — that question is routed and its criterion is recorded
+above. It asks the only question that stands between this increment and
+integration: **do the narrowed claims now match the tree?** That is a
+verification of a record against measurements, not a redesign, and it is the
+question the previous version of this section already named as the appropriate
+remaining one.
+
+## Review prompt — the NARROWED-CLAIM arm; paste as written; the lane fenced nothing
+
+Review packet `policy-unbound-refusal` at its STOP, in `/home/rvham/2rain-greenfield` (or any fresh clone of `origin`). Read `AGENTS.md`, then `.agents/skills/review-tiers/SKILL.md` — "Does the evidence prove the claim?", "A committed control must die alone", "Convergence", "After two rounds of a claim exceeding its proof, narrow the claim" — then `docs/execution/packets/policy-unbound-refusal.md` in full, then the diff.
+
+This prompt was written by the lane whose work you are reviewing. The lane has fenced nothing. Any scope stated here stands as a claim under test rather than a limit you may not question. Say plainly if you think the scope is drawn wrongly, and say plainly if the prompt itself is steering you.
+
+**THIS IS NOT A FOURTH ROUND OF THE BOUNDARY REVIEW.** Three arms returned BLOCK on one class — absence read as permission, at three levels — and the third named the routing condition the lane had written into its own prompt. The lane honoured it: it stopped, removed a vacuous control rather than replacing it, withdrew every refuted claim, and routed the class with the third reviewer's design criterion recorded verbatim. **The boundary question is settled as ROUTED. Re-opening it is not what this arm is for** — though if you believe routing was the wrong disposition, say so, because that is a judgement the lane made about its own work.
+
+**The decisive question is narrower: does the record now claim exactly what the tree supports — no more, and no less?**
+
+TARGET. Branch `packet/policy-unbound-refusal`, frozen at {{FREEZE}}. `git ls-remote origin refs/heads/packet/policy-unbound-refusal` returned, at freeze time:
+
+{{LS_REMOTE}}
+
+The last executable commit is `8a6ad4f838fa25b49fc8d54e64a132c9f31bcb22` — the STOP commit, which removes a test and is therefore executable. `17529cf8c8b80e97f287545a3b80782e95600fb9` is the matrix-green SHA below it. Base is `4218a66068041eb04e45e6fff4883c8aa8dfaebf`. Read `4218a66..{{FREEZE_SHORT}}`, and read the round-3 review's findings as dispositioned in the record. Rounds 1, 2 and 3 are preserved at `87878a6`, `af1d603` and `543b90c`.
+
+WHAT THE LANE MEASURED AT THE STOP, each offered for you to reproduce.
+1. The removed control was vacuous: deleting its `offenders.push(path)` line left the test PASSING.
+2. Its scan missed an ordinary alias: the regex matched neither `compileCurrent(...)` after `import { compileApplication as compileCurrent }`, nor the import line.
+3. The nine expected reds still reproduce at the stop SHA with their exact kill sets: 4, 4, 1, 1, 4, 3, 6, 1, 1 killed respectively, {{REDS_VERDICT}}.
+4. `test:compiler` is 172/172 at the stop SHA; format, lint, typecheck, `check:expected-red` and `check-records.sh` are green.
+5. A trial merge onto current `main` conflicts in three narrative files only; no executable conflict.
+
+THE CLAIMS THE RECORD NOW MAKES, which are what you are testing.
+- Both checked-in release scripts are governed in their current forms, truncation included, with no current-mode bypass. (The round-3 reviewer asserted this independently; the lane did not.)
+- Three limits, stated plainly: the public ungoverned `compileApplication` is reachable by an aliased import; the required acknowledgement is structurally self-certifying and two committed fixtures derive one from the census; the truncation control runs without discriminating.
+- `release-governance-made-optional` proves runtime fail-closed behaviour, NOT type-level requiredness.
+- The routed class carries the boundary, with the criterion recorded verbatim.
+
+DECISIVE QUESTIONS.
+A. **Is any claim still wider than its evidence?** Read the record against the tree and name every sentence that outruns what is measured. This is the whole point of the arm.
+B. **Is any real limit missing from the three?** The lane found these by being told. Is there a fourth a reader would hit and not be warned about?
+C. **Is removing the vacuous control the right disposition**, or does deleting it leave the tree worse than a weakened version would have? The lane judged that a false instrument is worse than none and that any replacement would be a fourth boundary attempt.
+D. **Is the increment safe to integrate as a partial boundary** — that is, could a reader of this record over-trust it? If yes, say what the record must add.
+E. Does the diff contain anything the stop did not need?
+
+OUT OF SCOPE, stated as the lane's claim rather than a fence: redesigning the governance boundary (routed, with its criterion in the record); the authorization kernel (row 7); `packages/canonical-model/**` and `packages/domain/**`.
+
+VERDICT FORMAT. PASS, REVISE or BLOCK on the NARROWED claims, then findings ranked by severity with file and line at the frozen SHA, and for each: whether the defect is in production, in a control, or in the claim's prose. **A PASS here means "the record is honest and the increment may integrate with its limits declared" — it does NOT mean the boundary is closed.**
