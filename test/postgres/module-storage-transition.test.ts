@@ -7355,13 +7355,22 @@ async function assertBackfillCheckpointRoleIsolation(
   otherContext: TrustedRequestContext,
   generationId: string,
 ): Promise<void> {
+  const sameTenantOtherEnvironmentContext = Object.freeze({
+    ...ownerContext,
+    environmentId: otherContext.environmentId,
+  });
   for (const rolePool of [materializerPool, moduleRuntimePool]) {
     const visible = await withInternalRoleScope(
       rolePool,
       ownerContext,
       (client) =>
-        client.query<{ rows_applied: string }>(
-          `SELECT rows_applied::text AS rows_applied
+        client.query<{
+          activation_attempt_id: string;
+          element_id: string;
+          rows_applied: string;
+        }>(
+          `SELECT activation_attempt_id::text AS activation_attempt_id,
+                  element_id, rows_applied::text AS rows_applied
              FROM north_star_internal.module_storage_backfill_checkpoints
             WHERE generation_id = $1`,
           [generationId],
@@ -7369,9 +7378,17 @@ async function assertBackfillCheckpointRoleIsolation(
     );
     assert.deepEqual(
       visible.rows,
-      [{ rows_applied: '100' }],
+      [
+        {
+          activation_attempt_id: visible.rows[0]?.activation_attempt_id,
+          element_id: visible.rows[0]?.element_id,
+          rows_applied: '100',
+        },
+      ],
       'the non-admin internal role must retain legitimate checkpoint access',
     );
+    assert.ok(visible.rows[0]?.activation_attempt_id);
+    assert.ok(visible.rows[0]?.element_id);
 
     const hidden = await withInternalRoleScope(
       rolePool,
@@ -7389,6 +7406,57 @@ async function assertBackfillCheckpointRoleIsolation(
       hidden.rowCount,
       0,
       'another tenant cannot discover or mutate the checkpoint through an actual internal role',
+    );
+
+    const otherEnvironmentHidden = await withInternalRoleScope(
+      rolePool,
+      sameTenantOtherEnvironmentContext,
+      (client) =>
+        client.query(
+          `UPDATE north_star_internal.module_storage_backfill_checkpoints
+              SET rows_applied = rows_applied + 1
+            WHERE generation_id = $1
+          RETURNING generation_id`,
+          [generationId],
+        ),
+    );
+    assert.equal(
+      otherEnvironmentHidden.rowCount,
+      0,
+      'another environment in the same tenant cannot discover or mutate the checkpoint',
+    );
+
+    await assert.rejects(
+      withInternalRoleScope(rolePool, ownerContext, (client) =>
+        client.query(
+          `UPDATE north_star_internal.module_storage_backfill_checkpoints
+              SET environment_id = $2
+            WHERE generation_id = $1`,
+          [generationId, otherContext.environmentId],
+        ),
+      ),
+      (error: unknown) => (error as Error & { code?: string }).code === '42501',
+      'a visible checkpoint cannot be rewritten into a foreign scope',
+    );
+
+    await assert.rejects(
+      withInternalRoleScope(rolePool, otherContext, (client) =>
+        client.query(
+          `INSERT INTO north_star_internal.module_storage_backfill_checkpoints (
+             tenant_id, environment_id, generation_id, element_id,
+             activation_attempt_id, rows_applied, complete
+           ) VALUES ($1, $2, $3, $4, $5, 0, false)`,
+          [
+            ownerContext.tenantId,
+            ownerContext.environmentId,
+            randomUUID(),
+            visible.rows[0]!.element_id,
+            visible.rows[0]!.activation_attempt_id,
+          ],
+        ),
+      ),
+      (error: unknown) => (error as Error & { code?: string }).code === '42501',
+      'a foreign-scoped checkpoint insert is rejected by the actual internal role',
     );
   }
 }

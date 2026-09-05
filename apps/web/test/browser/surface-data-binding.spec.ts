@@ -25,6 +25,7 @@ import {
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
+  type RegisteredCapabilityOperationAuthorizationRequest,
   type RegisteredCapabilityOperationExecutionRequest,
   type RegisteredCapabilityOperationExecutor,
   type SemanticOperationExecutionRequest,
@@ -2077,6 +2078,16 @@ class RecordingCapabilityExecutor implements RegisteredCapabilityOperationExecut
     readonly capabilityId: string,
     private readonly records: BrowserFixtureExecutor,
   ) {}
+
+  prepareAuthorization(
+    request: RegisteredCapabilityOperationAuthorizationRequest,
+  ) {
+    return Promise.resolve({
+      decisionInput: request.input,
+      legalEntityReadScopeIds: [],
+      readBackArguments: request.input,
+    });
+  }
 
   async execute(
     request: RegisteredCapabilityOperationExecutionRequest,

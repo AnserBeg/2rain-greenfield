@@ -14,6 +14,7 @@ import {
 
 import type { TrustedRequestContext } from './request-context.js';
 import {
+  LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   RequestRuntimeViewIntegrityError,
   assertRequestRuntimeView,
@@ -25,6 +26,7 @@ import {
 import type { RequestRuntimeView as IssuedRequestRuntimeView } from './request-runtime-view.js';
 import type { SemanticRecordDto } from './semantic-query-gateway.js';
 import {
+  QUERY_BOUNDARY_PERMISSION_ID,
   observePredicateReceiptSafely,
   registeredQueryFromPinnedView,
   type RegisteredQueryDefinition,
@@ -235,6 +237,7 @@ export interface SemanticOperationExecutionRequest {
 }
 
 export interface RegisteredCapabilityOperationExecutionRequest {
+  readonly authorization: RegisteredCapabilityOperationAuthorization;
   readonly channel: TrustedInvocationChannel;
   readonly context: TrustedRequestContext;
   readonly definition: RegisteredCapabilityOperationDefinition;
@@ -245,6 +248,22 @@ export interface RegisteredCapabilityOperationExecutionRequest {
   readonly policyEvaluatorVersion: typeof SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION;
   readonly readBackDefinition: RegisteredQueryDefinition;
   readonly view: IssuedRequestRuntimeView;
+}
+
+export interface RegisteredCapabilityOperationAuthorizationRequest {
+  readonly context: TrustedRequestContext;
+  readonly definition: RegisteredCapabilityOperationDefinition;
+  readonly input: ImmutableJsonValue;
+  readonly inputDigest: string;
+  readonly readBackDefinition: RegisteredQueryDefinition;
+  readonly view: IssuedRequestRuntimeView;
+}
+
+/** Trusted capability adapters resolve persisted scope before policy decides. */
+export interface RegisteredCapabilityOperationAuthorization {
+  readonly decisionInput: ImmutableJsonValue;
+  readonly legalEntityReadScopeIds: readonly string[];
+  readonly readBackArguments: ImmutableJsonValue;
 }
 
 export interface SemanticOperationParentGuard {
@@ -265,6 +284,9 @@ export interface SemanticOperationExecutor {
 /** Exact-ID registration for capability-backed O1 execution. */
 export interface RegisteredCapabilityOperationExecutor {
   readonly capabilityId: string;
+  prepareAuthorization(
+    request: RegisteredCapabilityOperationAuthorizationRequest,
+  ): Promise<RegisteredCapabilityOperationAuthorization>;
   execute(
     request: RegisteredCapabilityOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope>;
@@ -666,23 +688,6 @@ export class SemanticOperationGateway {
       ) {
         assertClosedOperationArguments(definition, request.input);
       }
-      const operationDecision = await authorizeCurrentPolicy(
-        this.currentPolicy,
-        view,
-        definition.permissionId,
-        Object.freeze({
-          input: request.input,
-          kind: 'registeredSemanticOperationPolicyInput',
-          operationId: request.operationId,
-          requestId: view.requestId,
-          schemaVersion: OPERATION_POLICY_INPUT_VERSION,
-        }),
-      );
-      policyDecision = operationDecision.decision;
-      policyVersion = operationDecision.policyVersion;
-      if (operationDecision.decision === 'DENY') {
-        throw new SemanticOperationPolicyDeniedError(request.operationId, view);
-      }
       this.mediation.assertConfirmationGrant(
         view,
         definition,
@@ -784,22 +789,104 @@ export class SemanticOperationGateway {
           'operation-read-back-unsupported',
         );
       }
+      const inputDigest = digestOperationInput(request.input);
+      let capabilityExecutor: RegisteredCapabilityOperationExecutor | null =
+        null;
+      let capabilityAuthorization: RegisteredCapabilityOperationAuthorization | null =
+        null;
+      if (isRegisteredCapabilityOperation(definition)) {
+        capabilityExecutor =
+          this.#capabilityExecutors.get(
+            definition.effect.capability.targetId,
+          ) ?? null;
+        if (!capabilityExecutor) {
+          throw new NoSuchRegisteredCapabilityError(
+            definition.effect.capability.targetId,
+            definition.operationId,
+          );
+        }
+        capabilityAuthorization = await capabilityExecutor.prepareAuthorization(
+          Object.freeze({
+            context: trustedContextForRequestRuntimeView(view),
+            definition,
+            input: request.input,
+            inputDigest,
+            readBackDefinition,
+            view,
+          }),
+        );
+      }
+      const authorizeRequired = async (
+        permissionId: string,
+        decisionInput: ImmutableJsonValue,
+      ) => {
+        const decision = await authorizeCurrentPolicy(
+          this.currentPolicy,
+          view,
+          permissionId,
+          decisionInput,
+        );
+        policyDecision = decision.decision;
+        policyVersion = decision.policyVersion;
+        if (decision.decision === 'DENY') {
+          throw new SemanticOperationPolicyDeniedError(
+            request.operationId,
+            view,
+          );
+        }
+        return decision;
+      };
+      const operationDecision = await authorizeRequired(
+        definition.permissionId,
+        Object.freeze({
+          input: capabilityAuthorization?.decisionInput ?? request.input,
+          kind: 'registeredSemanticOperationPolicyInput',
+          operationId: request.operationId,
+          requestId: view.requestId,
+          schemaVersion: OPERATION_POLICY_INPUT_VERSION,
+        }),
+      );
+      if (capabilityAuthorization) {
+        await authorizeRequired(
+          QUERY_BOUNDARY_PERMISSION_ID,
+          Object.freeze({
+            arguments: capabilityAuthorization.readBackArguments,
+            kind: 'semanticQueryPolicyInput',
+            queryId: readBackDefinition.queryId,
+            requestId: view.requestId,
+            schemaVersion: 'northstar.semantic-query-policy-input/v1',
+          }),
+        );
+        await authorizeRequired(
+          readBackDefinition.permissionId,
+          Object.freeze({
+            arguments: capabilityAuthorization.readBackArguments,
+            kind: 'registeredSemanticQueryPolicyInput',
+            queryId: readBackDefinition.queryId,
+            requestId: view.requestId,
+            schemaVersion: 'northstar.semantic-query-policy-input/v1',
+          }),
+        );
+        for (const legalEntityId of capabilityAuthorization.legalEntityReadScopeIds) {
+          await authorizeRequired(
+            LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
+            Object.freeze({ legalEntityId }),
+          );
+        }
+      }
       const commonExecution = {
         channel: invocation.channel,
         context: trustedContextForRequestRuntimeView(view),
         definition,
         idempotencyKey: request.idempotencyKey,
         input: request.input,
-        inputDigest: digestOperationInput(request.input),
+        inputDigest,
         policyVersion: operationDecision.policyVersion,
         readBackDefinition,
         view,
       } as const;
       if (isRegisteredCapabilityOperation(definition)) {
-        const capabilityExecutor = this.#capabilityExecutors.get(
-          definition.effect.capability.targetId,
-        );
-        if (!capabilityExecutor) {
+        if (!capabilityExecutor || !capabilityAuthorization) {
           throw new NoSuchRegisteredCapabilityError(
             definition.effect.capability.targetId,
             definition.operationId,
@@ -808,6 +895,7 @@ export class SemanticOperationGateway {
         return await capabilityExecutor.execute(
           Object.freeze({
             ...commonExecution,
+            authorization: capabilityAuthorization,
             policyEvaluatorVersion: SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION,
           }) as RegisteredCapabilityOperationExecutionRequest,
         );

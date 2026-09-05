@@ -7,11 +7,16 @@ import type { ImmutableJsonValue } from '@north-star/runtime/request-runtime-vie
 import {
   evaluateRegisteredOperationPrecondition,
   SEMANTIC_OPERATION_RESULT_VERSION,
+  type RegisteredCapabilityOperationAuthorization,
+  type RegisteredCapabilityOperationAuthorizationRequest,
   type RegisteredCapabilityOperationExecutionRequest,
   type RegisteredCapabilityOperationExecutor,
   type SemanticOperationResultEnvelope,
 } from '../../runtime/src/semantic-operation-gateway.js';
-import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../runtime/src/semantic-query-gateway.js';
+import {
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
+} from '../../runtime/src/semantic-query-gateway.js';
 import type {
   PostgresCapabilityOperationExecutorContext,
   PostgresCapabilityOperationExecutorFactory,
@@ -66,10 +71,23 @@ interface HydratedAdjustmentDraft {
   readonly values: Readonly<Record<string, ImmutableJsonValue>>;
 }
 
+interface PreparedInventoryPosting {
+  readonly definition: RegisteredCapabilityOperationAuthorizationRequest['definition'];
+  readonly draft: HydratedAdjustmentDraft;
+  readonly input: {
+    readonly expectedRevision: number;
+    readonly recordId: string;
+  };
+  readonly inputDigest: string;
+  readonly readBackDefinition: RegisteredCapabilityOperationAuthorizationRequest['readBackDefinition'];
+  readonly view: RegisteredCapabilityOperationAuthorizationRequest['view'];
+}
+
 class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
   readonly capabilityId = INVENTORY_POSTING_CAPABILITY_ID;
   readonly #binding: InventoryDraftBinding;
   readonly #posting: PostgresInventoryPostingService;
+  readonly #prepared = new WeakMap<object, PreparedInventoryPosting>();
 
   constructor(
     private readonly context: PostgresCapabilityOperationExecutorContext,
@@ -92,9 +110,9 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
     );
   }
 
-  async execute(
-    request: RegisteredCapabilityOperationExecutionRequest,
-  ): Promise<SemanticOperationResultEnvelope> {
+  async prepareAuthorization(
+    request: RegisteredCapabilityOperationAuthorizationRequest,
+  ): Promise<RegisteredCapabilityOperationAuthorization> {
     assertPostingOperation(request, this.#binding);
     const input = postingInput(request.input);
     const draft = await hydrateAdjustmentDraft(
@@ -120,6 +138,50 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
         );
       }
     }
+    const scope = request.readBackDefinition.legalEntityScope;
+    if (!scope || scope.cardinality !== 'exactlyOne') {
+      throw inputError('the posting read-back lacks exact legal-entity scope');
+    }
+    const authorization = Object.freeze({
+      decisionInput: Object.freeze({ legalEntityId: draft.legalEntityId }),
+      legalEntityReadScopeIds: Object.freeze([draft.legalEntityId]),
+      readBackArguments: Object.freeze({
+        [scope.operand.parameterId]: draft.legalEntityId,
+        recordId: input.recordId,
+      }),
+    });
+    this.#prepared.set(
+      authorization,
+      Object.freeze({
+        definition: request.definition,
+        draft,
+        input,
+        inputDigest: request.inputDigest,
+        readBackDefinition: request.readBackDefinition,
+        view: request.view,
+      }),
+    );
+    return authorization;
+  }
+
+  async execute(
+    request: RegisteredCapabilityOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope> {
+    assertPostingOperation(request, this.#binding);
+    const prepared = this.#prepared.get(request.authorization);
+    this.#prepared.delete(request.authorization);
+    if (
+      !prepared ||
+      prepared.definition !== request.definition ||
+      prepared.inputDigest !== request.inputDigest ||
+      prepared.readBackDefinition !== request.readBackDefinition ||
+      prepared.view !== request.view
+    ) {
+      throw inputError(
+        'the posting authorization is not bound to this execution',
+      );
+    }
+    const { draft, input } = prepared;
     const command = adjustmentCommand(request, input, draft);
     const actor = await this.context.actorIssuer.issue(request.context);
     const posted = await this.#posting.postAdjustment(
@@ -127,39 +189,50 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
       actor,
       command,
     );
-    const scope = request.readBackDefinition.legalEntityScope;
-    if (!scope || scope.cardinality !== 'exactlyOne') {
-      throw inputError('the posting read-back lacks exact legal-entity scope');
+    let readBack;
+    try {
+      readBack = await this.context.queryGateway.invoke(request.view, {
+        arguments: request.authorization.readBackArguments,
+        queryId: request.readBackDefinition.queryId,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      });
+    } catch (error) {
+      if (error instanceof SemanticQueryPolicyDeniedError) {
+        return postingResult(request, posted, null);
+      }
+      throw error;
     }
-    const readBack = await this.context.queryGateway.invoke(request.view, {
-      arguments: {
-        [scope.operand.parameterId]: draft.legalEntityId,
-        recordId: input.recordId,
-      },
-      queryId: request.readBackDefinition.queryId,
-      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-    });
     const record = readBack.records.find(
       (candidate) => candidate.recordId === input.recordId,
     );
     if (readBack.outcome !== 'exact' || !record) {
       throw inputError('the posted transaction did not read back exactly');
     }
-    return Object.freeze({
-      kind: 'semanticOperationResult',
-      operationId: request.definition.operationId,
-      outcome: 'succeeded',
-      readBack: record,
-      schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
-      trust: Object.freeze({
-        changeDocumentId: posted.trust.changeDocumentId,
-        domainEventId: posted.trust.domainEventId,
-        invocationId: posted.trust.invocationId,
-        outboxId: posted.trust.outboxId,
-      }),
-      unsupportedReason: null,
-    });
+    return postingResult(request, posted, record);
   }
+}
+
+function postingResult(
+  request: RegisteredCapabilityOperationExecutionRequest,
+  posted: Awaited<
+    ReturnType<PostgresInventoryPostingService['postAdjustment']>
+  >,
+  readBack: SemanticOperationResultEnvelope['readBack'],
+): SemanticOperationResultEnvelope {
+  return Object.freeze({
+    kind: 'semanticOperationResult',
+    operationId: request.definition.operationId,
+    outcome: 'succeeded',
+    readBack,
+    schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+    trust: Object.freeze({
+      changeDocumentId: posted.trust.changeDocumentId,
+      domainEventId: posted.trust.domainEventId,
+      invocationId: posted.trust.invocationId,
+      outboxId: posted.trust.outboxId,
+    }),
+    unsupportedReason: null,
+  });
 }
 
 /** Inventory owns the sole adapter from its registered capability to posting. */
@@ -177,7 +250,9 @@ export const INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY = Object.freeze({
 } satisfies PostgresCapabilityOperationExecutorFactory);
 
 function assertPostingOperation(
-  request: RegisteredCapabilityOperationExecutionRequest,
+  request:
+    | RegisteredCapabilityOperationAuthorizationRequest
+    | RegisteredCapabilityOperationExecutionRequest,
   binding: InventoryDraftBinding,
 ): void {
   if (
