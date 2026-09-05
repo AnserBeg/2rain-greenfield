@@ -4926,19 +4926,21 @@ test(
  * provider said 2, and every gate stayed green.
  */
 test('posting kernel admission: the shipped head release declares the posting capability version the provider implements', async () => {
+  type ReleaseHead = {
+    releaseManifest: {
+      capabilityFacts: Array<{
+        capabilityId: string;
+        capabilityVersion: number;
+      }>;
+    };
+  };
   const artifact = JSON.parse(
     await readFile(resolve('apps/web/release/app.compiled.json'), 'utf8'),
   ) as {
-    applications: Array<{
-      releaseManifest: {
-        capabilityFacts: Array<{
-          capabilityId: string;
-          capabilityVersion: number;
-        }>;
-      };
-    }>;
+    application?: ReleaseHead;
+    applications?: ReleaseHead[];
   };
-  const head = artifact.applications.at(-1);
+  const head = artifact.applications?.at(-1) ?? artifact.application;
   assert.ok(head, 'the compiled artifact has a head release');
   const facts = head.releaseManifest.capabilityFacts.filter(
     (fact) => fact.capabilityId === postingCapabilityId,
