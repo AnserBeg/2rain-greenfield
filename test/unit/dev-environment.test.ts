@@ -47,9 +47,10 @@ interface DeclaredIdentifiers {
 
 function declaredIdentifiers(): DeclaredIdentifiers {
   const envelope = JSON.parse(readFileSync(compiledPath, 'utf8')) as {
-    applications: { normalizedDefinitionBytesBase64: string }[];
+    application?: { normalizedDefinitionBytesBase64: string };
+    applications?: { normalizedDefinitionBytesBase64: string }[];
   };
-  const head = envelope.applications.at(-1);
+  const head = envelope.applications?.at(-1) ?? envelope.application;
   assert.ok(head, 'the compiled application release carries no application');
   const definition = JSON.parse(
     Buffer.from(head.normalizedDefinitionBytesBase64, 'base64').toString(
