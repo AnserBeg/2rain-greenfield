@@ -65,7 +65,6 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0024_module_storage_enum_domain_widening.sql',
       '0025_current_authorization.sql',
     );
     const admin = await pool.connect();
