@@ -382,8 +382,31 @@ export async function submitSurfaceRuntimeIntent(
       ref,
     );
   }
-  if (result.outcome !== 'succeeded' || !result.readBack) {
+  if (result.outcome !== 'succeeded') {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+  }
+  if (!result.readBack) {
+    const ref = { code: 'OPERATION_COMMITTED_READBACK_WITHHELD' } as const;
+    const evidence = result.trust
+      ? Object.entries(result.trust)
+          .map(
+            ([name, id]) =>
+              `<dt>${escapeHtml(name)}</dt><dd><code>${escapeHtml(id)}</code></dd>`,
+          )
+          .join('')
+      : '';
+    // A committed result with withheld data is not a failed command. Render
+    // neither stale record values nor a form that could resubmit the effect.
+    return Object.freeze({
+      statusCode: 200,
+      html: shellDocument(
+        view,
+        selection.surfaces,
+        selection.navigation,
+        selection.selected,
+        `<section class="panel operation-feedback" role="status" data-operation-committed="true" ${messageAttributes(ref)}>${messageBody(ref, operation.label, 'h1')}<dl data-operation-trust>${evidence}</dl></section>`,
+      ),
+    });
   }
 
   if (

@@ -6,15 +6,22 @@ import pg from 'pg';
 
 import { startComposedApplication } from '../../../api/src/composition-root.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
+import { governedStorageTarget } from '../../../../test/helpers/governed-storage-target.js';
+import {
+  receiptBinding,
+  receiptColumn,
+  receiptTable,
+  quoteReceiptIdentifier as q,
+} from '../../../../packages/postgres-provider/src/goods-receipt.js';
 
 const legalEntityId = '74000000-0000-4000-8000-000000000001';
 const itemId = '71000000-0000-4000-8000-000000000011';
 const locationId = '71000000-0000-4000-8000-000000000021';
 
-test('authorized receiving journey denies a revoked grant, then posts and shows server progress', async ({
+test('authorized receiving journey denies a revoked grant, then posts and exercises correction, reversal and order lifecycle', async ({
   page,
 }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(420_000);
   const externalBaseUrl = process.env.COMPOSED_APPLICATION_BASE_URL;
   if (externalBaseUrl) {
     // An external run must explicitly identify its disposable lane-owned DB.
@@ -98,6 +105,9 @@ async function journey(
       'Base unit': 'unit_id',
       'Actual received unit cost': 'unit_cost',
       'Actual cost currency': 'currency',
+      'Line revision': 'line_revision',
+      'Amendment reason': 'reason',
+      'Reversal of movement': 'reversal_of_movement_id',
     };
     const operationId = await page
       .locator('form#surface-record-form input[name="operationId"]')
@@ -252,4 +262,186 @@ async function journey(
   console.log(
     `RECEIVING_AUTHORIZED_WALKTHROUGH ${JSON.stringify({ orderUrl, receiptUrl: url('goods_receipt', 'detail', receiptId), ordered: '5', received: '3', remaining: '2', revokedPostDenied: true })}`,
   );
+
+  // The rest of this journey is also browser work, not service/fixture proof.
+  const orderLineUrl = url('purchase_order_line', 'detail', orderLineId);
+  await page.goto(orderLineUrl);
+  await page
+    .getByRole('link', { name: 'Request quantity amendment', exact: true })
+    .click();
+  await fill('Number', `RECEIPT-AM-${suffix}`);
+  await fill('Line revision', '1');
+  await fill('Quantity', '3');
+  await fill(
+    'Amendment reason',
+    'Correct ordered quantity to actual required quantity',
+  );
+  await relation('purchase_order_amendment_order_line', orderLineId);
+  await save();
+  await page.goto(orderLineUrl);
+  await command('Amend');
+  await expect(page.getByRole('status')).toContainText('Amend complete');
+  await page.goto(orderUrl);
+  await expect(progress.locator('td')).toHaveText([itemId, '3', '3', '0']);
+
+  const originalMovements = await movementsFor(receiptId);
+  expect(originalMovements).toHaveLength(1);
+  const originalMovementId = String(originalMovements[0]!.record_id);
+  const correctionId = await compensatingReceipt(
+    'correction',
+    '-1',
+    originalMovementId,
+  );
+  await page.goto(orderUrl);
+  await command('Close');
+  await expect(page.getByRole('status')).toContainText('Close complete');
+  await expect(
+    page.locator(
+      '[data-field-id="northstar.app:derived_state_field.machine.purchase_order_lifecycle"]',
+    ),
+  ).toContainText('purchase_order_closed');
+  // A staged correction cannot execute while its order is closed.
+  await page.goto(url('goods_receipt', 'detail', correctionId));
+  await command('Post');
+  await expect(page.locator('[data-diagnostic-code]')).toContainText(
+    'RECEIPT_ORDER_NOT_RELEASED',
+  );
+  expect(await movementsFor(correctionId)).toHaveLength(0);
+  await page.goto(orderUrl);
+  await command('Reopen');
+  await expect(page.getByRole('status')).toContainText('Reopen complete');
+  await page.goto(url('goods_receipt', 'detail', correctionId));
+  await command('Post');
+  await expect(page.getByRole('status')).toContainText('Post complete');
+  await page.goto(orderUrl);
+  await expect(progress.locator('td')).toHaveText([itemId, '3', '2', '1']);
+  expect(await movementsFor(receiptId)).toEqual(originalMovements);
+
+  const reversalId = await compensatingReceipt(
+    'reversal',
+    '-2',
+    originalMovementId,
+  );
+  await page.goto(url('goods_receipt', 'detail', reversalId));
+  const key = await page
+    .locator('form.capability-command input[name="idempotencyKey"]')
+    .inputValue();
+  const deniedBeforeReadBack = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM platform.trust_action_invocations WHERE tenant_id=$1 AND environment_id=$2 AND outcome='DENIED'`,
+    scope.slice(0, 2),
+  );
+  const trigger = `receipt_browser_revoke_${suffix}`;
+  await pool.query(`CREATE FUNCTION platform.${trigger}() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,platform AS $$ BEGIN
+    IF NEW.idempotency_key=TG_ARGV[0]::uuid THEN UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=NEW.tenant_id AND environment_id=NEW.environment_id AND role_id=TG_ARGV[1]::uuid AND permission_id='northstar.app:permission.goods_receipt_read'; END IF; RETURN NEW; END $$`);
+  await pool.query(
+    `CREATE TRIGGER ${trigger} AFTER INSERT ON platform.semantic_operation_receipts FOR EACH ROW EXECUTE FUNCTION platform.${trigger}('${key}','${grant.role_id}')`,
+  );
+  try {
+    await command('Post');
+    await expect(page.getByRole('status')).toContainText('Operation committed');
+    await expect(page.getByRole('status')).toContainText(
+      'Do not submit this operation again',
+    );
+    await expect(page.locator('form')).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: /Post|Retry|Submit/u }),
+    ).toHaveCount(0);
+    await expect(page.locator('[data-field-id]')).toHaveCount(0);
+    const persisted = await pool.query<{
+      invocation_id: string;
+      change_document_id: string;
+      domain_event_id: string;
+      outbox_id: string;
+    }>(
+      `SELECT invocation_id,change_document_id,domain_event_id,outbox_id FROM platform.semantic_operation_receipts WHERE tenant_id=$1 AND environment_id=$2 AND idempotency_key=$3`,
+      [...scope.slice(0, 2), key],
+    );
+    expect(persisted.rows).toHaveLength(1);
+    for (const id of Object.values(persisted.rows[0]!))
+      await expect(page.locator('[data-operation-trust]')).toContainText(id);
+    expect(await movementsFor(reversalId)).toHaveLength(1);
+    const deniedAfter = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM platform.trust_action_invocations WHERE tenant_id=$1 AND environment_id=$2 AND outcome='DENIED'`,
+      scope.slice(0, 2),
+    );
+    expect(Number(deniedAfter.rows[0]!.count)).toBe(
+      Number(deniedBeforeReadBack.rows[0]!.count) + 1,
+    );
+  } finally {
+    await pool.query(
+      `DROP TRIGGER ${trigger} ON platform.semantic_operation_receipts`,
+    );
+    await pool.query(`DROP FUNCTION platform.${trigger}()`);
+    await pool.query(
+      `UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE tenant_id=$1 AND environment_id=$2 AND role_id=$3 AND permission_id='northstar.app:permission.goods_receipt_read'`,
+      scope,
+    );
+  }
+  await page.goto(orderUrl);
+  await expect(progress.locator('td')).toHaveText([itemId, '3', '0', '3']);
+  expect(await movementsFor(receiptId)).toEqual(originalMovements);
+  console.log(
+    `RECEIVING_LIFECYCLE_WALKTHROUGH ${JSON.stringify({ orderUrl, correctionUrl: url('goods_receipt', 'detail', correctionId), reversalUrl: url('goods_receipt', 'detail', reversalId), ordered: '3', received: '0', remaining: '3', committedReadBackWithheld: true })}`,
+  );
+
+  async function command(label: string) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    await page
+      .getByRole('button', { name: `Confirm ${label}`, exact: true })
+      .click();
+  }
+  async function compensatingReceipt(
+    kind: 'correction' | 'reversal',
+    quantity: string,
+    movement: string,
+  ) {
+    await page.goto(url('goods_receipt', 'form'));
+    await fill('Receipt number', `RECEIPT-${kind}-${suffix}`);
+    await page
+      .getByRole('combobox', { name: 'State', exact: true })
+      .selectOption({ label: 'draft' });
+    await page
+      .getByRole('combobox', { name: 'Kind', exact: true })
+      .selectOption({ label: kind });
+    await fill('Received at', new Date().toISOString());
+    await fill('Receiving location', locationId);
+    await fill('Reason code', 'CORRECTION');
+    await fill(
+      'Reason',
+      'Correct original received facts without rewriting history',
+    );
+    await relation('goods_receipt_order', orderId);
+    await relation('goods_receipt_supersedes', receiptId);
+    const id = await save();
+    await page.goto(url('goods_receipt', 'detail', id));
+    await page
+      .getByRole('link', { name: 'Add receipt line', exact: true })
+      .click();
+    await fill('Line number', '1');
+    await fill('Item', itemId);
+    await fill('Quantity', quantity);
+    await fill('Base unit', 'EA');
+    await page
+      .locator(
+        '[name="value:northstar.app:field.goods_receipt_line_cost_status"]',
+      )
+      .selectOption({ label: 'absent' });
+    await fill('Reversal of movement', movement);
+    await relation('goods_receipt_line_receipt', id);
+    await relation('goods_receipt_line_order_line', orderLineId);
+    await save();
+    return id;
+  }
+  async function movementsFor(
+    sourceId: string,
+  ): Promise<Record<string, unknown>[]> {
+    // Inspect persisted immutable facts only; document creation/posting remains UI-only.
+    const binding = receiptBinding(await governedStorageTarget())!;
+    return (
+      await pool.query(
+        `SELECT * FROM ${receiptTable(binding.movement)} WHERE tenant_id=$1 AND environment_id=$2 AND ${q(receiptColumn(binding.movement, 'inventory_movement_source_id'))}=$3 ORDER BY record_id`,
+        [...scope.slice(0, 2), sourceId],
+      )
+    ).rows as Record<string, unknown>[];
+  }
 }
