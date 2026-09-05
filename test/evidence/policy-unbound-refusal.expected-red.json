@@ -119,6 +119,21 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: the unchanged composed application builds only with its exact evaluator-binding census",
           "expected": "COMPILER_PERMISSION_EVALUATOR_UNBOUND.*northstar\\.app:permission\\.party_create"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
+          "expected": "the refusal must name exactly the one unacknowledged permission and nothing else"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned",
+          "expected": "compiled"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it",
+          "expected": "narrowing keeps exactly the evaluator bindings the revision declares"
         }
       ]
     },
@@ -137,6 +152,16 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: the unchanged composed application builds only with its exact evaluator-binding census",
           "expected": "COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE.*northstar\\.app:permission\\.stock_count_probe_stale"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
+          "expected": "the refusal must name exactly the one unacknowledged permission and nothing else"
+        },
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned",
+          "expected": "compiled"
         }
       ]
     },
