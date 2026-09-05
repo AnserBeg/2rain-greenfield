@@ -1,8 +1,8 @@
 # RECEIPT — receive goods against purchase orders through the product
 
-Status: active combined candidate; not accepted or review-ready. Tier: Critical. Stops: 1.
+Status: active combined candidate; not accepted. Tier: Critical. Stops: 1.
 Base: `8af63acfd8eb4f95b5af8ceff1b6ce7c117b9def`. Owner's execution prompt is the charter.
-Combined code/test checkpoint: `5973d9b4e9b817ee42c4b9c1434c8274937173d0`; subsequent record commit carries no production changes. New-head CI is reported on draft PR #1, not inferred from focused greens.
+Combined code/test checkpoint: `8bf7213433f3a1595674169e8cdbf54cb15dcdae`; the subsequent record commit carries no production changes. New-head CI is reported on draft PR #1, not inferred from focused greens.
 Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. Review and acceptance remain external.
 
 ## Claims
@@ -11,13 +11,13 @@ Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. Review and accept
 2. Receipt posting atomically writes source, companions, movements, received projection and trust/idempotency effects.
 3. Immutable movement → receipt line → order line attribution and actual cost or explicit absence survive correction and rebuild.
 4. ADR-0065 claims 1–10: bounded quantity, refusal payload, concurrent locations, verified projection, correction floor, authored-write refusal, deterministic rebuild, non-healing reconciliation, amendment isolation and recoverable attribution.
-5. Product receiving uses the installed AUTH evaluator, explicit local grants, human-confirmed posting and server-derived ordered/received/remaining quantities.
+5. Product receiving uses the installed AUTH evaluator, authoritative prepared scope, required-read preflight, explicit local grants, human-confirmed posting and server-derived quantities. A commit-time read denial withholds data while preserving truthful success/trust.
 
 ## Decisions
 
-- Preserve checkpoint `58dbec7d33df6181176e4c039678e937963e46b6`. Exact published AUTH `b17a64a3d4695b24907301be645cc6702ca71966` incorporated by history-preserving merge `b1164729fd537265bec2c0df9f43d88e00f386af`; no arbitrary later AUTH work imported.
+- Preserve completed RECEIPT `6b2385476a68f3b6f9495bfbdc039edfa349ee08`. Exact AUTH correction `9d70c749752006ab21d1b9df9516b1cb7b491df3` incorporated by history-preserving merge `866f697a501c0dc53024ad18389a982b6ba44a0a`; no arbitrary AUTH work imported.
 - Accepted migrations through 0024 unchanged; AUTH 0025; RECEIPT 0026/0027. Kernel snapshot regenerated from all 27.
-- ADR-0066 re-baseline resets only disposable `dev-receipt-postgres`; no retained/customer or other lane data touched. Currency search required a second re-baseline after its attempted transition omitted a derived search column; earlier demonstration records are disposable and the walkthrough is recreated.
+- AUTH added no migrations or release-output change. Accepted through 0024 / AUTH 0025 / RECEIPT 0026–0027 and governed root `ca42045403a26d263a4d46c3ee62ada93f55be2be99645fca06fa966ae8dbefb` remain unchanged; the preserved lane database was not reset.
 - Scope: purchasing definitions, registered receiving capability/UI code, shared posting kernel, projection/reconciliation, migrations, release inputs and relevant tests. AUTH evaluator implementation remains inherited and unchanged.
 - Plan §5.11 records the owner's narrow RECEIPT exception in this branch; no second metadata authority or doctrine rewrite.
 - Forward-date default: zero tenant business days. Explicit close requires all active lines fully received; explicit reopen precedes further receiving, amendment or correction.
@@ -28,8 +28,9 @@ Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. Review and accept
 
 ## Integration
 
-- Governed release builds with real evaluator bindings; application assembly installs AUTH and both posting executor factories. New runtime identity/grants are local-demo only and loopback-bound.
-- Browser-created order and receipt exercise the real HTTP/forms/gateway/posting path: ordered 5, receipt 3, remaining 2. Revocation after rendering refuses Post; restoring the exact grant permits confirmed Post. Fresh-database browser test additionally asserts persisted DENY audit evidence.
+- Preparation resolves persisted target scope/revision read-only, binds its opaque token to the exact request/input digest/definitions/view, and the gateway preflights required read/scope permissions before execution. The mutation transaction retains revision/scope checks and idempotency.
+- Real gateway tests cover initial/correction/reversal/amend/close/reopen: missing read and A→B/forged scope produce no business effects and one redacted denial. Commit-time read revocation returns success/null read-back/trust IDs; unrelated exceptions remain failures; restored same-key retry adds no effects.
+- Browser HTTP submission covers the full lifecycle. Null read-back renders HTTP 200 registered guidance and trust IDs, with no record DTO/form/retry; exactly one semantic receipt and movement persist. Party lifecycle and stock replay stay green.
 - Forms no longer submit server-owned lifecycle fields; commands/confirmation preserve selected legal-entity scope and record identity. Receiving refresh is restricted to receiving commands: ordinary archive read-back and stock replay remain intact.
 - Currency codes are searchable on receipt lines as on purchase orders. A three-character excluded-currency probe collided with another verifier value; the field now follows its ordinary business search semantics, not an excluded-field exception.
 - Historical profile/reproduction checks use synthetic in-memory lineages after ADR-0066; their artifacts never enter the production path. The obsolete 168→163 historical scenario census is retired; current per-entity coverage and the independent executed/derived partition oracle remain.
@@ -38,28 +39,28 @@ Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. Review and accept
 
 ## Controls
 
-All eleven entries of `test/evidence/RECEIPT.expected-red.json` actually reproduced red/restored green on combined `968942c7eecc0ed10b3499a217d393a64bbe4dce`: pre-rebuild capture, ordered ceiling, refusal payload, common order lock, received floor, received verifier, authored-write fence, rebuild identity, corruption reporting, amendment isolation and projection-independent reconstruction.
+All eleven original RECEIPT entries reproduced red/restored green on `968942c7eecc0ed10b3499a217d393a64bbe4dce`: pre-rebuild capture, ordered ceiling, refusal payload, common order lock, received floor/verifier, authored-write fence, rebuild identity/corruption reporting, amendment isolation and projection-independent reconstruction.
 
 Six inherited controls reproduced red/restored green at `d359688b834ff248d93e646142b34d5db0819c7e`: `coverage-comparison-absent`, `version-four-digest-covers-the-derived-role`, `active-release-fact-checked-after-the-receipt-lookup`, `recorded-at-floor-absent`, `comparator-drops-the-movement-id-tie-break`, `negative-stock-stops-sorting-persisted-with-planned`.
 
-Three AUTH controls reproduced red/restored green at `18f2d91dba62cbda31a853621fdc3562fc6cb591`: `revoked-grant-treated-as-current`, `unknown-permission-allowed`, `foreign-entity-scope-widened`. `receipt-binding-action-drifted` reproduced red/restored green at `d359688`: its first run correctly refused binding drift but exposed a stale expected diagnostic; the control now pins the actual `COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE` and exact amendment permission. Total: 21 controls executed, not manifest validation or self-test. Later edits are browser/read-back repairs and records, not these kernel/evaluator paths; no unchanged-control reruns claimed.
+Three AUTH controls reproduced red/restored green at `18f2d91dba62cbda31a853621fdc3562fc6cb591`; `receipt-binding-action-drifted` did so at `d359688`. Ten affected controls executed against `8bf7213`: receipt post/order typed read denial, receipt historical retry, read preflight, authoritative scope, committed inventory read denial, denial recorder, legal-scope translation, active-release-before-replay and natural replay. Each killed only its declared tests and restored green. Total actual controls: 31; validation/self-tests are not counted.
 
 ## Gates
 
-Local combined checks executed: governed build/check; both schema snapshots; typecheck; compiler profile/bindings + purchasing 123/123 and real composed startup 11/11 at `968942c`; development release reader 14/14 at `18f2d91`; real fresh-database authorized/denied browser journey 1/1; policy + reconciliation 27/27; receipt atomic/lifecycle fixture 1/1; historical-invalid-head and synthetic intermediate refusal 2/2; synthetic profile/source rollback 1/1. These are focused results, not full CI.
+New correction checks at `8bf7213`: typecheck; governed release check; real-policy receiving 7/7; receipt atomic/lifecycle/binding 1/1; semantic gateway + surface contracts 80/80; formerly failing module-runtime scoped-member recheck 1/1; catalog/browser controls 17/17; Party lifecycle + stock replay 2/2; fresh and preserved-database full receiving browser journeys 1/1 each. Earlier receipt/reconciliation/compiler/schema checks remain recorded above. These are focused results, not full CI.
 
 The first browser run used the CI reachability reporter, which correctly returned nonzero for a filtered run despite the test passing. The explicit focused rerun used the list reporter and passed; no filtered run is claimed as CI reachability evidence.
 
 After the refresh repair, navigation/forms/stock replay/receiving passed 4/4; Party first timed out during governed restart, then at Restore in an isolated rerun. Its real-policy multi-form journey now has the existing 60-second multi-form allowance, plus the existing 180-second fixture-startup allowance for restart; no semantic assertions or performance gate were removed. Final isolated rerun passed 1/1 in 26.3 seconds at `b6f557e635c97b7e49e8368a453febeec5aa483b`. The shipped-head capability reader repair also passed 1/1. All five previously selected browser journeys now pass, not a claim of a full browser-suite run.
 
-CI run `33952548493` tested `968942c`: hosted authorized/denied receiving passed, as did schema drift, performance and security; quality failed two one-entry release-reader assertions and browser failed four older journeys. PostgreSQL finished 236/237: its only failure was the shipped-capability test's multi-entry-only reader, now repaired with its exact capability-version assertion retained. The development reader, navigation/type-control expectations and overly broad refresh are repaired too; no failed run is represented as green. New-head CI remains required. No independent review, owner test, acceptance, deployment or main merge claimed.
+New-head CI remains required and is reported after push. No independent review, owner test, acceptance, deployment or main merge claimed.
 
 Standalone `check-review-record.sh` reports pre-existing main doctrine commits `65d9222`/`8af63ac` without review records; accepted history/logs are untouched. A manifest validation attempted before committing correctly refused the dirty tree; it is not control execution evidence.
 
 ## Test it yourself
 
 Server: http://127.0.0.1:4317 (already running; do not start a second instance).
-Live posted example: [order, 5 ordered / 3 received / 2 remaining](http://127.0.0.1:4317/?surface=northstar.app%3Asurface.purchase_order_detail&northstar.app%3Aparameter.purchase_order_get_legal_entity_scope=74000000-0000-4000-8000-000000000001&record=59257aaa-140f-4d8f-ab8b-32332f02c67c), [posted receipt](http://127.0.0.1:4317/?surface=northstar.app%3Asurface.goods_receipt_detail&northstar.app%3Aparameter.goods_receipt_get_legal_entity_scope=74000000-0000-4000-8000-000000000001&record=595e6d8c-32de-40d1-8ef3-14a622877152).
+Live corrected-candidate example: [order, amended 3 / received 0 / remaining 3](http://127.0.0.1:4317/?surface=northstar.app%3Asurface.purchase_order_detail&northstar.app%3Aparameter.purchase_order_get_legal_entity_scope=74000000-0000-4000-8000-000000000001&record=1c6f4e00-d344-456b-b4ce-1d93c0020791), [initial receipt](http://127.0.0.1:4317/?surface=northstar.app%3Asurface.goods_receipt_detail&northstar.app%3Aparameter.goods_receipt_get_legal_entity_scope=74000000-0000-4000-8000-000000000001&record=73604320-2d13-408d-a893-30c606f883cb), [correction](http://127.0.0.1:4317/?surface=northstar.app%3Asurface.goods_receipt_detail&northstar.app%3Aparameter.goods_receipt_get_legal_entity_scope=74000000-0000-4000-8000-000000000001&record=73adddaa-3063-4c02-baee-e06027451bc4), [reversal](http://127.0.0.1:4317/?surface=northstar.app%3Asurface.goods_receipt_detail&northstar.app%3Aparameter.goods_receipt_get_legal_entity_scope=74000000-0000-4000-8000-000000000001&record=e7aa0d1b-f747-4da0-a170-efc8b38b80a8).
 If stopped, from this worktree run:
 `PORT=4317 NORTH_STAR_DATABASE_PORT=55437 NORTH_STAR_DEV_DATABASE_CONTAINER=dev-receipt-postgres NORTH_STAR_TENANT_SLUG=receipt-development corepack pnpm dev`.
 
@@ -81,7 +82,7 @@ The operator CLI ran on the populated demo with runtime credentials and `default
 
 ## Remaining / review
 
-Full combined CI and the final external Critical review remain. Corrections/amendment/close/reopen have gateway/fixture coverage; the browser proof currently covers initial receiving and grant revocation. Decimal entry retains the existing canonical-input requirement (no trailing fractional zeroes). Local-demo grants are development-only, not an external login facility. Program-review anti-trigger: mid-vertical integration is not a stage boundary; no autonomous program review.
+Full combined CI and the external Critical review remain. Decimal entry retains the existing canonical-input requirement (no trailing fractional zeroes). Local-demo grants are development-only, not an external login facility. Program-review anti-trigger: this unaccepted integration is not a stable stage boundary; no autonomous program review.
 
 Fresh-review prompt prepared below (17 lines); do not launch until the candidate is frozen with full CI. Record-claim follows at that point. No independent review run by this lane.
 
@@ -90,9 +91,9 @@ Review RECEIPT as a Critical end-to-end vertical; do not implement, merge or app
 Use PR #1's frozen candidate SHA and accepted base 8af63ac; verify full CI first.
 Read AGENTS, active plan, review-tiers, kernel guarantees and ADRs 0017/0049/0059/0060/0062/0063/0065/0066.
 Honor the owner's recorded narrow §5.11 exception and explicit closing/date defaults.
-Review the exact imported AUTH b17a64a snapshot at its RECEIPT callers, not arbitrary later AUTH work.
+Review exact imported AUTH 9d70c74 at its RECEIPT callers, not arbitrary later AUTH work.
 Trace purchasing/inventory definitions → governed release → composition root and actual policy bindings/grants.
-Trace PO navigation/forms/confirmation → surface runtime → operation gateway → registered receiving executor.
+Trace PO forms → operation gateway preparation/current policy → receiving executor → null-read-back HTTP acknowledgement.
 Trace the executor through the shared posting transaction, including source/companions/movements/progress/trust.
 Check all ten ADR-0065 claims against executed tests and discriminating mutation evidence.
 Check same-line/different-location races, deterministic locks, exact quantities and retry-key conflicts.
