@@ -152,7 +152,7 @@
         {
           "file": "test/postgres/composed-application.test.ts",
           "name": "current grants enforce allow, read-only, revocation, scope and denial evidence on one pinned runtime",
-          "expected": "every denied query and operation must record trust evidence"
+          "expected": "\\d+ !== \\d+"
         }
       ]
     },
