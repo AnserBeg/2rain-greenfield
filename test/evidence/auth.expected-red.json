@@ -107,6 +107,11 @@
           "file": "test/postgres/module-storage-transition.test.ts",
           "name": "backfill claims survive connection loss and coordinators converge",
           "expected": "another tenant cannot discover or mutate the checkpoint"
+        },
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "live-set reconciliation rejects altered, surplus, unknown, and destructive objects",
+          "expected": "assert.ok\\(obsoleteRoot\\)"
         }
       ]
     },
