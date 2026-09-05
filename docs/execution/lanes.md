@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RECEIPT` (critical-path step 1) | active isolated implementation/tests on draft PR #1; governed release awaits explicitly published real AUTH dependency; no temporary acknowledgements; external review and acceptance |
+| **BUILD** | `RECEIPT` (critical-path step 1) | draft PR #1 incorporates exact AUTH `b17a64a`; governed release and real authorized/denied receiving run on port 4317; combined CI and external Critical review/acceptance pending; no temporary acknowledgements |
 | **SUPPORT** | — | idle |
 
 
