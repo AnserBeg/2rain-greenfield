@@ -109,8 +109,12 @@ test('policy narrowing may reference only a parameter and type declared by the s
         ),
     },
   );
+  const request = Object.freeze({
+    ...ladderRequest(answeringQueryId),
+    arguments: Object.freeze({ [declaredParameterId]: 'allowed-scope' }),
+  });
   await assert.rejects(
-    gateway.invoke(view, ladderRequest(answeringQueryId)),
+    gateway.invoke(view, request),
     (error: unknown) =>
       error instanceof MalformedQueryPolicyNarrowingError &&
       /undeclared parameter or changes its declared type/u.test(error.message),
