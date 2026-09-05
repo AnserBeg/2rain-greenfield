@@ -25,6 +25,7 @@ import {
 import type { TrustedRequestContext } from './request-context.js';
 import {
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  LegalEntityReadScopePolicyDeniedError,
   assertRequestRuntimeView,
   authorizeCurrentPolicy,
   trustedContextForRequestRuntimeView,
@@ -573,20 +574,28 @@ export class SemanticQueryGateway {
     const parameterValues = bindQueryParameters(definition, request.arguments);
     // One authority per query: the declared operand or a supplied capability,
     // never both. The conflict is refused above, with the validation.
-    const legalEntityReadScope = scopeSelection
-      ? await issueLegalEntityReadScope(
-          this.currentPolicy,
-          view,
-          scopeSelection,
-        )
-      : executionContext.legalEntityReadScope === undefined
-        ? null
-        : await verifyLegalEntityReadScope(
+    let legalEntityReadScope: LegalEntityReadScope | null;
+    try {
+      legalEntityReadScope = scopeSelection
+        ? await issueLegalEntityReadScope(
             this.currentPolicy,
-            executionContext.legalEntityReadScope,
             view,
-            definition.sourceEntityId,
-          );
+            scopeSelection,
+          )
+        : executionContext.legalEntityReadScope === undefined
+          ? null
+          : await verifyLegalEntityReadScope(
+              this.currentPolicy,
+              executionContext.legalEntityReadScope,
+              view,
+              definition.sourceEntityId,
+            );
+    } catch (error) {
+      if (!(error instanceof LegalEntityReadScopePolicyDeniedError))
+        throw error;
+      await this.#recordDenied(view, request.queryId, error.policyVersion);
+      throw new SemanticQueryPolicyDeniedError(request.queryId, view);
+    }
     let result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope;
     if (definition.queryType === 'aggregate') {
       if (!this.executor.executeAggregate) {

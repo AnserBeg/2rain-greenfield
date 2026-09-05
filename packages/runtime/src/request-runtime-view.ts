@@ -425,12 +425,14 @@ export class LegalEntityReadScopeIntegrityError extends Error {
 export class LegalEntityReadScopePolicyDeniedError extends Error {
   readonly code = 'LEGAL_ENTITY_READ_SCOPE_POLICY_DENIED' as const;
   readonly legalEntityId: string;
+  readonly policyVersion: string;
 
   override readonly name = 'LegalEntityReadScopePolicyDeniedError';
 
-  constructor(legalEntityId: string) {
+  constructor(legalEntityId: string, policyVersion: string) {
     super(`current policy denied legal-entity read scope ${legalEntityId}`);
     this.legalEntityId = legalEntityId;
+    this.policyVersion = policyVersion;
   }
 }
 
@@ -639,7 +641,10 @@ export async function issueLegalEntityReadScope(
       legalEntityReadScopePolicyInput(view, legalEntityId),
     );
     if (decision.decision === 'DENY') {
-      throw new LegalEntityReadScopePolicyDeniedError(legalEntityId);
+      throw new LegalEntityReadScopePolicyDeniedError(
+        legalEntityId,
+        decision.policyVersion,
+      );
     }
     if (
       policyVersion !== undefined &&
@@ -728,7 +733,10 @@ export async function verifyLegalEntityReadScope(
       legalEntityReadScopePolicyInput(view, legalEntityId),
     );
     if (decision.decision === 'DENY') {
-      throw new LegalEntityReadScopePolicyDeniedError(legalEntityId);
+      throw new LegalEntityReadScopePolicyDeniedError(
+        legalEntityId,
+        decision.policyVersion,
+      );
     }
     if (
       decisionPolicyVersion !== undefined &&

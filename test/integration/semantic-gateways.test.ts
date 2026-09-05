@@ -274,6 +274,13 @@ test('O1 capability operations require confirmation and dispatch by one exact ID
     [
       {
         capabilityId,
+        prepareAuthorization(execution) {
+          return Promise.resolve({
+            decisionInput: execution.input,
+            legalEntityReadScopeIds: [],
+            readBackArguments: execution.input,
+          });
+        },
         async execute(execution) {
           executions += 1;
           assert.equal(
@@ -351,6 +358,9 @@ test('O1 capability operations require confirmation and dispatch by one exact ID
     [
       {
         capabilityId: 'northstar.inventory:capability.not_posting',
+        prepareAuthorization() {
+          return Promise.reject(new Error('wrong executor reached'));
+        },
         execute() {
           wrongExecutions += 1;
           return Promise.reject(new Error('wrong executor reached'));
