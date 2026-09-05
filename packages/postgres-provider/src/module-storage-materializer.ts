@@ -2270,6 +2270,40 @@ async function rebuildPostedStockBalanceOnClient(
       'stock identity count exceeds the provider rebuild contract',
     );
   }
+  // Capture before soft retirement or any overwrite. Both missing and extra
+  // identities matter: comparing only an inner join would hide lost rows.
+  await client.query(
+    `WITH ledger AS (
+       SELECT ${quoted(projection.movementLegalEntityColumn)} AS legal_entity_id,
+              ${quoted(projection.movementItemColumn)}::text AS item_id,
+              ${quoted(projection.movementLocationColumn)}::text AS location_id,
+              sum(${quoted(projection.movementQuantityColumn)})::numeric(38,18) AS quantity,
+              min(${quoted(projection.movementUnitColumn)}) AS unit_id
+         FROM north_star_module.${quoted(projection.movement.physicalTableName)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(projection.movementArchiveColumn)} IS NULL
+        GROUP BY 1, 2, 3
+     ), stored AS (
+       SELECT ${quoted(projection.balanceLegalEntityColumn)} AS legal_entity_id,
+              ${quoted(projection.balanceItemColumn)}::text AS item_id,
+              ${quoted(projection.balanceLocationColumn)}::text AS location_id,
+              ${quoted(projection.balanceQuantityColumn)} AS quantity,
+              ${quoted(projection.balanceUnitColumn)} AS unit_id,
+              to_jsonb(balance) AS row
+         FROM north_star_module.${quoted(projection.balance.physicalTableName)} balance
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(projection.balanceArchiveColumn)} IS NULL
+     )
+     INSERT INTO north_star_internal.inventory_projection_discrepancies
+       (tenant_id, environment_id, projection_entity_id, subject_identity, stored_row, recomputed_row)
+     SELECT $1, $2, $3,
+            jsonb_build_array(coalesce(s.legal_entity_id, l.legal_entity_id),
+                              coalesce(s.item_id, l.item_id), coalesce(s.location_id, l.location_id)),
+            s.row, to_jsonb(l)
+       FROM stored s FULL JOIN ledger l USING (legal_entity_id, item_id, location_id)
+      WHERE s.quantity IS DISTINCT FROM l.quantity OR s.unit_id IS DISTINCT FROM l.unit_id`,
+    [scope.tenantId, scope.environmentId, projection.balance.entityId],
+  );
   await client.query(
     `UPDATE north_star_module.${quoted(projection.balance.physicalTableName)}
         SET ${quoted(projection.balanceArchiveColumn)} = statement_timestamp(),
