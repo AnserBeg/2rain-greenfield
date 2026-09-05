@@ -2,7 +2,7 @@
 
 Status: active combined candidate; not accepted. Tier: Critical. Stops: 1.
 Base: `8af63acfd8eb4f95b5af8ceff1b6ce7c117b9def`. Owner's execution prompt is the charter.
-Combined code/test checkpoint: `8bf7213433f3a1595674169e8cdbf54cb15dcdae`; the subsequent record commit carries no production changes. New-head CI is reported on draft PR #1, not inferred from focused greens.
+Combined code/test checkpoint: `e3bac21bc007f24da359d5047d71518fd5e0af7d`; the subsequent record commit carries no production changes. New-head CI is reported on draft PR #1, not inferred from focused greens.
 Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. Review and acceptance remain external.
 
 ## Claims
@@ -47,7 +47,7 @@ Three AUTH controls reproduced red/restored green at `18f2d91dba62cbda31a853621f
 
 ## Gates
 
-New correction checks at `8bf7213`: typecheck; governed release check; real-policy receiving 7/7; receipt atomic/lifecycle/binding 1/1; semantic gateway + surface contracts 80/80; formerly failing module-runtime scoped-member recheck 1/1; catalog/browser controls 17/17; Party lifecycle + stock replay 2/2; fresh and preserved-database full receiving browser journeys 1/1 each. Earlier receipt/reconciliation/compiler/schema checks remain recorded above. These are focused results, not full CI.
+New correction checks at `8bf7213`: typecheck; governed release check; real-policy receiving 7/7; receipt atomic/lifecycle/binding 1/1; semantic gateway + surface contracts 80/80; formerly failing module-runtime scoped-member recheck 1/1; catalog/browser controls 17/17; Party lifecycle + stock replay 2/2; fresh and preserved-database full receiving browser journeys 1/1 each. At `e3bac21`: typecheck and the complete architecture suite 190/190 after re-deriving receipt-aware press-law, predicate, surface, test and tenant inventories; the gateway-authority scanner also has a named-type-import negative regression. Earlier receipt/reconciliation/compiler/schema checks remain recorded above. These are focused results, not full CI.
 
 The first browser run used the CI reachability reporter, which correctly returned nonzero for a filtered run despite the test passing. The explicit focused rerun used the list reporter and passed; no filtered run is claimed as CI reachability evidence.
 
