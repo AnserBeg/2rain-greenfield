@@ -636,7 +636,7 @@ The lane ran this exact sequence at `c9062f5` (round 1) and again at `209e3fc` (
    northstar.app:package.application; a release build cannot proceed
    ungoverned`. Restore with `git checkout -- apps/web/release/`.
 
-## Disposition — the green half is offered for integration; the seam is routed
+## Disposition — INTEGRATED 2026-09-04; the seam is routed
 
 **Ruled by the user's delegation on 2026-09-04 ("do whatever you think is
 best"), and the ruling follows `mission-cadence`'s own stop procedure rather
@@ -645,8 +645,35 @@ its own reviewable increment, and move the unfinished seam into a charter of its
 own with the discovered constraints written in from the start."* Holding the
 branch contradicts that and risks the parked-work rot `mission-cadence` records;
 discarding throws away a refusal the third reviewer independently confirmed
-works. So: **the narrowed increment is offered for integration, and the boundary
-is routed.**
+works. So: **the narrowed increment was integrated, and the boundary is
+routed.**
+
+**INTEGRATED.** Required packet-into-main `--no-ff` merge
+**`e76e0c3d6c6fbd8ae47ef04fe30adc4579a1d1da`**, second parent the branch tip
+`b1811895010a2c2b97f0961a92a15cd94fb70656`, on `main`'s first-parent chain.
+**`FULL_MATRIX_PASS_SHA=e76e0c3d6c6fbd8ae47ef04fe30adc4579a1d1da`** — green at
+the integrated SHA on the first attempt: performance 5/5, unit 155/155,
+compiler 173/173, integration 149/149, agent 3/3, architecture 189/189,
+contracts 29/29, PostgreSQL 223/223, locale 1/1, browser 93/93, observability
+11/11, language coverage PASS, reachability 106/106, security scans passed.
+Merge conflicts were the three shared narrative files only, resolved by keeping
+`main`'s newer rows; no executable conflict.
+
+**THE NARROWED-CLAIM ARM BELOW WAS NEVER RUN.** The packet integrated on the
+user's ruling without it, so **no review arm has ever passed this packet at any
+SHA** — three BLOCKs, zero PASSes. `review-log.md` says so in its own row rather
+than letting an accepted status imply a verdict nobody gave. The prompt is left
+here because it is still the right instrument if anyone later wants the narrowed
+claims checked; it is not owed and nothing waits on it.
+
+**One integration hazard, recorded because it nearly cost something.** While the
+matrix was running at `e76e0c3`, another lane merged `posting-kernel-admission`
+into the same shared orchestrator worktree on top of this merge, moving `HEAD`
+underneath this lane — the shared-directory hazard `git-workflow` records. This
+lane stopped rather than push another lane's then-unrecorded merge, and
+committed only its own two rows. That lane subsequently recorded its verdict and
+pushed; both merges and `enum-widen` are now on `main` with `check-review-record`
+and `check-records` green.
 
 **The lane does not and cannot accept it.** A Critical packet with three BLOCKs
 and no PASS cannot be accepted — `review-tiers` is explicit that a Critical
