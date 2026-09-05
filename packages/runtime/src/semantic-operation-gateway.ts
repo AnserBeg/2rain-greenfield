@@ -44,7 +44,7 @@ export const OPERATION_CATALOG_PAYLOAD_VERSION =
   'northstar.operation-catalog-payload/v0-provisional' as const;
 const OPERATION_POLICY_INPUT_VERSION =
   'northstar.semantic-operation-policy-input/v1' as const;
-const OPERATION_BOUNDARY_PERMISSION_ID =
+export const OPERATION_BOUNDARY_PERMISSION_ID =
   'northstar.runtime:permission.semantic-operation-boundary' as const;
 const MALFORMED_OPERATION_ACTION_ID =
   'northstar.runtime:operation.malformed_request' as const;

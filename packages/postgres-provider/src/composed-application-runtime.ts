@@ -35,16 +35,11 @@ import {
 } from '@north-star/observability';
 import {
   AuthenticatedRequestEntryAdapter,
+  type AuthenticateRequest,
   type AuthenticatedIdentity,
   type TrustedRequestContext,
 } from '@north-star/runtime';
-import {
-  AuthenticatedRequestRuntimeEntryAdapter,
-  CURRENT_POLICY_DECISION_VERSION,
-  type CurrentPolicyDecisionRequest,
-  type CurrentPolicyGateway,
-  type CurrentPolicySubject,
-} from '@north-star/runtime/request-runtime-view';
+import { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 import pg from 'pg';
 
 import {
@@ -81,6 +76,13 @@ import {
 } from './release-verification-service.js';
 import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
 import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  CURRENT_POLICY_RUNTIME_BINDINGS,
+  PostgresCurrentPolicyGateway,
+  PostgresSemanticQueryDenialRecorder,
+  currentPolicyBindingsFromPermissions,
+  type CurrentPolicyPermissionBinding,
+} from './current-policy.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
 const compiledApplicationVersion =
@@ -101,11 +103,15 @@ export interface ComposedApplicationRuntimeOptions {
     observation: FreshTenantIntermediateActivationObservation,
   ) => Promise<void>;
   readonly compiledApplication: unknown;
+  /** Verified non-demo identity integration. Absence fails request entry closed. */
+  readonly authenticateRequest?: AuthenticateRequest;
   readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
   readonly databaseUrl: string;
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
   readonly metrics?: ObservabilityMetrics;
+  /** Explicit local-only fixture identity and full-release grant provisioning. */
+  readonly localDemoIdentity?: true;
   /**
    * The elapsed-time source the composed read ingress is timed from. It exists
    * so a test can drive a composition across a real ladder boundary without
@@ -157,6 +163,7 @@ export interface ComposedApplicationRuntime {
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
   readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
   readonly identity: AuthenticatedIdentity;
+  readonly identityMode: 'FAIL_CLOSED' | 'LOCAL_DEMO' | 'VERIFIED_EXTERNAL';
   /** Registered-query ladder evidence for this runtime; see ADR-0032 §2. */
   readonly metrics: ObservabilityMetrics;
   readonly operationGateway: SemanticOperationGateway;
@@ -227,6 +234,11 @@ interface FreshTenantPreparationBinding {
 export async function createComposedApplicationRuntime(
   options: ComposedApplicationRuntimeOptions,
 ): Promise<ComposedApplicationRuntime> {
+  if (options.localDemoIdentity && options.authenticateRequest) {
+    throw new TypeError(
+      'local demo identity and verified request authentication are mutually exclusive',
+    );
+  }
   if (options.tenantSlug.trim() === '') {
     throw new TypeError('tenantSlug must not be blank');
   }
@@ -620,7 +632,23 @@ export async function createComposedApplicationRuntime(
       : null;
 
     const metrics = options.metrics ?? new ObservabilityMetrics();
-    const policy = new AllowAllLocalPolicy();
+    const normalizedApplication = parseNormalizedApplicationPackageJson(
+      applicationRelease.normalizedDefinitionBytes,
+    );
+    const applicationPolicyBindings = currentPolicyBindingsFromPermissions(
+      normalizedApplication.permissions,
+    );
+    if (options.localDemoIdentity) {
+      await provisionLocalDemoAuthorization(
+        adminPool,
+        identities.runtime,
+        applicationPolicyBindings,
+      );
+    }
+    const policy = new PostgresCurrentPolicyGateway(
+      runtimePool,
+      applicationPolicyBindings,
+    );
     const actorIssuer = humanActorIssuer();
     const interpreter = new PostgresModuleRuntimeInterpreter(
       runtimePool,
@@ -640,6 +668,7 @@ export async function createComposedApplicationRuntime(
         metrics,
         options.monotonicMilliseconds,
       ),
+      new PostgresSemanticQueryDenialRecorder(runtimePool, actorIssuer),
     );
     const capabilityExecutors = createRegisteredCapabilityExecutors(
       options.capabilityOperationExecutorFactories ?? [],
@@ -669,7 +698,11 @@ export async function createComposedApplicationRuntime(
       capabilityExecutors,
     );
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
-      new AuthenticatedRequestEntryAdapter(async () => identities.runtime),
+      new AuthenticatedRequestEntryAdapter(
+        options.localDemoIdentity
+          ? async () => identities.runtime
+          : (options.authenticateRequest ?? (async () => null)),
+      ),
       new PostgresRequestRuntimeViewService(runtimePool),
       policy,
     );
@@ -686,6 +719,11 @@ export async function createComposedApplicationRuntime(
       entry,
       freshTenantInstallEvidence,
       identity: identities.runtime,
+      identityMode: options.localDemoIdentity
+        ? ('LOCAL_DEMO' as const)
+        : options.authenticateRequest
+          ? ('VERIFIED_EXTERNAL' as const)
+          : ('FAIL_CLOSED' as const),
       metrics,
       operationGateway,
       operationMediation,
@@ -754,24 +792,6 @@ export function parseCompiledApplication(
     applications,
     bootstrap: parseRelease(input.bootstrap, 'bootstrap'),
   });
-}
-
-class AllowAllLocalPolicy implements CurrentPolicyGateway {
-  async authorize(_request: CurrentPolicyDecisionRequest) {
-    void _request;
-    return Object.freeze({
-      decision: 'ALLOW' as const,
-      decisionVersion: CURRENT_POLICY_DECISION_VERSION,
-      policyVersion: 'northstar.local-composed-policy/v1',
-    });
-  }
-
-  async readCurrentVersion(_subject: CurrentPolicySubject) {
-    void _subject;
-    return Object.freeze({
-      policyVersion: 'northstar.local-composed-policy/v1',
-    });
-  }
 }
 
 function parseRelease(value: unknown, label: string): ParsedRelease {
@@ -1020,6 +1040,75 @@ async function ensureScope(
       tenantId,
     }),
   });
+}
+
+async function provisionLocalDemoAuthorization(
+  pool: pg.Pool,
+  identity: AuthenticatedIdentity,
+  applicationBindings: readonly CurrentPolicyPermissionBinding[],
+): Promise<void> {
+  const roleId = stableUuid(
+    `${identity.tenantId}:${identity.environmentId}:local-demo-role`,
+  );
+  const membershipId = stableUuid(
+    `${identity.tenantId}:${identity.environmentId}:${identity.principalId}:local-demo-membership`,
+  );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO platform.current_policy_roles (
+         tenant_id, environment_id, role_id, role_key, revoked_at
+       ) VALUES ($1,$2,$3,'local-demo-full-release',NULL)
+       ON CONFLICT (tenant_id, environment_id, role_id)
+       DO UPDATE SET role_key = EXCLUDED.role_key, revoked_at = NULL`,
+      [identity.tenantId, identity.environmentId, roleId],
+    );
+    for (const binding of [
+      ...CURRENT_POLICY_RUNTIME_BINDINGS,
+      ...applicationBindings,
+    ]) {
+      await client.query(
+        `INSERT INTO platform.current_policy_permission_grants (
+           tenant_id, environment_id, role_id, permission_id, resource_id,
+           revoked_at
+         ) VALUES ($1,$2,$3,$4,$5,NULL)
+         ON CONFLICT (tenant_id, environment_id, role_id, permission_id)
+         DO UPDATE SET resource_id = EXCLUDED.resource_id, revoked_at = NULL`,
+        [
+          identity.tenantId,
+          identity.environmentId,
+          roleId,
+          binding.permissionId,
+          binding.resourceId,
+        ],
+      );
+    }
+    await client.query(
+      `INSERT INTO platform.current_policy_memberships (
+         tenant_id, environment_id, membership_id, principal_id, role_id,
+         legal_entity_id, revoked_at
+       ) VALUES ($1,$2,$3,$4,$5,NULL,NULL)
+       ON CONFLICT (tenant_id, environment_id, membership_id)
+       DO UPDATE SET principal_id = EXCLUDED.principal_id,
+                     role_id = EXCLUDED.role_id,
+                     legal_entity_id = NULL,
+                     revoked_at = NULL`,
+      [
+        identity.tenantId,
+        identity.environmentId,
+        membershipId,
+        identity.principalId,
+        roleId,
+      ],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function provisionInventoryScope(

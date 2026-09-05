@@ -250,14 +250,7 @@ const LEGAL_ENTITY_GOVERNED_PACKAGES = Object.freeze([
   'location',
   'party',
 ] as const);
-/**
- * The permissions some evaluator binds. EMPTY BY CONSTRUCTION today: every
- * production `CurrentPolicyGateway` returns ALLOW and nothing in the tree
- * evaluates a permission ID (program review 2026-08-20, R7). Queue row 7 --
- * the policy/identity kernel -- is what populates this from a real evaluator
- * registry. Until then the census of unbound permissions is the census of
- * declared permissions, and the acknowledgement list below carries all of it.
- */
+/** Fixture callers may still supply an explicit bound set to this validator. */
 const EVALUATOR_BOUND_PERMISSION_IDS: ReadonlySet<string> = new Set<string>();
 const INVENTORY_POSTING_ROLES = Object.freeze([
   'adjustment',
@@ -1591,6 +1584,7 @@ export function resolvePinnedLegalEntityRelationSemantics(
 export interface UnboundPermissionAcknowledgementSubject {
   readonly package: { readonly packageId: string };
   readonly permissions: ReadonlyArray<{
+    readonly action: string;
     readonly permissionId: string;
     readonly resource: { readonly targetId: string };
   }>;
@@ -1657,9 +1651,22 @@ export function validateUnboundPermissionAcknowledgement(
     !isRecord(acknowledgement) ||
     typeof acknowledgement.packageId !== 'string' ||
     !Array.isArray(acknowledgement.entries) ||
-    Object.keys(acknowledgement).length !== 2
+    (Object.keys(acknowledgement).length !== 2 &&
+      Object.keys(acknowledgement).sort().join(',') !==
+        'entries,evaluatorBindings,packageId') ||
+    ('evaluatorBindings' in acknowledgement &&
+      !Array.isArray(acknowledgement.evaluatorBindings))
   ) {
     return invalid('$.options.unboundPermissionAcknowledgement');
+  }
+  const rawEvaluatorBindings = acknowledgement.evaluatorBindings;
+  if (
+    rawEvaluatorBindings !== undefined &&
+    !Array.isArray(rawEvaluatorBindings)
+  ) {
+    return invalid(
+      '$.options.unboundPermissionAcknowledgement.evaluatorBindings',
+    );
   }
   if (acknowledgement.packageId !== packageId) {
     return invalid('$.options.unboundPermissionAcknowledgement.packageId');
@@ -1678,6 +1685,64 @@ export function validateUnboundPermissionAcknowledgement(
       permissionId: entry.permissionId,
       resource: entry.resource,
     });
+  }
+
+  const evaluatorBindings: {
+    action: string;
+    availability: 'active' | 'compatibleExtension';
+    permissionId: string;
+    resource: string;
+  }[] = [];
+  for (const binding of rawEvaluatorBindings ?? []) {
+    const keys = isRecord(binding) ? Object.keys(binding).sort().join(',') : '';
+    if (
+      !isRecord(binding) ||
+      typeof binding.action !== 'string' ||
+      typeof binding.permissionId !== 'string' ||
+      typeof binding.resource !== 'string' ||
+      (binding.availability !== undefined &&
+        binding.availability !== 'active' &&
+        binding.availability !== 'compatibleExtension') ||
+      (keys !== 'action,permissionId,resource' &&
+        keys !== 'action,availability,permissionId,resource')
+    ) {
+      return invalid(
+        '$.options.unboundPermissionAcknowledgement.evaluatorBindings',
+      );
+    }
+    evaluatorBindings.push({
+      action: binding.action,
+      availability: binding.availability ?? 'active',
+      permissionId: binding.permissionId,
+      resource: binding.resource,
+    });
+  }
+
+  const evaluatorBindingById = new Map<
+    string,
+    {
+      action: string;
+      availability: 'active' | 'compatibleExtension';
+      permissionId: string;
+      resource: string;
+    }
+  >();
+  for (const binding of evaluatorBindings) {
+    if (
+      evaluatorBindingById.has(binding.permissionId) ||
+      boundPermissionIds.has(binding.permissionId)
+    ) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+          'wholeModelValidation',
+          '$.permissions.permissionId',
+          binding.permissionId,
+        ),
+      );
+      continue;
+    }
+    evaluatorBindingById.set(binding.permissionId, binding);
   }
 
   const acknowledgedById = new Map<string, { resource: string }>();
@@ -1702,7 +1767,24 @@ export function validateUnboundPermissionAcknowledgement(
   );
 
   for (const permission of packageRevision.permissions) {
+    const evaluatorBinding = evaluatorBindingById.get(permission.permissionId);
     if (boundPermissionIds.has(permission.permissionId)) continue;
+    if (evaluatorBinding !== undefined) {
+      if (
+        evaluatorBinding.action !== permission.action ||
+        evaluatorBinding.resource !== permission.resource.targetId
+      ) {
+        diagnostics.push(
+          compilerDiagnostic(
+            'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+            'wholeModelValidation',
+            '$.permissions.permissionId',
+            permission.permissionId,
+          ),
+        );
+      }
+      continue;
+    }
     const acknowledged = acknowledgedById.get(permission.permissionId);
     if (acknowledged === undefined) {
       diagnostics.push(
@@ -1730,6 +1812,7 @@ export function validateUnboundPermissionAcknowledgement(
   for (const [acknowledgedId] of acknowledgedById) {
     if (
       boundPermissionIds.has(acknowledgedId) ||
+      evaluatorBindingById.has(acknowledgedId) ||
       !declaredPermissionIds.has(acknowledgedId)
     ) {
       diagnostics.push(
@@ -1738,6 +1821,21 @@ export function validateUnboundPermissionAcknowledgement(
           'wholeModelValidation',
           '$.permissions.permissionId',
           acknowledgedId,
+        ),
+      );
+    }
+  }
+  for (const [boundId, binding] of evaluatorBindingById) {
+    if (
+      binding.availability === 'active' &&
+      !declaredPermissionIds.has(boundId)
+    ) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+          'wholeModelValidation',
+          '$.permissions.permissionId',
+          boundId,
         ),
       );
     }

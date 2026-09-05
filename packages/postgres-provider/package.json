@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./composed-application-runtime": "./src/composed-application-runtime.ts",
+    "./current-policy": "./src/current-policy.ts",
     "./inventory-posting-capability-executor": "./src/inventory-posting-capability-executor.ts",
     "./receiving-capability-executor": "./src/receiving-capability-executor.ts",
     "./inventory-provider-error-mappings": "./src/inventory-provider-error-mappings.ts",

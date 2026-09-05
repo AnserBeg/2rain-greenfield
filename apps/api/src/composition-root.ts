@@ -75,6 +75,10 @@ export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
 export async function startComposedApplication(
   options: ComposedApplicationServerOptions,
 ): Promise<RunningComposedApplication> {
+  const host = options.host ?? '127.0.0.1';
+  if (!['127.0.0.1', '::1', 'localhost'].includes(host)) {
+    throw new Error('the composed demo identity may bind only to loopback');
+  }
   const compiledApplication = JSON.parse(
     await readFile(
       new URL('../../web/release/app.compiled.json', import.meta.url),
@@ -89,6 +93,7 @@ export async function startComposedApplication(
     compiledApplication,
     databaseUrl: options.databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+    localDemoIdentity: true,
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
@@ -108,7 +113,6 @@ export async function startComposedApplication(
   // object to close and its pools and container still held.
   let seededRecords: readonly ComposedApplicationSeedReceipt[];
   let server: Server;
-  const host = options.host ?? '127.0.0.1';
   try {
     seededRecords = await seedComposedApplication(
       runtime,

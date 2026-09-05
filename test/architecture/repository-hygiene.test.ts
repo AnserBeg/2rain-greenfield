@@ -123,6 +123,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/composed-application.test.ts',
+      'test/postgres/current-policy.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',
       'test/postgres/inventory-dimension-set-replay.test.ts',

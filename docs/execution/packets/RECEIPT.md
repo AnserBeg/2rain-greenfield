@@ -1,6 +1,6 @@
 # RECEIPT — receive goods against purchase orders through the product
 
-Status: active implementation; governed release awaits the published AUTH dependency, not review-ready. Tier: Critical. Stops: 1. Base: `8af63acfd8eb4f95b5af8ceff1b6ce7c117b9def`.
+Status: active product integration; AUTH dependency incorporated, combined candidate not review-ready. Tier: Critical. Stops: 1. Base: `8af63acfd8eb4f95b5af8ceff1b6ce7c117b9def`.
 Owner's execution prompt is the charter; final review and acceptance remain external.
 
 ## Claims (isolated verification; governed release and authorization pending)
@@ -13,6 +13,7 @@ Owner's execution prompt is the charter; final review and acceptance remain exte
 
 ## Decisions
 
+- AUTH snapshot `b17a64a3d4695b24907301be645cc6702ca71966` incorporated by authorized history-preserving merge. Accepted migrations through 0024 unchanged; AUTH 0025, RECEIPT 0026/0027; snapshot regenerated from all 27. Governed receipt release re-baselined under ADR-0066; only disposable `dev-receipt-postgres` data reset. Original 13 receipt bindings become active and five amendment bindings use AUTH's contract; evaluator unchanged.
 - Scope includes purchasing definitions, registered capability/UI code, the shared posting kernel, materializer/reconciler, append-only migrations, release artifacts and necessary tests/pins; AUTH implementation stays separate.
 - Plan §5.11 records the owner's narrow RECEIPT exception in this branch.
 - Forward-date default is zero tenant business days; close requires every active line fully received; reopen precedes receiving, amendment or correction of closed orders.

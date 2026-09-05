@@ -163,8 +163,9 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0022_module_storage_relation_requiredness_relaxation.sql',
           '0023_inventory_stock_count_companion_digest_version.sql',
           '0024_module_storage_enum_domain_widening.sql',
-          '0025_inventory_projection_discrepancies.sql',
-          '0026_receipt_posting.sql',
+          '0025_current_authorization.sql',
+          '0026_inventory_projection_discrepancies.sql',
+          '0027_receipt_posting.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -695,6 +696,13 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
                 complete: false,
                 rows_applied: '100',
               });
+              await assertBackfillCheckpointRoleIsolation(
+                materializerPool,
+                moduleRuntimePool,
+                contexts.a,
+                contexts.b,
+                scenario.generationId,
+              );
 
               const resumed = await new PostgresModuleStorageMaterializer(
                 materializerPool,
@@ -7340,6 +7348,76 @@ async function assertBackfillCheckpoint(
     completed: String(planted.recordIds.length),
     total: String(planted.recordIds.length),
   });
+}
+
+async function assertBackfillCheckpointRoleIsolation(
+  materializerPool: pg.Pool,
+  moduleRuntimePool: pg.Pool,
+  ownerContext: TrustedRequestContext,
+  otherContext: TrustedRequestContext,
+  generationId: string,
+): Promise<void> {
+  for (const rolePool of [materializerPool, moduleRuntimePool]) {
+    const visible = await withInternalRoleScope(
+      rolePool,
+      ownerContext,
+      (client) =>
+        client.query<{ rows_applied: string }>(
+          `SELECT rows_applied::text AS rows_applied
+             FROM north_star_internal.module_storage_backfill_checkpoints
+            WHERE generation_id = $1`,
+          [generationId],
+        ),
+    );
+    assert.deepEqual(
+      visible.rows,
+      [{ rows_applied: '100' }],
+      'the non-admin internal role must retain legitimate checkpoint access',
+    );
+
+    const hidden = await withInternalRoleScope(
+      rolePool,
+      otherContext,
+      (client) =>
+        client.query(
+          `UPDATE north_star_internal.module_storage_backfill_checkpoints
+              SET rows_applied = rows_applied + 1
+            WHERE generation_id = $1
+          RETURNING generation_id`,
+          [generationId],
+        ),
+    );
+    assert.equal(
+      hidden.rowCount,
+      0,
+      'another tenant cannot discover or mutate the checkpoint through an actual internal role',
+    );
+  }
+}
+
+async function withInternalRoleScope<T>(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  work: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('north_star.tenant_id', $1, true),
+              set_config('north_star.environment_id', $2, true),
+              set_config('north_star.principal_id', $3, true)`,
+      [context.tenantId, context.environmentId, context.principalId],
+    );
+    const result = await work(client);
+    await client.query('ROLLBACK');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function expireApproval(pool: pg.Pool, attemptId: string): Promise<void> {

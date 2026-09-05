@@ -1,0 +1,429 @@
+{
+  "schemaVersion": "northstar.web:current-policy-bindings/v1",
+  "packages": {
+    "northstar.app:package.application": [
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.purchase_order_amendment_archive",
+        "resource": "northstar.app:entity.purchase_order_amendment"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.purchase_order_amendment_create",
+        "resource": "northstar.app:entity.purchase_order_amendment"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.purchase_order_amendment_read",
+        "resource": "northstar.app:entity.purchase_order_amendment"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.purchase_order_amendment_restore",
+        "resource": "northstar.app:entity.purchase_order_amendment"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.purchase_order_amendment_update",
+        "resource": "northstar.app:entity.purchase_order_amendment"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.goods_receipt_archive",
+        "resource": "northstar.app:entity.goods_receipt"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.goods_receipt_create",
+        "resource": "northstar.app:entity.goods_receipt"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.goods_receipt_line_archive",
+        "resource": "northstar.app:entity.goods_receipt_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.goods_receipt_line_create",
+        "resource": "northstar.app:entity.goods_receipt_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.goods_receipt_line_read",
+        "resource": "northstar.app:entity.goods_receipt_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.goods_receipt_line_restore",
+        "resource": "northstar.app:entity.goods_receipt_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.goods_receipt_line_update",
+        "resource": "northstar.app:entity.goods_receipt_line"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.goods_receipt_post",
+        "resource": "northstar.app:entity.goods_receipt"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.goods_receipt_read",
+        "resource": "northstar.app:entity.goods_receipt"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.goods_receipt_restore",
+        "resource": "northstar.app:entity.goods_receipt"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.goods_receipt_update",
+        "resource": "northstar.app:entity.goods_receipt"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.advance_period_lock",
+        "resource": "northstar.app:entity.inventory_period_lock"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.inventory_movement_read",
+        "resource": "northstar.app:entity.inventory_movement"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.inventory_period_lock_read",
+        "resource": "northstar.app:entity.inventory_period_lock"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.inventory_transaction_archive",
+        "resource": "northstar.app:entity.inventory_transaction"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.inventory_transaction_create",
+        "resource": "northstar.app:entity.inventory_transaction"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.inventory_transaction_line_archive",
+        "resource": "northstar.app:entity.inventory_transaction_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.inventory_transaction_line_create",
+        "resource": "northstar.app:entity.inventory_transaction_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.inventory_transaction_line_read",
+        "resource": "northstar.app:entity.inventory_transaction_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.inventory_transaction_line_restore",
+        "resource": "northstar.app:entity.inventory_transaction_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.inventory_transaction_line_update",
+        "resource": "northstar.app:entity.inventory_transaction_line"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.inventory_transaction_post",
+        "resource": "northstar.app:entity.inventory_transaction"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.inventory_transaction_read",
+        "resource": "northstar.app:entity.inventory_transaction"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.inventory_transaction_restore",
+        "resource": "northstar.app:entity.inventory_transaction"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.inventory_transaction_update",
+        "resource": "northstar.app:entity.inventory_transaction"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.item_archive",
+        "resource": "northstar.app:entity.item"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.item_create",
+        "resource": "northstar.app:entity.item"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.item_read",
+        "resource": "northstar.app:entity.item"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.item_restore",
+        "resource": "northstar.app:entity.item"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.item_update",
+        "resource": "northstar.app:entity.item"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.legal_entity_archive",
+        "resource": "northstar.app:entity.legal_entity"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.legal_entity_create",
+        "resource": "northstar.app:entity.legal_entity"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.legal_entity_read",
+        "resource": "northstar.app:entity.legal_entity"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.legal_entity_restore",
+        "resource": "northstar.app:entity.legal_entity"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.legal_entity_update",
+        "resource": "northstar.app:entity.legal_entity"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.location_archive",
+        "resource": "northstar.app:entity.location"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.location_create",
+        "resource": "northstar.app:entity.location"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.location_read",
+        "resource": "northstar.app:entity.location"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.location_restore",
+        "resource": "northstar.app:entity.location"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.location_update",
+        "resource": "northstar.app:entity.location"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.party_archive",
+        "resource": "northstar.app:entity.party"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.party_create",
+        "resource": "northstar.app:entity.party"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.party_read",
+        "resource": "northstar.app:entity.party"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.party_restore",
+        "resource": "northstar.app:entity.party"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.party_role_archive",
+        "resource": "northstar.app:entity.party_role"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.party_role_create",
+        "resource": "northstar.app:entity.party_role"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.party_role_read",
+        "resource": "northstar.app:entity.party_role"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.party_role_restore",
+        "resource": "northstar.app:entity.party_role"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.party_role_update",
+        "resource": "northstar.app:entity.party_role"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.party_update",
+        "resource": "northstar.app:entity.party"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.posted_stock_balance_read",
+        "resource": "northstar.app:entity.posted_stock_balance"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.purchase_order_archive",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.purchase_order_cancel",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.purchase_order_close",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.purchase_order_create",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.purchase_order_line_archive",
+        "resource": "northstar.app:entity.purchase_order_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.purchase_order_line_create",
+        "resource": "northstar.app:entity.purchase_order_line"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.purchase_order_line_amend",
+        "resource": "northstar.app:entity.purchase_order_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.purchase_order_line_read",
+        "resource": "northstar.app:entity.purchase_order_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.purchase_order_line_restore",
+        "resource": "northstar.app:entity.purchase_order_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.purchase_order_line_update",
+        "resource": "northstar.app:entity.purchase_order_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.purchase_order_read",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.purchase_order_release",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.purchase_order_reopen",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.purchase_order_restore",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.purchase_order_received_read",
+        "resource": "northstar.app:entity.purchase_order_received"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.purchase_order_update",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.reopen_period",
+        "resource": "northstar.app:entity.inventory_period_lock"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.stock_count_archive",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.stock_count_create",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.stock_count_line_archive",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.stock_count_line_create",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.stock_count_line_read",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.stock_count_line_restore",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.stock_count_line_update",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.stock_count_read",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.stock_count_restore",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.stock_count_update",
+        "resource": "northstar.app:entity.stock_count"
+      }
+    ],
+    "northstar.shell:package.demo": [
+      {
+        "action": "read",
+        "permissionId": "northstar.shell:permission.workspace_read",
+        "resource": "northstar.shell:entity.workspace"
+      }
+    ]
+  }
+}
