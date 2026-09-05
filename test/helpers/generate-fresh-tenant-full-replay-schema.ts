@@ -7,6 +7,7 @@ import { format } from 'prettier';
 import { COMPOSED_APPLICATION_INVENTORY_SCOPE } from '../../apps/api/src/composition-root.js';
 import { createComposedApplicationRuntime } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
+import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from './postgres.js';
@@ -16,30 +17,21 @@ const migrationsDirectory = resolve('db/migrations');
 const snapshotPath = resolve(
   'test/postgres/fresh-tenant-full-replay-schema.snapshot.json',
 );
-// The first release whose registered search queries remain serviceable under
-// the current runtime. Starting here still applies every earlier physical
-// transition through the bounded fresh-install path; every successor is then
-// activated individually so the resulting snapshot observes full transition
-// replay without claiming obsolete pre-search heads can still serve.
-const FULL_REPLAY_SERVING_FLOOR_ROOT =
-  'd726ad313780bc595c97a0ecb30c9eaec84984e4a19fa28c2e8f5361e7edf12e';
+// ADR-0066: the disposable application now starts at its current baseline.
+const servingFloorIndex = 0;
 
 async function main(): Promise<void> {
   const compiledApplication = JSON.parse(
     await readFile(compiledArtifactPath, 'utf8'),
   ) as {
     applications: { releaseRoot?: string }[];
+    application?: { releaseRoot?: string };
     bootstrap: unknown;
     schemaVersion: string;
   };
-  const servingFloorIndex = compiledApplication.applications.findIndex(
-    (application) => application.releaseRoot === FULL_REPLAY_SERVING_FLOOR_ROOT,
-  );
-  if (servingFloorIndex < 0) {
-    throw new Error(
-      `recorded lineage no longer contains full-replay serving floor ${FULL_REPLAY_SERVING_FLOOR_ROOT}`,
-    );
-  }
+  compiledApplication.applications ??= [compiledApplication.application!];
+  compiledApplication.schemaVersion =
+    'northstar.web:compiled-application-release/v2';
 
   await withEphemeralPostgres(
     'fresh-tenant-full-replay',
@@ -52,6 +44,7 @@ async function main(): Promise<void> {
         const runtime = await createComposedApplicationRuntime({
           capabilityOperationExecutorFactories: [
             INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+            RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
           ],
           compiledApplication: {
             applications: compiledApplication.applications.slice(0, index + 1),

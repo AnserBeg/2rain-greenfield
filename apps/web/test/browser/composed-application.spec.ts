@@ -2773,9 +2773,10 @@ async function loadPostingProjection(releaseRoot: string): Promise<{
       'utf8',
     ),
   ) as {
+    readonly application?: CompiledApplicationRelease;
     readonly applications: readonly CompiledApplicationRelease[];
   };
-  const application = compiled.applications.find(
+  const application = (compiled.applications ?? [compiled.application!]).find(
     (candidate) => candidate.releaseRoot === releaseRoot,
   );
   if (!application)
@@ -2842,8 +2843,11 @@ async function loadOnHandLookupProjection(): Promise<CompiledOnHandLookupProject
       new URL('../../release/app.compiled.json', import.meta.url),
       'utf8',
     ),
-  ) as { readonly applications: readonly CompiledApplicationRelease[] };
-  const application = compiled.applications.at(-1);
+  ) as {
+    readonly application?: CompiledApplicationRelease;
+    readonly applications?: readonly CompiledApplicationRelease[];
+  };
+  const application = compiled.applications?.at(-1) ?? compiled.application;
   if (!application) throw new TypeError('compiled application is missing');
   const surfacePayload = projectionPayload(
     application,
@@ -2923,8 +2927,11 @@ async function loadSurfaceScopeParameterId(
       new URL('../../release/app.compiled.json', import.meta.url),
       'utf8',
     ),
-  ) as { readonly applications: readonly CompiledApplicationRelease[] };
-  const application = compiled.applications.at(-1);
+  ) as {
+    readonly application?: CompiledApplicationRelease;
+    readonly applications?: readonly CompiledApplicationRelease[];
+  };
+  const application = compiled.applications?.at(-1) ?? compiled.application;
   if (!application) throw new TypeError('compiled application is missing');
   const surfacePayload = projectionPayload(
     application,

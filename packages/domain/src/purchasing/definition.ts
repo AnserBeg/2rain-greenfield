@@ -740,6 +740,8 @@ function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
         optional: optional ?? false,
         searchable:
           name === 'number' ||
+          // Currency codes are ordinary searchable identifiers, as on the PO.
+          name === 'currency' ||
           name === 'item_id' ||
           (local === 'purchase_order_received' && name === 'unit_id'),
         businessKey: name === 'number',

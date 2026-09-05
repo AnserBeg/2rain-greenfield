@@ -23,6 +23,7 @@ import {
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
@@ -53,6 +54,7 @@ import {
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
+import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
@@ -67,7 +69,6 @@ import {
   PostgresReleaseVerificationService,
   ReleaseVerificationIntegrityError,
   releaseVerificationBinding,
-  verificationScenarioDeriver,
   type DurableReleaseVerificationEvidence,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
@@ -165,7 +166,9 @@ test('historical reproduction cannot admit a non-conformant freshly compiled hea
   const compiledApplication = JSON.parse(
     await readFile(compiledArtifactPath, 'utf8'),
   ) as { applications: unknown[] };
-  assert.ok(compiledApplication.applications.length >= 6);
+  assert.ok(
+    parseCompiledApplication(compiledApplication).applications.length > 0,
+  );
   const nonConformantHead = JSON.parse(
     await readFile(authoredArtifactPath, 'utf8'),
   ) as {
@@ -304,10 +307,15 @@ test('capability verification fails closed when a factory declares no refusal', 
 });
 
 test('fresh-tenant install refuses a failing intermediate transition', async () => {
-  const compiledApplication = JSON.parse(
-    await readFile(compiledArtifactPath, 'utf8'),
+  const compiledApplication = appendSameProfileSuccessor(
+    appendSameProfileSuccessor(
+      JSON.parse(await readFile(compiledArtifactPath, 'utf8')),
+    ),
   ) as { applications: unknown[] };
-  assert.ok(compiledApplication.applications.length > 3);
+  assert.ok(
+    compiledApplication.applications.length >= 3,
+    'the fixture constructs two successors even after a one-entry re-baseline',
+  );
   const firstIntermediate = compiledApplication.applications[1]!;
   compiledApplication.applications[1] = compiledApplication.applications[2]!;
   compiledApplication.applications[2] = firstIntermediate;
@@ -1021,8 +1029,22 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    // 34 + PUR-1's six Purchasing surfaces.
-    assert.equal(surfaces.length, 40);
+    // Prior 40 + three writable receipt/request records and one read-only projection.
+    assert.equal(surfaces.length, 51);
+    for (const local of [
+      'goods_receipt',
+      'goods_receipt_line',
+      'purchase_order_amendment',
+      'purchase_order_received',
+    ]) {
+      for (const role of ['list', 'detail'])
+        assert.ok(surfaces.includes(`northstar.app:surface.${local}_${role}`));
+      assert.equal(
+        surfaces.includes(`northstar.app:surface.${local}_form`),
+        local !== 'purchase_order_received',
+        'only authored receipt/request records expose a form',
+      );
+    }
     assert.ok(surfaces.includes(APPLICATION_IDS.party.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.catalog.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.location.listSurfaceId));
@@ -1091,7 +1113,10 @@ async function assertApprovalEnforcementAndApprovedActivation(
     await new PostgresReleaseVerificationService(
       runtimePool,
       INVENTORY_PROVIDER_ERROR_MAPPINGS,
-      [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
+      [
+        INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+        RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      ],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: application.compiled,
       evidenceId: staged.verificationEvidenceId,
@@ -1237,7 +1262,10 @@ async function assertApprovalRequiredForAdvancement(
       await new PostgresReleaseVerificationService(
         runtimePool,
         INVENTORY_PROVIDER_ERROR_MAPPINGS,
-        [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
+        [
+          INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+          RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+        ],
       ).executeSemanticCandidateAndPersist(context, {
         compiledRelease: application.compiled,
         evidenceId: target.verification_evidence_id,
@@ -1405,7 +1433,10 @@ async function assertReleaseServicesRejectNonExactReversePairs(
     await new PostgresReleaseVerificationService(
       runtimePool,
       INVENTORY_PROVIDER_ERROR_MAPPINGS,
-      [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
+      [
+        INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+        RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      ],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: immediateTarget.compiled,
       evidenceId: staged.verificationEvidenceId,
@@ -2411,6 +2442,7 @@ async function assertFailClosedIdentitySeam(
   const runtime = await createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl,
@@ -3138,7 +3170,7 @@ async function assertBoundedFreshTenantInstallEvidence(
   const servingScenarioCount = releaseVerificationBinding(
     compiled.application.compiled,
   ).plan.scenarios.length;
-  await assertAttributedSearchCapabilityScenarioDelta(compiledApplication);
+  assertReceivingVerificationCoverage(compiledApplication);
   // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
   // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
   // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
@@ -3155,8 +3187,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   // emitting differs from skipping: nothing is admitted unexecuted.
   assert.equal(
     servingScenarioCount,
-    198,
-    'PUR-1 adds 24 scenarios and the materialized state field adds none of them',
+    257,
+    'the release includes the prior 198 scenarios plus 59 for the four receiving entities',
   );
 
   const intermediate = await pool.query<{
@@ -3459,15 +3491,7 @@ test(
         // the authorization -- so this must NOT borrow
         // ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR (ADR-0047 §6).
         //
-        // THE EDGE IS LOCATED, NOT ASSUMED TO BE AT THE END -- corrected by
-        // `LANG-ADOPT-v5`. This read `at(-2)` against the real head and asserted the
-        // pair shared a definition, which held only while the profile-adoption entry
-        // WAS the head. Its sibling below already knew that was fragile: direction 2
-        // manufactures a truncated lineage precisely because the head was a profile
-        // sibling. Direction 1 needed the mirror image and did not have it, so an
-        // authored-source adoption turned a real ADR-0047 §6 gate into a premise
-        // failure. The profile-only edge is still in the lineage; only its position
-        // moved.
+        // ADR-0066: construct identical source under v1 then v2 in memory.
         const profileEdgeLineage =
           throughProfileSiblingHead(compiledApplication);
         const profileEdge = parseCompiledApplication(profileEdgeLineage);
@@ -3507,24 +3531,11 @@ test(
           'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
         );
 
-        // DIRECTION 2 -- the refusal does NOT fire on a source-changing edge, and the
-        // ADR-0046 observation this helper exists for is preserved rather than
-        // dropped. Truncating the lineage to the last source-changing head restores
-        // exactly the pair this asserted before the profile entry was appended: an
-        // eligible rollback whose verification refuses the pre-existing unusable
-        // search BY NAME. Without this the profile edge would have silently taken a
-        // real ADR-0046 gate out of the suite.
-        // Truncated THROUGH the profile edge and then past it, so the head is the
-        // last entry before the profile sibling and the target is the release that
-        // still carries the unusable search. `withoutProfileSiblingHead` alone no
-        // longer reaches it: with a source-changing head it returns the lineage
-        // unchanged, and the resulting edge crosses two post-search-capability
-        // releases where there is nothing for verification to refuse. Measured --
-        // that spelling produced "Missing expected rejection" rather than a red that
-        // named a real regression.
-        const sourceChangingLineage = withoutProfileSiblingHead(
-          throughProfileSiblingHead(compiledApplication),
-        );
+        // ADR-0066: the source-changing synthetic edge has a usable target.
+        // Actual successful rollback discriminates this from deny-every-edge.
+        // The obsolete pre-search first-party target is no longer retained.
+        const sourceChangingLineage =
+          syntheticSourceChangingLineage(compiledApplication);
         const truncated = parseCompiledApplication(sourceChangingLineage);
         const sourceChangingTarget = truncated.applications.at(-2);
         assert.ok(sourceChangingTarget);
@@ -3558,25 +3569,24 @@ test(
         );
         await sourceEdgeRuntime.close();
 
-        const historicalSearchQueryId =
-          'northstar.app:query.stock_count_line_search';
-        await assert.rejects(
-          createRuntime(sourceChangingLineage, databaseUrl, sourceEdgeSlug, {
+        const reversed = await createRuntime(
+          sourceChangingLineage,
+          databaseUrl,
+          sourceEdgeSlug,
+          {
             kind: 'rollback',
             targetReleaseRoot: sourceChangingTarget.compiled.releaseRoot,
-          }),
-          (error: unknown) => {
-            assert.ok(
-              !(error instanceof ReleaseReverseTransitionRefusal),
-              `a source-changing edge must not raise a reverse-transition refusal, got ${String((error as { code?: string }).code)}`,
-            );
-            assert.ok(error instanceof ModuleRuntimeInterpreterError);
-            assert.equal(error.code, 'MODULE_SEARCH_CAPABILITY_UNAVAILABLE');
-            assert.equal(error.subjectId, historicalSearchQueryId);
-            return true;
           },
-          'ADR-0046: rollback remains eligible, while verification of its pre-existing unusable search refuses by name',
         );
+        try {
+          assert.equal(
+            reversed.releaseRoot,
+            sourceChangingTarget.compiled.releaseRoot,
+            'a source-changing edge remains eligible and serves only after verification',
+          );
+        } finally {
+          await reversed.close();
+        }
       },
     );
   },
@@ -3588,50 +3598,73 @@ test(
  * source-changing rollback edge while the real artifact's head is a profile
  * sibling (ADR-0047 §4).
  */
-function withoutProfileSiblingHead(compiledApplication: unknown): unknown {
-  const envelope = structuredClone(compiledApplication) as {
-    applications: { normalizedDefinitionBytesBase64: string }[];
+function syntheticSourceChangingLineage(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const bytes = normalizedDefinitionVersion(
+    composedApplicationDefinition(),
+    '1.0.99',
+  );
+  const successor = compileSuccessor(previous.application.compiled, bytes);
+  return {
+    applications: [
+      ...previous.applications.map((entry) =>
+        serializedRelease(entry.normalizedDefinitionBytes, entry.compiled),
+      ),
+      serializedRelease(bytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
   };
-  while (
-    envelope.applications.length > 1 &&
-    envelope.applications.at(-1)!.normalizedDefinitionBytesBase64 ===
-      envelope.applications.at(-2)!.normalizedDefinitionBytesBase64
-  ) {
-    envelope.applications.pop();
-  }
-  return envelope;
 }
 
-/**
- * The mirror image, added by `LANG-ADOPT-v5`: the lineage truncated so its head
- * IS a profile sibling — the successor of the last profile-only edge (ADR-0047
- * §4), with every later entry dropped.
- *
- * Direction 1 above needs a serving head that shares a package revision with its
- * predecessor. That was true of the real artifact for exactly one packet, and
- * `withoutProfileSiblingHead` existed because its sibling direction already had
- * the opposite problem. Both directions now name the edge they need instead of
- * assuming the artifact's head happens to supply it.
- */
+/** ADR-0066: construct the profile edge instead of relying on disposable history. */
 function throughProfileSiblingHead(compiledApplication: unknown): unknown {
-  const envelope = structuredClone(compiledApplication) as {
-    applications: { normalizedDefinitionBytesBase64: string }[];
+  const previous = parseCompiledApplication(compiledApplication);
+  const definition = structuredClone(composedApplicationDefinition()) as {
+    surfaces: { slots: { disclosureTier?: string }[] }[];
   };
-  const lastEdgeIndex = envelope.applications.reduce(
-    (found, entry, index) =>
-      index > 0 &&
-      entry.normalizedDefinitionBytesBase64 ===
-        envelope.applications[index - 1]!.normalizedDefinitionBytesBase64
-        ? index
-        : found,
-    -1,
+  // The previous profile cannot admit an explicitly declared newer UI field.
+  // Both endpoints use this same synthetic source, so only the profile differs.
+  for (const surface of definition.surfaces)
+    for (const slot of surface.slots) delete slot.disclosureTier;
+  const bytes = new TextEncoder().encode(
+    canonicalize(normalizeApplicationPackage(definition)),
   );
-  assert.ok(
-    lastEdgeIndex > 0,
-    'the recorded lineage carries no profile-only edge, so ADR-0047 §6 has nothing to refuse',
+  const predecessor = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: expectedActiveReleaseFrom(
+      previous.bootstrap.compiled,
+    ),
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: bytes,
+    profile: {
+      ...profileForNormalizedBytes(bytes),
+      compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+    },
+  });
+  assert.equal(
+    predecessor.status,
+    'compiled',
+    predecessor.status === 'failed'
+      ? JSON.stringify(predecessor.diagnostics)
+      : undefined,
   );
-  envelope.applications.length = lastEdgeIndex + 1;
-  return envelope;
+  const successor = compileSuccessor(predecessor, bytes);
+  return {
+    applications: [
+      serializedRelease(bytes, predecessor),
+      serializedRelease(bytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
 }
 
 async function assertConstrainedDomainVerificationCompleted(
@@ -5017,28 +5050,17 @@ async function assertExactPartitionEvidence(
   );
   assert.ok(evidence.results.length > 0, 'real PostgreSQL probes still ran');
   assert.ok(derivations.length > 0);
-  // 127 -> 151. PUR-1's 24 scenarios ALL EXECUTE and none is derived, which is
-  // why `derivations` below is unchanged at 47 -- so the partition still closes:
-  // 151 + 47 = 198, the planned count asserted in
-  // `assertBoundedFreshTenantInstallEvidence`, and 127 + 47 = 174 was the same
-  // identity before this packet.
-  //
-  // That every one of them is ARRANGEABLE is a fact about the module rather
-  // than an accident. Inventory contributes derivations precisely because some
-  // of its scenarios are emitted-but-unarrangeable; purchasing declares no
-  // operationless entity, no provider-written read model, and no field a
-  // generic create cannot populate. **The materialized state field would have
-  // been the one exception, and it is not emitted at all** -- see the
-  // scenario-count comment in `assertBoundedFreshTenantInstallEvidence`.
+  // Measured on the combined governed release: 200 executed + 57 derived.
+  // The independent constructibility oracle below still verifies every member.
   assert.equal(
     evidence.results.length,
-    151,
-    'PUR-1 adds 24 executed scenarios and no derivation, so the partition still closes at 198',
+    200,
+    'receiving adds 49 executed scenarios to the prior 151',
   );
   assert.equal(
     derivations.length,
-    47,
-    'the 11 operationless posted-stock scenarios are derived while the historical search exclusions remain absent',
+    57,
+    'the 10 operationless received-projection scenarios join the prior 47 derivations',
   );
   assert.equal(
     binding.plan.scenarios.some(
@@ -5063,7 +5085,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    47,
+    57,
   );
   assert.deepEqual(
     [...executedScenarioIds, ...derivedScenarioIds].toSorted(),
@@ -5222,371 +5244,36 @@ interface ConstructibilityPartition {
   readonly results: readonly { readonly scenarioId: string }[];
 }
 
-async function assertAttributedSearchCapabilityScenarioDelta(
+function assertReceivingVerificationCoverage(
   compiledApplication: unknown,
-): Promise<void> {
-  const compiled = parseCompiledApplication(compiledApplication);
-  // PINNED BY IDENTITY, NOT BY POSITION -- corrected by `LANG-ADOPT-v5`.
-  //
-  // This read `previousSourceRelease(compiled)` against the lineage HEAD, which
-  // named the right pair only while the search-capability entry WAS the head.
-  // The delta it asserts is a historical fact about one recorded transition;
-  // "the head and the last entry before it that differs" is a description of
-  // where that transition happened to sit, and it silently re-points at a
-  // different pair the moment any authored change lands. `LANG-ADOPT-v5`
-  // appended one and this read 163 where it expected 168, while the transition
-  // it exists to guard had not moved at all.
-  //
-  // It is the second control in this repository found addressing lineage
-  // entries by position; the other is "consecutive lineage entries may share a
-  // normalized definition" in `compiler-semantic-profile.test.ts`.
-  const SEARCH_CAPABILITY_SOURCE_ROOT =
-    '4b254f50b2f558e96b98325467ae339a4bd6492d9691ccb464eb88d1b53f3bb1';
-  const SEARCH_CAPABILITY_TARGET_ROOT =
-    'd726ad313780bc595c97a0ecb30c9eaec84984e4a19fa28c2e8f5361e7edf12e';
-  // The ADR-0047 §4 entry minted by adopting compiler-semantic profile v1: its
-  // normalized definition is byte-identical to the target above and only its
-  // release root differs.
-  const PROFILE_ONLY_SUCCESSOR_ROOT =
-    'b0177bf482a73235eb1308eaf17bde3b0a3f4b23d2a9c9c59f7af23d1c9a2bbb';
-  // The source-changing language-v5 successor whose scenario identity delta is
-  // the historical fact this control measures. Later authored releases may add
-  // scenarios, so using the lineage head here would silently re-point the
-  // comparison exactly as the old position-addressed search-capability read did.
-  const LANGUAGE_ADOPTION_ROOT =
-    '3ef281274f753f3504a170b2308ef85c5099da7cd3a5f78c41310f9ad76215d1';
-  const releaseByRoot = (releaseRoot: string) => {
-    const release = compiled.applications.find(
-      (candidate) => candidate.compiled.releaseRoot === releaseRoot,
-    );
-    assert.ok(
-      release,
-      `the recorded lineage no longer contains ${releaseRoot}; history is append-only, so a missing root is a rewrite rather than a stale pin`,
-    );
-    return release;
-  };
-  const previous = releaseVerificationBinding(
-    releaseByRoot(SEARCH_CAPABILITY_SOURCE_ROOT).compiled,
+): void {
+  // ADR-0066 retires the historical 168 -> 163 scenario delta with its
+  // disposable lineage. Current verifier coverage remains a live assertion.
+  const { plan } = releaseVerificationBinding(
+    parseCompiledApplication(compiledApplication).application.compiled,
   );
-  const current = releaseVerificationBinding(
-    releaseByRoot(SEARCH_CAPABILITY_TARGET_ROOT).compiled,
-  );
-  assert.equal(previous.plan.scenarios.length, 168);
-  assert.equal(current.plan.scenarios.length, 163);
-
-  // The pinned pair must still be CONSECUTIVE, or "this transition removed five
-  // scenarios" is a claim about a span rather than an edge and some later entry
-  // could be doing the removing.
-  const rootOrder = compiled.applications.map(
-    (release) => release.compiled.releaseRoot,
-  );
-  assert.equal(
-    rootOrder.indexOf(SEARCH_CAPABILITY_TARGET_ROOT),
-    rootOrder.indexOf(SEARCH_CAPABILITY_SOURCE_ROOT) + 1,
-  );
-
-  // The language-adoption entry is checked separately by identity, which is
-  // what the position-addressed version was conflating with the lineage head.
-  //
-  // WRITTEN FROM THE MEASUREMENT, and the first attempt at this assertion was
-  // wrong. Asserting the adoption entry's scenario IDs equal the pinned
-  // target's failed:
-  // adoption holds the count at 163 and holds the verified content identical,
-  // while RE-IDENTIFYING a large fraction of the scenarios, because a scenario
-  // id is a fingerprint over version-stamped nodes. So the content is compared
-  // by what each scenario verifies, and the identity churn is asserted as the
-  // separate fact it is.
-  const languageAdoptionBinding = releaseVerificationBinding(
-    releaseByRoot(LANGUAGE_ADOPTION_ROOT).compiled,
-  );
-  const verifiedContent = (
-    scenarios: readonly { entityId: string; kind: string; subjectId: string }[],
-  ) =>
-    scenarios
-      .map(
-        (scenario) =>
-          `${scenario.kind}|${scenario.entityId}|${scenario.subjectId}`,
-      )
-      .toSorted();
-  assert.deepEqual(
-    verifiedContent(languageAdoptionBinding.plan.scenarios),
-    verifiedContent(current.plan.scenarios),
-    'the language adoption changes scenario identities without changing what the release verifies',
-  );
-
-  // A language adoption changes recorded scenario IDENTITIES; a
-  // compiler-semantic profile adoption does not. ADR-0047 §8 publishes exact
-  // cardinalities, so they are asserted exactly -- review round 4 found this
-  // control proving neither, with `.some(...)` for "69" and a subset check for
-  // "0".
-  //
-  // MEASURED WHILE BUILDING THIS, and it corrected the ADR: there is NO key
-  // that distinguishes all 163 scenarios except the id itself. Every
-  // combination of the recorded non-id fields -- kind, entityId, subjectId,
-  // probePolarity, targetEntityId, provider -- collapses to 105 unique values.
-  // So "69 scenarios were re-identified" is not expressible: under the best
-  // available key only 11 signatures map to a different id, while the raw
-  // id-set difference is 69. The well-defined fact is the id-set difference,
-  // and that is what 69 means.
-  const scenarioIds = (
-    scenarios: readonly { scenarioId: string }[],
-  ): string[] => scenarios.map((scenario) => scenario.scenarioId).toSorted();
-  const verifiedContentOf = (
-    scenarios: readonly { entityId: string; kind: string; subjectId: string }[],
-  ): string[] =>
-    scenarios
-      .map(
-        (scenario) =>
-          `${scenario.kind}|${scenario.entityId}|${scenario.subjectId}`,
-      )
-      .toSorted();
-
-  const languageAdoptionScenarios = languageAdoptionBinding.plan.scenarios;
-  const profileEdgeScenarios = releaseVerificationBinding(
-    releaseByRoot(PROFILE_ONLY_SUCCESSOR_ROOT).compiled,
-  ).plan.scenarios;
-
-  assert.equal(current.plan.scenarios.length, 163);
-  assert.equal(languageAdoptionScenarios.length, 163);
-  assert.equal(profileEdgeScenarios.length, 163);
-
-  // WHAT is verified does not move -- compared as a MULTISET, because the
-  // signature is not unique and a set comparison would silently tolerate a
-  // scenario being dropped while a duplicate signature covered for it.
-  assert.deepEqual(
-    verifiedContentOf(languageAdoptionScenarios),
-    verifiedContentOf(current.plan.scenarios),
-    'the language adoption preserves what the release verifies',
-  );
-
-  // THE SEMANTIC KEY, DERIVED FROM THE PRODUCTION SCENARIO OBJECT.
-  //
-  // Round 7 refuted the previous version of this control and the ADR ruling
-  // built on it. It used a hand-picked six-field tuple -- kind, entityId,
-  // subjectId, probePolarity, targetEntityId, provider -- and called that
-  // "every recorded non-id field". It is not. The recorded scenarios carry
-  // fifteen distinct fields across seven kinds, and `declaredEvidence` alone
-  // adds `assertionId`, `evidenceKind`, `expectedOutcome`,
-  // `expectedDiagnosticCode` and a full `invocation`; `uniquenessFold` adds
-  // `nfkcPolicy`.
-  //
-  // The old tuple therefore COLLAPSED exactly the 69 `declaredEvidence`
-  // scenarios into 11 groups, and the packet read that collapse as evidence
-  // that scenarios are indistinguishable by meaning. They are not: it was the
-  // projection that lost the distinction, not the data.
-  //
-  // Derived from the object rather than a field list, so a scenario kind added
-  // later is included automatically instead of silently dropped. Only the two
-  // GENERATED identity fields are excluded, and `schemaVersion` is normalized
-  // wherever it appears -- recursively, because `invocation` nests canonical
-  // references that carry their own stamps, and those stamps are exactly what
-  // moves.
-  const semanticKey = (scenario: unknown): string => {
-    const normalize = (value: unknown): unknown => {
-      if (Array.isArray(value)) return value.map(normalize);
-      if (typeof value === 'object' && value !== null) {
-        return Object.fromEntries(
-          Object.entries(value)
-            .filter(
-              ([key]) => key !== 'scenarioId' && key !== 'scenarioFingerprint',
-            )
-            .map(([key, entry]) => [
-              key,
-              key === 'schemaVersion' ? '<version>' : normalize(entry),
-            ]),
-        );
-      }
-      return value;
-    };
-    return JSON.stringify(normalize(scenario));
-  };
-
-  // A key that distinguishes every scenario in BOTH plans. The previous claim
-  // -- that none exists but the id itself -- was an artifact of the lossy tuple.
-  const targetBySemantic = new Map(
-    current.plan.scenarios.map((scenario) => [
-      semanticKey(scenario),
-      scenario.scenarioId,
-    ]),
-  );
-  const adoptionBySemantic = new Map(
-    languageAdoptionScenarios.map((scenario) => [
-      semanticKey(scenario),
-      scenario.scenarioId,
-    ]),
-  );
-  assert.equal(targetBySemantic.size, 163);
-  assert.equal(adoptionBySemantic.size, 163);
-
-  // A TOTAL BIJECTION across the language adoption: every scenario in one plan
-  // has exactly one counterpart in the other under a version-normalized reading
-  // of its whole payload. Evidence CAN be re-keyed by meaning.
-  assert.deepEqual(
-    [...adoptionBySemantic.keys()].toSorted(),
-    [...targetBySemantic.keys()].toSorted(),
-    'the language adoption preserves every scenario semantically; only identities move',
-  );
-
-  // Of those 163 pairs, exactly 69 are issued under a new id, and every one is
-  // a `declaredEvidence` scenario -- the only kind carrying an `invocation`,
-  // whose nested canonical references carry the version stamps the fingerprint
-  // covers. That is the mechanism, measured rather than inferred.
-  const reidentified = [...targetBySemantic].filter(
-    ([key, scenarioId]) => adoptionBySemantic.get(key) !== scenarioId,
-  );
-  assert.equal(reidentified.length, 69);
-  assert.deepEqual(
-    [
-      ...new Set(
-        reidentified.map(([key]) => (JSON.parse(key) as { kind: string }).kind),
-      ),
-    ],
-    ['declaredEvidence'],
-    'only scenarios carrying a version-stamped invocation are re-identified',
-  );
-
-  // ONE-PROPERTY NEGATIVE CONTROL on the comparison itself. Changing a field
-  // the OLD tuple omitted must change the semantic key; otherwise this control
-  // repeats the defect it was written to fix.
-  const [sampleDeclared] = current.plan.scenarios.filter(
-    (scenario) => scenario.kind === 'declaredEvidence',
-  );
-  assert.ok(sampleDeclared);
-  for (const omitted of [
-    'assertionId',
-    'evidenceKind',
-    'expectedOutcome',
-  ] as const) {
-    const mutated = { ...sampleDeclared, [omitted]: 'MUTATED' };
-    assert.notEqual(
-      semanticKey(mutated),
-      semanticKey(sampleDeclared),
-      `the semantic key must observe ${omitted}; the six-field tuple did not`,
+  for (const [local, count] of Object.entries({
+    goods_receipt: 19,
+    goods_receipt_line: 17,
+    purchase_order_amendment: 13,
+    purchase_order_received: 10,
+  })) {
+    assert.equal(
+      plan.scenarios.filter(
+        (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
+      ).length,
+      count,
+      `the receiving entity ${local} contributes its measured verifier scenarios`,
     );
   }
-  // ...while a change to a GENERATED identity field must not, or the key would
-  // report every re-identification as a semantic difference and the bijection
-  // above would be unobservable.
   assert.equal(
-    semanticKey({ ...sampleDeclared, scenarioId: 'MUTATED' }),
-    semanticKey(sampleDeclared),
-  );
-
-  // EXACTLY 69 recorded ids do not appear in the other plan, which is the
-  // number ADR-0047 §8 publishes.
-  const targetIdSet = new Set(scenarioIds(current.plan.scenarios));
-  const adoptionIdSet = new Set(scenarioIds(languageAdoptionScenarios));
-  assert.equal(
-    [...targetIdSet].filter((scenarioId) => !adoptionIdSet.has(scenarioId))
-      .length,
-    69,
-    'a language adoption changes exactly the ids whose fingerprint covers a version-stamped node',
-  );
-
-  // EXACTLY 0 across the ADR-0047 §4 profile-only edge, asserted as identity of
-  // the whole sorted id list rather than as a subset, so an added or replaced
-  // scenario cannot pass.
-  assert.deepEqual(
-    scenarioIds(profileEdgeScenarios),
-    scenarioIds(current.plan.scenarios),
-    'a compiler-semantic profile adoption changes no scenario identity; only the source axis does',
-  );
-
-  const changes = [
-    {
-      entityId: 'northstar.app:entity.inventory_movement',
-      partition: 'derived',
-      subjectId: 'northstar.app:field.inventory_movement_source_id',
-    },
-    {
-      entityId: 'northstar.app:entity.stock_count_line',
-      partition: 'executed',
-      subjectId: 'northstar.app:field.stock_count_line_unit_id',
-    },
-    {
-      entityId: 'northstar.app:entity.party_role',
-      partition: 'executed',
-      subjectId: 'northstar.app:field.party_role_kind',
-    },
-    {
-      entityId: 'northstar.app:entity.inventory_transaction_line',
-      partition: 'executed',
-      subjectId: 'northstar.app:field.inventory_transaction_line_unit_id',
-    },
-    {
-      entityId: 'northstar.app:entity.inventory_period_lock',
-      partition: 'derived',
-      subjectId: 'northstar.app:field.inventory_period_lock_closed_through',
-    },
-  ] as const;
-  assert.deepEqual(
-    changes.reduce(
-      (counts, change) => ({
-        derived: counts.derived + Number(change.partition === 'derived'),
-        executed: counts.executed + Number(change.partition === 'executed'),
-      }),
-      { derived: 0, executed: 0 },
+    plan.scenarios.some(
+      (scenario) =>
+        scenario.subjectId ===
+        'northstar.app:derived_state_field.machine.purchase_order_lifecycle',
     ),
-    { derived: 2, executed: 3 },
-    'the attributed delta is exactly three executed and two derived scenarios',
-  );
-
-  const derivePrevious = verificationScenarioDeriver(
-    releaseByRoot(SEARCH_CAPABILITY_SOURCE_ROOT).compiled,
-    previous,
-  );
-  assert.ok(derivePrevious);
-  const currentIds = new Set(
-    current.plan.scenarios.map((scenario) => scenario.scenarioId),
-  );
-  const removedScenarioIds = await Promise.all(
-    changes.map(async (change) => {
-      const candidates = previous.plan.scenarios.filter(
-        (scenario) =>
-          scenario.kind === 'searchableExclusion' &&
-          scenario.entityId === change.entityId &&
-          scenario.subjectId === change.subjectId,
-      );
-      assert.equal(candidates.length, 1);
-      const scenario = candidates[0]!;
-      assert.equal(
-        current.plan.scenarios.some(
-          (candidate) =>
-            candidate.kind === scenario.kind &&
-            candidate.entityId === scenario.entityId &&
-            candidate.subjectId === scenario.subjectId,
-        ),
-        false,
-        `${scenario.subjectId} exclusion is absent from the new plan rather than reclassified`,
-      );
-      assert.equal(currentIds.has(scenario.scenarioId), false);
-      assert.equal(
-        (await derivePrevious(scenario))?.code ?? null,
-        change.partition === 'derived'
-          ? 'VERIFICATION_NO_GENERIC_CREATE_OPERATION'
-          : null,
-        `${scenario.subjectId} is attributed to the ${change.partition} side of the prior partition`,
-      );
-      return scenario.scenarioId;
-    }),
-  );
-  assert.deepEqual(
-    previous.plan.scenarios
-      .filter((scenario) => !currentIds.has(scenario.scenarioId))
-      .map((scenario) => scenario.scenarioId)
-      .toSorted(),
-    removedScenarioIds.toSorted(),
-    'the five named exclusions are every scenario removed from the 168-scenario plan',
-  );
-  const previousIds = new Set(
-    previous.plan.scenarios.map((scenario) => scenario.scenarioId),
-  );
-  assert.deepEqual(
-    current.plan.scenarios
-      .filter((scenario) => !previousIds.has(scenario.scenarioId))
-      .map((scenario) => scenario.scenarioId),
-    [],
-    'the ruled change only removes the five named exclusions; it does not replace them with reclassified scenarios',
+    false,
+    'the server-owned lifecycle field is not probed through generic writes',
   );
 }
 
@@ -5800,6 +5487,7 @@ function createRuntime(
     compiledApplication,
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
     ],
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,

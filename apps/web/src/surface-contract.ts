@@ -1097,13 +1097,19 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
       value.inputContract === undefined
         ? null
         : Object.freeze(
-            value.inputContract.fields.map((field) =>
-              Object.freeze({
-                fieldId: field.fieldId,
-                kind: field.fieldKind,
-                required: field.required,
-              }),
-            ),
+            value.inputContract.fields
+              .filter(
+                (field) =>
+                  field.writable &&
+                  value.inputContract!.writableFieldIds.includes(field.fieldId),
+              )
+              .map((field) =>
+                Object.freeze({
+                  fieldId: field.fieldId,
+                  kind: field.fieldKind,
+                  required: field.required,
+                }),
+              ),
           ),
     intent,
     lifecycle: value.lifecycle,

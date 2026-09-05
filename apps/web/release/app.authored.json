@@ -3131,7 +3131,7 @@
       "presence": "optional",
       "reportable": true,
       "schemaVersion": "v5",
-      "searchable": false
+      "searchable": true
     },
     {
       "classification": "internal",

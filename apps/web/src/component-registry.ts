@@ -715,7 +715,7 @@ function renderCapabilityCommand(
   const explanation = operation.capabilityId
     ? '<span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span>'
     : '<span><strong>Ready.</strong> This moves the record to its next state.</span>';
-  return `<form class="capability-command" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">${explanation}<button type="submit">${escapeHtml(operation.label)}</button></form>`;
+  return `<form class="capability-command" method="post" action="${escapeHtml(surfaceHref(context.surface, record.recordId, record.archived, context))}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">${explanation}<button type="submit">${escapeHtml(operation.label)}</button></form>`;
 }
 
 function renderKeyFacts(context: SurfaceComponentContext): string {
@@ -1166,7 +1166,7 @@ function renderLifecycleForm(
     (binding) => binding.intent === intent,
   );
   return operation
-    ? `<form class="lifecycle-action" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><button class="secondary-action" type="submit">${escapeHtml(operation.label)}</button></form>`
+    ? `<form class="lifecycle-action" method="post" action="${escapeHtml(surfaceHref(context.surface, record.recordId, record.archived, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><button class="secondary-action" type="submit">${escapeHtml(operation.label)}</button></form>`
     : '';
 }
 
@@ -1487,6 +1487,10 @@ function renderFormFields(
     (operation.inputFields ?? []).map((field) => [field.fieldId, field]),
   );
   return surface.fieldIds
+    .filter(
+      (fieldId) =>
+        operation.inputFields === null || inputFieldsById.has(fieldId),
+    )
     .map((fieldId, index) => {
       const label = fieldLabel(fieldId, surfaceEntityId(context));
       const value = record ? record.values[fieldId] : undefined;

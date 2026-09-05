@@ -356,6 +356,7 @@ export async function submitSurfaceRuntimeIntent(
         operation,
         submission,
         grant,
+        requestUrl,
       );
     } catch {
       return operationDiagnostic('OPERATION_CONFIRMATION_REQUIRED', 422);
@@ -1191,7 +1192,10 @@ function renderConfirmationTransition(
   operation: CompiledSurfaceDataBinding['operations'][number],
   submission: SurfaceRuntimeSubmission,
   grant: string,
+  requestUrl: string,
 ): SurfaceRuntimeResponse {
+  const requestLocation = new URL(requestUrl, 'http://surface-runtime.local');
+  const action = `${requestLocation.pathname}${requestLocation.search}`;
   const preserved = Object.entries(submission)
     .filter(([key]) => key !== 'confirmationGrant' && key !== 'confirmed')
     .map(
@@ -1200,7 +1204,7 @@ function renderConfirmationTransition(
     )
     .join('');
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="${escapeHtml(action)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
     statusCode: 200,
   });
 }

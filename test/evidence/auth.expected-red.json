@@ -60,8 +60,8 @@
       "name": "receipt-binding-action-drifted",
       "claim": "The compiler-visible receiving contracts must match the real evaluator's exact action, permission id and resource; a binding is not a grant.",
       "file": "apps/web/release/current-policy-bindings.json",
-      "original": "        \"action\": \"transition\",\n        \"availability\": \"compatibleExtension\",\n        \"permissionId\": \"northstar.app:permission.purchase_order_line_amend\",",
-      "replacement": "        \"action\": \"read\",\n        \"availability\": \"compatibleExtension\",\n        \"permissionId\": \"northstar.app:permission.purchase_order_line_amend\",",
+      "original": "        \"action\": \"transition\",\n        \"permissionId\": \"northstar.app:permission.purchase_order_line_amend\",",
+      "replacement": "        \"action\": \"read\",\n        \"permissionId\": \"northstar.app:permission.purchase_order_line_amend\",",
       "test": {
         "files": ["test/compiler/g2-module-conformance.test.ts"],
         "namePattern": "unbound-permission acknowledgement: the unchanged composed application"
@@ -70,7 +70,7 @@
         {
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: the unchanged composed application builds only with its exact evaluator-binding census",
-          "expected": "13 receiving contracts"
+          "expected": "COMPILER_PERMISSION_EVALUATOR_UNBOUND"
         }
       ]
     },

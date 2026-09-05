@@ -1648,8 +1648,13 @@ test('unbound-permission acknowledgement: the unchanged composed application bui
   const activeBindings = (acknowledgement.evaluatorBindings ?? []).filter(
     (binding) => binding.availability !== 'compatibleExtension',
   );
-  const compatibleExtensions = (acknowledgement.evaluatorBindings ?? []).filter(
-    (binding) => binding.availability === 'compatibleExtension',
+  const receiptPermissionIds = new Set(
+    RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS.map(
+      (binding) => binding.permissionId,
+    ),
+  );
+  const receiptBindings = activeBindings.filter((binding) =>
+    receiptPermissionIds.has(binding.permissionId),
   );
   assert.deepEqual(
     [...activeBindings].sort(byPermissionId),
@@ -1672,7 +1677,7 @@ test('unbound-permission acknowledgement: the unchanged composed application bui
   );
   assert.ok(declared.length > 0);
   assert.deepEqual(
-    compatibleExtensions
+    receiptBindings
       .map(({ action, permissionId, resource }) => ({
         action,
         permissionId,
@@ -1686,17 +1691,10 @@ test('unbound-permission acknowledgement: the unchanged composed application bui
     })).sort(byPermissionId),
     'the 13 receiving contracts must be compiler-visible and backed by the real evaluator registry',
   );
-  assert.equal(compatibleExtensions.length, 13);
+  assert.equal(receiptBindings.length, 13);
   const withReceivingDeclarations: UnboundPermissionAcknowledgementSubject = {
     package: normalized.package,
-    permissions: [
-      ...normalized.permissions,
-      ...RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS.map((binding) => ({
-        action: binding.action,
-        permissionId: binding.permissionId,
-        resource: { targetId: binding.resourceId },
-      })),
-    ],
+    permissions: normalized.permissions,
   };
   assert.deepEqual(
     validateUnboundPermissionAcknowledgement(
@@ -1704,7 +1702,7 @@ test('unbound-permission acknowledgement: the unchanged composed application bui
       acknowledgement,
     ),
     [],
-    'declaring the exact receiving contracts must consume the reserved bindings without growing the unbound list',
+    'the integrated receiving declarations must use active bindings without growing the unbound list',
   );
   // `compileApplication` is the FIXTURE entry point and is ungoverned unless a
   // caller supplies an acknowledgement; that is what keeps synthetic packages

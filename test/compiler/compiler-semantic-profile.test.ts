@@ -34,14 +34,13 @@ import {
   mustCompile,
   normalizedBytes,
 } from './helpers.js';
+import { ordinaryModuleV1 } from '../fixtures/g2/module-conformance/definitions.js';
 import {
   CURRENT_POLICY_BINDINGS_FILE,
   CURRENT_POLICY_BINDINGS_VERSION,
   UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE,
   UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
-
-const LINEAGE_PATH = 'apps/web/release/app.compiled.json';
 
 // Release roots recorded on `main` at 66c8d96, BEFORE v1 was cut. Frozen
 // rather than compared against a second fresh compile: comparing two fresh
@@ -1036,9 +1035,34 @@ function readLineage(): {
   readonly applications: readonly RecordedRelease[];
   readonly bootstrap: RecordedRelease;
 } {
-  return JSON.parse(readFileSync(LINEAGE_PATH, 'utf8')) as {
-    readonly applications: readonly RecordedRelease[];
-    readonly bootstrap: RecordedRelease;
+  // ADR-0066: history reproduction is tested on a synthetic lineage, never
+  // coupled to the number of disposable first-party releases retained today.
+  const definition = ordinaryModuleV1();
+  const bootstrapBytes = normalizedBytes(
+    emptyApplicationDefinition(definition),
+  );
+  const bootstrap = compileFixtureAtV0(bootstrapBytes, null);
+  let previous = bootstrap;
+  const applications: RecordedRelease[] = [];
+  for (const version of [
+    COMPILER_SEMANTIC_PROFILE_VERSION,
+    COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  ]) {
+    if (version === COMPILER_SEMANTIC_PROFILE_V2_VERSION) {
+      (definition.package as { version: string }).version = '1.0.1';
+    }
+    const bytes = normalizedBytes(definition);
+    const base = compilerInput(bytes, expectedActiveReleaseFrom(previous));
+    previous = mustCompile({
+      ...base,
+      profile: { ...base.profile, compilerSemanticProfileVersion: version },
+    });
+    applications.push(serializeRelease(bytes, previous));
+  }
+  return {
+    applications,
+    bootstrap: serializeRelease(bootstrapBytes, bootstrap),
   };
 }
 
