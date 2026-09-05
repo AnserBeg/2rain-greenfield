@@ -1,0 +1,240 @@
+{
+  "version": 1,
+  "packet": "enum-widen",
+  "entries": [
+    {
+      "name": "widening-is-never-recognised",
+      "claim": "A candidate release that adds an option to an already-released enum field is PLANNED, as one widenEnumDomain element, rather than refused with COMPILER_STORAGE_RETYPE_UNSUPPORTED. This is the fence PUR-2c measured; a planner that never recognises the widening refuses every option-list change as a retype.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "        !isAdditiveEnumDomainTransition(oldField, field, sourceField)\n",
+      "replacement": "        true\n",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "plans exactly one widenEnumDomain element"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
+          "expected": "COMPILER_STORAGE_RETYPE_UNSUPPORTED"
+        }
+      ]
+    },
+    {
+      "name": "widening-ignores-everything-but-the-id-set",
+      "claim": "A widening is admitted only when the candidate field, with its NEW option records removed, fingerprints byte-for-byte as the previous release did -- so a changed label or orderKey on an EXISTING option, a reordering, or any other column property is refused alongside the widening. Round-1 finding: the round-1 predicate excluded the whole fingerprint and let widening-plus-relabel through. This mutation makes the fingerprint comparison vacuous; the first case it admits is widening plus a relabelled existing option.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "  return (\n    columnShapeFingerprint(\n      withoutNewOptions,\n      candidate.requiredAfterTightening,\n    ) === previous.shapeFingerprint\n  );\n}\n",
+      "replacement": "  void withoutNewOptions;\n  return true;\n}\n",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "plans exactly one widenEnumDomain element"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
+          "expected": "widenedAndRelabelled"
+        }
+      ]
+    },
+    {
+      "name": "checks-are-matched-by-name-only",
+      "claim": "A released CHECK that matches the previous release BY NAME is compared by DEFINITION before it is skipped. Matching by name alone is PUR-2c's observed hole: the physical name derives from the field id, so a widened option list produced zero elements and the release activated against the stale constraint.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "          ).digest ===\n          hashCanonical(\n            `${HASH_DOMAINS.projectionSemantic}/storage-check-transition-shape`,\n            check,\n          ).digest\n",
+      "replacement": "          ).digest !== undefined\n",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "plans exactly one widenEnumDomain element"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
+          "expected": "the widening plans one element and nothing else"
+        }
+      ]
+    },
+    {
+      "name": "old-readers-are-told-widening-is-transparent",
+      "claim": "The compatibility cell states oldRead: requiresReadFallback -- a reader compiled against N options observes the (N+1)th the moment a new writer stores it, and the matrix says so rather than calling the widening transparent.",
+      "file": "packages/compiler/src/storage.ts",
+      "original": "    oldRead: 'requiresReadFallback',\n    oldWrite: 'compatible',\n  }),\n});\n",
+      "replacement": "    oldRead: 'compatible',\n    oldWrite: 'compatible',\n  }),\n});\n",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "plans exactly one widenEnumDomain element"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused",
+          "expected": "the widening plans one element and nothing else"
+        }
+      ]
+    },
+    {
+      "name": "migration-0024-does-not-admit-widen-enum-domain",
+      "claim": "Migration 0024 admits widenEnumDomain to north_star_internal.module_storage_elements_shape, a CHECK constraint no TypeScript build observes, and the checked-in schema snapshot records that it did.",
+      "file": "db/migrations/0024_module_storage_enum_domain_widening.sql",
+      "original": "      'validateConstraint',\n      'widenEnumDomain'\n",
+      "replacement": "      'validateConstraint'\n",
+      "test": {
+        "files": ["test/postgres/trust-substrate.test.ts"],
+        "namePattern": "migrations upgrade accepted G1"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/trust-substrate.test.ts",
+          "name": "migrations upgrade accepted G1 and converge with the checked-in snapshot",
+          "expected": "physical schema differs from schema\\.snapshot\\.json"
+        }
+      ]
+    },
+    {
+      "name": "provider-never-executes-the-enum-widening",
+      "claim": "widenEnumDomainCheck really runs the single-statement DROP CONSTRAINT, ADD CONSTRAINT ... NOT VALID against PostgreSQL. The switch is not exhaustiveness-checked, so an element applied with no DDL leaves every other gate green; the catalog verification inside prepare is what observes the missing definition.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "  await client.query(\n    `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)}\n       DROP CONSTRAINT ${quoted(check.physicalName)},\n       ADD CONSTRAINT ${quoted(check.physicalName)}\n       CHECK (${enumCheckExpression(entity, check)}) NOT VALID`,\n  );\n}\n\nasync function provisionDefaultLegalEntity(",
+      "replacement": "}\n\nasync function provisionDefaultLegalEntity(",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "released enum domain is widened by one atomic CHECK replacement"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
+          "expected": "altered managed constraint"
+        }
+      ]
+    },
+    {
+      "name": "replay-reissues-the-ddl",
+      "claim": "A prepare whose target option set is already within the live constraint applies the element with NO DDL, so a replay -- the same widened release prepared again, here by the second tenant -- leaves the constraint's OID untouched. Without the early return the constraint is dropped and re-added on every prepare.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "  if (targetWithinLive) return;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "released enum domain is widened by one atomic CHECK replacement"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
+          "expected": "a replay against an already-wide constraint must not reissue the DDL"
+        }
+      ]
+    },
+    {
+      "name": "element-narrows-a-divergent-live-constraint",
+      "claim": "The element NEVER narrows. A target whose option set diverges from the live constraint -- neither a subset nor a superset -- is refused with ENUM_DOMAIN_NARROWING_REJECTED before any DDL. With the guard removed the live constraint is replaced by the divergent set, and the mixed-root catalog verification is what then refuses it, for a different reason.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "  if (!liveWithinTarget) {\n    throw failure(\n      'ENUM_DOMAIN_NARROWING_REJECTED',\n      `${entity.physicalTableName}.${check.physicalName} admits options the target does not; this element only widens`,\n    );\n  }\n",
+      "replacement": "  void liveWithinTarget;\n",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "released enum domain is widened by one atomic CHECK replacement"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
+          "expected": "conflicting live roots claim"
+        }
+      ]
+    },
+    {
+      "name": "merge-refuses-a-mixed-live-root-set-of-enum-checks",
+      "claim": "mergeExpectedTables tolerates an enum-domain widening between two accounted live roots and expects the SUPERSET. The managed tables are tenant-shared, so without the tolerance LIVE_SET_SHAPE_CONFLICT fires for every tenant the moment one of them widens.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "      if (widensEnumDomain(existing, check)) {\n        values.set(check.physicalName, check);\n        continue;\n      }\n      if (widensEnumDomain(check, existing)) continue;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "released enum domain is widened by one atomic CHECK replacement"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
+          "expected": "conflicting live roots claim"
+        }
+      ]
+    },
+    {
+      "name": "catalog-expects-the-narrower-check",
+      "claim": "The expected definition for a widened CHECK is the WIDER member. Keeping the narrower one makes a tampered transition -- target advertises the new option, envelope installs nothing -- verify clean against the untouched constraint, which is exactly the PUR-2c activation reconstructed.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "      if (widensEnumDomain(existing, check)) {\n        values.set(check.physicalName, check);\n        continue;\n      }\n",
+      "replacement": "      if (widensEnumDomain(existing, check)) continue;\n",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "released enum domain is widened by one atomic CHECK replacement"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "column-merge-refuses-the-widened-contract",
+      "claim": "A column whose field contract differs from a sibling root's only by an enum-domain widening is merged rather than refused; shapeFingerprint moves with the option list and is excluded from that comparison, as it already is for the additive search-mapping pair.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "        !enumDomainWideningIsCompatible &&\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "released enum domain is widened by one atomic CHECK replacement"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
+          "expected": "conflicting live roots claim"
+        }
+      ]
+    },
+    {
+      "name": "repair-before-measure",
+      "claim": "AGENTS.md section 6's subject-repaired-before-measured vector, and PUR-2c section 2.4b's assertion 9. The previous release's CHECK must REJECT the option it does not declare, as SQLSTATE 23514 from that constraint, BEFORE the widening is measured. A constraint that constrains nothing makes every post-transition acceptance vacuous, and the catalog verifier agrees with itself either way; only the pre-state rejection observes it. The tautology is `col = col` because PostgreSQL re-renders `IS NOT DISTINCT FROM` as `NOT ... IS DISTINCT FROM` and the catalog verifier would then drift at the first prepare, for a reason that is not this one.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "  return `${quoted(column.physicalName)} = ANY (ARRAY[${check.enumOptionIds\n    .map(sqlTextLiteral)\n    .join(', ')}])`;\n",
+      "replacement": "  return `${quoted(column.physicalName)} = ${quoted(column.physicalName)}`;\n",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "released enum domain is widened by one atomic CHECK replacement"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
+          "expected": "the previous release CHECK must reject the option it does not declare"
+        }
+      ]
+    },
+    {
+      "name": "missing-check-is-repaired-not-refused",
+      "claim": "An ABSENT released enum-domain CHECK is refused as catalog drift (ENUM_DOMAIN_CHECK_MISSING), never added. Round-1 finding: adding the target constraint NOT VALID when the table admitted everything is a pre-approval TIGHTENING that can newly refuse an update to a drifted row, and it repairs the drift before catalog verification measures it. With the refusal replaced by the round-1 repair, the drifted tenant's prepare succeeds and the verifier never sees the missing constraint.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "    throw failure(\n      'ENUM_DOMAIN_CHECK_MISSING',\n      `${entity.physicalTableName}.${check.physicalName} is absent from the live catalog; widenEnumDomain only widens an existing constraint`,\n    );\n",
+      "replacement": "    await ensureEnumCheckConstraint(client, entity, check);\n    return;\n",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "released enum domain is widened by one atomic CHECK replacement"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    }
+  ]
+}

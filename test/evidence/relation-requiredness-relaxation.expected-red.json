@@ -127,18 +127,18 @@
     },
     {
       "name": "migration-does-not-admit-the-new-kind",
-      "claim": "Migration 0022 admits relaxNotNull to north_star_internal.module_storage_elements_shape, a CHECK constraint no TypeScript build observes, and the checked-in schema snapshot records that it did.",
-      "file": "db/migrations/0022_module_storage_relation_requiredness_relaxation.sql",
+      "claim": "relaxNotNull is admitted to north_star_internal.module_storage_elements_shape, a CHECK constraint no TypeScript build observes, and the checked-in schema snapshot records that it is. REPOINTED 2026-09-02 by enum-widen, which caused the drift: the vocabulary CHECK holds one expression and Postgres has no add-to-array form, so migration 0024 DROPs and re-creates it with the full list. Removing the option from 0022 therefore no longer changes the final schema and this mutation SURVIVED. The subject is the migration that currently carries the vocabulary, which is 0024; the claim it defends -- that this element kind is admitted, observably, against a live database -- is unchanged.",
+      "file": "db/migrations/0024_module_storage_enum_domain_widening.sql",
       "original": "      'relaxNotNull',\n",
       "replacement": "",
       "test": {
         "files": ["test/postgres/trust-substrate.test.ts"],
-        "namePattern": "migrations 0006-0022 upgrade accepted G1"
+        "namePattern": "migrations upgrade accepted G1"
       },
       "kills": [
         {
           "file": "test/postgres/trust-substrate.test.ts",
-          "name": "migrations 0006-0022 upgrade accepted G1 and converge with the checked-in snapshot",
+          "name": "migrations upgrade accepted G1 and converge with the checked-in snapshot",
           "expected": "physical schema differs from schema\\.snapshot\\.json"
         }
       ]

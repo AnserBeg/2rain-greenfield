@@ -1136,7 +1136,7 @@ test('A2/A4 classification axes and compatibility carve-outs are exact', () => {
   // ... and the wider derivation is inert for every kind that existed before
   // it, because no other cell carries `oldRead: 'requiresReadFallback'`.
   for (const [kind, cell] of Object.entries(STORAGE_COMPATIBILITY_MATRIX)) {
-    if (kind === 'relaxNotNull') continue;
+    if (kind === 'relaxNotNull' || kind === 'widenEnumDomain') continue;
     assert.notEqual(cell.oldRead, 'requiresReadFallback');
   }
 });
@@ -1754,6 +1754,7 @@ test('the compatibility matrix is closed and old-writes-may-reject is never addi
     'relaxNotNull',
     'tightenNotNull',
     'validateConstraint',
+    'widenEnumDomain',
   ]);
   for (const cell of Object.values(STORAGE_COMPATIBILITY_MATRIX)) {
     if (cell.oldWrite === 'mayReject') {

@@ -278,7 +278,8 @@ export type StorageTransitionElementKind =
   | 'duplicateScan'
   | 'relaxNotNull'
   | 'tightenNotNull'
-  | 'validateConstraint';
+  | 'validateConstraint'
+  | 'widenEnumDomain';
 
 export type PreparationValidity =
   | 'preApprovalInert'

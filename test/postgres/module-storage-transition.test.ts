@@ -162,6 +162,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0021_bounded_fresh_tenant_install_evidence.sql',
           '0022_module_storage_relation_requiredness_relaxation.sql',
           '0023_inventory_stock_count_companion_digest_version.sql',
+          '0024_module_storage_enum_domain_widening.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -4104,6 +4105,1027 @@ test('a released required relation is widened by executed DDL, and a mixed live-
   );
 });
 
+test('an enum-domain CHECK replacement is one statement under ACCESS EXCLUSIVE and leaves no unconstrained window', async () => {
+  // Stop-condition 1 of the ENUM-WIDEN charter, committed rather than left in
+  // a scratch probe. PostgreSQL has no ALTER CONSTRAINT for a CHECK
+  // expression, so replacement is DROP plus ADD -- as two sub-commands of ONE
+  // ALTER TABLE, exactly the statement `widenEnumDomainCheck` renders. This
+  // measures PostgreSQL's transactional DDL under that statement shape against
+  // a populated table: what lock it takes, what concurrent writers of the OLD
+  // and the NEW value observe, what a third session sees in the catalog, and
+  // what a backend killed mid-transaction leaves behind.
+  const oldExpression = `v = ANY (ARRAY['a'::text, 'b'::text])`;
+  const newExpression = `v = ANY (ARRAY['a'::text, 'b'::text, 'c'::text])`;
+  await withEphemeralPostgres(
+    'enum-check-replacement-window',
+    async ({ connection, pool }) => {
+      await pool.query('CREATE TABLE t (id int PRIMARY KEY, v text NOT NULL)');
+      await pool.query(
+        `ALTER TABLE t ADD CONSTRAINT k CHECK (${oldExpression}) NOT VALID`,
+      );
+      await pool.query(
+        `INSERT INTO t
+           SELECT g, CASE WHEN g % 2 = 0 THEN 'a' ELSE 'b' END
+             FROM generate_series(1, 200000) AS g`,
+      );
+      // A lock-free catalog read: `pg_get_constraintdef` opens the relation
+      // and would block behind the replacement, which is itself the lock doing
+      // its job; this reads pg_constraint alone.
+      const catalog = async () =>
+        (
+          await pool.query<{ n: string; oid: string; validated: boolean }>(
+            `SELECT oid::text AS oid, convalidated AS validated,
+                    (SELECT count(*)::text FROM pg_constraint WHERE conname = 'k') AS n
+               FROM pg_constraint WHERE conname = 'k'`,
+          )
+        ).rows;
+      const definition = async () =>
+        (
+          await pool.query<{ definition: string }>(
+            `SELECT pg_get_expr(conbin, conrelid, true) AS definition
+               FROM pg_constraint WHERE conname = 'k'`,
+          )
+        ).rows[0]?.definition;
+      const before = await catalog();
+      assert.equal(before.length, 1);
+      assert.equal(before[0]?.validated, false);
+
+      const replacer = new pg.Client(connection);
+      const oldWriter = new pg.Client(connection);
+      const newWriter = new pg.Client(connection);
+      await Promise.all([
+        replacer.connect(),
+        oldWriter.connect(),
+        newWriter.connect(),
+      ]);
+      try {
+        await replacer.query('BEGIN');
+        const started = performance.now();
+        await replacer.query(
+          `ALTER TABLE t DROP CONSTRAINT k,
+             ADD CONSTRAINT k CHECK (${newExpression}) NOT VALID`,
+        );
+        const statementMilliseconds = performance.now() - started;
+        const replacerPid = (
+          await replacer.query<{ pid: number }>(
+            'SELECT pg_backend_pid() AS pid',
+          )
+        ).rows[0]!.pid;
+        // 1. The lock, read from pg_locks while the transaction is open.
+        const locks = await pool.query<{ granted: boolean; mode: string }>(
+          `SELECT l.mode, l.granted
+             FROM pg_locks AS l
+             JOIN pg_class AS r ON r.oid = l.relation
+            WHERE r.relname = 't' AND l.pid = $1`,
+          [replacerPid],
+        );
+        assert.deepEqual(locks.rows, [
+          { granted: true, mode: 'AccessExclusiveLock' },
+        ]);
+        // 2. A third session sees exactly ONE constraint, the old OID, for the
+        //    whole life of the transaction.
+        assert.deepEqual(await catalog(), before);
+        // 3. Writers of the OLD value and of the NEW value both wait on the
+        //    relation lock. Their wait is observed from pg_stat_activity, not
+        //    inferred from elapsed time.
+        const settled = { new: 'pending', old: 'pending' };
+        const newInsert = newWriter
+          .query(`INSERT INTO t VALUES (900001, 'c')`)
+          .then(
+            () => {
+              settled.new = 'succeeded';
+            },
+            (error: { code?: string }) => {
+              settled.new = `failed ${String(error.code)}`;
+            },
+          );
+        const oldInsert = oldWriter
+          .query(`INSERT INTO t VALUES (900002, 'a')`)
+          .then(
+            () => {
+              settled.old = 'succeeded';
+            },
+            (error: { code?: string }) => {
+              settled.old = `failed ${String(error.code)}`;
+            },
+          );
+        const waitForRelationLockWaiters = async (): Promise<number> => {
+          for (let attempt = 0; attempt < 200; attempt += 1) {
+            const waiting = await pool.query<{ count: string }>(
+              `SELECT count(*)::text AS count
+                 FROM pg_stat_activity
+                WHERE wait_event_type = 'Lock' AND wait_event = 'relation'
+                  AND query LIKE 'INSERT INTO t VALUES (90000%'`,
+            );
+            if (waiting.rows[0]?.count === '2') return 2;
+            await new Promise<void>((resolve) => setTimeout(resolve, 25));
+          }
+          return 0;
+        };
+        assert.equal(await waitForRelationLockWaiters(), 2);
+        assert.deepEqual(settled, { new: 'pending', old: 'pending' });
+        assert.deepEqual(await catalog(), before);
+        await replacer.query('COMMIT');
+        await Promise.all([newInsert, oldInsert]);
+        // 4. After COMMIT both writers succeed -- the new value against the new
+        //    definition, the old value against either -- and the catalog holds
+        //    exactly one constraint again, under a NEW OID, still NOT VALID.
+        assert.deepEqual(settled, { new: 'succeeded', old: 'succeeded' });
+        const after = await catalog();
+        assert.equal(after.length, 1);
+        assert.notEqual(after[0]?.oid, before[0]?.oid);
+        assert.equal(after[0]?.validated, false);
+        assert.equal(await definition(), newExpression);
+        console.log(
+          `enum-widen: CHECK replacement over 200000 rows took ${statementMilliseconds.toFixed(1)} ms under AccessExclusiveLock`,
+        );
+
+        // 5. Crash safety: a backend killed mid-transaction leaves the
+        //    constraint it was replacing, with its OID, and the value it did
+        //    not admit still refused.
+        const doomed = new pg.Client(connection);
+        doomed.on('error', () => undefined);
+        await doomed.connect();
+        await doomed.query('BEGIN');
+        await doomed.query(
+          `ALTER TABLE t DROP CONSTRAINT k,
+             ADD CONSTRAINT k CHECK (v = ANY (ARRAY['a'::text, 'b'::text, 'c'::text, 'd'::text])) NOT VALID`,
+        );
+        const doomedPid = (
+          await doomed.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        ).rows[0]!.pid;
+        await pool.query('SELECT pg_terminate_backend($1)', [doomedPid]);
+        await doomed.end().catch(() => undefined);
+        assert.deepEqual(await catalog(), after);
+        const refused = await pool
+          .query(`INSERT INTO t VALUES (900003, 'd')`)
+          .then(
+            () => null,
+            (error: { code?: string; constraint?: string }) => ({
+              code: error.code,
+              constraint: error.constraint,
+            }),
+          );
+        assert.deepEqual(refused, { code: '23514', constraint: 'k' });
+
+        // 6. Behind a long-open reader the replacement WAITS rather than
+        //    proceeding, and a lock_timeout bounds the wait with 55P03. The
+        //    materializer sets no lock_timeout today; this records what one
+        //    would do.
+        const reader = new pg.Client(connection);
+        await reader.connect();
+        await reader.query('BEGIN');
+        await reader.query('SELECT count(*) FROM t');
+        const bounded = new pg.Client(connection);
+        await bounded.connect();
+        await bounded.query(`SET lock_timeout = '250ms'`);
+        const timedOut = await bounded
+          .query(
+            `ALTER TABLE t DROP CONSTRAINT k,
+               ADD CONSTRAINT k CHECK (v = ANY (ARRAY['a'::text, 'b'::text, 'c'::text, 'e'::text])) NOT VALID`,
+          )
+          .then(
+            () => null,
+            (error: { code?: string }) => error.code,
+          );
+        assert.equal(timedOut, '55P03');
+        await reader.query('COMMIT');
+        assert.deepEqual(await catalog(), after);
+        await Promise.all([reader.end(), bounded.end()]);
+      } finally {
+        await Promise.all([replacer.end(), oldWriter.end(), newWriter.end()]);
+      }
+    },
+  );
+});
+
+test('an enum-domain widening plans exactly one widenEnumDomain element, and every adjacent option-list change stays refused', () => {
+  // Group 1 of the ENUM-WIDEN charter, without a database. `PUR-2c` measured
+  // that ANY option-list change presented to the planner as a retype, because
+  // `lowerColumn` fingerprints `fieldType` wholesale and an enum's `fieldType`
+  // carries its options. The physical column is `text` before and after. The
+  // predicate admits exactly the monotonic superset; everything adjacent to it
+  // keeps the refusal it had, and each adjacent case varies ONE property.
+  const previous = mustCompile(moduleInput(ordinaryModuleV2()));
+  const widened = mustCompile(
+    moduleInput(tierModule('widened'), expectedActiveReleaseFrom(previous)),
+  );
+  const target = projectionPayload<StorageTargetPayloadV1>(
+    widened,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const parent = target.entities.find(
+    (entity) => entity.entityId === FIXTURE_IDS.entityIds.parent,
+  );
+  assert.ok(parent);
+  const check = parent.checkConstraints.find(
+    (candidate) =>
+      candidate.canonicalFieldId === FIXTURE_IDS.fieldIds.parentTier,
+  );
+  assert.ok(check);
+  // The storage contract SORTS option ids, so the new option sorts first here.
+  assert.deepEqual(check.enumOptionIds, [
+    ENUM_WIDEN_OPTION_ID,
+    FIXTURE_IDS.optionIds.premium,
+    FIXTURE_IDS.optionIds.standard,
+  ]);
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    widened,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  // ONE element, and it is the whole plan: no addColumn, no
+  // addNotValidConstraint under the same name, no debt. The count is asserted
+  // first so a planner that emits nothing dies on this message rather than on
+  // the expected object below reading an element that is not there.
+  assert.equal(
+    transition.elements.length,
+    1,
+    'the widening plans one element and nothing else',
+  );
+  assert.deepEqual(
+    transition.elements.map(({ elementId, ...entry }) => {
+      void elementId;
+      return entry;
+    }),
+    [
+      {
+        classification: {
+          dataEffect: 'catalogOnly',
+          operationalRisk: 'boundedCatalogLock',
+          preparationValidity: 'preApprovalInert',
+          semanticEffect: 'additive',
+        },
+        coexistence: {
+          admission: 'additive',
+          newRead: 'compatible',
+          newWrite: 'compatible',
+          oldRead: 'requiresReadFallback',
+          oldWrite: 'compatible',
+        },
+        coexistenceImpact: 'requiresReadFallback',
+        declaredDependencyIds: [],
+        fieldId: FIXTURE_IDS.fieldIds.parentTier,
+        kind: 'widenEnumDomain',
+        physicalObjectName: check.physicalName,
+        schemaVersion: transition.elements[0]!.schemaVersion,
+        scope: {
+          keyColumns: ['tenant_id', 'environment_id'],
+          kind: 'tenantEnvironment',
+        },
+        storageDomain: 'managedModule',
+        storageGeneration: 'dedicatedTyped/v1',
+        subjectId: FIXTURE_IDS.entityIds.parent,
+      },
+    ],
+    'the widening plans one element and nothing else',
+  );
+  assert.deepEqual(transition.tighteningDebt, []);
+
+  // The preserved refusals. `narrowed` removes one option; `rebound` replaces
+  // one option id with another at constant count; `relabelled` changes a label
+  // and no id (equal sets are not a widening); `widenedAndRelabelled` and
+  // `widenedAndReordered` widen AND change an existing option's label or
+  // orderKey; `widenedAndSearchable` widens AND flips search mapping, so
+  // neither additive exception alone matches; `widenedAndRetype` widens AND
+  // retypes an unrelated column.
+  // `widenedAndRelabelled` and `widenedAndReordered` are the round-1 finding:
+  // a strict id superset whose EXISTING option records also moved. They come
+  // before `widenedAndSearchable` so the exactness mutation dies on them.
+  for (const variant of [
+    'narrowed',
+    'rebound',
+    'relabelled',
+    'widenedAndRelabelled',
+    'widenedAndReordered',
+    'widenedAndSearchable',
+  ] as const) {
+    const result = compileApplication(
+      moduleInput(tierModule(variant), expectedActiveReleaseFrom(previous)),
+    );
+    assert.equal(result.status, 'failed', variant);
+    if (result.status !== 'failed') return;
+    assert.deepEqual(
+      result.diagnostics.map(({ code, path, subjectId }) => ({
+        code,
+        path,
+        subjectId,
+      })),
+      [
+        {
+          code: 'COMPILER_STORAGE_RETYPE_UNSUPPORTED',
+          path: '$.fields.fieldType',
+          subjectId: FIXTURE_IDS.fieldIds.parentTier,
+        },
+      ],
+      variant,
+    );
+  }
+  const retyped = compileApplication(
+    moduleInput(
+      tierModule('widenedAndRetype'),
+      expectedActiveReleaseFrom(previous),
+    ),
+  );
+  assert.equal(retyped.status, 'failed');
+  if (retyped.status !== 'failed') return;
+  assert.deepEqual(
+    retyped.diagnostics.map(({ code, path }) => ({ code, path })),
+    [
+      {
+        code: 'COMPILER_STORAGE_RETYPE_UNSUPPORTED',
+        path: '$.fields.fieldType',
+      },
+    ],
+  );
+  assert.equal(
+    retyped.diagnostics[0]?.subjectId,
+    FIXTURE_IDS.fieldIds.parentName,
+  );
+});
+
+test('a released enum domain is widened by one atomic CHECK replacement, observed through preparation, activation and the live business table', async () => {
+  // Groups 2 and 3 of the ENUM-WIDEN charter: the nine assertions `PUR-2c`
+  // §2.4b left as the specification, each made DIRECTLY against the catalog,
+  // the receipts, the activation facts, SQLSTATE, and the real business table.
+  const emptyDefinition = emptyModuleDefinition();
+  const previousDefinition = ordinaryModuleV2();
+  const widenedDefinition = tierModule('widened');
+  const widenedPlusColumnDefinition = tierModule('widenedPlusColumn');
+
+  const source = mustCompile(moduleInput(emptyDefinition));
+  const previous = mustCompile(
+    moduleInput(previousDefinition, expectedActiveReleaseFrom(source)),
+  );
+  const widened = mustCompile(
+    moduleInput(widenedDefinition, expectedActiveReleaseFrom(previous)),
+  );
+  const widenedPlusColumn = mustCompile(
+    moduleInput(
+      widenedPlusColumnDefinition,
+      expectedActiveReleaseFrom(previous),
+    ),
+  );
+  // The tampered transition: the storage target still advertises the new
+  // option, the envelope no longer carries the element that installs it. This
+  // is `PUR-2c` §2.4's observed failure reconstructed as an artifact.
+  const tampered = withoutWidenEnumDomainElement(widenedPlusColumn);
+
+  const previousTarget = projectionPayload<StorageTargetPayloadV1>(
+    previous,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const widenedTarget = projectionPayload<StorageTargetPayloadV1>(
+    widened,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const parent = widenedTarget.entities.find(
+    (entity) => entity.entityId === FIXTURE_IDS.entityIds.parent,
+  );
+  assert.ok(parent);
+  const check = parent.checkConstraints.find(
+    (candidate) =>
+      candidate.canonicalFieldId === FIXTURE_IDS.fieldIds.parentTier,
+  );
+  assert.ok(check);
+  const previousCheck = previousTarget.entities
+    .find((entity) => entity.entityId === FIXTURE_IDS.entityIds.parent)
+    ?.checkConstraints.find(
+      (candidate) =>
+        candidate.canonicalFieldId === FIXTURE_IDS.fieldIds.parentTier,
+    );
+  assert.ok(previousCheck);
+  // Assertion 1: the candidate carries the new option and the previous does
+  // not, under ONE physical constraint name derived from the field id alone.
+  assert.equal(previousCheck.physicalName, check.physicalName);
+  assert.deepEqual(previousCheck.enumOptionIds, [
+    FIXTURE_IDS.optionIds.premium,
+    FIXTURE_IDS.optionIds.standard,
+  ]);
+  assert.deepEqual(check.enumOptionIds, [
+    ENUM_WIDEN_OPTION_ID,
+    FIXTURE_IDS.optionIds.premium,
+    FIXTURE_IDS.optionIds.standard,
+  ]);
+  const tierColumn = parent.columns.find(
+    (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentTier,
+  );
+  assert.ok(tierColumn);
+  const tableName = parent.physicalTableName;
+  const widening = projectionPayload<StorageTransitionEnvelope>(
+    widened,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  ).elements.find((element) => element.kind === 'widenEnumDomain');
+  assert.ok(widening);
+  assert.equal(widening.physicalObjectName, check.physicalName);
+
+  await withEphemeralPostgres(
+    'module-enum-domain-widening',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        const loaded = await loadMigrations(migrations);
+        const migrationResult = await runMigrations(admin, loaded);
+        assert.equal(migrationResult.verified.length, loaded.length);
+        await seedScope(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          source,
+          definitionBytes(emptyDefinition),
+          previous,
+          definitionBytes(previousDefinition),
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+
+        // Both tenants materialize the PREVIOUS release, so the live-root set
+        // is mixed the moment tenant A widens.
+        for (const [context, release] of [
+          [contexts.a, releases.a.target],
+          [contexts.b, releases.b.target],
+        ] as const) {
+          await materializer.prepare({
+            context,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            generationId: randomUUID(),
+            initiatedBy: context.principalId,
+            preparationId: randomUUID(),
+            targetReleaseId: release,
+          });
+        }
+
+        // Existing rows, in the REAL business table, under the previous
+        // release's option set.
+        const client = await pool.connect();
+        const insertTier = async (
+          context: TrustedRequestContext,
+          tier: string,
+        ): Promise<{
+          code: string | undefined;
+          constraint: string | undefined;
+          table: string | undefined;
+        } | null> =>
+          insertModuleRecord(client, context, widenedTarget, parent.entityId, {
+            [tierColumn.physicalName]: tier,
+          }).then(
+            () => null,
+            (error: unknown) => {
+              const shape = error as {
+                code?: string;
+                constraint?: string;
+                table?: string;
+              };
+              return {
+                code: shape.code,
+                constraint: shape.constraint,
+                table: shape.table,
+              };
+            },
+          );
+        try {
+          assert.equal(
+            await insertTier(contexts.a, FIXTURE_IDS.optionIds.standard),
+            null,
+          );
+          assert.equal(
+            await insertTier(contexts.a, FIXTURE_IDS.optionIds.premium),
+            null,
+          );
+
+          // Assertions 7 and 9, the repair-before-measure control: the previous
+          // release's CHECK must REJECT the option it does not declare, as
+          // SQLSTATE 23514 from THAT constraint on THAT table. If the constraint
+          // had already been widened -- or never constrained -- the acceptance
+          // measured after the transition would prove nothing. This is asserted
+          // on the captured error rather than through `assert.rejects`, so a
+          // silent success fails on the message below and not on node's own,
+          // and it is asserted BEFORE the definition is read, so a constraint
+          // that constrains nothing dies here rather than on an option count.
+          const rejection = await insertTier(contexts.a, ENUM_WIDEN_OPTION_ID);
+          assert.equal(
+            rejection?.code,
+            '23514',
+            'the previous release CHECK must reject the option it does not declare',
+          );
+          assert.equal(rejection?.constraint, check.physicalName);
+          assert.equal(rejection?.table, tableName);
+
+          // Assertion 6, before: the constraint, identified by table, name and
+          // OID, with its definition read back from the catalog.
+          const before = await readEnumDomainCheck(
+            pool,
+            tableName,
+            check.physicalName,
+          );
+          assert.ok(before);
+          assert.equal(before.validated, false);
+          assert.deepEqual(before.optionIds, previousCheck.enumOptionIds);
+
+          // `PUR-2c`'s residual, measured. Candidate verification's enumReject
+          // witness is `enumOptionIds[0]` of the OPERATION CATALOG, which lists
+          // options in declaration order -- not the storage contract's sorted
+          // list `PUR-2c` read. This candidate declares the new option FIRST,
+          // so the witness IS the new option, and verification run against the
+          // stale CHECK -- before any transition is prepared -- does not admit
+          // the candidate. Verification is not the gap; the missing element
+          // was.
+          await setActiveReleasePointer(pool, releases.a.target);
+          const next = await persistNextRelease(
+            runtimePool,
+            contexts.a,
+            releases.a.target,
+            widened,
+            definitionBytes(widenedDefinition),
+          );
+          const verificationAgainstStaleCheck =
+            await new PostgresReleaseVerificationService(runtimePool)
+              .executeSemanticCandidateAndPersist(contexts.a, {
+                compiledRelease: widened,
+                evidenceId: next.targetEvidence,
+                releaseId: next.target,
+              })
+              .then(
+                () => null,
+                (error: unknown) => error,
+              );
+          assert.ok(
+            verificationAgainstStaleCheck instanceof Error,
+            'candidate verification must not admit the widened release against the stale CHECK',
+          );
+          assert.match(
+            verificationAgainstStaleCheck.message,
+            /VERIFICATION_OPERATION_FAILED|did not succeed|23514/u,
+          );
+          console.log(
+            `enum-widen: verification against the stale CHECK refused with ${
+              (verificationAgainstStaleCheck as { code?: string }).code ??
+              verificationAgainstStaleCheck.name
+            }: ${verificationAgainstStaleCheck.message}`,
+          );
+          // Verification's probe rows are archived, not removed, so the table
+          // still carries rows -- and the CHECK is unchanged.
+          assert.equal(
+            (await readEnumDomainCheck(pool, tableName, check.physicalName))
+              ?.oid,
+            before.oid,
+          );
+
+          // The tampered-transition control, on tenant B, BEFORE the physical
+          // constraint has moved: the target advertises three options, the
+          // envelope installs none of them, and the addColumn it still carries
+          // is what gets preparation as far as catalog verification. Expected
+          // is the merged superset; actual is the untouched two-option CHECK.
+          await setActiveReleasePointerFor(pool, tenantB, releases.b.target);
+          const tamperedB = await persistNextRelease(
+            runtimePool,
+            contexts.b,
+            releases.b.target,
+            tampered,
+            definitionBytes(widenedPlusColumnDefinition),
+          );
+          await assert.rejects(
+            materializer.prepare({
+              context: contexts.b,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              generationId: randomUUID(),
+              initiatedBy: principalB,
+              preparationId: randomUUID(),
+              targetReleaseId: tamperedB.target,
+            }),
+            (error: unknown) =>
+              error instanceof ModuleStorageMaterializationError &&
+              error.code === 'CATALOG_DRIFT' &&
+              new RegExp(
+                `altered managed constraint ${tableName}\\.${check.physicalName}`,
+                'u',
+              ).test(error.message),
+          );
+          assert.equal(
+            (await readEnumDomainCheck(pool, tableName, check.physicalName))
+              ?.oid,
+            before.oid,
+          );
+
+          // Recovery: a preparation that fails AFTER the widening DDL has run
+          // rolls the DDL back with it. A stray index makes catalog
+          // verification refuse the prepared catalog; the constraint must come
+          // back with its ORIGINAL OID, and the retry must then succeed.
+          await pool.query(
+            `CREATE INDEX enum_widen_recovery_probe
+               ON north_star_module.${quoteTestIdentifier(tableName)} (${quoteTestIdentifier(tierColumn.physicalName)})`,
+          );
+          await assert.rejects(
+            materializer.prepare({
+              context: contexts.a,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              generationId: randomUUID(),
+              initiatedBy: principalA,
+              preparationId: randomUUID(),
+              targetReleaseId: next.target,
+            }),
+            (error: unknown) =>
+              error instanceof ModuleStorageMaterializationError &&
+              error.code === 'CATALOG_DRIFT',
+          );
+          const afterRollback = await readEnumDomainCheck(
+            pool,
+            tableName,
+            check.physicalName,
+          );
+          assert.equal(afterRollback?.oid, before.oid);
+          assert.deepEqual(
+            afterRollback?.optionIds,
+            previousCheck.enumOptionIds,
+          );
+          assert.equal(
+            (await insertTier(contexts.a, ENUM_WIDEN_OPTION_ID))?.code,
+            '23514',
+          );
+          await pool.query(
+            'DROP INDEX north_star_module.enum_widen_recovery_probe',
+          );
+
+          // THE TRANSITION. Tenant A prepares the widened release while tenant
+          // B is still accounted on the previous root -- and while a business
+          // writer holds an open transaction on the table. This is the lock
+          // measured through the COMPOSED prepare path rather than on a raw
+          // statement (round-1 finding): the materializer is observed in
+          // pg_stat_activity waiting on the relation lock behind that writer,
+          // the prepare does not resolve until the writer commits, and the
+          // widening lands afterwards.
+          const generationId = randomUUID();
+          const preparationId = randomUUID();
+          const writerAhead = await pool.connect();
+          let preparedState: 'pending' | 'resolved' = 'pending';
+          let prepared: Awaited<
+            ReturnType<PostgresModuleStorageMaterializer['prepare']>
+          >;
+          try {
+            await writerAhead.query('BEGIN');
+            await insertModuleRecord(
+              writerAhead,
+              contexts.a,
+              widenedTarget,
+              parent.entityId,
+              { [tierColumn.physicalName]: FIXTURE_IDS.optionIds.premium },
+            );
+            const preparing = materializer
+              .prepare({
+                context: contexts.a,
+                expiresAt: new Date(Date.now() + 60_000).toISOString(),
+                generationId,
+                initiatedBy: principalA,
+                preparationId,
+                targetReleaseId: next.target,
+              })
+              .then((result) => {
+                preparedState = 'resolved';
+                return result;
+              });
+            const waitForMaterializerLockWait = async (): Promise<boolean> => {
+              for (let attempt = 0; attempt < 400; attempt += 1) {
+                const waiting = await pool.query<{ count: string }>(
+                  `SELECT count(*)::text AS count
+                     FROM pg_stat_activity
+                    WHERE usename = 'north_star_module_materializer'
+                      AND wait_event_type = 'Lock'
+                      AND wait_event = 'relation'`,
+                );
+                if (waiting.rows[0]?.count === '1') return true;
+                await new Promise<void>((resolve) => setTimeout(resolve, 25));
+              }
+              return false;
+            };
+            assert.equal(
+              await waitForMaterializerLockWait(),
+              true,
+              'the composed prepare must be observed waiting on the relation lock behind an open writer',
+            );
+            assert.equal(preparedState, 'pending');
+            // Lock-free: `pg_get_expr` would open the relation and queue
+            // behind the materializer's pending ACCESS EXCLUSIVE request,
+            // deadlocking this test against its own writer.
+            const oidWhileWaiting = await pool.query<{ oid: string }>(
+              `SELECT constraint_record.oid::text AS oid
+                 FROM pg_constraint AS constraint_record
+                 JOIN pg_class AS relation_record
+                   ON relation_record.oid = constraint_record.conrelid
+                WHERE relation_record.relname = $1
+                  AND constraint_record.conname = $2`,
+              [tableName, check.physicalName],
+            );
+            assert.equal(oidWhileWaiting.rows[0]?.oid, before.oid);
+            await writerAhead.query('COMMIT');
+            prepared = await preparing;
+          } finally {
+            writerAhead.release();
+          }
+          assert.equal(preparedState, 'resolved');
+          // Assertion 3: the preparation receipt is for THIS candidate and the
+          // element is APPLIED at PREPARE, before any approval exists.
+          assert.equal(prepared.targetReleaseId, next.target);
+          assert.equal(prepared.receipt.state, 'PREPARED');
+          assert.equal(prepared.dataState, 'NOT_REQUIRED');
+          assert.equal(
+            prepared.diff.elements.find(
+              (element) => element.elementId === widening.elementId,
+            )?.disposition,
+            'APPLIED',
+          );
+          const persisted = await pool.query<{
+            element_kind: string;
+            physical_object_name: string;
+          }>(
+            `SELECT element_kind, physical_object_name
+               FROM north_star_internal.module_storage_elements
+              WHERE element_id = $1`,
+            [widening.elementId],
+          );
+          // Migration 0024's CHECK is what admits this row.
+          assert.deepEqual(persisted.rows, [
+            {
+              element_kind: 'widenEnumDomain',
+              physical_object_name: check.physicalName,
+            },
+          ]);
+          const receipt = await pool.query<{
+            catalog_verified: boolean;
+            receipt_state: string;
+            target_release_id: string;
+          }>(
+            `SELECT catalog_verified, receipt_state, target_release_id
+               FROM north_star_internal.module_storage_catalog_receipts
+              WHERE generation_id = $1`,
+            [generationId],
+          );
+          assert.deepEqual(receipt.rows, [
+            {
+              catalog_verified: true,
+              receipt_state: 'PREPARED',
+              target_release_id: next.target,
+            },
+          ]);
+
+          // Assertion 6, after: same table, same name, NEW OID (the constraint
+          // was replaced, not edited), three options, still NOT VALID because
+          // no row was scanned.
+          const after = await readEnumDomainCheck(
+            pool,
+            tableName,
+            check.physicalName,
+          );
+          assert.ok(after);
+          assert.notEqual(after.oid, before.oid);
+          assert.equal(after.validated, false);
+          assert.deepEqual(after.optionIds, check.enumOptionIds);
+
+          // Assertion 8: the same statement, two values differing only in the
+          // enum value, both accepted by the REAL business table now.
+          assert.equal(
+            await insertTier(contexts.a, FIXTURE_IDS.optionIds.standard),
+            null,
+          );
+          assert.equal(
+            await insertTier(contexts.a, ENUM_WIDEN_OPTION_ID),
+            null,
+          );
+          const stored = await pool.query<{ tier: string; count: string }>(
+            `SELECT ${quoteTestIdentifier(tierColumn.physicalName)} AS tier, count(*)::text AS count
+               FROM north_star_module.${quoteTestIdentifier(tableName)}
+              WHERE tenant_id = $1 AND ${quoteTestIdentifier(tierColumn.physicalName)} IS NOT NULL
+              GROUP BY 1 ORDER BY 1`,
+            [tenantA],
+          );
+          assert.deepEqual(
+            stored.rows.map((row) => row.tier),
+            [
+              ENUM_WIDEN_OPTION_ID,
+              FIXTURE_IDS.optionIds.premium,
+              FIXTURE_IDS.optionIds.standard,
+            ],
+          );
+          // A value NO release declares is still refused -- the constraint was
+          // widened, not removed.
+          assert.equal(
+            (
+              await insertTier(
+                contexts.a,
+                `${FIXTURE_IDS.namespace}:option.undeclared`,
+              )
+            )?.code,
+            '23514',
+          );
+
+          // Approval, attempt, and activation. Assertion 4: the activation
+          // facts record a module transition, and conformance is reported from
+          // the catalog receipt that observed the widened definition.
+          const attemptId = await createV2Approval(
+            runtimePool,
+            pool,
+            contexts,
+            next,
+            widened,
+            prepared,
+            preparationId,
+          );
+          assert.deepEqual(
+            await readApprovedAttempt(
+              materializerPool,
+              contexts.a,
+              attemptId,
+              preparationId,
+            ),
+            [{ approved: true }],
+          );
+          const executed = await materializer.executeApprovedAttempt({
+            activationAttemptId: attemptId,
+            context: contexts.a,
+            coordinatorId: randomUUID(),
+            generationId,
+          });
+          assert.equal(executed.disposition, 'READY_TO_SWAP');
+          assert.equal(executed.receipt?.state, 'READY_TO_SWAP');
+          // Candidate verification AFTER the widening: the same first-declared
+          // witness, now admitted by the physical constraint.
+          await admitPreparedTarget(runtimePool, contexts.a, next);
+          const activated = await new PostgresReleaseActivationService(
+            runtimePool,
+          ).activate(contexts.system, {
+            activationAttemptId: minted(attemptId),
+          });
+          assert.equal(activated.status, 'SWAPPED_VERIFIED');
+          const facts = await pool.query<{
+            module_schema_conformance_passed: boolean;
+            verification_version: string;
+          }>(
+            `SELECT verification_version, module_schema_conformance_passed
+               FROM platform.release_activation_verification_receipts
+              WHERE activation_attempt_id = $1`,
+            [attemptId],
+          );
+          assert.deepEqual(facts.rows, [
+            {
+              module_schema_conformance_passed: true,
+              verification_version:
+                'northstar.release-activation-verification/v2',
+            },
+          ]);
+          const pointer = await pool.query<{ release_id: string }>(
+            `SELECT release_id FROM platform.active_release_pointers
+              WHERE tenant_id = $1 AND environment_id = $2`,
+            [tenantA, environmentA],
+          );
+          assert.equal(pointer.rows[0]?.release_id, next.target);
+          assert.deepEqual(
+            (await materializer.verifyLiveCatalog(contexts.a)).drift,
+            [],
+          );
+
+          // Idempotent replay, from the other side of the mixed live set:
+          // tenant B prepares the same widened release against a constraint
+          // that is ALREADY wide enough. The element is APPLIED with no DDL --
+          // the OID does not move -- and the mixed-root catalog verification
+          // tolerates B's previous root beside A's widened one.
+          const nextB = await persistNextRelease(
+            runtimePool,
+            contexts.b,
+            releases.b.target,
+            widened,
+            definitionBytes(widenedDefinition),
+          );
+          const preparedB = await materializer.prepare({
+            context: contexts.b,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            generationId: randomUUID(),
+            initiatedBy: principalB,
+            preparationId: randomUUID(),
+            targetReleaseId: nextB.target,
+          });
+          assert.equal(
+            preparedB.diff.elements.find(
+              (element) => element.elementId === widening.elementId,
+            )?.disposition,
+            'APPLIED',
+          );
+          const replayed = await readEnumDomainCheck(
+            pool,
+            tableName,
+            check.physicalName,
+          );
+          assert.equal(
+            replayed?.oid,
+            after.oid,
+            'a replay against an already-wide constraint must not reissue the DDL',
+          );
+          assert.deepEqual(replayed?.optionIds, check.enumOptionIds);
+          assert.deepEqual(
+            (await materializer.verifyLiveCatalog(contexts.b)).drift,
+            [],
+          );
+
+          // The element NEVER narrows. A forged target whose option set
+          // diverges from the live constraint -- one option swapped for another
+          // it does not carry -- is refused before any DDL runs, and the
+          // constraint keeps the OID the widening gave it. The compiler cannot
+          // emit this target; the guard is the provider's own fence against a
+          // target it did not compile.
+          const forgedB = await persistNextRelease(
+            runtimePool,
+            contexts.b,
+            releases.b.target,
+            withDivergentEnumDomain(widened),
+            definitionBytes(widenedDefinition),
+          );
+          await assert.rejects(
+            materializer.prepare({
+              context: contexts.b,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              generationId: randomUUID(),
+              initiatedBy: principalB,
+              preparationId: randomUUID(),
+              targetReleaseId: forgedB.target,
+            }),
+            (error: unknown) =>
+              error instanceof ModuleStorageMaterializationError &&
+              error.code === 'ENUM_DOMAIN_NARROWING_REJECTED',
+          );
+          assert.equal(
+            (await readEnumDomainCheck(pool, tableName, check.physicalName))
+              ?.oid,
+            after.oid,
+          );
+
+          // Round-1 finding: an ABSENT released CHECK is catalog drift, not a
+          // widening. Adding the target constraint NOT VALID would be a
+          // pre-approval tightening -- the table admitted everything while
+          // the constraint was gone -- and it would repair the drift before
+          // catalog verification measured it. The element refuses, and the
+          // constraint stays absent for the verifier to find.
+          await pool.query(
+            `ALTER TABLE north_star_module.${quoteTestIdentifier(tableName)}
+               DROP CONSTRAINT ${quoteTestIdentifier(check.physicalName)}`,
+          );
+          await assert.rejects(
+            materializer.prepare({
+              context: contexts.b,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              generationId: randomUUID(),
+              initiatedBy: principalB,
+              preparationId: randomUUID(),
+              targetReleaseId: nextB.target,
+            }),
+            (error: unknown) =>
+              error instanceof ModuleStorageMaterializationError &&
+              error.code === 'ENUM_DOMAIN_CHECK_MISSING',
+          );
+          assert.equal(
+            await readEnumDomainCheck(pool, tableName, check.physicalName),
+            null,
+          );
+          await assertCatalogDrift(
+            materializer,
+            contexts.b,
+            /missing managed constraint/u,
+          );
+        } finally {
+          client.release();
+        }
+      } finally {
+        await moduleRuntimePool.end();
+        await materializerPool.end();
+        await runtimePool.end();
+      }
+    },
+  );
+});
+
 test('a pre-existing generated fold and prefix index record their measured locking window', async () => {
   const emptyDefinition = emptyModuleDefinition();
   const source = mustCompile(moduleInput(emptyDefinition));
@@ -5348,6 +6370,293 @@ function widenableRelation(required: boolean): Record<string, unknown> {
       targetId: FIXTURE_IDS.entityIds.parent,
     },
   };
+}
+
+const ENUM_WIDEN_OPTION_ID = `${FIXTURE_IDS.namespace}:option.basic`;
+
+/**
+ * `ordinaryModuleV2` with its `master_tier` enumeration varied by exactly one
+ * property per variant. The new option is declared FIRST, deliberately: the
+ * candidate-verification witness is the first DECLARED option, so `widened`
+ * is the case where verification writes the new option itself.
+ */
+function tierModule(
+  variant:
+    | 'narrowed'
+    | 'rebound'
+    | 'relabelled'
+    | 'widened'
+    | 'widenedAndRelabelled'
+    | 'widenedAndReordered'
+    | 'widenedAndRetype'
+    | 'widenedAndSearchable'
+    | 'widenedPlusColumn',
+): Record<string, unknown> {
+  const definition = ordinaryModuleV2() as {
+    fields: Array<{
+      fieldId: string;
+      fieldType: {
+        maximumLength?: number;
+        options?: Array<{
+          label?: string;
+          optionId?: string;
+          orderKey?: number;
+        }>;
+      };
+      searchable?: boolean;
+    }>;
+  };
+  const tier = definition.fields.find(
+    (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentTier,
+  );
+  assert.ok(tier?.fieldType.options);
+  const options = tier.fieldType.options;
+  const basic = {
+    kind: 'enumOption',
+    label: 'Basic',
+    optionId: ENUM_WIDEN_OPTION_ID,
+    orderKey: 5,
+    schemaVersion: FIXTURE_LANGUAGE_VERSION,
+  };
+  switch (variant) {
+    case 'widened':
+      options.unshift(basic);
+      break;
+    case 'narrowed':
+      options.pop();
+      break;
+    case 'rebound':
+      options[1]!.optionId = `${FIXTURE_IDS.namespace}:option.vendor`;
+      break;
+    case 'relabelled':
+      options[1]!.label = 'Premium plus';
+      break;
+    case 'widenedAndRelabelled':
+      // Round-1 finding: labels live only inside the column fingerprint, so a
+      // predicate that excludes the fingerprint let this through.
+      options[1]!.label = 'Premium plus';
+      options.unshift(basic);
+      break;
+    case 'widenedAndReordered':
+      options[1]!.orderKey = 30;
+      options.unshift(basic);
+      break;
+    case 'widenedAndSearchable':
+      options.unshift(basic);
+      tier.searchable = true;
+      break;
+    case 'widenedAndRetype': {
+      options.unshift(basic);
+      const name = definition.fields.find(
+        (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentName,
+      );
+      assert.ok(name?.fieldType.maximumLength);
+      name.fieldType.maximumLength += 1;
+      break;
+    }
+    case 'widenedPlusColumn':
+      options.unshift(basic);
+      definition.fields.push({
+        classification: 'internal',
+        collation: 'binary',
+        defaultSemantics: 'nullable',
+        entity: {
+          kind: 'entityReference',
+          schemaVersion: FIXTURE_LANGUAGE_VERSION,
+          targetId: FIXTURE_IDS.entityIds.parent,
+        },
+        fieldId: `${FIXTURE_IDS.namespace}:field.master_memo`,
+        fieldType: {
+          kind: 'textFieldType',
+          maximumLength: 120,
+          schemaVersion: FIXTURE_LANGUAGE_VERSION,
+        },
+        kind: 'fieldDefinition',
+        label: 'Memo',
+        orderKey: 35,
+        presence: 'optional',
+        reportable: true,
+        schemaVersion: FIXTURE_LANGUAGE_VERSION,
+        searchable: false,
+      } as never);
+      break;
+  }
+  return definition;
+}
+
+/** The compiled release with its `widenEnumDomain` element removed and every
+ *  root recomputed, so the artifact verifies while the plan installs nothing. */
+function withoutWidenEnumDomainElement(
+  compiled: CompileSuccess,
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  const before = transition.elements.length;
+  transition.elements = transition.elements.filter(
+    (element) => element.kind !== 'widenEnumDomain',
+  );
+  assert.equal(transition.elements.length, before - 1);
+  assert.ok(transition.elements.length > 0);
+  rewriteProjectionPayload(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+    transition,
+  );
+  rebuildReleaseRoot(clone);
+  return clone;
+}
+
+/** The compiled release with ONE option of the widened set swapped for an
+ *  option no release declares, in both the CHECK and the column contract, with
+ *  every root recomputed -- a target the compiler cannot emit. */
+function withDivergentEnumDomain(compiled: CompileSuccess): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const parent = storage.entities.find(
+    (entity) => entity.entityId === FIXTURE_IDS.entityIds.parent,
+  );
+  assert.ok(parent);
+  const check = parent.checkConstraints.find(
+    (candidate) =>
+      candidate.canonicalFieldId === FIXTURE_IDS.fieldIds.parentTier,
+  );
+  const column = parent.columns.find(
+    (candidate) =>
+      candidate.canonicalFieldId === FIXTURE_IDS.fieldIds.parentTier,
+  );
+  assert.ok(check);
+  assert.ok(column);
+  const divergent = check.enumOptionIds
+    .map((optionId) =>
+      optionId === FIXTURE_IDS.optionIds.standard
+        ? `${FIXTURE_IDS.namespace}:option.vendor`
+        : optionId,
+    )
+    .toSorted();
+  check.enumOptionIds = divergent;
+  column.fieldContract.enumOptionIds = divergent;
+  rewriteProjectionPayload(clone, PROJECTION_FAMILY_IDS.storageTarget, storage);
+  const storageReference = clone.bundle.releaseManifest.projections.find(
+    (reference) => reference.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.ok(storageReference);
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  transition.toStorageTargetArtifactRoot = storageReference.artifactRoot;
+  transition.toStorageTargetSemanticDigest = storageReference.semanticDigest;
+  rewriteProjectionPayload(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+    transition,
+  );
+  rebuildReleaseRoot(clone);
+  return clone;
+}
+
+async function readEnumDomainCheck(
+  pool: pg.Pool,
+  tableName: string,
+  constraintName: string,
+): Promise<{ oid: string; optionIds: string[]; validated: boolean } | null> {
+  const result = await pool.query<{
+    definition: string;
+    oid: string;
+    validated: boolean;
+  }>(
+    `SELECT constraint_record.oid::text AS oid,
+            pg_get_expr(constraint_record.conbin, constraint_record.conrelid, true) AS definition,
+            constraint_record.convalidated AS validated
+       FROM pg_constraint AS constraint_record
+       JOIN pg_class AS relation_record ON relation_record.oid = constraint_record.conrelid
+       JOIN pg_namespace AS namespace_record ON namespace_record.oid = relation_record.relnamespace
+      WHERE namespace_record.nspname = 'north_star_module'
+        AND relation_record.relname = $1
+        AND constraint_record.conname = $2`,
+    [tableName, constraintName],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    oid: row.oid,
+    optionIds: [...row.definition.matchAll(/'((?:[^']|'')*)'::text/gu)].map(
+      (match) => match[1]!.replaceAll("''", "'"),
+    ),
+    validated: row.validated,
+  };
+}
+
+/** A direct INSERT into a managed business table, every required column
+ *  supplied, with the named columns overridden. Returns the record id. */
+async function insertModuleRecord(
+  client: pg.PoolClient,
+  context: TrustedRequestContext,
+  target: StorageTargetPayloadV1,
+  entityId: string,
+  overrides: Readonly<Record<string, string>>,
+): Promise<string> {
+  const entity = target.entities.find(
+    (candidate) => candidate.entityId === entityId,
+  );
+  assert.ok(entity);
+  await client.query(
+    `SELECT set_config('north_star.tenant_id', $1, true),
+            set_config('north_star.environment_id', $2, true)`,
+    [context.tenantId, context.environmentId],
+  );
+  const recordId = randomUUID();
+  const columns = ['tenant_id', 'environment_id', entity.recordIdentity.column];
+  const values: unknown[] = [context.tenantId, context.environmentId, recordId];
+  for (const column of entity.columns) {
+    const override = overrides[column.physicalName];
+    if (
+      override === undefined &&
+      (column.nullable || column.defaultSemantics !== 'none')
+    ) {
+      continue;
+    }
+    columns.push(column.physicalName);
+    values.push(
+      override ??
+        (column.postgresqlType === 'uuid'
+          ? randomUUID()
+          : column.postgresqlType === 'boolean'
+            ? false
+            : /^(?:bigint|numeric)/.test(column.postgresqlType)
+              ? '1'
+              : `record-${recordId.slice(0, 8)}`),
+    );
+  }
+  for (const relation of target.relations) {
+    if (
+      relation.sourceEntityId !== entityId ||
+      relation.relationColumn.nullable ||
+      relation.relationColumn.origin === 'field'
+    ) {
+      continue;
+    }
+    const override = overrides[relation.relationColumn.physicalName];
+    assert.ok(
+      override !== undefined,
+      `relation ${relation.relationId} needs a target`,
+    );
+    columns.push(relation.relationColumn.physicalName);
+    values.push(override);
+  }
+  await client.query(
+    `INSERT INTO north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
+         (${columns.map(quoteTestIdentifier).join(', ')})
+       VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+    values,
+  );
+  return recordId;
 }
 
 async function insertUniqueKeyRecord(
