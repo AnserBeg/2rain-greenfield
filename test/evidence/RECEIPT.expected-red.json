@@ -302,8 +302,8 @@
       "name": "receipt-scoped-rebuild-retires-other-entity",
       "claim": "An entity-A-only received rebuild neither retires nor captures a same-id entity-B projection row.",
       "file": "packages/postgres-provider/src/received-quantity-projection.ts",
-      "original": "WHERE tenant_id=$1 AND environment_id=$2 AND ($3::uuid[] IS NULL OR ${q(e.legalEntity!.column)}=ANY($3)) AND archived_at IS NULL`,",
-      "replacement": "WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL`,",
+      "original": "WHERE tenant_id=$1 AND environment_id=$2 AND ($3::uuid[] IS NULL OR ${q(e.legalEntity!.column)}=ANY($3)) AND archived_at IS NULL`,\n    [scope.tenantId, scope.environmentId, scope.legalEntityIds ?? null],",
+      "replacement": "WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL`,\n    [scope.tenantId, scope.environmentId],",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],
         "namePattern": "RECEIPT posts"
