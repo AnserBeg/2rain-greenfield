@@ -108,6 +108,96 @@
           "expected": "Missing expected rejection"
         }
       ]
+    },
+    {
+      "name": "receipt-authored-projection-fence-absent",
+      "claim": "ADR-0065 claim 6: every authored operation tier is refused against received quantity.",
+      "file": "packages/compiler/src/conformance.ts",
+      "original": "if (providerWrittenReadModelRule && authoredEntityOperations.length > 0) {",
+      "replacement": "if (providerWrittenReadModelRule && authoredEntityOperations.length > 0 && !entity.entityId.endsWith(':entity.purchase_order_received')) {",
+      "test": {
+        "files": ["test/unit/purchasing-definition.test.ts"],
+        "namePattern": "RECEIPT received projection refuses"
+      },
+      "kills": [
+        {
+          "file": "test/unit/purchasing-definition.test.ts",
+          "name": "RECEIPT received projection refuses authored o0, o1 and transition write paths",
+          "expected": "provider-written quantity refuses every authored write tier"
+        }
+      ]
+    },
+    {
+      "name": "receipt-rebuild-identity-drift",
+      "claim": "ADR-0065 claim 7: rebuilding keeps the original deterministic identity.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "        row.recordId,\n        row.orderLineId,",
+      "replacement": "        '99999999-9999-4999-8999-999999999999',\n        row.orderLineId,",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "rebuild preserves the original deterministic received identity"
+        }
+      ]
+    },
+    {
+      "name": "receipt-reconciliation-hides-corruption",
+      "claim": "ADR-0065 claim 8: comparison reports corruption and the sweep leaves stored bytes unchanged.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "return { expected, discrepancies, repaired: 0 as const };",
+      "replacement": "return { expected, discrepancies: [], repaired: 0 as const };",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "received corruption produces one observed discrepancy"
+        }
+      ]
+    },
+    {
+      "name": "receipt-amendment-rewrites-progress",
+      "claim": "ADR-0065 claim 9: amendment leaves received-row bytes and revision unchanged.",
+      "file": "packages/postgres-provider/src/purchasing-order-lifecycle.ts",
+      "original": "  const ordered = receiptQuantity(quantity);",
+      "replacement": "  const ordered = receiptQuantity(quantity);\n  await client.query('SET LOCAL ROLE north_star_receipt_projection_writer');\n  await client.query(`UPDATE ${receiptTable(binding.received)} SET revision=revision+1 WHERE tenant_id=$1 AND environment_id=$2 AND ${q(receiptRelation(binding, binding.received, 'purchase_order_received_order_line'))}=$3`, [context.tenantId, context.environmentId, orderLineId]);\n  await client.query('SET LOCAL ROLE north_star_module_runtime');",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "amendment leaves received row bytes and revision unchanged"
+        }
+      ]
+    },
+    {
+      "name": "receipt-rebuild-depends-on-active-projection",
+      "claim": "ADR-0065 claim 10: attribution and quantities are recovered even when every projection row is retired.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "  const expected = await receivedFacts(client, binding, scope);",
+      "replacement": "  const hasProjection = await client.query(`SELECT 1 FROM ${receiptTable(binding.received)} WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL LIMIT 1`, [scope.tenantId, scope.environmentId]);\n  const expected = hasProjection.rows.length ? await receivedFacts(client, binding, scope) : [];",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "rebuild from empty active projection preserves identities and quantities"
+        }
+      ]
     }
   ]
 }

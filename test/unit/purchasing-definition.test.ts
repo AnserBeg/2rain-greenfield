@@ -1180,11 +1180,8 @@ test('commercial order intent stays separate from received facts; no sales or ha
     ],
   );
 
-  // No received quantity, anywhere. Plan section 7.12: it ships no receipts, so a
-  // stored column could only ever hold zero, and choosing to store it would
-  // pre-commit PS-0's over-receipt race to compare-and-swap when PUR-2 may need
-  // lock-and-sum on a derived sum. The absence IS the decision being left open,
-  // so it is asserted.
+  // ADR-0065: received quantity is a separate provider-written projection,
+  // never an independently writable counter on the authored order line.
   assert.equal(
     definition.fields.some(
       (field) =>

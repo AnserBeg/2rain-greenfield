@@ -3348,7 +3348,11 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       (client) =>
         reconcileReceivedQuantities(client, binding, database.context),
     );
-    assert.equal(comparison.discrepancies.length, 1);
+    assert.equal(
+      comparison.discrepancies.length,
+      1,
+      'received corruption produces one observed discrepancy',
+    );
     assert.equal(comparison.repaired, 0);
     const reconciler = new PostgresInventoryReconciliationService(
       database.runtimePool,
@@ -3405,6 +3409,15 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
         Number(await received()),
         7,
         'rebuild reproduces received from persisted movement attribution',
+      );
+      assert.deepEqual(
+        (
+          await database.adminPool.query(
+            `SELECT record_id FROM ${receiptTable(binding.received)} WHERE archived_at IS NULL ORDER BY record_id`,
+          )
+        ).rows,
+        progressBeforeAmendment.map((row) => ({ record_id: row.record_id })),
+        'rebuild preserves the original deterministic received identity',
       );
       assert.deepEqual(
         (
