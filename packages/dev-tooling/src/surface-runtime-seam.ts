@@ -613,6 +613,9 @@ function scanForBypass(
   const allowedMarkup = new Set<string>([
     paths.componentRegistry,
     paths.surfaceRuntime,
+    // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
+    // only by the closed registry; it is not an alternate surface authority.
+    'apps/web/src/receiving-section.ts',
   ]);
   const allowedSurfaceConsumers = new Set<string>([
     paths.componentRegistry,

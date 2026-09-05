@@ -126,6 +126,32 @@ test('plain framework and alternate authority declarations fail', () => {
   }
 });
 
+test('named type imports do not masquerade as authority declarations', () => {
+  const root = createArchitectureFixture({
+    'package.json': packageManifest('fixture'),
+    'packages/runtime/package.json': packageManifest('@north-star/runtime'),
+    'packages/runtime/src/authority.ts': 'export class SemanticQueryGateway {}',
+    'apps/web/package.json': packageManifest('@north-star/web'),
+    'apps/web/src/consumer.ts': [
+      "import { type SemanticQueryGateway } from '../../../packages/runtime/src/authority.js';",
+      'export function useGateway(gateway: SemanticQueryGateway): void { void gateway; }',
+    ].join('\n'),
+  });
+
+  try {
+    assert.equal(
+      checkArchitecture(root).violations.some((violation) =>
+        violation.message.includes(
+          'duplicate canonical authority declaration SemanticQueryGateway',
+        ),
+      ),
+      false,
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('plain gateway, inventory, and hard-delete violations fail', () => {
   const root = createArchitectureFixture({
     'package.json': packageManifest('fixture'),

@@ -260,8 +260,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const grouped = groupedManifest.navigation;
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
-  // 34 + PUR-1's six Purchasing surfaces.
-  assert.equal(groupedManifest.surfaces.length, 40);
+  // 34 + RECEIPT's expanded seventeen Purchasing surfaces.
+  assert.equal(groupedManifest.surfaces.length, 51);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -277,8 +277,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
   assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 3);
-  // 13 + Purchasing's two lists.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 15);
+  // 13 + Purchasing's six lists.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 19);
   // FIVE groups, which is exactly `MAX_PRIMARY_NAVIGATION_ENTRIES`, so
   // Purchasing renders as a peer of Inventory rather than as the first occupant
   // of an overflow `More`. A sixth module group is the one that collapses the
@@ -709,7 +709,14 @@ interface MutableCompiledSurface {
 function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObservation[] {
   return productModuleDefinitions.map(({ create, sourceDirectory }) => {
     const definition = create();
-    const normalized = normalizeApplicationPackage(definition);
+    // Purchasing now declares RECEIPT's accepted inventory boundary and cannot
+    // compile as a false standalone module. Compile it in the real composed
+    // dependency context, then select exactly its authored surface locals.
+    const normalized = normalizeApplicationPackage(
+      sourceDirectory === 'purchasing'
+        ? composedApplicationDefinition()
+        : definition,
+    );
     const compiled = compileApplication({
       dependencies: [],
       expectedActiveRelease: null,
@@ -728,17 +735,46 @@ function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObserv
       },
     });
     assert.equal(compiled.status, 'compiled');
-    const identity = definitionIdentity(normalized);
+    const identity = definitionIdentity(definition);
     const manifest = compiledSurfaceManifest(compiled);
+    const surfaces =
+      sourceDirectory === 'purchasing'
+        ? purchasingSurfaces(definition, manifest.surfaces)
+        : manifest.surfaces;
     return {
       ...identity,
       result: checkSurfaceGrammarConformance(
-        manifest.surfaces,
-        manifest.navigation,
+        surfaces,
+        sourceDirectory === 'purchasing' ? null : manifest.navigation,
       ),
       sourceDirectory,
     };
   });
+}
+
+function purchasingSurfaces(
+  definition: unknown,
+  surfaces: readonly ConformanceSurface[],
+): readonly ConformanceSurface[] {
+  assert.ok(definition && typeof definition === 'object');
+  const authored = (definition as { surfaces?: { surfaceId?: unknown }[] })
+    .surfaces;
+  assert.ok(Array.isArray(authored));
+  const locals = new Set(
+    authored.map(({ surfaceId }) => {
+      if (typeof surfaceId !== 'string') {
+        throw new TypeError('Purchasing surface identity must be a string');
+      }
+      return surfaceId.slice(surfaceId.indexOf(':surface.') + 9);
+    }),
+  );
+  const selected = surfaces.filter((surface) =>
+    locals.has(
+      surface.surfaceId.slice(surface.surfaceId.indexOf(':surface.') + 9),
+    ),
+  );
+  assert.equal(selected.length, locals.size);
+  return selected;
 }
 
 interface ConformanceSurfaceManifest {

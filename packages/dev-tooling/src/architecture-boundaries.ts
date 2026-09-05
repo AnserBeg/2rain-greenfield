@@ -575,7 +575,9 @@ function collectPlainAuthorityDeclarations(
 ): void {
   for (const [name, ruleId] of canonicalAuthorities) {
     const pattern = new RegExp(
-      `\\b(?:class|const|interface|let|type|var)\\s+${name}\\b`,
+      `\\b(?:class|interface)\\s+${name}\\b|` +
+        `\\btype\\s+${name}\\s*(?:<[^;=]*>)?\\s*=|` +
+        `\\b(?:const|let|var)\\s+${name}\\s*(?::|=)`,
       'g',
     );
     for (const match of source.matchAll(pattern)) {

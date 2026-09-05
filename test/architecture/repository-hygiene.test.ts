@@ -144,6 +144,7 @@ const suiteDefinitions = [
       'test/postgres/predicate-parity-corpus.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
       'test/postgres/query-filter-lowering.test.ts',
+      'test/postgres/receiving-authorization.test.ts',
       'test/postgres/release-activation.test.ts',
       'test/postgres/release-approval.test.ts',
       'test/postgres/releases.test.ts',
