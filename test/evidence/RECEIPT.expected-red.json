@@ -222,7 +222,7 @@
         {
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
-          "expected": "rebuild preserves the original deterministic received identity"
+          "expected": "Rebuilt received projection failed independent verification"
         }
       ]
     },
@@ -266,8 +266,8 @@
       "name": "receipt-rebuild-depends-on-active-projection",
       "claim": "ADR-0065 claim 10: attribution and quantities are recovered even when every projection row is retired.",
       "file": "packages/postgres-provider/src/received-quantity-projection.ts",
-      "original": "  const expected = await receivedFacts(client, binding, scope);",
-      "replacement": "  const hasProjection = await client.query(`SELECT 1 FROM ${receiptTable(binding.received)} WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL LIMIT 1`, [scope.tenantId, scope.environmentId]);\n  const expected = hasProjection.rows.length ? await receivedFacts(client, binding, scope) : [];",
+      "original": "  const reconstruction = await reconstructedReceivedFacts(\n    client,\n    binding,\n    scope,\n  );",
+      "replacement": "  const hasProjection = await client.query(`SELECT 1 FROM ${receiptTable(binding.received)} WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL LIMIT 1`, [scope.tenantId, scope.environmentId]);\n  const reconstruction = hasProjection.rows.length ? await reconstructedReceivedFacts(client, binding, scope) : [];",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],
         "namePattern": "RECEIPT posts"
@@ -276,7 +276,43 @@
         {
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
-          "expected": "rebuild from empty active projection preserves identities and quantities"
+          "expected": "Rebuilt received projection failed independent verification"
+        }
+      ]
+    },
+    {
+      "name": "receipt-reconciliation-scope-key-collapsed",
+      "claim": "Received reconciliation preserves tenant, environment, legal entity and record identity when equal record ids exist in different entities.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "  return JSON.stringify([tenantId, environmentId, legalEntityId, recordId]);",
+      "replacement": "  return recordId;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT comparison preserves"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT comparison preserves same record ids across legal-entity scope in either read order",
+          "expected": "Stored received projection contains duplicate scoped identity"
+        }
+      ]
+    },
+    {
+      "name": "receipt-scoped-rebuild-retires-other-entity",
+      "claim": "An entity-A-only received rebuild neither retires nor captures a same-id entity-B projection row.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "WHERE tenant_id=$1 AND environment_id=$2 AND ($3::uuid[] IS NULL OR ${q(e.legalEntity!.column)}=ANY($3)) AND archived_at IS NULL`,",
+      "replacement": "WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL`,",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "an entity-A-only rebuild leaves the same-id entity-B row byte-for-byte unchanged"
         }
       ]
     }

@@ -118,6 +118,27 @@ test('an induced out-of-vocabulary registry entry fails with SURF002', () => {
   }
 });
 
+test('application-domain selection in generic SurfaceRuntime fails with SURF001', () => {
+  const files = seamFixture();
+  const runtimePath = 'apps/web/src/surface-runtime.ts';
+  files[runtimePath] +=
+    "\nconst domainBranch = ':surface.goods_receipt_detail';\n";
+  const root = createArchitectureFixture(files);
+
+  try {
+    assert.ok(
+      checkSurfaceRuntimeSeam(root).violations.some(
+        (violation) =>
+          violation.file === runtimePath &&
+          violation.ruleId === 'SURF001_RUNTIME_BYPASS' &&
+          violation.message.includes('application-domain'),
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 function seamFixture(): Record<string, string> {
   return Object.fromEntries(
     seamPaths.map((path) => [path, readFileSync(path, 'utf8')]),

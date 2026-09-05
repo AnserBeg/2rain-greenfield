@@ -26,10 +26,6 @@ import {
   type SurfaceRelationPickerState,
 } from './component-registry.js';
 import { DESIGN_TOKENS } from './design-tokens.js';
-import {
-  loadReceivingSection,
-  receivingNavigation,
-} from './receiving-section.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
   operationMessageRef,
@@ -61,9 +57,30 @@ export interface SurfaceRuntimeResponse {
 }
 
 export interface SurfaceRuntimeGateways {
+  readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
   readonly operationMediation: SemanticOperationMediationAuthority;
   readonly operationGateway: SemanticOperationGateway;
   readonly queryGateway: SemanticQueryGateway;
+}
+
+type ReadySurfaceData = Extract<SurfaceDataRenderState, { status: 'READY' }>;
+
+export interface SurfaceRuntimeApplicationExtension {
+  augmentRecordData(context: {
+    readonly binding: CompiledSurfaceDataBinding;
+    readonly data: ReadySurfaceData;
+    readonly legalEntitySelection: readonly string[];
+    readonly queryGateway: SemanticQueryGateway;
+    readonly surface: CompiledSurfaceDefinition;
+    readonly surfaces: readonly CompiledSurfaceDefinition[];
+    readonly view: RuntimeViewContract.RequestRuntimeView;
+  }): Promise<ReadySurfaceData>;
+  refreshAfterOperation(context: {
+    readonly binding: CompiledSurfaceDataBinding;
+    readonly intent: SurfaceOperationIntent;
+    readonly surface: CompiledSurfaceDefinition;
+    readonly surfaces: readonly CompiledSurfaceDefinition[];
+  }): boolean;
 }
 
 export type SurfaceRuntimeSubmission = Readonly<Record<string, string>>;
@@ -226,37 +243,17 @@ export async function renderSurfaceRuntimeWithData(
       if (
         data.status === 'READY' &&
         selection.selected.surfaceRole === 'record' &&
-        selection.surfaces.some((surface) =>
-          surface.surfaceId.endsWith(':surface.goods_receipt_detail'),
-        ) &&
-        legalEntitySelection.length === 1
+        gateways.applicationExtension
       ) {
-        const navigation = receivingNavigation(
+        data = await gateways.applicationExtension.augmentRecordData({
+          binding,
+          data,
+          legalEntitySelection,
+          queryGateway: gateways.queryGateway,
+          surface: selection.selected,
+          surfaces: selection.surfaces,
           view,
-          binding.query.sourceEntityId,
-          legalEntitySelection[0]!,
-        );
-        if (navigation) data = { ...data, receivingNavigation: navigation };
-      }
-      if (
-        data.status === 'READY' &&
-        selection.selected.surfaceRole === 'record' &&
-        selection.surfaces.some((surface) =>
-          surface.surfaceId.endsWith(':surface.goods_receipt_detail'),
-        ) &&
-        binding.query.sourceEntityId.endsWith(':entity.purchase_order') &&
-        data.records[0] &&
-        legalEntitySelection.length === 1
-      ) {
-        data = {
-          ...data,
-          receiving: await loadReceivingSection(
-            view,
-            gateways.queryGateway,
-            data.records[0],
-            legalEntitySelection[0]!,
-          ),
-        };
+        });
       }
     }
   } catch (error) {
@@ -410,18 +407,16 @@ export async function submitSurfaceRuntimeIntent(
   }
 
   if (
-    intent === 'command' &&
-    selection.selected.surfaceRole === 'record' &&
-    ['purchase_order', 'purchase_order_line', 'goods_receipt'].some((entity) =>
-      binding.query.sourceEntityId.endsWith(`:entity.${entity}`),
-    ) &&
-    selection.surfaces.some((surface) =>
-      surface.surfaceId.endsWith(':surface.goods_receipt_detail'),
-    )
+    gateways.applicationExtension?.refreshAfterOperation({
+      binding,
+      intent,
+      surface: selection.selected,
+      surfaces: selection.surfaces,
+    }) === true
   )
-    // Receiving commands refresh server-derived progress and navigation.
-    // Ordinary lifecycle results retain their authoritative read-back below:
-    // an archive must not immediately query its now-inactive record as active.
+    // An explicitly composed application contribution may request an
+    // authoritative refresh. Ordinary lifecycle results retain their read-back
+    // below: an archive must not query its now-inactive record as active.
     return renderSurfaceRuntimeWithData(view, requestUrl, gateways, {
       intent,
       label: operation.label,

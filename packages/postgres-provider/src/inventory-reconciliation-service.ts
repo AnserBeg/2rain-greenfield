@@ -517,17 +517,26 @@ export class PostgresInventoryReconciliationService {
             { ...context, legalEntityIds },
           );
           const divergent = new Set(
-            comparison.discrepancies.map((row) => row.recordId),
+            comparison.discrepancies.map((row) =>
+              JSON.stringify(row.subjectIdentity),
+            ),
           );
           for (const row of comparison.expected) {
-            arm.examined(row.recordId, 'balance');
+            const subjectId = JSON.stringify([
+              context.tenantId,
+              context.environmentId,
+              row.legalEntityId,
+              row.recordId,
+            ]);
+            arm.examined(subjectId, 'balance');
             // receivedFacts checked the persisted receipt/order attribution.
-            arm.examined(row.recordId, 'integrity');
-            if (!divergent.has(row.recordId)) arm.consistent(row.recordId);
+            arm.examined(subjectId, 'integrity');
+            if (!divergent.has(subjectId)) arm.consistent(subjectId);
           }
           for (const row of comparison.discrepancies) {
-            arm.examined(row.recordId, 'balance');
-            arm.discrepant(row.recordId, {
+            const subjectId = JSON.stringify(row.subjectIdentity);
+            arm.examined(subjectId, 'balance');
+            arm.discrepant(subjectId, {
               axis: 'balance',
               code: 'RECEIVED_QUANTITY_LEDGER_DIVERGED',
               severity: 'discrepant',

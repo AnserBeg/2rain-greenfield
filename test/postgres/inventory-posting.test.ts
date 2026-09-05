@@ -61,6 +61,7 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import {
+  aggregateGenerationLockKey,
   ModuleRuntimeInterpreterError,
   PostgresModuleRuntimeInterpreter,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
@@ -94,13 +95,20 @@ import {
   amendOrderedQuantity,
   changePurchaseOrderState,
 } from '../../packages/postgres-provider/src/purchasing-order-lifecycle.js';
-import { reconcileReceivedQuantities } from '../../packages/postgres-provider/src/received-quantity-projection.js';
+import {
+  compareReceivedQuantityRows,
+  rebuildReceivedQuantitiesOnClient,
+  reconcileReceivedQuantities,
+} from '../../packages/postgres-provider/src/received-quantity-projection.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import type { RegisteredCapabilityOperationExecutionRequest } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { PostgresInventoryReconciliationService } from '../../packages/postgres-provider/src/inventory-reconciliation-service.js';
 import { renderSurfaceRuntimeWithData } from '../../apps/web/src/surface-runtime.js';
-import { loadReceivingSection } from '../../apps/web/src/receiving-section.js';
+import {
+  loadReceivingSection,
+  RECEIVING_SURFACE_RUNTIME_EXTENSION,
+} from '../../apps/web/src/receiving-section.js';
 import {
   RECEIVING_CAPABILITY_ID,
   receiptBinding,
@@ -217,6 +225,58 @@ test('the global same-instant order reaches its movementId tie-break', () => {
     [earlierId, laterId],
     'removing the production comparator movementId branch must reverse this verdict',
   );
+});
+
+test('RECEIPT comparison preserves same record ids across legal-entity scope in either read order', () => {
+  const recordId = '99000000-0000-4000-8000-000000000001';
+  const orderLineId = '99000000-0000-4000-8000-000000000002';
+  const expected = [
+    {
+      legalEntityId: legalReject,
+      orderLineId,
+      quantity: '3',
+      recordId,
+      unitId: 'EA',
+    },
+  ];
+  const stored = [
+    {
+      environmentId,
+      legalEntityId: legalReject,
+      orderLineId,
+      quantity: '3',
+      raw: { legal_entity_id: legalReject, marker: 'A' },
+      recordId,
+      tenantId,
+      unitId: 'EA',
+    },
+    {
+      environmentId,
+      legalEntityId: legalFlag,
+      orderLineId,
+      quantity: '999',
+      raw: { legal_entity_id: legalFlag, marker: 'B' },
+      recordId,
+      tenantId,
+      unitId: 'EA',
+    },
+  ];
+  for (const rows of [stored, [...stored].reverse()]) {
+    const discrepancies = compareReceivedQuantityRows(
+      { environmentId, tenantId },
+      expected,
+      rows,
+    );
+    assert.deepEqual(
+      discrepancies.map((entry) => [
+        entry.subjectIdentity,
+        entry.stored?.marker,
+        entry.recomputed,
+      ]),
+      [[[tenantId, environmentId, legalFlag, recordId], 'B', null]],
+      'same-id entity-B corruption remains visible in either input order',
+    );
+  }
 });
 
 test('posting error translation: a non-SQLSTATE code keeps its own error identity', () => {
@@ -2881,8 +2941,13 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
     };
     const received = async () => {
       const result = await database.adminPool.query(
-        `SELECT ${quoted(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))}::text AS quantity FROM ${receiptTable(binding.received)} WHERE record_id=$1`,
-        [receivedIdentity(database.context, legalReject, orderLineId)],
+        `SELECT ${quoted(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))}::text AS quantity FROM ${receiptTable(binding.received)} WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3 AND record_id=$4`,
+        [
+          tenantId,
+          environmentId,
+          legalReject,
+          receivedIdentity(database.context, legalReject, orderLineId),
+        ],
       );
       return result.rows[0]?.quantity as string | undefined;
     };
@@ -3234,6 +3299,7 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
         view,
         `/?${new URLSearchParams({ surface: 'northstar.app:surface.purchase_order_detail', record: orderId, 'northstar.app:parameter.purchase_order_get_legal_entity_scope': legalReject })}`,
         {
+          applicationExtension: RECEIVING_SURFACE_RUNTIME_EXTENSION,
           queryGateway,
           operationGateway: gateway,
           operationMediation: mediation,
@@ -3432,7 +3498,12 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
         (finding) =>
           finding.code === 'RECEIVED_QUANTITY_LEDGER_DIVERGED' &&
           finding.subjectId ===
-            receivedIdentity(database.context, legalReject, orderLineId),
+            JSON.stringify([
+              tenantId,
+              environmentId,
+              legalReject,
+              receivedIdentity(database.context, legalReject, orderLineId),
+            ]),
       ),
       'read-only reconciliation reports the corrupt received subject',
     );
@@ -3470,6 +3541,18 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
         Number(await received()),
         7,
         'rebuild reproduces received from persisted movement attribution',
+      );
+      assert.equal(
+        (
+          await withModuleRole(
+            database.runtimePool,
+            database.context,
+            (client) =>
+              reconcileReceivedQuantities(client, binding, database.context),
+          )
+        ).discrepancies.length,
+        0,
+        'independent verifier accepts the separately reconstructed projection',
       );
       assert.deepEqual(
         (
@@ -3526,6 +3609,186 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
         ).rows,
         immutableBefore,
         'reversal preserves every previous movement byte',
+      );
+
+      const scopedRecordId = receivedIdentity(
+        database.context,
+        legalReject,
+        orderLineId,
+      );
+      const corruptionClient = await database.adminPool.connect();
+      try {
+        await corruptionClient.query('SET session_replication_role=replica');
+        await corruptionClient.query(
+          `INSERT INTO ${receiptTable(binding.received)}
+            (tenant_id,environment_id,${quoted(binding.received.legalEntity!.column)},record_id,revision,archived_at,
+             ${quoted(receiptRelation(binding, binding.received, 'purchase_order_received_order_line'))},
+             ${quoted(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))},
+             ${quoted(receiptColumn(binding.received, 'purchase_order_received_unit_id'))})
+           VALUES ($1,$2,$3,$4,1,NULL,$5,999,'EA')`,
+          [tenantId, environmentId, legalFlag, scopedRecordId, orderLineId],
+        );
+      } finally {
+        await corruptionClient.query('SET session_replication_role=origin');
+        corruptionClient.release();
+      }
+      const entityBRow = async () =>
+        (
+          await database.adminPool.query(
+            `SELECT * FROM ${receiptTable(binding.received)} WHERE tenant_id=$1 AND environment_id=$2 AND ${quoted(binding.received.legalEntity!.column)}=$3 AND record_id=$4`,
+            [tenantId, environmentId, legalFlag, scopedRecordId],
+          )
+        ).rows[0] as Record<string, unknown>;
+      const entityBBefore = await entityBRow();
+      const broadComparison = await withModuleRole(
+        database.runtimePool,
+        database.context,
+        (client) =>
+          reconcileReceivedQuantities(client, binding, database.context),
+      );
+      assert.deepEqual(
+        broadComparison.discrepancies.map((entry) => [
+          entry.subjectIdentity,
+          entry.recomputed,
+        ]),
+        [[[tenantId, environmentId, legalFlag, scopedRecordId], null]],
+        'broad comparison preserves the unexpected entity-B scope despite the shared record id',
+      );
+      assert.equal(broadComparison.repaired, 0);
+      const scopedReport = await reconciler.reconcile(database.context, {
+        legalEntityIds: [legalReject, legalFlag],
+        scopeId: 'same-id-cross-entity-corruption',
+      });
+      assert.equal(scopedReport.transactionReadOnly, 'on');
+      assert.equal(scopedReport.repairedSubjectCount, 0);
+      assert.ok(
+        scopedReport.findings.some(
+          (finding) =>
+            finding.code === 'RECEIVED_QUANTITY_LEDGER_DIVERGED' &&
+            finding.subjectId ===
+              JSON.stringify([
+                tenantId,
+                environmentId,
+                legalFlag,
+                scopedRecordId,
+              ]),
+        ),
+        'operator reconciliation names the complete unexpected entity-B identity',
+      );
+      assert.deepEqual(
+        await entityBRow(),
+        entityBBefore,
+        'read-only scoped reconciliation leaves the malformed row unchanged',
+      );
+
+      const scopedRebuild = async (legalEntityIds: readonly string[]) => {
+        const client = await materializerPool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query(
+            `SELECT set_config('north_star.tenant_id',$1,true),
+                    set_config('north_star.environment_id',$2,true)`,
+            [tenantId, environmentId],
+          );
+          await client.query(
+            'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+            [aggregateGenerationLockKey(tenantId, environmentId)],
+          );
+          const count = await rebuildReceivedQuantitiesOnClient(
+            client,
+            database.registration.storageTarget,
+            { ...database.context, legalEntityIds },
+          );
+          await client.query('COMMIT');
+          return count;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      };
+      const scopedDiscrepancyCount = async () =>
+        Number(
+          (
+            await database.adminPool.query(
+              `SELECT count(*)::integer AS count
+                 FROM north_star_internal.inventory_projection_discrepancies
+                WHERE tenant_id=$1 AND environment_id=$2
+                  AND projection_entity_id=$3
+                  AND subject_identity=$4::jsonb`,
+              [
+                tenantId,
+                environmentId,
+                binding.received.entityId,
+                JSON.stringify([
+                  tenantId,
+                  environmentId,
+                  legalFlag,
+                  scopedRecordId,
+                ]),
+              ],
+            )
+          ).rows[0]!.count,
+        );
+      const discrepanciesBeforeScopedRebuild = await scopedDiscrepancyCount();
+      assert.equal(await scopedRebuild([legalReject]), 1);
+      assert.deepEqual(
+        await entityBRow(),
+        entityBBefore,
+        'an entity-A-only rebuild leaves the same-id entity-B row byte-for-byte unchanged',
+      );
+      assert.equal(
+        await scopedDiscrepancyCount(),
+        discrepanciesBeforeScopedRebuild,
+        'an A-only rebuild neither repairs nor captures out-of-scope B',
+      );
+
+      assert.equal(
+        await new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        ).rebuildReceivedQuantities(database.context),
+        1,
+      );
+      assert.equal(
+        await scopedDiscrepancyCount(),
+        discrepanciesBeforeScopedRebuild + 1,
+        'broad rebuild captures the fully scoped unexpected row before repair',
+      );
+      const capturedEntityB = (
+        await database.adminPool.query(
+          `SELECT subject_identity,stored_row,recomputed_row
+             FROM north_star_internal.inventory_projection_discrepancies
+            WHERE tenant_id=$1 AND environment_id=$2
+              AND projection_entity_id=$3
+              AND subject_identity=$4::jsonb
+            ORDER BY detected_at DESC,discrepancy_id DESC LIMIT 1`,
+          [
+            tenantId,
+            environmentId,
+            binding.received.entityId,
+            JSON.stringify([
+              tenantId,
+              environmentId,
+              legalFlag,
+              scopedRecordId,
+            ]),
+          ],
+        )
+      ).rows[0]!;
+      assert.deepEqual(capturedEntityB.subject_identity, [
+        tenantId,
+        environmentId,
+        legalFlag,
+        scopedRecordId,
+      ]);
+      assert.equal(capturedEntityB.stored_row.legal_entity_id, legalFlag);
+      assert.equal(capturedEntityB.recomputed_row, null);
+      assert.notEqual(
+        (await entityBRow()).archived_at,
+        null,
+        'broad rebuild retires rather than deletes the captured malformed row',
       );
     } finally {
       await materializerPool.end();

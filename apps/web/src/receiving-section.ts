@@ -10,6 +10,7 @@ import {
   SHARED_LIST_QUERY_VERSION,
 } from '../../../packages/runtime/src/list-behavior/index.js';
 import { escapeHtml } from './html.js';
+import type { SurfaceRuntimeApplicationExtension } from './app-server.js';
 
 export interface ReceivingSection {
   readonly namespace: string;
@@ -262,3 +263,61 @@ export function renderReceivingSection(section: ReceivingSection): string {
   };
   return `<section class="panel data-panel" data-receiving-progress><h2>Receiving</h2><p><a href="${link('goods_receipt_form')}">Create goods receipt</a> · <a href="${link('goods_receipt_list')}">View receipts and corrections</a></p><p>Receive against a released order. Close only when every active line has zero remaining. Reopen before receiving, correcting or amending a closed order.</p><table><thead><tr><th>Order line</th><th>Ordered</th><th>Received</th><th>Remaining</th></tr></thead><tbody>${section.lines.map((line) => `<tr data-order-line="${escapeHtml(line.recordId)}"><td><a href="${link('purchase_order_line_detail', line.recordId)}">${escapeHtml(line.item)}</a></td><td>${escapeHtml(line.ordered)}</td><td>${escapeHtml(line.received)}</td><td>${escapeHtml(line.remaining)}</td></tr>`).join('')}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<p>Corrections append compensating movements; they never edit the original receipt. If a correction would make historical stock negative, correct the erroneous outbound movement first, or use the stock-count process if the discrepancy is physical.</p></section>`;
 }
+
+/** Purchasing-specific selection, loading and refresh policy. The API
+ * composition root installs this contribution explicitly; SurfaceRuntime stays
+ * unaware of purchasing identities. */
+export const RECEIVING_SURFACE_RUNTIME_EXTENSION = Object.freeze({
+  async augmentRecordData({
+    binding,
+    data,
+    legalEntitySelection,
+    queryGateway,
+    surface,
+    surfaces,
+    view,
+  }) {
+    if (
+      surface.surfaceRole !== 'record' ||
+      legalEntitySelection.length !== 1 ||
+      !surfaces.some((candidate) =>
+        candidate.surfaceId.endsWith(':surface.goods_receipt_detail'),
+      )
+    )
+      return data;
+    const legalEntityId = legalEntitySelection[0]!;
+    const navigation = receivingNavigation(
+      view,
+      binding.query.sourceEntityId,
+      legalEntityId,
+    );
+    const order = data.records[0];
+    return {
+      ...data,
+      ...(navigation ? { receivingNavigation: navigation } : {}),
+      ...(binding.query.sourceEntityId.endsWith(':entity.purchase_order') &&
+      order
+        ? {
+            receiving: await loadReceivingSection(
+              view,
+              queryGateway,
+              order,
+              legalEntityId,
+            ),
+          }
+        : {}),
+    };
+  },
+  refreshAfterOperation({ binding, intent, surface, surfaces }) {
+    return (
+      intent === 'command' &&
+      surface.surfaceRole === 'record' &&
+      ['purchase_order', 'purchase_order_line', 'goods_receipt'].some(
+        (entity) => binding.query.sourceEntityId.endsWith(`:entity.${entity}`),
+      ) &&
+      surfaces.some((candidate) =>
+        candidate.surfaceId.endsWith(':surface.goods_receipt_detail'),
+      )
+    );
+  },
+} satisfies SurfaceRuntimeApplicationExtension);
