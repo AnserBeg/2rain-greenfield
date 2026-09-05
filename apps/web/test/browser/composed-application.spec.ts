@@ -31,7 +31,10 @@ const journeyTimeoutMilliseconds = Object.freeze({
   focusRing: 40_000,
   inventoryNavigation: 20_000,
   onHandLookup: 20_000,
-  partyLifecycle: 20_000,
+  // This multi-form lifecycle now performs real current-policy reads/writes.
+  // Like repairedFormAnatomy, it needs a bounded integration-test allowance;
+  // this is not a latency assertion, and all semantic assertions stay intact.
+  partyLifecycle: 60_000,
   postingRoute: 20_000,
   repairedFormAnatomy: 60_000,
   scopedInventory: 20_000,
@@ -153,9 +156,8 @@ composedTest.describe('composed application journeys', () => {
       await partyLifecycleJourney(page, composedApplication.currentBaseUrl());
       if (!composedApplication.restart) return;
 
-      // The UI journey retains its 20-second budget. Restart runs governed
-      // application startup (including current AUTH), so give that phase the
-      // same bounded allowance as this fixture's initial startup.
+      // Restart runs governed application startup (including current AUTH),
+      // so give it the same bounded allowance as initial fixture startup.
       composedTest.setTimeout(
         journeyTimeoutMilliseconds.partyLifecycle +
           sharedSetupTimeoutMilliseconds,
