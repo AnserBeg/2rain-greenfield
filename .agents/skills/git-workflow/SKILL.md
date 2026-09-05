@@ -35,6 +35,10 @@ description: Branches, commits, the frozen SHA, integration, pushing, worktrees
 
 ## Integration
 
+**Who:** the BUILD agent, for a vertical that owes no review arm; the
+orthestrator, after adjudicating the arm, for one that does. Either way the
+steps are the same.
+
 1. `git fetch`; if `main` moved, merge `main` into the packet branch (or rebase
    if unreviewed), push, let CI run.
 2. Integrate with **`git merge --no-ff packet/<id>` into `main`** — the packet

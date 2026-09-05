@@ -30,24 +30,48 @@ There is no production tenant. Until the first one, a storage change the planner
 refuses is resolved by re-baselining the release lineage, not by building a
 transition. The kernel's immutability mechanics stay in code and in tests.
 
-## 3. Cadence — a writer works a vertical, the user tests at checkpoints
+## 3. Unit, partition, topology — corrected 2026-09-05
 
-- **The unit of work is a vertical**: everything an office worker needs for one
-  user-visible capability (the goods receipt end to end, then the sale end to
-  end). It is chartered once, worked continuously by ONE writer lane, and
-  reviewed once at the end on its Critical paths (§4).
-- **Checkpoints, not stops.** Every slice inside the vertical ends with a
-  "Test it yourself" block the user can run in under ten minutes. The writer
-  does not wait for a ruling to continue to the next slice.
-- **Stop only on the STOP list:** (a) a one-way door — a canonical language
-  version, a ruling on money, time or identity, anything that would survive a
-  lineage reset; (b) a lease collision with the other live lane; (c) a CI red
-  the writer cannot make green honestly inside the slice; (d) a design fork
-  with product-visible consequences the plan does not settle. Everything else
-  the writer decides, notes in the record in one line, and continues.
-- **Two lanes, never more:** BUILD (the critical path) and SUPPORT (rulings,
-  reviews, docs, small correctives on paths BUILD does not hold).
-- Mechanics: `mission-cadence` skill (≤ 120 lines).
+**The unit is a vertical**: everything an office worker needs for one
+user-visible capability (the goods receipt end to end, then the sale). It is
+chartered once, worked continuously, reviewed once at the end on its Critical
+paths (§4). **A vertical is never split by review size or lease convenience.** It
+splits only at a user-observable boundary, and only by the orchestrator.
+
+**Partition by dependency, not by file.** The serialization in this codebase is
+the mount chain — `builder.ts`, the release lineage, the migration number — plus
+the posting kernel and the three record files. Two verticals that both mount a
+module or both enter the posting kernel run **one after the other**; leases
+between them are pointless. Two verticals that share none of that run in
+parallel with no lease at all. Today: RECEIPT then SALE are serial; AUTH runs
+beside either.
+
+**Topology — the human is not the message bus.**
+
+- **The BUILD agent owns the vertical end to end**: reads the charter, builds
+  every slice, pushes, and **integrates its own vertical on CI green when no
+  review arm is owed** (`git-workflow`, Integration). It writes the record and
+  the three one-line rows itself.
+- **The orchestrator is a session opened for three jobs only**: charter the next
+  vertical (≤ 60 lines); adjudicate the one Critical arm by reading the code and
+  integrate that vertical; keep the plan honest at stage boundaries. It is not a
+  relay and it does not stand between the writer and `main`.
+- **The user does two things**: tests the product at each slice's "Test it
+  yourself", and pastes exactly one Critical review prompt and its verdict when
+  a vertical touches the Critical set. Nothing else passes through the user.
+- **Reviewers and writers read the kernel note, not the records.**
+  `docs/architecture/posting-kernel-guarantees.md` states what the posting
+  kernel guarantees, at which symbol, and why, in under sixty lines. The
+  records and archives exist for the day something breaks.
+
+**Checkpoints, not stops.** Every slice ends with a "Test it yourself" block
+runnable in under ten minutes. **Stop only on the STOP list:** (a) a one-way
+door — a canonical language version, a ruling on money, time or identity,
+anything that survives a lineage reset; (b) a real dependency collision with a
+parallel vertical; (c) a CI red the writer cannot make green honestly inside
+the slice; (d) a design fork with product-visible consequences the plan does
+not settle. Everything else the writer decides, notes in one line, and
+continues. Mechanics: `mission-cadence`.
 
 ## 4. Review — one arm, on the Critical set only
 
@@ -97,13 +121,13 @@ transition. The kernel's immutability mechanics stay in code and in tests.
   `git-workflow` 150 lines; `program-review`, `ux-grammar`, `salvage-admission`
   and `capture-learnings` unchanged.
 
-## 7. The orchestrator edits
+## 7. Who edits what
 
-The orchestrator makes mechanical edits directly instead of stopping a lane:
-pin updates, manifest repoints, status lines, records, lane rows, bridges of a
-few lines into accepted artifacts, CI configuration. It still does not write
-product features — the writer does — and it still verifies before ruling by
-reading the code.
+The BUILD agent edits everything inside its vertical, including pins, manifests,
+records and rows, and small bridges into accepted artifacts that its gates
+demand — disclosed in one line, never stopped for. The orchestrator, when open,
+makes the same mechanical edits on `main` directly. Nobody stops a lane for an
+edit of a few lines.
 
 ## 8. Conduct and environment
 

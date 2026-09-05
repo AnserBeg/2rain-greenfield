@@ -24,7 +24,8 @@ ships on typecheck, tests, CI and the user's click-through, and its record says
   under these claims?* It is not asked to find any way the packet could fail, to
   grade the record, or to review evidence depth.
 - **Prompt ≤ 40 lines**: repository, branch, frozen SHA, the Critical paths, the
-  claims, the reading list, "say plainly if this prompt steers you".
+  claims, the reading list — which is `docs/architecture/posting-kernel-guarantees.md`
+  plus the diff, never the records — and "say plainly if this prompt steers you".
 
 ## What counts
 

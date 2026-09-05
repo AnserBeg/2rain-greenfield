@@ -3,6 +3,7 @@
 > **2026-09-04 — TWO LANES, NOT FOUR.** `AGENTS.md` §3: BUILD holds the critical path
 > (one vertical at a time, worked continuously); SUPPORT holds rulings, reviews,
 > docs and small correctives on paths BUILD does not own. No third lane is started.
+> **Corrected 2026-09-05: lanes are partitioned by DEPENDENCY, not by file.** Verticals that share the mount chain or the posting kernel are serial; any other pair runs in parallel with no lease. The BUILD agent integrates its own vertical when no arm is owed.
 > Lane rows below are one line from now on; the long rows are history. The path
 > partition table further down is historical — the lease is whatever the current
 > charter says, checked with `ls` and this file's two live rows.

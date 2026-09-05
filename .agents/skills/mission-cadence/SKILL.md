@@ -55,7 +55,7 @@ diff. The user tests when they choose; the writer does not wait.
 3. If the Critical set was touched: the review prompt (≤ 40 lines, per
    `review-tiers`) at the bottom of the record. Otherwise write
    `Review: not owed — outside the Critical set`.
-4. Stop and report: frozen SHA, CI run, the record, the test-it-yourself list.
+4. **No arm owed → integrate yourself** (`git-workflow`, Integration) and report: merge SHA, CI run, the record, the test-it-yourself list. **Arm owed → stop** with the same report plus the prompt; the orchestrator integrates after the arm.
 
 ## The packet record — at most 150 lines
 
@@ -76,11 +76,26 @@ record-claim block
 Ledger row, lane row and review-log row: **one line each**. No prose history in
 rows; history is `git log`.
 
-## Two lanes
+## Roles and who integrates (corrected 2026-09-05)
 
-BUILD holds the critical path. SUPPORT holds rulings, reviews, docs and small
-correctives on paths BUILD does not own. A third lane is not started. Each lane
-runs in its own worktree.
+- **BUILD agent** — owns the vertical end to end. Outside the Critical set it
+  **integrates itself**: `--no-ff` merge into `main` on CI green, one ledger
+  row, one lane row, one `no arm owed` review-log row, push. Nobody else is in
+  the loop.
+- **Orchestrator** — a session opened to charter the next vertical, to
+  adjudicate the one Critical arm and integrate that vertical, and for
+  stage-boundary reviews. Not a standing relay.
+- **User** — tests at checkpoints; pastes one Critical review prompt and its
+  verdict when owed.
+- **Parallelism is by dependency.** Two verticals sharing the mount chain or the
+  posting kernel are serial; otherwise parallel, no lease. Each vertical runs in
+  its own worktree.
+
+## Read the kernel note first
+
+`docs/architecture/posting-kernel-guarantees.md` is the writer's and reviewer's
+map of the posting kernel: guarantee, symbol, reason. Read it instead of the
+records; open a record only when the note points at it.
 
 ## Program review
 

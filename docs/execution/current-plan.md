@@ -4,8 +4,11 @@
 
 `AGENTS.md` is the doctrine and it is now short. The rules that matter for this file:
 
-1. **One BUILD lane works one vertical continuously**; the user tests at each
+1. **The BUILD agent owns a vertical end to end and integrates it itself on CI
+   green when no review arm is owed** (corrected 2026-09-05); the user tests at each
    slice's "Test it yourself"; stops only on the STOP list (`AGENTS.md` §3).
+   Verticals are never split for review size; parallelism is by dependency, not
+   by file lease.
 2. **CI green at the pushed SHA is the acceptance matrix.** No local matrix, no lock.
 3. **One review arm, only when the Critical set is touched, production defects
    only.** Everything else ships on tests and the user's click-through.
@@ -14,8 +17,10 @@
 5. **Records are one page; rows are one line; the doctrine is frozen until
    2026-10-04.** A finding that blocks nothing is one line in
    [current-plan-archive.md](current-plan-archive.md), *Filed during the freeze*.
-6. **The orchestrator edits** pins, manifests, statuses, records and small bridges
-   directly.
+6. **Nobody is a relay.** The orchestrator is opened for three jobs — charter, the
+   one Critical adjudication, stage-boundary review — and edits directly when open.
+   The user pastes only a Critical review prompt and its verdict. Writers and
+   reviewers read `docs/architecture/posting-kernel-guarantees.md`, not the records.
 
 The 2026-09-01 QUEUE FREEZE and the previous operating model are in the archive; their
 substance survives in the rules above.
