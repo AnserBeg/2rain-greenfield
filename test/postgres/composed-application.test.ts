@@ -2369,28 +2369,37 @@ async function assertCurrentAuthorizationVertical(
       ),
       'denial evidence must not persist business inputs or credentials',
     );
-
-    const archiveOperationId = 'northstar.app:operation.party_archive';
-    const archiveInput = { expectedRevision: 1, recordId: allowedRecordId };
-    await runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
-      runtime.operationGateway.invoke(
-        view,
-        {
-          confirmationGrant: runtime.operationMediation.issueConfirmationGrant(
-            view,
-            archiveOperationId,
-            archiveInput,
-          ),
-          idempotencyKey: randomUUID(),
-          input: archiveInput,
-          operationId: archiveOperationId,
-          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-        },
-        runtime.operationMediation.issueInvocation(view, 'UI'),
-      ),
-    );
   } finally {
     await restorePolicy();
+    if (
+      (await businessRecordCount(
+        pool,
+        runtime,
+        compiledApplication,
+        allowedRecordId,
+      )) === 1
+    ) {
+      const archiveOperationId = 'northstar.app:operation.party_archive';
+      const archiveInput = { expectedRevision: 1, recordId: allowedRecordId };
+      await runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+        runtime.operationGateway.invoke(
+          view,
+          {
+            confirmationGrant:
+              runtime.operationMediation.issueConfirmationGrant(
+                view,
+                archiveOperationId,
+                archiveInput,
+              ),
+            idempotencyKey: randomUUID(),
+            input: archiveInput,
+            operationId: archiveOperationId,
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          },
+          runtime.operationMediation.issueInvocation(view, 'UI'),
+        ),
+      );
+    }
   }
 }
 
