@@ -104,7 +104,7 @@ release lineage and migration chain, so the mounts cannot overlap.
 
 | step | packet | state | notes |
 |---|---|---|---|
-| 1 | `ENUM-WIDEN` | **REVIEW CONVERGED 2026-09-02, awaiting acceptance**; cut from `main` at `8c41752`, round-3 executable candidate `4a1103a`, `main` merged in at the packet tip | Critical, Band A. Three groups per `PUR-2c` §2.5; cuts migration `0024`; ADR-0064 reserved to it |
+| 1 | `ENUM-WIDEN` | **DONE — accepted and pushed 2026-09-04**, merge `18f6ede`, accepted at `c3a2994`, `FULL_MATRIX_PASS_SHA=48f0cdb` at the integrated tree. Step 3a `posted-stock-honesty` is unblocked and takes `module-storage-materializer.ts`. History: cut from `main` at `8c41752`, round-3 executable candidate `4a1103a`, `main` merged in at the packet tip | Critical, Band A. Three groups per `PUR-2c` §2.5; cuts migration `0024`; ADR-0064 reserved to it |
 | 2 | `PUR-2c` (resume) | blocked on 1, `posting-kernel-admission` and `posted-stock-honesty` | goods receipt + posting through PUR-2a's binding; consumer census; §7.16 catalog obligation; **builds the ADR-0065 received-quantity read model and owes its ten named claims**; **its charter RULES forward dating** (`5g3-prog` A4: a `maximumForwardDateDays` dial with a fail-closed default, or an explicit allow carried on the Posted stock surface) and **opens with the admission map** (B1) and **declared bands per family** (B2) |
 | 3 | `PUR-2` remainder | after 2 | receipt correction, received/open-to-receive read models, what closes an order (§7.5: not viable without these) |
 | 4 | `SAL-1` | after 2 and the R7 small | sales order, mirror of `PUR-1` |
