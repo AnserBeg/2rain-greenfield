@@ -70,7 +70,7 @@
         {
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: the unchanged composed application builds only with its exact evaluator-binding census",
-          "expected": "COMPILER_PERMISSION_EVALUATOR_UNBOUND"
+          "expected": "COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE.*northstar.app:permission.purchase_order_line_amend"
         }
       ]
     },
