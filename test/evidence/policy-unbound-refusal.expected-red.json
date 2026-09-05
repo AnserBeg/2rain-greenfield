@@ -227,8 +227,8 @@
       ]
     },
     {
-      "name": "recorded-revision-narrowing-removed",
-      "claim": "Narrowing the checked-in evaluator bindings to a recorded revision's own census is what lets --truncate-invalid-lineage govern historical entries at all: returning current active bindings unnarrowed reports every newer binding as stale against an older revision.",
+      "name": "recorded-revision-binding-narrowing-removed",
+      "claim": "Narrowing checked-in evaluator bindings to a recorded revision's own census prevents current active bindings from being treated as implementation evidence for permissions an older revision did not declare.",
       "file": "apps/web/scripts/unbound-permission-acknowledgement.ts",
       "original": "          evaluatorBindings: acknowledgement.evaluatorBindings.filter((entry) =>\n            declaredPermissionIds.has(entry.permissionId),\n          ),",
       "replacement": "          evaluatorBindings: acknowledgement.evaluatorBindings,",
@@ -244,7 +244,20 @@
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it",
           "expected": "narrowing keeps exactly the evaluator bindings the revision declares"
-        },
+        }
+      ]
+    },
+    {
+      "name": "recorded-revision-acknowledgement-narrowing-removed",
+      "claim": "Narrowing legacy acknowledgement entries to a recorded revision's census is load-bearing on the truncation route: without it, a valid older prefix is refused as stale against a newer listed permission.",
+      "file": "apps/web/scripts/unbound-permission-acknowledgement.ts",
+      "original": "    entries: acknowledgement.entries.filter((entry) =>\n      declaredPermissionIds.has(entry.permissionId),\n    ),",
+      "replacement": "    entries: acknowledgement.entries,",
+      "test": {
+        "files": ["test/compiler/compiler-semantic-profile.test.ts"],
+        "namePattern": "truncate-invalid-lineage"
+      },
+      "kills": [
         {
           "file": "test/compiler/compiler-semantic-profile.test.ts",
           "name": "--truncate-invalid-lineage governs recorded revisions: it narrows to each revision census and drops one declaring an unacknowledged permission",
