@@ -1411,7 +1411,11 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
         };
     }
     const result = compileApplication(compilerInput(definition));
-    assert.equal(result.status, 'failed');
+    assert.equal(
+      result.status,
+      'failed',
+      'provider-written quantity refuses every authored write tier',
+    );
     if (result.status === 'failed')
       assert.ok(
         result.diagnostics.some(
