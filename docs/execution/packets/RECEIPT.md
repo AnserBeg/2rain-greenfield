@@ -3,7 +3,7 @@
 Status: active implementation; governed release awaits the published AUTH dependency, not review-ready. Tier: Critical. Stops: 1. Base: `8af63acfd8eb4f95b5af8ceff1b6ce7c117b9def`.
 Owner's execution prompt is the charter; final review and acceptance remain external.
 
-## Claims (implementation and verification pending)
+## Claims (isolated verification; governed release and authorization pending)
 
 1. Reconciliation runs read-only; rebuild preserves discrepancies before repair.
 2. Receipt posting atomically writes source, companions, movements, received projection and trust/idempotency effects.
@@ -23,18 +23,20 @@ Owner's execution prompt is the charter; final review and acceptance remain exte
 
 - Reconciliation CLI and pre-rebuild discrepancy persistence committed in `4f0fc4b`; CLI exercised against isolated empty development ledger: INDETERMINATE, subjects=0, repaired=0, transactionReadOnly=on, exit 3. Populated/corruption coverage followed at `af14f0e`.
 - Receipt metadata, companion family, shared transaction, correction, received projection/rebuild and order lifecycle code are implemented under isolated fixture tests. The governed production release and authorized product walkthrough still await the published AUTH dependency.
-- Resumed isolated tests: purchasing definition 36/36; reconciliation 26/26 (corrupted CLI exit 2, no repair, pre-rebuild discrepancy and unchanged facts); receipt kernel 1/1 (atomic over-receipt refusal, retry, conflicting key, concurrent distinct locations observed at common order lock, correction through real gateway, late received corruption rollback, amendment floor and reconstruction). Fixture artifacts stay in memory, never in the serving release. New Record-section/gateway lifecycle checks are being added, not yet acceptance evidence.
+- Isolated tests: purchasing definition 36/36; reconciliation 26/26 (corrupted CLI exit 2, no repair, pre-rebuild discrepancy and unchanged facts); receipt lifecycle 1/1 (atomic over-receipt refusal, retry, conflicting key, concurrent distinct locations, late received corruption rollback, gateway correction/reversal/amendment/close/reopen, rendered Record progress and reconstruction). Fixture artifacts stay in memory, never in the serving release; the fixture policy is not production authorization evidence.
 - Amendment intent is a small ordinary `purchase_order_amendment` record: number, target order line, expected line revision, quantity and reason. The existing line-amend O1 hydrates exactly one matching request and consumes it atomically; the gateway input remains record/revision. Adds five exact permissions `northstar.app:permission.purchase_order_amendment_{create,read,update,archive,restore}`, resource `northstar.app:entity.purchase_order_amendment`, corresponding CRUD actions. Register through AUTH once delivered.
 
 ## Controls
 
-At `af14f0e`, actually executed `receipt-rebuild-discrepancy-capture-absent` and `receipt-ordered-ceiling-absent`: each reproduced its expected red and restored green. Additional payload, common-lock, received-floor and non-vacuous verifier controls are added; current candidate rerun remains owed. Manifest validation is not execution.
+All 11 entries in `test/evidence/RECEIPT.expected-red.json` actually reproduced their declared red and restored green: six at `ee595dae5bab5d4f41c5997625d846a74d47cfaf` (pre-rebuild capture, ordered ceiling, refusal payload, common order lock, received floor, received verifier); authored-write fence at `ec03a1163aa74a01e66aedda80e3069a0a986393`; rebuild identity, corruption reporting, amendment isolation and projection-independent reconstruction at `ad52434d87f57ab7e46a780f112b782a6a72fa2d`. The latter commits only refine tests/controls; the production tree is unchanged. Two initial controls caught the intended defect at an earlier assertion; their named assertions were corrected and rerun, never counted as successful runner executions before that.
+
+Six inherited controls also reproduced red/restored green at `ad52434`: `coverage-comparison-absent`, `version-four-digest-covers-the-derived-role`, `active-release-fact-checked-after-the-receipt-lookup`, `recorded-at-floor-absent`, `comparator-drops-the-movement-id-tie-break`, `negative-stock-stops-sorting-persisted-with-planned`. Seventeen executed controls total; manifest validation/self-test is not substituted. Final combined AUTH/RECEIPT candidate controls remain owed.
 
 ## Gates
 
 Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. No acceptance or review claimed; not at review readiness.
 
-Latest completed CI https://github.com/AnserBeg/2rain-greenfield/actions/runs/33945875219 tested `4b79d5e7a45d6a46fdf241f44c66c148db496caa`: schema drift and security green; unit/browser/provider startup exposed a receipt import cycle, now fixed by extracting the shared error type without changing its public export. Reconciliation's new empty arm is explicitly indeterminate. Focused reconciliation 26/26, dev lifecycle 14/14, receipt lifecycle/product Record 1/1 pass locally. Performance indeterminate (CPU idle 46.7%, required 90%); governed release/history still await AUTH. No checks weakened.
+CI https://github.com/AnserBeg/2rain-greenfield/actions/runs/33946463972 at `810d5b7a7940577a351c7d7e1cdd3e75f4bc6cd2`: unit 156/156, browser/security/performance green; compiler 169/173, with four failures at governed permission/release cases; PostgreSQL still running at this record update. Earlier schema drift and startup failures are repaired (shared error extraction preserves its public export); the new empty receiving reconciliation arm explicitly remains indeterminate. No checks weakened. New checkpoint CI will run on the PR push; no full-matrix green claimed.
 
 At blocked `a58cfb4`, governed compilation refused exactly 13 `COMPILER_PERMISSION_EVALUATOR_UNBOUND` declarations: goods_receipt {archive,create,post,read,restore,update}; goods_receipt_line {archive,create,read,restore,update}; purchase_order_line_amend; purchase_order_received_read. All IDs use `northstar.app:permission.`. The five later amendment-request permissions above also require real bindings; acknowledgement remains unchanged.
 

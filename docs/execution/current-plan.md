@@ -32,7 +32,7 @@ substance survives in the rules above.
 | G0, G1 | complete |
 | G2 | complete in substance (party, catalog, location, composed app, forms, pickers) |
 | G3 | inventory alpha: 14 of 17 gate criteria met (`rulings/g3-completion.md`); posting kernel hardened by `posting-kernel-admission` and `enum-widen` on 2026-09-04 |
-| G4 | purchase order accepted; goods receipt has no code |
+| G4 | purchase order accepted; RECEIPT implemented on draft PR #1 with isolated lifecycle/reconciliation tests; governed release and product authorization await the published AUTH dependency |
 | G5–G8, N1–N7 | not started; no agent package, no customization engine |
 
 Plan §13: 21 of 38 work packages done. The office-worker loop — receive and ship — is
