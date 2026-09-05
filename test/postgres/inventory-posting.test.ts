@@ -96,6 +96,7 @@ import {
 } from '../../packages/postgres-provider/src/purchasing-order-lifecycle.js';
 import { reconcileReceivedQuantities } from '../../packages/postgres-provider/src/received-quantity-projection.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
+import type { RegisteredCapabilityOperationExecutionRequest } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { PostgresInventoryReconciliationService } from '../../packages/postgres-provider/src/inventory-reconciliation-service.js';
 import { renderSurfaceRuntimeWithData } from '../../apps/web/src/surface-runtime.js';
@@ -2665,6 +2666,11 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       },
     });
     const mediation = new SemanticOperationMediationAuthority();
+    let tamperReceivingExecution:
+      | ((
+          request: RegisteredCapabilityOperationExecutionRequest,
+        ) => RegisteredCapabilityOperationExecutionRequest)
+      | undefined;
     const gateway = new SemanticOperationGateway(
       policy,
       interpreter,
@@ -2673,9 +2679,15 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       [
         {
           capabilityId: executor.capabilityId,
+          prepareAuthorization: (request) =>
+            executor.prepareAuthorization(request),
           execute: async (request) => {
             try {
-              return await executor.execute(request);
+              return await executor.execute(
+                tamperReceivingExecution
+                  ? tamperReceivingExecution(request)
+                  : request,
+              );
             } catch (error) {
               t.diagnostic(
                 error instanceof Error
@@ -3144,6 +3156,46 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       original: first.sourceId,
       movement: String(original.rows[0]!.record_id),
     });
+    const businessAndAcceptedEffects = async () =>
+      Object.fromEntries(
+        Object.entries(await allEffects()).filter(
+          ([table]) => table !== 'platform."trust_action_invocations"',
+        ),
+      );
+    const beforeTampering = await businessAndAcceptedEffects();
+    const tampering: readonly ((
+      request: RegisteredCapabilityOperationExecutionRequest,
+    ) => RegisteredCapabilityOperationExecutionRequest)[] = [
+      (request) => ({ ...request, inputDigest: 'different-input-digest' }),
+      (request) => ({ ...request, definition: { ...request.definition } }),
+      (request) => ({
+        ...request,
+        readBackDefinition: { ...request.readBackDefinition },
+      }),
+      (request) => ({ ...request, view: { ...request.view } }),
+      (request) => ({ ...request, context: { ...request.context } }),
+      (request) => ({
+        ...request,
+        input: { recordId: correction.sourceId, expectedRevision: 1 },
+      }),
+      (request) => ({
+        ...request,
+        authorization: { ...request.authorization },
+      }),
+    ];
+    try {
+      for (const tamper of tampering) {
+        tamperReceivingExecution = tamper;
+        await assert.rejects(
+          invoke('goods_receipt_post', correction.sourceId, 1),
+          { code: 'INVENTORY_POSTING_INPUT_INVALID' },
+          'preparation is bound to exact definitions, view, context, input and opaque authorization',
+        );
+        assert.deepEqual(await businessAndAcceptedEffects(), beforeTampering);
+      }
+    } finally {
+      tamperReceivingExecution = undefined;
+    }
     const corrected = await invoke(
       'goods_receipt_post',
       correction.sourceId,

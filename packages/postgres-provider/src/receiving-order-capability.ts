@@ -4,7 +4,10 @@ import type {
   SemanticOperationResultEnvelope,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import { SEMANTIC_OPERATION_RESULT_VERSION } from '../../runtime/src/semantic-operation-gateway.js';
-import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../runtime/src/semantic-query-gateway.js';
+import {
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
+} from '../../runtime/src/semantic-query-gateway.js';
 import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/trust/contracts.js';
 import type { PostgresCapabilityOperationExecutorContext } from './capability-operation-executor-factory.js';
 import {
@@ -30,6 +33,7 @@ export async function executeReceivingOrderState(
   binding: ReceiptBinding,
   request: RegisteredCapabilityOperationExecutionRequest,
   action: 'close' | 'reopen' | 'amend',
+  authorizedLegalEntityId: string,
 ): Promise<SemanticOperationResultEnvelope> {
   const entity = action === 'amend' ? binding.orderLine : binding.order;
   const input = request.input as Record<string, unknown>;
@@ -73,6 +77,11 @@ export async function executeReceivingOrderState(
             'Order is missing or outside the requested scope',
           );
         const legalEntityId = String(lookup.rows[0]!.legal_entity_id);
+        if (legalEntityId !== authorizedLegalEntityId)
+          throw receiptError(
+            'INVENTORY_POSTING_INPUT_INVALID',
+            'Order scope changed after authorization preparation',
+          );
         let amendmentId: string | null = null;
         const changed =
           action === 'amend'
@@ -224,20 +233,22 @@ export async function executeReceivingOrderState(
       'INVENTORY_POSTING_INPUT_INVALID',
       'Order read-back requires exact scope',
     );
-  const result = await context.queryGateway.invoke(request.view, {
-    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-    queryId: request.readBackDefinition.queryId,
-    arguments: {
-      recordId,
-      [scope.operand.parameterId]: trust.mutationResult.legalEntityId,
-    },
-  });
-  const record = result.records.find((row) => row.recordId === recordId);
-  if (result.outcome !== 'exact' || !record)
-    throw receiptError(
-      'RECEIPT_PROJECTION_DIVERGED',
-      'Order did not read back after its transition',
-    );
+  let record: SemanticOperationResultEnvelope['readBack'] = null;
+  try {
+    const result = await context.queryGateway.invoke(request.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: request.readBackDefinition.queryId,
+      arguments: request.authorization.readBackArguments,
+    });
+    record = result.records.find((row) => row.recordId === recordId) ?? null;
+    if (result.outcome !== 'exact' || !record)
+      throw receiptError(
+        'RECEIPT_PROJECTION_DIVERGED',
+        'Order did not read back after its transition',
+      );
+  } catch (error) {
+    if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+  }
   return {
     kind: 'semanticOperationResult',
     schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,

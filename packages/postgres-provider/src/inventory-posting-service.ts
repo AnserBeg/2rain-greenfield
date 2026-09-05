@@ -1122,11 +1122,12 @@ export class PostgresInventoryPostingService {
         parsed.idempotencyKey,
       );
       if (receipt) {
-        const replay = validateReceiptReplay(
+        const replay = await validateReceiptReplay(
           receipt,
           context,
           posting,
           parsed.idempotencyKey,
+          client,
         );
         await client.query('COMMIT');
         transactionOpen = false;
@@ -7160,13 +7161,50 @@ async function findReceipt(
   return result.rows[0] ?? null;
 }
 
-function validateReceiptReplay(
+async function validateReceiptReplay(
   receipt: RecordedReceiptRow,
   context: TrustedRequestContext,
   posting: ParsedPosting,
   idempotencyKey: string,
-): InventoryPostingResultV1 {
-  const inputDigest = digestCommand(posting, receipt.input_digest_version);
+  client: PoolClient,
+): Promise<InventoryPostingResultV1> {
+  let digestPosting = posting;
+  if (receipt.input_digest_version === 5 && posting.postingRole === 'receipt') {
+    // Version 5 includes authorization evidence in its immutable preimage.
+    // Reconstruct that historical evidence, not today's policy revision. The
+    // gateway still authorizes every retry against current grants before here.
+    // No business input is replaced, and no recorded digest is rewritten.
+    const evidence = await client.query<{
+      policy_version: string;
+      policy_evaluator_version: string;
+    }>(
+      `SELECT policy_version, policy_evaluator_version
+         FROM platform.trust_action_invocations
+        WHERE tenant_id=$1 AND environment_id=$2 AND invocation_id=$3
+          AND outcome='SUCCEEDED' AND policy_decision='ALLOW'`,
+      [context.tenantId, context.environmentId, receipt.invocation_id],
+    );
+    if (evidence.rows.length !== 1)
+      throw postingError(
+        'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+        'recorded receipt authorization evidence is missing',
+      );
+    digestPosting = {
+      ...posting,
+      command: {
+        ...posting.command,
+        authorization: {
+          decision: 'ALLOW',
+          evaluatorVersion: evidence.rows[0]!.policy_evaluator_version,
+          policyVersion: evidence.rows[0]!.policy_version,
+        },
+      },
+    };
+  }
+  const inputDigest = digestCommand(
+    digestPosting,
+    receipt.input_digest_version,
+  );
   if (
     receipt.principal_id.toLowerCase() !== context.principalId.toLowerCase() ||
     receipt.input_digest !== inputDigest
@@ -7196,7 +7234,13 @@ async function persistAdditionalReceipt(
     idempotencyKey,
   );
   if (existing)
-    return validateReceiptReplay(existing, context, posting, idempotencyKey);
+    return validateReceiptReplay(
+      existing,
+      context,
+      posting,
+      idempotencyKey,
+      client,
+    );
   const result = Object.freeze({ ...replay, replayed: true });
   await insertReceipt(
     client,

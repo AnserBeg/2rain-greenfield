@@ -4,11 +4,16 @@ import {
 } from '@north-star/compiler';
 import {
   SEMANTIC_OPERATION_RESULT_VERSION,
+  type RegisteredCapabilityOperationAuthorization,
+  type RegisteredCapabilityOperationAuthorizationRequest,
   type RegisteredCapabilityOperationExecutionRequest,
   type RegisteredCapabilityOperationExecutor,
   type SemanticOperationResultEnvelope,
 } from '../../runtime/src/semantic-operation-gateway.js';
-import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../runtime/src/semantic-query-gateway.js';
+import {
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
+} from '../../runtime/src/semantic-query-gateway.js';
 import type {
   PostgresCapabilityOperationExecutorContext,
   PostgresCapabilityOperationExecutorFactory,
@@ -34,10 +39,19 @@ import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { executeReceivingOrderState } from './receiving-order-capability.js';
 
+interface PreparedReceiving {
+  readonly request: RegisteredCapabilityOperationAuthorizationRequest;
+  readonly legalEntityId: string;
+  readonly currentRevision: number;
+  readonly recordId: string;
+  readonly expectedRevision: number;
+}
+
 class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
   readonly capabilityId = RECEIVING_CAPABILITY_ID;
   readonly #binding: ReceiptBinding;
   readonly #posting: PostgresInventoryPostingService;
+  readonly #prepared = new WeakMap<object, PreparedReceiving>();
   constructor(
     private readonly context: PostgresCapabilityOperationExecutorContext,
     storage: StorageTargetPayloadV1,
@@ -64,9 +78,126 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
       { currentInstant: context.currentInstant },
     );
   }
+  async prepareAuthorization(
+    request: RegisteredCapabilityOperationAuthorizationRequest,
+  ): Promise<RegisteredCapabilityOperationAuthorization> {
+    const binding = this.#binding;
+    const entity =
+      request.definition.operationId ===
+      `${binding.receipt.entityId.split(':')[0]}:operation.goods_receipt_post`
+        ? binding.receipt
+        : request.definition.operationId ===
+            `${binding.orderLine.entityId.split(':')[0]}:operation.purchase_order_line_amend`
+          ? binding.orderLine
+          : ['close', 'reopen'].some(
+                (action) =>
+                  request.definition.operationId ===
+                  `${binding.order.entityId.split(':')[0]}:operation.purchase_order_${action}`,
+              )
+            ? binding.order
+            : null;
+    const input = request.input;
+    const scope = request.readBackDefinition.legalEntityScope;
+    if (
+      !entity ||
+      request.definition.effect.capability.targetId !== this.capabilityId ||
+      request.readBackDefinition.sourceEntityId !== entity.entityId ||
+      !scope ||
+      scope.cardinality !== 'exactlyOne' ||
+      !input ||
+      typeof input !== 'object' ||
+      Array.isArray(input) ||
+      !('recordId' in input) ||
+      !('expectedRevision' in input) ||
+      typeof input.recordId !== 'string' ||
+      typeof input.expectedRevision !== 'number' ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1 ||
+      Object.keys(input).some(
+        (key) => !['recordId', 'expectedRevision'].includes(key),
+      )
+    ) {
+      throw receiptError(
+        'INVENTORY_POSTING_INPUT_INVALID',
+        'Receiving requires its registered target, exact scope and record revision',
+      );
+    }
+    const { recordId, expectedRevision } = input;
+    // Trusted SELECT-only preparation resolves scope from persisted facts, never
+    // from a caller assertion. The mutation transaction still owns all locks,
+    // revision/state checks, quantity guards and idempotency decisions.
+    const target = await withTrustedRequestTransaction(
+      this.context.pool,
+      request.context,
+      async (client) => {
+        await client.query('SET TRANSACTION READ ONLY');
+        return withModuleRuntimeRole(client, async () => {
+          const result = await client.query<{
+            legal_entity_id: string;
+            revision: number;
+          }>(
+            `SELECT ${q(entity.legalEntity!.column)} AS legal_entity_id, revision FROM ${receiptTable(entity)} WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3 AND archived_at IS NULL`,
+            [request.context.tenantId, request.context.environmentId, recordId],
+          );
+          if (result.rows.length !== 1)
+            throw receiptError(
+              'INVENTORY_POSTING_INPUT_INVALID',
+              'Receiving target is missing or archived',
+            );
+          return result.rows[0]!;
+        });
+      },
+    );
+    const currentRevision = Number(target.revision);
+    if (
+      currentRevision !== expectedRevision &&
+      currentRevision !== expectedRevision + 1
+    ) {
+      throw receiptError(
+        'INVENTORY_POSTING_INPUT_INVALID',
+        'Receiving target revision is no longer current',
+      );
+    }
+    const authorization = Object.freeze({
+      decisionInput: Object.freeze({ legalEntityId: target.legal_entity_id }),
+      legalEntityReadScopeIds: Object.freeze([target.legal_entity_id]),
+      readBackArguments: Object.freeze({
+        [scope.operand.parameterId]: target.legal_entity_id,
+        recordId,
+      }),
+    });
+    this.#prepared.set(
+      authorization,
+      Object.freeze({
+        request,
+        legalEntityId: target.legal_entity_id,
+        currentRevision,
+        recordId,
+        expectedRevision,
+      }),
+    );
+    return authorization;
+  }
+
   async execute(
     request: RegisteredCapabilityOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope> {
+    const prepared = this.#prepared.get(request.authorization);
+    this.#prepared.delete(request.authorization);
+    if (
+      !prepared ||
+      prepared.request.definition !== request.definition ||
+      prepared.request.inputDigest !== request.inputDigest ||
+      prepared.request.input !== request.input ||
+      prepared.request.context !== request.context ||
+      prepared.request.readBackDefinition !== request.readBackDefinition ||
+      prepared.request.view !== request.view
+    ) {
+      throw receiptError(
+        'INVENTORY_POSTING_INPUT_INVALID',
+        'Receiving authorization is not bound to this execution',
+      );
+    }
     if (
       request.definition.operationId.endsWith(
         ':operation.purchase_order_line_amend',
@@ -77,6 +208,7 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         this.#binding,
         request,
         'amend',
+        prepared.legalEntityId,
       );
     if (
       request.definition.operationId.endsWith(':operation.purchase_order_close')
@@ -86,6 +218,7 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         this.#binding,
         request,
         'close',
+        prepared.legalEntityId,
       );
     if (
       request.definition.operationId.endsWith(
@@ -97,6 +230,7 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         this.#binding,
         request,
         'reopen',
+        prepared.legalEntityId,
       );
     if (
       !request.definition.operationId.endsWith(
@@ -165,6 +299,15 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
             const legalEntityId = String(
               header[binding.receipt.legalEntity!.column],
             );
+            if (
+              legalEntityId !== prepared.legalEntityId ||
+              Number(header.revision) !== prepared.currentRevision
+            ) {
+              throw receiptError(
+                'INVENTORY_POSTING_INPUT_INVALID',
+                'Receipt scope or revision changed after authorization preparation',
+              );
+            }
             const rows = await client.query(
               `SELECT * FROM ${receiptTable(binding.line)} WHERE tenant_id=$1 AND environment_id=$2 AND ${q(binding.line.legalEntity!.column)}=$3 AND ${q(receiptRelation(binding, binding.line, 'goods_receipt_line_receipt'))}=$4 AND archived_at IS NULL ORDER BY record_id`,
               [
@@ -271,22 +414,26 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         'INVENTORY_POSTING_INPUT_INVALID',
         'Receipt read-back requires exact legal entity scope',
       );
-    const readBack = await this.context.queryGateway.invoke(request.view, {
-      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-      queryId: request.readBackDefinition.queryId,
-      arguments: {
-        [scope.operand.parameterId]: command.legalEntityId,
-        recordId,
-      },
-    });
-    const record = readBack.records.find(
-      (candidate) => candidate.recordId === recordId,
-    );
-    if (readBack.outcome !== 'exact' || !record)
-      throw receiptError(
-        'INVENTORY_POSTING_INPUT_INVALID',
-        'Posted receipt did not read back exactly',
-      );
+    let record: SemanticOperationResultEnvelope['readBack'] = null;
+    try {
+      const readBack = await this.context.queryGateway.invoke(request.view, {
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        queryId: request.readBackDefinition.queryId,
+        arguments: request.authorization.readBackArguments,
+      });
+      record =
+        readBack.records.find((candidate) => candidate.recordId === recordId) ??
+        null;
+      if (readBack.outcome !== 'exact' || !record)
+        throw receiptError(
+          'INVENTORY_POSTING_INPUT_INVALID',
+          'Posted receipt did not read back exactly',
+        );
+    } catch (error) {
+      // Only a typed, current-policy read denial after the committed kernel
+      // result withholds data. Other failures must not be disguised as success.
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+    }
     return {
       kind: 'semanticOperationResult',
       schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,

@@ -3,6 +3,87 @@
   "packet": "RECEIPT",
   "entries": [
     {
+      "name": "receipt-post-read-denial-thrown",
+      "claim": "Initial, correction and reversal receipts report committed success and trust IDs without read-back after current read permission is revoked at commit.",
+      "file": "packages/postgres-provider/src/receiving-capability-executor.ts",
+      "original": "      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;",
+      "replacement": "      throw error;",
+      "test": {
+        "files": ["test/postgres/receiving-authorization.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "initial",
+          "expected": "current policy denied query northstar.app:query.goods_receipt_get"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "correction",
+          "expected": "current policy denied query northstar.app:query.goods_receipt_get"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "reversal",
+          "expected": "current policy denied query northstar.app:query.goods_receipt_get"
+        }
+      ]
+    },
+    {
+      "name": "receipt-order-read-denial-thrown",
+      "claim": "Amendment, close and reopen preserve truthful committed success with null read-back on typed current-policy denial only.",
+      "file": "packages/postgres-provider/src/receiving-order-capability.ts",
+      "original": "    if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;",
+      "replacement": "    throw error;",
+      "test": {
+        "files": ["test/postgres/receiving-authorization.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "amend",
+          "expected": "current policy denied query northstar.app:query.purchase_order_line_get"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "close",
+          "expected": "current policy denied query northstar.app:query.purchase_order_get"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "reopen",
+          "expected": "current policy denied query northstar.app:query.purchase_order_get"
+        }
+      ]
+    },
+    {
+      "name": "receipt-replay-hashes-current-policy",
+      "claim": "An identical version-5 receipt retry after restoring a grant preserves its trust IDs and business effects; current authorization must not change the historical input preimage.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const inputDigest = digestCommand(\n    digestPosting,\n    receipt.input_digest_version,\n  );",
+      "replacement": "  const inputDigest = digestCommand(posting, receipt.input_digest_version);",
+      "test": {
+        "files": ["test/postgres/receiving-authorization.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "initial",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "correction",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "reversal",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT"
+        }
+      ]
+    },
+    {
       "name": "receipt-rebuild-discrepancy-capture-absent",
       "claim": "The rebuild persists the corrupted stored row before replacing its value; reconciliation itself does not repair.",
       "file": "packages/postgres-provider/src/module-storage-materializer.ts",
