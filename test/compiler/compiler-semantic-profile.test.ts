@@ -35,6 +35,8 @@ import {
   normalizedBytes,
 } from './helpers.js';
 import {
+  CURRENT_POLICY_BINDINGS_FILE,
+  CURRENT_POLICY_BINDINGS_VERSION,
   UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE,
   UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -569,6 +571,7 @@ test('--truncate-invalid-lineage governs recorded revisions: it narrows to each 
         schemaVersion: UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
       }),
     );
+    writeEmptyCurrentPolicyBindings(workspace, headCensus.package.packageId);
     writeFileSync(
       compiledPath,
       JSON.stringify({
@@ -736,6 +739,10 @@ function buildV0LineageWithInvalidSuffix(
       schemaVersion: UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
     }),
   );
+  writeEmptyCurrentPolicyBindings(
+    dirname(authoredPath),
+    census.package.packageId,
+  );
   writeFileSync(
     compiledPath,
     JSON.stringify({
@@ -759,6 +766,19 @@ function buildV0LineageWithInvalidSuffix(
     bootstrapRoot: bootstrap.releaseRoot,
     validRoot: application.releaseRoot,
   };
+}
+
+function writeEmptyCurrentPolicyBindings(
+  directory: string,
+  packageId: string,
+): void {
+  writeFileSync(
+    join(directory, CURRENT_POLICY_BINDINGS_FILE),
+    JSON.stringify({
+      packages: { [packageId]: [] },
+      schemaVersion: CURRENT_POLICY_BINDINGS_VERSION,
+    }),
+  );
 }
 
 function compileFixtureAtV0(
