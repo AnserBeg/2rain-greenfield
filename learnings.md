@@ -695,3 +695,15 @@ How to apply: run every new mutation and read WHICH assertion fails before
 committing it; leave any precondition the test asserts ahead of the claim intact,
 and make `expected` name a token unique to the claimed assertion rather than a
 generic assertion-failure shape. See `docs/execution/packets/relation-requiredness-relaxation.md`.
+
+## Size the process to the risk that exists, not the risk the architecture is designed for
+Date: 2026-09-04
+Why: six weeks in, packets averaged four to six review rounds with zero PASS verdicts, records
+ran 700-900 lines, the local matrix serialized every lane through one Docker slot with false
+reds, and four of eight packets between the purchase order and the goods receipt existed to
+protect released data that no tenant holds. The method caught real defects; its cost was
+process that never executed its own convergence rules, and immutability applied before there
+was anything to keep immutable. Measured in `program-reviews/2026-09-01-inventory-ledger.md`.
+How to apply: `AGENTS.md` (2026-09-04) — one vertical per lane worked continuously, CI as the gate,
+one arm on the Critical set only, one-page records, pre-tenant re-baselining (ADR-0066), and a
+doctrine freeze: no new rule without deleting one. Graduated to `AGENTS.md`.

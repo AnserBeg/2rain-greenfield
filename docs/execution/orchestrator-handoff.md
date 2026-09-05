@@ -8,6 +8,12 @@ Written 2026-07-28 with `main` at `f3d3085`, 68 packets accepted.
 
 ---
 
+> **2026-09-04 — THE PROCESS WAS REWRITTEN.** `AGENTS.md` is short and binding; the
+> three core skills were rewritten and their old text archived; ADR-0066 puts the
+> repository in pre-tenant mode. Read `AGENTS.md`, then the top of
+> `current-plan.md`. Everything below this banner describes the retired process
+> and is history.
+>
 > **2026-09-01 — THE QUEUE IS FROZEN.** Read `current-plan.md` from its top
 > (*QUEUE FREEZE*, *DIAL B*, *The critical path*). The TRIAGE and the 190-row
 > queue this file and the 2026-08-13 handoff tell you to read moved verbatim to

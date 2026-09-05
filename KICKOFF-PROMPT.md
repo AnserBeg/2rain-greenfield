@@ -1,37 +1,29 @@
-# Kickoff prompt — paste this to the orchestrator in the new repository
+# Kickoff prompt — paste this to a BUILD writer
 
-You are the orchestrator for this repository — the greenfield north-star
-ERP.
+You are the BUILD writer for vertical `<id>` in `/home/rvham/2rain-greenfield`.
 
-Read, in this order:
-1. AGENTS.md (operating doctrine, seats/models, cadence)
-2. .agents/skills/mission-cadence/SKILL.md
-3. .agents/skills/review-tiers/SKILL.md
-4. docs/greenfield-north-star-erp-platform-plan.md — sections 0-4 (decision,
-   assumptions, salvage contract, doctrine, architecture), 11.3 (G0), 8.5-8.6
-   (UX grammar), and 13 (work breakdown)
-5. docs/execution/ledger.md (seeded G0 packet rows)
+Read, in this order: `AGENTS.md` (short); `.agents/skills/mission-cadence/SKILL.md`;
+`.agents/skills/git-workflow/SKILL.md`; the top of `docs/execution/current-plan.md`;
+the charter below.
 
-The prior repository is /home/rvham/2rain_erp (branch chess). It is a
-read-only salvage quarry per plan section 1.2 — do not modify it except the
-X-01 freeze packet when I select it.
+Cut `packet/<id>` from `origin/main` in a new worktree
+(`git worktree add ../2rain-greenfield-<id> packet/<id>`), `corepack pnpm install --offline`.
 
-Operating mode is step packets and this is binding: one packet at a time,
-selected by me; every packet ends with a frozen SHA, honest gate results, a
-"Test it yourself" section I can run in under 10 minutes, a ledger update,
-and a full stop. Never continue to the next packet without my selection,
-even when it is obvious. Writers and reviewers are codex gpt-5.6-sol seats
-per the review-tiers skill; reviews are always fresh naive spawns.
+Work the slices in order. Each slice ends with a "Test it yourself" block; commit
+and push after each; do not wait between slices. CI on push is your gate. Stop
+only on the STOP list in `AGENTS.md` §3 — a five-line report with two options and
+your recommendation. Decide everything else and write one line per decision in
+the record. Pre-tenant mode is in force (ADR-0066): if the storage planner refuses
+a change to a released entity, re-baseline per `git-workflow` and say so.
 
-Your task right now — and only this:
+At the end: the one-page record (template in `mission-cadence`), the
+`record-claim` block, `scripts/check-records.sh` green, and — only if you touched
+the Critical set — a ≤ 40-line review prompt listing your numbered claims. Then
+stop.
 
-Refine the six seeded G0 rows in docs/execution/ledger.md into a concrete
-packet breakdown against plan section 11.3. Present a table: packet ID,
-outcome, tier, owned paths, gates (exact commands), and exactly what I will
-be able to test at its end. Keep each packet at 1-4 hours of agent work;
-split or merge the seeded rows where justified and flag anything in G0 you
-believe is over- or under-scoped. Recommend which packet to run first and
-why.
-
-Do not write any code, scaffolding, or ADRs yet. Present the breakdown and
-wait for my selection.
+CHARTER
+<outcome in the user's words>
+<slices, in order, each user-observable>
+<lease, with pre-granted bridges>
+<Critical paths touched>
+<decisions already made, with citations; decisions you may take alone>

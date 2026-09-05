@@ -1,39 +1,58 @@
 # Current plan — active execution state
 
-## QUEUE FREEZE — ruled 2026-09-01. Read this first; it governs everything below.
+## OPERATING MODEL — rewritten 2026-09-04 by user ruling. Read this and stop reading.
 
-**The queue is frozen to the critical path of one goal: *an office worker can receive
-inventory and send it out.*** Measured reason: this file held 190 queue rows, 93 marked
-OPEN, in 495KB that every lane and every reviewer re-read per session, while the ten days
-after `PUR-1` produced five merges of enabler work and zero goods-receipt code. The rows
-are not wrong; they are not competing for a slot.
+`AGENTS.md` is the doctrine and it is now short. The rules that matter for this file:
 
-**What moved.** Every section and row that is not on the critical path is in
-[current-plan-archive.md](current-plan-archive.md), **verbatim and unchanged** — TRIAGE,
-the old queue, the parked UX programme, the debate verdicts, the G2-era "where we are".
-A record elsewhere that says *"see row X in current-plan.md"* resolves there. Nothing was
-deleted and no disposition was altered.
+1. **One BUILD lane works one vertical continuously**; the user tests at each
+   slice's "Test it yourself"; stops only on the STOP list (`AGENTS.md` §3).
+2. **CI green at the pushed SHA is the acceptance matrix.** No local matrix, no lock.
+3. **One review arm, only when the Critical set is touched, production defects
+   only.** Everything else ships on tests and the user's click-through.
+4. **Pre-tenant mode** (ADR-0066): a refused storage transition is a re-baseline,
+   not an enabler packet.
+5. **Records are one page; rows are one line; the doctrine is frozen until
+   2026-10-04.** A finding that blocks nothing is one line in
+   [current-plan-archive.md](current-plan-archive.md), *Filed during the freeze*.
+6. **The orchestrator edits** pins, manifests, statuses, records and small bridges
+   directly.
 
-**The rules while the freeze holds.**
+The 2026-09-01 QUEUE FREEZE and the previous operating model are in the archive; their
+substance survives in the rules above.
 
-1. **Only a row in this file may hold a slot.** Chartering anything not on the critical
-   path table needs a user ruling written into that table first.
-2. **A finding made during a packet is filed by one test: does it block a critical-path
-   step?** If yes, it gets a row here naming the step it blocks. If no, it gets **one
-   line** in the archive's *Filed during the freeze* table — packet, date, one sentence —
-   and the packet record carries the detail. No prose disposition anywhere else, and no
-   packet is chartered from it.
-3. **Promotion is explicit.** A dormant row is promoted by moving its line into this file
-   with the reason it now blocks, dated. Surfacing during an unrelated packet is not a
-   reason; that is how the queue reached 190.
-4. **The record layer stops growing per packet.** A packet record, its ledger row, its
-   lane row and its review-log rows are the whole record. Findings inventories,
-   dispositioned overlays and "corrected twice" narratives are archive material.
-5. **The freeze lifts at `SAL-2` acceptance, or earlier by user ruling recorded here.**
-6. **Enabler WIP cap — adopted 2026-09-01 from `5g3-prog` arm 1.** After `ENUM-WIDEN`
-   and `posting-kernel-admission` land, **the next accepted merge to `main` contains
-   goods-receipt production code.** A further enabler between them needs a user ruling
-   written into the critical-path table naming what it blocks.
+## Where we are — 2026-09-04
+
+| stage | state |
+|---|---|
+| G0, G1 | complete |
+| G2 | complete in substance (party, catalog, location, composed app, forms, pickers) |
+| G3 | inventory alpha: 14 of 17 gate criteria met (`rulings/g3-completion.md`); posting kernel hardened by `posting-kernel-admission` and `enum-widen` on 2026-09-04 |
+| G4 | purchase order accepted; goods receipt has no code |
+| G5–G8, N1–N7 | not started; no agent package, no customization engine |
+
+Plan §13: 21 of 38 work packages done. The office-worker loop — receive and ship — is
+the near-term end. Everything below is ordered toward it.
+
+## The critical path — 2026-09-04
+
+| step | vertical | lane | contents | review |
+|---|---|---|---|---|
+| 1 | **RECEIPT** | BUILD | the goods receipt end to end, ONE packet: the posted-stock honesty items (`5g3-prog` A1: a runnable reconciliation script; the rebuild compares before it overwrites); widen the two inventory enums and move the conformance pins **by editing them and re-baselining** (ADR-0066); goods receipt + lines against a released PO; posting as the second family through PUR-2a's binding; the ADR-0065 received-quantity read model and its ten claims; receipt correction and reversal; open-to-receive; what closes an order; the forward-dating dial (`5g3-prog` A4). Slices in that order, each with a test-it-yourself | one arm on the posting-kernel diff at the end |
+| 2 | **SALE** | BUILD | sales order + lines (mirror of PUR-1), shipment + lines, negative posting as the third family, shipment correction, shipped quantity and open-to-ship (ADR-0065 mirror), the packing document. One packet | one arm on the posting-kernel diff |
+| 3 | **AUTH** | BUILD | queue row `7`: a real policy evaluator so a DENY exists; RLS on `module_storage_backfill_checkpoints`; the acknowledged-unbound list shrinks to zero. Required before any login outside the team | one arm (trust substrate) |
+| 4 | **AGENT** | BUILD | plan §13 A-01..A-03 over the loop above | one arm if it writes through the posting kernel |
+| ∥ | SUPPORT | SUPPORT | program reviews at stage boundaries; rulings; the `first-tenant` ruling when it comes; small correctives on paths BUILD does not hold | — |
+
+Rows that still decide whether a CI result can be trusted stay visible below:
+`container-pressure-forges-outcomes` (moot under CI runners),
+`review-record-gate-covered-by-any-later-record`. Owned-by-step rows:
+`purchasing-requires-inventory`, `posting-writer-coverage-is-declared-not-observed`
+(closed by `posting-kernel-admission`; row retained one cycle), `7` (step 3).
+
+**Retired from the path on 2026-09-04:** `posted-stock-honesty` as a separate packet (folded
+into RECEIPT); `PUR-2 remainder` as a separate packet (folded into RECEIPT); `SAL-1`/`SAL-2`
+as two packets (one SALE vertical); the PUR-2c re-charter (its scope is RECEIPT's first
+half; its record and stop remain the source for the enum measurement).
 
 ## DIAL B — the factory tripwire tripped, and it is answered here (2026-09-01)
 
@@ -84,42 +103,6 @@ enablers so the next merge after the current two is receipt code. Actions 1 and 
 adopted (the `posting-kernel-admission` packet and freeze rule 6); action 2 is proposed
 to the user. Record: [2026-09-01-inventory-ledger.md](program-reviews/2026-09-01-inventory-ledger.md).
 **Converged the same day: the Fable arm, independently, also returned ADJUST** — the method's cost came from its own rules not executing — and added three corrections: declare the band per family in the charter (adopted), archive `review-tiers`' dated sections (applied), and gate the round-three continuation criterion (proposed with arm 1's two-BLOCK stop). Six corrections reconciled in the record, §C.3.
-
-## Where we are — 2026-09-01
-
-| Stage | State |
-|---|---|
-| G0, G1 | COMPLETE |
-| G2 | walking slice, composed app, forms and pickers all accepted; stage never formally closed |
-| G3 | posting engine (adjust, transfer, count), stock balance read model accepted; `5g3-prog` review open |
-| G4 | `PUR-1` accepted 2026-08-22. `PUR-2` split into `2a` (accepted), `2b` (accepted), `2c` (STOPPED on the enum-widening refusal; record on `main`) |
-
-Accepted packets: 146 in six weeks. Since `PUR-1`: five merges, all enablers, no
-goods-receipt code. The critical path below is what remains.
-
-## The critical path — frozen 2026-09-01
-
-Serial unless marked parallel. Every module mount touches the same builder tuple,
-release lineage and migration chain, so the mounts cannot overlap.
-
-| step | packet | state | notes |
-|---|---|---|---|
-| 1 | `ENUM-WIDEN` | **DONE — accepted and pushed 2026-09-04**, merge `18f6ede`, accepted at `c3a2994`, `FULL_MATRIX_PASS_SHA=48f0cdb` at the integrated tree. Step 3a `posted-stock-honesty` is unblocked and takes `module-storage-materializer.ts`. History: cut from `main` at `8c41752`, round-3 executable candidate `4a1103a`, `main` merged in at the packet tip | Critical, Band A. Three groups per `PUR-2c` §2.5; cuts migration `0024`; ADR-0064 reserved to it |
-| 2 | `PUR-2c` (resume) | blocked on 1, `posting-kernel-admission` and `posted-stock-honesty` | goods receipt + posting through PUR-2a's binding; consumer census; §7.16 catalog obligation; **builds the ADR-0065 received-quantity read model and owes its ten named claims**; **its charter RULES forward dating** (`5g3-prog` A4: a `maximumForwardDateDays` dial with a fail-closed default, or an explicit allow carried on the Posted stock surface) and **opens with the admission map** (B1) and **declared bands per family** (B2) |
-| 3 | `PUR-2` remainder | after 2 | receipt correction, received/open-to-receive read models, what closes an order (§7.5: not viable without these) |
-| 4 | `SAL-1` | after 2 and the R7 small | sales order, mirror of `PUR-1` |
-| 5 | `SAL-2` | after 4 | shipment, negative posting, correction, read models, packing document |
-| ∥ | `received-quantity-ruling` | **ACCEPTED 2026-09-01**, merge `4fe5589` | ADR-0065: a provider-written rebuildable read model in the ADR-0057 shape, over-receipt refused inside the posting transaction on the order line as the serialization unit. The lane self-integrated; the orchestrator's read is recorded as a `local-confirm` in the `5g3-prog` record §6 — **the user's read is still owed** |
-| ∥ | `posting-kernel-admission` | **DONE — accepted and pushed 2026-09-04**, merge `ab2c5690179680e0ae42bbacec121c9c54cd4c8d`, `FULL_MATRIX_PASS_SHA=ab2c5690…` re-run at the integrated tree, all 87 expected-red entries green. Three arms: BLOCK, BLOCK, then REVISE with no production defect. Shipped R1+R2+R3+A2+A3+A6's comment; closes the two rows below. **With `ENUM-WIDEN` also landed, freeze rule 6 is now live: the next accepted merge to `main` contains goods-receipt production code.** | `5g3-prog` R1 + R2 + R3 + A2 (two ordering manifest entries) + A3 (a monotonic floor on `recordedAt` in `enforceNegativeStock`, one control), one packet — the writer may stop and split if it outgrows one freeze: ONE capability-version authority that release validation checks exactly; digest v4 excludes the derived `postingRole` (no persisted v4 receipt exists, measured); executed verifier tokens compared with the observed write set before commit. Owns `inventory-posting-service.ts`, `contracts.ts`, `definition.ts` (the version literal), the `conformance.ts` version cell, `release-repository.ts`'s capability-fact check, its tests and manifest. This IS arm 1's admission map for the posting kernel |
-| ∥ | `policy-unbound-refusal` | **parallel, now** | R7 small (a): a declared permission with no evaluator binding announces itself at compile time. R7 small (b), RLS on `module_storage_backfill_checkpoints`, needs a migration and is serialized behind `0024` |
-| 3a | `posted-stock-honesty` | **after ENUM-WIDEN lands, before step 2** (it edits `module-storage-materializer.ts`, ENUM-WIDEN's) | `5g3-prog` A1, the converged review's top finding: `reconcile` and the rebuild have no production caller while `ensurePostedStockBalanceProjection` heals the projection on EVERY transition without naming drift. Deliverables: a `scripts/` reconciliation runner the team can run (no route while row `7` is deferred); the rebuild compares each stored quantity to its recomputed sum and writes a discrepancy row in the `semantic_aggregate_anchor_discrepancies` shape before overwriting; a control for the posting-during-preparation refusal (A9). ADR-0057's sentences already corrected. Admitted under freeze rule 6's ruling clause on A1's ground |
-| ∥ | `5g3-prog` | **CONVERGED 2026-09-01**, two arms at `4218a66` | inventory-ledger program review; thirteen ranked findings, six fix-now across `posted-stock-honesty` and `posting-kernel-admission`, one charter decision for step 2, record fixes done, the rest filed; Dial B ADJUST both arms. [Record](program-reviews/2026-09-01-inventory-ledger.md) |
-
-Gate-integrity rows kept visible because they decide whether a matrix result can be
-trusted: `review-record-gate-covered-by-any-later-record`,
-`container-pressure-forges-outcomes`. Owned-by-step rows:
-`migration-range-encoded-in-a-test-title` (step 1), `purchasing-requires-inventory` and
-`posting-capability-version-has-three-encodings` (step 2), `7` (step 4).
 
 ## PROGRAM REVIEW — 2026-08-20, DONE. Read this before assuming one is due.
 
@@ -235,68 +218,6 @@ unchanged; every other row is in [current-plan-archive.md](current-plan-archive.
 | posting-capability-version-has-three-encodings | **CLOSED 2026-09-04 by `posting-kernel-admission`** (merge `ab2c569`): each verifier now mints a coverage token from the `tableoid` of a row it actually read, and before commit the executed set is compared EXACTLY with the observed write set in both directions, through no code the verifiers share. The survivor this row named — delete a verifier CALL with its registration intact — is the packet's first control and reds naming the relation. **Its declared limit, unchanged:** a token proves a row was READ, not that the verifier's comparisons ran. **The posting capability version is encoded three times and nothing reconciles them** | Critical | **FIX-NOW per `5g3-prog` R1 (2026-09-01, verified by the orchestrator: provider 2, three encodings at 1, `hasValidCapabilityFacts` checks only `>= 1`); owned by `posting-kernel-admission`.** **OPEN 2026-08-31, measured by `PUR-2b` while bumping the constant it was chartered to bump.** `INVENTORY_POSTING_CAPABILITY_VERSION` is now **2** in `packages/postgres-provider/src/inventory-posting-service.ts`. `INVENTORY_CONTRACT_V1.capabilityVersion` in `packages/domain/src/inventory/contracts.ts` is **1**, and `packages/compiler/src/conformance.ts` pins it to that LITERAL through `expectInventoryLiteral(..., ['capabilityVersion'], 1)`. The inventory module definition's `capabilityRequirement.capabilityVersion` on `postingCapabilityId` is **1**, and `buildCapabilityFacts` is what carries it into a release manifest's `capabilityFacts`. **`hasValidCapabilityFacts` in `release-repository.ts` checks only `Number(fact.capabilityVersion) >= 1`, so a release that DECLARES it requires posting v1 while the provider IMPLEMENTS v2 passes every gate in the matrix.** **Measured in the shipped artifact, not inferred:** all ten releases in `apps/web/release/app.compiled.json` that declare the posting capability declare it at `capabilityVersion: 1`, the head release (`releaseRoot` `8476ba3f...`) included — so after `PUR-2b` the release the runtime loads says 1 while the provider implements 2. Nothing compares the declared requirement against the registered implementation at any layer: `validateRegistration` compares the registration to the provider constant, and the executor builds the registration FROM that constant, so the check is self-referential by construction. **The charter said the constant "is not persisted in any migration CHECK", which is true and was verified, but the charter's premise that all `capabilityVersion: 1` literals belong to other capabilities is FALSE** — a grep returns fourteen hits, three of which bind the posting capability. **A second question the round-1 reviewer raised, and it is prior to the first:** the three values may be serving more than one MEANING — an exact negotiated protocol version, a MINIMUM-compatible capability version, or a provider implementation/result-format version. `hasValidCapabilityFacts` treats the fact as a LOWER BOUND (`>= 1`) while `validateRegistration` compares for EXACT equality, so two of the encodings are already read under different rules. A future consumer could compare as exact what validation treats as a bound. Owed: decide what these values MEAN before deciding which is authoritative, then make the other two derive from it or be observed against it. `packages/domain/**` and `packages/compiler/**` were both outside `PUR-2b`'s lease, so this is filed rather than taken. |
 | review-record-gate-covered-by-any-later-record | **CLOSED 2026-09-04 by `posting-kernel-admission`** (merge `ab2c569`): `INVENTORY_CONTRACT_V1.capabilityVersion` is the one authority — the module definition reads it, the provider imports it, and the compiler cell no longer spells a second number; a release whose declared capability fact differs from the registered provider version is refused on entry to `#post`, ahead of the stored-receipt lookup, so no path returns without the check. The MEANING question this row raised is answered: exact, because ADR-0063 decision 3 makes it a major version with no minor axis. `hasValidCapabilityFacts` stays a shape check, with the measured reason recorded at the site. **`check-review-record.sh` reports a merge covered when NO record names its packet tip — any later packet's record closes it** | Critical | **OPEN 2026-09-01, measured by the orchestrator while integrating `PUR-2b`, and it is the exact vacuity the script's own comments claim to have removed.** `covered_by_record` covers a merge `M` when `M^2` — the packet tip the review read — is an ancestor of ANY recorded SHA. Every later packet's record sits on `main`, which contains `M`, which contains `M^2`. **So every record retroactively covers every earlier merge, forever.** **Measured, not reasoned:** `a69e1af` (`posting-error-shape`) has second parent `ee8dc0c27edb041969b91294c56c192d9155ef30`, and that SHA appears **nowhere** in `docs/execution/review-log.md` — `grep -F` returns nothing — yet the gate reports all 60 executable commits covered. It is covered by `ec76617` (PUR-2a's record) and now also by `b2575349` (PUR-2b's), neither of which reviewed it. **This is why `lanes.md`'s note that the gate 'already FAILS on `main` for three merges' no longer reproduces:** the claim was true when the `posting-writer-inventory` lane measured it, and it was closed not by anyone reviewing those merges but by the next packet writing its own row. **The script anticipated this shape and missed this path.** Its comments retire two earlier models, the first being *'does ANY record contain this commit'*, which *"main being linear, made one late record cover all history"*. The merge branch reintroduces exactly that through second-parent ancestry, and the self-test does not catch it because its controls assert only that records load and resolve. **THE FIX IS SMALL AND EXACT.** For a merge, the legitimate record is on the packet's own branch line: a SHA that both descends from `M^2` and is an ancestor of `M`. The only commits satisfying both are `M^2` and `M` themselves — so the condition collapses to **the recorded SHA must BE the second parent (or the merge)**, not merely have it as an ancestor. That still admits the `relation-requiredness-relaxation` case this file records, where writing the row produced `55e1f28` which then became the tip and the second parent. **Needs a negative control that would have failed here:** a merge whose tip is recorded nowhere must RED. `scripts/**` and `test/architecture/**`; not held by any live lane. |
 | migration-range-encoded-in-a-test-title | **A test's own TITLE encodes the migration range, so every migration goes stale in two files at once** | Behavioral | **OPEN 2026-09-01, filed by the ORCHESTRATOR when DENYING `PUR-2b`'s bridge request.** `test/postgres/trust-substrate.test.ts:63` is titled *"migrations 0006-0022 upgrade accepted G1 and converge with the checked-in snapshot"* while its body asserts `0023`. **Advancing the digit is not a one-file edit**, and that is the whole point: `test/evidence/relation-requiredness-relaxation.expected-red.json` — an ACCEPTED packet's manifest — names that test by title TWICE, in `test.namePattern` and `kills[0].name`, and `measurePhase` asserts the pattern selects at least one test, so renaming the title alone reds `evidence:expected-red` with *the pattern or file selects nothing*. `check:expected-red` stays green either way, because validate mode reads the mutation SUBJECT and that entry's subject is migration `0022`, untouched — **so the two gates disagree, and only the one the lane was not running catches it.** **The bridge was DENIED, not deferred.** Verified by reading before ruling: the title does encode the range, the manifest does name it twice, and `grep -rn '0006-0022'` returns exactly those two sites outside `docs/`. Crossing into an accepted packet's manifest to advance one digit would have un-frozen a matrix-green candidate for a string that executes nothing, and Docker was down so the re-run could not have been paid anyway. **The durable fix is to DELETE the range from the title rather than advance it**, and to repoint both manifest strings at the range-free name — one crossing that ends the recurrence instead of one crossing per migration. **Same class as `press-law-splice-control-pinned-by-line-number`**: a coordinate that goes stale on every unrelated addition, and this is already its second occurrence. **Owner: whoever cuts migration `0024`**, which is the next packet that would otherwise pay the same toll. |
-
-## Operating model
-
-**THREE PARALLEL LANES ARE ACTIVE (2026-07-28).** See [lanes.md](lanes.md) for the binding path partition, the shared-file protocol, the serial-integration rule, and the mandatory report header. Writers cannot see each other, so that file is the only shared state — read it before starting or resuming any packet.
-
-- The user drives Codex `gpt-5.6-sol` sessions and pastes their reports back.
-- The assistant is **orchestrator + adjudicator**: it hands the user self-contained
-  packet prompts, adjudicates review findings and lease-bridge requests by reading the
-  code, and runs multi-model **debates** directly (it does not write product code).
-- One packet at a time, user-selected, per `mission-cadence`. New Codex session per
-  packet — every prompt reconstructs state from disk.
-- Reviews follow `review-tiers` (fresh naive spawns, mandatory charter; **a round with zero production defects converges the review** — ruled 2026-09-01).
-- Acceptance requires the **full CI matrix green at the integrated SHA** (not a
-  packet-chosen subset) — the rule PR-1 put in force.
-
-### Standing prioritization rule — user directive 2026-07-28 (binding)
-
-**A working inventory module is the goal, as soon as possible.** Every packet
-selection passes this filter, in order:
-
-  1. **Does it help get inventory running?** If yes, it is a candidate.
-  2. **If no — does it COST inventory?** This is the real test, and it is
-     narrower than "is it inventory work". A packet costs inventory if it does
-     any of:
-       - **holds or contends for a lease** on a file an inventory-path packet
-         needs;
-       - **takes the full-matrix slot** ahead of an inventory lane;
-       - **adds weight to the shared gates** every lane's matrix runs — a slow
-         or flaky new test taxes the inventory lanes on every run, which is the
-         subtle one; or
-       - **consumes adjudication attention** while an inventory lane is stopped
-         waiting on a ruling.
-  3. **If it costs nothing on all four, run it concurrently.** An idle lane is
-     waste, not safety.
-
-**Two standing priorities make concurrency safe**, and they are what replace
-idling: inventory lanes get the **matrix slot** first — a non-inventory lane
-waits — and inventory-lane reports get **adjudicated** first, always.
-
-**Corrected 2026-07-28, same day it was written.** The first draft said
-non-inventory work should be *deferred* unless it faced a closing window. That
-was over-corrected, as the user pointed out: the constraint is opportunity cost,
-not subject matter, and where opportunity cost is genuinely zero, an idle lane
-buys nothing. Authoring is fully parallel and only the matrix serializes, so a
-fourth lane on disjoint paths is net positive. What the original draft got right
-and is retained: an idle lane is **not itself a reason** to start something, so
-the answer to "what can we run" is still a real cost check and not a scramble
-for filler.
-
-Applied the same day it was issued, retracting three orchestrator
-recommendations: **row 9** (publish-path breadth envelope) and **row 8**
-(capability cycle-time baseline) both fail step 1, and row 9's
-baseline-cannot-be-reconstructed argument does not reach step 3 — the curve can
-begin at any N. **Row 1c-a** (rule the platform tier) also fails: 1c is in
-neither inventory chain, its own row records that no product path is affected,
-and deciding it later is *better*, because a real posting-service case would
-ground the Tier-B question that a hypothetical cannot.
-
-The inventory chains are `4c → Q1-P3b → G3-P5` and
-`1d → G3-P1b → G3-P2b → G3-P3`. When every downstream link is gated on a packet
-in flight, the highest-value orchestrator action is **landing that packet and
-pre-scoping its successor**, not opening a fourth lane.
 
 ## Standing lessons (why the queue looks like this)
 

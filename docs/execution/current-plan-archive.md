@@ -1105,3 +1105,142 @@ tree, and the required packet-into-main `--no-ff` merge completed.
 | renderer-statement-union-is-not-the-element-vocabulary | **The compiler's destructive-DDL allowlist fails OPEN on four element kinds the type system already lost track of** | Behavioral | **OPEN 2026-08-26, measured by `relation-requiredness-relaxation`.** `rendererStatement` (`module-storage-materializer.ts`) casts `{kind: element.kind}` to `StorageRendererStatement`, a union carrying only seven of the fourteen element kinds. `backfill`, `duplicateScan`, `tightenNotNull` and now `relaxNotNull` reach `validateStorageRendererStatements` as values outside its own declared type; the `as` cast hides that from TypeScript. Its allowlist is a named destructive SET rather than a closed enumeration, so an unrecognised kind is admitted rather than refused — **the destructive check fails OPEN on precisely the kinds the cast already lied about.** No live defect: none of the four renders destructive DDL today. But `assertNonDestructiveStorageStatements` is a Critical-path guard whose subject is a stale copy of the vocabulary it is meant to police. **NARROWED 2026-08-26 by the same packet's round-2 review (finding F3), and half closed.** The CONSEQUENCE is fixed: `validateStorageRendererStatements` is now an allowlist DERIVED from `STORAGE_COMPATIBILITY_MATRIX`'s keys, so an unrecognised kind is refused rather than admitted, and TypeScript forces that set to follow a new element kind. **The type-level half stays open**: `rendererStatement` still casts four element kinds into a union that does not carry them, so the cast still lies and `protocol.ts` still holds two vocabularies kept in step by hand. Owed: derive `StorageRendererStatement` from `StorageTransitionElementKind`. **Forward guidance from that packet's round-2 reviewer, recorded because the derived allowlist makes it load-bearing:** ADR-0011 currently treats the whole element vocabulary as non-destructive, so deriving the allowlist from the matrix keys is safe TODAY. A future element kind that is legitimately destructive must split *known transition element* from *renderer-safe transition element* rather than inherit this allowlist unchanged — otherwise it is admitted silently. This is the `gate-reads-a-different-thing-than-its-name` shape with a type cast holding the two apart. |
 | materializer-element-switch-is-not-exhaustive | **A new storage element kind builds green, lints green, and silently applies no DDL** | Behavioral | **OPEN 2026-08-26, measured by `relation-requiredness-relaxation`.** Adding an element kind is forced by TypeScript at exactly two sites — `STORAGE_COMPATIBILITY_MATRIX` (a `Record<Kind, Cell>`) and `classifyStorageTransitionElement`'s typed return. `applyDdlElement`'s switch, the site that actually runs SQL, has **no exhaustiveness check**: the packet measured `pnpm typecheck` green with the case absent. The element is then registered, marked `APPLIED`, and executes nothing. Catalog verification does catch the resulting drift, so the failure is loud rather than silent *at that tenant* — but it is caught at PREPARE against a live database instead of at build. **The charter for this packet predicted the opposite** — that TypeScript would find three of five sites — and the third is the one that runs. **Confirmed independently by that packet's round-1 reviewer, who named deleting the case as the cheapest broken tree surviving the whole matrix.** `relaxNotNull` itself is now covered by an executing PostgreSQL test that reads `information_schema.columns.is_nullable`, so the INSTANCE is closed; the CLASS is not, and the next kind added without a case still builds green and applies nothing. Owed: a `never`-typed default in `applyDdlElement`, so the executing site is at least as forced as the describing one. |
 | section-6-does-not-point-at-its-own-sequencing-ruling | **Two independent reviewers read `AGENTS.md` §6 as requiring the full CI matrix at FREEZE, and each cost a review round** | Behavioral | **OPEN 2026-08-26, measured by `relation-requiredness-relaxation` rounds 2 and 3.** §6 says a packet *"is acceptable only when the full CI matrix is green at the exact integrated SHA"*. `git-workflow`'s **"The matrix runs AFTER review converges, not before it — ruled 2026-08-14"** puts one matrix at step 4, at the SHA that will integrate, and states its own reconciliation: *"§6 is satisfied exactly as written — it requires the matrix green at the INTEGRATED SHA and has never required one before review"*, plus *"a freeze… no longer implies matrix-green."* **Both are correct and they do not conflict — but §6 does not say so, and §6 is what a reviewer opens.** A round-2 reviewer returned BLOCK citing §6 against a freeze-stage gate set; the lane answered with the ruling and the `posting-error-shape` precedent, and a round-3 reviewer would open the same §6 text. **This is the exact shape §4 and `review-tiers` already solved by citing each other** — §4 says *"a restatement here would read authoritative while being subordinate"* and points at the skill instead. Owed: one sentence in §6 pointing at the sequencing ruling, and one in `git-workflow` pointing back. **NOT taken by the measuring packet**: `AGENTS.md` and `.agents/skills/**` are outside every packet lease, and a lane editing the doctrine it is being judged against is the failure this routing exists to avoid. **Orchestrator's edit.** |
+
+## Moved here 2026-09-04 — the 2026-09-01 QUEUE FREEZE, where-we-are, critical path and operating model
+
+Superseded by the rewritten `AGENTS.md` and `current-plan.md`'s OPERATING MODEL section.
+Verbatim.
+
+## QUEUE FREEZE — ruled 2026-09-01. Read this first; it governs everything below.
+
+**The queue is frozen to the critical path of one goal: *an office worker can receive
+inventory and send it out.*** Measured reason: this file held 190 queue rows, 93 marked
+OPEN, in 495KB that every lane and every reviewer re-read per session, while the ten days
+after `PUR-1` produced five merges of enabler work and zero goods-receipt code. The rows
+are not wrong; they are not competing for a slot.
+
+**What moved.** Every section and row that is not on the critical path is in
+[current-plan-archive.md](current-plan-archive.md), **verbatim and unchanged** — TRIAGE,
+the old queue, the parked UX programme, the debate verdicts, the G2-era "where we are".
+A record elsewhere that says *"see row X in current-plan.md"* resolves there. Nothing was
+deleted and no disposition was altered.
+
+**The rules while the freeze holds.**
+
+1. **Only a row in this file may hold a slot.** Chartering anything not on the critical
+   path table needs a user ruling written into that table first.
+2. **A finding made during a packet is filed by one test: does it block a critical-path
+   step?** If yes, it gets a row here naming the step it blocks. If no, it gets **one
+   line** in the archive's *Filed during the freeze* table — packet, date, one sentence —
+   and the packet record carries the detail. No prose disposition anywhere else, and no
+   packet is chartered from it.
+3. **Promotion is explicit.** A dormant row is promoted by moving its line into this file
+   with the reason it now blocks, dated. Surfacing during an unrelated packet is not a
+   reason; that is how the queue reached 190.
+4. **The record layer stops growing per packet.** A packet record, its ledger row, its
+   lane row and its review-log rows are the whole record. Findings inventories,
+   dispositioned overlays and "corrected twice" narratives are archive material.
+5. **The freeze lifts at `SAL-2` acceptance, or earlier by user ruling recorded here.**
+6. **Enabler WIP cap — adopted 2026-09-01 from `5g3-prog` arm 1.** After `ENUM-WIDEN`
+   and `posting-kernel-admission` land, **the next accepted merge to `main` contains
+   goods-receipt production code.** A further enabler between them needs a user ruling
+   written into the critical-path table naming what it blocks.
+
+## Where we are — 2026-09-01
+
+| Stage | State |
+|---|---|
+| G0, G1 | COMPLETE |
+| G2 | walking slice, composed app, forms and pickers all accepted; stage never formally closed |
+| G3 | posting engine (adjust, transfer, count), stock balance read model accepted; `5g3-prog` review open |
+| G4 | `PUR-1` accepted 2026-08-22. `PUR-2` split into `2a` (accepted), `2b` (accepted), `2c` (STOPPED on the enum-widening refusal; record on `main`) |
+
+Accepted packets: 146 in six weeks. Since `PUR-1`: five merges, all enablers, no
+goods-receipt code. The critical path below is what remains.
+
+## The critical path — frozen 2026-09-01
+
+Serial unless marked parallel. Every module mount touches the same builder tuple,
+release lineage and migration chain, so the mounts cannot overlap.
+
+| step | packet | state | notes |
+|---|---|---|---|
+| 1 | `ENUM-WIDEN` | **DONE — accepted and pushed 2026-09-04**, merge `18f6ede`, accepted at `c3a2994`, `FULL_MATRIX_PASS_SHA=48f0cdb` at the integrated tree. Step 3a `posted-stock-honesty` is unblocked and takes `module-storage-materializer.ts`. History: cut from `main` at `8c41752`, round-3 executable candidate `4a1103a`, `main` merged in at the packet tip | Critical, Band A. Three groups per `PUR-2c` §2.5; cuts migration `0024`; ADR-0064 reserved to it |
+| 2 | `PUR-2c` (resume) | blocked on 1, `posting-kernel-admission` and `posted-stock-honesty` | goods receipt + posting through PUR-2a's binding; consumer census; §7.16 catalog obligation; **builds the ADR-0065 received-quantity read model and owes its ten named claims**; **its charter RULES forward dating** (`5g3-prog` A4: a `maximumForwardDateDays` dial with a fail-closed default, or an explicit allow carried on the Posted stock surface) and **opens with the admission map** (B1) and **declared bands per family** (B2) |
+| 3 | `PUR-2` remainder | after 2 | receipt correction, received/open-to-receive read models, what closes an order (§7.5: not viable without these) |
+| 4 | `SAL-1` | after 2 and the R7 small | sales order, mirror of `PUR-1` |
+| 5 | `SAL-2` | after 4 | shipment, negative posting, correction, read models, packing document |
+| ∥ | `received-quantity-ruling` | **ACCEPTED 2026-09-01**, merge `4fe5589` | ADR-0065: a provider-written rebuildable read model in the ADR-0057 shape, over-receipt refused inside the posting transaction on the order line as the serialization unit. The lane self-integrated; the orchestrator's read is recorded as a `local-confirm` in the `5g3-prog` record §6 — **the user's read is still owed** |
+| ∥ | `posting-kernel-admission` | **DONE — accepted and pushed 2026-09-04**, merge `ab2c5690179680e0ae42bbacec121c9c54cd4c8d`, `FULL_MATRIX_PASS_SHA=ab2c5690…` re-run at the integrated tree, all 87 expected-red entries green. Three arms: BLOCK, BLOCK, then REVISE with no production defect. Shipped R1+R2+R3+A2+A3+A6's comment; closes the two rows below. **With `ENUM-WIDEN` also landed, freeze rule 6 is now live: the next accepted merge to `main` contains goods-receipt production code.** | `5g3-prog` R1 + R2 + R3 + A2 (two ordering manifest entries) + A3 (a monotonic floor on `recordedAt` in `enforceNegativeStock`, one control), one packet — the writer may stop and split if it outgrows one freeze: ONE capability-version authority that release validation checks exactly; digest v4 excludes the derived `postingRole` (no persisted v4 receipt exists, measured); executed verifier tokens compared with the observed write set before commit. Owns `inventory-posting-service.ts`, `contracts.ts`, `definition.ts` (the version literal), the `conformance.ts` version cell, `release-repository.ts`'s capability-fact check, its tests and manifest. This IS arm 1's admission map for the posting kernel |
+| ∥ | `policy-unbound-refusal` | **parallel, now** | R7 small (a): a declared permission with no evaluator binding announces itself at compile time. R7 small (b), RLS on `module_storage_backfill_checkpoints`, needs a migration and is serialized behind `0024` |
+| 3a | `posted-stock-honesty` | **after ENUM-WIDEN lands, before step 2** (it edits `module-storage-materializer.ts`, ENUM-WIDEN's) | `5g3-prog` A1, the converged review's top finding: `reconcile` and the rebuild have no production caller while `ensurePostedStockBalanceProjection` heals the projection on EVERY transition without naming drift. Deliverables: a `scripts/` reconciliation runner the team can run (no route while row `7` is deferred); the rebuild compares each stored quantity to its recomputed sum and writes a discrepancy row in the `semantic_aggregate_anchor_discrepancies` shape before overwriting; a control for the posting-during-preparation refusal (A9). ADR-0057's sentences already corrected. Admitted under freeze rule 6's ruling clause on A1's ground |
+| ∥ | `5g3-prog` | **CONVERGED 2026-09-01**, two arms at `4218a66` | inventory-ledger program review; thirteen ranked findings, six fix-now across `posted-stock-honesty` and `posting-kernel-admission`, one charter decision for step 2, record fixes done, the rest filed; Dial B ADJUST both arms. [Record](program-reviews/2026-09-01-inventory-ledger.md) |
+
+Gate-integrity rows kept visible because they decide whether a matrix result can be
+trusted: `review-record-gate-covered-by-any-later-record`,
+`container-pressure-forges-outcomes`. Owned-by-step rows:
+`migration-range-encoded-in-a-test-title` (step 1), `purchasing-requires-inventory` and
+`posting-capability-version-has-three-encodings` (step 2), `7` (step 4).
+
+## Operating model
+
+**THREE PARALLEL LANES ARE ACTIVE (2026-07-28).** See [lanes.md](lanes.md) for the binding path partition, the shared-file protocol, the serial-integration rule, and the mandatory report header. Writers cannot see each other, so that file is the only shared state — read it before starting or resuming any packet.
+
+- The user drives Codex `gpt-5.6-sol` sessions and pastes their reports back.
+- The assistant is **orchestrator + adjudicator**: it hands the user self-contained
+  packet prompts, adjudicates review findings and lease-bridge requests by reading the
+  code, and runs multi-model **debates** directly (it does not write product code).
+- One packet at a time, user-selected, per `mission-cadence`. New Codex session per
+  packet — every prompt reconstructs state from disk.
+- Reviews follow `review-tiers` (fresh naive spawns, mandatory charter; **a round with zero production defects converges the review** — ruled 2026-09-01).
+- Acceptance requires the **full CI matrix green at the integrated SHA** (not a
+  packet-chosen subset) — the rule PR-1 put in force.
+
+### Standing prioritization rule — user directive 2026-07-28 (binding)
+
+**A working inventory module is the goal, as soon as possible.** Every packet
+selection passes this filter, in order:
+
+  1. **Does it help get inventory running?** If yes, it is a candidate.
+  2. **If no — does it COST inventory?** This is the real test, and it is
+     narrower than "is it inventory work". A packet costs inventory if it does
+     any of:
+       - **holds or contends for a lease** on a file an inventory-path packet
+         needs;
+       - **takes the full-matrix slot** ahead of an inventory lane;
+       - **adds weight to the shared gates** every lane's matrix runs — a slow
+         or flaky new test taxes the inventory lanes on every run, which is the
+         subtle one; or
+       - **consumes adjudication attention** while an inventory lane is stopped
+         waiting on a ruling.
+  3. **If it costs nothing on all four, run it concurrently.** An idle lane is
+     waste, not safety.
+
+**Two standing priorities make concurrency safe**, and they are what replace
+idling: inventory lanes get the **matrix slot** first — a non-inventory lane
+waits — and inventory-lane reports get **adjudicated** first, always.
+
+**Corrected 2026-07-28, same day it was written.** The first draft said
+non-inventory work should be *deferred* unless it faced a closing window. That
+was over-corrected, as the user pointed out: the constraint is opportunity cost,
+not subject matter, and where opportunity cost is genuinely zero, an idle lane
+buys nothing. Authoring is fully parallel and only the matrix serializes, so a
+fourth lane on disjoint paths is net positive. What the original draft got right
+and is retained: an idle lane is **not itself a reason** to start something, so
+the answer to "what can we run" is still a real cost check and not a scramble
+for filler.
+
+Applied the same day it was issued, retracting three orchestrator
+recommendations: **row 9** (publish-path breadth envelope) and **row 8**
+(capability cycle-time baseline) both fail step 1, and row 9's
+baseline-cannot-be-reconstructed argument does not reach step 3 — the curve can
+begin at any N. **Row 1c-a** (rule the platform tier) also fails: 1c is in
+neither inventory chain, its own row records that no product path is affected,
+and deciding it later is *better*, because a real posting-service case would
+ground the Tier-B question that a hypothetical cannot.
+
+The inventory chains are `4c → Q1-P3b → G3-P5` and
+`1d → G3-P1b → G3-P2b → G3-P3`. When every downstream link is gated on a packet
+in flight, the highest-value orchestrator action is **landing that packet and
+pre-scoping its successor**, not opening a fourth lane.
+
