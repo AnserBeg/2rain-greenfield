@@ -1068,14 +1068,17 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
   const blankFirstDuplicateScopeResponse = await page.goto(
     blankFirstDuplicateScopeUrl.href,
   );
-  expect(blankFirstDuplicateScopeResponse?.status()).toBe(422);
+  // A malformed scope now fails at current authorization before query
+  // execution. The rendered denial is still a non-data page and retains the
+  // caller's URL so the exact spoof attempt remains observable.
+  expect(blankFirstDuplicateScopeResponse?.status()).toBe(200);
   expect(
     new URL(page.url()).searchParams.getAll(
       onHandLookup.legalEntityParameterId,
     ),
   ).toEqual(['', browserLegalEntityId]);
   await expect(
-    page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
+    page.locator('[data-diagnostic-code="QUERY_PERMISSION_DENIED"]'),
   ).toBeVisible();
   await expect(
     page
@@ -1608,8 +1611,9 @@ async function repairedFormAnatomyJourney(
       'not-a-uuid',
     ),
     'TXN-SCOPE-MALFORMED',
-    'OPERATION_REFUSED',
-    'MODULE_INPUT_MALFORMED',
+    // The authorization boundary refuses malformed scope before it can reach
+    // provider input parsing; it must never inherit the demo role's ALLOW.
+    'OPERATION_PERMISSION_DENIED',
   );
 }
 
@@ -1801,7 +1805,10 @@ async function expectScopedInventoryCreateRefusal(
   scopeParameterId: string,
   action: string,
   transactionNumber: string,
-  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'OPERATION_REFUSED',
+  diagnosticCode:
+    | 'OPERATION_INPUT_INVALID'
+    | 'OPERATION_PERMISSION_DENIED'
+    | 'OPERATION_REFUSED',
   refusalCode?: string,
 ): Promise<void> {
   await page.goto(
