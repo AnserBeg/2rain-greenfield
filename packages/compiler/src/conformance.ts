@@ -45,6 +45,9 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'posted_stock_balance' },
   { classification: 'entityOwned', familyId: 'purchase_order' },
   { classification: 'entityOwned', familyId: 'purchase_order_line' },
+  { classification: 'entityOwned', familyId: 'goods_receipt' },
+  { classification: 'entityOwned', familyId: 'goods_receipt_line' },
+  { classification: 'entityOwned', familyId: 'purchase_order_received' },
   { classification: 'entityOwned', familyId: 'reservation' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
@@ -62,6 +65,11 @@ const INVENTORY_PROVIDER_WRITTEN_READ_MODEL_RULES = Object.freeze([
     familyId: 'posted_stock_balance',
     maintainerId:
       'northstar.postgresql-module-provider:posted-stock-balance/v1',
+  },
+  {
+    classification: 'providerWritten',
+    familyId: 'purchase_order_received',
+    maintainerId: 'northstar.postgresql-module-provider:received-quantity/v1',
   },
 ] as const);
 const INVENTORY_STORAGE_REFERENCE_RULES = Object.freeze([
@@ -178,6 +186,31 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'purchase_order_line',
     targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt',
+    targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt',
+    targetFamilyId: 'goods_receipt',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt_line',
+    targetFamilyId: 'goods_receipt',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt_line',
+    targetFamilyId: 'purchase_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'purchase_order_received',
+    targetFamilyId: 'purchase_order_line',
   },
   {
     semantics: 'sameEntity',
@@ -379,6 +412,10 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
     shape: {
       kind: 'enum',
       options: [
+        {
+          optionLocalId: 'inventory_posting_role_receipt',
+          label: 'receipt',
+        },
         {
           label: 'adjustment',
           optionLocalId: 'inventory_posting_role_adjustment',
@@ -1191,13 +1228,11 @@ function validatePinnedPostedStockBalanceEntity(
   entityId: string,
   movementEntityValidity: ReadonlyMap<string, boolean>,
   diagnostics: CompilerDiagnostic[],
+  rules: readonly PostedStockBalanceModuleFieldRule[] = POSTED_STOCK_BALANCE_MODULE_FIELD_RULES,
 ): boolean {
   let valid = true;
   const expected = new Map<string, PostedStockBalanceModuleFieldRule>(
-    POSTED_STOCK_BALANCE_MODULE_FIELD_RULES.map((rule) => [
-      rule.fieldLocalId,
-      rule,
-    ]),
+    rules.map((rule) => [rule.fieldLocalId, rule]),
   );
   const observed = new Set<string>();
   for (const field of packageRevision.fields.filter(
@@ -1247,7 +1282,7 @@ function validatePinnedPostedStockBalanceEntity(
       );
     }
   }
-  for (const rule of POSTED_STOCK_BALANCE_MODULE_FIELD_RULES) {
+  for (const rule of rules) {
     if (observed.has(rule.fieldLocalId)) continue;
     valid = false;
     diagnostics.push(
@@ -1287,6 +1322,13 @@ function operationTargetsEntity(
 ): boolean {
   if ('entity' in operation.effect) {
     return operation.effect.entity.targetId === entityId;
+  }
+  if (operation.effect.kind === 'registeredCapabilityEffect') {
+    return packageRevision.queries.some(
+      (query) =>
+        query.queryId === operation.readBack.targetId &&
+        query.sourceEntity.targetId === entityId,
+    );
   }
   if (operation.effect.kind !== 'transitionStateEffect') return false;
   const transitionId = operation.effect.transition.targetId;
@@ -1778,6 +1820,34 @@ export function validateModuleConformance(
           entity.entityId,
           movementEntityValidity,
           diagnostics,
+        )
+      ) {
+        qualifiedProviderWrittenReadModels.add(entity.entityId);
+      }
+    } else if (family.familyId === 'purchase_order_received') {
+      const rules = POSTED_STOCK_BALANCE_MODULE_FIELD_RULES.filter(
+        (rule) =>
+          rule.fieldLocalId === 'posted_stock_balance_posted_quantity' ||
+          rule.fieldLocalId === 'posted_stock_balance_unit_id',
+      ).map((rule) => ({
+        ...rule,
+        fieldLocalId:
+          rule.fieldLocalId === 'posted_stock_balance_posted_quantity'
+            ? 'purchase_order_received_received_quantity'
+            : 'purchase_order_received_unit_id',
+        storage: {
+          ...rule.storage,
+          searchable: rule.fieldLocalId === 'posted_stock_balance_unit_id',
+        },
+      }));
+      if (
+        entity.lifecycle === 'active' &&
+        validatePinnedPostedStockBalanceEntity(
+          packageRevision,
+          entity.entityId,
+          movementEntityValidity,
+          diagnostics,
+          rules,
         )
       ) {
         qualifiedProviderWrittenReadModels.add(entity.entityId);

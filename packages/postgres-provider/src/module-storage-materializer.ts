@@ -1374,6 +1374,14 @@ async function createManagedTable(
   entity: StorageEntityTarget,
 ): Promise<void> {
   const postedStockProjection = isPostedStockBalanceEntity(entity);
+  const receivedProjection = entity.entityId.endsWith(
+    ':entity.purchase_order_received',
+  );
+  const mutationFence = postedStockProjection
+    ? ' AND pg_trigger_depth() > 0'
+    : receivedProjection
+      ? " AND current_user = 'north_star_receipt_projection_writer'"
+      : '';
   const relationColumns = target.relations
     .filter(
       (relation) =>
@@ -1507,8 +1515,8 @@ async function createManagedTable(
         command === 'SELECT'
           ? `USING (${predicate})`
           : command === 'INSERT'
-            ? `WITH CHECK (${predicate}${postedStockProjection ? ' AND pg_trigger_depth() > 0' : ''})`
-            : `USING (${predicate}${postedStockProjection ? ' AND pg_trigger_depth() > 0' : ''}) WITH CHECK (${predicate}${postedStockProjection ? ' AND pg_trigger_depth() > 0' : ''})`;
+            ? `WITH CHECK (${predicate}${mutationFence})`
+            : `USING (${predicate}${mutationFence}) WITH CHECK (${predicate}${mutationFence})`;
       await client.query(
         `CREATE POLICY ${quoted(policy)} ON north_star_module.${quoted(entity.physicalTableName)}
            FOR ${command} TO north_star_module_runtime ${clause}`,
@@ -1518,7 +1526,7 @@ async function createManagedTable(
   if (entity.factStorage || entity.legalEntity || entity.legalEntityMaster) {
     await ensureMaterializerSelectPolicy(client, entity.physicalTableName);
   }
-  if (postedStockProjection) {
+  if (postedStockProjection || receivedProjection) {
     await ensureMaterializerProjectionMutationPolicies(
       client,
       entity.physicalTableName,
@@ -4668,6 +4676,12 @@ function buildExpectedPolicies(
   );
   return [...tables.values()].flatMap((entity) => {
     const postedStockProjection = isPostedStockBalanceEntity(entity);
+    const receivedProjection = entity.entityId.endsWith(
+      ':entity.purchase_order_received',
+    );
+    const receiptMutationPredicate = normalizePolicyExpression(
+      `tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND current_user = 'north_star_receipt_projection_writer'`,
+    );
     const triggerMutationPredicate = normalizePolicyExpression(
       `tenant_id = north_star_internal.trusted_tenant_id()
        AND environment_id = north_star_internal.trusted_environment_id()
@@ -4699,7 +4713,11 @@ function buildExpectedPolicies(
             tableName === entity.physicalTableName &&
             command !== 'SELECT'
               ? triggerMutationPredicate
-              : predicate;
+              : receivedProjection &&
+                  tableName === entity.physicalTableName &&
+                  command !== 'SELECT'
+                ? receiptMutationPredicate
+                : predicate;
           return {
             command,
             name: managedPolicyName(tableName, command),
@@ -4740,7 +4758,7 @@ function buildExpectedPolicies(
             },
           ]
         : []),
-      ...(postedStockProjection
+      ...(postedStockProjection || receivedProjection
         ? (['INSERT', 'UPDATE'] as const).map((command) => ({
             command,
             name: managedMaterializerProjectionPolicyName(

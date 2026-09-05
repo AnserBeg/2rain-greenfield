@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RECEIPT` (critical-path step 1) | active on `packet/RECEIPT`, isolated receipt worktree; owner-authorized complete vertical; external review and acceptance |
+| **BUILD** | `RECEIPT` (critical-path step 1) | blocked on AUTH/release-policy bridge: 13 new permissions unbound, acknowledgement register may only shrink; incomplete draft PR #1 on `packet/RECEIPT`; external review and acceptance |
 | **SUPPORT** | — | idle |
 
 

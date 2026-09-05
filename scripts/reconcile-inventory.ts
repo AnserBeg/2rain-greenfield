@@ -77,7 +77,7 @@ async function main(): Promise<void> {
       scopeId: 'operator-inventory-reconciliation',
     });
     process.stdout.write(
-      `${renderInventoryReconciliationReport(report)}\n${JSON.stringify(report)}\n`,
+      `${renderInventoryReconciliationReport(report).join('\n')}\n${JSON.stringify(report)}\n`,
     );
     process.exitCode =
       report.outcome === 'consistent'

@@ -86,6 +86,11 @@ export const INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1 = Object.freeze([
     maintainerId:
       'northstar.postgresql-module-provider:posted-stock-balance/v1',
   },
+  {
+    classification: 'providerWritten',
+    familyId: 'purchase_order_received',
+    maintainerId: 'northstar.postgresql-module-provider:received-quantity/v1',
+  },
 ] as const satisfies readonly InventoryProviderWrittenReadModelRuleV1[]);
 
 export const INVENTORY_STORAGE_REFERENCES_V1 = Object.freeze([
@@ -160,6 +165,9 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'posted_stock_balance' },
   { classification: 'entityOwned', familyId: 'purchase_order' },
   { classification: 'entityOwned', familyId: 'purchase_order_line' },
+  { classification: 'entityOwned', familyId: 'goods_receipt' },
+  { classification: 'entityOwned', familyId: 'goods_receipt_line' },
+  { classification: 'entityOwned', familyId: 'purchase_order_received' },
   { classification: 'entityOwned', familyId: 'reservation' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
@@ -195,6 +203,31 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'purchase_order_line',
     targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt',
+    targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt',
+    targetFamilyId: 'goods_receipt',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt_line',
+    targetFamilyId: 'goods_receipt',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt_line',
+    targetFamilyId: 'purchase_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'purchase_order_received',
+    targetFamilyId: 'purchase_order_line',
   },
   {
     semantics: 'sameEntity',

@@ -313,6 +313,7 @@ export function inventoryModuleDefinition(
         'Transaction type',
         20,
         enumeration(definitionIds, 'inventory_transaction_type', [
+          'goodsReceipt',
           'opening',
           'adjustment',
           'transfer',
@@ -695,6 +696,7 @@ export function inventoryModuleDefinition(
         'Posting role',
         120,
         enumeration(definitionIds, 'inventory_posting_role', [
+          'receipt',
           'adjustment',
           'transfer',
           'count',
