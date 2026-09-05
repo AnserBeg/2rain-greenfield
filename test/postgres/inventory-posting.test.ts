@@ -3405,11 +3405,6 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
         ).rebuildReceivedQuantities(database.context),
         1,
       );
-      assert.equal(
-        Number(await received()),
-        7,
-        'rebuild reproduces received from persisted movement attribution',
-      );
       assert.deepEqual(
         (
           await database.adminPool.query(
@@ -3418,6 +3413,11 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
         ).rows,
         progressBeforeAmendment.map((row) => ({ record_id: row.record_id })),
         'rebuild preserves the original deterministic received identity',
+      );
+      assert.equal(
+        Number(await received()),
+        7,
+        'rebuild reproduces received from persisted movement attribution',
       );
       assert.deepEqual(
         (
