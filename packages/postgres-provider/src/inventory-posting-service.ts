@@ -999,6 +999,44 @@ export class PostgresInventoryPostingService {
       throw inputError('Correction must name the original receipt');
     if (command.supersedesReceiptId !== null)
       requiredUuid(command.supersedesReceiptId, 'supersedesReceiptId');
+    requiredText(command.receiptNumber, 'receiptNumber', 60);
+    for (const line of command.lines) {
+      exactKeys(line, [
+        'receiptLineId',
+        'orderLineId',
+        'sourceLine',
+        'itemId',
+        'unitId',
+        'quantityDelta',
+        'costStatus',
+        'unitCost',
+        'currency',
+        'reversalOfMovementId',
+      ]);
+      requiredUuid(line.receiptLineId, 'receiptLineId');
+      requiredUuid(line.orderLineId, 'orderLineId');
+      requiredUuid(line.itemId, 'itemId');
+      requiredText(line.unitId, 'unitId', 32);
+      requiredText(line.sourceLine, 'sourceLine', 80);
+      if (!['known', 'absent'].includes(line.costStatus))
+        throw inputError('Actual cost status must be known or absent');
+      if (line.reversalOfMovementId !== null)
+        requiredUuid(line.reversalOfMovementId, 'reversalOfMovementId');
+    }
+    command = {
+      ...normalizeCommandEnvelope(structuredClone(command)),
+      sourceId: command.sourceId.toLowerCase(),
+      orderId: command.orderId.toLowerCase(),
+      locationId: command.locationId.toLowerCase(),
+      supersedesReceiptId: command.supersedesReceiptId?.toLowerCase() ?? null,
+      lines: command.lines.map((line) => ({
+        ...line,
+        receiptLineId: line.receiptLineId.toLowerCase(),
+        orderLineId: line.orderLineId.toLowerCase(),
+        itemId: line.itemId.toLowerCase(),
+        reversalOfMovementId: line.reversalOfMovementId?.toLowerCase() ?? null,
+      })),
+    };
     const ids = new Set<string>();
     const derived: DerivedGoodsReceiptCommand = {
       ...command,
@@ -1028,6 +1066,10 @@ export class PostgresInventoryPostingService {
         return {
           ...line,
           quantityDelta: receiptDecimal(quantity),
+          unitCost:
+            line.unitCost === null
+              ? null
+              : receiptDecimal(receiptQuantity(line.unitCost)),
           transactionLineId: deriveInventoryPostingCompanionId({
             capabilityId: RECEIVING_CAPABILITY_ID,
             familyId: 'goods_receipt',
@@ -4055,6 +4097,24 @@ async function assertReceiptCompensation(
     ],
   );
   const used = new Set<string>();
+  const remainingByMovement = new Map<string, bigint>();
+  for (const original of originalMovements.rows) {
+    const compensated = await client.query<{ quantity: string }>(
+      `SELECT coalesce(sum(${quoted(receiptColumn(m, 'inventory_movement_quantity_delta'))}),0)::text AS quantity FROM ${receiptTable(m)} WHERE tenant_id=$1 AND environment_id=$2 AND ${quoted(m.legalEntity!.column)}=$3 AND ${quoted(receiptColumn(m, 'inventory_movement_reversal_of_movement_id'))}=$4 AND archived_at IS NULL`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        original.record_id,
+      ],
+    );
+    remainingByMovement.set(
+      String(original.record_id),
+      receiptQuantity(
+        String(original[receiptColumn(m, 'inventory_movement_quantity_delta')]),
+      ) + receiptQuantity(compensated.rows[0]!.quantity),
+    );
+  }
   for (const line of command.lines) {
     if (used.has(line.reversalOfMovementId!))
       throw postingError(
@@ -4091,19 +4151,7 @@ async function assertReceiptCompensation(
         'RECEIPT_CORRECTION_INVALID',
         'Correction must preserve order-line, item, location and unit attribution',
       );
-    const compensated = await client.query<{ quantity: string }>(
-      `SELECT coalesce(sum(${quoted(receiptColumn(m, 'inventory_movement_quantity_delta'))}),0)::text AS quantity FROM ${receiptTable(m)} WHERE tenant_id=$1 AND environment_id=$2 AND ${quoted(m.legalEntity!.column)}=$3 AND ${quoted(receiptColumn(m, 'inventory_movement_reversal_of_movement_id'))}=$4 AND archived_at IS NULL`,
-      [
-        context.tenantId,
-        context.environmentId,
-        command.legalEntityId,
-        line.reversalOfMovementId,
-      ],
-    );
-    const remaining =
-      receiptQuantity(
-        String(original[receiptColumn(m, 'inventory_movement_quantity_delta')]),
-      ) + receiptQuantity(compensated.rows[0]!.quantity);
+    const remaining = remainingByMovement.get(String(original.record_id))!;
     const attempted = -receiptQuantity(line.quantityDelta);
     if (
       attempted <= 0n ||
@@ -4117,11 +4165,15 @@ async function assertReceiptCompensation(
   }
   if (
     command.kind === 'reversal' &&
-    originalMovements.rows.some((row) => !used.has(String(row.record_id)))
+    originalMovements.rows.some(
+      (row) =>
+        remainingByMovement.get(String(row.record_id))! > 0n &&
+        !used.has(String(row.record_id)),
+    )
   )
     throw postingError(
       'RECEIPT_CORRECTION_INVALID',
-      'Reversal must include every original receipt movement',
+      'Reversal must include every uncompensated original receipt movement',
     );
 }
 

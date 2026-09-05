@@ -32,6 +32,7 @@ import {
 } from './inventory-posting-service.js';
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
+import { executeReceivingOrderState } from './receiving-order-capability.js';
 
 class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
   readonly capabilityId = RECEIVING_CAPABILITY_ID;
@@ -66,6 +67,37 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
   async execute(
     request: RegisteredCapabilityOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope> {
+    if (
+      request.definition.operationId.endsWith(
+        ':operation.purchase_order_line_amend',
+      )
+    )
+      return executeReceivingOrderState(
+        this.context,
+        this.#binding,
+        request,
+        'amend',
+      );
+    if (
+      request.definition.operationId.endsWith(':operation.purchase_order_close')
+    )
+      return executeReceivingOrderState(
+        this.context,
+        this.#binding,
+        request,
+        'close',
+      );
+    if (
+      request.definition.operationId.endsWith(
+        ':operation.purchase_order_reopen',
+      )
+    )
+      return executeReceivingOrderState(
+        this.context,
+        this.#binding,
+        request,
+        'reopen',
+      );
     if (
       !request.definition.operationId.endsWith(
         ':operation.goods_receipt_post',

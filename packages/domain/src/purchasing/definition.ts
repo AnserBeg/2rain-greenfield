@@ -1,11 +1,11 @@
 // Canonical language v5 -- the version that MATERIALIZES a state machine's
 // state field as an ordinary enum field on its entity. Purchasing declares no
-// capability of its own, and nothing here appends an inventory fact.
+// generic CRUD for documents; receiving runs through the registered capability.
 //
 // SCOPE, as held: the purchase order DOCUMENT and its lines -- entities,
 // fields, queries, generic operations, two named transitions, surfaces and the
-// parent-scoped line relation. No receipt, no movement, no posting role, no
-// sales.
+// parent-scoped line relation, goods receipts, received progress and guarded
+// quantity amendment requests. No sales.
 //
 // THIS FILE IS THE FIRST FIRST-PARTY DECLARATION OF `stateMachines`.
 // `ADR-0050` ruled `transitionStateEffect` and `stateMachines` as one decision
@@ -144,6 +144,7 @@ const ENTITY_OWNED_QUERY_FAMILIES = new Set([
   'goods_receipt',
   'goods_receipt_line',
   'purchase_order_received',
+  'purchase_order_amendment',
 ]);
 
 function ids(namespace: string) {
@@ -235,6 +236,11 @@ export function purchasingModuleDefinition(
     ['purchase_order', 'Purchase order', entityIds.purchaseOrder],
     ['purchase_order_line', 'Purchase order line', entityIds.purchaseOrderLine],
     ['goods_receipt', 'Goods receipt', `${namespace}:entity.goods_receipt`],
+    [
+      'purchase_order_amendment',
+      'Order quantity amendment request',
+      `${namespace}:entity.purchase_order_amendment`,
+    ],
     [
       'goods_receipt_line',
       'Receipt line',
@@ -467,6 +473,11 @@ export function purchasingModuleDefinition(
       receivingOperation(definitionIds, 'purchase_order_line', 'amend'),
       ...operations(
         definitionIds,
+        'purchase_order_amendment',
+        `${namespace}:entity.purchase_order_amendment`,
+      ),
+      ...operations(
+        definitionIds,
         'purchase_order',
         entityIds.purchaseOrder,
         editableStates(definitionIds),
@@ -542,12 +553,19 @@ export function purchasingModuleDefinition(
         entityId,
         selectedFieldsForEntity(definitionIds, local),
         resolveFieldForEntity(fieldIds, local) ||
-          `${namespace}:field.${local}_${local === 'goods_receipt' ? 'number' : local === 'goods_receipt_line' ? 'item_id' : 'unit_id'}`,
+          `${namespace}:field.${local}_${local === 'goods_receipt' || local === 'purchase_order_amendment' ? 'number' : local === 'goods_receipt_line' ? 'item_id' : 'unit_id'}`,
       ),
     ),
     relations: [
       ...(
         [
+          [
+            'purchase_order_amendment_order_line',
+            'purchase_order_amendment',
+            'purchase_order_line',
+            'reference',
+            true,
+          ],
           [
             'goods_receipt_order',
             'goods_receipt',
@@ -646,6 +664,20 @@ function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
     })),
   });
   const specs: Array<readonly [string, string, string, FieldType, boolean?]> = [
+    [
+      'purchase_order_amendment',
+      'number',
+      'Amendment request number',
+      text(60),
+    ],
+    [
+      'purchase_order_amendment',
+      'line_revision',
+      'Expected order line revision',
+      integer(),
+    ],
+    ['purchase_order_amendment', 'quantity', 'New ordered quantity', decimal()],
+    ['purchase_order_amendment', 'reason', 'Amendment reason', text(2000)],
     ['goods_receipt', 'number', 'Receipt number', text(60)],
     [
       'goods_receipt',
@@ -662,7 +694,7 @@ function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
     ['goods_receipt', 'effective_at', 'Received at', instant()],
     ['goods_receipt', 'location_id', 'Receiving location', text(80)],
     ['goods_receipt', 'reason_code', 'Reason code', text(80)],
-    ['goods_receipt', 'reason_narrative', 'Reason', text(2000)],
+    ['goods_receipt', 'reason_narrative', 'Reason', text(1000)],
     ['goods_receipt_line', 'line_number', 'Line number', integer()],
     ['goods_receipt_line', 'item_id', 'Item', text(80)],
     ['goods_receipt_line', 'quantity', 'Quantity', decimal()],

@@ -37,6 +37,7 @@ import {
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import { aggregateGenerationLockKey } from './module-runtime-interpreter.js';
+import { rebuildReceivedQuantitiesOnClient } from './received-quantity-projection.js';
 
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
@@ -767,6 +768,51 @@ export class PostgresModuleStorageMaterializer {
       );
       await client.query('COMMIT');
       return result;
+    } catch (error) {
+      await rollbackQuietly(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async rebuildReceivedQuantities(
+    context: TrustedRequestContext,
+  ): Promise<number> {
+    const client = await this.materializerPool.connect();
+    try {
+      assertTrustedRequestContext(context);
+      await assertMaterializerSession(client);
+      await beginLocked(client);
+      await setMaterializerScope(client, context);
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [aggregateGenerationLockKey(context.tenantId, context.environmentId)],
+      );
+      const pointer = await requiredOne<{ release_id: string | null }>(
+        client,
+        'SELECT release_id FROM north_star_internal.module_storage_read_active_release_pointer($1,$2)',
+        [context.tenantId, context.environmentId],
+        'active release pointer',
+      );
+      if (!pointer.release_id)
+        throw failure(
+          'POSTED_STOCK_BALANCE_RELEASE_MISSING',
+          'Received rebuild requires an active release',
+        );
+      const release = await loadVerifiedReleaseStorage(
+        client,
+        context.tenantId,
+        context.environmentId,
+        pointer.release_id,
+      );
+      const count = await rebuildReceivedQuantitiesOnClient(
+        client,
+        release.target,
+        context,
+      );
+      await client.query('COMMIT');
+      return count;
     } catch (error) {
       await rollbackQuietly(client);
       throw error;
@@ -2044,6 +2090,7 @@ async function ensurePostedStockBalanceProjection(
   // cross-table projection only after every prepared table exists.
   await ensurePostedStockBalanceFunction(client);
   await rebuildPostedStockBalanceOnClient(client, target, scope);
+  await rebuildReceivedQuantitiesOnClient(client, target, scope);
   await ensurePostedStockBalanceTrigger(client, target);
 }
 

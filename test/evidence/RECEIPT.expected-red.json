@@ -8,7 +8,9 @@
       "file": "packages/postgres-provider/src/module-storage-materializer.ts",
       "original": "WHERE s.quantity IS DISTINCT FROM l.quantity OR s.unit_id IS DISTINCT FROM l.unit_id`,",
       "replacement": "WHERE false`,",
-      "test": { "files": ["test/postgres/inventory-reconciliation.test.ts"] },
+      "test": {
+        "files": ["test/postgres/inventory-reconciliation.test.ts"]
+      },
       "kills": [
         {
           "file": "test/postgres/inventory-reconciliation.test.ts",
@@ -19,7 +21,7 @@
     },
     {
       "name": "receipt-ordered-ceiling-absent",
-      "claim": "Concurrent receipts on one order line into different locations cannot exceed ordered quantity.",
+      "claim": "A receipt above ordered quantity is refused atomically.",
       "file": "packages/postgres-provider/src/goods-receipt.ts",
       "original": "if (result < 0n || result > ordered)",
       "replacement": "if (result < 0n)",
@@ -31,7 +33,79 @@
         {
           "file": "test/postgres/inventory-posting.test.ts",
           "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
-          "expected": "order-line lock serializes distinct stock locations"
+          "expected": "over-receipt is refused before any write"
+        }
+      ]
+    },
+    {
+      "name": "receipt-refusal-payload-incomplete",
+      "claim": "The refusal contains the attempted quantity as well as order line, ordered and received-before.",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "attemptedQuantity: receiptDecimal(attempted),",
+      "replacement": "attemptedQuantity: 'omitted',",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "receipt refusal exposes all four quantity operands"
+        }
+      ]
+    },
+    {
+      "name": "receipt-common-order-lock-absent",
+      "claim": "Both distinct-location receipts take the common order lock before the quantity check.",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "command.orderId,\n    true,",
+      "replacement": "command.orderId,\n    false,",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "expected 2 concurrent posting lock waiters"
+        }
+      ]
+    },
+    {
+      "name": "receipt-received-floor-absent",
+      "claim": "A correction below zero received is refused by the receiving bound.",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "if (result < 0n || result > ordered)",
+      "replacement": "if (result > ordered)",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "correction cannot reduce received below zero"
+        }
+      ]
+    },
+    {
+      "name": "receipt-received-verifier-vacuous",
+      "claim": "A received writer corrupting its output is refused before any business or trust effects commit.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "equals(actual[column], value),",
+      "replacement": "true,",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "Missing expected rejection"
         }
       ]
     }

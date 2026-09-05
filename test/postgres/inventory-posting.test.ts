@@ -91,6 +91,15 @@ import {
 } from '../../packages/runtime/src/request-runtime-view.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import {
+  amendOrderedQuantity,
+  changePurchaseOrderState,
+} from '../../packages/postgres-provider/src/purchasing-order-lifecycle.js';
+import { reconcileReceivedQuantities } from '../../packages/postgres-provider/src/received-quantity-projection.js';
+import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
+import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
+import { PostgresInventoryReconciliationService } from '../../packages/postgres-provider/src/inventory-reconciliation-service.js';
+import { renderSurfaceRuntimeWithData } from '../../apps/web/src/surface-runtime.js';
+import {
   RECEIVING_CAPABILITY_ID,
   receiptBinding,
   receiptColumn,
@@ -2619,6 +2628,82 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
     );
     const orderId = randomUUID(),
       orderLineId = randomUUID();
+    const policy = new AllowRuntimePolicy();
+    const issuer = new TrustedActorEnvelopeIssuer({
+      resolve: async () => ({
+        approvingHumanId: null,
+        delegation: null,
+        executionPrincipal: { kind: 'HUMAN', principalId },
+        initiatingHumanId: principalId,
+        subject: null,
+      }),
+    });
+    const interpreter = new PostgresModuleRuntimeInterpreter(
+      database.runtimePool,
+      issuer,
+      INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    );
+    const queryGateway = new SemanticQueryGateway(policy, interpreter);
+    const fixture = await compiledFixture();
+    const executor = RECEIVING_CAPABILITY_EXECUTOR_FACTORY.create({
+      actorIssuer: issuer,
+      pool: database.runtimePool,
+      currentInstant: () => recordedAt,
+      queryGateway,
+      releaseId: database.registration.releaseId,
+      releaseContentHash: database.registration.releaseContentHash,
+      projection: (familyId) => {
+        const projection = projectionPayload<unknown>(
+          fixture.inventory,
+          familyId,
+        );
+        return {
+          payload: projection.payload,
+          contentHash: projection.contentHash,
+        };
+      },
+    });
+    const mediation = new SemanticOperationMediationAuthority();
+    const gateway = new SemanticOperationGateway(
+      policy,
+      interpreter,
+      mediation,
+      undefined,
+      [executor],
+    );
+    const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+      new AuthenticatedRequestEntryAdapter(async () => ({
+        environmentId,
+        principalId,
+        tenantId,
+      })),
+      new PostgresRequestRuntimeViewService(database.runtimePool),
+      policy,
+    );
+    const invoke = (
+      local: string,
+      recordId: string,
+      expectedRevision: number,
+    ) =>
+      entry.run({ headers: {} }, (view) => {
+        const operationId = `northstar.app:operation.${local}`,
+          input = { recordId, expectedRevision };
+        return gateway.invoke(
+          view,
+          {
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+            operationId,
+            input,
+            idempotencyKey: randomUUID(),
+            confirmationGrant: mediation.issueConfirmationGrant(
+              view,
+              operationId,
+              input,
+            ),
+          },
+          mediation.issueInvocation(view, 'UI'),
+        );
+      });
     const insert = async (
       entity: StorageEntityTarget,
       id: string,
@@ -2772,13 +2857,208 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       );
       return result.rows[0]?.quantity as string | undefined;
     };
-    const first = await staged('6');
+    const allEffects = async () => {
+      const tables = [
+        ...database.registration.storageTarget.entities.map(receiptTable),
+        ...[
+          'semantic_operation_receipts',
+          'trust_action_invocations',
+          'trust_business_change_documents',
+          'trust_domain_events',
+          'trust_outbox',
+        ].map((name) => `platform.${quoted(name)}`),
+      ];
+      return Object.fromEntries(
+        await Promise.all(
+          tables.map(async (name) => [
+            name,
+            (
+              await database.adminPool.query(
+                `SELECT row_to_json(t)::text AS row FROM ${name} t ORDER BY row_to_json(t)::text`,
+              )
+            ).rows,
+          ]),
+        ),
+      );
+    };
+    const over = await staged('11');
+    const beforeOver = await allEffects();
+    await assert.rejects(
+      () => service.postGoodsReceipt(database.context, database.actor, over),
+      (error: unknown) => {
+        assert.ok(error instanceof InventoryPostingError);
+        assert.equal(error.code, 'RECEIPT_QUANTITY_OUT_OF_BOUNDS');
+        assert.deepEqual(
+          error.details,
+          {
+            orderLineId,
+            orderedQuantity: '10',
+            receivedBefore: '0',
+            attemptedQuantity: '11',
+          },
+          'receipt refusal exposes all four quantity operands',
+        );
+        return true;
+      },
+      'over-receipt is refused before any write',
+    );
+    assert.deepEqual(
+      await allEffects(),
+      beforeOver,
+      'refused receipt leaves every business and trust relation unchanged',
+    );
+    const futureDraft = await staged('1');
+    const future = { ...futureDraft, effectiveAt: '2026-07-30T12:00:00.000Z' };
+    await database.adminPool.query(
+      `UPDATE ${receiptTable(binding.receipt)} SET ${quoted(receiptColumn(binding.receipt, 'goods_receipt_effective_at'))}=$2 WHERE record_id=$1`,
+      [future.sourceId, future.effectiveAt],
+    );
+    const beforeFuture = await allEffects();
+    await assert.rejects(
+      () => service.postGoodsReceipt(database.context, database.actor, future),
+      { code: 'RECEIPT_FORWARD_DATE_REFUSED' },
+      'receipt default disallows the next tenant business day',
+    );
+    assert.deepEqual(await allEffects(), beforeFuture);
+    const costDraft = await staged('1');
+    const missingCost = {
+      ...costDraft,
+      lines: costDraft.lines.map((line) => ({
+        ...line,
+        costStatus: 'known' as const,
+      })),
+    };
+    await database.adminPool.query(
+      `UPDATE ${receiptTable(binding.line)} SET ${quoted(receiptColumn(binding.line, 'goods_receipt_line_cost_status'))}=$2 WHERE record_id=$1`,
+      [
+        missingCost.lines[0]!.receiptLineId,
+        receiptOption(binding.line, 'goods_receipt_line_cost_status', 'known'),
+      ],
+    );
+    const beforeCost = await allEffects();
+    await assert.rejects(
+      () =>
+        service.postGoodsReceipt(database.context, database.actor, missingCost),
+      { code: 'RECEIPT_COST_REQUIRED' },
+      'known actual cost requires a value and currency',
+    );
+    assert.deepEqual(await allEffects(), beforeCost);
+    const lateFailure = await staged('1');
+    const beforeLateFailure = await allEffects();
+    await database.adminPool.query(`CREATE SEQUENCE public.receipt_late_probe`);
+    await database.adminPool.query(
+      'GRANT USAGE ON SEQUENCE public.receipt_late_probe TO north_star_receipt_projection_writer',
+    );
+    await database.adminPool.query(
+      `CREATE FUNCTION public.receipt_late_probe_fn() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN PERFORM nextval('public.receipt_late_probe'); NEW.${quoted(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))}:=NEW.${quoted(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))}+1; RETURN NEW; END $probe$`,
+    );
+    await database.adminPool.query(
+      `CREATE TRIGGER receipt_late_probe BEFORE INSERT ON ${receiptTable(binding.received)} FOR EACH ROW EXECUTE FUNCTION public.receipt_late_probe_fn()`,
+    );
+    try {
+      await assert.rejects(
+        () =>
+          service.postGoodsReceipt(
+            database.context,
+            database.actor,
+            lateFailure,
+          ),
+        { code: 'RECEIPT_PROJECTION_DIVERGED' },
+      );
+      assert.equal(
+        (
+          await database.adminPool.query(
+            'SELECT is_called FROM public.receipt_late_probe',
+          )
+        ).rows[0]!.is_called,
+        true,
+        'late control reached the received writer after movements and companions',
+      );
+      assert.deepEqual(
+        await allEffects(),
+        beforeLateFailure,
+        'late received verification failure rolls back source, companions, movements, projection, idempotency and trust',
+      );
+    } finally {
+      await database.adminPool.query(
+        `DROP TRIGGER receipt_late_probe ON ${receiptTable(binding.received)}`,
+      );
+      await database.adminPool.query(
+        'DROP FUNCTION public.receipt_late_probe_fn()',
+      );
+      await database.adminPool.query('DROP SEQUENCE public.receipt_late_probe');
+    }
+    const firstDraft = await staged('6');
+    const first = {
+      ...firstDraft,
+      lines: firstDraft.lines.map((line) => ({
+        ...line,
+        costStatus: 'known' as const,
+        unitCost: '7.25',
+        currency: 'CAD',
+      })),
+    };
+    await database.adminPool.query(
+      `UPDATE ${receiptTable(binding.line)} SET ${quoted(receiptColumn(binding.line, 'goods_receipt_line_cost_status'))}=$2,${quoted(receiptColumn(binding.line, 'goods_receipt_line_unit_cost'))}=$3,${quoted(receiptColumn(binding.line, 'goods_receipt_line_currency'))}=$4 WHERE record_id=$1`,
+      [
+        first.lines[0]!.receiptLineId,
+        receiptOption(binding.line, 'goods_receipt_line_cost_status', 'known'),
+        '7.25',
+        'CAD',
+      ],
+    );
     const posted = await service.postGoodsReceipt(
       database.context,
       database.actor,
       first,
     );
     assert.equal(Number(await received()), 6);
+    await assert.rejects(
+      () =>
+        entry.run({ headers: {} }, (view) =>
+          gateway.invoke(
+            view,
+            {
+              schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+              operationId: 'northstar.app:operation.goods_receipt_line_update',
+              input: {
+                recordId: first.lines[0]!.receiptLineId,
+                expectedRevision: 1,
+                patch: {
+                  'northstar.app:field.goods_receipt_line_unit_cost': '8',
+                },
+              },
+              idempotencyKey: randomUUID(),
+              confirmationGrant: null,
+            },
+            mediation.issueInvocation(view, 'UI'),
+          ),
+        ),
+      { code: 'MODULE_MUTATION_PRECONDITION_FAILED' },
+      'posted actual unit cost and receipt attribution are not ordinarily editable',
+    );
+    const firstMovement = (
+      await database.adminPool.query(
+        `SELECT record_id FROM ${receiptTable(binding.movement)} WHERE ${quoted(receiptColumn(binding.movement, 'inventory_movement_source_id'))}=$1`,
+        [first.sourceId],
+      )
+    ).rows[0]!.record_id as string;
+    const belowZero = await staged('-7', locationPrimary, {
+      original: first.sourceId,
+      movement: firstMovement,
+    });
+    const beforeBelowZero = await allEffects();
+    await assert.rejects(
+      () =>
+        service.postGoodsReceipt(database.context, database.actor, belowZero),
+      { code: 'RECEIPT_QUANTITY_OUT_OF_BOUNDS' },
+      'correction cannot reduce received below zero',
+    );
+    assert.deepEqual(
+      await allEffects(),
+      beforeBelowZero,
+      'below-zero correction writes nothing',
+    );
     assert.deepEqual(
       await service.postGoodsReceipt(database.context, database.actor, first),
       { ...posted, replayed: true },
@@ -2796,11 +3076,38 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       staged('3', locationPrimary),
       staged('3', locationTie),
     ]);
-    const outcomes = await Promise.allSettled(
+    const receiptBlocker = await database.adminPool.connect();
+    await beginBoundedControlTransaction(receiptBlocker);
+    await receiptBlocker.query(
+      `SELECT record_id FROM ${receiptTable(binding.order)} WHERE record_id=$1 FOR NO KEY UPDATE`,
+      [orderId],
+    );
+    const postingRace = Promise.allSettled(
       races.map((receipt) =>
         service.postGoodsReceipt(database.context, database.actor, receipt),
       ),
     );
+    let outcomes: Awaited<typeof postingRace>;
+    try {
+      const parked = await waitForPostingLockWaiters(database.adminPool, 2);
+      assert.equal(
+        parked.length,
+        2,
+        'both distinct-location receipts reach the common order lock',
+      );
+      assert.ok(
+        parked.every((row) =>
+          row.query.includes(binding.order.physicalTableName),
+        ),
+        'both receiving writers are blocked on the common order, not stock identity',
+      );
+      await receiptBlocker.query('ROLLBACK');
+      outcomes = await postingRace;
+    } finally {
+      await receiptBlocker.query('ROLLBACK');
+      await postingRace;
+      receiptBlocker.release();
+    }
     assert.equal(
       outcomes.filter((outcome) => outcome.status === 'fulfilled').length,
       1,
@@ -2820,12 +3127,40 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       original: first.sourceId,
       movement: String(original.rows[0]!.record_id),
     });
-    await service.postGoodsReceipt(
-      database.context,
-      database.actor,
-      correction,
+    const corrected = await invoke(
+      'goods_receipt_post',
+      correction.sourceId,
+      1,
+    );
+    assert.equal(
+      corrected.outcome,
+      'succeeded',
+      'receipt correction uses the real operation gateway and registered executor',
     );
     assert.equal(Number(await received()), 7);
+    const orderPage = await entry.run({ headers: {} }, (view) =>
+      renderSurfaceRuntimeWithData(
+        view,
+        `/?${new URLSearchParams({ surface: 'northstar.app:surface.purchase_order_detail', record: orderId, 'northstar.app:parameter.purchase_order_get_legal_entity_scope': legalReject })}`,
+        {
+          queryGateway,
+          operationGateway: gateway,
+          operationMediation: mediation,
+        },
+      ),
+    );
+    assert.equal(orderPage.statusCode, 200);
+    assert.match(
+      orderPage.html,
+      /data-receiving-progress/u,
+      'purchase order exposes receiving in the actual Record surface',
+    );
+    assert.match(
+      orderPage.html,
+      /<td>10<\/td><td>7<\/td><td>3<\/td>/u,
+      'ordered, received and remaining are resolved on the server',
+    );
+    assert.match(orderPage.html, /Create goods receipt/u);
     const originalAfter = await database.adminPool.query(
       `SELECT ${quoted(receiptColumn(binding.receipt, 'goods_receipt_state'))} AS state FROM ${receiptTable(binding.receipt)} WHERE record_id=$1`,
       [first.sourceId],
@@ -2834,6 +3169,264 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       originalAfter.rows[0]!.state,
       receiptOption(binding.receipt, 'goods_receipt_state', 'posted'),
     );
+    const immutableBefore = (
+      await database.adminPool.query(
+        `SELECT * FROM ${receiptTable(binding.movement)} ORDER BY record_id`,
+      )
+    ).rows;
+    await assert.rejects(
+      () =>
+        withModuleRole(database.runtimePool, database.context, (client) =>
+          changePurchaseOrderState(
+            client,
+            binding,
+            database.context,
+            legalReject,
+            orderId,
+            1,
+            'close',
+          ),
+        ),
+      { code: 'RECEIPT_QUANTITY_OUT_OF_BOUNDS' },
+    );
+    await assert.rejects(
+      () =>
+        withModuleRole(database.runtimePool, database.context, (client) =>
+          amendOrderedQuantity(
+            client,
+            binding,
+            database.context,
+            legalReject,
+            orderLineId,
+            1,
+            '6',
+          ),
+        ),
+      { code: 'RECEIPT_QUANTITY_OUT_OF_BOUNDS' },
+    );
+    const progressBeforeAmendment = (
+      await database.adminPool.query(
+        `SELECT * FROM ${receiptTable(binding.received)} ORDER BY record_id`,
+      )
+    ).rows;
+    const amendmentEntity = binding.target.entities.find((row) =>
+      row.entityId.endsWith(':entity.purchase_order_amendment'),
+    )!;
+    const amendmentId = randomUUID();
+    await insert(
+      amendmentEntity,
+      amendmentId,
+      {
+        'field.purchase_order_amendment_number': 'AMEND-RECEIPT',
+        'field.purchase_order_amendment_line_revision': 1,
+        'field.purchase_order_amendment_quantity': '7',
+        'field.purchase_order_amendment_reason':
+          'Correct ordered intent to actual agreed quantity',
+      },
+      { purchase_order_amendment_order_line: orderLineId },
+    );
+    assert.equal(
+      (await invoke('purchase_order_line_amend', orderLineId, 1)).outcome,
+      'succeeded',
+      'amendment runs through the registered gateway with staged intent',
+    );
+    assert.notEqual(
+      (
+        await database.adminPool.query(
+          `SELECT archived_at FROM ${receiptTable(amendmentEntity)} WHERE record_id=$1`,
+          [amendmentId],
+        )
+      ).rows[0]!.archived_at,
+      null,
+      'applied amendment request is retained and consumed',
+    );
+    assert.equal(
+      Number(await received()),
+      7,
+      'amendment changes intent, not receipts',
+    );
+    assert.deepEqual(
+      (
+        await database.adminPool.query(
+          `SELECT * FROM ${receiptTable(binding.received)} ORDER BY record_id`,
+        )
+      ).rows,
+      progressBeforeAmendment,
+      'amendment leaves received row bytes and revision unchanged',
+    );
+    assert.equal(
+      (await invoke('purchase_order_close', orderId, 1)).outcome,
+      'succeeded',
+    );
+    await assert.rejects(
+      () =>
+        withModuleRole(database.runtimePool, database.context, (client) =>
+          amendOrderedQuantity(
+            client,
+            binding,
+            database.context,
+            legalReject,
+            orderLineId,
+            2,
+            '8',
+          ),
+        ),
+      { code: 'RECEIPT_ORDER_NOT_RELEASED' },
+    );
+    const closedCorrection = await staged('-1', locationPrimary, {
+      original: first.sourceId,
+      movement: String(original.rows[0]!.record_id),
+    });
+    await assert.rejects(
+      () =>
+        service.postGoodsReceipt(
+          database.context,
+          database.actor,
+          closedCorrection,
+        ),
+      { code: 'RECEIPT_ORDER_NOT_RELEASED' },
+    );
+    assert.equal(
+      (await invoke('purchase_order_reopen', orderId, 2)).outcome,
+      'succeeded',
+    );
+    assert.deepEqual(
+      (
+        await database.adminPool.query(
+          `SELECT * FROM ${receiptTable(binding.movement)} ORDER BY record_id`,
+        )
+      ).rows,
+      immutableBefore,
+      'closing, reopening and quantity amendments leave receipt facts unchanged',
+    );
+    await database.adminPool.query(
+      `UPDATE ${receiptTable(binding.received)} SET ${quoted(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))}=999 WHERE record_id=$1`,
+      [receivedIdentity(database.context, legalReject, orderLineId)],
+    );
+    const comparison = await withModuleRole(
+      database.runtimePool,
+      database.context,
+      (client) =>
+        reconcileReceivedQuantities(client, binding, database.context),
+    );
+    assert.equal(comparison.discrepancies.length, 1);
+    assert.equal(comparison.repaired, 0);
+    const reconciler = new PostgresInventoryReconciliationService(
+      database.runtimePool,
+      {
+        storageTarget: database.registration.storageTarget,
+        aggregateQueryId: 'northstar.app:query.inventory_movement_on_hand',
+        aggregateParameterIds: {
+          atTime: 'northstar.app:parameter.on_hand_at_time',
+          recordedAtHorizon:
+            'northstar.app:parameter.on_hand_recorded_at_horizon',
+          itemId: 'northstar.app:parameter.on_hand_item_id',
+          locationId: 'northstar.app:parameter.on_hand_location_id',
+          legalEntityId: 'northstar.app:parameter.on_hand_legal_entity_id',
+        },
+      },
+    );
+    const report = await reconciler.reconcile(database.context, {
+      legalEntityIds: [legalReject],
+      scopeId: 'receipt-corruption-control',
+    });
+    assert.equal(report.transactionReadOnly, 'on');
+    assert.equal(report.repairedSubjectCount, 0);
+    assert.ok(
+      report.findings.some(
+        (finding) =>
+          finding.code === 'RECEIVED_QUANTITY_LEDGER_DIVERGED' &&
+          finding.subjectId ===
+            receivedIdentity(database.context, legalReject, orderLineId),
+      ),
+      'read-only reconciliation reports the corrupt received subject',
+    );
+    assert.equal(
+      Number(await received()),
+      999,
+      'received reconciliation does not heal',
+    );
+    const materializerPool = new pg.Pool({
+      ...database.connection,
+      user: 'north_star_module_materializer',
+    });
+    const modulePool = new pg.Pool({
+      ...database.connection,
+      user: 'north_star_module_runtime',
+    });
+    try {
+      assert.equal(
+        await new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        ).rebuildReceivedQuantities(database.context),
+        1,
+      );
+      assert.equal(
+        Number(await received()),
+        7,
+        'rebuild reproduces received from persisted movement attribution',
+      );
+      assert.deepEqual(
+        (
+          await database.adminPool.query(
+            `SELECT * FROM ${receiptTable(binding.movement)} ORDER BY record_id`,
+          )
+        ).rows,
+        immutableBefore,
+      );
+      const identitiesBefore = (
+        await database.adminPool.query(
+          `SELECT record_id,legal_entity_id,${quoted(receiptRelation(binding, binding.received, 'purchase_order_received_order_line'))},${quoted(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))},${quoted(receiptColumn(binding.received, 'purchase_order_received_unit_id'))} FROM ${receiptTable(binding.received)} WHERE archived_at IS NULL ORDER BY record_id`,
+        )
+      ).rows;
+      await database.adminPool.query(
+        `UPDATE ${receiptTable(binding.received)} SET archived_at=transaction_timestamp()`,
+      );
+      await new PostgresModuleStorageMaterializer(
+        materializerPool,
+        modulePool,
+      ).rebuildReceivedQuantities(database.context);
+      assert.deepEqual(
+        (
+          await database.adminPool.query(
+            `SELECT record_id,legal_entity_id,${quoted(receiptRelation(binding, binding.received, 'purchase_order_received_order_line'))},${quoted(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))},${quoted(receiptColumn(binding.received, 'purchase_order_received_unit_id'))} FROM ${receiptTable(binding.received)} WHERE archived_at IS NULL ORDER BY record_id`,
+          )
+        ).rows,
+        identitiesBefore,
+        'rebuild from empty active projection preserves identities and quantities',
+      );
+      const reversalDraft = await staged('-4', locationPrimary, {
+        original: first.sourceId,
+        movement: firstMovement,
+      });
+      await database.adminPool.query(
+        `UPDATE ${receiptTable(binding.receipt)} SET ${quoted(receiptColumn(binding.receipt, 'goods_receipt_kind'))}=$2 WHERE record_id=$1`,
+        [
+          reversalDraft.sourceId,
+          receiptOption(binding.receipt, 'goods_receipt_kind', 'reversal'),
+        ],
+      );
+      assert.equal(
+        (await invoke('goods_receipt_post', reversalDraft.sourceId, 1)).outcome,
+        'succeeded',
+        'reversal compensates the remaining original quantity after partial correction',
+      );
+      assert.equal(Number(await received()), 3);
+      assert.deepEqual(
+        (
+          await database.adminPool.query(
+            `SELECT * FROM ${receiptTable(binding.movement)} WHERE record_id=ANY($1::uuid[]) ORDER BY record_id`,
+            [immutableBefore.map((row) => row.record_id)],
+          )
+        ).rows,
+        immutableBefore,
+        'reversal preserves every previous movement byte',
+      );
+    } finally {
+      await materializerPool.end();
+      await modulePool.end();
+    }
   });
 });
 

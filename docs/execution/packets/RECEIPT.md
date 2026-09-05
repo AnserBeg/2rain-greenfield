@@ -21,25 +21,28 @@ Owner's execution prompt is the charter; final review and acceptance remain exte
 
 ## Slices
 
-- Reconciliation CLI and pre-rebuild discrepancy persistence committed in `4f0fc4b`; CLI exercised against isolated empty development ledger: INDETERMINATE, subjects=0, repaired=0, transactionReadOnly=on, exit 3. Populated/corruption controls remain owed.
-- Receipt metadata, companion family, shared transaction changes, correction checks, received writer role and registered gateway adapter are staged implementation, not runtime-verified. Lifecycle/amendment execution, received rebuild/reconciliation and product receiving remain incomplete.
-- Resumed isolated tests: purchasing definition 35/35; reconciliation 26/26 (includes corrupted CLI exit 2, no repair, persisted pre-rebuild discrepancy and unchanged movement facts); receipt kernel test 1/1 (posting, retry, conflicting key, two locations against one line, correction). Fixture artifacts stay in memory, not in the production release.
+- Reconciliation CLI and pre-rebuild discrepancy persistence committed in `4f0fc4b`; CLI exercised against isolated empty development ledger: INDETERMINATE, subjects=0, repaired=0, transactionReadOnly=on, exit 3. Populated/corruption coverage followed at `af14f0e`.
+- Receipt metadata, companion family, shared transaction, correction, received projection/rebuild and order lifecycle code are implemented under isolated fixture tests. The governed production release and authorized product walkthrough still await the published AUTH dependency.
+- Resumed isolated tests: purchasing definition 36/36; reconciliation 26/26 (corrupted CLI exit 2, no repair, pre-rebuild discrepancy and unchanged facts); receipt kernel 1/1 (atomic over-receipt refusal, retry, conflicting key, concurrent distinct locations observed at common order lock, correction through real gateway, late received corruption rollback, amendment floor and reconstruction). Fixture artifacts stay in memory, never in the serving release. New Record-section/gateway lifecycle checks are being added, not yet acceptance evidence.
+- Amendment intent is a small ordinary `purchase_order_amendment` record: number, target order line, expected line revision, quantity and reason. The existing line-amend O1 hydrates exactly one matching request and consumes it atomically; the gateway input remains record/revision. Adds five exact permissions `northstar.app:permission.purchase_order_amendment_{create,read,update,archive,restore}`, resource `northstar.app:entity.purchase_order_amendment`, corresponding CRUD actions. Register through AUTH once delivered.
 
 ## Controls
 
-Pending implementation and actual execution; manifest validation is not execution.
+At `af14f0e`, actually executed `receipt-rebuild-discrepancy-capture-absent` and `receipt-ordered-ceiling-absent`: each reproduced its expected red and restored green. Additional payload, common-lock, received-floor and non-vacuous verifier controls are added; current candidate rerun remains owed. Manifest validation is not execution.
 
 ## Gates
 
-Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. No acceptance or review claimed. Critical expected-red controls executed: none; not at review readiness.
+Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. No acceptance or review claimed; not at review readiness.
 
-Local checkpoint: `pnpm format`, `pnpm typecheck`, `git diff --check` passed. Earlier slice CI https://github.com/AnserBeg/2rain-greenfield/actions/runs/33943109657 tested `4f0fc4b7e63a83ebb854a791d82bd5232179317e`: failed architecture/hygiene and schema drift; PostgreSQL suite not reached. This is not evidence for the later kernel work; migration snapshot/pins and full verification remain owed.
+Latest completed CI https://github.com/AnserBeg/2rain-greenfield/actions/runs/33944484616 tested `af14f0e0957adc2557751be08fdc7069f3772d0d`: unit and schema drift repaired; compiler and PostgreSQL now fail on changed contract/release/history inputs, browser/security green. Performance indeterminate (CPU idle 69.5%, required 90%), not a measured budget failure. Release must be regenerated after AUTH; no checks weakened.
 
-Candidate definition compile against the unchanged acknowledgement register refuses ONLY 13 `COMPILER_PERMISSION_EVALUATOR_UNBOUND` declarations: goods_receipt {archive,create,post,read,restore,update}; goods_receipt_line {archive,create,read,restore,update}; purchase_order_line_amend; purchase_order_received_read. All IDs use `northstar.app:permission.`.
+At blocked `a58cfb4`, governed compilation refused exactly 13 `COMPILER_PERMISSION_EVALUATOR_UNBOUND` declarations: goods_receipt {archive,create,post,read,restore,update}; goods_receipt_line {archive,create,read,restore,update}; purchase_order_line_amend; purchase_order_received_read. All IDs use `northstar.app:permission.`. The five later amendment-request permissions above also require real bindings; acknowledgement remains unchanged.
 
 ## Test it yourself
 
 The receipt product walkthrough is not yet runnable. No owner test claimed.
+
+Fixture checkpoint: `node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test --test-name-pattern='RECEIPT posts' test/postgres/inventory-posting.test.ts`; `node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test test/postgres/inventory-reconciliation.test.ts`. Both use disposable isolated test databases; neither starts or repairs the development server.
 
 From this worktree, start the isolated existing-release server with `PORT=4317 NORTH_STAR_DATABASE_PORT=55437 NORTH_STAR_DEV_DATABASE_CONTAINER=dev-receipt-postgres NORTH_STAR_TENANT_SLUG=receipt-development corepack pnpm dev` (do not start a second instance if already running).
 

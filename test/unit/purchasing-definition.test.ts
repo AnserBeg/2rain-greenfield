@@ -995,7 +995,7 @@ test('purchasing and receiving surfaces use registered anatomy; received project
     ],
   ]);
   const surfaces = authored().surfaces;
-  assert.equal(surfaces.length, 14);
+  assert.equal(surfaces.length, 17);
   assert.equal(
     surfaces.some(
       (surface) =>
@@ -1273,11 +1273,11 @@ test('the module rides the adopted language version and compiles deterministical
     definition.normalizationProfileVersion,
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
-  assert.equal(definition.entities.length, 5);
-  assert.equal(definition.queries.length, 20);
-  assert.equal(definition.operations.length, 23);
-  assert.equal(definition.permissions.length, 27);
-  assert.equal(definition.assertions.length, 5);
+  assert.equal(definition.entities.length, 6);
+  assert.equal(definition.queries.length, 24);
+  assert.equal(definition.operations.length, 27);
+  assert.equal(definition.permissions.length, 32);
+  assert.equal(definition.assertions.length, 6);
 
   const first = compile();
   const second = compile();
@@ -1338,6 +1338,93 @@ test('the module rides the adopted language version and compiles deterministical
       `${namespace}:entity.purchase_order_received`,
     ].toSorted(),
   );
+});
+
+test('RECEIPT received projection refuses authored o0, o1 and transition write paths', () => {
+  const entityId = `${namespace}:entity.purchase_order_received`;
+  for (const tier of ['o0', 'o1', 'transition'] as const) {
+    const definition = purchasingModuleDefinition() as Record<string, unknown>;
+    const operations = definition.operations as Array<Record<string, unknown>>;
+    const template = operations.find((row) =>
+      String(row.operationId).endsWith(
+        tier === 'o0' ? '.goods_receipt_update' : '.goods_receipt_post',
+      ),
+    )!;
+    operations.push({
+      ...structuredClone(template),
+      operationId: `${namespace}:operation.received_illegal_${tier}`,
+      readBack: {
+        kind: 'queryReference',
+        schemaVersion: 'v5',
+        targetId: `${namespace}:query.purchase_order_received_get`,
+      },
+      ...(tier === 'o0'
+        ? {
+            effect: {
+              kind: 'updateRecordEffect',
+              schemaVersion: 'v5',
+              entity: {
+                kind: 'entityReference',
+                schemaVersion: 'v5',
+                targetId: entityId,
+              },
+            },
+          }
+        : {}),
+    });
+    if (tier === 'transition') {
+      const machines = definition.stateMachines as Array<
+        Record<string, unknown>
+      >;
+      const machine = JSON.parse(
+        JSON.stringify(machines[0]).replaceAll(
+          'purchase_order',
+          'received_illegal',
+        ),
+      ) as Record<string, unknown>;
+      machine.entity = {
+        kind: 'entityReference',
+        schemaVersion: 'v5',
+        targetId: entityId,
+      };
+      machines.push(machine);
+      const operation = operations.at(-1)!;
+      operation.tier = 'o0';
+      operation.effect = {
+        kind: 'transitionStateEffect',
+        schemaVersion: 'v5',
+        transition: {
+          kind: 'transitionReference',
+          schemaVersion: 'v5',
+          targetId: `${namespace}:transition.received_illegal_release`,
+        },
+      };
+      operation.permission = {
+        kind: 'permissionReference',
+        schemaVersion: 'v5',
+        targetId: `${namespace}:permission.purchase_order_release`,
+      };
+      for (const transition of machine.transitions as Array<
+        Record<string, unknown>
+      >)
+        transition.permission = {
+          kind: 'permissionReference',
+          schemaVersion: 'v5',
+          targetId: `${namespace}:permission.purchase_order_release`,
+        };
+    }
+    const result = compileApplication(compilerInput(definition));
+    assert.equal(result.status, 'failed');
+    if (result.status === 'failed')
+      assert.ok(
+        result.diagnostics.some(
+          (row) =>
+            row.code === 'COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED' &&
+            row.subjectId === entityId,
+        ),
+        'provider-written quantity refuses every authored write tier',
+      );
+  }
 });
 
 test('release verification plans no scenario it cannot arrange for the state field', () => {

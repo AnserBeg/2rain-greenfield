@@ -11,6 +11,8 @@ import {
   withModuleRuntimeRole,
 } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
+import { receiptBinding } from './goods-receipt.js';
+import { reconcileReceivedQuantities } from './received-quantity-projection.js';
 
 export const INVENTORY_RECONCILIATION_REPORT_VERSION =
   'northstar.inventory-reconciliation-report/v1' as const;
@@ -25,7 +27,10 @@ const scaleFactor = 10n ** decimalScale;
 const maximumScaledMagnitude = 10n ** 38n;
 
 export type InventoryReconciliationArmIdV1 =
-  'aggregateAnchors' | 'postedStockBalances' | 'sourceDocuments';
+  | 'aggregateAnchors'
+  | 'postedStockBalances'
+  | 'sourceDocuments'
+  | 'receivedQuantities';
 
 /**
  * Three outcomes, never two. ADR-0044's rule applied to reconciliation:
@@ -45,6 +50,7 @@ export type InventoryReconciliationOutcomeV1 =
 export type InventoryReconciliationAxisV1 = 'balance' | 'integrity';
 
 export type InventoryReconciliationFindingCodeV1 =
+  | 'RECEIVED_QUANTITY_LEDGER_DIVERGED'
   | 'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED'
   | 'AGGREGATE_ANCHOR_DIGEST_DIVERGED'
   | 'AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE'
@@ -286,6 +292,7 @@ interface ReconciliationStorageBinding {
   readonly movement: EntityBinding;
   readonly movementPostingRoleAdjustment: string;
   readonly movementPostingRoleCorrection: string;
+  readonly movementPostingRoleReceipt: string | null;
   readonly movementPostingRoleCount: string;
   readonly movementPostingRoleTransfer: string;
   readonly movementQuantityColumn: string;
@@ -300,6 +307,7 @@ interface ReconciliationStorageBinding {
   readonly transaction: EntityBinding;
   readonly transactionAdjustmentType: string;
   readonly transactionCountCorrectionType: string;
+  readonly transactionReceiptType: string | null;
   readonly transactionEffectiveAtColumn: string;
   readonly transactionLine: EntityBinding;
   readonly transactionLineFromLocationColumn: string;
@@ -500,6 +508,34 @@ export class PostgresInventoryReconciliationService {
           legalEntityIds,
         );
         const arms = [aggregateAnchors, postedStockBalances, sourceDocuments];
+        const receiving = receiptBinding(this.registration.storageTarget);
+        if (receiving) {
+          const arm = new ArmAccumulator('receivedQuantities');
+          const comparison = await reconcileReceivedQuantities(
+            client,
+            receiving,
+            { ...context, legalEntityIds },
+          );
+          const divergent = new Set(
+            comparison.discrepancies.map((row) => row.recordId),
+          );
+          for (const row of comparison.expected) {
+            arm.examined(row.recordId, 'balance');
+            if (!divergent.has(row.recordId)) arm.consistent(row.recordId);
+          }
+          for (const row of comparison.discrepancies) {
+            arm.examined(row.recordId, 'balance');
+            arm.discrepant(row.recordId, {
+              axis: 'balance',
+              code: 'RECEIVED_QUANTITY_LEDGER_DIVERGED',
+              severity: 'discrepant',
+              declaredValue: JSON.stringify(row.stored),
+              observedValue: JSON.stringify(row.recomputed),
+              detail: { projectionEntityId: receiving.received.entityId },
+            });
+          }
+          arms.push(arm.freeze());
+        }
         const findings = arms.flatMap((arm) => arm.findings);
         const subjectCount = arms.reduce(
           (total, arm) => total + arm.subjectCount,
@@ -729,6 +765,7 @@ export class PostgresInventoryReconciliationService {
       const expectedAtLocation = expected.byLocation.get(movement.locationId);
       if (
         expectedAtLocation !== undefined &&
+        expectedAtLocation.sourceLine !== null &&
         movement.sourceLine !== expectedAtLocation.sourceLine
       ) {
         // The natural-effect identity: source line is part of the movement's
@@ -1557,7 +1594,7 @@ function combinedOutcome(
 
 interface ExpectedLocationEffect {
   readonly quantity: bigint;
-  readonly sourceLine: string;
+  readonly sourceLine: string | null;
 }
 
 /**
@@ -1608,7 +1645,8 @@ function expectedLineEffects(
   }
   if (
     line.transactionType !== binding.transactionAdjustmentType &&
-    line.transactionType !== binding.transactionCountCorrectionType
+    line.transactionType !== binding.transactionCountCorrectionType &&
+    line.transactionType !== binding.transactionReceiptType
   ) {
     return null;
   }
@@ -1620,19 +1658,34 @@ function expectedLineEffects(
   if (negative !== (line.fromLocationId !== null)) return null;
   return {
     byLocation: new Map([
-      [declaredLocations[0]!, { quantity, sourceLine: line.lineNumber }],
+      [
+        declaredLocations[0]!,
+        {
+          quantity,
+          sourceLine:
+            line.transactionType === binding.transactionReceiptType
+              ? null
+              : line.lineNumber,
+        },
+      ],
     ]),
     movementCount: 1,
     // A count correction posts as either an initial count or a correction, and
     // which one is a fact about the stock-count session rather than about the
     // transaction, so both are admissible from the document alone.
     postingRoles:
-      line.transactionType === binding.transactionAdjustmentType
-        ? new Set([binding.movementPostingRoleAdjustment])
-        : new Set([
-            binding.movementPostingRoleCount,
+      line.transactionType === binding.transactionReceiptType &&
+      binding.movementPostingRoleReceipt
+        ? new Set([
+            binding.movementPostingRoleReceipt,
             binding.movementPostingRoleCorrection,
-          ]),
+          ])
+        : line.transactionType === binding.transactionAdjustmentType
+          ? new Set([binding.movementPostingRoleAdjustment])
+          : new Set([
+              binding.movementPostingRoleCount,
+              binding.movementPostingRoleCorrection,
+            ]),
   };
 }
 
@@ -2239,6 +2292,14 @@ function resolveReconciliationStorage(
   );
   return Object.freeze({
     movement,
+    movementPostingRoleReceipt:
+      movementPostingRole.find((option) => option.endsWith('_receipt')) ?? null,
+    transactionReceiptType: target.entities.some((entity) =>
+      entity.entityId.endsWith(':entity.goods_receipt'),
+    )
+      ? (transactionType.find((option) => option.endsWith('_goods_receipt')) ??
+        null)
+      : null,
     movementPostingRoleAdjustment: uniqueEnumOption(
       movementPostingRole,
       'adjustment',

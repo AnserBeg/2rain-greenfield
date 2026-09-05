@@ -26,6 +26,10 @@ import {
   type SurfaceRelationPickerState,
 } from './component-registry.js';
 import { DESIGN_TOKENS } from './design-tokens.js';
+import {
+  loadReceivingSection,
+  receivingNavigation,
+} from './receiving-section.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
   operationMessageRef,
@@ -219,6 +223,41 @@ export async function renderSurfaceRuntimeWithData(
     } else {
       const result = await gateways.queryGateway.invoke(view, request);
       data = dataState(result);
+      if (
+        data.status === 'READY' &&
+        selection.selected.surfaceRole === 'record' &&
+        selection.surfaces.some((surface) =>
+          surface.surfaceId.endsWith(':surface.goods_receipt_detail'),
+        ) &&
+        legalEntitySelection.length === 1
+      ) {
+        const navigation = receivingNavigation(
+          view,
+          binding.query.sourceEntityId,
+          legalEntitySelection[0]!,
+        );
+        if (navigation) data = { ...data, receivingNavigation: navigation };
+      }
+      if (
+        data.status === 'READY' &&
+        selection.selected.surfaceRole === 'record' &&
+        selection.surfaces.some((surface) =>
+          surface.surfaceId.endsWith(':surface.goods_receipt_detail'),
+        ) &&
+        binding.query.sourceEntityId.endsWith(':entity.purchase_order') &&
+        data.records[0] &&
+        legalEntitySelection.length === 1
+      ) {
+        data = {
+          ...data,
+          receiving: await loadReceivingSection(
+            view,
+            gateways.queryGateway,
+            data.records[0],
+            legalEntitySelection[0]!,
+          ),
+        };
+      }
     }
   } catch (error) {
     const code = queryMessageCode(error);
@@ -345,6 +384,19 @@ export async function submitSurfaceRuntimeIntent(
   if (result.outcome !== 'succeeded' || !result.readBack) {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
+
+  if (
+    selection.selected.surfaceRole === 'record' &&
+    selection.surfaces.some((surface) =>
+      surface.surfaceId.endsWith(':surface.goods_receipt_detail'),
+    )
+  )
+    return renderSurfaceRuntimeWithData(view, requestUrl, gateways, {
+      intent,
+      label: operation.label,
+      record: result.readBack,
+      trustLinked: result.trust !== null,
+    });
 
   return renderSelectedSurface(
     view,
