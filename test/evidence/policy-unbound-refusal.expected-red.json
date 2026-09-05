@@ -90,8 +90,8 @@
       "name": "stale-check-removed",
       "claim": "The rule's stale half is what refuses an entry naming a permission the package does not declare: testing membership in the acknowledgement itself instead of in the declared census makes the branch unreachable, and a stale entry then survives compilation.",
       "file": "packages/compiler/src/conformance.ts",
-      "original": "      boundPermissionIds.has(acknowledgedId) ||\n      !declaredPermissionIds.has(acknowledgedId)",
-      "replacement": "      boundPermissionIds.has(acknowledgedId) ||\n      !acknowledgedById.has(acknowledgedId)",
+      "original": "      boundPermissionIds.has(acknowledgedId) ||\n      evaluatorBindingById.has(acknowledgedId) ||\n      !declaredPermissionIds.has(acknowledgedId)",
+      "replacement": "      boundPermissionIds.has(acknowledgedId) ||\n      evaluatorBindingById.has(acknowledgedId) ||\n      !acknowledgedById.has(acknowledgedId)",
       "test": {
         "files": ["test/compiler/g2-module-conformance.test.ts"],
         "namePattern": "unbound-permission acknowledgement"
@@ -105,10 +105,10 @@
       ]
     },
     {
-      "name": "acknowledgement-entry-removed",
-      "claim": "Removing one acknowledgement entry for a permission the composed application still declares (party_create) refuses the unchanged composed application by that permission's name; the admission twin is the same test passing with production restored, which the runner measures before mutating. The probe test dies with it: the refusal then names two permissions and the probe test requires exactly one. Three more controls die with it, all for the same removal: the release entry point's admission assertion (the real list no longer admits the real package), and the narrowing control, whose expected narrowed set is exactly that entry.",
-      "file": "apps/web/release/unbound-permission-acknowledgement.json",
-      "original": "      {\n        \"permissionId\": \"northstar.app:permission.party_create\",\n        \"resource\": \"northstar.app:entity.party\"\n      },\n",
+      "name": "evaluator-binding-removed",
+      "claim": "Removing the exact party_create evaluator binding while the composed application still declares it refuses the release by that permission's name. The empty acknowledgement cannot conceal a missing implementation binding.",
+      "file": "apps/web/release/current-policy-bindings.json",
+      "original": "      {\n        \"action\": \"create\",\n        \"permissionId\": \"northstar.app:permission.party_create\",\n        \"resource\": \"northstar.app:entity.party\"\n      },\n",
       "replacement": "",
       "test": {
         "files": ["test/compiler/g2-module-conformance.test.ts"],
@@ -117,32 +117,17 @@
       "kills": [
         {
           "file": "test/compiler/g2-module-conformance.test.ts",
-          "name": "unbound-permission acknowledgement: the unchanged composed application builds under its acknowledgement, which is exactly its declared census",
+          "name": "unbound-permission acknowledgement: the unchanged composed application builds only with its exact evaluator-binding census",
           "expected": "COMPILER_PERMISSION_EVALUATOR_UNBOUND.*northstar\\.app:permission\\.party_create"
-        },
-        {
-          "file": "test/compiler/g2-module-conformance.test.ts",
-          "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
-          "expected": "the refusal must name exactly the one unacknowledged permission and nothing else"
-        },
-        {
-          "file": "test/compiler/g2-module-conformance.test.ts",
-          "name": "unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned",
-          "expected": "compiled"
-        },
-        {
-          "file": "test/compiler/g2-module-conformance.test.ts",
-          "name": "unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it",
-          "expected": "narrowing keeps exactly the permissions the revision declares"
         }
       ]
     },
     {
-      "name": "stale-entry-added",
-      "claim": "An acknowledgement entry naming a permission the composed application does not declare refuses the unchanged composed application as stale by that entry's name: the list cannot rot. The probe test dies with it for the same two-diagnostics reason. The release entry point's admission assertion dies with it: the real list no longer admits the real package once it carries an entry the package does not declare.",
-      "file": "apps/web/release/unbound-permission-acknowledgement.json",
+      "name": "stale-active-binding-added",
+      "claim": "An active evaluator binding naming a permission the package does not declare refuses the unchanged release as stale. Only exact compatible-extension bindings may precede their dependent declaration.",
+      "file": "apps/web/release/current-policy-bindings.json",
       "original": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ],",
-      "replacement": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      },\n      {\n        \"permissionId\": \"northstar.app:permission.stock_count_probe_stale\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ],",
+      "replacement": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      },\n      {\n        \"action\": \"read\",\n        \"permissionId\": \"northstar.app:permission.stock_count_probe_stale\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ],",
       "test": {
         "files": ["test/compiler/g2-module-conformance.test.ts"],
         "namePattern": "unbound-permission acknowledgement"
@@ -150,18 +135,8 @@
       "kills": [
         {
           "file": "test/compiler/g2-module-conformance.test.ts",
-          "name": "unbound-permission acknowledgement: the unchanged composed application builds under its acknowledgement, which is exactly its declared census",
+          "name": "unbound-permission acknowledgement: the unchanged composed application builds only with its exact evaluator-binding census",
           "expected": "COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE.*northstar\\.app:permission\\.stock_count_probe_stale"
-        },
-        {
-          "file": "test/compiler/g2-module-conformance.test.ts",
-          "name": "unbound-permission acknowledgement: a permission the composed application declares and nothing acknowledges refuses the release by name",
-          "expected": "the refusal must name exactly the one unacknowledged permission and nothing else"
-        },
-        {
-          "file": "test/compiler/g2-module-conformance.test.ts",
-          "name": "unbound-permission acknowledgement: the release entry point governs unconditionally, so casting around its required parameter is refused rather than ungoverned",
-          "expected": "compiled"
         }
       ]
     },
@@ -183,7 +158,7 @@
         },
         {
           "file": "test/compiler/g2-module-conformance.test.ts",
-          "name": "unbound-permission acknowledgement: the unchanged composed application builds under its acknowledgement, which is exactly its declared census",
+          "name": "unbound-permission acknowledgement: the unchanged composed application builds only with its exact evaluator-binding census",
           "expected": "names no entries for package northstar\\.app:package\\.application;"
         },
         {
@@ -228,10 +203,10 @@
     },
     {
       "name": "recorded-revision-narrowing-removed",
-      "claim": "Narrowing the checked-in list to a recorded revision's own census is what lets --truncate-invalid-lineage govern historical entries at all: returning the list unnarrowed reports every newer entry as stale against an older revision, and the narrowing control observes that the helper no longer restricts to the declared set. Measured at the ROUTE too, not only at the helper: the discriminating truncation specimen reds, because an older revision is then judged against a permission it never declared and the lineage loses its valid prefix.",
+      "claim": "Narrowing the checked-in evaluator bindings to a recorded revision's own census is what lets --truncate-invalid-lineage govern historical entries at all: returning current active bindings unnarrowed reports every newer binding as stale against an older revision.",
       "file": "apps/web/scripts/unbound-permission-acknowledgement.ts",
-      "original": "    entries: acknowledgement.entries.filter((entry) =>\n      declaredPermissionIds.has(entry.permissionId),\n    ),",
-      "replacement": "    entries: acknowledgement.entries,",
+      "original": "          evaluatorBindings: acknowledgement.evaluatorBindings.filter((entry) =>\n            declaredPermissionIds.has(entry.permissionId),\n          ),",
+      "replacement": "          evaluatorBindings: acknowledgement.evaluatorBindings,",
       "test": {
         "files": [
           "test/compiler/g2-module-conformance.test.ts",
@@ -243,7 +218,7 @@
         {
           "file": "test/compiler/g2-module-conformance.test.ts",
           "name": "unbound-permission acknowledgement: a recorded revision is governed by the checked-in list narrowed to its own census, which can only shrink it",
-          "expected": "narrowing keeps exactly the permissions the revision declares"
+          "expected": "narrowing keeps exactly the evaluator bindings the revision declares"
         },
         {
           "file": "test/compiler/compiler-semantic-profile.test.ts",

@@ -60,6 +60,7 @@ async function main(): Promise<void> {
           },
           databaseUrl: connectionUrl(connection),
           inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+          localDemoIdentity: true,
           migrationsDirectory,
           providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
           tenantSlug: 'fresh-tenant-full-replay',

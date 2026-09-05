@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "packet": "AUTH",
+  "entries": [
+    {
+      "name": "revoked-grant-treated-as-current",
+      "claim": "A grant revoked after a request view is issued must deny the next decision on that same release-pinned view.",
+      "file": "packages/postgres-provider/src/current-policy.ts",
+      "original": "            AND permission_grant.resource_id = $5\n            AND permission_grant.revoked_at IS NULL`,",
+      "replacement": "            AND permission_grant.resource_id = $5`,",
+      "test": {
+        "files": ["test/postgres/current-policy.test.ts"],
+        "namePattern": "current policy evaluates live grants and scope"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/current-policy.test.ts",
+          "name": "current policy evaluates live grants and scope under the non-admin runtime role",
+          "expected": "DENY"
+        }
+      ]
+    },
+    {
+      "name": "unknown-permission-allowed",
+      "claim": "An unknown permission contract must return DENY before consulting grants.",
+      "file": "packages/postgres-provider/src/current-policy.ts",
+      "original": "    if (!binding || scope.status === 'invalid') {\n      return Object.freeze({\n        decision: 'DENY' as const,",
+      "replacement": "    if (!binding || scope.status === 'invalid') {\n      return Object.freeze({\n        decision: 'ALLOW' as const,",
+      "test": {
+        "files": ["test/postgres/current-policy.test.ts"],
+        "namePattern": "current policy evaluates live grants and scope"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/current-policy.test.ts",
+          "name": "current policy evaluates live grants and scope under the non-admin runtime role",
+          "expected": "DENY"
+        }
+      ]
+    },
+    {
+      "name": "foreign-entity-scope-widened",
+      "claim": "Every legal entity operand must be covered by the principal's current scoped membership.",
+      "file": "packages/postgres-provider/src/current-policy.ts",
+      "original": "              scope.legalEntityIds.every((id) => memberships.includes(id));",
+      "replacement": "              scope.legalEntityIds.every(() => true);",
+      "test": {
+        "files": ["test/postgres/current-policy.test.ts"],
+        "namePattern": "current policy evaluates live grants and scope"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/current-policy.test.ts",
+          "name": "current policy evaluates live grants and scope under the non-admin runtime role",
+          "expected": "DENY"
+        }
+      ]
+    },
+    {
+      "name": "receipt-binding-action-drifted",
+      "claim": "The compiler-visible receiving contracts must match the real evaluator's exact action, permission id and resource; a binding is not a grant.",
+      "file": "apps/web/release/current-policy-bindings.json",
+      "original": "        \"action\": \"transition\",\n        \"availability\": \"compatibleExtension\",\n        \"permissionId\": \"northstar.app:permission.purchase_order_line_amend\",",
+      "replacement": "        \"action\": \"read\",\n        \"availability\": \"compatibleExtension\",\n        \"permissionId\": \"northstar.app:permission.purchase_order_line_amend\",",
+      "test": {
+        "files": ["test/compiler/g2-module-conformance.test.ts"],
+        "namePattern": "unbound-permission acknowledgement: the unchanged composed application"
+      },
+      "kills": [
+        {
+          "file": "test/compiler/g2-module-conformance.test.ts",
+          "name": "unbound-permission acknowledgement: the unchanged composed application builds only with its exact evaluator-binding census",
+          "expected": "13 receiving contracts"
+        }
+      ]
+    },
+    {
+      "name": "policy-narrowing-accepts-invented-parameter",
+      "claim": "A policy query narrowing cannot introduce a caller-controlled parameter or alter its declared type.",
+      "file": "packages/runtime/src/semantic-query-gateway.ts",
+      "original": "  if (parameterized) {\n    assertPolicyNarrowingParameterBindings(",
+      "replacement": "  if (false && parameterized) {\n    assertPolicyNarrowingParameterBindings(",
+      "test": {
+        "files": ["test/integration/semantic-gateways.test.ts"],
+        "namePattern": "policy narrowing may reference only"
+      },
+      "kills": [
+        {
+          "file": "test/integration/semantic-gateways.test.ts",
+          "name": "policy narrowing may reference only a parameter and type declared by the selected query",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "checkpoint-rls-disabled",
+      "claim": "Backfill checkpoints must enforce tenant and environment isolation under both actual non-admin internal roles while preserving legitimate access.",
+      "file": "db/migrations/0025_current_authorization.sql",
+      "original": "ALTER TABLE north_star_internal.module_storage_backfill_checkpoints\n  ENABLE ROW LEVEL SECURITY;",
+      "replacement": "ALTER TABLE north_star_internal.module_storage_backfill_checkpoints\n  DISABLE ROW LEVEL SECURITY;",
+      "test": {
+        "files": ["test/postgres/module-storage-transition.test.ts"],
+        "namePattern": "compiled module materialization is isolated, convergent, and provenance-closed"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/module-storage-transition.test.ts",
+          "name": "compiled module materialization is isolated, convergent, and provenance-closed",
+          "expected": "another tenant cannot discover or mutate the checkpoint"
+        }
+      ]
+    },
+    {
+      "name": "missing-identity-falls-back-to-demo",
+      "claim": "A composed non-demo entry with no verified authentication integration must fail closed instead of manufacturing the fixed demo identity.",
+      "file": "packages/postgres-provider/src/composed-application-runtime.ts",
+      "original": "          : (options.authenticateRequest ?? (async () => null)),",
+      "replacement": "          : (options.authenticateRequest ?? (async () => identities.runtime)),",
+      "test": {
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "composed product activates through the kernel"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/composed-application.test.ts",
+          "name": "a composed runtime with no verified identity integration fails request entry closed",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "query-denial-recorder-unwired",
+      "claim": "Denied query and relation-option calls must persist redacted trust evidence while denied business writes leave their rows absent.",
+      "file": "packages/postgres-provider/src/composed-application-runtime.ts",
+      "original": "      new PostgresSemanticQueryDenialRecorder(runtimePool, actorIssuer),",
+      "replacement": "      undefined,",
+      "test": {
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "composed product activates through the kernel"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/composed-application.test.ts",
+          "name": "current grants enforce allow, read-only, revocation, scope and denial evidence on one pinned runtime",
+          "expected": "every denied query and operation must record trust evidence"
+        }
+      ]
+    }
+  ]
+}

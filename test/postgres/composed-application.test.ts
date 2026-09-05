@@ -77,11 +77,19 @@ import {
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
-import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
-import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  SEMANTIC_OPERATION_REQUEST_VERSION,
+  SemanticOperationPolicyDeniedError,
+} from '../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import {
+  CURRENT_POLICY_BINDINGS_FILE,
+  CURRENT_POLICY_BINDINGS_VERSION,
   UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE,
   UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -105,25 +113,38 @@ async function writeAcknowledgementBeside(
   const authored = definition as {
     package: { packageId: string };
     permissions: ReadonlyArray<{
+      action: string;
       permissionId: string;
       resource: { targetId: string };
     }>;
   };
-  await writeFile(
-    resolve(dirname(authoredPath), UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE),
-    JSON.stringify({
-      header: ['test workspace: every declared permission acknowledged'],
-      packages: {
-        [authored.package.packageId]: authored.permissions.map(
-          (permission) => ({
-            permissionId: permission.permissionId,
-            resource: permission.resource.targetId,
-          }),
-        ),
-      },
-      schemaVersion: UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
-    }),
-  );
+  await Promise.all([
+    writeFile(
+      resolve(dirname(authoredPath), UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE),
+      JSON.stringify({
+        header: [
+          'test workspace: every declared permission is evaluator-bound',
+        ],
+        packages: { [authored.package.packageId]: [] },
+        schemaVersion: UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
+      }),
+    ),
+    writeFile(
+      resolve(dirname(authoredPath), CURRENT_POLICY_BINDINGS_FILE),
+      JSON.stringify({
+        packages: {
+          [authored.package.packageId]: authored.permissions.map(
+            (permission) => ({
+              action: permission.action,
+              permissionId: permission.permissionId,
+              resource: permission.resource.targetId,
+            }),
+          ),
+        },
+        schemaVersion: CURRENT_POLICY_BINDINGS_VERSION,
+      }),
+    ),
+  ]);
 }
 const migrationsDirectory = resolve('db/migrations');
 const fullReplaySchemaSnapshotPath = resolve(
@@ -575,6 +596,24 @@ test(
             separateRequest.records.map((record) => record.recordId),
             [recordId],
             'a separate gateway request reads the committed PostgreSQL row',
+          );
+          await context.test(
+            'current grants enforce allow, read-only, revocation, scope and denial evidence on one pinned runtime',
+            () =>
+              assertCurrentAuthorizationVertical(
+                pool,
+                tenantA,
+                compiledApplication,
+              ),
+          );
+          await context.test(
+            'a composed runtime with no verified identity integration fails request entry closed',
+            () =>
+              assertFailClosedIdentitySeam(
+                compiledApplication,
+                databaseUrl,
+                'composed-tenant-a',
+              ),
           );
 
           await tenantA.close();
@@ -2051,6 +2090,412 @@ function createParty(
       runtime.operationMediation.issueInvocation(view, 'UI'),
     ),
   );
+}
+
+async function assertCurrentAuthorizationVertical(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  assert.equal(runtime.identityMode, 'LOCAL_DEMO');
+  const scope = [runtime.identity.tenantId, runtime.identity.environmentId];
+  const role = await pool.query<{ role_id: string }>(
+    `SELECT role_id
+       FROM platform.current_policy_roles
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND role_key = 'local-demo-full-release'`,
+    scope,
+  );
+  const roleId = role.rows[0]?.role_id;
+  assert.ok(roleId);
+  const membership = await pool.query<{ membership_id: string }>(
+    `SELECT membership_id
+       FROM platform.current_policy_memberships
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND principal_id = $3 AND role_id = $4`,
+    [...scope, runtime.identity.principalId, roleId],
+  );
+  const membershipId = membership.rows[0]?.membership_id;
+  assert.ok(membershipId);
+  const deniedBefore = await deniedInvocationCount(pool, runtime);
+  const allowedRecordId = randomUUID();
+  const partyCreatePermission = 'northstar.app:permission.party_create';
+  const partyReadPermission = 'northstar.app:permission.party_read';
+  const restorePolicy = async () => {
+    await pool.query(
+      `UPDATE platform.current_policy_permission_grants
+          SET revoked_at = NULL
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3`,
+      [...scope, roleId],
+    );
+    await pool.query(
+      `UPDATE platform.current_policy_memberships
+          SET legal_entity_id = NULL, revoked_at = NULL
+        WHERE tenant_id = $1 AND environment_id = $2 AND membership_id = $3`,
+      [...scope, membershipId],
+    );
+  };
+  const setGrant = (permissionId: string, revoked: boolean) =>
+    pool.query(
+      `UPDATE platform.current_policy_permission_grants
+          SET revoked_at = CASE WHEN $5::boolean THEN clock_timestamp() ELSE NULL END
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3
+          AND permission_id = $4`,
+      [...scope, roleId, permissionId, revoked],
+    );
+  const invokePartyOnView = (
+    view: RequestRuntimeView,
+    recordId: string,
+    number: string,
+  ) =>
+    runtime.operationGateway.invoke(
+      view,
+      {
+        confirmationGrant: null,
+        idempotencyKey: randomUUID(),
+        input: {
+          recordId,
+          values: {
+            [APPLICATION_IDS.party.fieldIds.contactSummary]:
+              'authorization@example.test',
+            [APPLICATION_IDS.party.fieldIds.name]: 'Authorization Party',
+            [APPLICATION_IDS.party.fieldIds.number]: number,
+          },
+        },
+        operationId: APPLICATION_IDS.party.createOperationId,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      runtime.operationMediation.issueInvocation(view, 'UI'),
+    );
+
+  try {
+    // The same request view keeps its release pin while the live grant changes.
+    const revokedRecordId = randomUUID();
+    await runtime.entry.run(
+      { headers: { authorization: 'local' } },
+      async (view) => {
+        const allowed = await invokePartyOnView(
+          view,
+          allowedRecordId,
+          `AUTH-ALLOW-${randomUUID().slice(0, 8)}`,
+        );
+        assert.equal(allowed.outcome, 'succeeded');
+        await setGrant(partyCreatePermission, true);
+        await assert.rejects(
+          invokePartyOnView(view, revokedRecordId, 'AUTH-REVOKED'),
+          (error: unknown) =>
+            error instanceof SemanticOperationPolicyDeniedError,
+          'revocation must apply to an already-issued, release-pinned view',
+        );
+      },
+    );
+    assert.equal(
+      await businessRecordCount(
+        pool,
+        runtime,
+        compiledApplication,
+        revokedRecordId,
+      ),
+      0,
+      'the denied write left business data unchanged',
+    );
+
+    // A read-only role retains reads while every application mutation is denied.
+    await setGrant(partyCreatePermission, false);
+    await pool.query(
+      `UPDATE platform.current_policy_permission_grants
+          SET revoked_at = clock_timestamp()
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3
+          AND permission_id LIKE 'northstar.app:permission.%'
+          AND permission_id NOT LIKE '%\\_read' ESCAPE '\\'`,
+      [...scope, roleId],
+    );
+    await listParty(runtime);
+    await assert.rejects(
+      createParty(runtime, randomUUID(), 'AUTH-READ-ONLY'),
+      (error: unknown) => error instanceof SemanticOperationPolicyDeniedError,
+    );
+    await restorePolicy();
+
+    // A relation label has its target query authorized independently.
+    await setGrant(partyReadPermission, true);
+    await assert.rejects(
+      runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+        runtime.queryGateway.invoke(view, {
+          arguments: {
+            includeArchived: false,
+            list: {
+              cursor: null,
+              matchMode: 'substring',
+              pageSize: 10,
+              relationLabels: [
+                {
+                  fieldId: APPLICATION_IDS.party.fieldIds.name,
+                  queryId: APPLICATION_IDS.party.listQueryId,
+                  relationId: 'northstar.app:relation.party_role_party',
+                },
+              ],
+              schemaVersion: SHARED_LIST_QUERY_VERSION,
+              search: '',
+              sort: [],
+            },
+          },
+          queryId: 'northstar.app:query.party_role_list',
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        }),
+      ),
+      (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+    );
+    await setGrant(partyReadPermission, false);
+
+    // A scoped membership may use its entity and cannot widen it through a
+    // query operand or an operation input.
+    const legalEntityId = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+    const foreignLegalEntityId = randomUUID();
+    await pool.query(
+      `UPDATE platform.current_policy_memberships
+          SET legal_entity_id = $4
+        WHERE tenant_id = $1 AND environment_id = $2 AND membership_id = $3`,
+      [...scope, membershipId, legalEntityId],
+    );
+    const inventoryScopeParameter =
+      'northstar.app:parameter.inventory_transaction_list_legal_entity_scope';
+    const inventoryList = (selectedEntityId: string) =>
+      runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+        runtime.queryGateway.invoke(view, {
+          arguments: {
+            [inventoryScopeParameter]: selectedEntityId,
+            includeArchived: false,
+            list: {
+              cursor: null,
+              matchMode: 'substring',
+              pageSize: 10,
+              relationLabels: [],
+              schemaVersion: SHARED_LIST_QUERY_VERSION,
+              search: '',
+              sort: [],
+            },
+          },
+          queryId: 'northstar.app:query.inventory_transaction_list',
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        }),
+      );
+    await inventoryList(legalEntityId);
+    await assert.rejects(
+      inventoryList(foreignLegalEntityId),
+      (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+    );
+    const scopedWriteRecordId = randomUUID();
+    await assert.rejects(
+      invokeInventoryTransactionCreate(
+        runtime,
+        scopedWriteRecordId,
+        foreignLegalEntityId,
+      ),
+      (error: unknown) => error instanceof SemanticOperationPolicyDeniedError,
+    );
+    assert.equal(
+      await businessRecordCount(
+        pool,
+        runtime,
+        compiledApplication,
+        scopedWriteRecordId,
+        'northstar.app:entity.inventory_transaction',
+      ),
+      0,
+    );
+    await assert.rejects(
+      inventoryList('caller-supplied-invalid-entity'),
+      (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+    );
+    await restorePolicy();
+
+    // Revoking membership denies at the boundary even though all grants remain.
+    await pool.query(
+      `UPDATE platform.current_policy_memberships
+          SET revoked_at = clock_timestamp()
+        WHERE tenant_id = $1 AND environment_id = $2 AND membership_id = $3`,
+      [...scope, membershipId],
+    );
+    await assert.rejects(
+      listParty(runtime),
+      (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+    );
+    await restorePolicy();
+
+    for (const header of [
+      'x-tenant-id',
+      'x-environment-id',
+      'x-principal-id',
+      'x-legal-entity-id',
+    ]) {
+      await assert.rejects(
+        runtime.entry.run(
+          { headers: { authorization: 'local', [header]: randomUUID() } },
+          async () => undefined,
+        ),
+        `${header} must not widen the sealed identity`,
+      );
+    }
+
+    const deniedAfter = await deniedInvocationCount(pool, runtime);
+    assert.ok(
+      deniedAfter - deniedBefore >= 7,
+      'every denied query and operation must record trust evidence',
+    );
+    const evidence = await pool.query<{
+      metadata: unknown;
+      policy_decision: string;
+      policy_inputs: unknown;
+    }>(
+      `SELECT metadata, policy_decision, policy_inputs
+         FROM platform.trust_action_invocations
+        WHERE tenant_id = $1 AND environment_id = $2 AND outcome = 'DENIED'
+        ORDER BY recorded_at DESC
+        LIMIT 7`,
+      scope,
+    );
+    assert.ok(
+      evidence.rows.length >= 7,
+      'recorded denial evidence must remain queryable through the trust store',
+    );
+    assert.ok(evidence.rows.every((row) => row.policy_decision === 'DENY'));
+    assert.ok(
+      evidence.rows.every(
+        (row) =>
+          !JSON.stringify([row.metadata, row.policy_inputs]).includes(
+            'authorization@example.test',
+          ),
+      ),
+      'denial evidence must not persist business inputs or credentials',
+    );
+
+    const archiveOperationId = 'northstar.app:operation.party_archive';
+    const archiveInput = { expectedRevision: 1, recordId: allowedRecordId };
+    await runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+      runtime.operationGateway.invoke(
+        view,
+        {
+          confirmationGrant: runtime.operationMediation.issueConfirmationGrant(
+            view,
+            archiveOperationId,
+            archiveInput,
+          ),
+          idempotencyKey: randomUUID(),
+          input: archiveInput,
+          operationId: archiveOperationId,
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+        },
+        runtime.operationMediation.issueInvocation(view, 'UI'),
+      ),
+    );
+  } finally {
+    await restorePolicy();
+  }
+}
+
+async function assertFailClosedIdentitySeam(
+  compiledApplication: unknown,
+  databaseUrl: string,
+  tenantSlug: string,
+): Promise<void> {
+  const runtime = await createComposedApplicationRuntime({
+    capabilityOperationExecutorFactories: [
+      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+    ],
+    compiledApplication,
+    databaseUrl,
+    inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+    migrationsDirectory,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    tenantSlug,
+  });
+  try {
+    assert.equal(runtime.identityMode, 'FAIL_CLOSED');
+    await assert.rejects(
+      runtime.entry.run({ headers: { authorization: 'unverified' } }, () =>
+        Promise.resolve('must-not-run'),
+      ),
+      /authenticated request identity is required/u,
+    );
+  } finally {
+    await runtime.close();
+  }
+}
+
+function invokeInventoryTransactionCreate(
+  runtime: ComposedApplicationRuntime,
+  recordId: string,
+  legalEntityId: string,
+) {
+  return runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+    runtime.operationGateway.invoke(
+      view,
+      {
+        confirmationGrant: null,
+        idempotencyKey: randomUUID(),
+        input: {
+          legalEntityId,
+          recordId,
+          relations: {},
+          values: {
+            'northstar.app:field.inventory_transaction_actor_id': 'auth-test',
+            'northstar.app:field.inventory_transaction_effective_at':
+              '2026-09-04T12:00:00.000Z',
+            'northstar.app:field.inventory_transaction_number': `AUTH-SCOPE-${recordId.slice(0, 8)}`,
+            'northstar.app:field.inventory_transaction_recorded_at':
+              '2026-09-04T12:00:00.000Z',
+            'northstar.app:field.inventory_transaction_source_id': 'auth-test',
+            'northstar.app:field.inventory_transaction_source_type': 'test',
+            'northstar.app:field.inventory_transaction_state':
+              'northstar.app:option.inventory_transaction_state_draft',
+            'northstar.app:field.inventory_transaction_type':
+              'northstar.app:option.inventory_transaction_type_adjustment',
+          },
+        },
+        operationId: 'northstar.app:operation.inventory_transaction_create',
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      runtime.operationMediation.issueInvocation(view, 'UI'),
+    ),
+  );
+}
+
+async function deniedInvocationCount(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.trust_action_invocations
+      WHERE tenant_id = $1 AND environment_id = $2 AND outcome = 'DENIED'`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
+async function businessRecordCount(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+  recordId: string,
+  entityId: string = 'northstar.app:entity.party',
+): Promise<number> {
+  const storage = storageTarget(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  const entity = storage.entities.find(
+    (candidate) => candidate.entityId === entityId,
+  );
+  assert.ok(entity);
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM north_star_module.${entity.physicalTableName}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND "${entity.recordIdentity.column}" = $3`,
+    [runtime.identity.tenantId, runtime.identity.environmentId, recordId],
+  );
+  return Number(result.rows[0]?.count ?? '0');
 }
 
 async function partyRowSnapshot(
@@ -5349,6 +5794,7 @@ function createRuntime(
     ],
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+    localDemoIdentity: true,
     migrationsDirectory,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
     ...(releaseSelection ? { releaseSelection } : {}),
