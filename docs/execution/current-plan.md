@@ -40,6 +40,8 @@ the near-term end. Everything below is ordered toward it.
 
 ## The critical path — 2026-09-04
 
+**RECEIPT/AUTH bridge ruling (2026-09-05):** minimum complete AUTH evaluator/binding dependency first, then RECEIPT, then remaining AUTH scope. RECEIPT may incorporate only AUTH's explicitly published coherent SHA, with AUTH's new migrations first and RECEIPT's unaccepted migrations renumbered afterward. No acknowledgements are added; independent receipt implementation/tests continue. [Owner coordination](https://github.com/AnserBeg/2rain-greenfield/pull/1#issuecomment-5549264574).
+
 | step | vertical | lane | contents | review |
 |---|---|---|---|---|
 | 1 | **RECEIPT** | BUILD | the goods receipt end to end, ONE packet: the posted-stock honesty items (`5g3-prog` A1: a runnable reconciliation script; the rebuild compares before it overwrites); widen the two inventory enums and move the conformance pins **by editing them and re-baselining** (ADR-0066); goods receipt + lines against a released PO; posting as the second family through PUR-2a's binding; the ADR-0065 received-quantity read model and its ten claims; receipt correction and reversal; open-to-receive; what closes an order; the forward-dating dial (`5g3-prog` A4). Slices in that order, each with a test-it-yourself | one arm on the posting-kernel diff at the end |

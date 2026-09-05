@@ -99,6 +99,7 @@ import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-p
 import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { PostgresInventoryReconciliationService } from '../../packages/postgres-provider/src/inventory-reconciliation-service.js';
 import { renderSurfaceRuntimeWithData } from '../../apps/web/src/surface-runtime.js';
+import { loadReceivingSection } from '../../apps/web/src/receiving-section.js';
 import {
   RECEIVING_CAPABILITY_ID,
   receiptBinding,
@@ -2613,7 +2614,7 @@ function lowercaseUuidCommand(
 
 let fixturePromise: Promise<PostingFixture> | undefined;
 
-test('RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history', async () => {
+test('RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history', async (t) => {
   await withPostingDatabase(async (database) => {
     const binding = receiptBinding(database.registration.storageTarget)!;
     assert.ok(binding);
@@ -2669,7 +2670,23 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       interpreter,
       mediation,
       undefined,
-      [executor],
+      [
+        {
+          capabilityId: executor.capabilityId,
+          execute: async (request) => {
+            try {
+              return await executor.execute(request);
+            } catch (error) {
+              t.diagnostic(
+                error instanceof Error
+                  ? (error.stack ?? error.message)
+                  : String(error),
+              );
+              throw error;
+            }
+          },
+        },
+      ],
     );
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
       new AuthenticatedRequestEntryAdapter(async () => ({
@@ -3034,7 +3051,7 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
             mediation.issueInvocation(view, 'UI'),
           ),
         ),
-      { code: 'MODULE_MUTATION_PRECONDITION_FAILED' },
+      { code: 'MODULE_OPERATION_PRECONDITION_REFUSED' },
       'posted actual unit cost and receipt attribution are not ordinarily editable',
     );
     const firstMovement = (
@@ -3138,6 +3155,28 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       'receipt correction uses the real operation gateway and registered executor',
     );
     assert.equal(Number(await received()), 7);
+    await entry.run({ headers: {} }, async (view) => {
+      const order = await queryGateway.invoke(view, {
+        schemaVersion: 'northstar.semantic-query-request/v1',
+        queryId: 'northstar.app:query.purchase_order_get',
+        arguments: {
+          recordId: orderId,
+          'northstar.app:parameter.purchase_order_get_legal_entity_scope':
+            legalReject,
+        },
+      });
+      assert.ok(order.records[0]);
+      const progress = await loadReceivingSection(
+        view,
+        queryGateway,
+        order.records[0],
+        legalReject,
+      );
+      assert.deepEqual(
+        progress.lines.map((row) => [row.ordered, row.received, row.remaining]),
+        [['10', '7', '3']],
+      );
+    });
     const orderPage = await entry.run({ headers: {} }, (view) =>
       renderSurfaceRuntimeWithData(
         view,

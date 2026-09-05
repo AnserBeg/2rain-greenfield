@@ -34,7 +34,7 @@ At `af14f0e`, actually executed `receipt-rebuild-discrepancy-capture-absent` and
 
 Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. No acceptance or review claimed; not at review readiness.
 
-Latest completed CI https://github.com/AnserBeg/2rain-greenfield/actions/runs/33944484616 tested `af14f0e0957adc2557751be08fdc7069f3772d0d`: unit and schema drift repaired; compiler and PostgreSQL now fail on changed contract/release/history inputs, browser/security green. Performance indeterminate (CPU idle 69.5%, required 90%), not a measured budget failure. Release must be regenerated after AUTH; no checks weakened.
+Latest completed CI https://github.com/AnserBeg/2rain-greenfield/actions/runs/33945875219 tested `4b79d5e7a45d6a46fdf241f44c66c148db496caa`: schema drift and security green; unit/browser/provider startup exposed a receipt import cycle, now fixed by extracting the shared error type without changing its public export. Reconciliation's new empty arm is explicitly indeterminate. Focused reconciliation 26/26, dev lifecycle 14/14, receipt lifecycle/product Record 1/1 pass locally. Performance indeterminate (CPU idle 46.7%, required 90%); governed release/history still await AUTH. No checks weakened.
 
 At blocked `a58cfb4`, governed compilation refused exactly 13 `COMPILER_PERMISSION_EVALUATOR_UNBOUND` declarations: goods_receipt {archive,create,post,read,restore,update}; goods_receipt_line {archive,create,read,restore,update}; purchase_order_line_amend; purchase_order_received_read. All IDs use `northstar.app:permission.`. The five later amendment-request permissions above also require real bindings; acknowledgement remains unchanged.
 
@@ -42,7 +42,7 @@ At blocked `a58cfb4`, governed compilation refused exactly 13 `COMPILER_PERMISSI
 
 The receipt product walkthrough is not yet runnable. No owner test claimed.
 
-Fixture checkpoint: `node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test --test-name-pattern='RECEIPT posts' test/postgres/inventory-posting.test.ts`; `node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test test/postgres/inventory-reconciliation.test.ts`. Both use disposable isolated test databases; neither starts or repairs the development server.
+Fixture checkpoint: `node --import tsx --test --test-name-pattern='RECEIPT posts' test/postgres/inventory-posting.test.ts`; `node --import tsx --test test/postgres/inventory-reconciliation.test.ts`. Both use disposable isolated test databases; neither starts or repairs the development server. The receipt test renders the real Record surface and invokes posting, amendment, close and reopen through the application gateway, using an isolated test policy, not production authorization evidence.
 
 From this worktree, start the isolated existing-release server with `PORT=4317 NORTH_STAR_DATABASE_PORT=55437 NORTH_STAR_DEV_DATABASE_CONTAINER=dev-receipt-postgres NORTH_STAR_TENANT_SLUG=receipt-development corepack pnpm dev` (do not start a second instance if already running).
 

@@ -2,10 +2,8 @@ import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 import type { TrustedRequestContext } from '@north-star/runtime';
-import {
-  InventoryPostingError,
-  type InventoryAdjustmentPostingCommandV1,
-} from './inventory-posting-service.js';
+import { InventoryPostingError } from './inventory-posting-error.js';
+import type { InventoryAdjustmentPostingCommandV1 } from './inventory-posting-service.js';
 
 export const RECEIVING_CAPABILITY_ID =
   'northstar.purchasing:capability.receiving' as const;

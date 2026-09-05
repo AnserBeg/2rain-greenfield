@@ -1,4 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
+import {
+  InventoryPostingError,
+  type InventoryPostingErrorCode,
+} from './inventory-posting-error.js';
 
 import { canonicalize } from '@north-star/canonical-model';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
@@ -527,50 +531,10 @@ type RecordedInventoryPostingResult = Omit<
   })[];
 };
 
-export type InventoryPostingErrorCode =
-  | 'RECEIPT_ORDER_NOT_RELEASED'
-  | 'RECEIPT_COST_REQUIRED'
-  | 'RECEIPT_PROJECTION_DIVERGED'
-  | 'RECEIPT_QUANTITY_OUT_OF_BOUNDS'
-  | 'RECEIPT_CORRECTION_INVALID'
-  | 'RECEIPT_FORWARD_DATE_REFUSED'
-  | 'INVENTORY_ADJUSTMENT_APPROVAL_REQUIRED'
-  | 'INVENTORY_ADJUSTMENT_REASON_REQUIRED'
-  | 'INVENTORY_BACKDATE_LIMIT_EXCEEDED'
-  | 'INVENTORY_BASE_UNIT_IMMUTABLE'
-  | 'INVENTORY_COUNT_APPROVAL_REQUIRED'
-  | 'INVENTORY_COUNT_COMPENSATION_CONFLICT'
-  | 'INVENTORY_COUNT_EVIDENCE_CONFLICT'
-  | 'INVENTORY_COUNT_REASON_REQUIRED'
-  | 'INVENTORY_ITEM_INACTIVE'
-  | 'INVENTORY_ITEM_UNIT_MISMATCH'
-  | 'INVENTORY_LEGAL_ENTITY_INACTIVE'
-  | 'INVENTORY_LOCATION_INACTIVE'
-  | 'INVENTORY_PERIOD_CLOSED'
-  | 'INVENTORY_POSTING_CAPABILITY_MISMATCH'
-  | 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT'
-  | 'INVENTORY_POSTING_INPUT_INVALID'
-  | 'INVENTORY_POSTING_LOCK_TIMEOUT'
-  | 'INVENTORY_POSTING_RELEASE_MISMATCH'
-  | 'INVENTORY_POSTING_STORAGE_INVALID'
-  | 'INVENTORY_POSTING_STORAGE_REJECTED'
-  | 'INVENTORY_RECORDED_AT_REGRESSION'
-  | 'INVENTORY_STOCK_NEGATIVE'
-  | 'INVENTORY_TRANSFER_APPROVAL_REQUIRED'
-  | 'INVENTORY_TRANSFER_REASON_REQUIRED'
-  | 'INVENTORY_TRANSACTION_STATE_CONFLICT';
-
-export class InventoryPostingError extends Error {
-  override readonly name = 'InventoryPostingError';
-
-  constructor(
-    readonly code: InventoryPostingErrorCode,
-    message: string,
-    readonly details: Readonly<Record<string, string>> = Object.freeze({}),
-  ) {
-    super(`${code}: ${message}`);
-  }
-}
+export {
+  InventoryPostingError,
+  type InventoryPostingErrorCode,
+} from './inventory-posting-error.js';
 
 interface EntityBinding {
   archiveColumn: string;

@@ -521,6 +521,8 @@ export class PostgresInventoryReconciliationService {
           );
           for (const row of comparison.expected) {
             arm.examined(row.recordId, 'balance');
+            // receivedFacts checked the persisted receipt/order attribution.
+            arm.examined(row.recordId, 'integrity');
             if (!divergent.has(row.recordId)) arm.consistent(row.recordId);
           }
           for (const row of comparison.discrepancies) {

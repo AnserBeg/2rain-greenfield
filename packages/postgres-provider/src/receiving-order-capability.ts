@@ -20,7 +20,10 @@ import {
   changePurchaseOrderState,
 } from './purchasing-order-lifecycle.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
-import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
+import {
+  auditFieldId,
+  withModuleRuntimeRole,
+} from './module-runtime-interpreter.js';
 
 export async function executeReceivingOrderState(
   context: PostgresCapabilityOperationExecutorContext,
@@ -192,7 +195,7 @@ export async function executeReceivingOrderState(
               changes: [
                 {
                   classification: 'INTERNAL' as const,
-                  fieldId: changed.fieldId,
+                  fieldId: auditFieldId(changed.fieldId),
                   oldState: { state: 'VALUE' as const, value: changed.before },
                   newState: { state: 'VALUE' as const, value: changed.after },
                 },
@@ -201,7 +204,10 @@ export async function executeReceivingOrderState(
             event: {
               eventId: randomUUID(),
               eventSchemaVersion: 'northstar.purchasing-order-event/v1',
-              eventType: `northstar.purchasing.order.${action}`,
+              eventType: request.definition.operationId.replace(
+                ':operation.',
+                ':event.',
+              ),
               payload: metadata,
             },
             outbox: {

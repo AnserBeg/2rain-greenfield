@@ -147,7 +147,7 @@ export async function loadReceivingSection(
               relationLabels: [
                 {
                   relationId: `${namespace}:relation.${relationLocal}`,
-                  queryId: `${namespace}:query.${targetLocal}_get`,
+                  queryId: `${namespace}:query.${targetLocal}_list`,
                   fieldId: `${namespace}:field.${labelField}`,
                 },
               ],
