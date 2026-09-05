@@ -2853,10 +2853,15 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
     (candidate) =>
       candidate.entityId === 'northstar.app:entity.posted_stock_balance',
   );
+  const receivedQuantity = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === 'northstar.app:entity.purchase_order_received',
+  );
   assert.ok(master?.legalEntityMaster);
   assert.ok(periodLock?.periodLock);
   assert.ok(ordinary);
   assert.ok(postedStockBalance);
+  assert.ok(receivedQuantity);
 
   // The second tenant reached the same seeded state as the first.
   const periodLockScope = periodLock.legalEntity;
@@ -2899,7 +2904,7 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
   }
 
   // The insert policy exists for exactly the two seeded table classes and the
-  // one pinned provider-written projection.
+  // two explicitly named provider-written projections.
   const insertPolicies = await pool.query<{ tablename: string }>(
     `SELECT tablename
        FROM pg_catalog.pg_policies
@@ -2914,8 +2919,9 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
       master.physicalTableName,
       periodLock.physicalTableName,
       postedStockBalance.physicalTableName,
+      receivedQuantity.physicalTableName,
     ].toSorted(),
-    'only the seeded table classes and named provider-written projection carry a materializer insert policy',
+    'only the seeded table classes and named stock/received projections carry a materializer insert policy',
   );
 
   const materializerPool = new pg.Pool({
