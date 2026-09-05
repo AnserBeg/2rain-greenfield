@@ -2,7 +2,7 @@
 
 Status: active combined candidate; not accepted. Tier: Critical. Stops: 1.
 Base: `8af63acfd8eb4f95b5af8ceff1b6ce7c117b9def`. Owner's execution prompt is the charter.
-Combined code/test checkpoint: `e3bac21bc007f24da359d5047d71518fd5e0af7d`; the subsequent record commit carries no production changes. New-head CI is reported on draft PR #1, not inferred from focused greens.
+Combined code/test checkpoint: `ca2e9d20b57fa73925e04611552b3fbcd361cc05`; the subsequent record commit carries no production changes. New-head CI is reported on draft PR #1, not inferred from focused greens.
 Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/1. Review and acceptance remain external.
 
 ## Claims
@@ -43,11 +43,17 @@ All eleven original RECEIPT entries reproduced red/restored green on `968942c7ee
 
 Six inherited controls reproduced red/restored green at `d359688b834ff248d93e646142b34d5db0819c7e`: `coverage-comparison-absent`, `version-four-digest-covers-the-derived-role`, `active-release-fact-checked-after-the-receipt-lookup`, `recorded-at-floor-absent`, `comparator-drops-the-movement-id-tie-break`, `negative-stock-stops-sorting-persisted-with-planned`.
 
-Three AUTH controls reproduced red/restored green at `18f2d91dba62cbda31a853621fdc3562fc6cb591`; `receipt-binding-action-drifted` did so at `d359688`. Ten affected controls executed against `8bf7213`: receipt post/order typed read denial, receipt historical retry, read preflight, authoritative scope, committed inventory read denial, denial recorder, legal-scope translation, active-release-before-replay and natural replay. Each killed only its declared tests and restored green. Total actual controls: 31; validation/self-tests are not counted.
+Three AUTH controls reproduced red/restored green at `18f2d91dba62cbda31a853621fdc3562fc6cb591`; `receipt-binding-action-drifted` did so at `d359688`. Ten affected controls executed against `8bf7213`: receipt post/order typed read denial, receipt historical retry, read preflight, authoritative scope, committed inventory read denial, denial recorder, legal-scope translation, active-release-before-replay and natural replay. Each killed only its declared tests and restored green. R1/R2 executed three current controls: the repointed reconstruction control and two new scoped-identity controls; each killed only its declared regression and restored green. Total current named controls actually executed: 33; validation/self-tests are not counted.
+
+| Finding | Fix commit | Executed regression result |
+| --- | --- | --- |
+| R1 — rebuild reused verifier plan | `446b41c` | Independent-writer receipt regression 1/1; `receipt-rebuild-depends-on-active-projection` killed the reconstruction alone and the unchanged verifier refused divergence, then restored green. |
+| R2 — scoped identities collapsed | `446b41c` (`ca2e9d2` makes its mutation discriminating) | Same-ID A/B comparison passed in both row orders; populated receipt/rebuild regression 1/1; scope-key and A-only-retirement controls each killed the named assertion and restored green. |
+| R3 — purchasing behavior in generic runtime | `446b41c` | Generic-domain negative seam 1/1 within seam 5/5; surface/runtime bindings 63/63; real authorized receiving browser lifecycle 1/1; complete architecture 191/191. |
 
 ## Gates
 
-New correction checks at `8bf7213`: typecheck; governed release check; real-policy receiving 7/7; receipt atomic/lifecycle/binding 1/1; semantic gateway + surface contracts 80/80; formerly failing module-runtime scoped-member recheck 1/1; catalog/browser controls 17/17; Party lifecycle + stock replay 2/2; fresh and preserved-database full receiving browser journeys 1/1 each. At `e3bac21`: typecheck and the complete architecture suite 190/190 after re-deriving receipt-aware press-law, predicate, surface, test and tenant inventories; the gateway-authority scanner also has a named-type-import negative regression. Earlier receipt/reconciliation/compiler/schema checks remain recorded above. These are focused results, not full CI.
+New correction checks at `8bf7213`: typecheck; governed release check; real-policy receiving 7/7; receipt atomic/lifecycle/binding 1/1; semantic gateway + surface contracts 80/80; formerly failing module-runtime scoped-member recheck 1/1; catalog/browser controls 17/17; Party lifecycle + stock replay 2/2; fresh and preserved-database full receiving browser journeys 1/1 each. At `ca2e9d2`: format and typecheck; received comparison/rebuild 2/2; reconciliation 26/26; surface/runtime binding 63/63; focused architecture 73/73; complete architecture 191/191; real authorized receiving browser lifecycle 1/1. Earlier receipt/reconciliation/compiler/schema checks remain recorded above. These are focused results, not full CI.
 
 The first browser run used the CI reachability reporter, which correctly returned nonzero for a filtered run despite the test passing. The explicit focused rerun used the list reporter and passed; no filtered run is claimed as CI reachability evidence.
 
