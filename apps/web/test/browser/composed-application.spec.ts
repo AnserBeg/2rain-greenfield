@@ -153,7 +153,16 @@ composedTest.describe('composed application journeys', () => {
       await partyLifecycleJourney(page, composedApplication.currentBaseUrl());
       if (!composedApplication.restart) return;
 
-      await composedApplication.restart();
+      // The UI journey retains its 20-second budget. Restart runs governed
+      // application startup (including current AUTH), so give that phase the
+      // same bounded allowance as this fixture's initial startup.
+      composedTest.setTimeout(
+        journeyTimeoutMilliseconds.partyLifecycle +
+          sharedSetupTimeoutMilliseconds,
+      );
+      await composedTest.step('restart governed application', async () => {
+        await composedApplication.restart!();
+      });
       await page.goto(
         surfaceUrl(composedApplication.currentBaseUrl(), 'party_list'),
       );
@@ -847,12 +856,16 @@ async function inventoryNavigationJourney(
     'Posted stock',
     'Stock count line',
     'Stock count',
+    'Receipt line',
+    'Goods receipt',
+    'Order quantity amendment request',
     // Normalization sorts surfaces by id, and
     // `surface.purchase_order_line_list` precedes `surface.purchase_order_list`
     // -- 'n' before 's' at the first differing code unit -- so the line list
     // leads its group.
     'Purchase order line',
     'Purchase order',
+    'Received quantity',
   ]);
   await expect(
     navigation.getByRole('link', { name: /detail|form/i }),
@@ -1724,13 +1737,13 @@ async function fillInventoryTransactionForm(
   transactionNumber: string,
 ): Promise<void> {
   await page.getByLabel('Number', { exact: true }).fill(transactionNumber);
-  // Enum controls are addressed by ROLE, not by label text. A wrapping
-  // `<label>` around a `<select>` has the option labels inside its text
-  // content, so an exact getByLabel never matches one -- it works for the
-  // `<input>` fields above only because an input contributes no text.
+  // Six declared transaction types now cross the grammar's five-option
+  // select threshold; the datalist input submits the canonical option id.
   await page
     .getByRole('combobox', { exact: true, name: 'Type' })
-    .selectOption({ label: 'adjustment' });
+    .fill(
+      `${applicationNamespace}:option.inventory_transaction_type_adjustment`,
+    );
   await page
     .getByRole('combobox', { exact: true, name: 'State' })
     .selectOption({ label: 'draft' });

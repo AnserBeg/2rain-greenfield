@@ -387,11 +387,18 @@ export async function submitSurfaceRuntimeIntent(
   }
 
   if (
+    intent === 'command' &&
     selection.selected.surfaceRole === 'record' &&
+    ['purchase_order', 'purchase_order_line', 'goods_receipt'].some((entity) =>
+      binding.query.sourceEntityId.endsWith(`:entity.${entity}`),
+    ) &&
     selection.surfaces.some((surface) =>
       surface.surfaceId.endsWith(':surface.goods_receipt_detail'),
     )
   )
+    // Receiving commands refresh server-derived progress and navigation.
+    // Ordinary lifecycle results retain their authoritative read-back below:
+    // an archive must not immediately query its now-inactive record as active.
     return renderSurfaceRuntimeWithData(view, requestUrl, gateways, {
       intent,
       label: operation.label,
