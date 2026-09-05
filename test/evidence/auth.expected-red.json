@@ -105,7 +105,7 @@
       "kills": [
         {
           "file": "test/postgres/module-storage-transition.test.ts",
-          "name": "compiled module materialization is isolated, convergent, and provenance-closed",
+          "name": "backfill claims survive connection loss and coordinators converge",
           "expected": "another tenant cannot discover or mutate the checkpoint"
         }
       ]
