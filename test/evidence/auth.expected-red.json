@@ -209,7 +209,7 @@
       "name": "legal-scope-denial-translation-removed",
       "claim": "A legal-entity scope denial must be translated and recorded exactly once at the semantic query boundary with the denying policy version.",
       "file": "packages/runtime/src/semantic-query-gateway.ts",
-      "original": "      if (!(error instanceof LegalEntityReadScopePolicyDeniedError)) throw error;\n      await this.#recordDenied(view, request.queryId, error.policyVersion);",
+      "original": "      if (!(error instanceof LegalEntityReadScopePolicyDeniedError))\n        throw error;\n      await this.#recordDenied(view, request.queryId, error.policyVersion);",
       "replacement": "      throw error;\n      await this.#recordDenied(view, request.queryId, error.policyVersion);",
       "test": {
         "files": ["test/postgres/composed-application.test.ts"],
