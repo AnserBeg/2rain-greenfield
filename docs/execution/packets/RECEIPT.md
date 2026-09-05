@@ -1,6 +1,6 @@
 # RECEIPT — receive goods against purchase orders through the product
 
-Status: blocked on authorization/release-policy bridge, not review-ready. Tier: Critical. Stops: 1. Base: `8af63acfd8eb4f95b5af8ceff1b6ce7c117b9def`.
+Status: active implementation; governed release awaits the published AUTH dependency, not review-ready. Tier: Critical. Stops: 1. Base: `8af63acfd8eb4f95b5af8ceff1b6ce7c117b9def`.
 Owner's execution prompt is the charter; final review and acceptance remain external.
 
 ## Claims (implementation and verification pending)
@@ -23,6 +23,7 @@ Owner's execution prompt is the charter; final review and acceptance remain exte
 
 - Reconciliation CLI and pre-rebuild discrepancy persistence committed in `4f0fc4b`; CLI exercised against isolated empty development ledger: INDETERMINATE, subjects=0, repaired=0, transactionReadOnly=on, exit 3. Populated/corruption controls remain owed.
 - Receipt metadata, companion family, shared transaction changes, correction checks, received writer role and registered gateway adapter are staged implementation, not runtime-verified. Lifecycle/amendment execution, received rebuild/reconciliation and product receiving remain incomplete.
+- Resumed isolated tests: purchasing definition 35/35; reconciliation 26/26 (includes corrupted CLI exit 2, no repair, persisted pre-rebuild discrepancy and unchanged movement facts); receipt kernel test 1/1 (posting, retry, conflicting key, two locations against one line, correction). Fixture artifacts stay in memory, not in the production release.
 
 ## Controls
 
@@ -48,7 +49,7 @@ Run `DATABASE_URL=postgresql://north_star_runtime@127.0.0.1:55437/postgres node 
 
 The checked-in `apps/web/release/unbound-permission-acknowledgement.json` says "THIS LIST MAY ONLY SHRINK". New receipt declarations cannot compile under that policy; AUTH owns the evaluator and this lane may not absorb it. The register and AUTH implementation remain unchanged.
 
-Options: AUTH supplies evaluator bindings for these receipt resources (recommended); or owner explicitly authorizes a narrow temporary receipt-only acknowledgement under the existing team-only policy. The §5.11 exception does not grant that authorization. Request sent to owner; no selection assumed.
+Owner ruling: https://github.com/AnserBeg/2rain-greenfield/pull/1#issuecomment-5549264574. AUTH supplies a real evaluator/binding dependency first; no temporary acknowledgements. Isolated fixture compilation/testing may continue, never feeding production release/serving artifacts. Only an explicitly published dependency SHA may be history-preservingly merged; none incorporated yet. AUTH migrations go first, followed by renumbering only RECEIPT's unaccepted migrations and regenerating combined snapshots.
 
 ## Filed
 

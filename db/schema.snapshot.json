@@ -2,6 +2,118 @@
   "columns": [
     {
       "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "ordinal_position": 3,
+      "column_name": "discrepancy_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": "gen_random_uuid()",
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "ordinal_position": 4,
+      "column_name": "projection_entity_id",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "ordinal_position": 5,
+      "column_name": "subject_identity",
+      "data_type": "jsonb",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "ordinal_position": 6,
+      "column_name": "stored_row",
+      "data_type": "jsonb",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "ordinal_position": 7,
+      "column_name": "recomputed_row",
+      "data_type": "jsonb",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "ordinal_position": 8,
+      "column_name": "detected_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": false,
+      "column_default": "transaction_timestamp()",
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
       "relation": "module_fold_function_ddl_witnesses",
       "ordinal_position": 1,
       "column_name": "function_identity",
@@ -9217,6 +9329,34 @@
   "constraints": [
     {
       "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "domain": null,
+      "name": "inventory_projection_discrepancies_check",
+      "type": "c",
+      "definition": "CHECK (stored_row IS NOT NULL OR recomputed_row IS NOT NULL)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "domain": null,
+      "name": "inventory_projection_discrepancies_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, discrepancy_id)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_internal",
       "relation": "module_fold_function_ddl_witnesses",
       "domain": null,
       "name": "module_fold_function_ddl_witnesses_identity",
@@ -12413,7 +12553,7 @@
       "domain": null,
       "name": "semantic_operation_receipts_input_digest_version",
       "type": "c",
-      "definition": "CHECK (input_digest_version = ANY (ARRAY[1, 2, 3, 4]))",
+      "definition": "CHECK (input_digest_version = ANY (ARRAY[1, 2, 3, 4, 5]))",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,
@@ -13850,6 +13990,25 @@
     }
   ],
   "indexes": [
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "name": "inventory_projection_discrepancies_pkey",
+      "owner": "postgres",
+      "access_method": "btree",
+      "definition": "CREATE UNIQUE INDEX inventory_projection_discrepancies_pkey ON north_star_internal.inventory_projection_discrepancies USING btree (tenant_id, environment_id, discrepancy_id)",
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "is_immediate": true,
+      "is_clustered": false,
+      "is_valid": true,
+      "is_ready": true,
+      "is_live": true,
+      "is_replica_identity": false,
+      "expressions": null,
+      "predicate": null
+    },
     {
       "schema": "north_star_internal",
       "relation": "module_fold_function_ddl_witnesses",
@@ -15925,6 +16084,26 @@
   "policies": [
     {
       "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "name": "inventory_projection_discrepancies_capture",
+      "permissive": true,
+      "roles": ["north_star_module_materializer"],
+      "command": "a",
+      "using_expression": null,
+      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "name": "inventory_projection_discrepancies_scope",
+      "permissive": true,
+      "roles": ["north_star_module_materializer", "north_star_module_runtime"],
+      "command": "r",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
+      "check_expression": null
+    },
+    {
+      "schema": "north_star_internal",
       "relation": "module_storage_catalog_receipts",
       "name": "module_storage_catalog_receipts_materializer",
       "permissive": true,
@@ -16665,6 +16844,25 @@
     }
   ],
   "relations": [
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "kind": "r",
+      "owner": "postgres",
+      "persistence": "p",
+      "row_level_security": true,
+      "force_row_level_security": true,
+      "is_partition": false,
+      "replica_identity": "d",
+      "access_method": "heap",
+      "tablespace": null,
+      "options": [],
+      "partition_key": null,
+      "partition_bound": null,
+      "view_definition": null,
+      "foreign_server": null,
+      "foreign_options": []
+    },
     {
       "schema": "north_star_internal",
       "relation": "module_fold_function_ddl_witnesses",
@@ -17731,6 +17929,86 @@
     }
   ],
   "relationPrivileges": [
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "north_star_module_materializer",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "north_star_module_materializer",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
     {
       "schema": "north_star_internal",
       "relation": "module_fold_function_ddl_witnesses",
@@ -22878,6 +23156,24 @@
     }
   ],
   "rules": [
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "name": "inventory_projection_discrepancies_reject_delete",
+      "definition": "CREATE RULE inventory_projection_discrepancies_reject_delete AS\n    ON DELETE TO north_star_internal.inventory_projection_discrepancies DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('inventory_projection_discrepancies'::text);",
+      "enabled": "O",
+      "is_instead": true,
+      "event_type": "4"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "inventory_projection_discrepancies",
+      "name": "inventory_projection_discrepancies_reject_update",
+      "definition": "CREATE RULE inventory_projection_discrepancies_reject_update AS\n    ON UPDATE TO north_star_internal.inventory_projection_discrepancies DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('inventory_projection_discrepancies'::text);",
+      "enabled": "O",
+      "is_instead": true,
+      "event_type": "2"
+    },
     {
       "schema": "north_star_internal",
       "relation": "module_storage_catalog_receipts",

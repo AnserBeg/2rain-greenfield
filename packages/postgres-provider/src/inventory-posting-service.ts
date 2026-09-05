@@ -4185,7 +4185,7 @@ async function verifyGoodsReceiptPosting(
     environment_id: context.environmentId,
     legal_entity_id: command.legalEntityId,
     record_id: id,
-    revision: 1,
+    revision: '1',
     archived_at: null,
   });
   const numeric = (value: string) => {
@@ -4195,7 +4195,7 @@ async function verifyGoodsReceiptPosting(
   };
   await verify(bindEntity(receipt.receipt), command.sourceId, {
     ...locked.header,
-    revision: command.sourceRevision + 1,
+    revision: String(command.sourceRevision + 1),
     [receiptColumn(receipt.receipt, 'goods_receipt_state')]: receiptOption(
       receipt.receipt,
       'goods_receipt_state',
@@ -4262,7 +4262,7 @@ async function verifyGoodsReceiptPosting(
     const rowId = receivedIdentity(context, command.legalEntityId, id);
     await verify(bindEntity(receipt.received), rowId, {
       ...base(rowId),
-      revision: Number(locked.priorProgress.get(id)?.revision ?? 0) + 1,
+      revision: String(Number(locked.priorProgress.get(id)?.revision ?? 0) + 1),
       [receiptRelation(
         receipt,
         receipt.received,

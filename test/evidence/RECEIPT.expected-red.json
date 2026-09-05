@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "packet": "RECEIPT",
+  "entries": [
+    {
+      "name": "receipt-rebuild-discrepancy-capture-absent",
+      "claim": "The rebuild persists the corrupted stored row before replacing its value; reconciliation itself does not repair.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "WHERE s.quantity IS DISTINCT FROM l.quantity OR s.unit_id IS DISTINCT FROM l.unit_id`,",
+      "replacement": "WHERE false`,",
+      "test": { "files": ["test/postgres/inventory-reconciliation.test.ts"] },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-reconciliation.test.ts",
+          "name": "one corrupted posted quantity is named as ledger divergence and never repaired",
+          "expected": "rebuild must persist the observed discrepancy before replacing derived values"
+        }
+      ]
+    },
+    {
+      "name": "receipt-ordered-ceiling-absent",
+      "claim": "Concurrent receipts on one order line into different locations cannot exceed ordered quantity.",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "if (result < 0n || result > ordered)",
+      "replacement": "if (result < 0n)",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "order-line lock serializes distinct stock locations"
+        }
+      ]
+    }
+  ]
+}

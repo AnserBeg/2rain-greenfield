@@ -90,6 +90,16 @@ import {
   type CurrentPolicySubject,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import {
+  RECEIVING_CAPABILITY_ID,
+  receiptBinding,
+  receiptColumn,
+  receiptOption,
+  receiptRelation,
+  receiptTable,
+  receivedIdentity,
+  type GoodsReceiptCommand,
+} from '../../packages/postgres-provider/src/goods-receipt.js';
 
 const migrations = resolve('db/migrations');
 const applicationBuilderImport = '../../packages/domain/src/app/builder.js';
@@ -2593,6 +2603,239 @@ function lowercaseUuidCommand(
 }
 
 let fixturePromise: Promise<PostingFixture> | undefined;
+
+test('RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history', async () => {
+  await withPostingDatabase(async (database) => {
+    const binding = receiptBinding(database.registration.storageTarget)!;
+    assert.ok(binding);
+    const service = new PostgresInventoryPostingService(
+      database.runtimePool,
+      {
+        ...database.registration,
+        capabilityId: RECEIVING_CAPABILITY_ID,
+        capabilityVersion: 1,
+      },
+      { currentInstant: () => recordedAt },
+    );
+    const orderId = randomUUID(),
+      orderLineId = randomUUID();
+    const insert = async (
+      entity: StorageEntityTarget,
+      id: string,
+      values: Record<string, unknown>,
+      relations: Record<string, string | null> = {},
+    ) => {
+      const row: Record<string, unknown> = {
+        tenant_id: tenantId,
+        environment_id: environmentId,
+        legal_entity_id: legalReject,
+        record_id: id,
+        revision: 1,
+        archived_at: null,
+      };
+      for (const column of entity.columns) {
+        const local = column.canonicalFieldId.split(':').at(-1)!;
+        row[column.physicalName] = values[local] ?? null;
+      }
+      for (const [relation, value] of Object.entries(relations))
+        row[receiptRelation(binding, entity, relation)] = value;
+      await database.adminPool.query(
+        `INSERT INTO ${receiptTable(entity)} (${Object.keys(row).map(quoted).join(',')}) VALUES (${Object.keys(
+          row,
+        )
+          .map((_, index) => `$${index + 1}`)
+          .join(',')})`,
+        Object.values(row),
+      );
+    };
+    await insert(binding.order, orderId, {
+      'field.purchase_order_number': 'RECEIPT-ORDER',
+      'field.purchase_order_supplier_party_id': randomUUID(),
+      'field.purchase_order_order_date': businessPeriod,
+      'field.purchase_order_expected_date': businessPeriod,
+      'field.purchase_order_currency': 'CAD',
+      'field.purchase_order_notes': 'Receipt kernel control',
+      'derived_state_field.machine.purchase_order_lifecycle':
+        'northstar.app:state.purchase_order_released',
+    });
+    await insert(
+      binding.orderLine,
+      orderLineId,
+      {
+        'field.purchase_order_line_line_number': 1,
+        'field.purchase_order_line_item_id': itemId,
+        'field.purchase_order_line_ordered_quantity': '10',
+        'field.purchase_order_line_unit_price': null,
+      },
+      { purchase_order_line_order: orderId },
+    );
+    const staged = async (
+      quantity: string,
+      locationId = locationPrimary,
+      correction?: { original: string; movement: string },
+    ): Promise<GoodsReceiptCommand> => {
+      const sourceId = randomUUID(),
+        receiptLineId = randomUUID();
+      const kind = correction ? 'correction' : 'initial';
+      const receiptEffectiveAt = correction
+        ? '2026-07-29T12:30:00.000Z'
+        : effectiveAt;
+      const number = `GR-${sourceId}`;
+      await insert(
+        binding.receipt,
+        sourceId,
+        {
+          'field.goods_receipt_number': number,
+          'field.goods_receipt_state': receiptOption(
+            binding.receipt,
+            'goods_receipt_state',
+            'draft',
+          ),
+          'field.goods_receipt_kind': receiptOption(
+            binding.receipt,
+            'goods_receipt_kind',
+            kind,
+          ),
+          'field.goods_receipt_effective_at': receiptEffectiveAt,
+          'field.goods_receipt_location_id': locationId,
+          'field.goods_receipt_reason_code': 'COUNT-CORRECTION',
+          'field.goods_receipt_reason_narrative': 'Controlled receipt',
+        },
+        {
+          goods_receipt_order: orderId,
+          goods_receipt_supersedes: correction?.original ?? null,
+        },
+      );
+      await insert(
+        binding.line,
+        receiptLineId,
+        {
+          'field.goods_receipt_line_line_number': 1,
+          'field.goods_receipt_line_item_id': itemId,
+          'field.goods_receipt_line_quantity': quantity,
+          'field.goods_receipt_line_unit_id': 'EA',
+          'field.goods_receipt_line_cost_status': receiptOption(
+            binding.line,
+            'goods_receipt_line_cost_status',
+            'absent',
+          ),
+          'field.goods_receipt_line_unit_cost': null,
+          'field.goods_receipt_line_currency': null,
+          'field.goods_receipt_line_reversal_of_movement_id':
+            correction?.movement ?? null,
+        },
+        {
+          goods_receipt_line_receipt: sourceId,
+          goods_receipt_line_order_line: orderLineId,
+        },
+      );
+      return {
+        authorization: {
+          decision: 'ALLOW',
+          evaluatorVersion: 'northstar.test-policy-evaluator/v1',
+          policyVersion: 'northstar.test-policy/v1',
+        },
+        channel: 'API',
+        effectiveAt: receiptEffectiveAt,
+        idempotencyKey: randomUUID(),
+        legalEntityId: legalReject,
+        sourceId,
+        sourceRevision: 1,
+        sourceType: 'goodsReceipt',
+        stockDimensionSetVersion: 'v1',
+        kind,
+        receiptNumber: number,
+        orderId,
+        locationId,
+        supersedesReceiptId: correction?.original ?? null,
+        reason: { code: 'COUNT-CORRECTION', narrative: 'Controlled receipt' },
+        lines: [
+          {
+            receiptLineId,
+            orderLineId,
+            sourceLine: '1',
+            itemId,
+            unitId: 'EA',
+            quantityDelta: quantity,
+            costStatus: 'absent',
+            unitCost: null,
+            currency: null,
+            reversalOfMovementId: correction?.movement ?? null,
+          },
+        ],
+      };
+    };
+    const received = async () => {
+      const result = await database.adminPool.query(
+        `SELECT ${quoted(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))}::text AS quantity FROM ${receiptTable(binding.received)} WHERE record_id=$1`,
+        [receivedIdentity(database.context, legalReject, orderLineId)],
+      );
+      return result.rows[0]?.quantity as string | undefined;
+    };
+    const first = await staged('6');
+    const posted = await service.postGoodsReceipt(
+      database.context,
+      database.actor,
+      first,
+    );
+    assert.equal(Number(await received()), 6);
+    assert.deepEqual(
+      await service.postGoodsReceipt(database.context, database.actor, first),
+      { ...posted, replayed: true },
+      'same request replays exactly',
+    );
+    await assert.rejects(
+      () =>
+        service.postGoodsReceipt(database.context, database.actor, {
+          ...first,
+          reason: { ...first.reason, narrative: 'changed' },
+        }),
+      { code: 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT' },
+    );
+    const races = await Promise.all([
+      staged('3', locationPrimary),
+      staged('3', locationTie),
+    ]);
+    const outcomes = await Promise.allSettled(
+      races.map((receipt) =>
+        service.postGoodsReceipt(database.context, database.actor, receipt),
+      ),
+    );
+    assert.equal(
+      outcomes.filter((outcome) => outcome.status === 'fulfilled').length,
+      1,
+      'order-line lock serializes distinct stock locations',
+    );
+    assert.equal(Number(await received()), 9);
+    const refused = outcomes.find((outcome) => outcome.status === 'rejected');
+    assert.equal(
+      refused?.status === 'rejected' && refused.reason.code,
+      'RECEIPT_QUANTITY_OUT_OF_BOUNDS',
+    );
+    const original = await database.adminPool.query(
+      `SELECT record_id FROM ${receiptTable(binding.movement)} WHERE ${quoted(receiptColumn(binding.movement, 'inventory_movement_source_id'))}=$1`,
+      [first.sourceId],
+    );
+    const correction = await staged('-2', locationPrimary, {
+      original: first.sourceId,
+      movement: String(original.rows[0]!.record_id),
+    });
+    await service.postGoodsReceipt(
+      database.context,
+      database.actor,
+      correction,
+    );
+    assert.equal(Number(await received()), 7);
+    const originalAfter = await database.adminPool.query(
+      `SELECT ${quoted(receiptColumn(binding.receipt, 'goods_receipt_state'))} AS state FROM ${receiptTable(binding.receipt)} WHERE record_id=$1`,
+      [first.sourceId],
+    );
+    assert.equal(
+      originalAfter.rows[0]!.state,
+      receiptOption(binding.receipt, 'goods_receipt_state', 'posted'),
+    );
+  });
+});
 
 async function compiledFixture(): Promise<PostingFixture> {
   fixturePromise ??= buildFixture();

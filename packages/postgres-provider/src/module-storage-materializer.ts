@@ -1380,7 +1380,7 @@ async function createManagedTable(
   const mutationFence = postedStockProjection
     ? ' AND pg_trigger_depth() > 0'
     : receivedProjection
-      ? " AND current_user = 'north_star_receipt_projection_writer'"
+      ? " AND CURRENT_USER = 'north_star_receipt_projection_writer'::name"
       : '';
   const relationColumns = target.relations
     .filter(
@@ -4680,7 +4680,7 @@ function buildExpectedPolicies(
       ':entity.purchase_order_received',
     );
     const receiptMutationPredicate = normalizePolicyExpression(
-      `tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND current_user = 'north_star_receipt_projection_writer'`,
+      `tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND CURRENT_USER = 'north_star_receipt_projection_writer'::name`,
     );
     const triggerMutationPredicate = normalizePolicyExpression(
       `tenant_id = north_star_internal.trusted_tenant_id()
