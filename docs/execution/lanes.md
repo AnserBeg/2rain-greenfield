@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `receipt` (critical-path step 1) | to be chartered — see `current-plan.md`, *The critical path — 2026-09-04* |
+| **BUILD** | `RECEIPT` (critical-path step 1) | active on `packet/RECEIPT`, isolated receipt worktree; owner-authorized complete vertical; external review and acceptance |
 | **SUPPORT** | — | idle |
 
 

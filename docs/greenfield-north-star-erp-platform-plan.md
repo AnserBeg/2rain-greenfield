@@ -811,6 +811,16 @@ The module-conformance gate scans source and artifacts for these violations.
 
 ### 5.11 Kernel evolution rule
 
+**RECEIPT scoped owner ruling (2026-09-04).** For the goods-receipt vertical,
+step 3 below does not require designing a concept's entire future semantic
+space before its first useful implementation. Ship the smallest coherent,
+typed implementation behind existing semantic gateways and registered
+capability boundaries. Reuse metadata for ordinary structure; registered
+domain code or a focused registered UI component may supply behavior whose
+language generalization would block delivery. This exception creates no
+second metadata authority and does not relax accepted stock, identity, time,
+money, authorization or audit invariants.
+
 When a desired module cannot be expressed:
 
 1. identify the missing semantic dimension;
