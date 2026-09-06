@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `SALE` — usable sales orders only | evidence_ready on `packet/SALE`; executable head `4ae529e`. RECEIPT and scoped AUTH landed through PR #1 at `c30e951` by owner-authorized integration; no final independent approval was reissued and no production-authentication claim is made. SALE does not wait on the former pending wording |
+| **BUILD** | `SALE` — usable sales orders only | evidence_ready on `packet/SALE`; executable head `96b4892` includes the focused CI correction. RECEIPT and scoped AUTH landed through PR #1 at `c30e951` by owner-authorized integration; no final independent approval was reissued and no production-authentication claim is made. SALE does not wait on the former pending wording |
 | **SUPPORT** | — | idle |
 
 

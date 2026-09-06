@@ -2,7 +2,7 @@
 
 Status: evidence_ready; draft PR handoff. Tier: Behavioral. Critical paths touched: none. Stops: 0.
 Base: `c30e951f56f7ead4b2e3d9e228208dd639e5a461`.
-Executable head: `4ae529e3361e8f45178112d5d9355c71b06de06b`.
+Executable head: `96b48921163b0228bd34d7b9141cfa97435cd117`.
 
 ## Claims
 
@@ -29,9 +29,21 @@ Executable head: `4ae529e3361e8f45178112d5d9355c71b06de06b`.
 
 - `pnpm format`, `pnpm typecheck`, `pnpm lint`, and `pnpm check:app-release`: PASS.
 - `pnpm test:unit`: 163/163 PASS.
-- `pnpm test:compiler`: 174/174 PASS.
-- `pnpm test:architecture`: 191/191 PASS before this record; re-run at the narrative tip is required before push because the suite reads `docs/**`.
-- Focused Playwright product journey: 1/1 PASS in 109.9 seconds. It created quantity 10, edited draft, observed stale-revision refusal, revoked update and observed unchanged state, released, observed server refusal of a line edit, confirmed cancellation, narrowed scope and observed foreign-scope denial, with stock unchanged throughout.
+- `pnpm test:compiler`: 175/175 PASS. The added Sales compiler scenario reads
+  emitted non-empty input fields and their refinements, exact operation
+  effects, and the semantic effects of the pre-Sales → Sales storage
+  transition.
+- `pnpm test:architecture`: 191/191 PASS after this record update; record checks also PASS.
+- Focused composed-application navigation/form regressions: 2/2 PASS on their
+  unchanged 20s/60s budgets. The navigation asserts the exact five primary
+  entries, opens More, enumerates Purchasing and Sales, and reaches Purchase
+  order through More → Purchasing; the existing form/relation-picker journey
+  remains intact. The More-aware `--b500` focus-ring control also passes 1/1.
+- Focused Playwright product journey: 1/1 PASS in 1.9 minutes. It created quantity 10, edited draft, observed stale-revision refusal, revoked update and observed unchanged state, released, observed server refusal of a line edit, confirmed cancellation, narrowed scope and observed foreign-scope denial, with stock unchanged throughout.
+- `check:language-coverage`: PASS (2,050 obligations; 464 first-party
+  observations) after the unit producer manifest was corrected to name the
+  already-executed Sales definition test. This remains the gate's stated
+  decision-bound result, not a claim that declarations are mutation execution.
 - The first governed release build without the Sales bindings failed closed on all 13 unbound permissions; adding only the exact bindings made the release build pass. This is compile-time refusal evidence, not mutation execution.
 - Isolated dev smoke: `COMPOSED_APPLICATION_READY` at port 4318, database port 55442, container `dev-sale-postgres`, release root `dad3d1fcfe1c209f97acca82c0c87a3243add27cef8bd3e254943706c0d5839d`; `dev-receipt-postgres` remained running.
 - Full CI is required on the pushed draft-PR tip and its current status is reported in the handoff; no local focused run is presented as full-matrix acceptance.
@@ -71,7 +83,7 @@ Review: not owed — the final diff is outside the repository's current Critical
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SALE",
   "base": "c30e951f56f7ead4b2e3d9e228208dd639e5a461",
-  "head": "4ae529e3361e8f45178112d5d9355c71b06de06b",
+  "head": "96b48921163b0228bd34d7b9141cfa97435cd117",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/package.json",
@@ -80,6 +92,7 @@ Review: not owed — the final diff is outside the repository's current Critical
     "apps/web/release/current-policy-bindings.json",
     "apps/web/src/component-registry.ts",
     "apps/web/src/sales-section.ts",
+    "apps/web/test/browser/composed-application.spec.ts",
     "apps/web/test/browser/sales-order.composed-application.spec.ts",
     "package.json",
     "packages/compiler/src/conformance.ts",
@@ -92,7 +105,9 @@ Review: not owed — the final diff is outside the repository's current Critical
     "test/architecture/repository-hygiene.test.ts",
     "test/architecture/surface-grammar-conformance.baseline.ts",
     "test/architecture/surface-grammar-conformance.test.ts",
+    "test/compiler/g2-module-conformance.test.ts",
     "test/compiler/inventory-contract.release.golden.json",
+    "test/helpers/reachability-producers.ts",
     "test/unit/purchasing-definition.test.ts",
     "test/unit/sales-definition.test.ts"
   ],
