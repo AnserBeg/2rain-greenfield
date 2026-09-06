@@ -488,10 +488,12 @@ composedTest.describe('focus ring coverage', () => {
         result.grounds.some((ground) => ground.includes('#0f5f8c')),
         `rail-raised was never measured; grounds were ${result.grounds.join(' | ')}`,
       );
-      // Precisely one selector reds, and it is the flyout one: --b500 clears
-      // 3:1 on the rail itself (3.61:1) and fails only on the raised overlay
-      // (2.08:1). That is the exact state §2.1 asserted was fine.
+      // Both focus subjects on the raised navigation ground red now that the
+      // compiler emits the More disclosure: its summary and its child links.
+      // --b500 still clears 3:1 on the rail itself (3.61:1) and fails on the
+      // raised overlay (2.08:1). That is the exact state §2.1 asserted was fine.
       assert.deepEqual(result.violations, [
+        'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -835,15 +837,15 @@ async function inventoryNavigationJourney(
     name: 'Release navigation',
   });
   const primaryEntries = navigation.locator('.navigation-tree > li');
-  // PUR-1 mounted Purchasing as the fifth module group. Five is exactly
-  // MAX_PRIMARY_NAVIGATION_ENTRIES, so it renders as a peer of Inventory rather
-  // than as the first occupant of an overflow `More`.
+  // Sales is the sixth module group. The compiled navigation keeps the first
+  // four groups primary and places both Purchasing and Sales under the fifth
+  // `More` entry, preserving the fixed primary-navigation budget.
   await expect(primaryEntries).toHaveCount(5);
   await expect(
     primaryEntries.locator(
       ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2)',
     ),
-  ).toHaveText(['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing']);
+  ).toHaveText(['Party', 'Catalog', 'Location', 'Inventory', 'More']);
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
     'Party',
     'Party role',
@@ -868,6 +870,8 @@ async function inventoryNavigationJourney(
     'Purchase order line',
     'Purchase order',
     'Received quantity',
+    'Sales order line',
+    'Sales order',
   ]);
   await expect(
     navigation.getByRole('link', { name: /detail|form/i }),
@@ -900,6 +904,38 @@ async function inventoryNavigationJourney(
     ],
   );
   await inventoryNavigation.getByText('Inventory', { exact: true }).click();
+  const moreNavigation = primaryEntries
+    .getByRole('group')
+    .filter({ hasText: 'More' });
+  await expect(moreNavigation).toBeVisible();
+  await moreNavigation.getByText('More', { exact: true }).click();
+  const purchasingNavigation = moreNavigation
+    .getByRole('group')
+    .filter({ hasText: 'Purchasing' });
+  const salesNavigation = moreNavigation
+    .getByRole('group')
+    .filter({ hasText: 'Sales' });
+  await expect(purchasingNavigation).toBeVisible();
+  await expect(salesNavigation).toBeVisible();
+  await purchasingNavigation.getByText('Purchasing', { exact: true }).click();
+  await expect(
+    purchasingNavigation.locator('a > span:nth-child(2)'),
+  ).toHaveText([
+    'Receipt line',
+    'Goods receipt',
+    'Order quantity amendment request',
+    'Purchase order line',
+    'Purchase order',
+    'Received quantity',
+  ]);
+  await salesNavigation.getByText('Sales', { exact: true }).click();
+  await expect(salesNavigation.locator('a > span:nth-child(2)')).toHaveText([
+    'Sales order line',
+    'Sales order',
+  ]);
+  await salesNavigation.getByText('Sales', { exact: true }).click();
+  await purchasingNavigation.getByText('Purchasing', { exact: true }).click();
+  await moreNavigation.getByText('More', { exact: true }).click();
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
@@ -1009,6 +1045,21 @@ async function inventoryNavigationJourney(
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
+  await moreNavigation.getByText('More', { exact: true }).click();
+  await purchasingNavigation.getByText('Purchasing', { exact: true }).click();
+  await purchasingNavigation
+    .getByRole('link', { name: 'Purchase order', exact: true })
+    .click();
+  await page
+    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('link', { name: 'DEFAULT', exact: true })
+    .click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Purchase order' }),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-platform-slot="list:dataGrid"]'),
+  ).toBeVisible();
 }
 
 async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
