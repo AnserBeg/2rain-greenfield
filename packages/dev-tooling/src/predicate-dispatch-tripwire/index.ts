@@ -111,6 +111,11 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
       'allPredicate',
       'notPredicate',
     ]),
+    'packages/domain/src/sales/definition.ts': signature([
+      'fieldComparisonPredicate',
+      'allPredicate',
+      'notPredicate',
+    ]),
     'packages/domain/src/inventory/definition.ts': signature([
       'notPredicate',
       'fieldComparisonPredicate',

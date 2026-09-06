@@ -10,7 +10,7 @@ import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
-import { RECEIVING_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/receiving-section';
+import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
 import {
   composedApplicationSeed,
@@ -120,7 +120,7 @@ export async function startComposedApplication(
       options.seedProfile ?? 'demo',
     );
     server = createSurfaceRuntimeServer(runtime.entry, {
-      applicationExtension: RECEIVING_SURFACE_RUNTIME_EXTENSION,
+      applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
       operationGateway: runtime.operationGateway,
       operationMediation: runtime.operationMediation,
       queryGateway: runtime.queryGateway,

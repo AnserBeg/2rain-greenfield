@@ -47,6 +47,7 @@ import {
 } from '../../packages/domain/src/index.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/index.js';
+import { salesModuleDefinition } from '../../packages/domain/src/sales/index.js';
 import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from './surface-grammar-conformance.baseline.js';
 import {
   compiledSurfaceGrammarSurfaces,
@@ -75,6 +76,7 @@ const productModuleDefinitions = [
   { create: partyModuleDefinition, sourceDirectory: 'party' },
   { create: platformModuleDefinition, sourceDirectory: 'platform' },
   { create: purchasingModuleDefinition, sourceDirectory: 'purchasing' },
+  { create: salesModuleDefinition, sourceDirectory: 'sales' },
 ] as const;
 
 test('compiled production modules match the reviewed surface-grammar debt baseline', () => {
@@ -91,7 +93,7 @@ test('compiled production modules match the reviewed surface-grammar debt baseli
   );
 
   console.log(formatProductSurfaceGrammarRatchet(result));
-  assert.equal(result.modulesRead, 6);
+  assert.equal(result.modulesRead, 7);
   assert.deepEqual(
     result.observations.map((observation) => ({
       moduleId: observation.moduleId,
@@ -260,8 +262,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const grouped = groupedManifest.navigation;
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
-  // 34 + RECEIPT's expanded seventeen Purchasing surfaces.
-  assert.equal(groupedManifest.surfaces.length, 51);
+  // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' six surfaces.
+  assert.equal(groupedManifest.surfaces.length, 57);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -277,22 +279,20 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
   assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 3);
-  // 13 + Purchasing's six lists.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 19);
-  // FIVE groups, which is exactly `MAX_PRIMARY_NAVIGATION_ENTRIES`, so
-  // Purchasing renders as a peer of Inventory rather than as the first occupant
-  // of an overflow `More`. A sixth module group is the one that collapses the
-  // tail, and the overflow arm below still observes that.
+  // 13 + Purchasing's six lists + Sales' two lists.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 21);
+  // Sales is the sixth module, so the compiler groups Purchasing and Sales
+  // under the fifth compact entry rather than exceeding the navigation budget.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing'],
+    ['Party', 'Catalog', 'Location', 'Inventory', 'More'],
   );
   assert.deepEqual(compact.navigationEntryIds, [
     'northstar.app:module.party',
     'northstar.app:module.catalog',
     'northstar.app:module.location',
     'northstar.app:module.inventory',
-    'northstar.app:module.purchasing',
+    'northstar.app:navigation.more',
   ]);
   assert.deepEqual(
     navigationRuleIds(
@@ -910,6 +910,11 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     composed,
     purchasingModuleDefinition('northstar.app'),
     'purchasing',
+  );
+  composed = withoutModule(
+    composed,
+    salesModuleDefinition('northstar.app'),
+    'sales',
   );
   return composed;
 }

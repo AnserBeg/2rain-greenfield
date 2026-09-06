@@ -369,6 +369,71 @@
       },
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.sales_order_archive",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.sales_order_cancel",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.sales_order_close",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.sales_order_create",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.sales_order_line_archive",
+        "resource": "northstar.app:entity.sales_order_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.sales_order_line_create",
+        "resource": "northstar.app:entity.sales_order_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.sales_order_line_read",
+        "resource": "northstar.app:entity.sales_order_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.sales_order_line_restore",
+        "resource": "northstar.app:entity.sales_order_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.sales_order_line_update",
+        "resource": "northstar.app:entity.sales_order_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.sales_order_read",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.sales_order_release",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.sales_order_restore",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.sales_order_update",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.stock_count_archive",
         "resource": "northstar.app:entity.stock_count"
       },

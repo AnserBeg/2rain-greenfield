@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./app-server": "./src/app-server.ts",
-    "./receiving-section": "./src/receiving-section.ts"
+    "./receiving-section": "./src/receiving-section.ts",
+    "./sales-section": "./src/sales-section.ts"
   },
   "scripts": {
     "build:app-release": "node --import tsx scripts/compile-app-release.ts",
