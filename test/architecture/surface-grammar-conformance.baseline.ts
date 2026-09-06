@@ -76,4 +76,13 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // platform work rather than a receipt-specific renderer rewrite.
     violationCount: 60,
   }),
+  Object.freeze({
+    moduleId: 'northstar.sales:module.sales',
+    packageId: 'northstar.sales:package.sales',
+    sourceDirectory: 'sales',
+    // Measured from Sales' two ordinary list/detail/form document shapes. The
+    // 23 residuals are the already-known shared childTables/activity and list
+    // affordance gaps; no new violation kind or renderer exemption is added.
+    violationCount: 23,
+  }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);

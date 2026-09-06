@@ -1091,11 +1091,12 @@ test('the composed application derives its modules from an ordered registry', ()
     'location',
     'inventory',
     'purchasing',
+    'sales',
   ]);
   assert.equal(composed.modules.length, COMPOSED_MODULE_NAMES.length);
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing'],
+    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing', 'Sales'],
   );
   // `orderKey` is derived from registry POSITION, which is what makes order the
   // only thing the registry has to declare.
@@ -1111,30 +1112,32 @@ test('the composed application derives its modules from an ordered registry', ()
   );
 });
 
-test('Purchasing mounts as the fifth navigation group, with no overflow', () => {
+test('Purchasing remains fifth when Sales mounts sixth', () => {
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing'],
+    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing', 'Sales'],
   );
 
   const navigation = surfaceManifest(compile(composed)).navigation;
   assert.ok(navigation, 'the composed application emits no navigation tree');
   assert.deepEqual(
     navigation.entries.map((entry) => entry.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing'],
-    'a sixth group would collapse the tail into an overflow More',
+    ['Party', 'Catalog', 'Location', 'Inventory', 'More'],
+    'the sixth module belongs under the compiled overflow group',
   );
 });
 
-test('the composed application still carries exactly one state machine', () => {
+test('the composed application carries the Purchasing and Sales machines', () => {
   const composed = normalizeApplicationPackage(
     composedApplicationDefinition(),
   ) as unknown as NormalizedShape;
-  assert.equal(composed.stateMachines.length, 1);
-  assert.equal(
-    composed.stateMachines[0]!.machineId,
-    'northstar.app:machine.purchase_order_lifecycle',
+  assert.deepEqual(
+    composed.stateMachines.map((machine) => machine.machineId),
+    [
+      'northstar.app:machine.purchase_order_lifecycle',
+      'northstar.app:machine.sales_order_lifecycle',
+    ],
   );
   // The composed module re-instantiates under `northstar.app`, so the derived
   // field id carries that namespace too. A hardcoded purchasing-namespace id

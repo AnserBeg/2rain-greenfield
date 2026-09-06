@@ -20,6 +20,7 @@ import {
   type ReceivingNavigation,
   type ReceivingSection,
 } from './receiving-section.js';
+import type { SalesOrderSection } from './sales-section.js';
 import { sharedListView } from './list-runtime.js';
 import type { QueryDiagnosticCode } from './message-catalog.js';
 import {
@@ -99,6 +100,7 @@ export type SurfaceDataRenderState =
       readonly records: readonly SemanticRecordDto[];
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
+      readonly salesOrder?: SalesOrderSection;
       readonly result?: SemanticQueryResultEnvelope;
       readonly status: 'READY';
     }
@@ -767,7 +769,7 @@ function renderSections(context: SurfaceComponentContext): string {
     return slotPanel(
       context,
       record
-        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
+        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
         : dataDiagnostic('QUERY_NOT_FOUND'),
       'sections-slot',
     );
@@ -799,6 +801,24 @@ function renderSections(context: SurfaceComponentContext): string {
     `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context, operation, record)}</div></form></section>`,
     'sections-slot',
   );
+}
+
+function renderSalesOrderSection(section: SalesOrderSection): string {
+  const link = (local: string, recordId?: string) => {
+    const parameters = new URLSearchParams({
+      surface: `${section.namespace}:surface.${local}`,
+      [section.scopeParameterIds[local]!]: section.legalEntityId,
+    });
+    if (recordId) parameters.set('record', recordId);
+    return escapeHtml(`/?${parameters}`);
+  };
+  const rows = section.lines
+    .map(
+      (line) =>
+        `<tr data-sales-order-line="${escapeHtml(line.recordId)}"><td><a href="${link('sales_order_line_detail', line.recordId)}">${escapeHtml(line.lineNumber)}</a></td><td>${escapeHtml(line.item)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(line.unit)}</td><td>${escapeHtml(line.unitPrice)}</td></tr>`,
+    )
+    .join('');
+  return `<section class="panel data-panel" data-sales-order-lines><h2>Order lines</h2><p><a href="${link('sales_order_line_form')}">Add sales order line</a> · <a href="${link('sales_order_line_list')}">View all sales order lines</a></p><table><thead><tr><th>Line</th><th>Item</th><th>Quantity</th><th>Unit</th><th>Unit price</th></tr></thead><tbody>${rows}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<p>Release accepts the order without reserving stock. Shipment, reservation and fulfilment quantities are not part of this increment.</p></section>`;
 }
 
 type FormAdmissionDecision =

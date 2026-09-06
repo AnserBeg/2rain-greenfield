@@ -3,6 +3,7 @@ import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
+import { salesModuleDefinition } from '../sales/definition.js';
 
 const version = 'v5' as const;
 const normalizationProfileVersion = 'northstar.normalization/v5' as const;
@@ -46,6 +47,7 @@ const MODULE_REGISTRY = Object.freeze([
     create: purchasingModuleDefinition,
     moduleName: 'purchasing',
   }),
+  Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
 ] as const);
 
 /** The mounted module names, in composition order, for callers that assert on the set. */
@@ -223,6 +225,46 @@ export const APPLICATION_IDS = Object.freeze({
       released: `${APPLICATION_NAMESPACE}:state.purchase_order_released`,
     }),
     updateOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_update`,
+  }),
+  sales: Object.freeze({
+    cancelOperationId: `${APPLICATION_NAMESPACE}:operation.sales_order_cancel`,
+    createOperationId: `${APPLICATION_NAMESPACE}:operation.sales_order_create`,
+    detailSurfaceId: `${APPLICATION_NAMESPACE}:surface.sales_order_detail`,
+    entityIds: Object.freeze({
+      salesOrder: `${APPLICATION_NAMESPACE}:entity.sales_order`,
+      salesOrderLine: `${APPLICATION_NAMESPACE}:entity.sales_order_line`,
+    }),
+    fieldIds: Object.freeze({
+      currency: `${APPLICATION_NAMESPACE}:field.sales_order_currency`,
+      customerPartyId: `${APPLICATION_NAMESPACE}:field.sales_order_customer_party_id`,
+      itemId: `${APPLICATION_NAMESPACE}:field.sales_order_line_item_id`,
+      lineNumber: `${APPLICATION_NAMESPACE}:field.sales_order_line_line_number`,
+      notes: `${APPLICATION_NAMESPACE}:field.sales_order_notes`,
+      number: `${APPLICATION_NAMESPACE}:field.sales_order_number`,
+      orderDate: `${APPLICATION_NAMESPACE}:field.sales_order_order_date`,
+      orderedQuantity: `${APPLICATION_NAMESPACE}:field.sales_order_line_ordered_quantity`,
+      requestedDate: `${APPLICATION_NAMESPACE}:field.sales_order_requested_date`,
+      unitId: `${APPLICATION_NAMESPACE}:field.sales_order_line_unit_id`,
+      unitPrice: `${APPLICATION_NAMESPACE}:field.sales_order_line_unit_price`,
+    }),
+    formSurfaceId: `${APPLICATION_NAMESPACE}:surface.sales_order_form`,
+    lineCreateOperationId: `${APPLICATION_NAMESPACE}:operation.sales_order_line_create`,
+    lineDetailSurfaceId: `${APPLICATION_NAMESPACE}:surface.sales_order_line_detail`,
+    lineFormSurfaceId: `${APPLICATION_NAMESPACE}:surface.sales_order_line_form`,
+    lineListQueryId: `${APPLICATION_NAMESPACE}:query.sales_order_line_list`,
+    lineListSurfaceId: `${APPLICATION_NAMESPACE}:surface.sales_order_line_list`,
+    lineRelationId: `${APPLICATION_NAMESPACE}:relation.sales_order_line_order`,
+    lineUpdateOperationId: `${APPLICATION_NAMESPACE}:operation.sales_order_line_update`,
+    listQueryId: `${APPLICATION_NAMESPACE}:query.sales_order_list`,
+    listSurfaceId: `${APPLICATION_NAMESPACE}:surface.sales_order_list`,
+    releaseOperationId: `${APPLICATION_NAMESPACE}:operation.sales_order_release`,
+    stateFieldId: `${APPLICATION_NAMESPACE}:derived_state_field.machine.sales_order_lifecycle`,
+    stateIds: Object.freeze({
+      cancelled: `${APPLICATION_NAMESPACE}:state.sales_order_cancelled`,
+      draft: `${APPLICATION_NAMESPACE}:state.sales_order_draft`,
+      released: `${APPLICATION_NAMESPACE}:state.sales_order_released`,
+    }),
+    updateOperationId: `${APPLICATION_NAMESPACE}:operation.sales_order_update`,
   }),
 });
 

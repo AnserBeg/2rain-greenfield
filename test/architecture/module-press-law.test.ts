@@ -321,8 +321,9 @@ test('one auto-discovered guard covers every definition-backed product module', 
     'party',
     'platform',
     'purchasing',
+    'sales',
   ]);
-  assert.equal(result.modulesRead, 6);
+  assert.equal(result.modulesRead, 7);
   assert.ok(
     result.productionFilesRead > 0,
     'press-law guard read zero production files',

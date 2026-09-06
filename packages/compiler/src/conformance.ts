@@ -49,6 +49,8 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'goods_receipt_line' },
   { classification: 'entityOwned', familyId: 'purchase_order_received' },
   { classification: 'entityOwned', familyId: 'purchase_order_amendment' },
+  { classification: 'entityOwned', familyId: 'sales_order' },
+  { classification: 'entityOwned', familyId: 'sales_order_line' },
   { classification: 'entityOwned', familyId: 'reservation' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
@@ -217,6 +219,11 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'purchase_order_amendment',
     targetFamilyId: 'purchase_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'sales_order_line',
+    targetFamilyId: 'sales_order',
   },
   {
     semantics: 'sameEntity',

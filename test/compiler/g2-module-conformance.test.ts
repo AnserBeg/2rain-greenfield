@@ -63,6 +63,7 @@ import {
   APPLICATION_NAMESPACE,
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
+import { salesModuleDefinition } from '../../packages/domain/src/sales/index.js';
 import {
   narrowAcknowledgementToDeclared,
   readAcknowledgementDocument,
@@ -526,6 +527,159 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
         (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentAmount,
       )?.bounds,
     { maximumLength: null, precision: 5, scale: 2 },
+  );
+});
+
+test('sales compiler scenarios execute input refinements and operation/storage effects', () => {
+  const compiled = mustCompile(input(salesModuleDefinition()));
+  const operations = projectionPayload<{
+    operations: Array<{
+      effect: Record<string, unknown>;
+      inputContract: {
+        fields: Array<{
+          bounds: {
+            maximumLength: number | null;
+            precision: number | null;
+            scale: number | null;
+          };
+          fieldId: string;
+          fieldKind: string;
+          required: boolean;
+          writable: boolean;
+        }>;
+        relationInputs: Array<Record<string, unknown>>;
+        writableFieldIds: string[];
+      };
+      operationId: string;
+    }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const orderCreate = operations.find((operation) =>
+    operation.operationId.endsWith(':operation.sales_order_create'),
+  );
+  const lineCreate = operations.find((operation) =>
+    operation.operationId.endsWith(':operation.sales_order_line_create'),
+  );
+  const release = operations.find((operation) =>
+    operation.operationId.endsWith(':operation.sales_order_release'),
+  );
+  assert.ok(orderCreate);
+  assert.ok(lineCreate);
+  assert.ok(release);
+
+  // The semantic-non-empty branch is observed from compiler output, not from
+  // the authored declaration: both ordinary create operations have actual
+  // writable fields, while transition input remains closed and fieldless.
+  for (const create of [orderCreate, lineCreate]) {
+    assert.ok(create.inputContract.fields.length > 0);
+    assert.deepEqual(
+      create.inputContract.writableFieldIds,
+      create.inputContract.fields.map((field) => field.fieldId).sort(),
+    );
+  }
+  assert.deepEqual(release.inputContract.fields, []);
+  assert.deepEqual(release.inputContract.writableFieldIds, []);
+
+  // Exercise the field-type refinement invariants on the emitted line input:
+  // text length, exact-decimal precision/scale, requiredness and writability.
+  assert.deepEqual(
+    lineCreate.inputContract.fields.map((field) => ({
+      bounds: field.bounds,
+      fieldId: field.fieldId,
+      fieldKind: field.fieldKind,
+      required: field.required,
+      writable: field.writable,
+    })),
+    [
+      salesInputField(
+        'line_number',
+        'integerFieldType',
+        true,
+        null,
+        null,
+        null,
+      ),
+      salesInputField('item_id', 'textFieldType', true, 80, null, null),
+      salesInputField('unit_id', 'textFieldType', true, 32, null, null),
+      salesInputField(
+        'ordered_quantity',
+        'exactDecimalFieldType',
+        true,
+        null,
+        38,
+        18,
+      ),
+      salesInputField(
+        'unit_price',
+        'exactDecimalFieldType',
+        false,
+        null,
+        38,
+        18,
+      ),
+    ],
+  );
+  assert.deepEqual(lineCreate.inputContract.relationInputs, [
+    {
+      archiveBehavior: 'restrict',
+      relationId: 'northstar.sales:relation.sales_order_line_order',
+      required: true,
+      targetEntityId: 'northstar.sales:entity.sales_order',
+    },
+  ]);
+
+  // Operation effect lowering is exercised for both ordinary mutation and the
+  // state transition; the transition has no inventory or capability effect.
+  assert.equal(orderCreate.effect.kind, 'createRecordEffect');
+  assert.deepEqual(release.effect, {
+    entity: {
+      kind: 'entityReference',
+      schemaVersion: 'v5',
+      targetId: 'northstar.sales:entity.sales_order',
+    },
+    fromStateId: 'northstar.sales:state.sales_order_draft',
+    kind: 'transitionStateEffect',
+    schemaVersion: 'v5',
+    stateFieldId:
+      'northstar.sales:derived_state_field.machine.sales_order_lifecycle',
+    toStateId: 'northstar.sales:state.sales_order_released',
+    transition: {
+      kind: 'transitionReference',
+      schemaVersion: 'v5',
+      targetId: 'northstar.sales:transition.sales_order_release',
+    },
+  });
+
+  // The storage semantic-effect branch is exercised on a real transition from
+  // the same composed application without Sales to the shipped application.
+  const prior = mustCompile(input(composedApplicationWithoutSales()));
+  const candidate = mustCompile(
+    input(composedApplicationDefinition(), expectedActiveReleaseFrom(prior)),
+  );
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    candidate,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  assert.deepEqual(
+    transition.elements.map((element) => ({
+      kind: element.kind,
+      semanticEffect: element.classification.semanticEffect,
+      subjectId: element.subjectId,
+    })),
+    [
+      salesStorageEffect('createTable', 'additive', 'entity.sales_order'),
+      salesStorageEffect('createTable', 'additive', 'entity.sales_order_line'),
+      salesStorageEffect('createIndex', 'none', 'entity.sales_order'),
+      salesStorageEffect('createIndex', 'none', 'entity.sales_order_line'),
+      salesStorageEffect('createIndex', 'none', 'entity.sales_order_line'),
+      salesStorageEffect('createIndex', 'none', 'entity.sales_order_line'),
+      salesStorageEffect('createIndex', 'none', 'entity.sales_order'),
+      salesStorageEffect(
+        'addForeignKey',
+        'additive',
+        'relation.sales_order_line_order',
+      ),
+      salesStorageEffect('createIndex', 'none', 'entity.sales_order'),
+    ],
   );
 });
 
@@ -1498,6 +1652,66 @@ function structuralDiagnostics(result: CompileResult): Array<{
     path,
     subjectId,
   }));
+}
+
+function salesInputField(
+  localId: string,
+  fieldKind: string,
+  required: boolean,
+  maximumLength: number | null,
+  precision: number | null,
+  scale: number | null,
+): unknown {
+  return {
+    bounds: { maximumLength, precision, scale },
+    fieldId: `northstar.sales:field.sales_order_line_${localId}`,
+    fieldKind,
+    required,
+    writable: true,
+  };
+}
+
+function salesStorageEffect(
+  kind: StorageTransitionEnvelope['elements'][number]['kind'],
+  semanticEffect: StorageTransitionEnvelope['elements'][number]['classification']['semanticEffect'],
+  subjectSuffix: string,
+): unknown {
+  return {
+    kind,
+    semanticEffect,
+    subjectId: `northstar.app:${subjectSuffix}`,
+  };
+}
+
+function composedApplicationWithoutSales(): Record<string, unknown> {
+  const definition = structuredClone(composedApplicationDefinition());
+  for (const collectionName of [
+    'assertions',
+    'entities',
+    'fields',
+    'modules',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const) {
+    const entries = definition[collectionName];
+    assert.ok(Array.isArray(entries));
+    definition[collectionName] = entries.filter(
+      (entry) =>
+        !JSON.stringify(entry).includes('sales_order') &&
+        !(
+          collectionName === 'modules' &&
+          typeof entry === 'object' &&
+          entry !== null &&
+          (entry as Record<string, unknown>).label === 'Sales'
+        ),
+    );
+  }
+  return definition;
 }
 
 function declaredEvidenceFor(

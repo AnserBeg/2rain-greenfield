@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RECEIPT` (critical-path step 1) | draft PR #1 incorporates exact AUTH correction `9d70c74`; governed authorized/denied full receiving lifecycle runs on port 4317; combined CI and external Critical review/acceptance pending |
+| **BUILD** | `SALE` — usable sales orders only | evidence_ready on `packet/SALE`; executable head `96b4892` includes the focused CI correction. RECEIPT and scoped AUTH landed through PR #1 at `c30e951` by owner-authorized integration; no final independent approval was reissued and no production-authentication claim is made. SALE does not wait on the former pending wording |
 | **SUPPORT** | — | idle |
 
 

@@ -32,7 +32,7 @@ substance survives in the rules above.
 | G0, G1 | complete |
 | G2 | complete in substance (party, catalog, location, composed app, forms, pickers) |
 | G3 | inventory alpha: 14 of 17 gate criteria met (`rulings/g3-completion.md`); posting kernel hardened by `posting-kernel-admission` and `enum-widen` on 2026-09-04 |
-| G4 | purchase order accepted; RECEIPT draft PR #1 incorporates AUTH correction 9d70c74 and exercises authorized/denied full browser receiving; combined CI and Critical acceptance remain pending |
+| G4 | purchase order accepted; RECEIPT and scoped AUTH landed through PR #1 at `c30e951` by owner-authorized integration. No final independent approval was reissued, and this does not claim production authentication |
 | G5–G8, N1–N7 | not started; no agent package, no customization engine |
 
 Plan §13: 21 of 38 work packages done. The office-worker loop — receive and ship — is
@@ -40,15 +40,15 @@ the near-term end. Everything below is ordered toward it.
 
 ## The critical path — 2026-09-04
 
-**RECEIPT/AUTH bridge ruling (2026-09-05):** minimum complete AUTH evaluator/binding dependency first, then RECEIPT, then remaining AUTH scope. RECEIPT may incorporate only AUTH's explicitly published coherent SHA, with AUTH's new migrations first and RECEIPT's unaccepted migrations renumbered afterward. No acknowledgements are added; independent receipt implementation/tests continue. [Owner coordination](https://github.com/AnserBeg/2rain-greenfield/pull/1#issuecomment-5549264574).
+**RECEIPT/AUTH bridge result (2026-09-05):** RECEIPT and the scoped AUTH evaluator/bindings landed together through PR #1 at `c30e951` by owner-authorized integration. No final independent approval was reissued, and local-demo authorization is not a claim of production authentication. The former pending wording is therefore not a dependency blocker for SALE. [Owner coordination](https://github.com/AnserBeg/2rain-greenfield/pull/1#issuecomment-5549264574).
 
-RECEIPT incorporated exact AUTH correction `9d70c749752006ab21d1b9df9516b1cb7b491df3` via merge `866f697a501c0dc53024ad18389a982b6ba44a0a`: no new AUTH migration; accepted through 0024, AUTH 0025, RECEIPT 0026/0027 remain stable. This is development integration, not AUTH or RECEIPT acceptance.
+The landed tree includes exact AUTH correction `9d70c749752006ab21d1b9df9516b1cb7b491df3`; accepted-through-0024, AUTH 0025 and RECEIPT 0026/0027 remain stable. This records the actual integration baseline, not an independent approval or production-authentication claim.
 
 | step | vertical | lane | contents | review |
 |---|---|---|---|---|
-| 1 | **RECEIPT** | BUILD | the goods receipt end to end, ONE packet: the posted-stock honesty items (`5g3-prog` A1: a runnable reconciliation script; the rebuild compares before it overwrites); widen the two inventory enums and move the conformance pins **by editing them and re-baselining** (ADR-0066); goods receipt + lines against a released PO; posting as the second family through PUR-2a's binding; the ADR-0065 received-quantity read model and its ten claims; receipt correction and reversal; open-to-receive; what closes an order; the forward-dating dial (`5g3-prog` A4). Slices in that order, each with a test-it-yourself | one arm on the posting-kernel diff at the end |
-| 2 | **SALE** | BUILD | sales order + lines (mirror of PUR-1), shipment + lines, negative posting as the third family, shipment correction, shipped quantity and open-to-ship (ADR-0065 mirror), the packing document. One packet | one arm on the posting-kernel diff |
-| 3 | **AUTH** | BUILD | queue row `7`: a real policy evaluator so a DENY exists; RLS on `module_storage_backfill_checkpoints`; the acknowledged-unbound list shrinks to zero. Required before any login outside the team | one arm (trust substrate) |
+| 1 | **RECEIPT** | BUILD | landed through PR #1 at `c30e951` with scoped AUTH by owner-authorized integration; limitations above remain explicit | no new approval inferred |
+| 2 | **SALE** | BUILD | current user-visible increment: sales order + parent-scoped lines, draft edit, release and eligible cancellation only. Reservation, shipment, correction, shipped quantity/open-to-ship and packing document remain future scope | no Critical-set arm unless the final diff enters that set |
+| 3 | **AUTH** | BUILD | scoped evaluator/bindings landed at `c30e951`; production authentication and remaining hardening stay separate future scope, not a SALE dependency | one arm only if trust substrate changes |
 | 4 | **AGENT** | BUILD | plan §13 A-01..A-03 over the loop above | one arm if it writes through the posting kernel |
 | ∥ | SUPPORT | SUPPORT | program reviews at stage boundaries; rulings; the `first-tenant` ruling when it comes; small correctives on paths BUILD does not hold | — |
 
@@ -149,7 +149,7 @@ ruling and the status, nothing else.
 | R4 | Gate-invisible scope evaporates | **RULED 2026-08-22 by the user: sequencing devolves to THIS FILE.** The plan §1.1 now claims scope, architecture and completion only. Stage-gate evidence documents are NOT revived, so **every packet charter must name gate-invisible deliverables as explicit acceptance criteria** — that is now the only thing between declared scope and silent evaporation | **CLOSED.** Plan amended; `PUR-2`'s charter owes its read models as named acceptance criteria |
 | R5 | Press-law gate makes a false claim | **BEFORE `PUR-2`.** §7.16 requires PUR-2 to prove the catalog is the exact active-release artifact; a fail-open press-law gate cannot hold that | `press-law-splice` **ACCEPTED on main at `c6418b6`; matrix `1ef547c`** |
 | R6 | Browsable balance mispriced | — | **DONE**, `stock-balance-read-model` accepted |
-| R7 | Every production policy gateway returns ALLOW | **smalls BEFORE `SAL-1`** (the review's own trigger, upheld). Noted: PUR-1 WILL declare purchasing permissions born unbound, so small (a) gets cheaper the earlier it lands | not started |
+| R7 | Every production policy gateway returns ALLOW | the SALE dependency is satisfied by the scoped evaluator/bindings landed at `c30e951`; production authentication remains outside this claim | **dependency closed for SALE through PR #1; no production-authentication claim** |
 | R8 | Posting-error classification sniffs any `code` | **HARD PREREQUISITE OF `PUR-2`** — now satisfied | **DONE**, `posting-error-shape` accepted: integrated `a69e1af`, `FULL_MATRIX_PASS_SHA=107f6803`. The guard admits only `/^[0-9A-Z]{5}$/u`, so a foreign `code` keeps its own identity instead of becoming `INVENTORY_POSTING_STORAGE_REJECTED`. **The residue is routed, not closed:** a SQLSTATE-SHAPED foreign code (realistically `EPIPE`) is still admitted, shape cannot exclude it, and closure is provenance-based — owned by `posting-error-provenance` (`c6cce1c`), ruled not to block `PUR-2`. |
 | R9 | Container pressure forges outcomes | **cheap half before any acceptance matrix we intend to trust.** Wrong outcomes, not slow ones. Currently moot — Docker does not start on this machine | not started |
 | R10 | Version-cut hygiene + false comments | **comments: opportunistic, zero byte risk. Predicates: before a v6 cut, which PUR does not make** — delay | not started — **verified still live** at `protocol.ts:15`, `compiler.ts:1232`, `normalize.ts:2236` |
