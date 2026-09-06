@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "packet": "SALE-FULFILLMENT",
+  "entries": [
+    {
+      "name": "reserve-rechecks-active-customer",
+      "claim": "Reserve validates the current active customer role at execution time, including for an order created before that role exists.",
+      "file": "packages/postgres-provider/src/fulfillment-lifecycle.ts",
+      "original": "  await assertActiveCustomer(client, binding, request, order);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "reserve must revalidate the current active customer role for a previously created order"
+        }
+      ]
+    },
+    {
+      "name": "shipment-rechecks-active-customer",
+      "claim": "Shipment posting validates the current active customer role after canonical locks are acquired.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  await assertShipmentCustomer(client, binding, context, order);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "shipment posting must revalidate the current active customer role"
+        }
+      ]
+    },
+    {
+      "name": "reservation-retry-keeps-idempotency-key",
+      "claim": "The reserve/release lifecycle passes the caller's idempotency key into the trust transaction so exact retries replay and conflicting retries refuse.",
+      "file": "packages/postgres-provider/src/fulfillment-lifecycle.ts",
+      "original": "      idempotencyKey: request.idempotencyKey,\n",
+      "replacement": "      idempotencyKey: randomUUID(),\n",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "an exact reservation retry must replay without executing again"
+        }
+      ]
+    },
+    {
+      "name": "stock-reducers-observe-live-reservations",
+      "claim": "Every stock-reducing posting path refuses a final on-hand quantity below live reservation coverage; zero coverage does not replace the existing negative-stock policy.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    if (reservedBefore !== null && reservedBefore > 0n) {\n",
+      "replacement": "    if (false && reservedBefore !== null && reservedBefore > 0n) {\n",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "an adjustment must not reduce stock below live reservations"
+        }
+      ]
+    },
+    {
+      "name": "reservations-share-order-line-bound-across-locations",
+      "claim": "Reservation admission applies one ordered-minus-shipped-minus-reserved bound across all locations for the order line.",
+      "file": "packages/postgres-provider/src/fulfillment-lifecycle.ts",
+      "original": "  if (ordered - shipped - lineReserved < quantity)\n",
+      "replacement": "  if (false && ordered - shipped - lineReserved < quantity)\n",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "cross-location reservations must share the order-line bound"
+        }
+      ]
+    },
+    {
+      "name": "initial-shipment-requires-live-reservation",
+      "claim": "An initial shipment line must select a currently live reservation; released coverage is never treated as shippable.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      if (!live.includes(String(state)))\n",
+      "replacement": "      if (false && !live.includes(String(state)))\n",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "an initial shipment must select a currently live reservation"
+        }
+      ]
+    },
+    {
+      "name": "correction-does-not-resurrect-released-reservation",
+      "claim": "A linked shipment correction restores stock and net shipped quantity without changing a released reservation or restoring its coverage.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    if (currentState === released) continue;\n",
+      "replacement": "    if (false && currentState === released) continue;\n",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "a linked correction must not silently resurrect a released reservation"
+        }
+      ]
+    },
+    {
+      "name": "reconciliation-compares-reconstructed-quantity",
+      "claim": "Fulfillment reconciliation independently compares stored reservation quantities with reconstruction from reservation and shipment movement facts.",
+      "file": "packages/postgres-provider/src/fulfillment-projections.ts",
+      "original": "      fulfillmentQuantity(fact.quantity) !==\n        fulfillmentQuantity(stored.quantity) ||\n",
+      "replacement": "      false ||\n",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "reconciliation must detect a tampered reservation quantity"
+        }
+      ]
+    }
+  ]
+}

@@ -18,6 +18,8 @@ import {
   FULFILLMENT_CAPABILITY_ID,
   fulfillmentBinding,
   fulfillmentColumn,
+  fulfillmentQuantity,
+  fulfillmentRelation,
   fulfillmentTable,
   quoteFulfillmentIdentifier as q,
 } from '../../packages/postgres-provider/src/fulfillment.js';
@@ -122,15 +124,6 @@ test(
             key = randomUUID(),
           ) => invoke(local, { expectedRevision, recordId }, key);
 
-          await create(
-            'party_role',
-            {
-              kind: `${ns}:option.customer`,
-              status: `${ns}:option.active`,
-            },
-            { party: customerPartyId },
-            false,
-          );
           const now = new Date().toISOString();
           const stock = await create('inventory_transaction', {
             actor_id: 'fulfillment-test',
@@ -205,6 +198,27 @@ test(
               },
               { order_line: line.recordId },
             );
+          const eligibilityProbe = await reservation('1');
+          await assert.rejects(
+            transition(
+              'reservation_reserve',
+              eligibilityProbe.recordId,
+              eligibilityProbe.revision,
+            ),
+            (error: unknown) =>
+              error instanceof InventoryPostingError &&
+              error.code === 'FULFILLMENT_CUSTOMER_INELIGIBLE',
+            'reserve must revalidate the current active customer role for a previously created order',
+          );
+          const customerRole = await create(
+            'party_role',
+            {
+              kind: `${ns}:option.customer`,
+              status: `${ns}:option.active`,
+            },
+            { party: customerPartyId },
+            false,
+          );
           const first = await reservation('6');
           const second = await reservation('6');
           await assert.rejects(
@@ -236,6 +250,7 @@ test(
           assert.equal(
             competing.filter((result) => result.status === 'fulfilled').length,
             1,
+            'competing reservations must have exactly one winner',
           );
           const refused = competing.find(
             (result): result is PromiseRejectedResult =>
@@ -252,13 +267,15 @@ test(
           const active = competing[0]!.status === 'fulfilled' ? first : second;
           const activeKey = active === first ? firstKey : secondKey;
           const inactive = active === first ? second : first;
-          const replay = await transition(
-            'reservation_reserve',
-            active.recordId,
-            active.revision,
-            activeKey,
-          );
-          assert.equal(replay.outcome, 'succeeded');
+          await assert.doesNotReject(async () => {
+            const replay = await transition(
+              'reservation_reserve',
+              active.recordId,
+              active.revision,
+              activeKey,
+            );
+            assert.equal(replay.outcome, 'succeeded');
+          }, 'an exact reservation retry must replay without executing again');
           await assert.rejects(
             transition(
               'reservation_reserve',
@@ -269,6 +286,7 @@ test(
             (error: unknown) =>
               error instanceof TrustEvidenceError &&
               error.code === 'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
+            'a conflicting reservation retry must be refused',
           );
 
           // Existing stock reducers cannot leave on-hand below live coverage.
@@ -305,6 +323,7 @@ test(
             (error: unknown) =>
               error instanceof InventoryPostingError &&
               error.code === 'FULFILLMENT_RESERVATION_SHORTAGE',
+            'an adjustment must not reduce stock below live reservations',
           );
 
           const locationCodeSuffix = randomUUID().slice(0, 8);
@@ -414,6 +433,7 @@ test(
               (error: unknown) =>
                 error instanceof InventoryPostingError &&
                 error.code === 'FULFILLMENT_RESERVATION_SHORTAGE',
+              'a transfer must not reduce stock below live reservations',
             );
           } finally {
             await directRuntimePool.end();
@@ -457,22 +477,34 @@ test(
             (error: unknown) =>
               error instanceof InventoryPostingError &&
               error.code === 'FULFILLMENT_QUANTITY_OUT_OF_BOUNDS',
+            'cross-location reservations must share the order-line bound',
           );
 
-          const shipment = async (quantity: string) => {
+          const shipment = async (
+            quantity: string,
+            options: {
+              kind?: 'initial' | 'correction' | 'reversal';
+              reversalOfMovementId?: string;
+              supersedesShipmentId?: string;
+            } = {},
+          ) => {
+            const kind = options.kind ?? 'initial';
             const header = await create(
               'shipment',
               {
                 effective_at: now,
                 external_reference: randomUUID(),
-                kind: `${ns}:option.shipment_kind_initial`,
+                kind: `${ns}:option.shipment_kind_${kind}`,
                 location_id: locationA,
                 number: `SHP-${randomUUID()}`,
                 reason_code: 'SHIP',
                 reason_narrative: 'Competing shipment',
                 state: `${ns}:option.shipment_state_draft`,
               },
-              { order: order.recordId, supersedes: null },
+              {
+                order: order.recordId,
+                supersedes: options.supersedesShipmentId ?? null,
+              },
             );
             await create(
               'shipment_line',
@@ -480,7 +512,7 @@ test(
                 item_id: itemId,
                 line_number: '1',
                 quantity,
-                reversal_of_movement_id: null,
+                reversal_of_movement_id: options.reversalOfMovementId ?? null,
                 unit_id: 'EA',
               },
               {
@@ -491,6 +523,32 @@ test(
             );
             return header;
           };
+          await transition(
+            'party_role_archive',
+            customerRole.recordId,
+            customerRole.revision,
+          );
+          const ineligibleShipment = await shipment('1');
+          await assert.rejects(
+            transition(
+              'shipment_post',
+              ineligibleShipment.recordId,
+              ineligibleShipment.revision,
+            ),
+            (error: unknown) =>
+              error instanceof InventoryPostingError &&
+              error.code === 'FULFILLMENT_CUSTOMER_INELIGIBLE',
+            'shipment posting must revalidate the current active customer role',
+          );
+          await create(
+            'party_role',
+            {
+              kind: `${ns}:option.customer`,
+              status: `${ns}:option.active`,
+            },
+            { party: customerPartyId },
+            false,
+          );
           const shipmentA = await shipment('4');
           const shipmentB = await shipment('4');
           const shipping = await Promise.allSettled([
@@ -500,6 +558,7 @@ test(
           assert.equal(
             shipping.filter((result) => result.status === 'fulfilled').length,
             1,
+            'competing shipments must have exactly one winner',
           );
           assert.ok(
             shipping.some(
@@ -511,6 +570,89 @@ test(
           );
           const postedShipment =
             shipping[0]!.status === 'fulfilled' ? shipmentA : shipmentB;
+          const binding = fulfillmentBinding(target)!;
+          const originalMovement = await pool.query<{ record_id: string }>(
+            `SELECT record_id::text FROM ${fulfillmentTable(binding.movement)}
+              WHERE tenant_id=$1 AND environment_id=$2
+                AND ${q(binding.movement.legalEntity!.column)}=$3
+                AND ${q(fulfillmentColumn(binding.movement, 'inventory_movement_source_type'))}='shipment'
+                AND ${q(fulfillmentColumn(binding.movement, 'inventory_movement_source_id'))}=$4`,
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              legalEntityId,
+              postedShipment.recordId,
+            ],
+          );
+          assert.equal(originalMovement.rows.length, 1);
+          const currentReservation = await pool.query<{ revision: string }>(
+            `SELECT revision FROM ${fulfillmentTable(binding.reservation)}
+              WHERE tenant_id=$1 AND environment_id=$2
+                AND ${q(binding.reservation.legalEntity!.column)}=$3 AND record_id=$4`,
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              legalEntityId,
+              active.recordId,
+            ],
+          );
+          await transition(
+            'reservation_release',
+            active.recordId,
+            Number(currentReservation.rows[0]!.revision),
+          );
+          const releasedInitialShipment = await shipment('1');
+          await assert.rejects(
+            transition(
+              'shipment_post',
+              releasedInitialShipment.recordId,
+              releasedInitialShipment.revision,
+            ),
+            (error: unknown) =>
+              error instanceof InventoryPostingError &&
+              error.code === 'FULFILLMENT_RESERVATION_STATE_CONFLICT',
+            'an initial shipment must select a currently live reservation',
+          );
+          const correction = await shipment('2', {
+            kind: 'correction',
+            reversalOfMovementId: originalMovement.rows[0]!.record_id,
+            supersedesShipmentId: postedShipment.recordId,
+          });
+          await transition(
+            'shipment_post',
+            correction.recordId,
+            correction.revision,
+          );
+          const releasedReservation = await pool.query<{
+            quantity: string;
+            state: string;
+          }>(
+            `SELECT r.${q(fulfillmentColumn(binding.reservation, 'reservation_state'))}::text AS state,
+                    b.${q(fulfillmentColumn(binding.reservationBalance, 'reservation_balance_remaining_quantity'))}::text AS quantity
+               FROM ${fulfillmentTable(binding.reservation)} r
+               JOIN ${fulfillmentTable(binding.reservationBalance)} b
+                 ON b.tenant_id=r.tenant_id AND b.environment_id=r.environment_id
+                AND b.${q(binding.reservationBalance.legalEntity!.column)}=r.${q(binding.reservation.legalEntity!.column)}
+                AND b.${q(fulfillmentRelation(binding, binding.reservationBalance, 'reservation_balance_reservation'))}=r.record_id
+              WHERE r.tenant_id=$1 AND r.environment_id=$2
+                AND r.${q(binding.reservation.legalEntity!.column)}=$3 AND r.record_id=$4`,
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              legalEntityId,
+              active.recordId,
+            ],
+          );
+          assert.equal(
+            releasedReservation.rows[0]!.state,
+            `${ns}:option.reservation_state_released`,
+            'a linked correction must not silently resurrect a released reservation',
+          );
+          assert.equal(
+            fulfillmentQuantity(releasedReservation.rows[0]!.quantity),
+            0n,
+            'a linked correction must not restore released reservation coverage',
+          );
           const trustEvidence = await pool.query<{
             changes: unknown;
             payload: unknown;
@@ -544,7 +686,6 @@ test(
             assert.ok(observed.includes('initial'));
           }
 
-          const binding = fulfillmentBinding(target)!;
           const client = await pool.connect();
           try {
             await client.query('BEGIN READ ONLY');
@@ -567,7 +708,11 @@ test(
               binding,
               runtime.identity,
             );
-            assert.equal(divergent.discrepancies.length, 1);
+            assert.equal(
+              divergent.discrepancies.length,
+              1,
+              'reconciliation must detect a tampered reservation quantity',
+            );
             await client.query('ROLLBACK');
           } finally {
             client.release();
