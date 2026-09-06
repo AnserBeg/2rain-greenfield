@@ -12,6 +12,7 @@ import {
 } from '../../packages/domain/src/app/builder.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/definition.js';
+import { salesModuleDefinition } from '../../packages/domain/src/sales/definition.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -2027,6 +2028,17 @@ test('ABI function checks compose additively across live roots and conflicting d
   const priorDefinition = composedApplicationWithoutInventoryForTransition();
   const prior = mustCompile(
     moduleInput(priorDefinition, expectedActiveReleaseFrom(empty)),
+  );
+  const priorStorage = projectionPayload<StorageTargetPayloadV1>(
+    prior,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.deepEqual(
+    priorStorage.entities
+      .filter((entity) => entity.legalEntity !== undefined)
+      .map((entity) => entity.entityId),
+    [],
+    'the Inventory-free prior retains no entity-owned family that requires the removed legal-entity master',
   );
   const mountedDefinition = composedApplicationDefinition();
   const mounted = mustCompile(
@@ -5695,26 +5707,29 @@ function withoutModuleForTransition(
 }
 
 /**
- * The composed application with neither Inventory NOR Purchasing.
+ * The composed application with neither Inventory nor a module whose retained
+ * families require Inventory's legal-entity master.
  *
- * Purchasing is stripped too, and the reason is structural rather than
- * cosmetic: `PUR-1` classified both purchasing families as `entityOwned`, and
- * `createManagedTable` requires exactly one compiled legal-entity master for
- * any entity-owned table -- but `legal_entity` is declared by the INVENTORY
- * module. A composition carrying Purchasing without Inventory therefore fails
- * closed with `LEGAL_ENTITY_MASTER_TARGET_INVALID: expected one compiled
- * legal-entity master, received 0`, which is the gate working. Before `PUR-1`
- * this fixture had no entity-owned entity at all, so the check was never
- * reached.
+ * Purchasing and Sales are stripped too, and the reason is structural rather
+ * than cosmetic: their families are `entityOwned`, and `createManagedTable`
+ * requires exactly one compiled legal-entity master for any entity-owned table
+ * -- but `legal_entity` is declared by the Inventory module. A composition
+ * retaining either dependent module without Inventory therefore fails closed
+ * with `LEGAL_ENTITY_MASTER_TARGET_INVALID: expected one compiled legal-entity
+ * master, received 0`, which is the gate working.
  */
 function composedApplicationWithoutInventoryForTransition(): Record<
   string,
   unknown
 > {
   const application = withoutModuleForTransition(
-    structuredClone(inventoryOwnedModuleDefinition()),
-    purchasingModuleDefinition(APPLICATION_NAMESPACE),
-    'purchasing',
+    withoutModuleForTransition(
+      structuredClone(inventoryOwnedModuleDefinition()),
+      purchasingModuleDefinition(APPLICATION_NAMESPACE),
+      'purchasing',
+    ),
+    salesModuleDefinition(APPLICATION_NAMESPACE),
+    'sales',
   );
   const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
   for (const collection of [

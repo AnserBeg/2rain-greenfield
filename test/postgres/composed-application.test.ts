@@ -1049,8 +1049,8 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    // Prior 40 + three writable receipt/request records and one read-only projection.
-    assert.equal(surfaces.length, 51);
+    // Prior 51 + the Sales order and line list/detail/form surfaces.
+    assert.equal(surfaces.length, 57);
     for (const local of [
       'goods_receipt',
       'goods_receipt_line',
@@ -1075,6 +1075,19 @@ async function assertRealProductDefinition(
     assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.lineListSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.detailSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.formSurfaceId));
+    for (const salesSurfaceId of [
+      APPLICATION_IDS.sales.listSurfaceId,
+      APPLICATION_IDS.sales.detailSurfaceId,
+      APPLICATION_IDS.sales.formSurfaceId,
+      APPLICATION_IDS.sales.lineListSurfaceId,
+      APPLICATION_IDS.sales.lineDetailSurfaceId,
+      APPLICATION_IDS.sales.lineFormSurfaceId,
+    ]) {
+      assert.ok(
+        surfaces.includes(salesSurfaceId),
+        `the composed product mounts ${salesSurfaceId}`,
+      );
+    }
     // Inventory only reaches a mounted runtime once its emitted-but-
     // unarrangeable verification scenarios are recorded as derivations.
     for (const inventorySurfaceId of [
@@ -3317,6 +3330,7 @@ async function assertBoundedFreshTenantInstallEvidence(
     compiled.application.compiled,
   ).plan.scenarios.length;
   assertReceivingVerificationCoverage(compiledApplication);
+  assertSalesVerificationCoverage(compiledApplication);
   // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
   // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
   // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
@@ -3331,10 +3345,13 @@ async function assertBoundedFreshTenantInstallEvidence(
   // structurally excluded from that contract. `projections.ts` declines to emit
   // either, which is ADR-0050 section 6 item 2 closed at the compiler. Not
   // emitting differs from skipping: nothing is admitted unexecuted.
+  // SALE adds another measured 24: 12 for the order and 12 for its line.
+  // `assertSalesVerificationCoverage` pins both entity contributions and the
+  // same server-owned lifecycle-field exclusion independently of this total.
   assert.equal(
     servingScenarioCount,
-    257,
-    'the release includes the prior 198 scenarios plus 59 for the four receiving entities',
+    281,
+    'the release includes the prior 198 scenarios, 59 for receiving, and 24 for Sales',
   );
 
   const intermediate = await pool.query<{
@@ -3782,7 +3799,7 @@ function throughProfileSiblingHead(compiledApplication: unknown): unknown {
   const predecessor = compileApplication({
     dependencies: [],
     expectedActiveRelease: expectedActiveReleaseFrom(
-      previous.bootstrap.compiled,
+      previous.application.compiled,
     ),
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
@@ -3802,6 +3819,9 @@ function throughProfileSiblingHead(compiledApplication: unknown): unknown {
   const successor = compileSuccessor(predecessor, bytes);
   return {
     applications: [
+      ...previous.applications.map((entry) =>
+        serializedRelease(entry.normalizedDefinitionBytes, entry.compiled),
+      ),
       serializedRelease(bytes, predecessor),
       serializedRelease(bytes, successor),
     ],
@@ -5521,12 +5541,12 @@ async function assertExactPartitionEvidence(
   );
   assert.ok(evidence.results.length > 0, 'real PostgreSQL probes still ran');
   assert.ok(derivations.length > 0);
-  // Measured on the combined governed release: 200 executed + 57 derived.
+  // Measured on the combined governed release: 224 executed + 57 derived.
   // The independent constructibility oracle below still verifies every member.
   assert.equal(
     evidence.results.length,
-    200,
-    'receiving adds 49 executed scenarios to the prior 151',
+    224,
+    'receiving adds 49 and Sales adds 24 executed scenarios to the prior 151',
   );
   assert.equal(
     derivations.length,
@@ -5557,6 +5577,22 @@ async function assertExactPartitionEvidence(
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
     57,
+  );
+  const executedScenarioIdSet = new Set(executedScenarioIds);
+  const salesEntityIds = new Set<string>([
+    APPLICATION_IDS.sales.entityIds.salesOrder,
+    APPLICATION_IDS.sales.entityIds.salesOrderLine,
+  ]);
+  const salesScenarioIds = binding.plan.scenarios
+    .filter((scenario) => salesEntityIds.has(scenario.entityId))
+    .map((scenario) => scenario.scenarioId);
+  assert.equal(salesScenarioIds.length, 24);
+  assert.equal(
+    salesScenarioIds.every((scenarioId) =>
+      executedScenarioIdSet.has(scenarioId),
+    ),
+    true,
+    'every Sales verification scenario executes rather than becoming a derivation',
   );
   assert.deepEqual(
     [...executedScenarioIds, ...derivedScenarioIds].toSorted(),
@@ -5745,6 +5781,28 @@ function assertReceivingVerificationCoverage(
     ),
     false,
     'the server-owned lifecycle field is not probed through generic writes',
+  );
+}
+
+function assertSalesVerificationCoverage(compiledApplication: unknown): void {
+  const { plan } = releaseVerificationBinding(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  for (const local of ['sales_order', 'sales_order_line']) {
+    assert.equal(
+      plan.scenarios.filter(
+        (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
+      ).length,
+      12,
+      `the Sales entity ${local} contributes its measured verifier scenarios`,
+    );
+  }
+  assert.equal(
+    plan.scenarios.some(
+      (scenario) => scenario.subjectId === APPLICATION_IDS.sales.stateFieldId,
+    ),
+    false,
+    'the Sales server-owned lifecycle field is not probed through generic writes',
   );
 }
 
