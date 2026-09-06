@@ -144,6 +144,18 @@ export function registerInventoryContractCases(
           maintainerId:
             'northstar.postgresql-module-provider:received-quantity/v1',
         },
+        {
+          classification: 'providerWritten',
+          familyId: 'sales_order_shipped',
+          maintainerId:
+            'northstar.postgresql-module-provider:shipped-quantity/v1',
+        },
+        {
+          classification: 'providerWritten',
+          familyId: 'reservation_balance',
+          maintainerId:
+            'northstar.postgresql-module-provider:reservation-balance/v1',
+        },
       ]);
       assert.deepEqual(
         resolvePinnedInventoryProviderWrittenReadModel(

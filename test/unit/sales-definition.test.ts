@@ -64,20 +64,26 @@ function definition(): Definition {
   return salesModuleDefinition() as unknown as Definition;
 }
 
-test('sales order metadata is a complete list/detail/form document with lines', () => {
+test('sales fulfillment metadata is a complete order, reservation and shipment document', () => {
   const authored = definition();
   assert.equal(authored.languageVersion, ADOPTED_LANGUAGE_VERSION);
   assert.equal(
     authored.normalizationProfileVersion,
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
-  assert.equal(authored.entities.length, 2);
-  assert.equal(authored.fields.length, 11);
-  assert.equal(authored.operations.length, 11);
-  assert.equal(authored.permissions.length, 13);
-  assert.equal(authored.queries.length, 8);
-  assert.equal(authored.surfaces.length, 6);
-  for (const local of ['sales_order', 'sales_order_line']) {
+  assert.equal(authored.entities.length, 7);
+  assert.equal(authored.fields.length, 35);
+  assert.equal(authored.operations.length, 27);
+  assert.equal(authored.permissions.length, 33);
+  assert.equal(authored.queries.length, 28);
+  assert.equal(authored.surfaces.length, 19);
+  for (const local of [
+    'sales_order',
+    'sales_order_line',
+    'reservation',
+    'shipment',
+    'shipment_line',
+  ]) {
     for (const role of ['list', 'detail', 'form']) {
       const surface = authored.surfaces.find((candidate) =>
         candidate.surfaceId.endsWith(`:surface.${local}_${role}`),
@@ -112,7 +118,6 @@ test('the state machine releases and cancels only through compiled targets', () 
     [
       'northstar.sales:operation.sales_order_release',
       'northstar.sales:operation.sales_order_draft_cancel',
-      'northstar.sales:operation.sales_order_cancel',
     ],
   );
   const stateField = (
@@ -173,36 +178,20 @@ test('draft editing is admitted and every released/cancelled edit is refused by 
   }
 });
 
-test('line mutations inherit the order guard from one parent-scoped relation', () => {
+test('line mutations inherit their parent guards and fulfillment references are explicit', () => {
   const authored = definition();
-  assert.deepEqual(authored.relations, [
-    {
-      archiveBehavior: 'restrict',
-      cardinality: 'manyToOne',
-      foreignKeyActions: {
-        onDelete: 'restrict',
-        onUpdate: 'restrict',
-        schemaVersion: 'v5',
-      },
-      joinEligibility: 'query',
-      kind: 'relationDefinition',
-      orderKey: 10,
-      ownership: 'parentScopedChild',
-      relationId: SALES_IDS.relationIds.salesOrderLineOrder,
-      required: true,
-      schemaVersion: 'v5',
-      sourceEntity: {
-        kind: 'entityReference',
-        schemaVersion: 'v5',
-        targetId: SALES_IDS.entityIds.salesOrderLine,
-      },
-      targetEntity: {
-        kind: 'entityReference',
-        schemaVersion: 'v5',
-        targetId: SALES_IDS.entityIds.salesOrder,
-      },
-    },
-  ]);
+  assert.equal(authored.relations.length, 9);
+  assert.deepEqual(
+    authored.relations.map((relation) => relation.relationId),
+    Object.values(SALES_IDS.relationIds),
+  );
+  assert.equal(
+    authored.relations.find(
+      (relation) =>
+        relation.relationId === SALES_IDS.relationIds.salesOrderLineOrder,
+    )?.ownership,
+    'parentScopedChild',
+  );
   assert.equal(
     authored.operations
       .filter((operation) =>
@@ -210,6 +199,14 @@ test('line mutations inherit the order guard from one parent-scoped relation', (
       )
       .some((operation) => operation.precondition !== undefined),
     false,
+  );
+  assert.equal(
+    authored.relations.find(
+      (relation) =>
+        relation.relationId ===
+        'northstar.sales:relation.shipment_line_shipment',
+    )?.ownership,
+    'parentScopedChild',
   );
 });
 
@@ -232,6 +229,31 @@ test('all sales permissions are exact current-policy contracts', () => {
         `northstar.sales:permission.sales_order_line_${action}`,
         SALES_IDS.entityIds.salesOrderLine,
       ]),
+      ...['create', 'read', 'update', 'archive', 'restore'].map((action) => [
+        action,
+        `northstar.sales:permission.reservation_${action}`,
+        'northstar.sales:entity.reservation',
+      ]),
+      [
+        'read',
+        'northstar.sales:permission.reservation_balance_read',
+        'northstar.sales:entity.reservation_balance',
+      ],
+      ...['create', 'read', 'update', 'archive', 'restore'].map((action) => [
+        action,
+        `northstar.sales:permission.shipment_${action}`,
+        'northstar.sales:entity.shipment',
+      ]),
+      ...['create', 'read', 'update', 'archive', 'restore'].map((action) => [
+        action,
+        `northstar.sales:permission.shipment_line_${action}`,
+        'northstar.sales:entity.shipment_line',
+      ]),
+      [
+        'read',
+        'northstar.sales:permission.sales_order_shipped_read',
+        'northstar.sales:entity.sales_order_shipped',
+      ],
       [
         'transition',
         'northstar.sales:permission.sales_order_release',
@@ -246,6 +268,21 @@ test('all sales permissions are exact current-policy contracts', () => {
         'transition',
         'northstar.sales:permission.sales_order_close',
         SALES_IDS.entityIds.salesOrder,
+      ],
+      [
+        'transition',
+        'northstar.sales:permission.reservation_reserve',
+        'northstar.sales:entity.reservation',
+      ],
+      [
+        'transition',
+        'northstar.sales:permission.reservation_release',
+        'northstar.sales:entity.reservation',
+      ],
+      [
+        'transition',
+        'northstar.sales:permission.shipment_post',
+        'northstar.sales:entity.shipment',
       ],
     ],
   );
@@ -276,7 +313,7 @@ test('sales queries and storage are explicitly entity-owned', () => {
   );
 });
 
-test('sales is the sixth compiled navigation group and inventory effects stay absent', () => {
+test('sales is the sixth compiled navigation group and fulfillment is registered behavior', () => {
   assert.deepEqual(COMPOSED_MODULE_NAMES, [
     'party',
     'catalog',
@@ -305,15 +342,11 @@ test('sales is the sixth compiled navigation group and inventory effects stay ab
     operation.operationId.includes(':operation.sales_order'),
   );
   assert.equal(
-    salesOperations.some(
+    salesOperations.filter(
       (operation) => operation.effect.kind === 'registeredCapabilityEffect',
-    ),
-    false,
+    ).length,
+    2,
   );
-  assert.equal(
-    JSON.stringify(salesModuleDefinition()).match(
-      /inventory_movement|reservation|shipment/gu,
-    ),
-    null,
-  );
+  assert.match(JSON.stringify(salesModuleDefinition()), /reservation/gu);
+  assert.match(JSON.stringify(salesModuleDefinition()), /shipment/gu);
 });

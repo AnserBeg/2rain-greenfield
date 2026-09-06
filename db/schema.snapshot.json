@@ -13071,7 +13071,7 @@
       "domain": null,
       "name": "semantic_operation_receipts_input_digest_version",
       "type": "c",
-      "definition": "CHECK (input_digest_version = ANY (ARRAY[1, 2, 3, 4, 5]))",
+      "definition": "CHECK (input_digest_version = ANY (ARRAY[1, 2, 3, 4, 5, 6]))",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,

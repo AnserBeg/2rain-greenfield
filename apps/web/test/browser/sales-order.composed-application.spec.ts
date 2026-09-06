@@ -219,7 +219,10 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   ).toHaveText([
     '1',
     itemId,
-    '10.000000000000000000',
+    '10',
+    '0',
+    '0',
+    '10',
     'EA',
     '12.500000000000000000',
   ]);

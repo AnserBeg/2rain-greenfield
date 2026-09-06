@@ -52,6 +52,10 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'sales_order' },
   { classification: 'entityOwned', familyId: 'sales_order_line' },
   { classification: 'entityOwned', familyId: 'reservation' },
+  { classification: 'entityOwned', familyId: 'reservation_balance' },
+  { classification: 'entityOwned', familyId: 'shipment' },
+  { classification: 'entityOwned', familyId: 'shipment_line' },
+  { classification: 'entityOwned', familyId: 'sales_order_shipped' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const);
@@ -73,6 +77,16 @@ const INVENTORY_PROVIDER_WRITTEN_READ_MODEL_RULES = Object.freeze([
     classification: 'providerWritten',
     familyId: 'purchase_order_received',
     maintainerId: 'northstar.postgresql-module-provider:received-quantity/v1',
+  },
+  {
+    classification: 'providerWritten',
+    familyId: 'sales_order_shipped',
+    maintainerId: 'northstar.postgresql-module-provider:shipped-quantity/v1',
+  },
+  {
+    classification: 'providerWritten',
+    familyId: 'reservation_balance',
+    maintainerId: 'northstar.postgresql-module-provider:reservation-balance/v1',
   },
 ] as const);
 const INVENTORY_STORAGE_REFERENCE_RULES = Object.freeze([
@@ -224,6 +238,46 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'sales_order_line',
     targetFamilyId: 'sales_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'reservation',
+    targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'reservation_balance',
+    targetFamilyId: 'reservation',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment',
+    targetFamilyId: 'sales_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment',
+    targetFamilyId: 'shipment',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment_line',
+    targetFamilyId: 'shipment',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment_line',
+    targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment_line',
+    targetFamilyId: 'reservation',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'sales_order_shipped',
+    targetFamilyId: 'sales_order_line',
   },
   {
     semantics: 'sameEntity',
@@ -421,6 +475,10 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
         {
           optionLocalId: 'inventory_posting_role_receipt',
           label: 'receipt',
+        },
+        {
+          optionLocalId: 'inventory_posting_role_shipment',
+          label: 'shipment',
         },
         {
           label: 'adjustment',
@@ -1935,7 +1993,23 @@ export function validateModuleConformance(
       ) {
         qualifiedProviderWrittenReadModels.add(entity.entityId);
       }
-    } else if (family.familyId === 'purchase_order_received') {
+    } else if (
+      family.familyId === 'purchase_order_received' ||
+      family.familyId === 'sales_order_shipped' ||
+      family.familyId === 'reservation_balance'
+    ) {
+      const quantityField =
+        family.familyId === 'purchase_order_received'
+          ? 'purchase_order_received_received_quantity'
+          : family.familyId === 'sales_order_shipped'
+            ? 'sales_order_shipped_shipped_quantity'
+            : 'reservation_balance_remaining_quantity';
+      const unitField =
+        family.familyId === 'purchase_order_received'
+          ? 'purchase_order_received_unit_id'
+          : family.familyId === 'sales_order_shipped'
+            ? 'sales_order_shipped_unit_id'
+            : 'reservation_balance_unit_id';
       const rules = POSTED_STOCK_BALANCE_MODULE_FIELD_RULES.filter(
         (rule) =>
           rule.fieldLocalId === 'posted_stock_balance_posted_quantity' ||
@@ -1944,8 +2018,8 @@ export function validateModuleConformance(
         ...rule,
         fieldLocalId:
           rule.fieldLocalId === 'posted_stock_balance_posted_quantity'
-            ? 'purchase_order_received_received_quantity'
-            : 'purchase_order_received_unit_id',
+            ? quantityField
+            : unitField,
         storage: {
           ...rule.storage,
           searchable: rule.fieldLocalId === 'posted_stock_balance_unit_id',

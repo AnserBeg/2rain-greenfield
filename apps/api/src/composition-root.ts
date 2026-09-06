@@ -8,6 +8,7 @@ import {
 } from '@north-star/postgres-provider/composed-application-runtime';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
+import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/fulfillment-capability-executor';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
@@ -90,6 +91,7 @@ export async function startComposedApplication(
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl: options.databaseUrl,

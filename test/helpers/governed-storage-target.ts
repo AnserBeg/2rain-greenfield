@@ -16,6 +16,14 @@ interface ReleaseArtifacts {
 
 /** Read the actual checked-in governed head; never compile an isolated fixture. */
 export async function governedStorageTarget(): Promise<StorageTargetPayloadV1> {
+  return (await governedStorageTargetArtifact()).payload;
+}
+
+/** Read the governed payload together with the persisted projection-chunk hash. */
+export async function governedStorageTargetArtifact(): Promise<{
+  readonly contentHash: string;
+  readonly payload: StorageTargetPayloadV1;
+}> {
   const release = JSON.parse(
     await readFile(
       resolve(__dirname, '../../apps/web/release/app.compiled.json'),
@@ -50,5 +58,5 @@ export async function governedStorageTarget(): Promise<StorageTargetPayloadV1> {
     Buffer.from(chunk.canonicalBytesBase64, 'base64').toString('utf8'),
   ) as StorageTargetPayloadV1;
   assert.equal(target.kind, 'storageTargetPayload');
-  return target;
+  return { contentHash: chunk.contentHash, payload: target };
 }

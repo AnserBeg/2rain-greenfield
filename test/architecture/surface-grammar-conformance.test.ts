@@ -262,8 +262,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const grouped = groupedManifest.navigation;
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
-  // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' six surfaces.
-  assert.equal(groupedManifest.surfaces.length, 57);
+  // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces.
+  assert.equal(groupedManifest.surfaces.length, 70);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -279,8 +279,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
   assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 3);
-  // 13 + Purchasing's six lists + Sales' two lists.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 21);
+  // 13 + Purchasing's six lists + Sales' seven lists.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 26);
   // Sales is the sixth module, so the compiler groups Purchasing and Sales
   // under the fifth compact entry rather than exceeding the navigation budget.
   assert.deepEqual(
@@ -709,13 +709,14 @@ interface MutableCompiledSurface {
 function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObservation[] {
   return productModuleDefinitions.map(({ create, sourceDirectory }) => {
     const definition = create();
-    // Purchasing now declares RECEIPT's accepted inventory boundary and cannot
-    // compile as a false standalone module. Compile it in the real composed
+    // Purchasing and Sales declare registered Inventory boundaries and cannot
+    // compile as false standalone modules. Compile either in the real composed
     // dependency context, then select exactly its authored surface locals.
+    const needsComposedContext = ['purchasing', 'sales'].includes(
+      sourceDirectory,
+    );
     const normalized = normalizeApplicationPackage(
-      sourceDirectory === 'purchasing'
-        ? composedApplicationDefinition()
-        : definition,
+      needsComposedContext ? composedApplicationDefinition() : definition,
     );
     const compiled = compileApplication({
       dependencies: [],
@@ -737,24 +738,24 @@ function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObserv
     assert.equal(compiled.status, 'compiled');
     const identity = definitionIdentity(definition);
     const manifest = compiledSurfaceManifest(compiled);
-    const surfaces =
-      sourceDirectory === 'purchasing'
-        ? purchasingSurfaces(definition, manifest.surfaces)
-        : manifest.surfaces;
+    const surfaces = needsComposedContext
+      ? moduleSurfaces(definition, manifest.surfaces, sourceDirectory)
+      : manifest.surfaces;
     return {
       ...identity,
       result: checkSurfaceGrammarConformance(
         surfaces,
-        sourceDirectory === 'purchasing' ? null : manifest.navigation,
+        needsComposedContext ? null : manifest.navigation,
       ),
       sourceDirectory,
     };
   });
 }
 
-function purchasingSurfaces(
+function moduleSurfaces(
   definition: unknown,
   surfaces: readonly ConformanceSurface[],
+  sourceDirectory: string,
 ): readonly ConformanceSurface[] {
   assert.ok(definition && typeof definition === 'object');
   const authored = (definition as { surfaces?: { surfaceId?: unknown }[] })
@@ -763,7 +764,9 @@ function purchasingSurfaces(
   const locals = new Set(
     authored.map(({ surfaceId }) => {
       if (typeof surfaceId !== 'string') {
-        throw new TypeError('Purchasing surface identity must be a string');
+        throw new TypeError(
+          `${sourceDirectory} surface identity must be a string`,
+        );
       }
       return surfaceId.slice(surfaceId.indexOf(':surface.') + 9);
     }),

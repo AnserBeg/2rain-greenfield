@@ -1627,6 +1627,7 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 @keyframes skeleton-sweep{to{transform:translateX(100%)}}
 @media (prefers-reduced-motion:reduce){.skeleton::after{animation:none;display:none}}
 @media (prefers-reduced-motion:no-preference){.sidebar a,.navigation-group>summary,.primary-action,.secondary-action,.list-page-link,.record-link,.data-table-wrap tbody tr,button{transition:background-color var(--motion-duration) var(--motion-easing),border-color var(--motion-duration) var(--motion-easing),color var(--motion-duration) var(--motion-easing),opacity var(--motion-duration) var(--motion-easing)}}
+@media print{body *{visibility:hidden}.packing-document,.packing-document *{visibility:visible}.packing-document{position:absolute;inset:0;width:100%;border:0;box-shadow:none}.print-guidance{display:none}}
 @media(max-width:800px){
 body{padding-bottom:72px}
 .app-shell{display:block}

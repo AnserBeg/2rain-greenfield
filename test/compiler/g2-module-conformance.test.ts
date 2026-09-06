@@ -63,7 +63,6 @@ import {
   APPLICATION_NAMESPACE,
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
-import { salesModuleDefinition } from '../../packages/domain/src/sales/index.js';
 import {
   narrowAcknowledgementToDeclared,
   readAcknowledgementDocument,
@@ -531,7 +530,7 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
 });
 
 test('sales compiler scenarios execute input refinements and operation/storage effects', () => {
-  const compiled = mustCompile(input(salesModuleDefinition()));
+  const compiled = mustCompile(input(composedApplicationDefinition()));
   const operations = projectionPayload<{
     operations: Array<{
       effect: Record<string, unknown>;
@@ -621,9 +620,9 @@ test('sales compiler scenarios execute input refinements and operation/storage e
   assert.deepEqual(lineCreate.inputContract.relationInputs, [
     {
       archiveBehavior: 'restrict',
-      relationId: 'northstar.sales:relation.sales_order_line_order',
+      relationId: 'northstar.app:relation.sales_order_line_order',
       required: true,
-      targetEntityId: 'northstar.sales:entity.sales_order',
+      targetEntityId: 'northstar.app:entity.sales_order',
     },
   ]);
 
@@ -634,18 +633,18 @@ test('sales compiler scenarios execute input refinements and operation/storage e
     entity: {
       kind: 'entityReference',
       schemaVersion: 'v5',
-      targetId: 'northstar.sales:entity.sales_order',
+      targetId: 'northstar.app:entity.sales_order',
     },
-    fromStateId: 'northstar.sales:state.sales_order_draft',
+    fromStateId: 'northstar.app:state.sales_order_draft',
     kind: 'transitionStateEffect',
     schemaVersion: 'v5',
     stateFieldId:
-      'northstar.sales:derived_state_field.machine.sales_order_lifecycle',
-    toStateId: 'northstar.sales:state.sales_order_released',
+      'northstar.app:derived_state_field.machine.sales_order_lifecycle',
+    toStateId: 'northstar.app:state.sales_order_released',
     transition: {
       kind: 'transitionReference',
       schemaVersion: 'v5',
-      targetId: 'northstar.sales:transition.sales_order_release',
+      targetId: 'northstar.app:transition.sales_order_release',
     },
   });
 
@@ -659,27 +658,54 @@ test('sales compiler scenarios execute input refinements and operation/storage e
     candidate,
     PROJECTION_FAMILY_IDS.storageTransition,
   );
-  assert.deepEqual(
-    transition.elements.map((element) => ({
-      kind: element.kind,
-      semanticEffect: element.classification.semanticEffect,
-      subjectId: element.subjectId,
-    })),
-    [
-      salesStorageEffect('createTable', 'additive', 'entity.sales_order'),
-      salesStorageEffect('createTable', 'additive', 'entity.sales_order_line'),
-      salesStorageEffect('createIndex', 'none', 'entity.sales_order'),
-      salesStorageEffect('createIndex', 'none', 'entity.sales_order_line'),
-      salesStorageEffect('createIndex', 'none', 'entity.sales_order_line'),
-      salesStorageEffect('createIndex', 'none', 'entity.sales_order_line'),
-      salesStorageEffect('createIndex', 'none', 'entity.sales_order'),
-      salesStorageEffect(
-        'addForeignKey',
-        'additive',
-        'relation.sales_order_line_order',
+  const effects = transition.elements.map((element) => ({
+    kind: element.kind,
+    semanticEffect: element.classification.semanticEffect,
+    subjectId: element.subjectId,
+  }));
+  for (const local of [
+    'sales_order',
+    'sales_order_line',
+    'reservation',
+    'reservation_balance',
+    'shipment',
+    'shipment_line',
+    'sales_order_shipped',
+  ])
+    assert.ok(
+      effects.some(
+        (effect) =>
+          effect.kind === 'createTable' &&
+          effect.semanticEffect === 'additive' &&
+          effect.subjectId.endsWith(`:entity.${local}`),
       ),
-      salesStorageEffect('createIndex', 'none', 'entity.sales_order'),
-    ],
+      `missing additive table for ${local}`,
+    );
+  for (const local of [
+    'sales_order_line_order',
+    'reservation_order_line',
+    'reservation_balance_reservation',
+    'shipment_order',
+    'shipment_supersedes',
+    'shipment_line_shipment',
+    'shipment_line_order_line',
+    'shipment_line_reservation',
+    'sales_order_shipped_order_line',
+  ])
+    assert.ok(
+      effects.some(
+        (effect) =>
+          effect.kind === 'addForeignKey' &&
+          effect.semanticEffect === 'additive' &&
+          effect.subjectId.endsWith(`:relation.${local}`),
+      ),
+      `missing additive relation for ${local}`,
+    );
+  assert.equal(
+    effects.every((effect) =>
+      ['additive', 'none'].includes(effect.semanticEffect),
+    ),
+    true,
   );
 });
 
@@ -1664,27 +1690,54 @@ function salesInputField(
 ): unknown {
   return {
     bounds: { maximumLength, precision, scale },
-    fieldId: `northstar.sales:field.sales_order_line_${localId}`,
+    fieldId: `northstar.app:field.sales_order_line_${localId}`,
     fieldKind,
     required,
     writable: true,
   };
 }
 
-function salesStorageEffect(
-  kind: StorageTransitionEnvelope['elements'][number]['kind'],
-  semanticEffect: StorageTransitionEnvelope['elements'][number]['classification']['semanticEffect'],
-  subjectSuffix: string,
-): unknown {
-  return {
-    kind,
-    semanticEffect,
-    subjectId: `northstar.app:${subjectSuffix}`,
-  };
-}
-
 function composedApplicationWithoutSales(): Record<string, unknown> {
   const definition = structuredClone(composedApplicationDefinition());
+  const salesModuleId = 'northstar.app:module.sales';
+  const salesEntityIds = new Set(
+    (definition.entities as Array<Record<string, unknown>>)
+      .filter((entry) => referenceTarget(entry.module) === salesModuleId)
+      .map((entry) => String(entry.entityId)),
+  );
+  const belongsToSales = (
+    collectionName: string,
+    entry: Record<string, unknown>,
+  ): boolean => {
+    switch (collectionName) {
+      case 'assertions':
+        return [...salesEntityIds].some((entityId) =>
+          String(entry.assertionId).includes(entityId.split(':entity.')[1]!),
+        );
+      case 'entities':
+        return salesEntityIds.has(String(entry.entityId));
+      case 'fields':
+      case 'stateMachines':
+      case 'storageMappings':
+        return salesEntityIds.has(referenceTarget(entry.entity) ?? '');
+      case 'modules':
+        return String(entry.moduleId) === salesModuleId;
+      case 'operations':
+      case 'surfaces':
+        return referenceTarget(entry.module) === salesModuleId;
+      case 'queries':
+        return salesEntityIds.has(referenceTarget(entry.sourceEntity) ?? '');
+      case 'relations':
+        return (
+          salesEntityIds.has(referenceTarget(entry.sourceEntity) ?? '') ||
+          salesEntityIds.has(referenceTarget(entry.targetEntity) ?? '')
+        );
+      case 'permissions':
+        return salesEntityIds.has(referenceTarget(entry.resource) ?? '');
+      default:
+        return false;
+    }
+  };
   for (const collectionName of [
     'assertions',
     'entities',
@@ -1702,16 +1755,16 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
     assert.ok(Array.isArray(entries));
     definition[collectionName] = entries.filter(
       (entry) =>
-        !JSON.stringify(entry).includes('sales_order') &&
-        !(
-          collectionName === 'modules' &&
-          typeof entry === 'object' &&
-          entry !== null &&
-          (entry as Record<string, unknown>).label === 'Sales'
-        ),
+        !belongsToSales(collectionName, entry as Record<string, unknown>),
     );
   }
   return definition;
+}
+
+function referenceTarget(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const targetId = (value as Record<string, unknown>).targetId;
+  return typeof targetId === 'string' ? targetId : null;
 }
 
 function declaredEvidenceFor(
