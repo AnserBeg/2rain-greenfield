@@ -2,7 +2,7 @@
 
 Status: evidence_ready; draft PR handoff. Tier: Behavioral. Critical paths touched: none. Stops: 0.
 Base: `c30e951f56f7ead4b2e3d9e228208dd639e5a461`.
-Executable head: `96b48921163b0228bd34d7b9141cfa97435cd117`.
+Executable head: `66ac1cb5e267e6565d7753bad4fe14cbabd6a41a`.
 
 ## Claims
 
@@ -20,6 +20,7 @@ Executable head: `96b48921163b0228bd34d7b9141cfa97435cd117`.
 - Party and item are existing identifiers, matching accepted Purchasing. The selected demo values are proved to exist, but customer-role and item eligibility validation are not added in this increment.
 - No migration is authored or rewritten. A disposable SALE database materializes the governed release; the receipt database and ports are untouched.
 - Shared correctness-sensitive boundaries changed additively: the legal-entity family/relation contract and compiler mirror, composed builder/navigation, release lineage, and governed permission bindings. Posting kernel, AUTH evaluator, trust substrate, migrations and release activation logic are unchanged.
+- The PostgreSQL composition correction changes tests and the generated full-replay schema oracle only; it changes no production or shared correctness-sensitive boundary.
 
 ## Slices
 
@@ -33,6 +34,16 @@ Executable head: `96b48921163b0228bd34d7b9141cfa97435cd117`.
   emitted non-empty input fields and their refinements, exact operation
   effects, and the semantic effects of the pre-Sales → Sales storage
   transition.
+- PostgreSQL CI run 34009435238 exposed three stale composition fixtures. The
+  exact three-test filtered reproduction was 0/3 before correction; the two
+  complete affected files then passed 39/39 under the exclusive test lock.
+  The regenerated full-replay oracle was additive in every catalog collection
+  (two tables, 30 columns, six constraints, nine indexes and eight policies;
+  zero removals).
+- `check:app-release`, focused Sales definition contracts (7/7), formatting,
+  lint and typecheck: PASS. The focused Sales product browser smoke passed 1/1
+  with quantity 10, unchanged-state permission denial, released-line refusal,
+  permitted cancellation, foreign-scope denial and unchanged stock.
 - `pnpm test:architecture`: 191/191 PASS after this record update; record checks also PASS.
 - Focused composed-application navigation/form regressions: 2/2 PASS on their
   unchanged 20s/60s budgets. The navigation asserts the exact five primary
@@ -83,7 +94,7 @@ Review: not owed — the final diff is outside the repository's current Critical
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SALE",
   "base": "c30e951f56f7ead4b2e3d9e228208dd639e5a461",
-  "head": "96b48921163b0228bd34d7b9141cfa97435cd117",
+  "head": "66ac1cb5e267e6565d7753bad4fe14cbabd6a41a",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/package.json",
@@ -108,6 +119,9 @@ Review: not owed — the final diff is outside the repository's current Critical
     "test/compiler/g2-module-conformance.test.ts",
     "test/compiler/inventory-contract.release.golden.json",
     "test/helpers/reachability-producers.ts",
+    "test/postgres/composed-application.test.ts",
+    "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
+    "test/postgres/module-storage-transition.test.ts",
     "test/unit/purchasing-definition.test.ts",
     "test/unit/sales-definition.test.ts"
   ],
