@@ -3032,11 +3032,21 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
     (candidate) =>
       candidate.entityId === 'northstar.app:entity.purchase_order_received',
   );
+  const reservedCoverage = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === 'northstar.app:entity.reservation_balance',
+  );
+  const shippedQuantity = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === 'northstar.app:entity.sales_order_shipped',
+  );
   assert.ok(master?.legalEntityMaster);
   assert.ok(periodLock?.periodLock);
   assert.ok(ordinary);
   assert.ok(postedStockBalance);
   assert.ok(receivedQuantity);
+  assert.ok(reservedCoverage);
+  assert.ok(shippedQuantity);
 
   // The second tenant reached the same seeded state as the first.
   const periodLockScope = periodLock.legalEntity;
@@ -3079,7 +3089,9 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
   }
 
   // The insert policy exists for exactly the two seeded table classes and the
-  // two explicitly named provider-written projections.
+  // four explicitly named provider-written projections. Fulfillment adds the
+  // reserved-coverage and shipped-quantity read models, which the kernel
+  // maintains the same way it maintains posted stock and received quantity.
   const insertPolicies = await pool.query<{ tablename: string }>(
     `SELECT tablename
        FROM pg_catalog.pg_policies
@@ -3095,8 +3107,10 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
       periodLock.physicalTableName,
       postedStockBalance.physicalTableName,
       receivedQuantity.physicalTableName,
+      reservedCoverage.physicalTableName,
+      shippedQuantity.physicalTableName,
     ].toSorted(),
-    'only the seeded table classes and named stock/received projections carry a materializer insert policy',
+    'only the seeded table classes and the named stock, received, reserved and shipped projections carry a materializer insert policy',
   );
 
   const materializerPool = new pg.Pool({
@@ -5565,17 +5579,21 @@ async function assertExactPartitionEvidence(
   );
   assert.ok(evidence.results.length > 0, 'real PostgreSQL probes still ran');
   assert.ok(derivations.length > 0);
-  // Measured on the combined governed release: 224 executed + 57 derived.
-  // The independent constructibility oracle below still verifies every member.
+  // Measured on the combined governed release: 271 executed + 77 derived.
+  // Fulfillment's 67 scenarios split exactly along operation ownership:
+  // reservation 14, shipment 19 and shipment line 14 execute, while the two
+  // operationless projection carriers derive. The partition assertion below
+  // still forces executed + derived to equal the emitted plan, and the
+  // independent constructibility oracle still verifies every member.
   assert.equal(
     evidence.results.length,
-    224,
-    'receiving adds 49 and Sales adds 24 executed scenarios to the prior 151',
+    271,
+    'fulfillment adds 47 executed scenarios to the prior 224',
   );
   assert.equal(
     derivations.length,
-    57,
-    'the 10 operationless received-projection scenarios join the prior 47 derivations',
+    77,
+    'the 20 operationless reserved-coverage and shipped-quantity scenarios join the prior 57 derivations',
   );
   assert.equal(
     binding.plan.scenarios.some(
@@ -5600,7 +5618,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    57,
+    77,
   );
   const executedScenarioIdSet = new Set(executedScenarioIds);
   const salesEntityIds = new Set<string>([

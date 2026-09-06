@@ -7,6 +7,7 @@ import { format } from 'prettier';
 import { COMPOSED_APPLICATION_INVENTORY_SCOPE } from '../../apps/api/src/composition-root.js';
 import { createComposedApplicationRuntime } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
+import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/fulfillment-capability-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
@@ -45,6 +46,7 @@ async function main(): Promise<void> {
           capabilityOperationExecutorFactories: [
             INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
             RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+            FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
           ],
           compiledApplication: {
             applications: compiledApplication.applications.slice(0, index + 1),
