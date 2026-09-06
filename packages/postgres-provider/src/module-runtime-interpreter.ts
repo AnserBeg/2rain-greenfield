@@ -2095,6 +2095,7 @@ async function listSharedRecords(
       searchExpressions,
       list.query.search,
       list.query.matchMode,
+      values.length,
     );
     values.push(...match.values);
     predicates.push(match.sql);
@@ -2569,6 +2570,7 @@ function buildFoldedExpressionMatchPredicate(
   foldedExpressions: readonly string[],
   text: string,
   mode: 'exact' | 'prefix' | 'substring',
+  parameterOffset = 0,
 ): { readonly sql: string; readonly values: readonly unknown[] } {
   if (foldedExpressions.length === 0) {
     throw failure(
@@ -2577,7 +2579,11 @@ function buildFoldedExpressionMatchPredicate(
     );
   }
   const values: unknown[] = [];
-  const textParameter = parameter(values, text);
+  const appendParameter = (value: unknown): string => {
+    values.push(value);
+    return `$${String(parameterOffset + values.length)}`;
+  };
+  const textParameter = appendParameter(text);
   const foldedParameter = `north_star_module.${unicodeCaseFoldFunctionName}(${textParameter}::text)`;
   const escapedSubstringParameter = `replace(replace(replace(${foldedParameter}, '!', '!!'), '%', '!%'), '_', '!_')`;
   const upperBound =
@@ -2585,7 +2591,7 @@ function buildFoldedExpressionMatchPredicate(
   const upperParameter =
     upperBound === null || upperBound === undefined
       ? null
-      : parameter(values, upperBound);
+      : appendParameter(upperBound);
   const terms = foldedExpressions.map((foldedColumn) => {
     switch (mode) {
       case 'exact':

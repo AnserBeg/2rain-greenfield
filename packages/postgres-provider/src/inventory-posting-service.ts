@@ -4003,7 +4003,7 @@ async function enforceNegativeStock(
       identity.itemId,
       identity.locationId,
     );
-    if (reservedBefore !== null && reservedBefore > 0n) {
+    if (reservedBefore !== null) {
       let relief = 0n;
       if (shipment) {
         for (const line of shipment.command.lines.filter(
@@ -4038,7 +4038,10 @@ async function enforceNegativeStock(
         0n,
       );
       const reservedAfter = reservedBefore - relief;
-      if (reservedAfter < 0n || finalOnHand < reservedAfter)
+      if (
+        reservedAfter < 0n ||
+        (reservedAfter > 0n && finalOnHand < reservedAfter)
+      )
         throw postingError(
           'FULFILLMENT_RESERVATION_SHORTAGE',
           'Stock-reducing posting would consume inventory held by live reservations',

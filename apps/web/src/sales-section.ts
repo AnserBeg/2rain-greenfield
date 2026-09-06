@@ -381,39 +381,57 @@ async function loadShipmentPackingDocument(
   );
   if (!query?.legalEntityScope || query.queryType !== 'list')
     throw new Error('Packing document line query lacks exact scope');
-  const result = requireSharedListResult(
-    await gateway.invoke(view, {
-      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-      queryId: query.queryId,
-      arguments: {
-        includeArchived: false,
-        [query.legalEntityScope.operand.parameterId]: legalEntityId,
-        list: {
-          schemaVersion: SHARED_LIST_QUERY_VERSION,
-          cursor: null,
-          matchMode: 'substring',
-          pageSize: query.maximumResultCount,
-          search: '',
-          sort: [],
-          relationLabels: [
-            {
-              relationId: `${namespace}:relation.shipment_line_shipment`,
-              queryId: `${namespace}:query.shipment_list`,
-              fieldId: `${namespace}:field.shipment_number`,
-            },
-          ],
-        },
-      },
-    }),
+  const shipmentNumber = String(
+    shipment.values[`${namespace}:field.shipment_number`],
   );
-  if (result.listCoverage.hasMore)
-    throw new Error('Packing document refuses a partial shipment line list');
+  const records: SemanticRecordDto[] = [];
+  let cursor: string | null = null;
+  do {
+    // Relation labels participate in the registered list search. Shipment
+    // number is a scoped business key, so this narrows retrieval to the parent
+    // before pagination; the record-id comparison below remains authoritative
+    // if another label merely contains the searched number.
+    const result: ReturnType<
+      typeof requireSharedListResult<SemanticRecordDto>
+    > = requireSharedListResult(
+      await gateway.invoke(view, {
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        queryId: query.queryId,
+        arguments: {
+          includeArchived: false,
+          [query.legalEntityScope.operand.parameterId]: legalEntityId,
+          list: {
+            schemaVersion: SHARED_LIST_QUERY_VERSION,
+            cursor,
+            matchMode: 'substring',
+            pageSize: query.maximumResultCount,
+            search: shipmentNumber,
+            sort: [],
+            relationLabels: [
+              {
+                relationId: `${namespace}:relation.shipment_line_shipment`,
+                queryId: `${namespace}:query.shipment_list`,
+                fieldId: `${namespace}:field.shipment_number`,
+              },
+            ],
+          },
+        },
+      }),
+    );
+    records.push(...result.records);
+    if (
+      result.listCoverage.hasMore &&
+      (result.records.length === 0 ||
+        result.listCoverage.nextCursor === cursor ||
+        records.length > 10000)
+    )
+      throw new Error('Packing document refuses incomplete parent pagination');
+    cursor = result.listCoverage.nextCursor;
+  } while (cursor !== null);
   return {
     namespace,
     legalEntityId,
-    shipmentNumber: String(
-      shipment.values[`${namespace}:field.shipment_number`],
-    ),
+    shipmentNumber,
     effectiveAt: String(
       shipment.values[`${namespace}:field.shipment_effective_at`],
     ),
@@ -429,7 +447,7 @@ async function loadShipmentPackingDocument(
     orderId:
       shipment.relationLabels?.[`${namespace}:relation.shipment_order`]
         ?.recordId ?? '—',
-    lines: result.records
+    lines: records
       .filter(
         (line) =>
           line.relationLabels?.[`${namespace}:relation.shipment_line_shipment`]

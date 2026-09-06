@@ -1049,8 +1049,9 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    // Prior 51 + the Sales order and line list/detail/form surfaces.
-    assert.equal(surfaces.length, 57);
+    // Prior 51 + Sales order entry and the fulfillment document/read-model
+    // surfaces. Projection carriers deliberately omit editable forms.
+    assert.equal(surfaces.length, 70);
     for (const local of [
       'goods_receipt',
       'goods_receipt_line',
@@ -1082,12 +1083,33 @@ async function assertRealProductDefinition(
       APPLICATION_IDS.sales.lineListSurfaceId,
       APPLICATION_IDS.sales.lineDetailSurfaceId,
       APPLICATION_IDS.sales.lineFormSurfaceId,
+      'northstar.app:surface.reservation_list',
+      'northstar.app:surface.reservation_detail',
+      'northstar.app:surface.reservation_form',
+      'northstar.app:surface.reservation_balance_list',
+      'northstar.app:surface.reservation_balance_detail',
+      'northstar.app:surface.shipment_list',
+      'northstar.app:surface.shipment_detail',
+      'northstar.app:surface.shipment_form',
+      'northstar.app:surface.shipment_line_list',
+      'northstar.app:surface.shipment_line_detail',
+      'northstar.app:surface.shipment_line_form',
+      'northstar.app:surface.sales_order_shipped_list',
+      'northstar.app:surface.sales_order_shipped_detail',
     ]) {
       assert.ok(
         surfaces.includes(salesSurfaceId),
         `the composed product mounts ${salesSurfaceId}`,
       );
     }
+    assert.equal(
+      surfaces.includes('northstar.app:surface.reservation_balance_form'),
+      false,
+    );
+    assert.equal(
+      surfaces.includes('northstar.app:surface.sales_order_shipped_form'),
+      false,
+    );
     // Inventory only reaches a mounted runtime once its emitted-but-
     // unarrangeable verification scenarios are recorded as derivations.
     for (const inventorySurfaceId of [
@@ -3345,13 +3367,15 @@ async function assertBoundedFreshTenantInstallEvidence(
   // structurally excluded from that contract. `projections.ts` declines to emit
   // either, which is ADR-0050 section 6 item 2 closed at the compiler. Not
   // emitting differs from skipping: nothing is admitted unexecuted.
-  // SALE adds another measured 24: 12 for the order and 12 for its line.
-  // `assertSalesVerificationCoverage` pins both entity contributions and the
-  // same server-owned lifecycle-field exclusion independently of this total.
+  // SALE entry adds 24: 12 for the order and 12 for its line. Fulfillment adds
+  // another measured 67 across reservation (14), reservation balance (10),
+  // shipment (19), shipment line (14), and shipped quantity (10).
+  // `assertSalesVerificationCoverage` pins every entity contribution and the
+  // server-owned lifecycle-field exclusion independently of this total.
   assert.equal(
     servingScenarioCount,
-    281,
-    'the release includes the prior 198 scenarios, 59 for receiving, and 24 for Sales',
+    348,
+    'the release includes the prior 198 scenarios, 59 for receiving, and 91 for Sales and fulfillment',
   );
 
   const intermediate = await pool.query<{
@@ -5788,12 +5812,20 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
   const { plan } = releaseVerificationBinding(
     parseCompiledApplication(compiledApplication).application.compiled,
   );
-  for (const local of ['sales_order', 'sales_order_line']) {
+  for (const [local, count] of Object.entries({
+    reservation: 14,
+    reservation_balance: 10,
+    sales_order: 12,
+    sales_order_line: 12,
+    sales_order_shipped: 10,
+    shipment: 19,
+    shipment_line: 14,
+  })) {
     assert.equal(
       plan.scenarios.filter(
         (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
       ).length,
-      12,
+      count,
       `the Sales entity ${local} contributes its measured verifier scenarios`,
     );
   }

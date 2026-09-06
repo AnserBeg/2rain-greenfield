@@ -4,7 +4,10 @@ import type pg from 'pg';
 
 import { startComposedApplication } from '../../../api/src/composition-root.js';
 import {
+  fulfillmentBinding,
   fulfillmentColumn,
+  fulfillmentOption,
+  fulfillmentRelation,
   fulfillmentTable,
   quoteFulfillmentIdentifier as q,
 } from '../../../../packages/postgres-provider/src/fulfillment.js';
@@ -197,6 +200,11 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     quantity: '5',
     reservationId,
   });
+  await seedPackingNoise(pool, {
+    orderId,
+    orderLineId,
+    reservationId,
+  });
   await page.goto(url('shipment', 'detail', initialShipment.shipmentId));
   const committedRequest = page.waitForRequest(
     (request) =>
@@ -210,6 +218,12 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await expect(page.locator('[data-packing-document]')).toContainText(
     `SHP-${suffix}`,
   );
+  await expect(page.locator('[data-packing-document] tbody tr')).toHaveCount(1);
+  await page.goto(url('shipment', 'detail', initialShipment.shipmentId));
+  await expect(page.locator('[data-packing-document]')).toContainText(
+    `SHP-${suffix}`,
+  );
+  await expect(page.locator('[data-packing-document] tbody tr')).toHaveCount(1);
   const replay = await page.request.post(
     url('shipment', 'detail', initialShipment.shipmentId),
     { form: Object.fromEntries(committedPayload) },
@@ -373,6 +387,83 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     const shipmentLineId = await save();
     return { shipmentId, shipmentLineId };
   }
+}
+
+async function seedPackingNoise(
+  pool: pg.Pool,
+  input: {
+    readonly orderId: string;
+    readonly orderLineId: string;
+    readonly reservationId: string;
+  },
+): Promise<void> {
+  const binding = fulfillmentBinding(await governedStorageTarget())!;
+  const shipment = binding.shipment;
+  const line = binding.shipmentLine;
+  const tenant = await pool.query<{
+    environment_id: string;
+    tenant_id: string;
+  }>(
+    `SELECT tenant_id,environment_id FROM platform.current_policy_roles
+      WHERE role_key='local-demo-full-release' AND revoked_at IS NULL`,
+  );
+  expect(tenant.rows).toHaveLength(1);
+  const identity = tenant.rows[0]!;
+  const noiseShipmentId = '00000000-0000-4000-8000-000000000001';
+  await pool.query(
+    `INSERT INTO ${fulfillmentTable(shipment)}
+       (tenant_id,environment_id,${q(shipment.legalEntity!.column)},record_id,revision,archived_at,
+        ${q(fulfillmentColumn(shipment, 'shipment_number'))},
+        ${q(fulfillmentColumn(shipment, 'shipment_state'))},
+        ${q(fulfillmentColumn(shipment, 'shipment_kind'))},
+        ${q(fulfillmentColumn(shipment, 'shipment_effective_at'))},
+        ${q(fulfillmentColumn(shipment, 'shipment_location_id'))},
+        ${q(fulfillmentColumn(shipment, 'shipment_external_reference'))},
+        ${q(fulfillmentColumn(shipment, 'shipment_reason_code'))},
+        ${q(fulfillmentColumn(shipment, 'shipment_reason_narrative'))},
+        ${q(fulfillmentRelation(binding, shipment, 'shipment_order'))},
+        ${q(fulfillmentRelation(binding, shipment, 'shipment_supersedes'))})
+     VALUES ($1,$2,$3,$4,1,NULL,$5,$6,$7,$8,$9,NULL,$10,NULL,$11,NULL)`,
+    [
+      identity.tenant_id,
+      identity.environment_id,
+      legalEntityId,
+      noiseShipmentId,
+      `SHP-NOISE-${randomUUID()}`,
+      fulfillmentOption(shipment, 'shipment_state', 'draft'),
+      fulfillmentOption(shipment, 'shipment_kind', 'initial'),
+      new Date().toISOString(),
+      locationId,
+      'packing-pagination-noise',
+      input.orderId,
+    ],
+  );
+  await pool.query(
+    `INSERT INTO ${fulfillmentTable(line)}
+       (tenant_id,environment_id,${q(line.legalEntity!.column)},record_id,revision,archived_at,
+        ${q(fulfillmentColumn(line, 'shipment_line_line_number'))},
+        ${q(fulfillmentColumn(line, 'shipment_line_item_id'))},
+        ${q(fulfillmentColumn(line, 'shipment_line_quantity'))},
+        ${q(fulfillmentColumn(line, 'shipment_line_unit_id'))},
+        ${q(fulfillmentColumn(line, 'shipment_line_reversal_of_movement_id'))},
+        ${q(fulfillmentRelation(binding, line, 'shipment_line_shipment'))},
+        ${q(fulfillmentRelation(binding, line, 'shipment_line_order_line'))},
+        ${q(fulfillmentRelation(binding, line, 'shipment_line_reservation'))})
+     SELECT $1,$2,$3,
+            ('00000000-0000-4000-8000-' || lpad(series::text,12,'0'))::uuid,
+            1,NULL,series,$4,'1',$5,NULL,$6,$7,$8
+       FROM generate_series(100,200) AS series`,
+    [
+      identity.tenant_id,
+      identity.environment_id,
+      legalEntityId,
+      itemId,
+      'EA',
+      noiseShipmentId,
+      input.orderLineId,
+      input.reservationId,
+    ],
+  );
 }
 
 async function expectFulfillmentRow(page: Page, values: string[]) {

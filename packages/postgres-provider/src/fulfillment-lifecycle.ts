@@ -732,8 +732,7 @@ function assertCurrent(
   if (
     row.archived_at !== null ||
     revision !== prepared.currentRevision ||
-    (revision !== prepared.expectedRevision &&
-      revision !== prepared.expectedRevision + 1)
+    revision !== prepared.expectedRevision
   )
     throw fulfillmentError(
       'INVENTORY_TRANSACTION_STATE_CONFLICT',

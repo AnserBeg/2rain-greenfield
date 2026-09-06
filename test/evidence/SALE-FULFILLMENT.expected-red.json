@@ -60,8 +60,8 @@
       "name": "stock-reducers-observe-live-reservations",
       "claim": "Every stock-reducing posting path refuses a final on-hand quantity below live reservation coverage; zero coverage does not replace the existing negative-stock policy.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "    if (reservedBefore !== null && reservedBefore > 0n) {\n",
-      "replacement": "    if (false && reservedBefore !== null && reservedBefore > 0n) {\n",
+      "original": "    if (reservedBefore !== null) {\n",
+      "replacement": "    if (false && reservedBefore !== null) {\n",
       "test": {
         "files": ["test/postgres/fulfillment.test.ts"],
         "namePattern": "fulfillment serializes"
@@ -71,6 +71,62 @@
           "file": "test/postgres/fulfillment.test.ts",
           "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
           "expected": "an adjustment must not reduce stock below live reservations"
+        }
+      ]
+    },
+    {
+      "name": "correction-validates-resulting-reservation-backing",
+      "claim": "Shipment correction validates zero-to-positive resulting live reservation coverage against resulting on-hand inside the posting transaction.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    if (reservedBefore !== null) {\n",
+      "replacement": "    if (reservedBefore !== null && reservedBefore > 0n) {\n",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "a correction must not restore reservation coverage above resulting on-hand"
+        }
+      ]
+    },
+    {
+      "name": "lifecycle-replay-precedes-fresh-revision-check",
+      "claim": "An exact committed fulfillment lifecycle request replays after later revisions while a fresh request still requires its exact expected revision.",
+      "file": "packages/postgres-provider/src/fulfillment-capability-executor.ts",
+      "original": "      operation.endsWith(':operation.shipment_post') &&\n",
+      "replacement": "      true &&\n",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "a delayed exact retry must return the original committed evidence"
+        }
+      ]
+    },
+    {
+      "name": "packing-retrieval-is-parent-scoped",
+      "claim": "Packing retrieval narrows the registered line list by the shipment parent and paginates every matching line before rendering.",
+      "file": "apps/web/src/sales-section.ts",
+      "original": "            search: shipmentNumber,\n",
+      "replacement": "            search: '',\n",
+      "test": {
+        "files": [
+          "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts"
+        ],
+        "namePattern": "SALE-FULFILLMENT reserves exactly"
+      },
+      "kills": [
+        {
+          "file": "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
+          "name": "SALE-FULFILLMENT reserves exactly, ships partially, corrects without resurrection and cancels safely",
+          "expected": "data-packing-document"
         }
       ]
     },

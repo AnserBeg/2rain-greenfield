@@ -145,7 +145,15 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
     );
     const legalEntityId = String(target[entity.legalEntity!.column]);
     const currentRevision = Number(target.revision);
+    // Lifecycle commands defer their exact revision check until the
+    // idempotency transaction knows whether this is a fresh command or a
+    // matching committed replay. A replay may legitimately arrive after
+    // shipment consequences have advanced the target several revisions; it
+    // still passes current policy and scope authorization above, then the
+    // stored receipt binds principal, release, action and input digest. Fresh
+    // commands remain exact in `assertCurrent`.
     if (
+      operation.endsWith(':operation.shipment_post') &&
       currentRevision !== expectedRevision &&
       currentRevision !== expectedRevision + 1
     )

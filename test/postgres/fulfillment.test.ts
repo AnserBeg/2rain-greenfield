@@ -8,6 +8,7 @@ import {
   INVENTORY_POSTING_CAPABILITY_ID,
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
   PostgresInventoryPostingService,
+  deriveInventoryPostingCompanionId,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
 
 import {
@@ -30,6 +31,7 @@ import { TrustEvidenceError } from '../../packages/postgres-provider/src/trust/p
 import { TrustedActorEnvelopeIssuer } from '../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
+  SemanticOperationPolicyDeniedError,
   parsePinnedOperationCatalog,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
@@ -184,6 +186,7 @@ test(
           const reservation = async (
             quantity: string,
             locationId = locationA,
+            orderLineId = line.recordId,
           ) =>
             create(
               'reservation',
@@ -196,7 +199,7 @@ test(
                 state: `${ns}:option.reservation_state_draft`,
                 unit_id: 'EA',
               },
-              { order_line: line.recordId },
+              { order_line: orderLineId },
             );
           const eligibilityProbe = await reservation('1');
           await assert.rejects(
@@ -266,6 +269,13 @@ test(
           );
           const active = competing[0]!.status === 'fulfilled' ? first : second;
           const activeKey = active === first ? firstKey : secondKey;
+          const activeReserveResult = competing.find(
+            (
+              result,
+            ): result is PromiseFulfilledResult<
+              Awaited<ReturnType<typeof transition>>
+            > => result.status === 'fulfilled',
+          )!.value;
           const inactive = active === first ? second : first;
           await assert.doesNotReject(async () => {
             const replay = await transition(
@@ -484,6 +494,10 @@ test(
             quantity: string,
             options: {
               kind?: 'initial' | 'correction' | 'reversal';
+              locationId?: string;
+              orderId?: string;
+              orderLineId?: string;
+              reservationId?: string;
               reversalOfMovementId?: string;
               supersedesShipmentId?: string;
             } = {},
@@ -495,14 +509,14 @@ test(
                 effective_at: now,
                 external_reference: randomUUID(),
                 kind: `${ns}:option.shipment_kind_${kind}`,
-                location_id: locationA,
+                location_id: options.locationId ?? locationA,
                 number: `SHP-${randomUUID()}`,
                 reason_code: 'SHIP',
                 reason_narrative: 'Competing shipment',
                 state: `${ns}:option.shipment_state_draft`,
               },
               {
-                order: order.recordId,
+                order: options.orderId ?? order.recordId,
                 supersedes: options.supersedesShipmentId ?? null,
               },
             );
@@ -516,13 +530,293 @@ test(
                 unit_id: 'EA',
               },
               {
-                order_line: line.recordId,
-                reservation: active.recordId,
+                order_line: options.orderLineId ?? line.recordId,
+                reservation: options.reservationId ?? active.recordId,
                 shipment: header.recordId,
               },
             );
             return header;
           };
+
+          // F1 review regression. Build an independent exact five-unit loop at
+          // location B, consume all coverage, permit an ordinary negative
+          // adjustment while live coverage is zero, then attempt a correction
+          // that would restore one unit of reservation against zero stock.
+          const trimSecondaryStock = await create('inventory_transaction', {
+            actor_id: 'fulfillment-test',
+            effective_at: now,
+            number: `ADJ-B-TRIM-${randomUUID()}`,
+            reason_code: 'SETUP',
+            reason_narrative: 'Leave exactly five for correction coverage',
+            recorded_at: now,
+            source_id: randomUUID(),
+            source_type: 'test',
+            state: `${ns}:option.inventory_transaction_state_draft`,
+            type: `${ns}:option.inventory_transaction_type_adjustment`,
+          });
+          await create(
+            'inventory_transaction_line',
+            {
+              from_location_id: locationB,
+              item_id: itemId,
+              line_number: '1',
+              quantity: '-5',
+              to_location_id: null,
+              unit_id: 'EA',
+            },
+            { transaction: trimSecondaryStock.recordId },
+          );
+          await transition(
+            'inventory_transaction_post',
+            trimSecondaryStock.recordId,
+            trimSecondaryStock.revision,
+          );
+          const correctionOrder = await create('sales_order', {
+            currency: 'CAD',
+            customer_party_id: customerPartyId,
+            notes: 'Resulting reservation coverage regression',
+            number: `SO-COVERAGE-${randomUUID()}`,
+            order_date: now,
+            requested_date: now,
+          });
+          const correctionOrderLine = await create(
+            'sales_order_line',
+            {
+              item_id: itemId,
+              line_number: '1',
+              ordered_quantity: '5',
+              unit_id: 'EA',
+              unit_price: null,
+            },
+            { order: correctionOrder.recordId },
+          );
+          await transition(
+            'sales_order_release',
+            correctionOrder.recordId,
+            correctionOrder.revision,
+          );
+          const correctionReservation = await reservation(
+            '5',
+            locationB,
+            correctionOrderLine.recordId,
+          );
+          await transition(
+            'reservation_reserve',
+            correctionReservation.recordId,
+            correctionReservation.revision,
+          );
+          const fullyConsumedShipment = await shipment('5', {
+            locationId: locationB,
+            orderId: correctionOrder.recordId,
+            orderLineId: correctionOrderLine.recordId,
+            reservationId: correctionReservation.recordId,
+          });
+          await transition(
+            'shipment_post',
+            fullyConsumedShipment.recordId,
+            fullyConsumedShipment.revision,
+          );
+          const binding = fulfillmentBinding(target)!;
+          const consumedMovement = await pool.query<{ record_id: string }>(
+            `SELECT record_id::text FROM ${fulfillmentTable(binding.movement)}
+              WHERE tenant_id=$1 AND environment_id=$2
+                AND ${q(binding.movement.legalEntity!.column)}=$3
+                AND ${q(fulfillmentColumn(binding.movement, 'inventory_movement_source_type'))}='shipment'
+                AND ${q(fulfillmentColumn(binding.movement, 'inventory_movement_source_id'))}=$4`,
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              legalEntityId,
+              fullyConsumedShipment.recordId,
+            ],
+          );
+          assert.equal(consumedMovement.rows.length, 1);
+          await pool.query(
+            `UPDATE platform.inventory_posting_configurations
+                SET negative_stock='allowWithFlag',revision=revision+1
+              WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3`,
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              legalEntityId,
+            ],
+          );
+          const negativeAdjustment = await create('inventory_transaction', {
+            actor_id: 'fulfillment-test',
+            effective_at: now,
+            number: `ADJ-B-NEGATIVE-${randomUUID()}`,
+            reason_code: 'NEGATIVE',
+            reason_narrative: 'Native allow-with-flag control at zero coverage',
+            recorded_at: now,
+            source_id: randomUUID(),
+            source_type: 'test',
+            state: `${ns}:option.inventory_transaction_state_draft`,
+            type: `${ns}:option.inventory_transaction_type_adjustment`,
+          });
+          await create(
+            'inventory_transaction_line',
+            {
+              from_location_id: locationB,
+              item_id: itemId,
+              line_number: '1',
+              quantity: '-1',
+              to_location_id: null,
+              unit_id: 'EA',
+            },
+            { transaction: negativeAdjustment.recordId },
+          );
+          await transition(
+            'inventory_transaction_post',
+            negativeAdjustment.recordId,
+            negativeAdjustment.revision,
+          );
+          const unbackedCorrection = await shipment('1', {
+            kind: 'correction',
+            locationId: locationB,
+            orderId: correctionOrder.recordId,
+            orderLineId: correctionOrderLine.recordId,
+            reservationId: correctionReservation.recordId,
+            reversalOfMovementId: consumedMovement.rows[0]!.record_id,
+            supersedesShipmentId: fullyConsumedShipment.recordId,
+          });
+          const correctionKey = randomUUID();
+          const transactionEntity = target.entities.find((entity) =>
+            entity.entityId.endsWith(':entity.inventory_transaction'),
+          )!;
+          const companionId = deriveInventoryPostingCompanionId({
+            capabilityId: FULFILLMENT_CAPABILITY_ID,
+            companionFamilyId: transactionEntity.entityId,
+            familyId: 'shipment',
+            sourceRecordId: unbackedCorrection.recordId,
+          });
+          const correctionSnapshot = async () =>
+            pool.query<{
+              accepted_receipts: string;
+              companion_rows: string;
+              movement_rows: string;
+              reservation_quantity: string;
+              reservation_revision: string;
+              reservation_state: string;
+              shipment_revision: string;
+              shipment_state: string;
+              shipped_quantity: string;
+            }>(
+              `SELECT
+                 (SELECT count(*)::text FROM platform.semantic_operation_receipts
+                   WHERE tenant_id=$1 AND environment_id=$2 AND idempotency_key=$7) AS accepted_receipts,
+                 (SELECT count(*)::text FROM ${fulfillmentTable(transactionEntity)}
+                   WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$8) AS companion_rows,
+                 (SELECT count(*)::text FROM ${fulfillmentTable(binding.movement)}
+                   WHERE tenant_id=$1 AND environment_id=$2
+                     AND ${q(binding.movement.legalEntity!.column)}=$3
+                     AND ${q(fulfillmentColumn(binding.movement, 'inventory_movement_source_id'))}=$4::text) AS movement_rows,
+                 (SELECT ${q(fulfillmentColumn(binding.reservationBalance, 'reservation_balance_remaining_quantity'))}::text
+                    FROM ${fulfillmentTable(binding.reservationBalance)}
+                   WHERE tenant_id=$1 AND environment_id=$2
+                     AND ${q(fulfillmentRelation(binding, binding.reservationBalance, 'reservation_balance_reservation'))}=$5) AS reservation_quantity,
+                 (SELECT revision::text FROM ${fulfillmentTable(binding.reservation)}
+                   WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$5) AS reservation_revision,
+                 (SELECT ${q(fulfillmentColumn(binding.reservation, 'reservation_state'))}::text
+                    FROM ${fulfillmentTable(binding.reservation)}
+                   WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$5) AS reservation_state,
+                 (SELECT revision::text FROM ${fulfillmentTable(binding.shipment)}
+                   WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$4::uuid) AS shipment_revision,
+                 (SELECT ${q(fulfillmentColumn(binding.shipment, 'shipment_state'))}::text
+                    FROM ${fulfillmentTable(binding.shipment)}
+                   WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$4::uuid) AS shipment_state,
+                 (SELECT ${q(fulfillmentColumn(binding.shipped, 'sales_order_shipped_shipped_quantity'))}::text
+                    FROM ${fulfillmentTable(binding.shipped)}
+                   WHERE tenant_id=$1 AND environment_id=$2
+                     AND ${q(fulfillmentRelation(binding, binding.shipped, 'sales_order_shipped_order_line'))}=$6) AS shipped_quantity`,
+              [
+                runtime.identity.tenantId,
+                runtime.identity.environmentId,
+                legalEntityId,
+                unbackedCorrection.recordId,
+                correctionReservation.recordId,
+                correctionOrderLine.recordId,
+                correctionKey,
+                companionId,
+              ],
+            );
+          const beforeUnbackedCorrection = await correctionSnapshot();
+          await assert.rejects(
+            transition(
+              'shipment_post',
+              unbackedCorrection.recordId,
+              unbackedCorrection.revision,
+              correctionKey,
+            ),
+            (error: unknown) =>
+              error instanceof InventoryPostingError &&
+              error.code === 'FULFILLMENT_RESERVATION_SHORTAGE',
+            'a correction must not restore reservation coverage above resulting on-hand',
+          );
+          assert.deepEqual(
+            (await correctionSnapshot()).rows,
+            beforeUnbackedCorrection.rows,
+            'an unbacked correction refusal must roll back every accepted business consequence',
+          );
+          const failedCorrection = await pool.query<{ failure_code: string }>(
+            `SELECT failure_code FROM platform.trust_action_invocations
+              WHERE tenant_id=$1 AND environment_id=$2 AND action_id=$3
+                AND outcome='FAILED' ORDER BY recorded_at DESC LIMIT 1`,
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              `${ns}:operation.shipment_post`,
+            ],
+          );
+          assert.deepEqual(failedCorrection.rows, [
+            { failure_code: 'FULFILLMENT_RESERVATION_SHORTAGE' },
+          ]);
+
+          // Replenish enough that the identical correction is now backed. A
+          // failed attempt has no receipt, so the same exact key remains a
+          // legitimate retry and must commit once the invariant is satisfied.
+          const backingAdjustment = await create('inventory_transaction', {
+            actor_id: 'fulfillment-test',
+            effective_at: now,
+            number: `ADJ-B-BACK-${randomUUID()}`,
+            reason_code: 'BACKING',
+            reason_narrative: 'Back valid correction coverage',
+            recorded_at: now,
+            source_id: randomUUID(),
+            source_type: 'test',
+            state: `${ns}:option.inventory_transaction_state_draft`,
+            type: `${ns}:option.inventory_transaction_type_adjustment`,
+          });
+          await create(
+            'inventory_transaction_line',
+            {
+              from_location_id: null,
+              item_id: itemId,
+              line_number: '1',
+              quantity: '2',
+              to_location_id: locationB,
+              unit_id: 'EA',
+            },
+            { transaction: backingAdjustment.recordId },
+          );
+          await transition(
+            'inventory_transaction_post',
+            backingAdjustment.recordId,
+            backingAdjustment.revision,
+          );
+          await transition(
+            'shipment_post',
+            unbackedCorrection.recordId,
+            unbackedCorrection.revision,
+            correctionKey,
+          );
+          const backedCorrection = await correctionSnapshot();
+          assert.equal(backedCorrection.rows[0]!.movement_rows, '1');
+          assert.equal(
+            fulfillmentQuantity(backedCorrection.rows[0]!.reservation_quantity),
+            10n ** 18n,
+          );
+          assert.equal(backedCorrection.rows[0]!.accepted_receipts, '1');
+
           await transition(
             'party_role_archive',
             customerRole.recordId,
@@ -570,7 +864,6 @@ test(
           );
           const postedShipment =
             shipping[0]!.status === 'fulfilled' ? shipmentA : shipmentB;
-          const binding = fulfillmentBinding(target)!;
           const originalMovement = await pool.query<{ record_id: string }>(
             `SELECT record_id::text FROM ${fulfillmentTable(binding.movement)}
               WHERE tenant_id=$1 AND environment_id=$2
@@ -596,6 +889,101 @@ test(
               active.recordId,
             ],
           );
+          assert.ok(Number(currentReservation.rows[0]!.revision) >= 3);
+          const effectsBeforeDelayedReplay = await pool.query<{
+            receipts: string;
+            succeeded: string;
+          }>(
+            `SELECT
+               (SELECT count(*)::text FROM platform.semantic_operation_receipts
+                 WHERE tenant_id=$1 AND environment_id=$2) AS receipts,
+               (SELECT count(*)::text FROM platform.trust_action_invocations
+                 WHERE tenant_id=$1 AND environment_id=$2 AND outcome='SUCCEEDED') AS succeeded`,
+            [runtime.identity.tenantId, runtime.identity.environmentId],
+          );
+          const delayedReplay = await transition(
+            'reservation_reserve',
+            active.recordId,
+            active.revision,
+            activeKey,
+          );
+          assert.deepEqual(
+            delayedReplay.trust,
+            activeReserveResult.trust,
+            'a delayed exact retry must return the original committed evidence',
+          );
+          assert.deepEqual(
+            await pool
+              .query(
+                `SELECT
+                 (SELECT count(*)::text FROM platform.semantic_operation_receipts
+                   WHERE tenant_id=$1 AND environment_id=$2) AS receipts,
+                 (SELECT count(*)::text FROM platform.trust_action_invocations
+                   WHERE tenant_id=$1 AND environment_id=$2 AND outcome='SUCCEEDED') AS succeeded`,
+                [runtime.identity.tenantId, runtime.identity.environmentId],
+              )
+              .then((result) => result.rows),
+            effectsBeforeDelayedReplay.rows,
+            'a delayed exact retry must not repeat business or accepted trust effects',
+          );
+          await assert.rejects(
+            transition(
+              'reservation_reserve',
+              active.recordId,
+              active.revision,
+              randomUUID(),
+            ),
+            (error: unknown) =>
+              error instanceof InventoryPostingError &&
+              error.code === 'INVENTORY_TRANSACTION_STATE_CONFLICT',
+            'a fresh command with the delayed request revision must remain stale',
+          );
+
+          const policyRole = await pool.query<{ role_id: string }>(
+            `SELECT role_id FROM platform.current_policy_memberships
+              WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3
+                AND revoked_at IS NULL`,
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              runtime.identity.principalId,
+            ],
+          );
+          assert.equal(policyRole.rows.length, 1);
+          const reservePermission = `${ns}:permission.reservation_reserve`;
+          await pool.query(
+            `UPDATE platform.current_policy_permission_grants SET revoked_at=clock_timestamp()
+              WHERE tenant_id=$1 AND environment_id=$2 AND role_id=$3 AND permission_id=$4`,
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              policyRole.rows[0]!.role_id,
+              reservePermission,
+            ],
+          );
+          try {
+            await assert.rejects(
+              transition(
+                'reservation_reserve',
+                active.recordId,
+                active.revision,
+                activeKey,
+              ),
+              SemanticOperationPolicyDeniedError,
+              'an exact receipt must not bypass current operation authorization',
+            );
+          } finally {
+            await pool.query(
+              `UPDATE platform.current_policy_permission_grants SET revoked_at=NULL
+                WHERE tenant_id=$1 AND environment_id=$2 AND role_id=$3 AND permission_id=$4`,
+              [
+                runtime.identity.tenantId,
+                runtime.identity.environmentId,
+                policyRole.rows[0]!.role_id,
+                reservePermission,
+              ],
+            );
+          }
           await transition(
             'reservation_release',
             active.recordId,
@@ -699,8 +1087,13 @@ test(
             await client.query(
               `UPDATE ${fulfillmentTable(binding.reservationBalance)}
                   SET ${q(fulfillmentColumn(binding.reservationBalance, 'reservation_balance_remaining_quantity'))}=999
-                WHERE tenant_id=$1 AND environment_id=$2`,
-              [runtime.identity.tenantId, runtime.identity.environmentId],
+                WHERE tenant_id=$1 AND environment_id=$2
+                  AND ${q(fulfillmentRelation(binding, binding.reservationBalance, 'reservation_balance_reservation'))}=$3`,
+              [
+                runtime.identity.tenantId,
+                runtime.identity.environmentId,
+                active.recordId,
+              ],
             );
             await client.query('BEGIN READ ONLY');
             const divergent = await reconcileFulfillmentProjections(
