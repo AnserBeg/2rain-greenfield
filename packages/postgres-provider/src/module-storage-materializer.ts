@@ -37,6 +37,7 @@ import {
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import { aggregateGenerationLockKey } from './module-runtime-interpreter.js';
+import { rebuildReceivedQuantitiesOnClient } from './received-quantity-projection.js';
 
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
@@ -775,6 +776,51 @@ export class PostgresModuleStorageMaterializer {
     }
   }
 
+  async rebuildReceivedQuantities(
+    context: TrustedRequestContext,
+  ): Promise<number> {
+    const client = await this.materializerPool.connect();
+    try {
+      assertTrustedRequestContext(context);
+      await assertMaterializerSession(client);
+      await beginLocked(client);
+      await setMaterializerScope(client, context);
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [aggregateGenerationLockKey(context.tenantId, context.environmentId)],
+      );
+      const pointer = await requiredOne<{ release_id: string | null }>(
+        client,
+        'SELECT release_id FROM north_star_internal.module_storage_read_active_release_pointer($1,$2)',
+        [context.tenantId, context.environmentId],
+        'active release pointer',
+      );
+      if (!pointer.release_id)
+        throw failure(
+          'POSTED_STOCK_BALANCE_RELEASE_MISSING',
+          'Received rebuild requires an active release',
+        );
+      const release = await loadVerifiedReleaseStorage(
+        client,
+        context.tenantId,
+        context.environmentId,
+        pointer.release_id,
+      );
+      const count = await rebuildReceivedQuantitiesOnClient(
+        client,
+        release.target,
+        context,
+      );
+      await client.query('COMMIT');
+      return count;
+    } catch (error) {
+      await rollbackQuietly(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   private async applyBackfill(
     command: ExecuteModuleStorageAttemptCommand,
     preparationId: string,
@@ -1374,6 +1420,14 @@ async function createManagedTable(
   entity: StorageEntityTarget,
 ): Promise<void> {
   const postedStockProjection = isPostedStockBalanceEntity(entity);
+  const receivedProjection = entity.entityId.endsWith(
+    ':entity.purchase_order_received',
+  );
+  const mutationFence = postedStockProjection
+    ? ' AND pg_trigger_depth() > 0'
+    : receivedProjection
+      ? " AND CURRENT_USER = 'north_star_receipt_projection_writer'::name"
+      : '';
   const relationColumns = target.relations
     .filter(
       (relation) =>
@@ -1507,8 +1561,8 @@ async function createManagedTable(
         command === 'SELECT'
           ? `USING (${predicate})`
           : command === 'INSERT'
-            ? `WITH CHECK (${predicate}${postedStockProjection ? ' AND pg_trigger_depth() > 0' : ''})`
-            : `USING (${predicate}${postedStockProjection ? ' AND pg_trigger_depth() > 0' : ''}) WITH CHECK (${predicate}${postedStockProjection ? ' AND pg_trigger_depth() > 0' : ''})`;
+            ? `WITH CHECK (${predicate}${mutationFence})`
+            : `USING (${predicate}${mutationFence}) WITH CHECK (${predicate}${mutationFence})`;
       await client.query(
         `CREATE POLICY ${quoted(policy)} ON north_star_module.${quoted(entity.physicalTableName)}
            FOR ${command} TO north_star_module_runtime ${clause}`,
@@ -1518,7 +1572,7 @@ async function createManagedTable(
   if (entity.factStorage || entity.legalEntity || entity.legalEntityMaster) {
     await ensureMaterializerSelectPolicy(client, entity.physicalTableName);
   }
-  if (postedStockProjection) {
+  if (postedStockProjection || receivedProjection) {
     await ensureMaterializerProjectionMutationPolicies(
       client,
       entity.physicalTableName,
@@ -2036,6 +2090,7 @@ async function ensurePostedStockBalanceProjection(
   // cross-table projection only after every prepared table exists.
   await ensurePostedStockBalanceFunction(client);
   await rebuildPostedStockBalanceOnClient(client, target, scope);
+  await rebuildReceivedQuantitiesOnClient(client, target, scope);
   await ensurePostedStockBalanceTrigger(client, target);
 }
 
@@ -2270,6 +2325,40 @@ async function rebuildPostedStockBalanceOnClient(
       'stock identity count exceeds the provider rebuild contract',
     );
   }
+  // Capture before soft retirement or any overwrite. Both missing and extra
+  // identities matter: comparing only an inner join would hide lost rows.
+  await client.query(
+    `WITH ledger AS (
+       SELECT ${quoted(projection.movementLegalEntityColumn)} AS legal_entity_id,
+              ${quoted(projection.movementItemColumn)}::text AS item_id,
+              ${quoted(projection.movementLocationColumn)}::text AS location_id,
+              sum(${quoted(projection.movementQuantityColumn)})::numeric(38,18) AS quantity,
+              min(${quoted(projection.movementUnitColumn)}) AS unit_id
+         FROM north_star_module.${quoted(projection.movement.physicalTableName)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(projection.movementArchiveColumn)} IS NULL
+        GROUP BY 1, 2, 3
+     ), stored AS (
+       SELECT ${quoted(projection.balanceLegalEntityColumn)} AS legal_entity_id,
+              ${quoted(projection.balanceItemColumn)}::text AS item_id,
+              ${quoted(projection.balanceLocationColumn)}::text AS location_id,
+              ${quoted(projection.balanceQuantityColumn)} AS quantity,
+              ${quoted(projection.balanceUnitColumn)} AS unit_id,
+              to_jsonb(balance) AS row
+         FROM north_star_module.${quoted(projection.balance.physicalTableName)} balance
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(projection.balanceArchiveColumn)} IS NULL
+     )
+     INSERT INTO north_star_internal.inventory_projection_discrepancies
+       (tenant_id, environment_id, projection_entity_id, subject_identity, stored_row, recomputed_row)
+     SELECT $1, $2, $3,
+            jsonb_build_array(coalesce(s.legal_entity_id, l.legal_entity_id),
+                              coalesce(s.item_id, l.item_id), coalesce(s.location_id, l.location_id)),
+            s.row, to_jsonb(l)
+       FROM stored s FULL JOIN ledger l USING (legal_entity_id, item_id, location_id)
+      WHERE s.quantity IS DISTINCT FROM l.quantity OR s.unit_id IS DISTINCT FROM l.unit_id`,
+    [scope.tenantId, scope.environmentId, projection.balance.entityId],
+  );
   await client.query(
     `UPDATE north_star_module.${quoted(projection.balance.physicalTableName)}
         SET ${quoted(projection.balanceArchiveColumn)} = statement_timestamp(),
@@ -4634,6 +4723,12 @@ function buildExpectedPolicies(
   );
   return [...tables.values()].flatMap((entity) => {
     const postedStockProjection = isPostedStockBalanceEntity(entity);
+    const receivedProjection = entity.entityId.endsWith(
+      ':entity.purchase_order_received',
+    );
+    const receiptMutationPredicate = normalizePolicyExpression(
+      `tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND CURRENT_USER = 'north_star_receipt_projection_writer'::name`,
+    );
     const triggerMutationPredicate = normalizePolicyExpression(
       `tenant_id = north_star_internal.trusted_tenant_id()
        AND environment_id = north_star_internal.trusted_environment_id()
@@ -4665,7 +4760,11 @@ function buildExpectedPolicies(
             tableName === entity.physicalTableName &&
             command !== 'SELECT'
               ? triggerMutationPredicate
-              : predicate;
+              : receivedProjection &&
+                  tableName === entity.physicalTableName &&
+                  command !== 'SELECT'
+                ? receiptMutationPredicate
+                : predicate;
           return {
             command,
             name: managedPolicyName(tableName, command),
@@ -4706,7 +4805,7 @@ function buildExpectedPolicies(
             },
           ]
         : []),
-      ...(postedStockProjection
+      ...(postedStockProjection || receivedProjection
         ? (['INSERT', 'UPDATE'] as const).map((command) => ({
             command,
             name: managedMaterializerProjectionPolicyName(

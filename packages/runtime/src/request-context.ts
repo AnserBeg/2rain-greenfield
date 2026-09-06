@@ -39,6 +39,8 @@ const uuidPattern =
 const forbiddenArgumentNames = new Set([
   'environmentId',
   'environment_id',
+  'legalEntityId',
+  'legal_entity_id',
   'principalId',
   'principal_id',
   'tenantId',
@@ -46,9 +48,11 @@ const forbiddenArgumentNames = new Set([
 ]);
 const forbiddenHeaderNames = new Set([
   'environment-id',
+  'legal-entity-id',
   'principal-id',
   'tenant-id',
   'x-environment-id',
+  'x-legal-entity-id',
   'x-principal-id',
   'x-tenant-id',
 ]);

@@ -903,11 +903,12 @@ test('the message catalog honours the vocabulary it declares', () => {
   // `form-wire-semantics`' `OPERATION_INPUT_INVALID`, then 30 with the scoped
   // create operand's subject-bearing inactive-legal-entity refusal, then 31
   // with the relation-id-bearing incomplete-enumeration refusal, then 33 with
-  // the code-bearing provider and runtime-view refusals. The count
+  // the code-bearing provider and runtime-view refusals, then 34 with
+  // committed success whose current-policy read-back is withheld. The count
   // is pinned so
   // registering a code is a deliberate, visible edit; moving it is the intended
   // cost of adding one, not a symptom.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 33);
+  assert.equal(SURFACE_MESSAGE_CODES.length, 34);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];

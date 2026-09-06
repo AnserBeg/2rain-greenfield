@@ -51,6 +51,23 @@ interface RoutedPressLawDebt {
   readonly sourceLine: string;
 }
 
+function routedIdentityDebt(
+  file: string,
+  moduleDirectory: string,
+  identity: string,
+  sourceLine: string,
+  occurrence = 1,
+): RoutedPressLawDebt {
+  return {
+    file,
+    message: `generic press references ${moduleDirectory} identity ${identity}`,
+    moduleDirectory,
+    occurrence,
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+    sourceLine,
+  };
+}
+
 /**
  * Re-express a reported violation by WHAT it sits on rather than WHERE. Refuses
  * rather than guessing when the line cannot be read, so a stale or out-of-range
@@ -94,6 +111,55 @@ function locateIn(
 // press-law-evasion owns the posting provider's frozen identity, whose
 // retirement path is not adjudicated.
 const routedPressLawDebt: readonly RoutedPressLawDebt[] = [
+  routedIdentityDebt(
+    'apps/web/src/receiving-section.ts',
+    'purchasing',
+    'goods_receipt_line_get',
+    "'goods_receipt_line_get',",
+  ),
+  routedIdentityDebt(
+    'apps/web/src/receiving-section.ts',
+    'purchasing',
+    'goods_receipt_line_list',
+    "'goods_receipt_line_list',",
+  ),
+  routedIdentityDebt(
+    'apps/web/src/receiving-section.ts',
+    'purchasing',
+    'goods_receipt_line_list',
+    "'goods_receipt_line_list',",
+    2,
+  ),
+  routedIdentityDebt(
+    'apps/web/src/receiving-section.ts',
+    'purchasing',
+    'purchase_order_amendment_get',
+    "'purchase_order_amendment_get',",
+  ),
+  routedIdentityDebt(
+    'apps/web/src/receiving-section.ts',
+    'purchasing',
+    'goods_receipt_get',
+    "['goods_receipt_form', 'goods_receipt_get'],",
+  ),
+  routedIdentityDebt(
+    'apps/web/src/receiving-section.ts',
+    'purchasing',
+    'goods_receipt_list',
+    "['goods_receipt_list', 'goods_receipt_list'],",
+  ),
+  routedIdentityDebt(
+    'apps/web/src/receiving-section.ts',
+    'purchasing',
+    'goods_receipt_list',
+    "['goods_receipt_list', 'goods_receipt_list'],",
+  ),
+  routedIdentityDebt(
+    'apps/web/src/receiving-section.ts',
+    'purchasing',
+    'goods_receipt_list',
+    "return `<section class=\"panel data-panel\" data-receiving-progress><h2>Receiving</h2><p><a href=\"${link('goods_receipt_form')}\">Create goods receipt</a> · <a href=\"${link('goods_receipt_list')}\">View receipts and corrections</a></p><p>Receive against a released order. Close only when every active line has zero remaining. Reopen before receiving, correcting or amending a closed order.</p><table><thead><tr><th>Order line</th><th>Ordered</th><th>Received</th><th>Remaining</th></tr></thead><tbody>${section.lines.map((line) => `<tr data-order-line=\"${escapeHtml(line.recordId)}\"><td><a href=\"${link('purchase_order_line_detail', line.recordId)}\">${escapeHtml(line.item)}</a></td><td>${escapeHtml(line.ordered)}</td><td>${escapeHtml(line.received)}</td><td>${escapeHtml(line.remaining)}</td></tr>`).join('')}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<p>Corrections append compensating movements; they never edit the original receipt. If a correction would make historical stock negative, correct the erroneous outbound movement first, or use the stock-count process if the discrepancy is physical.</p></section>`;",
+  ),
   {
     file: 'packages/compiler/src/conformance.ts',
     message: 'generic press references inventory identity northstar.inventory',
@@ -158,6 +224,60 @@ const routedPressLawDebt: readonly RoutedPressLawDebt[] = [
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
     sourceLine: "'northstar.inventory:capability.posting',",
   },
+  routedIdentityDebt(
+    'packages/postgres-provider/src/current-policy.ts',
+    'purchasing',
+    'goods_receipt_archive',
+    "receiptBinding('archive', 'goods_receipt_archive', 'goods_receipt'),",
+  ),
+  routedIdentityDebt(
+    'packages/postgres-provider/src/current-policy.ts',
+    'purchasing',
+    'goods_receipt_create',
+    "receiptBinding('create', 'goods_receipt_create', 'goods_receipt'),",
+  ),
+  routedIdentityDebt(
+    'packages/postgres-provider/src/current-policy.ts',
+    'purchasing',
+    'goods_receipt_line_archive',
+    "receiptBinding('archive', 'goods_receipt_line_archive', 'goods_receipt_line'),",
+  ),
+  routedIdentityDebt(
+    'packages/postgres-provider/src/current-policy.ts',
+    'purchasing',
+    'goods_receipt_line_create',
+    "receiptBinding('create', 'goods_receipt_line_create', 'goods_receipt_line'),",
+  ),
+  routedIdentityDebt(
+    'packages/postgres-provider/src/current-policy.ts',
+    'purchasing',
+    'goods_receipt_line_restore',
+    "receiptBinding('restore', 'goods_receipt_line_restore', 'goods_receipt_line'),",
+  ),
+  routedIdentityDebt(
+    'packages/postgres-provider/src/current-policy.ts',
+    'purchasing',
+    'goods_receipt_line_update',
+    "receiptBinding('update', 'goods_receipt_line_update', 'goods_receipt_line'),",
+  ),
+  routedIdentityDebt(
+    'packages/postgres-provider/src/current-policy.ts',
+    'purchasing',
+    'goods_receipt_restore',
+    "receiptBinding('restore', 'goods_receipt_restore', 'goods_receipt'),",
+  ),
+  routedIdentityDebt(
+    'packages/postgres-provider/src/current-policy.ts',
+    'purchasing',
+    'goods_receipt_update',
+    "receiptBinding('update', 'goods_receipt_update', 'goods_receipt'),",
+  ),
+  routedIdentityDebt(
+    'packages/postgres-provider/src/goods-receipt.ts',
+    'purchasing',
+    'northstar.purchasing',
+    "'northstar.purchasing:capability.receiving' as const;",
+  ),
   {
     file: 'packages/postgres-provider/src/inventory-posting-service.ts',
     message: 'generic press references inventory identity northstar.inventory',
@@ -183,6 +303,12 @@ const routedPressLawDebt: readonly RoutedPressLawDebt[] = [
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
     sourceLine: "eventType: 'northstar.platform:event.saved_filter_changed',",
   },
+  routedIdentityDebt(
+    'scripts/reconcile-inventory.ts',
+    'inventory',
+    'inventory_movement_on_hand',
+    'aggregateQueryId: `${namespace}:query.inventory_movement_on_hand`,',
+  ),
 ] as const;
 
 test('one auto-discovered guard covers every definition-backed product module', () => {
@@ -509,8 +635,8 @@ test('consolidated guard red: the routed Inventory literal cannot mask a later l
     /export const INVENTORY_POSTING_CAPABILITY_ID =\n {2}'northstar\.inventory:capability\.posting' as const;/u,
   );
   const mutatedProvider = providerSource.replace(
-    'registration.capabilityId !== INVENTORY_POSTING_CAPABILITY_ID',
-    "registration.capabilityId !==\n      `${'northstar'}.${'inventory'}:capability.posting`",
+    'registration.capabilityId === INVENTORY_POSTING_CAPABILITY_ID',
+    "registration.capabilityId ===\n        `${'northstar'}.${'inventory'}:capability.posting`",
   );
   assert.notEqual(mutatedProvider, providerSource);
 
@@ -581,7 +707,7 @@ test('consolidated guard red: the routed Inventory literal cannot mask a later l
             'generic press references inventory identity northstar.inventory',
           moduleDirectory: 'inventory',
           occurrence: 1,
-          sourceLine: "`${'northstar'}.${'inventory'}:capability.posting` ||",
+          sourceLine: "`${'northstar'}.${'inventory'}:capability.posting` &&",
           ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
         },
       ],

@@ -8,7 +8,9 @@ import {
 } from '@north-star/postgres-provider/composed-application-runtime';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
+import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
+import { RECEIVING_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/receiving-section';
 
 import {
   composedApplicationSeed,
@@ -74,6 +76,10 @@ export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
 export async function startComposedApplication(
   options: ComposedApplicationServerOptions,
 ): Promise<RunningComposedApplication> {
+  const host = options.host ?? '127.0.0.1';
+  if (!['127.0.0.1', '::1', 'localhost'].includes(host)) {
+    throw new Error('the composed demo identity may bind only to loopback');
+  }
   const compiledApplication = JSON.parse(
     await readFile(
       new URL('../../web/release/app.compiled.json', import.meta.url),
@@ -83,10 +89,12 @@ export async function startComposedApplication(
   const runtime = await createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl: options.databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+    localDemoIdentity: true,
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
@@ -106,13 +114,13 @@ export async function startComposedApplication(
   // object to close and its pools and container still held.
   let seededRecords: readonly ComposedApplicationSeedReceipt[];
   let server: Server;
-  const host = options.host ?? '127.0.0.1';
   try {
     seededRecords = await seedComposedApplication(
       runtime,
       options.seedProfile ?? 'demo',
     );
     server = createSurfaceRuntimeServer(runtime.entry, {
+      applicationExtension: RECEIVING_SURFACE_RUNTIME_EXTENSION,
       operationGateway: runtime.operationGateway,
       operationMediation: runtime.operationMediation,
       queryGateway: runtime.queryGateway,

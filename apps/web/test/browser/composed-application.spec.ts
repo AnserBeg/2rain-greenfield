@@ -31,7 +31,10 @@ const journeyTimeoutMilliseconds = Object.freeze({
   focusRing: 40_000,
   inventoryNavigation: 20_000,
   onHandLookup: 20_000,
-  partyLifecycle: 20_000,
+  // This multi-form lifecycle now performs real current-policy reads/writes.
+  // Like repairedFormAnatomy, it needs a bounded integration-test allowance;
+  // this is not a latency assertion, and all semantic assertions stay intact.
+  partyLifecycle: 60_000,
   postingRoute: 20_000,
   repairedFormAnatomy: 60_000,
   scopedInventory: 20_000,
@@ -153,7 +156,15 @@ composedTest.describe('composed application journeys', () => {
       await partyLifecycleJourney(page, composedApplication.currentBaseUrl());
       if (!composedApplication.restart) return;
 
-      await composedApplication.restart();
+      // Restart runs governed application startup (including current AUTH),
+      // so give it the same bounded allowance as initial fixture startup.
+      composedTest.setTimeout(
+        journeyTimeoutMilliseconds.partyLifecycle +
+          sharedSetupTimeoutMilliseconds,
+      );
+      await composedTest.step('restart governed application', async () => {
+        await composedApplication.restart!();
+      });
       await page.goto(
         surfaceUrl(composedApplication.currentBaseUrl(), 'party_list'),
       );
@@ -847,12 +858,16 @@ async function inventoryNavigationJourney(
     'Posted stock',
     'Stock count line',
     'Stock count',
+    'Receipt line',
+    'Goods receipt',
+    'Order quantity amendment request',
     // Normalization sorts surfaces by id, and
     // `surface.purchase_order_line_list` precedes `surface.purchase_order_list`
     // -- 'n' before 's' at the first differing code unit -- so the line list
     // leads its group.
     'Purchase order line',
     'Purchase order',
+    'Received quantity',
   ]);
   await expect(
     navigation.getByRole('link', { name: /detail|form/i }),
@@ -1068,14 +1083,17 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
   const blankFirstDuplicateScopeResponse = await page.goto(
     blankFirstDuplicateScopeUrl.href,
   );
-  expect(blankFirstDuplicateScopeResponse?.status()).toBe(422);
+  // A malformed scope now fails at current authorization before query
+  // execution. The rendered denial is still a non-data page and retains the
+  // caller's URL so the exact spoof attempt remains observable.
+  expect(blankFirstDuplicateScopeResponse?.status()).toBe(200);
   expect(
     new URL(page.url()).searchParams.getAll(
       onHandLookup.legalEntityParameterId,
     ),
   ).toEqual(['', browserLegalEntityId]);
   await expect(
-    page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
+    page.locator('[data-diagnostic-code="QUERY_PERMISSION_DENIED"]'),
   ).toBeVisible();
   await expect(
     page
@@ -1608,8 +1626,9 @@ async function repairedFormAnatomyJourney(
       'not-a-uuid',
     ),
     'TXN-SCOPE-MALFORMED',
-    'OPERATION_REFUSED',
-    'MODULE_INPUT_MALFORMED',
+    // The authorization boundary refuses malformed scope before it can reach
+    // provider input parsing; it must never inherit the demo role's ALLOW.
+    'OPERATION_PERMISSION_DENIED',
   );
 }
 
@@ -1720,13 +1739,13 @@ async function fillInventoryTransactionForm(
   transactionNumber: string,
 ): Promise<void> {
   await page.getByLabel('Number', { exact: true }).fill(transactionNumber);
-  // Enum controls are addressed by ROLE, not by label text. A wrapping
-  // `<label>` around a `<select>` has the option labels inside its text
-  // content, so an exact getByLabel never matches one -- it works for the
-  // `<input>` fields above only because an input contributes no text.
+  // Six declared transaction types now cross the grammar's five-option
+  // select threshold; the datalist input submits the canonical option id.
   await page
     .getByRole('combobox', { exact: true, name: 'Type' })
-    .selectOption({ label: 'adjustment' });
+    .fill(
+      `${applicationNamespace}:option.inventory_transaction_type_adjustment`,
+    );
   await page
     .getByRole('combobox', { exact: true, name: 'State' })
     .selectOption({ label: 'draft' });
@@ -1801,7 +1820,10 @@ async function expectScopedInventoryCreateRefusal(
   scopeParameterId: string,
   action: string,
   transactionNumber: string,
-  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'OPERATION_REFUSED',
+  diagnosticCode:
+    | 'OPERATION_INPUT_INVALID'
+    | 'OPERATION_PERMISSION_DENIED'
+    | 'OPERATION_REFUSED',
   refusalCode?: string,
 ): Promise<void> {
   await page.goto(
@@ -2766,9 +2788,10 @@ async function loadPostingProjection(releaseRoot: string): Promise<{
       'utf8',
     ),
   ) as {
+    readonly application?: CompiledApplicationRelease;
     readonly applications: readonly CompiledApplicationRelease[];
   };
-  const application = compiled.applications.find(
+  const application = (compiled.applications ?? [compiled.application!]).find(
     (candidate) => candidate.releaseRoot === releaseRoot,
   );
   if (!application)
@@ -2835,8 +2858,11 @@ async function loadOnHandLookupProjection(): Promise<CompiledOnHandLookupProject
       new URL('../../release/app.compiled.json', import.meta.url),
       'utf8',
     ),
-  ) as { readonly applications: readonly CompiledApplicationRelease[] };
-  const application = compiled.applications.at(-1);
+  ) as {
+    readonly application?: CompiledApplicationRelease;
+    readonly applications?: readonly CompiledApplicationRelease[];
+  };
+  const application = compiled.applications?.at(-1) ?? compiled.application;
   if (!application) throw new TypeError('compiled application is missing');
   const surfacePayload = projectionPayload(
     application,
@@ -2916,8 +2942,11 @@ async function loadSurfaceScopeParameterId(
       new URL('../../release/app.compiled.json', import.meta.url),
       'utf8',
     ),
-  ) as { readonly applications: readonly CompiledApplicationRelease[] };
-  const application = compiled.applications.at(-1);
+  ) as {
+    readonly application?: CompiledApplicationRelease;
+    readonly applications?: readonly CompiledApplicationRelease[];
+  };
+  const application = compiled.applications?.at(-1) ?? compiled.application;
   if (!application) throw new TypeError('compiled application is missing');
   const surfacePayload = projectionPayload(
     application,

@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `receipt` (critical-path step 1) | to be chartered — see `current-plan.md`, *The critical path — 2026-09-04* |
+| **BUILD** | `RECEIPT` (critical-path step 1) | draft PR #1 incorporates exact AUTH correction `9d70c74`; governed authorized/denied full receiving lifecycle runs on port 4317; combined CI and external Critical review/acceptance pending |
 | **SUPPORT** | — | idle |
 
 

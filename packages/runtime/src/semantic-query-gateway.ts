@@ -25,6 +25,7 @@ import {
 import type { TrustedRequestContext } from './request-context.js';
 import {
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  LegalEntityReadScopePolicyDeniedError,
   assertRequestRuntimeView,
   authorizeCurrentPolicy,
   trustedContextForRequestRuntimeView,
@@ -55,7 +56,7 @@ const QUERY_CATALOG_PAYLOAD_VERSION =
   'northstar.query-catalog-payload/v0-provisional' as const;
 const QUERY_POLICY_INPUT_VERSION =
   'northstar.semantic-query-policy-input/v1' as const;
-const QUERY_BOUNDARY_PERMISSION_ID =
+export const QUERY_BOUNDARY_PERMISSION_ID =
   'northstar.runtime:permission.semantic-query-boundary' as const;
 const canonicalIdPattern =
   /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
@@ -235,6 +236,15 @@ export interface SemanticQueryExecutor {
   ): Promise<SemanticAggregateResultEnvelope>;
 }
 
+export interface SemanticQueryDenialRecorder {
+  recordDenied(request: {
+    readonly context: TrustedRequestContext;
+    readonly policyVersion: string;
+    readonly queryId: string;
+    readonly view: IssuedRequestRuntimeView;
+  }): Promise<void>;
+}
+
 /**
  * One read-ingress call, timed. `queryId` is null when the request was refused
  * before it named a query — a malformed envelope still cost the caller time,
@@ -326,6 +336,8 @@ export class SemanticQueryGateway {
       QueryPolicyNarrowingGateway | undefined = undefined,
     private readonly registeredQueryLatency:
       RegisteredQueryLatencyInstrumentation | undefined = undefined,
+    private readonly denialRecorder:
+      SemanticQueryDenialRecorder | undefined = undefined,
   ) {}
 
   async invoke(
@@ -426,6 +438,11 @@ export class SemanticQueryGateway {
       }),
     );
     if (boundaryDecision.decision === 'DENY') {
+      await this.#recordDenied(
+        view,
+        request.queryId,
+        boundaryDecision.policyVersion,
+      );
       throw new SemanticQueryPolicyDeniedError(request.queryId, view);
     }
 
@@ -457,6 +474,11 @@ export class SemanticQueryGateway {
       }),
     );
     if (queryDecision.decision === 'DENY') {
+      await this.#recordDenied(
+        view,
+        request.queryId,
+        queryDecision.policyVersion,
+      );
       throw new SemanticQueryPolicyDeniedError(request.queryId, view);
     }
     // The operand is part of the REQUEST contract, so it is validated before
@@ -516,7 +538,7 @@ export class SemanticQueryGateway {
           view,
         }),
       );
-      filterPlans.push(parsePolicyNarrowing(contributed));
+      filterPlans.push(parsePolicyNarrowing(contributed, definition));
     }
     const listQuery = parseSharedListArguments(request.arguments, {
       declaredParameterIds:
@@ -539,6 +561,8 @@ export class SemanticQueryGateway {
             definition,
             listQuery,
             this.observePredicateReceipt,
+            (queryId, policyVersion) =>
+              this.#recordDenied(view, queryId, policyVersion),
           )
         : null;
     if (listQuery && !list) {
@@ -550,20 +574,28 @@ export class SemanticQueryGateway {
     const parameterValues = bindQueryParameters(definition, request.arguments);
     // One authority per query: the declared operand or a supplied capability,
     // never both. The conflict is refused above, with the validation.
-    const legalEntityReadScope = scopeSelection
-      ? await issueLegalEntityReadScope(
-          this.currentPolicy,
-          view,
-          scopeSelection,
-        )
-      : executionContext.legalEntityReadScope === undefined
-        ? null
-        : await verifyLegalEntityReadScope(
+    let legalEntityReadScope: LegalEntityReadScope | null;
+    try {
+      legalEntityReadScope = scopeSelection
+        ? await issueLegalEntityReadScope(
             this.currentPolicy,
-            executionContext.legalEntityReadScope,
             view,
-            definition.sourceEntityId,
-          );
+            scopeSelection,
+          )
+        : executionContext.legalEntityReadScope === undefined
+          ? null
+          : await verifyLegalEntityReadScope(
+              this.currentPolicy,
+              executionContext.legalEntityReadScope,
+              view,
+              definition.sourceEntityId,
+            );
+    } catch (error) {
+      if (!(error instanceof LegalEntityReadScopePolicyDeniedError))
+        throw error;
+      await this.#recordDenied(view, request.queryId, error.policyVersion);
+      throw new SemanticQueryPolicyDeniedError(request.queryId, view);
+    }
     let result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope;
     if (definition.queryType === 'aggregate') {
       if (!this.executor.executeAggregate) {
@@ -624,6 +656,22 @@ export class SemanticQueryGateway {
       assertAggregateResultEnvelope(result);
     }
     return result;
+  }
+
+  async #recordDenied(
+    view: IssuedRequestRuntimeView,
+    queryId: string,
+    policyVersion: string,
+  ): Promise<void> {
+    if (!this.denialRecorder) return;
+    await this.denialRecorder.recordDenied(
+      Object.freeze({
+        context: trustedContextForRequestRuntimeView(view),
+        policyVersion,
+        queryId,
+        view,
+      }),
+    );
   }
 }
 
@@ -705,6 +753,7 @@ async function authorizeSharedListProjection(
   query: NonNullable<ReturnType<typeof parseSharedListArguments>>,
   observePredicateReceipt:
     ((receipt: PredicateKernelReceipt) => void) | undefined,
+  recordDenied: (queryId: string, policyVersion: string) => Promise<void>,
 ): Promise<AuthorizedSharedListRequest | null> {
   authorizeSharedListFields(query, {
     selectedFieldIds: new Set(
@@ -748,6 +797,7 @@ async function authorizeSharedListProjection(
       }),
     );
     if (decision.decision === 'DENY') {
+      await recordDenied(targetDefinition.queryId, decision.policyVersion);
       throw new SemanticQueryPolicyDeniedError(targetDefinition.queryId, view);
     }
     const predicateReceipt = inspectPredicateForExecution(
@@ -1445,7 +1495,10 @@ function isLegalEntityScopeNodeVersion(value: unknown): boolean {
   );
 }
 
-function parsePolicyNarrowing(value: unknown): QueryFilterLoweringPlan {
+function parsePolicyNarrowing(
+  value: unknown,
+  definition: RegisteredSemanticQueryDefinition,
+): QueryFilterLoweringPlan {
   const invalid = (message: string): MalformedQueryPolicyNarrowingError =>
     new MalformedQueryPolicyNarrowingError(message);
   const cloned = cloneImmutableJson(value, '$.policyNarrowing', invalid);
@@ -1466,7 +1519,47 @@ function parsePolicyNarrowing(value: unknown): QueryFilterLoweringPlan {
     invalid,
     parameterized,
   );
+  if (parameterized) {
+    assertPolicyNarrowingParameterBindings(
+      cloned.filterPlan,
+      definition,
+      cloned.filter.schemaVersion,
+      invalid,
+    );
+  }
   return cloned.filterPlan as unknown as QueryFilterLoweringPlan;
+}
+
+function assertPolicyNarrowingParameterBindings(
+  plan: unknown,
+  definition: RegisteredSemanticQueryDefinition,
+  predicateSchemaVersion: unknown,
+  error: (message: string) => Error,
+): void {
+  if (!isRecord(plan) || !isRecord(plan.root)) {
+    throw error('policy narrowing parameterized plan is invalid');
+  }
+  const observed = new Map<string, Record<string, unknown>>();
+  const version = requiredAggregateNodeVersion(predicateSchemaVersion, error);
+  inspectLoweringNode(plan.root, 1, error, true, version, observed);
+  const declared = new Map(
+    (definition.parameters ?? []).map((parameter) => [
+      parameter.parameterId,
+      parameter.parameterType as Record<string, unknown>,
+    ]),
+  );
+  for (const [parameterId, parameterType] of observed) {
+    const declaredType = declared.get(parameterId);
+    if (
+      !declaredType ||
+      canonicalizeAndHash(declaredType).contentHash !==
+        canonicalizeAndHash(parameterType).contentHash
+    ) {
+      throw error(
+        'policy narrowing uses an undeclared parameter or changes its declared type',
+      );
+    }
+  }
 }
 
 function assertPredicateLoweringPlan(

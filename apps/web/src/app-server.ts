@@ -17,6 +17,8 @@ import {
   type SurfaceRuntimeResponse,
 } from './surface-runtime.js';
 
+export type { SurfaceRuntimeApplicationExtension } from './surface-runtime.js';
+
 /** HTTP composition owns transport only; the issued view owns definition. */
 export function createSurfaceRuntimeServer(
   entry: AuthenticatedRequestRuntimeEntryAdapter,

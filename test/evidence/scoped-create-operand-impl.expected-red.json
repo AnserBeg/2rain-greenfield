@@ -60,7 +60,7 @@
       "name": "registered-operation-permission-refusal-removed",
       "claim": "The semantic operation gateway refuses a registered operation whose policy decision is DENY, before any provider effect runs.",
       "file": "packages/runtime/src/semantic-operation-gateway.ts",
-      "original": "      if (operationDecision.decision === 'DENY') {\n        throw new SemanticOperationPolicyDeniedError(request.operationId, view);\n      }\n",
+      "original": "        if (decision.decision === 'DENY') {\n          throw new SemanticOperationPolicyDeniedError(\n            request.operationId,\n            view,\n          );\n        }\n",
       "replacement": "",
       "test": {
         "files": ["test/integration/surface-data-binding.test.ts"],

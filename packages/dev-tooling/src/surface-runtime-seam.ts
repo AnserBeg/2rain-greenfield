@@ -613,6 +613,9 @@ function scanForBypass(
   const allowedMarkup = new Set<string>([
     paths.componentRegistry,
     paths.surfaceRuntime,
+    // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
+    // only by the closed registry; it is not an alternate surface authority.
+    'apps/web/src/receiving-section.ts',
   ]);
   const allowedSurfaceConsumers = new Set<string>([
     paths.componentRegistry,
@@ -620,6 +623,16 @@ function scanForBypass(
   ]);
   const structuralMarkup =
     /<\s*(?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])(?:\s|>)|createElement\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|(?:jsx|jsxs|jsxDEV)\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|data-surface-archetype\s*=|data-component\s*=/i;
+
+  const genericRuntime = readFileSync(join(root, paths.surfaceRuntime), 'utf8');
+  if (/goods_receipt|purchase_order|receiving-section/u.test(genericRuntime)) {
+    add(
+      violations,
+      paths.surfaceRuntime,
+      'SURF001_RUNTIME_BYPASS',
+      'generic SurfaceRuntime contains application-domain selection or loading',
+    );
+  }
 
   for (const file of sourceFiles(sourceRoot)) {
     const repoPath = normalize(relative(root, file));

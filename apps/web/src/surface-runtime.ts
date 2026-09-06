@@ -57,9 +57,30 @@ export interface SurfaceRuntimeResponse {
 }
 
 export interface SurfaceRuntimeGateways {
+  readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
   readonly operationMediation: SemanticOperationMediationAuthority;
   readonly operationGateway: SemanticOperationGateway;
   readonly queryGateway: SemanticQueryGateway;
+}
+
+type ReadySurfaceData = Extract<SurfaceDataRenderState, { status: 'READY' }>;
+
+export interface SurfaceRuntimeApplicationExtension {
+  augmentRecordData(context: {
+    readonly binding: CompiledSurfaceDataBinding;
+    readonly data: ReadySurfaceData;
+    readonly legalEntitySelection: readonly string[];
+    readonly queryGateway: SemanticQueryGateway;
+    readonly surface: CompiledSurfaceDefinition;
+    readonly surfaces: readonly CompiledSurfaceDefinition[];
+    readonly view: RuntimeViewContract.RequestRuntimeView;
+  }): Promise<ReadySurfaceData>;
+  refreshAfterOperation(context: {
+    readonly binding: CompiledSurfaceDataBinding;
+    readonly intent: SurfaceOperationIntent;
+    readonly surface: CompiledSurfaceDefinition;
+    readonly surfaces: readonly CompiledSurfaceDefinition[];
+  }): boolean;
 }
 
 export type SurfaceRuntimeSubmission = Readonly<Record<string, string>>;
@@ -219,6 +240,21 @@ export async function renderSurfaceRuntimeWithData(
     } else {
       const result = await gateways.queryGateway.invoke(view, request);
       data = dataState(result);
+      if (
+        data.status === 'READY' &&
+        selection.selected.surfaceRole === 'record' &&
+        gateways.applicationExtension
+      ) {
+        data = await gateways.applicationExtension.augmentRecordData({
+          binding,
+          data,
+          legalEntitySelection,
+          queryGateway: gateways.queryGateway,
+          surface: selection.selected,
+          surfaces: selection.surfaces,
+          view,
+        });
+      }
     }
   } catch (error) {
     const code = queryMessageCode(error);
@@ -317,6 +353,7 @@ export async function submitSurfaceRuntimeIntent(
         operation,
         submission,
         grant,
+        requestUrl,
       );
     } catch {
       return operationDiagnostic('OPERATION_CONFIRMATION_REQUIRED', 422);
@@ -342,9 +379,50 @@ export async function submitSurfaceRuntimeIntent(
       ref,
     );
   }
-  if (result.outcome !== 'succeeded' || !result.readBack) {
+  if (result.outcome !== 'succeeded') {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
+  if (!result.readBack) {
+    const ref = { code: 'OPERATION_COMMITTED_READBACK_WITHHELD' } as const;
+    const evidence = result.trust
+      ? Object.entries(result.trust)
+          .map(
+            ([name, id]) =>
+              `<dt>${escapeHtml(name)}</dt><dd><code>${escapeHtml(id)}</code></dd>`,
+          )
+          .join('')
+      : '';
+    // A committed result with withheld data is not a failed command. Render
+    // neither stale record values nor a form that could resubmit the effect.
+    return Object.freeze({
+      statusCode: 200,
+      html: shellDocument(
+        view,
+        selection.surfaces,
+        selection.navigation,
+        selection.selected,
+        `<section class="panel operation-feedback" role="status" data-operation-committed="true" ${messageAttributes(ref)}>${messageBody(ref, operation.label, 'h1')}<dl data-operation-trust>${evidence}</dl></section>`,
+      ),
+    });
+  }
+
+  if (
+    gateways.applicationExtension?.refreshAfterOperation({
+      binding,
+      intent,
+      surface: selection.selected,
+      surfaces: selection.surfaces,
+    }) === true
+  )
+    // An explicitly composed application contribution may request an
+    // authoritative refresh. Ordinary lifecycle results retain their read-back
+    // below: an archive must not query its now-inactive record as active.
+    return renderSurfaceRuntimeWithData(view, requestUrl, gateways, {
+      intent,
+      label: operation.label,
+      record: result.readBack,
+      trustLinked: result.trust !== null,
+    });
 
   return renderSelectedSurface(
     view,
@@ -1139,7 +1217,10 @@ function renderConfirmationTransition(
   operation: CompiledSurfaceDataBinding['operations'][number],
   submission: SurfaceRuntimeSubmission,
   grant: string,
+  requestUrl: string,
 ): SurfaceRuntimeResponse {
+  const requestLocation = new URL(requestUrl, 'http://surface-runtime.local');
+  const action = `${requestLocation.pathname}${requestLocation.search}`;
   const preserved = Object.entries(submission)
     .filter(([key]) => key !== 'confirmationGrant' && key !== 'confirmed')
     .map(
@@ -1148,7 +1229,7 @@ function renderConfirmationTransition(
     )
     .join('');
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="${escapeHtml(action)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
     statusCode: 200,
   });
 }

@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    "./app-server": "./src/app-server.ts"
+    "./app-server": "./src/app-server.ts",
+    "./receiving-section": "./src/receiving-section.ts"
   },
   "scripts": {
     "build:app-release": "node --import tsx scripts/compile-app-release.ts",

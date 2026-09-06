@@ -18,7 +18,7 @@ export const LEGAL_ENTITY_READ_SCOPE_VERSION =
 
 const LEGAL_ENTITY_READ_SCOPE_POLICY_INPUT_VERSION =
   'northstar.legal-entity-read-scope-policy-input/v1' as const;
-const LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID =
+export const LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID =
   'northstar.runtime:permission.legal-entity-read-scope' as const;
 
 export const REQUEST_RUNTIME_PROJECTION_FAMILIES = Object.freeze({
@@ -391,6 +391,11 @@ export type PinValidationResult =
 
 const issuedViews = new WeakSet<object>();
 const issuedViewContexts = new WeakMap<object, TrustedRequestContext>();
+const issuedPolicySubjects = new WeakMap<object, TrustedRequestContext>();
+const issuedPolicyDecisionRequests = new WeakMap<
+  object,
+  TrustedRequestContext
+>();
 const issuedLegalEntityReadScopes = new WeakMap<object, RequestRuntimeView>();
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const uuidPattern =
@@ -420,12 +425,14 @@ export class LegalEntityReadScopeIntegrityError extends Error {
 export class LegalEntityReadScopePolicyDeniedError extends Error {
   readonly code = 'LEGAL_ENTITY_READ_SCOPE_POLICY_DENIED' as const;
   readonly legalEntityId: string;
+  readonly policyVersion: string;
 
   override readonly name = 'LegalEntityReadScopePolicyDeniedError';
 
-  constructor(legalEntityId: string) {
+  constructor(legalEntityId: string, policyVersion: string) {
     super(`current policy denied legal-entity read scope ${legalEntityId}`);
     this.legalEntityId = legalEntityId;
+    this.policyVersion = policyVersion;
   }
 }
 
@@ -571,6 +578,13 @@ export async function authorizeCurrentPolicy(
     principalId: view.principalId,
     tenantId: view.tenantId,
   });
+  const context = issuedViewContexts.get(view);
+  if (!context) {
+    throw new RequestRuntimeViewIntegrityError(
+      'current policy decision requires an issued request context',
+    );
+  }
+  issuedPolicyDecisionRequests.set(request, context);
   const decision = await gateway.authorize(request);
   if (
     decision.decisionVersion !== CURRENT_POLICY_DECISION_VERSION ||
@@ -627,7 +641,10 @@ export async function issueLegalEntityReadScope(
       legalEntityReadScopePolicyInput(view, legalEntityId),
     );
     if (decision.decision === 'DENY') {
-      throw new LegalEntityReadScopePolicyDeniedError(legalEntityId);
+      throw new LegalEntityReadScopePolicyDeniedError(
+        legalEntityId,
+        decision.policyVersion,
+      );
     }
     if (
       policyVersion !== undefined &&
@@ -716,7 +733,10 @@ export async function verifyLegalEntityReadScope(
       legalEntityReadScopePolicyInput(view, legalEntityId),
     );
     if (decision.decision === 'DENY') {
-      throw new LegalEntityReadScopePolicyDeniedError(legalEntityId);
+      throw new LegalEntityReadScopePolicyDeniedError(
+        legalEntityId,
+        decision.policyVersion,
+      );
     }
     if (
       decisionPolicyVersion !== undefined &&
@@ -1010,12 +1030,57 @@ function cloneImmutableJson(value: unknown, path: string): ImmutableJsonValue {
   );
 }
 
+export function trustedContextForCurrentPolicySubject(
+  subject: CurrentPolicySubject,
+): TrustedRequestContext {
+  const context = issuedPolicySubjects.get(subject);
+  if (!context) {
+    throw new RequestRuntimeViewIntegrityError(
+      'current policy subject was not issued from trusted request context',
+    );
+  }
+  return context;
+}
+
+export function trustedContextForCurrentPolicyDecision(
+  request: CurrentPolicyDecisionRequest,
+): TrustedRequestContext {
+  const context = issuedPolicyDecisionRequests.get(request);
+  if (!context) {
+    throw new RequestRuntimeViewIntegrityError(
+      'current policy decision was not issued from a request runtime view',
+    );
+  }
+  return context;
+}
+
 function policySubject(context: CurrentPolicySubject): CurrentPolicySubject {
-  return Object.freeze({
+  const subject = Object.freeze({
     environmentId: context.environmentId,
     principalId: context.principalId,
     tenantId: context.tenantId,
   });
+  const trustedContext = isTrustedRequestContext(context)
+    ? context
+    : issuedViewContexts.get(context);
+  if (!trustedContext) {
+    throw new RequestRuntimeViewIntegrityError(
+      'current policy subject requires trusted request context',
+    );
+  }
+  issuedPolicySubjects.set(subject, trustedContext);
+  return subject;
+}
+
+function isTrustedRequestContext(
+  value: CurrentPolicySubject,
+): value is TrustedRequestContext {
+  try {
+    assertTrustedRequestContext(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function legalEntityReadScopePolicyInput(

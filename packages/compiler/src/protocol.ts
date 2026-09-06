@@ -244,6 +244,20 @@ export interface UnboundPermissionAcknowledgementEntry {
   readonly resource: string;
 }
 
+/** One permission bound by the release's current-policy evaluator. */
+export interface PermissionEvaluatorBinding {
+  readonly action: string;
+  /**
+   * `compatibleExtension` reserves an exact evaluator contract for a package
+   * declaration that lands in a dependent packet. It may be absent from the
+   * current package census; once declared, action and resource must still
+   * match exactly and it is governed like every active binding.
+   */
+  readonly availability?: 'active' | 'compatibleExtension';
+  readonly permissionId: string;
+  readonly resource: string;
+}
+
 /**
  * The acknowledgement a RELEASE BUILD hands the compiler, for exactly one
  * package. It is not part of `CompilerInput` and is hashed into nothing: it is
@@ -255,6 +269,7 @@ export interface UnboundPermissionAcknowledgementEntry {
  * checked-in list has no entry for their package.
  */
 export interface UnboundPermissionAcknowledgementInput {
+  readonly evaluatorBindings?: readonly PermissionEvaluatorBinding[];
   readonly entries: readonly UnboundPermissionAcknowledgementEntry[];
   readonly packageId: string;
 }

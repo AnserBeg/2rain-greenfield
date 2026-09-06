@@ -32,13 +32,17 @@ substance survives in the rules above.
 | G0, G1 | complete |
 | G2 | complete in substance (party, catalog, location, composed app, forms, pickers) |
 | G3 | inventory alpha: 14 of 17 gate criteria met (`rulings/g3-completion.md`); posting kernel hardened by `posting-kernel-admission` and `enum-widen` on 2026-09-04 |
-| G4 | purchase order accepted; goods receipt has no code |
+| G4 | purchase order accepted; RECEIPT draft PR #1 incorporates AUTH correction 9d70c74 and exercises authorized/denied full browser receiving; combined CI and Critical acceptance remain pending |
 | G5–G8, N1–N7 | not started; no agent package, no customization engine |
 
 Plan §13: 21 of 38 work packages done. The office-worker loop — receive and ship — is
 the near-term end. Everything below is ordered toward it.
 
 ## The critical path — 2026-09-04
+
+**RECEIPT/AUTH bridge ruling (2026-09-05):** minimum complete AUTH evaluator/binding dependency first, then RECEIPT, then remaining AUTH scope. RECEIPT may incorporate only AUTH's explicitly published coherent SHA, with AUTH's new migrations first and RECEIPT's unaccepted migrations renumbered afterward. No acknowledgements are added; independent receipt implementation/tests continue. [Owner coordination](https://github.com/AnserBeg/2rain-greenfield/pull/1#issuecomment-5549264574).
+
+RECEIPT incorporated exact AUTH correction `9d70c749752006ab21d1b9df9516b1cb7b491df3` via merge `866f697a501c0dc53024ad18389a982b6ba44a0a`: no new AUTH migration; accepted through 0024, AUTH 0025, RECEIPT 0026/0027 remain stable. This is development integration, not AUTH or RECEIPT acceptance.
 
 | step | vertical | lane | contents | review |
 |---|---|---|---|---|

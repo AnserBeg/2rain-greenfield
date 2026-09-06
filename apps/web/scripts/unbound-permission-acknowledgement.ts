@@ -12,6 +12,10 @@ export const UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION =
   'northstar.web:unbound-permission-acknowledgement/v1' as const;
 export const UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE =
   'unbound-permission-acknowledgement.json' as const;
+export const CURRENT_POLICY_BINDINGS_VERSION =
+  'northstar.web:current-policy-bindings/v1' as const;
+export const CURRENT_POLICY_BINDINGS_FILE =
+  'current-policy-bindings.json' as const;
 
 /**
  * The checked-in acknowledgement of every declared permission no evaluator
@@ -51,7 +55,79 @@ export function readUnboundPermissionAcknowledgementFor(
       `unbound-permission acknowledgement at ${path} names no entries for package ${packageId}; a release build cannot proceed ungoverned -- add the package with one entry per declared permission, or stop declaring permissions`,
     );
   }
-  return { entries, packageId };
+  const evaluatorBindings = readCurrentPolicyBindingsFor(
+    releaseInputPath,
+    packageId,
+  );
+  return { entries, evaluatorBindings, packageId };
+}
+
+function readCurrentPolicyBindingsFor(
+  releaseInputPath: string,
+  packageId: string,
+): readonly {
+  readonly action: string;
+  readonly availability?: 'active' | 'compatibleExtension';
+  readonly permissionId: string;
+  readonly resource: string;
+}[] {
+  const path = resolve(dirname(releaseInputPath), CURRENT_POLICY_BINDINGS_FILE);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  } catch (error) {
+    throw new Error(
+      `current-policy bindings at ${path} cannot be read: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  const refuse = (detail: string): never => {
+    throw new Error(
+      `current-policy bindings at ${path} are not the versioned shape: ${detail}`,
+    );
+  };
+  if (!isRecord(parsed)) return refuse('the document is not an object');
+  if (
+    Object.keys(parsed).sort().join(',') !== 'packages,schemaVersion' ||
+    parsed.schemaVersion !== CURRENT_POLICY_BINDINGS_VERSION ||
+    !isRecord(parsed.packages)
+  ) {
+    return refuse('expected exactly the current schemaVersion and packages');
+  }
+  const raw = parsed.packages[packageId];
+  if (!Array.isArray(raw)) {
+    return refuse(`packages.${packageId} must be an array`);
+  }
+  return raw.map((binding, index) => {
+    const keys = isRecord(binding) ? Object.keys(binding).sort().join(',') : '';
+    if (
+      !isRecord(binding) ||
+      (keys !== 'action,permissionId,resource' &&
+        keys !== 'action,availability,permissionId,resource') ||
+      typeof binding.action !== 'string' ||
+      typeof binding.permissionId !== 'string' ||
+      typeof binding.resource !== 'string' ||
+      (binding.availability !== undefined &&
+        binding.availability !== 'active' &&
+        binding.availability !== 'compatibleExtension') ||
+      binding.action.length === 0 ||
+      binding.permissionId.length === 0 ||
+      binding.resource.length === 0
+    ) {
+      return refuse(
+        `packages.${packageId}[${String(index)}] must be exactly {action, permissionId, resource} with an optional supported availability`,
+      );
+    }
+    return Object.freeze({
+      action: binding.action,
+      ...(binding.availability === undefined
+        ? {}
+        : { availability: binding.availability }),
+      permissionId: binding.permissionId,
+      resource: binding.resource,
+    });
+  });
 }
 
 interface AcknowledgementDocument {
@@ -151,9 +227,10 @@ export function readRetainableAcknowledgementFor(
   } catch (error) {
     if (
       error instanceof Error &&
-      error.message.includes('names no entries for package')
+      (error.message.includes('names no entries for package') ||
+        error.message.includes('must be an array'))
     ) {
-      return { entries: [], packageId };
+      return { entries: [], evaluatorBindings: [], packageId };
     }
     throw error;
   }
@@ -180,6 +257,13 @@ export function narrowAcknowledgementToDeclared(
   declaredPermissionIds: ReadonlySet<string>,
 ): UnboundPermissionAcknowledgementInput {
   return {
+    ...(acknowledgement.evaluatorBindings
+      ? {
+          evaluatorBindings: acknowledgement.evaluatorBindings.filter((entry) =>
+            declaredPermissionIds.has(entry.permissionId),
+          ),
+        }
+      : {}),
     entries: acknowledgement.entries.filter((entry) =>
       declaredPermissionIds.has(entry.permissionId),
     ),

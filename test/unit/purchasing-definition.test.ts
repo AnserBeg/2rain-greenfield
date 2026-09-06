@@ -32,6 +32,7 @@ import {
   purchasingModuleDefinition,
 } from '../../packages/domain/src/purchasing/index.js';
 import { evaluateRegisteredOperationPrecondition } from '../../packages/runtime/src/semantic-operation-gateway.js';
+import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 
 const namespace = PURCHASING_IDS.namespace;
 const stateFieldId = PURCHASING_IDS.stateFieldId;
@@ -823,7 +824,7 @@ test('each transition is offered only where it can move the record', () => {
   }
 });
 
-test('close and reopen are DECLARED edges that nothing can invoke', () => {
+test('close and reopen use the guarded receiving capability, never generic state transitions', () => {
   // THE FINDING THIS EXISTS FOR. An earlier version of this module emitted an
   // operation for every transition in the table, which made `released -> closed`
   // and `closed -> released` executable through the semantic operation gateway
@@ -867,7 +868,7 @@ test('close and reopen are DECLARED edges that nothing can invoke', () => {
           operation.operationId ===
           `${namespace}:operation.purchase_order_${action}`,
       ),
-      false,
+      true,
     );
   }
 
@@ -890,6 +891,11 @@ test('control: binding an operation to a declared-only edge is visible to that c
   // emit. The check above must see it.
   const bound = compile(
     mutated((definition) => {
+      definition.operations = definition.operations.filter(
+        (operation) =>
+          operation.operationId !==
+          `${namespace}:operation.purchase_order_close`,
+      );
       definition.operations.push({
         confirmation: 'none',
         effect: {
@@ -976,7 +982,7 @@ test('a declared edge costs no state, and adding one later would', () => {
 // DECLARATION each of those reads.
 // ===========================================================================
 
-test('six surfaces carry the anatomy this runtime registers, and nothing inert', () => {
+test('purchasing and receiving surfaces use registered anatomy; received projection has no edit form', () => {
   const expected = new Map<string, readonly string[]>([
     ['list', ['title', 'dataGrid', 'bulkActions']],
     [
@@ -989,8 +995,21 @@ test('six surfaces carry the anatomy this runtime registers, and nothing inert',
     ],
   ]);
   const surfaces = authored().surfaces;
-  assert.equal(surfaces.length, 6);
-  for (const local of ['purchase_order', 'purchase_order_line']) {
+  assert.equal(surfaces.length, 17);
+  assert.equal(
+    surfaces.some(
+      (surface) =>
+        surface.surfaceId ===
+        `${namespace}:surface.purchase_order_received_form`,
+    ),
+    false,
+  );
+  for (const local of [
+    'purchase_order',
+    'purchase_order_line',
+    'goods_receipt',
+    'goods_receipt_line',
+  ]) {
     for (const [suffix, slots] of expected) {
       const surface = surfaces.find(
         (candidate) =>
@@ -1035,8 +1054,8 @@ test('the command verbs are the ones the renderer reads', () => {
   for (const action of DECLARED_ONLY) {
     assert.equal(
       operationIds.includes(`${namespace}:operation.purchase_order_${action}`),
-      false,
-      `${action} must not be an operation in this packet`,
+      true,
+      `${action} must be a guarded receiving operation`,
     );
   }
   // BOTH cancels end in `_cancel`, deliberately: ADR-0056 ranks on the final
@@ -1134,7 +1153,7 @@ test('the composed application still carries exactly one state machine', () => {
 // Scope and the pinned registries.
 // ===========================================================================
 
-test('the document carries its plan shape and nothing from receiving, valuation or sales', () => {
+test('commercial order intent stays separate from received facts; no sales or hard delete operations', () => {
   const definition = authored();
   assert.deepEqual(
     definition.fields
@@ -1161,15 +1180,26 @@ test('the document carries its plan shape and nothing from receiving, valuation 
     ],
   );
 
-  // No received quantity, anywhere. Plan section 7.12: it ships no receipts, so a
-  // stored column could only ever hold zero, and choosing to store it would
-  // pre-commit PS-0's over-receipt race to compare-and-swap when PUR-2 may need
-  // lock-and-sum on a derived sum. The absence IS the decision being left open,
-  // so it is asserted.
-  assert.doesNotMatch(JSON.stringify(definition), /received/iu);
+  // ADR-0065: received quantity is a separate provider-written projection,
+  // never an independently writable counter on the authored order line.
+  assert.equal(
+    definition.fields.some(
+      (field) =>
+        field.fieldId ===
+        `${namespace}:field.purchase_order_received_received_quantity`,
+    ),
+    true,
+  );
+  assert.equal(
+    definition.fields.some(
+      (field) =>
+        field.fieldId === `${namespace}:field.goods_receipt_line_cost_status`,
+    ),
+    true,
+  );
   assert.doesNotMatch(
     JSON.stringify(definition),
-    /goods_receipt|inventory_movement|posting|sales_order|shipment|reservation/iu,
+    /sales_order|shipment|reservation/iu,
   );
   assert.equal(
     definition.operations.some((operation) =>
@@ -1240,11 +1270,11 @@ test('the module rides the adopted language version and compiles deterministical
     definition.normalizationProfileVersion,
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
-  assert.equal(definition.entities.length, 2);
-  assert.equal(definition.queries.length, 8);
-  assert.equal(definition.operations.length, 11);
-  assert.equal(definition.permissions.length, 14);
-  assert.equal(definition.assertions.length, 2);
+  assert.equal(definition.entities.length, 6);
+  assert.equal(definition.queries.length, 24);
+  assert.equal(definition.operations.length, 27);
+  assert.equal(definition.permissions.length, 32);
+  assert.equal(definition.assertions.length, 6);
 
   const first = compile();
   const second = compile();
@@ -1287,9 +1317,115 @@ test('the module rides the adopted language version and compiles deterministical
     transition.elements
       .filter((element) => element.kind === 'createTable')
       .map((element) => element.subjectId)
+      .filter((id) =>
+        [
+          orderEntityId,
+          lineEntityId,
+          `${namespace}:entity.goods_receipt`,
+          `${namespace}:entity.goods_receipt_line`,
+          `${namespace}:entity.purchase_order_received`,
+        ].includes(id),
+      )
       .toSorted(),
-    [orderEntityId, lineEntityId].toSorted(),
+    [
+      orderEntityId,
+      lineEntityId,
+      `${namespace}:entity.goods_receipt`,
+      `${namespace}:entity.goods_receipt_line`,
+      `${namespace}:entity.purchase_order_received`,
+    ].toSorted(),
   );
+});
+
+test('RECEIPT received projection refuses authored o0, o1 and transition write paths', () => {
+  const entityId = `${namespace}:entity.purchase_order_received`;
+  for (const tier of ['o0', 'o1', 'transition'] as const) {
+    const definition = purchasingModuleDefinition() as Record<string, unknown>;
+    const operations = definition.operations as Array<Record<string, unknown>>;
+    const template = operations.find((row) =>
+      String(row.operationId).endsWith(
+        tier === 'o0' ? '.goods_receipt_update' : '.goods_receipt_post',
+      ),
+    )!;
+    operations.push({
+      ...structuredClone(template),
+      operationId: `${namespace}:operation.received_illegal_${tier}`,
+      readBack: {
+        kind: 'queryReference',
+        schemaVersion: 'v5',
+        targetId: `${namespace}:query.purchase_order_received_get`,
+      },
+      ...(tier === 'o0'
+        ? {
+            effect: {
+              kind: 'updateRecordEffect',
+              schemaVersion: 'v5',
+              entity: {
+                kind: 'entityReference',
+                schemaVersion: 'v5',
+                targetId: entityId,
+              },
+            },
+          }
+        : {}),
+    });
+    if (tier === 'transition') {
+      const machines = definition.stateMachines as Array<
+        Record<string, unknown>
+      >;
+      const machine = JSON.parse(
+        JSON.stringify(machines[0]).replaceAll(
+          'purchase_order',
+          'received_illegal',
+        ),
+      ) as Record<string, unknown>;
+      machine.entity = {
+        kind: 'entityReference',
+        schemaVersion: 'v5',
+        targetId: entityId,
+      };
+      machines.push(machine);
+      const operation = operations.at(-1)!;
+      operation.tier = 'o0';
+      operation.effect = {
+        kind: 'transitionStateEffect',
+        schemaVersion: 'v5',
+        transition: {
+          kind: 'transitionReference',
+          schemaVersion: 'v5',
+          targetId: `${namespace}:transition.received_illegal_release`,
+        },
+      };
+      operation.permission = {
+        kind: 'permissionReference',
+        schemaVersion: 'v5',
+        targetId: `${namespace}:permission.purchase_order_release`,
+      };
+      for (const transition of machine.transitions as Array<
+        Record<string, unknown>
+      >)
+        transition.permission = {
+          kind: 'permissionReference',
+          schemaVersion: 'v5',
+          targetId: `${namespace}:permission.purchase_order_release`,
+        };
+    }
+    const result = compileApplication(compilerInput(definition));
+    assert.equal(
+      result.status,
+      'failed',
+      'provider-written quantity refuses every authored write tier',
+    );
+    if (result.status === 'failed')
+      assert.ok(
+        result.diagnostics.some(
+          (row) =>
+            row.code === 'COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED' &&
+            row.subjectId === entityId,
+        ),
+        'provider-written quantity refuses every authored write tier',
+      );
+  }
 });
 
 test('release verification plans no scenario it cannot arrange for the state field', () => {
@@ -1503,13 +1639,54 @@ function compilerInput(
   definition: unknown,
   expectedActiveRelease: CompilerInput['expectedActiveRelease'] = null,
 ): CompilerInput {
+  // Receiving depends on the inventory ledger. Compile the unchanged module
+  // with that real dependency, in memory only; never produce serving artifacts.
+  const composed = structuredClone(definition) as Record<string, unknown>;
+  if (
+    (composed.package as { namespace: string }).namespace === namespace &&
+    (composed.entities as unknown[]).length > 0
+  ) {
+    const dependency = inventoryModuleDefinition(namespace) as Record<
+      string,
+      unknown
+    >;
+    for (const family of [
+      'assertions',
+      'entities',
+      'fields',
+      'operations',
+      'permissions',
+      'queries',
+      'relations',
+      'stateMachines',
+      'storageMappings',
+      'surfaces',
+      'modules',
+    ]) {
+      composed[family] = [
+        ...((composed[family] as unknown[]) ?? []),
+        ...((dependency[family] as unknown[]) ?? []),
+      ];
+    }
+    composed.capabilityRequirements = [
+      ...(composed.capabilityRequirements as unknown[]),
+      ...(dependency.capabilityRequirements as unknown[]).slice(1),
+    ];
+    composed.modules = (composed.modules as Record<string, unknown>[]).map(
+      (module, index) => ({
+        ...module,
+        ownerPackageId: (composed.package as { packageId: string }).packageId,
+        orderKey: (index + 1) * 10,
+      }),
+    );
+  }
   return {
     dependencies: [],
     expectedActiveRelease,
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: new TextEncoder().encode(
-      canonicalize(normalizeApplicationPackage(definition)),
+      canonicalize(normalizeApplicationPackage(composed)),
     ),
     profile: { ...MODULE_COMPILER_PROFILE },
   };

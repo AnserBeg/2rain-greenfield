@@ -1,0 +1,320 @@
+{
+  "version": 1,
+  "packet": "RECEIPT",
+  "entries": [
+    {
+      "name": "receipt-post-read-denial-thrown",
+      "claim": "Initial, correction and reversal receipts report committed success and trust IDs without read-back after current read permission is revoked at commit.",
+      "file": "packages/postgres-provider/src/receiving-capability-executor.ts",
+      "original": "      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;",
+      "replacement": "      throw error;",
+      "test": {
+        "files": ["test/postgres/receiving-authorization.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "initial",
+          "expected": "current policy denied query northstar.app:query.goods_receipt_get"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "correction",
+          "expected": "current policy denied query northstar.app:query.goods_receipt_get"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "reversal",
+          "expected": "current policy denied query northstar.app:query.goods_receipt_get"
+        }
+      ]
+    },
+    {
+      "name": "receipt-order-read-denial-thrown",
+      "claim": "Amendment, close and reopen preserve truthful committed success with null read-back on typed current-policy denial only.",
+      "file": "packages/postgres-provider/src/receiving-order-capability.ts",
+      "original": "    if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;",
+      "replacement": "    throw error;",
+      "test": {
+        "files": ["test/postgres/receiving-authorization.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "amend",
+          "expected": "current policy denied query northstar.app:query.purchase_order_line_get"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "close",
+          "expected": "current policy denied query northstar.app:query.purchase_order_get"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "reopen",
+          "expected": "current policy denied query northstar.app:query.purchase_order_get"
+        }
+      ]
+    },
+    {
+      "name": "receipt-replay-hashes-current-policy",
+      "claim": "An identical version-5 receipt retry after restoring a grant preserves its trust IDs and business effects; current authorization must not change the historical input preimage.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const inputDigest = digestCommand(\n    digestPosting,\n    receipt.input_digest_version,\n  );",
+      "replacement": "  const inputDigest = digestCommand(posting, receipt.input_digest_version);",
+      "test": {
+        "files": ["test/postgres/receiving-authorization.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "initial",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "correction",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT"
+        },
+        {
+          "file": "test/postgres/receiving-authorization.test.ts",
+          "name": "reversal",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT"
+        }
+      ]
+    },
+    {
+      "name": "receipt-rebuild-discrepancy-capture-absent",
+      "claim": "The rebuild persists the corrupted stored row before replacing its value; reconciliation itself does not repair.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "WHERE s.quantity IS DISTINCT FROM l.quantity OR s.unit_id IS DISTINCT FROM l.unit_id`,",
+      "replacement": "WHERE false`,",
+      "test": {
+        "files": ["test/postgres/inventory-reconciliation.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-reconciliation.test.ts",
+          "name": "one corrupted posted quantity is named as ledger divergence and never repaired",
+          "expected": "rebuild must persist the observed discrepancy before replacing derived values"
+        }
+      ]
+    },
+    {
+      "name": "receipt-ordered-ceiling-absent",
+      "claim": "A receipt above ordered quantity is refused atomically.",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "if (result < 0n || result > ordered)",
+      "replacement": "if (result < 0n)",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "over-receipt is refused before any write"
+        }
+      ]
+    },
+    {
+      "name": "receipt-refusal-payload-incomplete",
+      "claim": "The refusal contains the attempted quantity as well as order line, ordered and received-before.",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "attemptedQuantity: receiptDecimal(attempted),",
+      "replacement": "attemptedQuantity: 'omitted',",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "receipt refusal exposes all four quantity operands"
+        }
+      ]
+    },
+    {
+      "name": "receipt-common-order-lock-absent",
+      "claim": "Both distinct-location receipts take the common order lock before the quantity check.",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "command.orderId,\n    true,",
+      "replacement": "command.orderId,\n    false,",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "expected 2 concurrent posting lock waiters"
+        }
+      ]
+    },
+    {
+      "name": "receipt-received-floor-absent",
+      "claim": "A correction below zero received is refused by the receiving bound.",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "if (result < 0n || result > ordered)",
+      "replacement": "if (result > ordered)",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "correction cannot reduce received below zero"
+        }
+      ]
+    },
+    {
+      "name": "receipt-received-verifier-vacuous",
+      "claim": "A received writer corrupting its output is refused before any business or trust effects commit.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "equals(actual[column], value),",
+      "replacement": "true,",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "receipt-authored-projection-fence-absent",
+      "claim": "ADR-0065 claim 6: every authored operation tier is refused against received quantity.",
+      "file": "packages/compiler/src/conformance.ts",
+      "original": "if (providerWrittenReadModelRule && authoredEntityOperations.length > 0) {",
+      "replacement": "if (providerWrittenReadModelRule && authoredEntityOperations.length > 0 && !entity.entityId.endsWith(':entity.purchase_order_received')) {",
+      "test": {
+        "files": ["test/unit/purchasing-definition.test.ts"],
+        "namePattern": "RECEIPT received projection refuses"
+      },
+      "kills": [
+        {
+          "file": "test/unit/purchasing-definition.test.ts",
+          "name": "RECEIPT received projection refuses authored o0, o1 and transition write paths",
+          "expected": "provider-written quantity refuses every authored write tier"
+        }
+      ]
+    },
+    {
+      "name": "receipt-rebuild-identity-drift",
+      "claim": "ADR-0065 claim 7: rebuilding keeps the original deterministic identity.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "        row.recordId,\n        row.orderLineId,",
+      "replacement": "        '99999999-9999-4999-8999-999999999999',\n        row.orderLineId,",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "Rebuilt received projection failed independent verification"
+        }
+      ]
+    },
+    {
+      "name": "receipt-reconciliation-hides-corruption",
+      "claim": "ADR-0065 claim 8: comparison reports corruption and the sweep leaves stored bytes unchanged.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "return { expected, discrepancies, repaired: 0 as const };",
+      "replacement": "return { expected, discrepancies: [], repaired: 0 as const };",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "received corruption produces one observed discrepancy"
+        }
+      ]
+    },
+    {
+      "name": "receipt-amendment-rewrites-progress",
+      "claim": "ADR-0065 claim 9: amendment leaves received-row bytes and revision unchanged.",
+      "file": "packages/postgres-provider/src/purchasing-order-lifecycle.ts",
+      "original": "  const ordered = receiptQuantity(quantity);",
+      "replacement": "  const ordered = receiptQuantity(quantity);\n  await client.query('SET LOCAL ROLE north_star_receipt_projection_writer');\n  await client.query(`UPDATE ${receiptTable(binding.received)} SET revision=revision+1 WHERE tenant_id=$1 AND environment_id=$2 AND ${q(receiptRelation(binding, binding.received, 'purchase_order_received_order_line'))}=$3`, [context.tenantId, context.environmentId, orderLineId]);\n  await client.query('SET LOCAL ROLE north_star_module_runtime');",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "amendment leaves received row bytes and revision unchanged"
+        }
+      ]
+    },
+    {
+      "name": "receipt-rebuild-depends-on-active-projection",
+      "claim": "ADR-0065 claim 10: attribution and quantities are recovered even when every projection row is retired.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "  const reconstruction = await reconstructedReceivedFacts(\n    client,\n    binding,\n    scope,\n  );",
+      "replacement": "  const hasProjection = await client.query(`SELECT 1 FROM ${receiptTable(binding.received)} WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL LIMIT 1`, [scope.tenantId, scope.environmentId]);\n  const reconstruction = hasProjection.rows.length ? await reconstructedReceivedFacts(client, binding, scope) : [];",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "Rebuilt received projection failed independent verification"
+        }
+      ]
+    },
+    {
+      "name": "receipt-reconciliation-scope-key-collapsed",
+      "claim": "Received reconciliation preserves tenant, environment, legal entity and record identity when equal record ids exist in different entities.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "  return JSON.stringify([tenantId, environmentId, legalEntityId, recordId]);",
+      "replacement": "  return recordId;",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT comparison preserves"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT comparison preserves same record ids across legal-entity scope in either read order",
+          "expected": "Stored received projection contains duplicate scoped identity"
+        }
+      ]
+    },
+    {
+      "name": "receipt-scoped-rebuild-retires-other-entity",
+      "claim": "An entity-A-only received rebuild neither retires nor captures a same-id entity-B projection row.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "WHERE tenant_id=$1 AND environment_id=$2 AND ($3::uuid[] IS NULL OR ${q(e.legalEntity!.column)}=ANY($3)) AND archived_at IS NULL`,\n    [scope.tenantId, scope.environmentId, scope.legalEntityIds ?? null],",
+      "replacement": "WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL`,\n    [scope.tenantId, scope.environmentId],",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "an entity-A-only rebuild leaves the same-id entity-B row byte-for-byte unchanged"
+        }
+      ]
+    }
+  ]
+}

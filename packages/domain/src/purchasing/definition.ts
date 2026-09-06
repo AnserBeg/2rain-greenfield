@@ -1,11 +1,11 @@
 // Canonical language v5 -- the version that MATERIALIZES a state machine's
 // state field as an ordinary enum field on its entity. Purchasing declares no
-// capability of its own, and nothing here appends an inventory fact.
+// generic CRUD for documents; receiving runs through the registered capability.
 //
 // SCOPE, as held: the purchase order DOCUMENT and its lines -- entities,
 // fields, queries, generic operations, two named transitions, surfaces and the
-// parent-scoped line relation. No receipt, no movement, no posting role, no
-// sales.
+// parent-scoped line relation, goods receipts, received progress and guarded
+// quantity amendment requests. No sales.
 //
 // THIS FILE IS THE FIRST FIRST-PARTY DECLARATION OF `stateMachines`.
 // `ADR-0050` ruled `transitionStateEffect` and `stateMachines` as one decision
@@ -141,6 +141,10 @@ const TRANSITION_PERMISSIONS = [
 const ENTITY_OWNED_QUERY_FAMILIES = new Set([
   'purchase_order',
   'purchase_order_line',
+  'goods_receipt',
+  'goods_receipt_line',
+  'purchase_order_received',
+  'purchase_order_amendment',
 ]);
 
 function ids(namespace: string) {
@@ -231,6 +235,22 @@ export function purchasingModuleDefinition(
   const standardEntities = [
     ['purchase_order', 'Purchase order', entityIds.purchaseOrder],
     ['purchase_order_line', 'Purchase order line', entityIds.purchaseOrderLine],
+    ['goods_receipt', 'Goods receipt', `${namespace}:entity.goods_receipt`],
+    [
+      'purchase_order_amendment',
+      'Order quantity amendment request',
+      `${namespace}:entity.purchase_order_amendment`,
+    ],
+    [
+      'goods_receipt_line',
+      'Receipt line',
+      `${namespace}:entity.goods_receipt_line`,
+    ],
+    [
+      'purchase_order_received',
+      'Received quantity',
+      `${namespace}:entity.purchase_order_received`,
+    ],
   ] as const;
 
   return {
@@ -256,11 +276,30 @@ export function purchasingModuleDefinition(
         schemaVersion: version,
         supportStatus: 'supported',
       },
+      {
+        capabilityId: 'northstar.purchasing:capability.receiving',
+        capabilityVersion: 1,
+        declaredEffects: ['appendFact'],
+        kind: 'capabilityRequirement',
+        requiredProjections: [
+          'storage',
+          'policy',
+          'query',
+          'operation',
+          'surface',
+          'agent',
+          'reporting',
+          'verification',
+        ],
+        schemaVersion: version,
+        supportStatus: 'supported',
+      },
     ],
     entities: standardEntities.map(([local, label, entityId], index) =>
       entity(definitionIds, local, label, entityId, (index + 1) * 10),
     ),
     fields: [
+      ...receiptFields(definitionIds),
       // NO `state` field. See the file header: the machine owns that identity
       // and normalization materializes it at `orderKey: 0`, ahead of every
       // authored field.
@@ -409,6 +448,36 @@ export function purchasingModuleDefinition(
     operations: [
       ...operations(
         definitionIds,
+        'goods_receipt',
+        `${namespace}:entity.goods_receipt`,
+        {
+          kind: 'notPredicate',
+          schemaVersion: version,
+          term: fieldComparison(
+            `${namespace}:field.goods_receipt_state`,
+            `${namespace}:option.goods_receipt_state_posted`,
+          ),
+        },
+      ),
+      ...operations(
+        definitionIds,
+        'goods_receipt_line',
+        `${namespace}:entity.goods_receipt_line`,
+      ),
+      ...(['post'] as const).map((action) =>
+        receivingOperation(definitionIds, 'goods_receipt', action),
+      ),
+      ...(['close', 'reopen'] as const).map((action) =>
+        receivingOperation(definitionIds, 'purchase_order', action),
+      ),
+      receivingOperation(definitionIds, 'purchase_order_line', 'amend'),
+      ...operations(
+        definitionIds,
+        'purchase_order_amendment',
+        `${namespace}:entity.purchase_order_amendment`,
+      ),
+      ...operations(
+        definitionIds,
         'purchase_order',
         entityIds.purchaseOrder,
         editableStates(definitionIds),
@@ -439,8 +508,24 @@ export function purchasingModuleDefinition(
       version: '1.0.0',
     },
     permissions: [
+      ...(['goods_receipt_post', 'purchase_order_line_amend'] as const).map(
+        (local) => ({
+          action: 'transition',
+          kind: 'permissionDefinition',
+          label: local.replaceAll('_', ' '),
+          permissionId: `${namespace}:permission.${local}`,
+          resource: reference(
+            'entityReference',
+            `${namespace}:entity.${local === 'goods_receipt_post' ? 'goods_receipt' : 'purchase_order_line'}`,
+          ),
+          schemaVersion: version,
+        }),
+      ),
       ...standardEntities.flatMap(([local, , entityId]) =>
-        permissions(definitionIds, local, entityId),
+        permissions(definitionIds, local, entityId).filter(
+          (permission) =>
+            local !== 'purchase_order_received' || permission.action === 'read',
+        ),
       ),
       // ADR-0050 §7 -- and this is the one rule in this file that guards a
       // SECURITY declaration rather than a business one. The language declares
@@ -467,10 +552,66 @@ export function purchasingModuleDefinition(
         local,
         entityId,
         selectedFieldsForEntity(definitionIds, local),
-        resolveFieldForEntity(fieldIds, local),
+        resolveFieldForEntity(fieldIds, local) ||
+          `${namespace}:field.${local}_${local === 'goods_receipt' || local === 'purchase_order_amendment' ? 'number' : local === 'goods_receipt_line' ? 'item_id' : 'unit_id'}`,
       ),
     ),
     relations: [
+      ...(
+        [
+          [
+            'purchase_order_amendment_order_line',
+            'purchase_order_amendment',
+            'purchase_order_line',
+            'reference',
+            true,
+          ],
+          [
+            'goods_receipt_order',
+            'goods_receipt',
+            'purchase_order',
+            'reference',
+            true,
+          ],
+          [
+            'goods_receipt_supersedes',
+            'goods_receipt',
+            'goods_receipt',
+            'reference',
+            false,
+          ],
+          [
+            'goods_receipt_line_receipt',
+            'goods_receipt_line',
+            'goods_receipt',
+            'parentScopedChild',
+            true,
+          ],
+          [
+            'goods_receipt_line_order_line',
+            'goods_receipt_line',
+            'purchase_order_line',
+            'reference',
+            true,
+          ],
+          [
+            'purchase_order_received_order_line',
+            'purchase_order_received',
+            'purchase_order_line',
+            'reference',
+            true,
+          ],
+        ] as const
+      ).map(([local, source, target, ownership, required], index) => ({
+        ...relation(
+          `${namespace}:relation.${local}`,
+          `${namespace}:entity.${source}`,
+          `${namespace}:entity.${target}`,
+          20 + index * 10,
+        ),
+        ownership,
+        required,
+      })),
       relation(
         definitionIds.relationIds.purchaseOrderLineOrder,
         entityIds.purchaseOrderLine,
@@ -484,7 +625,10 @@ export function purchasingModuleDefinition(
       storageMapping(definitionIds, local, entityId),
     ),
     surfaces: standardEntities.flatMap(([local, label]) =>
-      surfaces(definitionIds, local, label),
+      surfaces(definitionIds, local, label).filter(
+        (surface) =>
+          local !== 'purchase_order_received' || surface.surfaceRole !== 'form',
+      ),
     ),
   };
 }
@@ -501,6 +645,140 @@ export function purchasingModuleDefinition(
 function derivedStateFieldId(machineId: string): string {
   const separator = machineId.indexOf(':');
   return `${machineId.slice(0, separator)}:derived_state_field.${machineId.slice(separator + 1)}`;
+}
+
+function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
+  const enumType = (
+    local: string,
+    name: string,
+    options: readonly string[],
+  ): FieldType => ({
+    kind: 'enumFieldType',
+    schemaVersion: version,
+    options: options.map((value, index) => ({
+      kind: 'enumOption',
+      schemaVersion: version,
+      optionId: `${ids.namespace}:option.${local}_${name}_${value}`,
+      label: value,
+      orderKey: index * 10 + 10,
+    })),
+  });
+  const specs: Array<readonly [string, string, string, FieldType, boolean?]> = [
+    [
+      'purchase_order_amendment',
+      'number',
+      'Amendment request number',
+      text(60),
+    ],
+    [
+      'purchase_order_amendment',
+      'line_revision',
+      'Expected order line revision',
+      integer(),
+    ],
+    ['purchase_order_amendment', 'quantity', 'New ordered quantity', decimal()],
+    ['purchase_order_amendment', 'reason', 'Amendment reason', text(2000)],
+    ['goods_receipt', 'number', 'Receipt number', text(60)],
+    [
+      'goods_receipt',
+      'state',
+      'State',
+      enumType('goods_receipt', 'state', ['draft', 'posted']),
+    ],
+    [
+      'goods_receipt',
+      'kind',
+      'Kind',
+      enumType('goods_receipt', 'kind', ['initial', 'correction', 'reversal']),
+    ],
+    ['goods_receipt', 'effective_at', 'Received at', instant()],
+    ['goods_receipt', 'location_id', 'Receiving location', text(80)],
+    ['goods_receipt', 'reason_code', 'Reason code', text(80)],
+    ['goods_receipt', 'reason_narrative', 'Reason', text(1000)],
+    ['goods_receipt_line', 'line_number', 'Line number', integer()],
+    ['goods_receipt_line', 'item_id', 'Item', text(80)],
+    ['goods_receipt_line', 'quantity', 'Quantity', decimal()],
+    ['goods_receipt_line', 'unit_id', 'Base unit', text(32)],
+    [
+      'goods_receipt_line',
+      'cost_status',
+      'Actual cost',
+      enumType('goods_receipt_line', 'cost_status', ['known', 'absent']),
+    ],
+    [
+      'goods_receipt_line',
+      'unit_cost',
+      'Actual received unit cost',
+      decimal(),
+      true,
+    ],
+    ['goods_receipt_line', 'currency', 'Actual cost currency', text(3), true],
+    [
+      'goods_receipt_line',
+      'reversal_of_movement_id',
+      'Compensated movement',
+      text(80),
+      true,
+    ],
+    [
+      'purchase_order_received',
+      'received_quantity',
+      'Received quantity',
+      decimal(),
+    ],
+    ['purchase_order_received', 'unit_id', 'Base unit', text(32)],
+  ];
+  return specs.map(([local, name, label, type, optional], index) =>
+    field(
+      ids,
+      `${ids.namespace}:entity.${local}`,
+      `${ids.namespace}:field.${local}_${name}`,
+      label,
+      (index + 1) * 10,
+      type,
+      {
+        optional: optional ?? false,
+        searchable:
+          name === 'number' ||
+          // Currency codes are ordinary searchable identifiers, as on the PO.
+          name === 'currency' ||
+          name === 'item_id' ||
+          (local === 'purchase_order_received' && name === 'unit_id'),
+        businessKey: name === 'number',
+      },
+    ),
+  );
+}
+
+function receivingOperation(
+  ids: PurchasingIds,
+  local: string,
+  action: string,
+): Record<string, unknown> {
+  return {
+    confirmation: 'humanRequired',
+    effect: {
+      kind: 'registeredCapabilityEffect',
+      schemaVersion: version,
+      capability: reference(
+        'capabilityReference',
+        'northstar.purchasing:capability.receiving',
+      ),
+    },
+    kind: 'operationDefinition',
+    module: reference('moduleReference', ids.moduleId),
+    operationId: `${ids.namespace}:operation.${local}_${action}`,
+    permission: reference(
+      'permissionReference',
+      `${ids.namespace}:permission.${local}_${action}`,
+    ),
+    readBack: reference(
+      'queryReference',
+      `${ids.namespace}:query.${local}_get`,
+    ),
+    schemaVersion: version,
+    tier: 'o1',
+  };
 }
 
 /**
@@ -702,7 +980,13 @@ function selectedFieldsForEntity(
     case 'purchase_order_line':
       return Object.values(ids.fieldIds.purchaseOrderLine);
     default:
-      throw new TypeError(`unknown purchasing entity ${local}`);
+      return receiptFields(ids)
+        .filter(
+          (value) =>
+            (value.entity as { targetId: string }).targetId ===
+            `${ids.namespace}:entity.${local}`,
+        )
+        .map((value) => String(value.fieldId));
   }
 }
 
@@ -722,7 +1006,7 @@ function resolveFieldForEntity(
     case 'purchase_order_line':
       return fieldIds.purchaseOrderLine.itemId;
     default:
-      throw new TypeError(`unknown purchasing entity ${local}`);
+      return '';
   }
 }
 

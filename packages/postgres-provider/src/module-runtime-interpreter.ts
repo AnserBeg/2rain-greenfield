@@ -4010,7 +4010,7 @@ function valueState(value: unknown): BusinessValueStateInput {
     : Object.freeze({ state: 'VALUE', value });
 }
 
-function auditFieldId(canonicalId: string): string {
+export function auditFieldId(canonicalId: string): string {
   const readable = canonicalId.replaceAll(/[^A-Za-z0-9_.-]/g, '.');
   return readable.length <= 120
     ? readable

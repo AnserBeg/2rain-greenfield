@@ -707,3 +707,13 @@ was anything to keep immutable. Measured in `program-reviews/2026-09-01-inventor
 How to apply: `AGENTS.md` (2026-09-04) — one vertical per lane worked continuously, CI as the gate,
 one arm on the Critical set only, one-page records, pre-tenant re-baselining (ADR-0066), and a
 doctrine freeze: no new rule without deleting one. Graduated to `AGENTS.md`.
+
+## Preserve lifecycle read-back when refreshing derived record sections
+Date: 2026-09-05
+Why: RECEIPT's blanket post-operation refresh queried an archived Party as active, hiding a successful archive; it also made stock replay depend on unrelated query inputs.
+How to apply: scope derived-section refresh to the receiving commands that need it; retain ordinary operation read-back. The unchanged Party archive and stock replay browser assertions caught both regressions. See `docs/execution/packets/RECEIPT.md`.
+
+## Separate current authorization from historical retry evidence
+Date: 2026-09-05
+Why: the real receiving gateway's unchanged retry conflicted after grant restoration because the version-5 digest includes the policy revision.
+How to apply: authorize every retry against current policy, but reconstruct a historical digest using its immutable recorded authorization evidence; never rewrite its business input or persisted digest. Exercise revocation, restoration and same-key retry together. See `docs/execution/packets/RECEIPT.md`.

@@ -107,7 +107,7 @@
       "claim": "findNaturalReplay proves replay from the persisted effects and the recorded principal, so it must NOT reconstruct an input digest. That absence is what lets a version-3 receipt keep replaying while the explicit-key route refuses it, and an absence is invisible to every gate unless something restores it. This mutation routes the natural-replay handoff through validateReceiptReplay, which reconstructs -- and a version-3 receipt then hits the unreconstructible refusal on a route that had independent evidence. Round-1 review asked for a control at this exact handoff because it holds the decoder admission and the intended absence together.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  return recordedResultForReplay(row);",
-      "replacement": "  return validateReceiptReplay(row, context, posting, command.idempotencyKey);",
+      "replacement": "  return validateReceiptReplay(row, context, posting, command.idempotencyKey, client);",
       "test": {
         "files": ["test/postgres/inventory-stock-count.test.ts"],
         "namePattern": "natural replay"

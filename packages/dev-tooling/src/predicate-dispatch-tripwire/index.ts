@@ -106,6 +106,7 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
     // `all(not(equals), not(equals), not(equals))` editing guard, which is
     // three kinds.
     'packages/domain/src/purchasing/definition.ts': signature([
+      'notPredicate',
       'fieldComparisonPredicate',
       'allPredicate',
       'notPredicate',

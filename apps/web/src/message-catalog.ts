@@ -234,6 +234,16 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Operation refused',
     subject: 'refusalCode',
   },
+  OPERATION_COMMITTED_READBACK_WITHHELD: {
+    consequence: 'advisory',
+    detail:
+      'The operation committed successfully. Current permissions do not allow its record to be displayed.',
+    nextAction:
+      'Do not submit this operation again. Keep the trust reference and ask an administrator to restore read access.',
+    placements: ['page'],
+    sentence: 'Operation committed',
+    subject: null,
+  },
   OPERATION_UNAVAILABLE: {
     consequence: 'blocking',
     detail: 'The semantic operation could not be completed safely.',

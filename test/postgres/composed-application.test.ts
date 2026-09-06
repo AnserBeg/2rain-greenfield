@@ -23,6 +23,7 @@ import {
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
@@ -53,8 +54,17 @@ import {
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
+import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
+import {
+  PostgresCurrentPolicyGateway,
+  currentPolicyBindingsFromPermissions,
+} from '../../packages/postgres-provider/src/current-policy.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
-import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
+import {
+  LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
+  issueLegalEntityReadScope,
+  type ImmutableJsonValue,
+} from '../../packages/runtime/src/request-runtime-view.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
@@ -67,7 +77,6 @@ import {
   PostgresReleaseVerificationService,
   ReleaseVerificationIntegrityError,
   releaseVerificationBinding,
-  verificationScenarioDeriver,
   type DurableReleaseVerificationEvidence,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
@@ -77,11 +86,21 @@ import {
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
-import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
-import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  SEMANTIC_OPERATION_REQUEST_VERSION,
+  MalformedSemanticOperationRequestError,
+  SemanticOperationPolicyDeniedError,
+  type SemanticOperationResultEnvelope,
+} from '../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import {
+  CURRENT_POLICY_BINDINGS_FILE,
+  CURRENT_POLICY_BINDINGS_VERSION,
   UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE,
   UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -105,25 +124,38 @@ async function writeAcknowledgementBeside(
   const authored = definition as {
     package: { packageId: string };
     permissions: ReadonlyArray<{
+      action: string;
       permissionId: string;
       resource: { targetId: string };
     }>;
   };
-  await writeFile(
-    resolve(dirname(authoredPath), UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE),
-    JSON.stringify({
-      header: ['test workspace: every declared permission acknowledged'],
-      packages: {
-        [authored.package.packageId]: authored.permissions.map(
-          (permission) => ({
-            permissionId: permission.permissionId,
-            resource: permission.resource.targetId,
-          }),
-        ),
-      },
-      schemaVersion: UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
-    }),
-  );
+  await Promise.all([
+    writeFile(
+      resolve(dirname(authoredPath), UNBOUND_PERMISSION_ACKNOWLEDGEMENT_FILE),
+      JSON.stringify({
+        header: [
+          'test workspace: every declared permission is evaluator-bound',
+        ],
+        packages: { [authored.package.packageId]: [] },
+        schemaVersion: UNBOUND_PERMISSION_ACKNOWLEDGEMENT_VERSION,
+      }),
+    ),
+    writeFile(
+      resolve(dirname(authoredPath), CURRENT_POLICY_BINDINGS_FILE),
+      JSON.stringify({
+        packages: {
+          [authored.package.packageId]: authored.permissions.map(
+            (permission) => ({
+              action: permission.action,
+              permissionId: permission.permissionId,
+              resource: permission.resource.targetId,
+            }),
+          ),
+        },
+        schemaVersion: CURRENT_POLICY_BINDINGS_VERSION,
+      }),
+    ),
+  ]);
 }
 const migrationsDirectory = resolve('db/migrations');
 const fullReplaySchemaSnapshotPath = resolve(
@@ -144,7 +176,9 @@ test('historical reproduction cannot admit a non-conformant freshly compiled hea
   const compiledApplication = JSON.parse(
     await readFile(compiledArtifactPath, 'utf8'),
   ) as { applications: unknown[] };
-  assert.ok(compiledApplication.applications.length >= 6);
+  assert.ok(
+    parseCompiledApplication(compiledApplication).applications.length > 0,
+  );
   const nonConformantHead = JSON.parse(
     await readFile(authoredArtifactPath, 'utf8'),
   ) as {
@@ -283,10 +317,15 @@ test('capability verification fails closed when a factory declares no refusal', 
 });
 
 test('fresh-tenant install refuses a failing intermediate transition', async () => {
-  const compiledApplication = JSON.parse(
-    await readFile(compiledArtifactPath, 'utf8'),
+  const compiledApplication = appendSameProfileSuccessor(
+    appendSameProfileSuccessor(
+      JSON.parse(await readFile(compiledArtifactPath, 'utf8')),
+    ),
   ) as { applications: unknown[] };
-  assert.ok(compiledApplication.applications.length > 3);
+  assert.ok(
+    compiledApplication.applications.length >= 3,
+    'the fixture constructs two successors even after a one-entry re-baseline',
+  );
   const firstIntermediate = compiledApplication.applications[1]!;
   compiledApplication.applications[1] = compiledApplication.applications[2]!;
   compiledApplication.applications[2] = firstIntermediate;
@@ -543,6 +582,15 @@ test(
                 compiledApplication,
               ),
           );
+          await context.test(
+            'posting authorization binds authoritative entity scope and preserves committed truth across read revocation',
+            () =>
+              assertInventoryPostingAuthorizationBoundaries(
+                pool,
+                tenantA,
+                compiledApplication,
+              ),
+          );
           const recordId = randomUUID();
           const created = await tenantA.entry.run(
             { headers: { authorization: 'local' } },
@@ -575,6 +623,25 @@ test(
             separateRequest.records.map((record) => record.recordId),
             [recordId],
             'a separate gateway request reads the committed PostgreSQL row',
+          );
+          await context.test(
+            'current grants enforce allow, read-only, revocation, scope and denial evidence on one pinned runtime',
+            () =>
+              assertCurrentAuthorizationVertical(
+                pool,
+                tenantA,
+                compiledApplication,
+                connection,
+              ),
+          );
+          await context.test(
+            'a composed runtime with no verified identity integration fails request entry closed',
+            () =>
+              assertFailClosedIdentitySeam(
+                compiledApplication,
+                databaseUrl,
+                'composed-tenant-a',
+              ),
           );
 
           await tenantA.close();
@@ -982,8 +1049,22 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    // 34 + PUR-1's six Purchasing surfaces.
-    assert.equal(surfaces.length, 40);
+    // Prior 40 + three writable receipt/request records and one read-only projection.
+    assert.equal(surfaces.length, 51);
+    for (const local of [
+      'goods_receipt',
+      'goods_receipt_line',
+      'purchase_order_amendment',
+      'purchase_order_received',
+    ]) {
+      for (const role of ['list', 'detail'])
+        assert.ok(surfaces.includes(`northstar.app:surface.${local}_${role}`));
+      assert.equal(
+        surfaces.includes(`northstar.app:surface.${local}_form`),
+        local !== 'purchase_order_received',
+        'only authored receipt/request records expose a form',
+      );
+    }
     assert.ok(surfaces.includes(APPLICATION_IDS.party.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.catalog.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.location.listSurfaceId));
@@ -1052,7 +1133,10 @@ async function assertApprovalEnforcementAndApprovedActivation(
     await new PostgresReleaseVerificationService(
       runtimePool,
       INVENTORY_PROVIDER_ERROR_MAPPINGS,
-      [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
+      [
+        INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+        RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      ],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: application.compiled,
       evidenceId: staged.verificationEvidenceId,
@@ -1198,7 +1282,10 @@ async function assertApprovalRequiredForAdvancement(
       await new PostgresReleaseVerificationService(
         runtimePool,
         INVENTORY_PROVIDER_ERROR_MAPPINGS,
-        [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
+        [
+          INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+          RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+        ],
       ).executeSemanticCandidateAndPersist(context, {
         compiledRelease: application.compiled,
         evidenceId: target.verification_evidence_id,
@@ -1366,7 +1453,10 @@ async function assertReleaseServicesRejectNonExactReversePairs(
     await new PostgresReleaseVerificationService(
       runtimePool,
       INVENTORY_PROVIDER_ERROR_MAPPINGS,
-      [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
+      [
+        INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+        RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      ],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: immediateTarget.compiled,
       evidenceId: staged.verificationEvidenceId,
@@ -2053,6 +2143,542 @@ function createParty(
   );
 }
 
+async function assertCurrentAuthorizationVertical(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+  connection: pg.PoolConfig,
+): Promise<void> {
+  assert.equal(runtime.identityMode, 'LOCAL_DEMO');
+  const scope = [runtime.identity.tenantId, runtime.identity.environmentId];
+  const role = await pool.query<{ role_id: string }>(
+    `SELECT role_id
+       FROM platform.current_policy_roles
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND role_key = 'local-demo-full-release'`,
+    scope,
+  );
+  const roleId = role.rows[0]?.role_id;
+  assert.ok(roleId);
+  const membership = await pool.query<{ membership_id: string }>(
+    `SELECT membership_id
+       FROM platform.current_policy_memberships
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND principal_id = $3 AND role_id = $4`,
+    [...scope, runtime.identity.principalId, roleId],
+  );
+  const membershipId = membership.rows[0]?.membership_id;
+  assert.ok(membershipId);
+  const deniedBefore = await deniedInvocationCount(pool, runtime);
+  const allowedRecordId = randomUUID();
+  const partyCreatePermission = 'northstar.app:permission.party_create';
+  const partyReadPermission = 'northstar.app:permission.party_read';
+  const inventoryScopeParameter =
+    'northstar.app:parameter.inventory_transaction_list_legal_entity_scope';
+  const inventoryList = (selectedEntityId: string) =>
+    runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+      runtime.queryGateway.invoke(view, {
+        arguments: {
+          [inventoryScopeParameter]: selectedEntityId,
+          includeArchived: false,
+          list: {
+            cursor: null,
+            matchMode: 'substring',
+            pageSize: 10,
+            relationLabels: [],
+            schemaVersion: SHARED_LIST_QUERY_VERSION,
+            search: '',
+            sort: [],
+          },
+        },
+        queryId: 'northstar.app:query.inventory_transaction_list',
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      }),
+    );
+  const currentPolicyPool = new pg.Pool({
+    ...connection,
+    max: 2,
+    user: 'north_star_runtime',
+  });
+  currentPolicyPool.on('error', () => undefined);
+  const currentPolicy = new PostgresCurrentPolicyGateway(
+    currentPolicyPool,
+    currentPolicyBindingsFromPermissions(
+      composedApplicationDefinition().permissions as readonly Readonly<{
+        action: string;
+        permissionId: string;
+        resource: { targetId: string };
+      }>[],
+    ),
+  );
+  const restorePolicy = async () => {
+    await pool.query(
+      `UPDATE platform.current_policy_permission_grants
+          SET revoked_at = NULL
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3`,
+      [...scope, roleId],
+    );
+    await pool.query(
+      `UPDATE platform.current_policy_memberships
+          SET legal_entity_id = NULL, revoked_at = NULL
+        WHERE tenant_id = $1 AND environment_id = $2 AND membership_id = $3`,
+      [...scope, membershipId],
+    );
+  };
+  const setGrant = (permissionId: string, revoked: boolean) =>
+    pool.query(
+      `UPDATE platform.current_policy_permission_grants
+          SET revoked_at = CASE WHEN $5::boolean THEN clock_timestamp() ELSE NULL END
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3
+          AND permission_id = $4`,
+      [...scope, roleId, permissionId, revoked],
+    );
+  const invokePartyOnView = (
+    view: RequestRuntimeView,
+    recordId: string,
+    number: string,
+  ) =>
+    runtime.operationGateway.invoke(
+      view,
+      {
+        confirmationGrant: null,
+        idempotencyKey: randomUUID(),
+        input: {
+          recordId,
+          values: {
+            [APPLICATION_IDS.party.fieldIds.contactSummary]:
+              'authorization@example.test',
+            [APPLICATION_IDS.party.fieldIds.name]: 'Authorization Party',
+            [APPLICATION_IDS.party.fieldIds.number]: number,
+          },
+        },
+        operationId: APPLICATION_IDS.party.createOperationId,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      runtime.operationMediation.issueInvocation(view, 'UI'),
+    );
+
+  try {
+    // The same request view keeps its release pin while the live grant changes.
+    const revokedRecordId = randomUUID();
+    await runtime.entry.run(
+      { headers: { authorization: 'local' } },
+      async (view) => {
+        const allowed = await invokePartyOnView(
+          view,
+          allowedRecordId,
+          `AUTH-ALLOW-${randomUUID().slice(0, 8)}`,
+        );
+        assert.equal(allowed.outcome, 'succeeded');
+        await setGrant(partyCreatePermission, true);
+        await assert.rejects(
+          invokePartyOnView(view, revokedRecordId, 'AUTH-REVOKED'),
+          (error: unknown) =>
+            error instanceof SemanticOperationPolicyDeniedError,
+          'revocation must apply to an already-issued, release-pinned view',
+        );
+      },
+    );
+    assert.equal(
+      await businessRecordCount(
+        pool,
+        runtime,
+        compiledApplication,
+        revokedRecordId,
+      ),
+      0,
+      'the denied write left business data unchanged',
+    );
+
+    // A read-only role retains reads while every application mutation is denied.
+    await setGrant(partyCreatePermission, false);
+    await pool.query(
+      `UPDATE platform.current_policy_permission_grants
+          SET revoked_at = clock_timestamp()
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3
+          AND permission_id LIKE 'northstar.app:permission.%'
+          AND permission_id NOT LIKE '%\\_read' ESCAPE '\\'`,
+      [...scope, roleId],
+    );
+    await listParty(runtime);
+    await assert.rejects(
+      createParty(runtime, randomUUID(), 'AUTH-READ-ONLY'),
+      (error: unknown) => error instanceof SemanticOperationPolicyDeniedError,
+    );
+    await restorePolicy();
+
+    // A relation label has its target query authorized independently.
+    await setGrant(partyReadPermission, true);
+    await assert.rejects(
+      runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+        runtime.queryGateway.invoke(view, {
+          arguments: {
+            includeArchived: false,
+            list: {
+              cursor: null,
+              matchMode: 'substring',
+              pageSize: 10,
+              relationLabels: [
+                {
+                  fieldId: APPLICATION_IDS.party.fieldIds.name,
+                  queryId: APPLICATION_IDS.party.listQueryId,
+                  relationId: 'northstar.app:relation.party_role_party',
+                },
+              ],
+              schemaVersion: SHARED_LIST_QUERY_VERSION,
+              search: '',
+              sort: [],
+            },
+          },
+          queryId: 'northstar.app:query.party_role_list',
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        }),
+      ),
+      (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+    );
+    await setGrant(partyReadPermission, false);
+
+    // Scope issuance and revalidation are live permission checks of their own.
+    // Each denial is translated at the query boundary and recorded once before
+    // the provider can execute.
+    const legalEntityId = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+    await setGrant(LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID, true);
+    const issuanceDeniedBefore = await deniedInvocationCount(pool, runtime);
+    await assert.rejects(
+      inventoryList(legalEntityId),
+      (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+    );
+    await assertSingleQueryDenial(
+      pool,
+      runtime,
+      issuanceDeniedBefore,
+      'northstar.app:query.inventory_transaction_list',
+    );
+    await setGrant(LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID, false);
+    await runtime.entry.run(
+      { headers: { authorization: 'local' } },
+      async (view) => {
+        const issuedScope = await issueLegalEntityReadScope(
+          currentPolicy,
+          view,
+          [legalEntityId],
+        );
+        await setGrant(LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID, true);
+        const revalidationDeniedBefore = await deniedInvocationCount(
+          pool,
+          runtime,
+        );
+        await assert.rejects(
+          runtime.queryGateway.invoke(
+            view,
+            {
+              arguments: {
+                includeArchived: false,
+                list: {
+                  cursor: null,
+                  matchMode: 'substring',
+                  pageSize: 10,
+                  relationLabels: [],
+                  schemaVersion: SHARED_LIST_QUERY_VERSION,
+                  search: '',
+                  sort: [],
+                },
+              },
+              queryId: APPLICATION_IDS.party.listQueryId,
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+            },
+            { legalEntityReadScope: issuedScope },
+          ),
+          (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+        );
+        await assertSingleQueryDenial(
+          pool,
+          runtime,
+          revalidationDeniedBefore,
+          APPLICATION_IDS.party.listQueryId,
+        );
+      },
+    );
+    await setGrant(LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID, false);
+
+    // A scoped membership may use its entity and cannot widen it through a
+    // query operand or an operation input.
+    const foreignLegalEntityId = randomUUID();
+    await pool.query(
+      `UPDATE platform.current_policy_memberships
+          SET legal_entity_id = $4
+        WHERE tenant_id = $1 AND environment_id = $2 AND membership_id = $3`,
+      [...scope, membershipId, legalEntityId],
+    );
+    await inventoryList(legalEntityId);
+    await assert.rejects(
+      inventoryList(foreignLegalEntityId),
+      (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+    );
+    const scopedWriteRecordId = randomUUID();
+    await assert.rejects(
+      invokeInventoryTransactionCreate(
+        runtime,
+        scopedWriteRecordId,
+        foreignLegalEntityId,
+      ),
+      (error: unknown) => error instanceof SemanticOperationPolicyDeniedError,
+    );
+    assert.equal(
+      await businessRecordCount(
+        pool,
+        runtime,
+        compiledApplication,
+        scopedWriteRecordId,
+        'northstar.app:entity.inventory_transaction',
+      ),
+      0,
+    );
+    await assert.rejects(
+      inventoryList('caller-supplied-invalid-entity'),
+      (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+    );
+    await restorePolicy();
+
+    // Revoking membership denies at the boundary even though all grants remain.
+    await pool.query(
+      `UPDATE platform.current_policy_memberships
+          SET revoked_at = clock_timestamp()
+        WHERE tenant_id = $1 AND environment_id = $2 AND membership_id = $3`,
+      [...scope, membershipId],
+    );
+    await assert.rejects(
+      listParty(runtime),
+      (error: unknown) => error instanceof SemanticQueryPolicyDeniedError,
+    );
+    await restorePolicy();
+
+    for (const header of [
+      'x-tenant-id',
+      'x-environment-id',
+      'x-principal-id',
+      'x-legal-entity-id',
+    ]) {
+      await assert.rejects(
+        runtime.entry.run(
+          { headers: { authorization: 'local', [header]: randomUUID() } },
+          async () => undefined,
+        ),
+        `${header} must not widen the sealed identity`,
+      );
+    }
+
+    const deniedAfter = await deniedInvocationCount(pool, runtime);
+    assert.ok(
+      deniedAfter - deniedBefore >= 7,
+      'every denied query and operation must record trust evidence',
+    );
+    const evidence = await pool.query<{
+      metadata: unknown;
+      policy_decision: string;
+      policy_inputs: unknown;
+    }>(
+      `SELECT metadata, policy_decision, policy_inputs
+         FROM platform.trust_action_invocations
+        WHERE tenant_id = $1 AND environment_id = $2 AND outcome = 'DENIED'
+        ORDER BY recorded_at DESC
+        LIMIT 7`,
+      scope,
+    );
+    assert.ok(
+      evidence.rows.length >= 7,
+      'recorded denial evidence must remain queryable through the trust store',
+    );
+    assert.ok(evidence.rows.every((row) => row.policy_decision === 'DENY'));
+    assert.ok(
+      evidence.rows.every(
+        (row) =>
+          !JSON.stringify([row.metadata, row.policy_inputs]).includes(
+            'authorization@example.test',
+          ),
+      ),
+      'denial evidence must not persist business inputs or credentials',
+    );
+  } finally {
+    await restorePolicy();
+    await currentPolicyPool.end();
+    if (
+      (await businessRecordCount(
+        pool,
+        runtime,
+        compiledApplication,
+        allowedRecordId,
+      )) === 1
+    ) {
+      const archiveOperationId = 'northstar.app:operation.party_archive';
+      const archiveInput = { expectedRevision: 1, recordId: allowedRecordId };
+      await runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+        runtime.operationGateway.invoke(
+          view,
+          {
+            confirmationGrant:
+              runtime.operationMediation.issueConfirmationGrant(
+                view,
+                archiveOperationId,
+                archiveInput,
+              ),
+            idempotencyKey: randomUUID(),
+            input: archiveInput,
+            operationId: archiveOperationId,
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          },
+          runtime.operationMediation.issueInvocation(view, 'UI'),
+        ),
+      );
+    }
+  }
+}
+
+async function assertFailClosedIdentitySeam(
+  compiledApplication: unknown,
+  databaseUrl: string,
+  tenantSlug: string,
+): Promise<void> {
+  const runtime = await createComposedApplicationRuntime({
+    capabilityOperationExecutorFactories: [
+      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+    ],
+    compiledApplication,
+    databaseUrl,
+    inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+    migrationsDirectory,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    tenantSlug,
+  });
+  try {
+    assert.equal(runtime.identityMode, 'FAIL_CLOSED');
+    await assert.rejects(
+      runtime.entry.run({ headers: { authorization: 'unverified' } }, () =>
+        Promise.resolve('must-not-run'),
+      ),
+      /authenticated request identity is required/u,
+    );
+  } finally {
+    await runtime.close();
+  }
+}
+
+function invokeInventoryTransactionCreate(
+  runtime: ComposedApplicationRuntime,
+  recordId: string,
+  legalEntityId: string,
+) {
+  return runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+    runtime.operationGateway.invoke(
+      view,
+      {
+        confirmationGrant: null,
+        idempotencyKey: randomUUID(),
+        input: {
+          legalEntityId,
+          recordId,
+          relations: {},
+          values: {
+            'northstar.app:field.inventory_transaction_actor_id': 'auth-test',
+            'northstar.app:field.inventory_transaction_effective_at':
+              '2026-09-04T12:00:00.000Z',
+            'northstar.app:field.inventory_transaction_number': `AUTH-SCOPE-${recordId.slice(0, 8)}`,
+            'northstar.app:field.inventory_transaction_recorded_at':
+              '2026-09-04T12:00:00.000Z',
+            'northstar.app:field.inventory_transaction_source_id': 'auth-test',
+            'northstar.app:field.inventory_transaction_source_type': 'test',
+            'northstar.app:field.inventory_transaction_state':
+              'northstar.app:option.inventory_transaction_state_draft',
+            'northstar.app:field.inventory_transaction_type':
+              'northstar.app:option.inventory_transaction_type_adjustment',
+          },
+        },
+        operationId: 'northstar.app:operation.inventory_transaction_create',
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      runtime.operationMediation.issueInvocation(view, 'UI'),
+    ),
+  );
+}
+
+async function deniedInvocationCount(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.trust_action_invocations
+      WHERE tenant_id = $1 AND environment_id = $2 AND outcome = 'DENIED'`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
+async function assertSingleQueryDenial(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  before: number,
+  queryId: string,
+): Promise<void> {
+  assert.equal(await deniedInvocationCount(pool, runtime), before + 1);
+  const result = await pool.query<{
+    action_id: string;
+    failure_code: string;
+    metadata: unknown;
+    policy_inputs: unknown;
+    policy_version: string;
+  }>(
+    `SELECT action_id, failure_code, metadata, policy_inputs, policy_version
+       FROM platform.trust_action_invocations
+      WHERE tenant_id = $1 AND environment_id = $2 AND outcome = 'DENIED'
+      ORDER BY recorded_at DESC, invocation_id DESC
+      LIMIT 1`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.equal(result.rows[0]?.action_id, queryId);
+  assert.equal(result.rows[0]?.failure_code, 'SEMANTIC_QUERY_POLICY_DENIED');
+  const epoch = await pool.query<{ policy_version: string }>(
+    `SELECT policy_version::text AS policy_version
+       FROM platform.current_policy_epochs
+      WHERE tenant_id = $1 AND environment_id = $2`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.equal(
+    result.rows[0]?.policy_version,
+    `northstar.current-policy/${epoch.rows[0]?.policy_version ?? '0'}`,
+  );
+  const recorded = JSON.stringify([
+    result.rows[0]?.metadata,
+    result.rows[0]?.policy_inputs,
+  ]);
+  assert.doesNotMatch(recorded, /authorization|legalEntityId|Bearer/iu);
+}
+
+async function businessRecordCount(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+  recordId: string,
+  entityId: string = 'northstar.app:entity.party',
+): Promise<number> {
+  const storage = storageTarget(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  const entity = storage.entities.find(
+    (candidate) => candidate.entityId === entityId,
+  );
+  assert.ok(entity);
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM north_star_module.${entity.physicalTableName}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND "${entity.recordIdentity.column}" = $3`,
+    [runtime.identity.tenantId, runtime.identity.environmentId, recordId],
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
 async function partyRowSnapshot(
   pool: pg.Pool,
   runtime: ComposedApplicationRuntime,
@@ -2367,10 +2993,15 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
     (candidate) =>
       candidate.entityId === 'northstar.app:entity.posted_stock_balance',
   );
+  const receivedQuantity = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === 'northstar.app:entity.purchase_order_received',
+  );
   assert.ok(master?.legalEntityMaster);
   assert.ok(periodLock?.periodLock);
   assert.ok(ordinary);
   assert.ok(postedStockBalance);
+  assert.ok(receivedQuantity);
 
   // The second tenant reached the same seeded state as the first.
   const periodLockScope = periodLock.legalEntity;
@@ -2413,7 +3044,7 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
   }
 
   // The insert policy exists for exactly the two seeded table classes and the
-  // one pinned provider-written projection.
+  // two explicitly named provider-written projections.
   const insertPolicies = await pool.query<{ tablename: string }>(
     `SELECT tablename
        FROM pg_catalog.pg_policies
@@ -2428,8 +3059,9 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
       master.physicalTableName,
       periodLock.physicalTableName,
       postedStockBalance.physicalTableName,
+      receivedQuantity.physicalTableName,
     ].toSorted(),
-    'only the seeded table classes and named provider-written projection carry a materializer insert policy',
+    'only the seeded table classes and named stock/received projections carry a materializer insert policy',
   );
 
   const materializerPool = new pg.Pool({
@@ -2684,7 +3316,7 @@ async function assertBoundedFreshTenantInstallEvidence(
   const servingScenarioCount = releaseVerificationBinding(
     compiled.application.compiled,
   ).plan.scenarios.length;
-  await assertAttributedSearchCapabilityScenarioDelta(compiledApplication);
+  assertReceivingVerificationCoverage(compiledApplication);
   // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
   // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
   // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
@@ -2701,8 +3333,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   // emitting differs from skipping: nothing is admitted unexecuted.
   assert.equal(
     servingScenarioCount,
-    198,
-    'PUR-1 adds 24 scenarios and the materialized state field adds none of them',
+    257,
+    'the release includes the prior 198 scenarios plus 59 for the four receiving entities',
   );
 
   const intermediate = await pool.query<{
@@ -3005,15 +3637,7 @@ test(
         // the authorization -- so this must NOT borrow
         // ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR (ADR-0047 §6).
         //
-        // THE EDGE IS LOCATED, NOT ASSUMED TO BE AT THE END -- corrected by
-        // `LANG-ADOPT-v5`. This read `at(-2)` against the real head and asserted the
-        // pair shared a definition, which held only while the profile-adoption entry
-        // WAS the head. Its sibling below already knew that was fragile: direction 2
-        // manufactures a truncated lineage precisely because the head was a profile
-        // sibling. Direction 1 needed the mirror image and did not have it, so an
-        // authored-source adoption turned a real ADR-0047 §6 gate into a premise
-        // failure. The profile-only edge is still in the lineage; only its position
-        // moved.
+        // ADR-0066: construct identical source under v1 then v2 in memory.
         const profileEdgeLineage =
           throughProfileSiblingHead(compiledApplication);
         const profileEdge = parseCompiledApplication(profileEdgeLineage);
@@ -3053,24 +3677,11 @@ test(
           'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
         );
 
-        // DIRECTION 2 -- the refusal does NOT fire on a source-changing edge, and the
-        // ADR-0046 observation this helper exists for is preserved rather than
-        // dropped. Truncating the lineage to the last source-changing head restores
-        // exactly the pair this asserted before the profile entry was appended: an
-        // eligible rollback whose verification refuses the pre-existing unusable
-        // search BY NAME. Without this the profile edge would have silently taken a
-        // real ADR-0046 gate out of the suite.
-        // Truncated THROUGH the profile edge and then past it, so the head is the
-        // last entry before the profile sibling and the target is the release that
-        // still carries the unusable search. `withoutProfileSiblingHead` alone no
-        // longer reaches it: with a source-changing head it returns the lineage
-        // unchanged, and the resulting edge crosses two post-search-capability
-        // releases where there is nothing for verification to refuse. Measured --
-        // that spelling produced "Missing expected rejection" rather than a red that
-        // named a real regression.
-        const sourceChangingLineage = withoutProfileSiblingHead(
-          throughProfileSiblingHead(compiledApplication),
-        );
+        // ADR-0066: the source-changing synthetic edge has a usable target.
+        // Actual successful rollback discriminates this from deny-every-edge.
+        // The obsolete pre-search first-party target is no longer retained.
+        const sourceChangingLineage =
+          syntheticSourceChangingLineage(compiledApplication);
         const truncated = parseCompiledApplication(sourceChangingLineage);
         const sourceChangingTarget = truncated.applications.at(-2);
         assert.ok(sourceChangingTarget);
@@ -3104,25 +3715,24 @@ test(
         );
         await sourceEdgeRuntime.close();
 
-        const historicalSearchQueryId =
-          'northstar.app:query.stock_count_line_search';
-        await assert.rejects(
-          createRuntime(sourceChangingLineage, databaseUrl, sourceEdgeSlug, {
+        const reversed = await createRuntime(
+          sourceChangingLineage,
+          databaseUrl,
+          sourceEdgeSlug,
+          {
             kind: 'rollback',
             targetReleaseRoot: sourceChangingTarget.compiled.releaseRoot,
-          }),
-          (error: unknown) => {
-            assert.ok(
-              !(error instanceof ReleaseReverseTransitionRefusal),
-              `a source-changing edge must not raise a reverse-transition refusal, got ${String((error as { code?: string }).code)}`,
-            );
-            assert.ok(error instanceof ModuleRuntimeInterpreterError);
-            assert.equal(error.code, 'MODULE_SEARCH_CAPABILITY_UNAVAILABLE');
-            assert.equal(error.subjectId, historicalSearchQueryId);
-            return true;
           },
-          'ADR-0046: rollback remains eligible, while verification of its pre-existing unusable search refuses by name',
         );
+        try {
+          assert.equal(
+            reversed.releaseRoot,
+            sourceChangingTarget.compiled.releaseRoot,
+            'a source-changing edge remains eligible and serves only after verification',
+          );
+        } finally {
+          await reversed.close();
+        }
       },
     );
   },
@@ -3134,50 +3744,73 @@ test(
  * source-changing rollback edge while the real artifact's head is a profile
  * sibling (ADR-0047 §4).
  */
-function withoutProfileSiblingHead(compiledApplication: unknown): unknown {
-  const envelope = structuredClone(compiledApplication) as {
-    applications: { normalizedDefinitionBytesBase64: string }[];
+function syntheticSourceChangingLineage(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const bytes = normalizedDefinitionVersion(
+    composedApplicationDefinition(),
+    '1.0.99',
+  );
+  const successor = compileSuccessor(previous.application.compiled, bytes);
+  return {
+    applications: [
+      ...previous.applications.map((entry) =>
+        serializedRelease(entry.normalizedDefinitionBytes, entry.compiled),
+      ),
+      serializedRelease(bytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
   };
-  while (
-    envelope.applications.length > 1 &&
-    envelope.applications.at(-1)!.normalizedDefinitionBytesBase64 ===
-      envelope.applications.at(-2)!.normalizedDefinitionBytesBase64
-  ) {
-    envelope.applications.pop();
-  }
-  return envelope;
 }
 
-/**
- * The mirror image, added by `LANG-ADOPT-v5`: the lineage truncated so its head
- * IS a profile sibling — the successor of the last profile-only edge (ADR-0047
- * §4), with every later entry dropped.
- *
- * Direction 1 above needs a serving head that shares a package revision with its
- * predecessor. That was true of the real artifact for exactly one packet, and
- * `withoutProfileSiblingHead` existed because its sibling direction already had
- * the opposite problem. Both directions now name the edge they need instead of
- * assuming the artifact's head happens to supply it.
- */
+/** ADR-0066: construct the profile edge instead of relying on disposable history. */
 function throughProfileSiblingHead(compiledApplication: unknown): unknown {
-  const envelope = structuredClone(compiledApplication) as {
-    applications: { normalizedDefinitionBytesBase64: string }[];
+  const previous = parseCompiledApplication(compiledApplication);
+  const definition = structuredClone(composedApplicationDefinition()) as {
+    surfaces: { slots: { disclosureTier?: string }[] }[];
   };
-  const lastEdgeIndex = envelope.applications.reduce(
-    (found, entry, index) =>
-      index > 0 &&
-      entry.normalizedDefinitionBytesBase64 ===
-        envelope.applications[index - 1]!.normalizedDefinitionBytesBase64
-        ? index
-        : found,
-    -1,
+  // The previous profile cannot admit an explicitly declared newer UI field.
+  // Both endpoints use this same synthetic source, so only the profile differs.
+  for (const surface of definition.surfaces)
+    for (const slot of surface.slots) delete slot.disclosureTier;
+  const bytes = new TextEncoder().encode(
+    canonicalize(normalizeApplicationPackage(definition)),
   );
-  assert.ok(
-    lastEdgeIndex > 0,
-    'the recorded lineage carries no profile-only edge, so ADR-0047 §6 has nothing to refuse',
+  const predecessor = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: expectedActiveReleaseFrom(
+      previous.bootstrap.compiled,
+    ),
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: bytes,
+    profile: {
+      ...profileForNormalizedBytes(bytes),
+      compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+    },
+  });
+  assert.equal(
+    predecessor.status,
+    'compiled',
+    predecessor.status === 'failed'
+      ? JSON.stringify(predecessor.diagnostics)
+      : undefined,
   );
-  envelope.applications.length = lastEdgeIndex + 1;
-  return envelope;
+  const successor = compileSuccessor(predecessor, bytes);
+  return {
+    applications: [
+      serializedRelease(bytes, predecessor),
+      serializedRelease(bytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
 }
 
 async function assertConstrainedDomainVerificationCompleted(
@@ -4412,6 +5045,331 @@ async function assertInventoryPostingCapabilityRoute(
   ]);
 }
 
+async function assertInventoryPostingAuthorizationBoundaries(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled =
+    parseCompiledApplication(compiledApplication).application.compiled;
+  const storage = storageTarget(compiled);
+  const transaction = requiredStorageEntity(storage, 'inventory_transaction');
+  const movement = requiredStorageEntity(storage, 'inventory_movement');
+  const legalEntity = requiredStorageEntity(storage, 'legal_entity');
+  assert.ok(transaction.legalEntity);
+  assert.ok(legalEntity.legalEntityMaster);
+  const tenantEnvironment = [
+    runtime.identity.tenantId,
+    runtime.identity.environmentId,
+  ];
+  const role = await pool.query<{ role_id: string }>(
+    `SELECT role_id
+       FROM platform.current_policy_roles
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND role_key = 'local-demo-full-release'`,
+    tenantEnvironment,
+  );
+  const roleId = role.rows[0]?.role_id;
+  assert.ok(roleId);
+  const membership = await pool.query<{ membership_id: string }>(
+    `SELECT membership_id
+       FROM platform.current_policy_memberships
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND principal_id = $3 AND role_id = $4`,
+    [...tenantEnvironment, runtime.identity.principalId, roleId],
+  );
+  const membershipId = membership.rows[0]?.membership_id;
+  assert.ok(membershipId);
+  const readPermission = 'northstar.app:permission.inventory_transaction_read';
+  const postOperation = 'northstar.app:operation.inventory_transaction_post';
+  const entityA = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+  const entityB = randomUUID();
+  const itemId = randomUUID();
+  const locationId = randomUUID();
+
+  const create = (
+    operationId: string,
+    recordId: string,
+    values: Readonly<Record<string, unknown>>,
+    options: Readonly<{
+      legalEntityId?: string;
+      relations?: Readonly<Record<string, string>>;
+    }> = {},
+  ) =>
+    runtime.entry.run({ headers: { authorization: 'auth-review' } }, (view) =>
+      runtime.operationGateway.invoke(
+        view,
+        {
+          confirmationGrant: null,
+          idempotencyKey: randomUUID(),
+          input: {
+            ...(options.legalEntityId
+              ? { legalEntityId: options.legalEntityId }
+              : {}),
+            recordId,
+            relations: options.relations ?? {},
+            values,
+          },
+          operationId,
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+        },
+        runtime.operationMediation.issueInvocation(view, 'UI'),
+      ),
+    );
+  const setReadGrant = (revoked: boolean) =>
+    pool.query(
+      `UPDATE platform.current_policy_permission_grants
+          SET revoked_at = CASE WHEN $5::boolean THEN clock_timestamp() ELSE NULL END
+        WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3
+          AND permission_id = $4`,
+      [...tenantEnvironment, roleId, readPermission, revoked],
+    );
+  const setMembershipScope = (legalEntityId: string | null) =>
+    pool.query(
+      `UPDATE platform.current_policy_memberships
+          SET legal_entity_id = $4
+        WHERE tenant_id = $1 AND environment_id = $2 AND membership_id = $3`,
+      [...tenantEnvironment, membershipId, legalEntityId],
+    );
+  const seedDraft = async (legalEntityId: string, label: string) => {
+    const recordId = randomUUID();
+    const lineId = randomUUID();
+    const sourceId = `auth-review-${label.toLowerCase()}-${recordId.slice(0, 8)}`;
+    const effectiveAt = new Date().toISOString();
+    await create(
+      'northstar.app:operation.inventory_transaction_create',
+      recordId,
+      {
+        'northstar.app:field.inventory_transaction_actor_id': 'auth-review',
+        'northstar.app:field.inventory_transaction_effective_at': effectiveAt,
+        'northstar.app:field.inventory_transaction_number': `AUTH-${label}-${recordId.slice(0, 8)}`,
+        'northstar.app:field.inventory_transaction_reason_code': 'adjustment',
+        'northstar.app:field.inventory_transaction_reason_narrative':
+          'Focused authorization review regression',
+        'northstar.app:field.inventory_transaction_recorded_at': effectiveAt,
+        'northstar.app:field.inventory_transaction_source_id': sourceId,
+        'northstar.app:field.inventory_transaction_source_type': 'test',
+        'northstar.app:field.inventory_transaction_state':
+          'northstar.app:option.inventory_transaction_state_draft',
+        'northstar.app:field.inventory_transaction_type':
+          'northstar.app:option.inventory_transaction_type_adjustment',
+      },
+      { legalEntityId },
+    );
+    await create(
+      'northstar.app:operation.inventory_transaction_line_create',
+      lineId,
+      {
+        'northstar.app:field.inventory_transaction_line_from_location_id': null,
+        'northstar.app:field.inventory_transaction_line_item_id': itemId,
+        'northstar.app:field.inventory_transaction_line_line_number': '1',
+        'northstar.app:field.inventory_transaction_line_quantity': '3',
+        'northstar.app:field.inventory_transaction_line_to_location_id':
+          locationId,
+        'northstar.app:field.inventory_transaction_line_unit_id': 'EA',
+      },
+      {
+        legalEntityId,
+        relations: {
+          'northstar.app:relation.inventory_transaction_line_transaction':
+            recordId,
+        },
+      },
+    );
+    return Object.freeze({
+      input: Object.freeze({ expectedRevision: 1, recordId }),
+      recordId,
+      sourceId,
+    });
+  };
+  const post = (
+    draft: Awaited<ReturnType<typeof seedDraft>>,
+    input: Readonly<Record<string, unknown>> = draft.input,
+  ): Promise<SemanticOperationResultEnvelope> =>
+    runtime.entry.run({ headers: { authorization: 'auth-review' } }, (view) =>
+      runtime.operationGateway.invoke(
+        view,
+        {
+          confirmationGrant: runtime.operationMediation.issueConfirmationGrant(
+            view,
+            postOperation,
+            input as ImmutableJsonValue,
+          ),
+          idempotencyKey: randomUUID(),
+          input: input as ImmutableJsonValue,
+          operationId: postOperation,
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+        },
+        runtime.operationMediation.issueInvocation(view, 'UI'),
+      ),
+    );
+  const movementCount = async (sourceId: string): Promise<number> => {
+    const sourceColumn = requiredStorageColumn(
+      movement,
+      'inventory_movement_source_id',
+    );
+    const result = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM north_star_module.${quoteSqlIdentifier(movement.physicalTableName)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoteSqlIdentifier(sourceColumn)} = $3`,
+      [...tenantEnvironment, sourceId],
+    );
+    return Number(result.rows[0]?.count ?? '0');
+  };
+  const revision = async (recordId: string): Promise<number> => {
+    const result = await pool.query<{ revision: number }>(
+      `SELECT ${quoteSqlIdentifier(transaction.optimisticRevision.column)}::integer AS revision
+         FROM north_star_module.${quoteSqlIdentifier(transaction.physicalTableName)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoteSqlIdentifier(transaction.recordIdentity.column)} = $3`,
+      [...tenantEnvironment, recordId],
+    );
+    assert.equal(result.rows.length, 1);
+    return result.rows[0]!.revision;
+  };
+  const policyVersion = async (): Promise<string> => {
+    const result = await pool.query<{ policy_version: string }>(
+      `SELECT policy_version::text AS policy_version
+         FROM platform.current_policy_epochs
+        WHERE tenant_id = $1 AND environment_id = $2`,
+      tenantEnvironment,
+    );
+    return `northstar.current-policy/${result.rows[0]?.policy_version ?? '0'}`;
+  };
+  const assertOneDenied = async (
+    before: number,
+    failureCode: string,
+    forbidden: readonly string[],
+  ): Promise<void> => {
+    assert.equal(await deniedInvocationCount(pool, runtime), before + 1);
+    const evidence = await pool.query<{
+      failure_code: string;
+      metadata: unknown;
+      policy_inputs: unknown;
+      policy_version: string;
+    }>(
+      `SELECT failure_code, metadata, policy_inputs, policy_version
+         FROM platform.trust_action_invocations
+        WHERE tenant_id = $1 AND environment_id = $2 AND outcome = 'DENIED'
+        ORDER BY recorded_at DESC, invocation_id DESC
+        LIMIT 1`,
+      tenantEnvironment,
+    );
+    assert.equal(evidence.rows[0]?.failure_code, failureCode);
+    assert.equal(evidence.rows[0]?.policy_version, await policyVersion());
+    const serialized = JSON.stringify([
+      evidence.rows[0]?.metadata,
+      evidence.rows[0]?.policy_inputs,
+    ]);
+    for (const value of forbidden)
+      assert.doesNotMatch(serialized, new RegExp(value, 'u'));
+  };
+
+  let revocationTriggerInstalled = false;
+  try {
+    await create('northstar.app:operation.item_create', itemId, {
+      'northstar.app:field.item_base_unit': 'EA',
+      'northstar.app:field.item_description': 'AUTH review item',
+      'northstar.app:field.item_name': `AUTH review ${itemId.slice(0, 8)}`,
+      'northstar.app:field.item_sku': `AUTH-${itemId.slice(0, 8)}`,
+    });
+    await create('northstar.app:operation.location_create', locationId, {
+      'northstar.app:field.location_code': `AUTH-${locationId.slice(0, 8)}`,
+      'northstar.app:field.location_name': 'AUTH review location',
+      'northstar.app:field.location_type': 'northstar.app:option.warehouse',
+    });
+    await create('northstar.app:operation.legal_entity_create', entityB, {
+      'northstar.app:field.legal_entity_code': `AUTH-${entityB.slice(0, 8)}`,
+      'northstar.app:field.legal_entity_is_default': false,
+      'northstar.app:field.legal_entity_name': 'AUTH review entity B',
+      'northstar.app:field.legal_entity_status':
+        legalEntity.legalEntityMaster.activeStatusValue,
+    });
+
+    const missingRead = await seedDraft(entityA, 'MISSING-READ');
+    await setReadGrant(true);
+    const missingReadDenied = await deniedInvocationCount(pool, runtime);
+    let missingReadError: unknown;
+    try {
+      await post(missingRead);
+    } catch (error) {
+      missingReadError = error;
+    }
+    assert.equal(await movementCount(missingRead.sourceId), 0);
+    assert.equal(await revision(missingRead.recordId), 1);
+    assert.ok(missingReadError instanceof SemanticOperationPolicyDeniedError);
+    await assertOneDenied(
+      missingReadDenied,
+      'SEMANTIC_OPERATION_POLICY_DENIED',
+      [missingRead.recordId, missingRead.sourceId],
+    );
+    await setReadGrant(false);
+
+    const scopedA = await seedDraft(entityA, 'ENTITY-A');
+    const scopedB = await seedDraft(entityB, 'ENTITY-B');
+    await setMembershipScope(entityA);
+    const allowedA = await post(scopedA);
+    assert.equal(allowedA.outcome, 'succeeded');
+    assert.equal(allowedA.readBack?.revision, 2);
+    const foreignDenied = await deniedInvocationCount(pool, runtime);
+    await assert.rejects(post(scopedB), SemanticOperationPolicyDeniedError);
+    assert.equal(await movementCount(scopedB.sourceId), 0);
+    assert.equal(await revision(scopedB.recordId), 1);
+    await assertOneDenied(foreignDenied, 'SEMANTIC_OPERATION_POLICY_DENIED', [
+      scopedB.recordId,
+      scopedB.sourceId,
+    ]);
+    await assert.rejects(
+      post(scopedA, { ...scopedA.input, legalEntityId: entityA }),
+      MalformedSemanticOperationRequestError,
+    );
+
+    const afterCommit = await seedDraft(entityA, 'AFTER-COMMIT');
+    await pool.query(
+      `CREATE FUNCTION platform.auth_review_revoke_read_after_post()
+       RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+       SET search_path = pg_catalog, platform AS $$ BEGIN
+         UPDATE platform.current_policy_permission_grants
+            SET revoked_at = clock_timestamp()
+          WHERE tenant_id = NEW.tenant_id
+            AND environment_id = NEW.environment_id
+            AND permission_id = 'northstar.app:permission.inventory_transaction_read'
+            AND revoked_at IS NULL;
+         RETURN NEW;
+       END $$`,
+    );
+    await pool.query(
+      `CREATE TRIGGER auth_review_revoke_read_after_post
+       AFTER INSERT ON platform.semantic_operation_receipts
+       FOR EACH ROW EXECUTE FUNCTION platform.auth_review_revoke_read_after_post()`,
+    );
+    revocationTriggerInstalled = true;
+    const committedDenied = await deniedInvocationCount(pool, runtime);
+    const committed = await post(afterCommit);
+    assert.equal(committed.outcome, 'succeeded');
+    assert.equal(committed.readBack, null);
+    assert.ok(committed.trust);
+    assert.equal(await movementCount(afterCommit.sourceId), 1);
+    assert.equal(await revision(afterCommit.recordId), 2);
+    await assertOneDenied(committedDenied, 'SEMANTIC_QUERY_POLICY_DENIED', [
+      afterCommit.recordId,
+      afterCommit.sourceId,
+    ]);
+  } finally {
+    if (revocationTriggerInstalled) {
+      await pool.query(
+        'DROP TRIGGER auth_review_revoke_read_after_post ON platform.semantic_operation_receipts',
+      );
+      await pool.query(
+        'DROP FUNCTION platform.auth_review_revoke_read_after_post()',
+      );
+    }
+    await setReadGrant(false);
+    await setMembershipScope(null);
+  }
+}
+
 function requiredStorageEntity(
   storage: StorageTargetPayloadV1,
   localId: string,
@@ -4563,28 +5521,17 @@ async function assertExactPartitionEvidence(
   );
   assert.ok(evidence.results.length > 0, 'real PostgreSQL probes still ran');
   assert.ok(derivations.length > 0);
-  // 127 -> 151. PUR-1's 24 scenarios ALL EXECUTE and none is derived, which is
-  // why `derivations` below is unchanged at 47 -- so the partition still closes:
-  // 151 + 47 = 198, the planned count asserted in
-  // `assertBoundedFreshTenantInstallEvidence`, and 127 + 47 = 174 was the same
-  // identity before this packet.
-  //
-  // That every one of them is ARRANGEABLE is a fact about the module rather
-  // than an accident. Inventory contributes derivations precisely because some
-  // of its scenarios are emitted-but-unarrangeable; purchasing declares no
-  // operationless entity, no provider-written read model, and no field a
-  // generic create cannot populate. **The materialized state field would have
-  // been the one exception, and it is not emitted at all** -- see the
-  // scenario-count comment in `assertBoundedFreshTenantInstallEvidence`.
+  // Measured on the combined governed release: 200 executed + 57 derived.
+  // The independent constructibility oracle below still verifies every member.
   assert.equal(
     evidence.results.length,
-    151,
-    'PUR-1 adds 24 executed scenarios and no derivation, so the partition still closes at 198',
+    200,
+    'receiving adds 49 executed scenarios to the prior 151',
   );
   assert.equal(
     derivations.length,
-    47,
-    'the 11 operationless posted-stock scenarios are derived while the historical search exclusions remain absent',
+    57,
+    'the 10 operationless received-projection scenarios join the prior 47 derivations',
   );
   assert.equal(
     binding.plan.scenarios.some(
@@ -4609,7 +5556,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    47,
+    57,
   );
   assert.deepEqual(
     [...executedScenarioIds, ...derivedScenarioIds].toSorted(),
@@ -4768,371 +5715,36 @@ interface ConstructibilityPartition {
   readonly results: readonly { readonly scenarioId: string }[];
 }
 
-async function assertAttributedSearchCapabilityScenarioDelta(
+function assertReceivingVerificationCoverage(
   compiledApplication: unknown,
-): Promise<void> {
-  const compiled = parseCompiledApplication(compiledApplication);
-  // PINNED BY IDENTITY, NOT BY POSITION -- corrected by `LANG-ADOPT-v5`.
-  //
-  // This read `previousSourceRelease(compiled)` against the lineage HEAD, which
-  // named the right pair only while the search-capability entry WAS the head.
-  // The delta it asserts is a historical fact about one recorded transition;
-  // "the head and the last entry before it that differs" is a description of
-  // where that transition happened to sit, and it silently re-points at a
-  // different pair the moment any authored change lands. `LANG-ADOPT-v5`
-  // appended one and this read 163 where it expected 168, while the transition
-  // it exists to guard had not moved at all.
-  //
-  // It is the second control in this repository found addressing lineage
-  // entries by position; the other is "consecutive lineage entries may share a
-  // normalized definition" in `compiler-semantic-profile.test.ts`.
-  const SEARCH_CAPABILITY_SOURCE_ROOT =
-    '4b254f50b2f558e96b98325467ae339a4bd6492d9691ccb464eb88d1b53f3bb1';
-  const SEARCH_CAPABILITY_TARGET_ROOT =
-    'd726ad313780bc595c97a0ecb30c9eaec84984e4a19fa28c2e8f5361e7edf12e';
-  // The ADR-0047 §4 entry minted by adopting compiler-semantic profile v1: its
-  // normalized definition is byte-identical to the target above and only its
-  // release root differs.
-  const PROFILE_ONLY_SUCCESSOR_ROOT =
-    'b0177bf482a73235eb1308eaf17bde3b0a3f4b23d2a9c9c59f7af23d1c9a2bbb';
-  // The source-changing language-v5 successor whose scenario identity delta is
-  // the historical fact this control measures. Later authored releases may add
-  // scenarios, so using the lineage head here would silently re-point the
-  // comparison exactly as the old position-addressed search-capability read did.
-  const LANGUAGE_ADOPTION_ROOT =
-    '3ef281274f753f3504a170b2308ef85c5099da7cd3a5f78c41310f9ad76215d1';
-  const releaseByRoot = (releaseRoot: string) => {
-    const release = compiled.applications.find(
-      (candidate) => candidate.compiled.releaseRoot === releaseRoot,
-    );
-    assert.ok(
-      release,
-      `the recorded lineage no longer contains ${releaseRoot}; history is append-only, so a missing root is a rewrite rather than a stale pin`,
-    );
-    return release;
-  };
-  const previous = releaseVerificationBinding(
-    releaseByRoot(SEARCH_CAPABILITY_SOURCE_ROOT).compiled,
+): void {
+  // ADR-0066 retires the historical 168 -> 163 scenario delta with its
+  // disposable lineage. Current verifier coverage remains a live assertion.
+  const { plan } = releaseVerificationBinding(
+    parseCompiledApplication(compiledApplication).application.compiled,
   );
-  const current = releaseVerificationBinding(
-    releaseByRoot(SEARCH_CAPABILITY_TARGET_ROOT).compiled,
-  );
-  assert.equal(previous.plan.scenarios.length, 168);
-  assert.equal(current.plan.scenarios.length, 163);
-
-  // The pinned pair must still be CONSECUTIVE, or "this transition removed five
-  // scenarios" is a claim about a span rather than an edge and some later entry
-  // could be doing the removing.
-  const rootOrder = compiled.applications.map(
-    (release) => release.compiled.releaseRoot,
-  );
-  assert.equal(
-    rootOrder.indexOf(SEARCH_CAPABILITY_TARGET_ROOT),
-    rootOrder.indexOf(SEARCH_CAPABILITY_SOURCE_ROOT) + 1,
-  );
-
-  // The language-adoption entry is checked separately by identity, which is
-  // what the position-addressed version was conflating with the lineage head.
-  //
-  // WRITTEN FROM THE MEASUREMENT, and the first attempt at this assertion was
-  // wrong. Asserting the adoption entry's scenario IDs equal the pinned
-  // target's failed:
-  // adoption holds the count at 163 and holds the verified content identical,
-  // while RE-IDENTIFYING a large fraction of the scenarios, because a scenario
-  // id is a fingerprint over version-stamped nodes. So the content is compared
-  // by what each scenario verifies, and the identity churn is asserted as the
-  // separate fact it is.
-  const languageAdoptionBinding = releaseVerificationBinding(
-    releaseByRoot(LANGUAGE_ADOPTION_ROOT).compiled,
-  );
-  const verifiedContent = (
-    scenarios: readonly { entityId: string; kind: string; subjectId: string }[],
-  ) =>
-    scenarios
-      .map(
-        (scenario) =>
-          `${scenario.kind}|${scenario.entityId}|${scenario.subjectId}`,
-      )
-      .toSorted();
-  assert.deepEqual(
-    verifiedContent(languageAdoptionBinding.plan.scenarios),
-    verifiedContent(current.plan.scenarios),
-    'the language adoption changes scenario identities without changing what the release verifies',
-  );
-
-  // A language adoption changes recorded scenario IDENTITIES; a
-  // compiler-semantic profile adoption does not. ADR-0047 §8 publishes exact
-  // cardinalities, so they are asserted exactly -- review round 4 found this
-  // control proving neither, with `.some(...)` for "69" and a subset check for
-  // "0".
-  //
-  // MEASURED WHILE BUILDING THIS, and it corrected the ADR: there is NO key
-  // that distinguishes all 163 scenarios except the id itself. Every
-  // combination of the recorded non-id fields -- kind, entityId, subjectId,
-  // probePolarity, targetEntityId, provider -- collapses to 105 unique values.
-  // So "69 scenarios were re-identified" is not expressible: under the best
-  // available key only 11 signatures map to a different id, while the raw
-  // id-set difference is 69. The well-defined fact is the id-set difference,
-  // and that is what 69 means.
-  const scenarioIds = (
-    scenarios: readonly { scenarioId: string }[],
-  ): string[] => scenarios.map((scenario) => scenario.scenarioId).toSorted();
-  const verifiedContentOf = (
-    scenarios: readonly { entityId: string; kind: string; subjectId: string }[],
-  ): string[] =>
-    scenarios
-      .map(
-        (scenario) =>
-          `${scenario.kind}|${scenario.entityId}|${scenario.subjectId}`,
-      )
-      .toSorted();
-
-  const languageAdoptionScenarios = languageAdoptionBinding.plan.scenarios;
-  const profileEdgeScenarios = releaseVerificationBinding(
-    releaseByRoot(PROFILE_ONLY_SUCCESSOR_ROOT).compiled,
-  ).plan.scenarios;
-
-  assert.equal(current.plan.scenarios.length, 163);
-  assert.equal(languageAdoptionScenarios.length, 163);
-  assert.equal(profileEdgeScenarios.length, 163);
-
-  // WHAT is verified does not move -- compared as a MULTISET, because the
-  // signature is not unique and a set comparison would silently tolerate a
-  // scenario being dropped while a duplicate signature covered for it.
-  assert.deepEqual(
-    verifiedContentOf(languageAdoptionScenarios),
-    verifiedContentOf(current.plan.scenarios),
-    'the language adoption preserves what the release verifies',
-  );
-
-  // THE SEMANTIC KEY, DERIVED FROM THE PRODUCTION SCENARIO OBJECT.
-  //
-  // Round 7 refuted the previous version of this control and the ADR ruling
-  // built on it. It used a hand-picked six-field tuple -- kind, entityId,
-  // subjectId, probePolarity, targetEntityId, provider -- and called that
-  // "every recorded non-id field". It is not. The recorded scenarios carry
-  // fifteen distinct fields across seven kinds, and `declaredEvidence` alone
-  // adds `assertionId`, `evidenceKind`, `expectedOutcome`,
-  // `expectedDiagnosticCode` and a full `invocation`; `uniquenessFold` adds
-  // `nfkcPolicy`.
-  //
-  // The old tuple therefore COLLAPSED exactly the 69 `declaredEvidence`
-  // scenarios into 11 groups, and the packet read that collapse as evidence
-  // that scenarios are indistinguishable by meaning. They are not: it was the
-  // projection that lost the distinction, not the data.
-  //
-  // Derived from the object rather than a field list, so a scenario kind added
-  // later is included automatically instead of silently dropped. Only the two
-  // GENERATED identity fields are excluded, and `schemaVersion` is normalized
-  // wherever it appears -- recursively, because `invocation` nests canonical
-  // references that carry their own stamps, and those stamps are exactly what
-  // moves.
-  const semanticKey = (scenario: unknown): string => {
-    const normalize = (value: unknown): unknown => {
-      if (Array.isArray(value)) return value.map(normalize);
-      if (typeof value === 'object' && value !== null) {
-        return Object.fromEntries(
-          Object.entries(value)
-            .filter(
-              ([key]) => key !== 'scenarioId' && key !== 'scenarioFingerprint',
-            )
-            .map(([key, entry]) => [
-              key,
-              key === 'schemaVersion' ? '<version>' : normalize(entry),
-            ]),
-        );
-      }
-      return value;
-    };
-    return JSON.stringify(normalize(scenario));
-  };
-
-  // A key that distinguishes every scenario in BOTH plans. The previous claim
-  // -- that none exists but the id itself -- was an artifact of the lossy tuple.
-  const targetBySemantic = new Map(
-    current.plan.scenarios.map((scenario) => [
-      semanticKey(scenario),
-      scenario.scenarioId,
-    ]),
-  );
-  const adoptionBySemantic = new Map(
-    languageAdoptionScenarios.map((scenario) => [
-      semanticKey(scenario),
-      scenario.scenarioId,
-    ]),
-  );
-  assert.equal(targetBySemantic.size, 163);
-  assert.equal(adoptionBySemantic.size, 163);
-
-  // A TOTAL BIJECTION across the language adoption: every scenario in one plan
-  // has exactly one counterpart in the other under a version-normalized reading
-  // of its whole payload. Evidence CAN be re-keyed by meaning.
-  assert.deepEqual(
-    [...adoptionBySemantic.keys()].toSorted(),
-    [...targetBySemantic.keys()].toSorted(),
-    'the language adoption preserves every scenario semantically; only identities move',
-  );
-
-  // Of those 163 pairs, exactly 69 are issued under a new id, and every one is
-  // a `declaredEvidence` scenario -- the only kind carrying an `invocation`,
-  // whose nested canonical references carry the version stamps the fingerprint
-  // covers. That is the mechanism, measured rather than inferred.
-  const reidentified = [...targetBySemantic].filter(
-    ([key, scenarioId]) => adoptionBySemantic.get(key) !== scenarioId,
-  );
-  assert.equal(reidentified.length, 69);
-  assert.deepEqual(
-    [
-      ...new Set(
-        reidentified.map(([key]) => (JSON.parse(key) as { kind: string }).kind),
-      ),
-    ],
-    ['declaredEvidence'],
-    'only scenarios carrying a version-stamped invocation are re-identified',
-  );
-
-  // ONE-PROPERTY NEGATIVE CONTROL on the comparison itself. Changing a field
-  // the OLD tuple omitted must change the semantic key; otherwise this control
-  // repeats the defect it was written to fix.
-  const [sampleDeclared] = current.plan.scenarios.filter(
-    (scenario) => scenario.kind === 'declaredEvidence',
-  );
-  assert.ok(sampleDeclared);
-  for (const omitted of [
-    'assertionId',
-    'evidenceKind',
-    'expectedOutcome',
-  ] as const) {
-    const mutated = { ...sampleDeclared, [omitted]: 'MUTATED' };
-    assert.notEqual(
-      semanticKey(mutated),
-      semanticKey(sampleDeclared),
-      `the semantic key must observe ${omitted}; the six-field tuple did not`,
+  for (const [local, count] of Object.entries({
+    goods_receipt: 19,
+    goods_receipt_line: 17,
+    purchase_order_amendment: 13,
+    purchase_order_received: 10,
+  })) {
+    assert.equal(
+      plan.scenarios.filter(
+        (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
+      ).length,
+      count,
+      `the receiving entity ${local} contributes its measured verifier scenarios`,
     );
   }
-  // ...while a change to a GENERATED identity field must not, or the key would
-  // report every re-identification as a semantic difference and the bijection
-  // above would be unobservable.
   assert.equal(
-    semanticKey({ ...sampleDeclared, scenarioId: 'MUTATED' }),
-    semanticKey(sampleDeclared),
-  );
-
-  // EXACTLY 69 recorded ids do not appear in the other plan, which is the
-  // number ADR-0047 §8 publishes.
-  const targetIdSet = new Set(scenarioIds(current.plan.scenarios));
-  const adoptionIdSet = new Set(scenarioIds(languageAdoptionScenarios));
-  assert.equal(
-    [...targetIdSet].filter((scenarioId) => !adoptionIdSet.has(scenarioId))
-      .length,
-    69,
-    'a language adoption changes exactly the ids whose fingerprint covers a version-stamped node',
-  );
-
-  // EXACTLY 0 across the ADR-0047 §4 profile-only edge, asserted as identity of
-  // the whole sorted id list rather than as a subset, so an added or replaced
-  // scenario cannot pass.
-  assert.deepEqual(
-    scenarioIds(profileEdgeScenarios),
-    scenarioIds(current.plan.scenarios),
-    'a compiler-semantic profile adoption changes no scenario identity; only the source axis does',
-  );
-
-  const changes = [
-    {
-      entityId: 'northstar.app:entity.inventory_movement',
-      partition: 'derived',
-      subjectId: 'northstar.app:field.inventory_movement_source_id',
-    },
-    {
-      entityId: 'northstar.app:entity.stock_count_line',
-      partition: 'executed',
-      subjectId: 'northstar.app:field.stock_count_line_unit_id',
-    },
-    {
-      entityId: 'northstar.app:entity.party_role',
-      partition: 'executed',
-      subjectId: 'northstar.app:field.party_role_kind',
-    },
-    {
-      entityId: 'northstar.app:entity.inventory_transaction_line',
-      partition: 'executed',
-      subjectId: 'northstar.app:field.inventory_transaction_line_unit_id',
-    },
-    {
-      entityId: 'northstar.app:entity.inventory_period_lock',
-      partition: 'derived',
-      subjectId: 'northstar.app:field.inventory_period_lock_closed_through',
-    },
-  ] as const;
-  assert.deepEqual(
-    changes.reduce(
-      (counts, change) => ({
-        derived: counts.derived + Number(change.partition === 'derived'),
-        executed: counts.executed + Number(change.partition === 'executed'),
-      }),
-      { derived: 0, executed: 0 },
+    plan.scenarios.some(
+      (scenario) =>
+        scenario.subjectId ===
+        'northstar.app:derived_state_field.machine.purchase_order_lifecycle',
     ),
-    { derived: 2, executed: 3 },
-    'the attributed delta is exactly three executed and two derived scenarios',
-  );
-
-  const derivePrevious = verificationScenarioDeriver(
-    releaseByRoot(SEARCH_CAPABILITY_SOURCE_ROOT).compiled,
-    previous,
-  );
-  assert.ok(derivePrevious);
-  const currentIds = new Set(
-    current.plan.scenarios.map((scenario) => scenario.scenarioId),
-  );
-  const removedScenarioIds = await Promise.all(
-    changes.map(async (change) => {
-      const candidates = previous.plan.scenarios.filter(
-        (scenario) =>
-          scenario.kind === 'searchableExclusion' &&
-          scenario.entityId === change.entityId &&
-          scenario.subjectId === change.subjectId,
-      );
-      assert.equal(candidates.length, 1);
-      const scenario = candidates[0]!;
-      assert.equal(
-        current.plan.scenarios.some(
-          (candidate) =>
-            candidate.kind === scenario.kind &&
-            candidate.entityId === scenario.entityId &&
-            candidate.subjectId === scenario.subjectId,
-        ),
-        false,
-        `${scenario.subjectId} exclusion is absent from the new plan rather than reclassified`,
-      );
-      assert.equal(currentIds.has(scenario.scenarioId), false);
-      assert.equal(
-        (await derivePrevious(scenario))?.code ?? null,
-        change.partition === 'derived'
-          ? 'VERIFICATION_NO_GENERIC_CREATE_OPERATION'
-          : null,
-        `${scenario.subjectId} is attributed to the ${change.partition} side of the prior partition`,
-      );
-      return scenario.scenarioId;
-    }),
-  );
-  assert.deepEqual(
-    previous.plan.scenarios
-      .filter((scenario) => !currentIds.has(scenario.scenarioId))
-      .map((scenario) => scenario.scenarioId)
-      .toSorted(),
-    removedScenarioIds.toSorted(),
-    'the five named exclusions are every scenario removed from the 168-scenario plan',
-  );
-  const previousIds = new Set(
-    previous.plan.scenarios.map((scenario) => scenario.scenarioId),
-  );
-  assert.deepEqual(
-    current.plan.scenarios
-      .filter((scenario) => !previousIds.has(scenario.scenarioId))
-      .map((scenario) => scenario.scenarioId),
-    [],
-    'the ruled change only removes the five named exclusions; it does not replace them with reclassified scenarios',
+    false,
+    'the server-owned lifecycle field is not probed through generic writes',
   );
 }
 
@@ -5346,9 +5958,11 @@ function createRuntime(
     compiledApplication,
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
     ],
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+    localDemoIdentity: true,
     migrationsDirectory,
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
     ...(releaseSelection ? { releaseSelection } : {}),

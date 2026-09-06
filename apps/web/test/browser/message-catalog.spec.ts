@@ -598,6 +598,12 @@ const REAL_PATH_DRIVERS: Readonly<
 const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
   Partial<Record<SurfaceMessageCode, string>>
 > = {
+  OPERATION_COMMITTED_READBACK_WITHHELD:
+    'Driven through the real receiving gateway and evaluator in ' +
+    'receiving.composed-application.spec.ts: a commit-time read-grant revocation ' +
+    'shows committed success, trust IDs and no retry form. That spec owns the ' +
+    'governed release and PostgreSQL revocation fixture; this census also ' +
+    'observes the registered message text.',
   INVALID_SURFACE_BINDING:
     'Reachable, and driven by a real request in surface-data-binding.spec.ts ' +
     'beside unsupported-query and unavailable-runtime-view controls. That ' +

@@ -17,6 +17,7 @@ carries the detail. No packet is chartered from this table without a user ruling
 
 | packet | date | finding (one sentence) | record |
 |---|---|---|---|
+| `RECEIPT` | 2026-09-05 | Changing receipt-line currency from non-searchable to searchable appended a release whose query referenced a missing derived search column (SQLSTATE 42703); ADR-0066 re-baselining resolves this disposable lane, while the transition defect remains deferred before retained tenants. | [record](packets/RECEIPT.md) |
 | `policy-unbound-refusal` | 2026-09-04 | **ROUTED CLASS after three BLOCKs on one defect:** production must not be able to obtain a servable current `CompileSuccess` through any package-exported compiler operation without presenting non-self-certifying governance, and fixture compilation must be unavailable through production imports — a symbol-aware scanner may verify that boundary but must not BE it. | [packets/policy-unbound-refusal.md](packets/policy-unbound-refusal.md) |
 | `5g3-prog` arm 1 | 2026-09-01 | R4 — platform-plane writes (trust documents, semantic receipt, outbox, generation state) still get no column-by-column read-back; already row `posting-platform-plane-writes-not-row-complete`, stays dormant | [record](program-reviews/2026-09-01-inventory-ledger.md) §2 |
 | `5g3-prog` arm 1 | 2026-09-01 | R5 — ADR-0018's horizon clause versus ADR-0057's snapshot projection: record fixed by the ADR-0057 amendment, no code change | [record](program-reviews/2026-09-01-inventory-ledger.md) §2 |
@@ -1243,4 +1244,3 @@ The inventory chains are `4c → Q1-P3b → G3-P5` and
 `1d → G3-P1b → G3-P2b → G3-P3`. When every downstream link is gated on a packet
 in flight, the highest-value orchestrator action is **landing that packet and
 pre-scoping its successor**, not opening a fourth lane.
-

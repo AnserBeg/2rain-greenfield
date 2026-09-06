@@ -43,6 +43,7 @@ import {
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   MalformedPinnedQueryCatalogError,
+  MalformedQueryPolicyNarrowingError,
   MalformedSemanticQueryRequestError,
   NoSuchRegisteredQueryError,
   SEMANTIC_AGGREGATE_RESULT_VERSION,
@@ -75,6 +76,50 @@ const queryId = 'northstar.bootstrap:query.missing';
 const operationId = 'northstar.bootstrap:operation.missing';
 const authenticationInput = Object.freeze({
   headers: Object.freeze({ authorization: 'Bearer semantic-gateway-fixture' }),
+});
+
+test('policy narrowing may reference only a parameter and type declared by the selected query', async () => {
+  const declaredParameterId =
+    'northstar.bootstrap:parameter.item_list_policy_scope';
+  const fixture = createFixture({
+    queryPayload: queryCatalogWithParameter(
+      answeringQueryId,
+      declaredParameterId,
+    ),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  let executed = false;
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    {
+      execute: (request) => {
+        executed = true;
+        return Promise.resolve(recordEnvelope(request.definition.queryId));
+      },
+    },
+    undefined,
+    {
+      narrow: () =>
+        Promise.resolve(
+          parameterizedPolicyNarrowing(
+            'northstar.bootstrap:parameter.caller_invented_scope',
+          ),
+        ),
+    },
+  );
+  const request = Object.freeze({
+    ...ladderRequest(answeringQueryId),
+    arguments: Object.freeze({ [declaredParameterId]: 'allowed-scope' }),
+  });
+  await assert.rejects(
+    gateway.invoke(view, request),
+    (error: unknown) =>
+      error instanceof MalformedQueryPolicyNarrowingError &&
+      /undeclared parameter or changes its declared type/u.test(error.message),
+  );
+  assert.equal(executed, false);
 });
 const identity: AuthenticatedIdentity = Object.freeze({
   environmentId,
@@ -229,6 +274,13 @@ test('O1 capability operations require confirmation and dispatch by one exact ID
     [
       {
         capabilityId,
+        prepareAuthorization(execution) {
+          return Promise.resolve({
+            decisionInput: execution.input,
+            legalEntityReadScopeIds: [],
+            readBackArguments: execution.input,
+          });
+        },
         async execute(execution) {
           executions += 1;
           assert.equal(
@@ -306,6 +358,9 @@ test('O1 capability operations require confirmation and dispatch by one exact ID
     [
       {
         capabilityId: 'northstar.inventory:capability.not_posting',
+        prepareAuthorization() {
+          return Promise.reject(new Error('wrong executor reached'));
+        },
         execute() {
           wrongExecutions += 1;
           return Promise.reject(new Error('wrong executor reached'));
@@ -1709,6 +1764,70 @@ function queryCatalogWith(registeredQueryId: string): ImmutableJsonValue {
       },
     ],
     schemaVersion: 'northstar.query-catalog-payload/v0-provisional',
+  };
+}
+
+function queryCatalogWithParameter(
+  registeredQueryId: string,
+  parameterId: string,
+): ImmutableJsonValue {
+  const catalog = queryCatalogWith(registeredQueryId) as {
+    queries: Array<Record<string, unknown>>;
+  };
+  catalog.queries[0]!.parameters = [
+    {
+      orderKey: 10,
+      parameterId,
+      parameterType: {
+        kind: 'textFieldType',
+        maximumLength: 40,
+        schemaVersion: 'v5',
+      },
+    },
+  ];
+  return catalog as ImmutableJsonValue;
+}
+
+function parameterizedPolicyNarrowing(parameterId: string): unknown {
+  const filter = {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v5',
+      targetId: 'northstar.bootstrap:field.id',
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'equals',
+    schemaVersion: 'v5',
+    value: {
+      kind: 'queryParameterReference',
+      parameterId,
+      schemaVersion: 'v5',
+    },
+  };
+  return {
+    filter,
+    filterPlan: {
+      costClass: 'tenantBoundedScan',
+      kind: 'predicateLoweringPlan',
+      positionProfileVersion: PREDICATE_POSITION_PROFILE_VERSION,
+      predicateDigest: canonicalizeAndHash(filter).contentHash,
+      root: {
+        comparisonMode: 'binary',
+        costClass: 'tenantBoundedScan',
+        fieldId: 'northstar.bootstrap:field.id',
+        kind: 'fieldComparisonPredicate',
+        loweringRowId:
+          'northstar.predicate-lowering/parameterized-comparison-v1',
+        operator: 'equals',
+        sourceFieldType: {
+          kind: 'textFieldType',
+          maximumLength: 40,
+          schemaVersion: 'v5',
+        },
+        value: filter.value,
+      },
+      schemaVersion: PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
+    },
   };
 }
 

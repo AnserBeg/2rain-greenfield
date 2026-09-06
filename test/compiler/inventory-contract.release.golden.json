@@ -157,6 +157,22 @@
       },
       {
         "classification": "entityOwned",
+        "familyId": "goods_receipt"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "goods_receipt_line"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "purchase_order_received"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "purchase_order_amendment"
+      },
+      {
+        "classification": "entityOwned",
         "familyId": "reservation"
       },
       {
@@ -201,6 +217,36 @@
       },
       {
         "semantics": "sameEntity",
+        "sourceFamilyId": "goods_receipt",
+        "targetFamilyId": "purchase_order"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "goods_receipt",
+        "targetFamilyId": "goods_receipt"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "goods_receipt_line",
+        "targetFamilyId": "goods_receipt"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "goods_receipt_line",
+        "targetFamilyId": "purchase_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "purchase_order_received",
+        "targetFamilyId": "purchase_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "purchase_order_amendment",
+        "targetFamilyId": "purchase_order_line"
+      },
+      {
+        "semantics": "sameEntity",
         "sourceFamilyId": "inventory_transaction_line",
         "targetFamilyId": "inventory_transaction"
       },
@@ -242,6 +288,11 @@
         "classification": "providerWritten",
         "familyId": "posted_stock_balance",
         "maintainerId": "northstar.postgresql-module-provider:posted-stock-balance/v1"
+      },
+      {
+        "classification": "providerWritten",
+        "familyId": "purchase_order_received",
+        "maintainerId": "northstar.postgresql-module-provider:received-quantity/v1"
       }
     ]
   },
@@ -290,7 +341,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "920858077ea568b4b93ec11d7e11d82643915692650f062c60f4fe208789a117",
+  "releaseRoot": "b7ac244c2025fd5d2083d447debe5b9639907ee87c7d4c47b6e9b4db37c10bb5",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

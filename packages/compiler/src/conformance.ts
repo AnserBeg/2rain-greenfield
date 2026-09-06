@@ -45,6 +45,10 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'posted_stock_balance' },
   { classification: 'entityOwned', familyId: 'purchase_order' },
   { classification: 'entityOwned', familyId: 'purchase_order_line' },
+  { classification: 'entityOwned', familyId: 'goods_receipt' },
+  { classification: 'entityOwned', familyId: 'goods_receipt_line' },
+  { classification: 'entityOwned', familyId: 'purchase_order_received' },
+  { classification: 'entityOwned', familyId: 'purchase_order_amendment' },
   { classification: 'entityOwned', familyId: 'reservation' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
@@ -62,6 +66,11 @@ const INVENTORY_PROVIDER_WRITTEN_READ_MODEL_RULES = Object.freeze([
     familyId: 'posted_stock_balance',
     maintainerId:
       'northstar.postgresql-module-provider:posted-stock-balance/v1',
+  },
+  {
+    classification: 'providerWritten',
+    familyId: 'purchase_order_received',
+    maintainerId: 'northstar.postgresql-module-provider:received-quantity/v1',
   },
 ] as const);
 const INVENTORY_STORAGE_REFERENCE_RULES = Object.freeze([
@@ -181,6 +190,36 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
   },
   {
     semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt',
+    targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt',
+    targetFamilyId: 'goods_receipt',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt_line',
+    targetFamilyId: 'goods_receipt',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'goods_receipt_line',
+    targetFamilyId: 'purchase_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'purchase_order_received',
+    targetFamilyId: 'purchase_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'purchase_order_amendment',
+    targetFamilyId: 'purchase_order_line',
+  },
+  {
+    semantics: 'sameEntity',
     sourceFamilyId: 'inventory_transaction_line',
     targetFamilyId: 'inventory_transaction',
   },
@@ -211,14 +250,7 @@ const LEGAL_ENTITY_GOVERNED_PACKAGES = Object.freeze([
   'location',
   'party',
 ] as const);
-/**
- * The permissions some evaluator binds. EMPTY BY CONSTRUCTION today: every
- * production `CurrentPolicyGateway` returns ALLOW and nothing in the tree
- * evaluates a permission ID (program review 2026-08-20, R7). Queue row 7 --
- * the policy/identity kernel -- is what populates this from a real evaluator
- * registry. Until then the census of unbound permissions is the census of
- * declared permissions, and the acknowledgement list below carries all of it.
- */
+/** Fixture callers may still supply an explicit bound set to this validator. */
 const EVALUATOR_BOUND_PERMISSION_IDS: ReadonlySet<string> = new Set<string>();
 const INVENTORY_POSTING_ROLES = Object.freeze([
   'adjustment',
@@ -379,6 +411,10 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
     shape: {
       kind: 'enum',
       options: [
+        {
+          optionLocalId: 'inventory_posting_role_receipt',
+          label: 'receipt',
+        },
         {
           label: 'adjustment',
           optionLocalId: 'inventory_posting_role_adjustment',
@@ -1191,13 +1227,11 @@ function validatePinnedPostedStockBalanceEntity(
   entityId: string,
   movementEntityValidity: ReadonlyMap<string, boolean>,
   diagnostics: CompilerDiagnostic[],
+  rules: readonly PostedStockBalanceModuleFieldRule[] = POSTED_STOCK_BALANCE_MODULE_FIELD_RULES,
 ): boolean {
   let valid = true;
   const expected = new Map<string, PostedStockBalanceModuleFieldRule>(
-    POSTED_STOCK_BALANCE_MODULE_FIELD_RULES.map((rule) => [
-      rule.fieldLocalId,
-      rule,
-    ]),
+    rules.map((rule) => [rule.fieldLocalId, rule]),
   );
   const observed = new Set<string>();
   for (const field of packageRevision.fields.filter(
@@ -1247,7 +1281,7 @@ function validatePinnedPostedStockBalanceEntity(
       );
     }
   }
-  for (const rule of POSTED_STOCK_BALANCE_MODULE_FIELD_RULES) {
+  for (const rule of rules) {
     if (observed.has(rule.fieldLocalId)) continue;
     valid = false;
     diagnostics.push(
@@ -1287,6 +1321,13 @@ function operationTargetsEntity(
 ): boolean {
   if ('entity' in operation.effect) {
     return operation.effect.entity.targetId === entityId;
+  }
+  if (operation.effect.kind === 'registeredCapabilityEffect') {
+    return packageRevision.queries.some(
+      (query) =>
+        query.queryId === operation.readBack.targetId &&
+        query.sourceEntity.targetId === entityId,
+    );
   }
   if (operation.effect.kind !== 'transitionStateEffect') return false;
   const transitionId = operation.effect.transition.targetId;
@@ -1543,6 +1584,7 @@ export function resolvePinnedLegalEntityRelationSemantics(
 export interface UnboundPermissionAcknowledgementSubject {
   readonly package: { readonly packageId: string };
   readonly permissions: ReadonlyArray<{
+    readonly action: string;
     readonly permissionId: string;
     readonly resource: { readonly targetId: string };
   }>;
@@ -1609,9 +1651,22 @@ export function validateUnboundPermissionAcknowledgement(
     !isRecord(acknowledgement) ||
     typeof acknowledgement.packageId !== 'string' ||
     !Array.isArray(acknowledgement.entries) ||
-    Object.keys(acknowledgement).length !== 2
+    (Object.keys(acknowledgement).length !== 2 &&
+      Object.keys(acknowledgement).sort().join(',') !==
+        'entries,evaluatorBindings,packageId') ||
+    ('evaluatorBindings' in acknowledgement &&
+      !Array.isArray(acknowledgement.evaluatorBindings))
   ) {
     return invalid('$.options.unboundPermissionAcknowledgement');
+  }
+  const rawEvaluatorBindings = acknowledgement.evaluatorBindings;
+  if (
+    rawEvaluatorBindings !== undefined &&
+    !Array.isArray(rawEvaluatorBindings)
+  ) {
+    return invalid(
+      '$.options.unboundPermissionAcknowledgement.evaluatorBindings',
+    );
   }
   if (acknowledgement.packageId !== packageId) {
     return invalid('$.options.unboundPermissionAcknowledgement.packageId');
@@ -1630,6 +1685,64 @@ export function validateUnboundPermissionAcknowledgement(
       permissionId: entry.permissionId,
       resource: entry.resource,
     });
+  }
+
+  const evaluatorBindings: {
+    action: string;
+    availability: 'active' | 'compatibleExtension';
+    permissionId: string;
+    resource: string;
+  }[] = [];
+  for (const binding of rawEvaluatorBindings ?? []) {
+    const keys = isRecord(binding) ? Object.keys(binding).sort().join(',') : '';
+    if (
+      !isRecord(binding) ||
+      typeof binding.action !== 'string' ||
+      typeof binding.permissionId !== 'string' ||
+      typeof binding.resource !== 'string' ||
+      (binding.availability !== undefined &&
+        binding.availability !== 'active' &&
+        binding.availability !== 'compatibleExtension') ||
+      (keys !== 'action,permissionId,resource' &&
+        keys !== 'action,availability,permissionId,resource')
+    ) {
+      return invalid(
+        '$.options.unboundPermissionAcknowledgement.evaluatorBindings',
+      );
+    }
+    evaluatorBindings.push({
+      action: binding.action,
+      availability: binding.availability ?? 'active',
+      permissionId: binding.permissionId,
+      resource: binding.resource,
+    });
+  }
+
+  const evaluatorBindingById = new Map<
+    string,
+    {
+      action: string;
+      availability: 'active' | 'compatibleExtension';
+      permissionId: string;
+      resource: string;
+    }
+  >();
+  for (const binding of evaluatorBindings) {
+    if (
+      evaluatorBindingById.has(binding.permissionId) ||
+      boundPermissionIds.has(binding.permissionId)
+    ) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+          'wholeModelValidation',
+          '$.permissions.permissionId',
+          binding.permissionId,
+        ),
+      );
+      continue;
+    }
+    evaluatorBindingById.set(binding.permissionId, binding);
   }
 
   const acknowledgedById = new Map<string, { resource: string }>();
@@ -1654,7 +1767,24 @@ export function validateUnboundPermissionAcknowledgement(
   );
 
   for (const permission of packageRevision.permissions) {
+    const evaluatorBinding = evaluatorBindingById.get(permission.permissionId);
     if (boundPermissionIds.has(permission.permissionId)) continue;
+    if (evaluatorBinding !== undefined) {
+      if (
+        evaluatorBinding.action !== permission.action ||
+        evaluatorBinding.resource !== permission.resource.targetId
+      ) {
+        diagnostics.push(
+          compilerDiagnostic(
+            'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+            'wholeModelValidation',
+            '$.permissions.permissionId',
+            permission.permissionId,
+          ),
+        );
+      }
+      continue;
+    }
     const acknowledged = acknowledgedById.get(permission.permissionId);
     if (acknowledged === undefined) {
       diagnostics.push(
@@ -1682,6 +1812,7 @@ export function validateUnboundPermissionAcknowledgement(
   for (const [acknowledgedId] of acknowledgedById) {
     if (
       boundPermissionIds.has(acknowledgedId) ||
+      evaluatorBindingById.has(acknowledgedId) ||
       !declaredPermissionIds.has(acknowledgedId)
     ) {
       diagnostics.push(
@@ -1690,6 +1821,21 @@ export function validateUnboundPermissionAcknowledgement(
           'wholeModelValidation',
           '$.permissions.permissionId',
           acknowledgedId,
+        ),
+      );
+    }
+  }
+  for (const [boundId, binding] of evaluatorBindingById) {
+    if (
+      binding.availability === 'active' &&
+      !declaredPermissionIds.has(boundId)
+    ) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+          'wholeModelValidation',
+          '$.permissions.permissionId',
+          boundId,
         ),
       );
     }
@@ -1778,6 +1924,34 @@ export function validateModuleConformance(
           entity.entityId,
           movementEntityValidity,
           diagnostics,
+        )
+      ) {
+        qualifiedProviderWrittenReadModels.add(entity.entityId);
+      }
+    } else if (family.familyId === 'purchase_order_received') {
+      const rules = POSTED_STOCK_BALANCE_MODULE_FIELD_RULES.filter(
+        (rule) =>
+          rule.fieldLocalId === 'posted_stock_balance_posted_quantity' ||
+          rule.fieldLocalId === 'posted_stock_balance_unit_id',
+      ).map((rule) => ({
+        ...rule,
+        fieldLocalId:
+          rule.fieldLocalId === 'posted_stock_balance_posted_quantity'
+            ? 'purchase_order_received_received_quantity'
+            : 'purchase_order_received_unit_id',
+        storage: {
+          ...rule.storage,
+          searchable: rule.fieldLocalId === 'posted_stock_balance_unit_id',
+        },
+      }));
+      if (
+        entity.lifecycle === 'active' &&
+        validatePinnedPostedStockBalanceEntity(
+          packageRevision,
+          entity.entityId,
+          movementEntityValidity,
+          diagnostics,
+          rules,
         )
       ) {
         qualifiedProviderWrittenReadModels.add(entity.entityId);

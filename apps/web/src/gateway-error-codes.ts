@@ -152,7 +152,8 @@ export function operationMessageRef(error: unknown): OperationMessageRef {
     typeof error === 'object' &&
     error !== null &&
     'name' in error &&
-    error.name === 'ModuleRuntimeInterpreterError' &&
+    (error.name === 'ModuleRuntimeInterpreterError' ||
+      error.name === 'InventoryPostingError') &&
     'code' in error &&
     typeof error.code === 'string' &&
     error.code.length > 0

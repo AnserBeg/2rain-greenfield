@@ -69,6 +69,7 @@ import {
   readRetainableAcknowledgementFor,
   readUnboundPermissionAcknowledgementFor,
 } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import { RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS } from '../../packages/postgres-provider/src/current-policy.js';
 
 registerInventoryContractCases((name, run) => test(name, run));
 
@@ -1619,7 +1620,7 @@ const RELEASE_SCRIPT = 'apps/web/scripts/compile-app-release.ts';
 
 type AcknowledgementEntry = { permissionId: string; resource: string };
 
-test('unbound-permission acknowledgement: the unchanged composed application builds under its acknowledgement, which is exactly its declared census', () => {
+test('unbound-permission acknowledgement: the unchanged composed application builds only with its exact evaluator-binding census', () => {
   const normalized = normalizeApplicationPackage(
     composedApplicationDefinition(),
   );
@@ -1640,18 +1641,69 @@ test('unbound-permission acknowledgement: the unchanged composed application bui
       result.status === 'failed' ? result.diagnostics : [],
     )}`,
   );
-  // One entry per declared permission, no more, no less, none twice.
+  // The unbound list is empty and every normalized declaration is instead
+  // bound by exact action, id and resource.
   const declared = composedPermissionCensus(normalized);
+  assert.deepEqual(acknowledgement.entries, []);
+  const activeBindings = (acknowledgement.evaluatorBindings ?? []).filter(
+    (binding) => binding.availability !== 'compatibleExtension',
+  );
+  const receiptPermissionIds = new Set(
+    RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS.map(
+      (binding) => binding.permissionId,
+    ),
+  );
+  const receiptBindings = activeBindings.filter((binding) =>
+    receiptPermissionIds.has(binding.permissionId),
+  );
   assert.deepEqual(
-    [...acknowledgement.entries].sort(byPermissionId),
-    declared,
-    'the acknowledgement must name exactly the permissions the composed application declares, each on its declared resource',
+    [...activeBindings].sort(byPermissionId),
+    normalized.permissions
+      .map((permission) => ({
+        action: permission.action,
+        permissionId: permission.permissionId,
+        resource: permission.resource.targetId,
+      }))
+      .sort(byPermissionId),
+    'the binding registry must name exactly the action, id and resource of every declared permission',
   );
   assert.equal(
-    new Set(acknowledgement.entries.map((entry) => entry.permissionId)).size,
-    acknowledgement.entries.length,
+    new Set(
+      (acknowledgement.evaluatorBindings ?? []).map(
+        (entry) => entry.permissionId,
+      ),
+    ).size,
+    acknowledgement.evaluatorBindings?.length,
   );
   assert.ok(declared.length > 0);
+  assert.deepEqual(
+    receiptBindings
+      .map(({ action, permissionId, resource }) => ({
+        action,
+        permissionId,
+        resource,
+      }))
+      .sort(byPermissionId),
+    RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS.map((binding) => ({
+      action: binding.action,
+      permissionId: binding.permissionId,
+      resource: binding.resourceId,
+    })).sort(byPermissionId),
+    'the 13 receiving contracts must be compiler-visible and backed by the real evaluator registry',
+  );
+  assert.equal(receiptBindings.length, 13);
+  const withReceivingDeclarations: UnboundPermissionAcknowledgementSubject = {
+    package: normalized.package,
+    permissions: normalized.permissions,
+  };
+  assert.deepEqual(
+    validateUnboundPermissionAcknowledgement(
+      withReceivingDeclarations,
+      acknowledgement,
+    ),
+    [],
+    'the integrated receiving declarations must use active bindings without growing the unbound list',
+  );
   // `compileApplication` is the FIXTURE entry point and is ungoverned unless a
   // caller supplies an acknowledgement; that is what keeps synthetic packages
   // compiling. It is not reachable from a release path -- see the two controls
@@ -1720,6 +1772,7 @@ test('unbound-permission acknowledgement: a recorded revision from an unlisted p
   );
   assert.deepEqual(retainable, {
     entries: [],
+    evaluatorBindings: [],
     packageId: 'northstar.unlisted:package.fixture',
   });
   // Empty is not permissive: a package declaring a permission under it is
@@ -1752,9 +1805,9 @@ test('unbound-permission acknowledgement: a recorded revision is governed by the
   const narrowed = narrowAcknowledgementToDeclared(acknowledgement, declared);
   assert.equal(narrowed.packageId, COMPOSED_PACKAGE_ID);
   assert.deepEqual(
-    narrowed.entries.map((entry) => entry.permissionId),
+    narrowed.evaluatorBindings?.map((entry) => entry.permissionId),
     [PARTY_CREATE_PERMISSION_ID],
-    'narrowing keeps exactly the permissions the revision declares',
+    'narrowing keeps exactly the evaluator bindings the revision declares',
   );
   // It can only remove. A permission the revision declares that the checked-in
   // list does not name stays ABSENT, so the compiler refuses it as unbound --
@@ -1763,7 +1816,10 @@ test('unbound-permission acknowledgement: a recorded revision is governed by the
   const invented = narrowAcknowledgementToDeclared(acknowledgement, {
     has: () => true,
   } as unknown as ReadonlySet<string>);
-  assert.equal(invented.entries.length, acknowledgement.entries.length);
+  assert.equal(
+    invented.evaluatorBindings?.length,
+    acknowledgement.evaluatorBindings?.length,
+  );
   assert.ok(
     !invented.entries.some(
       (entry) =>
@@ -1963,6 +2019,35 @@ test('unbound-permission acknowledgement: a permission an evaluator binds leaves
       bound,
     ),
     [],
+  );
+});
+
+test('unbound-permission acknowledgement: evaluator bindings match the declared action and resource exactly', () => {
+  const normalized = composedNormalized();
+  const census = composedPermissionCensus(normalized);
+  assert.deepEqual(
+    structuralOf(
+      validateUnboundPermissionAcknowledgement(normalized, {
+        entries: census.filter(
+          (entry) => entry.permissionId !== PARTY_CREATE_PERMISSION_ID,
+        ),
+        evaluatorBindings: [
+          {
+            action: 'read',
+            permissionId: PARTY_CREATE_PERMISSION_ID,
+            resource: PARTY_ENTITY_ID,
+          },
+        ],
+        packageId: COMPOSED_PACKAGE_ID,
+      }),
+    ),
+    [
+      {
+        code: 'COMPILER_PERMISSION_ACKNOWLEDGEMENT_STALE',
+        path: '$.permissions.permissionId',
+        subjectId: PARTY_CREATE_PERMISSION_ID,
+      },
+    ],
   );
 });
 
@@ -2180,6 +2265,7 @@ function releaseInputsCopy(): string {
   for (const file of [
     'app.authored.json',
     'app.compiled.json',
+    'current-policy-bindings.json',
     'unbound-permission-acknowledgement.json',
   ]) {
     cpSync(resolve('apps/web/release', file), join(directory, file));

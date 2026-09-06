@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -361,7 +363,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
       );
 
       await t.test(
-        'a genuinely consistent scope is reported consistent, naming every witness',
+        'populated stock witnesses remain consistent while an empty receiving scope is explicitly indeterminate',
         async () => {
           observations.length = 0;
           const report = await reconciliation.reconcile(scopeA.context, {
@@ -372,8 +374,12 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             report.schemaVersion,
             INVENTORY_RECONCILIATION_REPORT_VERSION,
           );
-          assert.equal(report.outcome, 'consistent');
-          assert.deepEqual(report.findings, []);
+          assert.equal(report.outcome, 'indeterminate');
+          assert.deepEqual(
+            report.findings.map((row) => [row.armId, row.code]),
+            [['receivedQuantities', 'SCOPE_OBSERVED_NO_SUBJECTS']],
+          );
+          assert.equal(arm(report, 'receivedQuantities').subjectCount, 0);
           const sourceDocuments = arm(report, 'sourceDocuments');
           assert.deepEqual(
             sourceDocuments.consistentSubjectIds.toSorted(),
@@ -432,6 +438,41 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           );
           assert.equal(finding.declaredValue, '999');
           assert.equal(finding.observedValue, '6');
+          await assert.rejects(
+            () =>
+              promisify(execFile)(
+                process.execPath,
+                [
+                  '--import',
+                  'tsx',
+                  'scripts/reconcile-inventory.ts',
+                  tenantA,
+                  environmentA,
+                  principalA,
+                  legalEntityA,
+                ],
+                {
+                  env: {
+                    ...process.env,
+                    DATABASE_URL: `postgresql://north_star_runtime@${database.connection.host}:${database.connection.port}/${database.connection.database}`,
+                  },
+                },
+              ),
+            (error: unknown) => {
+              const result = error as { code?: number; stdout?: string };
+              assert.equal(
+                result.code,
+                2,
+                'operator command exits discrepant, not success',
+              );
+              assert.match(result.stdout ?? '', /DISCREPANT/u);
+              assert.match(
+                result.stdout ?? '',
+                /repaired=0 transactionReadOnly=on/u,
+              );
+              return true;
+            },
+          );
           assert.equal(
             await readPostedStockQuantity(
               database.pool,
@@ -442,12 +483,68 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             before,
             'the read-only reconciliation must preserve the corrupted projection for explicit repair',
           );
-          await setPostedStockQuantity(
-            database.pool,
-            scopeA,
-            binding,
-            locationPrimary,
-            '6',
+          assert.equal(report.transactionReadOnly, 'on');
+          assert.equal(report.repairedSubjectCount, 0);
+          const factsBefore = await database.pool.query(
+            `SELECT * FROM ${table(binding, binding.movement)} ORDER BY record_id`,
+          );
+          const evidenceBefore = await database.pool.query(
+            'SELECT count(*)::integer AS count FROM north_star_internal.inventory_projection_discrepancies',
+          );
+          await new PostgresModuleStorageMaterializer(
+            materializerPool,
+            modulePool,
+          ).rebuildPostedStockBalances(scopeA.context);
+          assert.equal(
+            await readPostedStockQuantity(
+              database.pool,
+              scopeA,
+              binding,
+              locationPrimary,
+            ),
+            '6.000000000000000000',
+          );
+          const evidence = await database.pool.query(
+            'SELECT stored_row, recomputed_row FROM north_star_internal.inventory_projection_discrepancies WHERE tenant_id=$1 AND environment_id=$2',
+            [tenantA, environmentA],
+          );
+          assert.equal(
+            evidence.rows.length,
+            Number(evidenceBefore.rows[0]!.count) + 1,
+            'rebuild must persist the observed discrepancy before replacing derived values',
+          );
+          assert.equal(
+            evidence.rows[0]!.stored_row[
+              field(
+                binding.postedStockBalance,
+                'posted_stock_balance_posted_quantity',
+              ).physicalName
+            ],
+            999,
+            'persist the discrepancy before repair overwrites it',
+          );
+          assert.equal(evidence.rows[0]!.recomputed_row.quantity, 6);
+          assert.deepEqual(
+            (
+              await database.pool.query(
+                `SELECT * FROM ${table(binding, binding.movement)} ORDER BY record_id`,
+              )
+            ).rows,
+            factsBefore.rows,
+            'rebuilding may not change movement facts',
+          );
+          await new PostgresModuleStorageMaterializer(
+            materializerPool,
+            modulePool,
+          ).rebuildPostedStockBalances(scopeA.context);
+          assert.equal(
+            (
+              await database.pool.query(
+                'SELECT count(*)::integer AS count FROM north_star_internal.inventory_projection_discrepancies',
+              )
+            ).rows[0]!.count,
+            evidence.rows.length,
+            'a clean repeat rebuild produces no invented discrepancy',
           );
         },
       );
@@ -845,6 +942,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           assert.deepEqual(
             report.findings.map((finding) => finding.code),
             [
+              'SCOPE_OBSERVED_NO_SUBJECTS',
               'SCOPE_OBSERVED_NO_SUBJECTS',
               'SCOPE_OBSERVED_NO_SUBJECTS',
               'SCOPE_OBSERVED_NO_SUBJECTS',

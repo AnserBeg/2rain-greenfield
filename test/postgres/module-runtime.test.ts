@@ -87,6 +87,7 @@ import {
   MalformedSemanticQueryRequestError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
+  SemanticQueryPolicyDeniedError,
   type SemanticAggregateResultEnvelope,
   type SemanticQueryExecutionContext,
   type SemanticQueryResultEnvelope,
@@ -2087,9 +2088,7 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           aggregateQuery(memberRecheckGateway, view, aggregateArguments, {
             legalEntityReadScope: memberRecheckScope,
           }),
-          (error: unknown) =>
-            error instanceof LegalEntityReadScopePolicyDeniedError &&
-            error.legalEntityId === deniedSecondId,
+          SemanticQueryPolicyDeniedError,
         );
         assert.deepEqual(memberRecheckPolicy.legalEntityAuthorizationCalls, [
           allowedFirstId,

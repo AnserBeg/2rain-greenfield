@@ -123,6 +123,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/composed-application.test.ts',
+      'test/postgres/current-policy.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',
       'test/postgres/inventory-dimension-set-replay.test.ts',
@@ -143,6 +144,7 @@ const suiteDefinitions = [
       'test/postgres/predicate-parity-corpus.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
       'test/postgres/query-filter-lowering.test.ts',
+      'test/postgres/receiving-authorization.test.ts',
       'test/postgres/release-activation.test.ts',
       'test/postgres/release-approval.test.ts',
       'test/postgres/releases.test.ts',
