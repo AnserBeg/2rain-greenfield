@@ -124,7 +124,7 @@
         {
           "file": "test/postgres/fulfillment.test.ts",
           "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
-          "expected": "a linked correction must not silently resurrect a released reservation"
+          "expected": "this posting wrote module relations no executed verifier observed"
         }
       ]
     },
