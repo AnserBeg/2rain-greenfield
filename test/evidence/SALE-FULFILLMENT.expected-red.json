@@ -106,7 +106,7 @@
         {
           "file": "test/postgres/fulfillment.test.ts",
           "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
-          "expected": "a delayed exact retry must return the original committed evidence"
+          "expected": "Fulfillment target revision is no longer current"
         }
       ]
     },
