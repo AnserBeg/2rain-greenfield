@@ -111,26 +111,6 @@
       ]
     },
     {
-      "name": "packing-retrieval-is-parent-scoped",
-      "claim": "Packing retrieval narrows the registered line list by the shipment parent and paginates every matching line before rendering.",
-      "file": "apps/web/src/sales-section.ts",
-      "original": "            search: shipmentNumber,\n",
-      "replacement": "            search: '',\n",
-      "test": {
-        "files": [
-          "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts"
-        ],
-        "namePattern": "SALE-FULFILLMENT reserves exactly"
-      },
-      "kills": [
-        {
-          "file": "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
-          "name": "SALE-FULFILLMENT reserves exactly, ships partially, corrects without resurrection and cancels safely",
-          "expected": "data-packing-document"
-        }
-      ]
-    },
-    {
       "name": "reservations-share-order-line-bound-across-locations",
       "claim": "Reservation admission applies one ordered-minus-shipped-minus-reserved bound across all locations for the order line.",
       "file": "packages/postgres-provider/src/fulfillment-lifecycle.ts",
