@@ -43,10 +43,13 @@ const journeyTimeoutMilliseconds = Object.freeze({
   focusRing: 75_000,
   inventoryNavigation: 70_000,
   onHandLookup: 45_000,
-  // This multi-form lifecycle now performs real current-policy reads/writes.
-  // Like repairedFormAnatomy, it needs a bounded integration-test allowance;
-  // this is not a latency assertion, and all semantic assertions stay intact.
-  partyLifecycle: 60_000,
+  // This multi-form lifecycle now performs real current-policy reads/writes
+  // and restarts the composed application, so it is the most variable journey
+  // here. It measured 56.4s against its previous 60s bound in an uncontended
+  // run -- passing, but with 6% of headroom on a suite that inflates 1.5-1.7x
+  // under worker contention. Same allowance as the rest; not a latency
+  // assertion, and all semantic assertions stay intact.
+  partyLifecycle: 115_000,
   postingRoute: 100_000,
   repairedFormAnatomy: 160_000,
   scopedInventory: 75_000,
