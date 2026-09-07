@@ -2453,6 +2453,7 @@ function listCoverage(
     matchMode: request.list.query.matchMode,
     nextCursor: null,
     pageOffset: request.list.query.pageOffset,
+    parentScope: null,
     projectedSearchValueCount:
       request.list.query.search.length === 0
         ? 0

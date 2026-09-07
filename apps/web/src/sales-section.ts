@@ -363,7 +363,7 @@ export async function loadSalesOrderSection(
   };
 }
 
-async function loadShipmentPackingDocument(
+export async function loadShipmentPackingDocument(
   view: RequestRuntimeView,
   gateway: SemanticQueryGateway,
   shipment: SemanticRecordDto,
@@ -384,13 +384,14 @@ async function loadShipmentPackingDocument(
   const shipmentNumber = String(
     shipment.values[`${namespace}:field.shipment_number`],
   );
+  const lineRelationId = `${namespace}:relation.shipment_line_shipment`;
   const records: SemanticRecordDto[] = [];
   let cursor: string | null = null;
   do {
-    // Relation labels participate in the registered list search. Shipment
-    // number is a scoped business key, so this narrows retrieval to the parent
-    // before pagination; the record-id comparison below remains authoritative
-    // if another label merely contains the searched number.
+    // Exact parent identity, applied by the executor before the count and the
+    // page window, so the paged set is this shipment's lines and nothing else.
+    // A display-number search would page a broader set, and an OFFSET taken
+    // over a set that shrinks between pages silently skips a committed line.
     const result: ReturnType<
       typeof requireSharedListResult<SemanticRecordDto>
     > = requireSharedListResult(
@@ -405,11 +406,15 @@ async function loadShipmentPackingDocument(
             cursor,
             matchMode: 'substring',
             pageSize: query.maximumResultCount,
-            search: shipmentNumber,
+            parentScope: {
+              recordId: shipment.recordId,
+              relationId: lineRelationId,
+            },
+            search: '',
             sort: [],
             relationLabels: [
               {
-                relationId: `${namespace}:relation.shipment_line_shipment`,
+                relationId: lineRelationId,
                 queryId: `${namespace}:query.shipment_list`,
                 fieldId: `${namespace}:field.shipment_number`,
               },
@@ -418,6 +423,16 @@ async function loadShipmentPackingDocument(
         },
       }),
     );
+    // An executor that did not apply the restriction cannot report it. Reading
+    // the echo keeps a silently ignored filter from being served as a complete
+    // document.
+    if (
+      result.listCoverage.parentScope?.recordId !== shipment.recordId ||
+      result.listCoverage.parentScope.relationId !== lineRelationId
+    )
+      throw new Error(
+        'Packing document refuses a line list that did not apply its shipment scope',
+      );
     records.push(...result.records);
     if (
       result.listCoverage.hasMore &&
@@ -428,6 +443,16 @@ async function loadShipmentPackingDocument(
       throw new Error('Packing document refuses incomplete parent pagination');
     cursor = result.listCoverage.nextCursor;
   } while (cursor !== null);
+  // The scope above is authoritative. This stays as a fail-closed identity
+  // check rather than a filter: a line that is not this shipment's must refuse
+  // the document, not disappear from it.
+  if (
+    records.some(
+      (line) =>
+        line.relationLabels?.[lineRelationId]?.recordId !== shipment.recordId,
+    )
+  )
+    throw new Error('Packing document refuses a line outside its shipment');
   return {
     namespace,
     legalEntityId,
@@ -447,22 +472,16 @@ async function loadShipmentPackingDocument(
     orderId:
       shipment.relationLabels?.[`${namespace}:relation.shipment_order`]
         ?.recordId ?? '—',
-    lines: records
-      .filter(
-        (line) =>
-          line.relationLabels?.[`${namespace}:relation.shipment_line_shipment`]
-            ?.recordId === shipment.recordId,
-      )
-      .map((line) => ({
-        lineNumber: String(
-          line.values[`${namespace}:field.shipment_line_line_number`],
-        ),
-        item: String(line.values[`${namespace}:field.shipment_line_item_id`]),
-        quantity: String(
-          line.values[`${namespace}:field.shipment_line_quantity`],
-        ),
-        unit: String(line.values[`${namespace}:field.shipment_line_unit_id`]),
-      })),
+    lines: records.map((line) => ({
+      lineNumber: String(
+        line.values[`${namespace}:field.shipment_line_line_number`],
+      ),
+      item: String(line.values[`${namespace}:field.shipment_line_item_id`]),
+      quantity: String(
+        line.values[`${namespace}:field.shipment_line_quantity`],
+      ),
+      unit: String(line.values[`${namespace}:field.shipment_line_unit_id`]),
+    })),
   };
 }
 

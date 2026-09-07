@@ -1189,6 +1189,7 @@ async function executeQueryOnClient(
           filterPlans,
           relationPlans,
           readScope,
+          parentScopePlan(storage, entity, list),
         );
       }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
@@ -2035,6 +2036,47 @@ interface ListRelationPlan {
   readonly target: StorageEntity;
 }
 
+interface ListParentScopePlan {
+  readonly column: string;
+  readonly recordId: string;
+}
+
+/**
+ * Resolves an exact parent restriction against the PINNED COMPILED relation,
+ * never against caller input. The request names a relation identity; the
+ * physical column is read from the compiled storage target, so a caller cannot
+ * turn a supplied string into column or table authority. The relation must
+ * belong to this query's source entity and must be the `parentScopedChild`
+ * class -- the same class the parent-guard chain uses -- and anything else
+ * fails closed rather than degrading to an unfiltered list.
+ */
+function parentScopePlan(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  list: AuthorizedSharedListRequest,
+): ListParentScopePlan | null {
+  const requested = list.query.parentScope;
+  if (!requested) return null;
+  const relation = storage.relations.find(
+    (candidate) => candidate.relationId === requested.relationId,
+  );
+  if (
+    !relation ||
+    relation.sourceEntityId !== entity.entityId ||
+    relation.ownership !== 'parentScopedChild'
+  ) {
+    throw failure(
+      'MODULE_LIST_PARENT_SCOPE_INVALID',
+      'list parentScope must name a parentScopedChild relation of the queried entity',
+      requested.relationId,
+    );
+  }
+  return Object.freeze({
+    column: relation.relationColumn.physicalName,
+    recordId: requested.recordId,
+  });
+}
+
 async function listSharedRecords(
   client: PoolClient,
   entity: StorageEntity,
@@ -2043,6 +2085,7 @@ async function listSharedRecords(
   filterPlans: readonly QueryFilterLoweringPlan[],
   relationPlans: readonly ListRelationPlan[],
   readScope: VerifiedLegalEntityReadScope | null,
+  parentScope: ListParentScopePlan | null,
 ): Promise<SemanticQueryResultEnvelope> {
   const sourceAlias = 'table_source';
   const selectedColumns = definition.selections.map((selection) => {
@@ -2107,6 +2150,16 @@ async function listSharedRecords(
     predicates,
     sourceAlias,
   );
+  if (parentScope) {
+    // Ahead of both the count and the page window, so the paged set IS the
+    // parent's children rather than a broader set the page happens to land in.
+    predicates.push(
+      `${qualified(sourceAlias, parentScope.column)} = ${parameter(
+        values,
+        parentScope.recordId,
+      )}::uuid`,
+    );
+  }
   const whereSql = predicates.length > 0 ? predicates.join(' AND ') : 'true';
   const count = await client.query<{ total_count: string }>(
     `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
@@ -2151,6 +2204,7 @@ async function listSharedRecords(
       ? encodeSharedListCursor(definition.queryId, list.query, nextOffset)
       : null,
     pageOffset: list.query.pageOffset,
+    parentScope: list.query.parentScope,
     projectedSearchValueCount:
       list.query.search.trim() === '' ? 0 : searchExpressions.length,
     requestedPageSize: list.query.requestedPageSize,

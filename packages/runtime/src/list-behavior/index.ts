@@ -12,6 +12,8 @@ const SHARED_LIST_CURSOR_VERSION = 'northstar.shared-list-cursor/v1' as const;
 
 const canonicalIdPattern =
   /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
+const canonicalRecordIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface SharedListSort {
   readonly direction: 'ascending' | 'descending';
@@ -24,12 +26,26 @@ export interface SharedListRelationLabelRequest {
   readonly relationId: string;
 }
 
+/**
+ * An exact parent restriction for a `parentScopedChild` relation. It narrows a
+ * child list to one parent record BEFORE the count and the page window, so a
+ * caller that wants one parent's children never pages a broader set. Naming the
+ * relation rather than a column keeps the operand a compiled identity: the
+ * gateway resolves it against the pinned relation and the executor resolves the
+ * physical column, so a caller-supplied string never becomes table authority.
+ */
+export interface SharedListParentScope {
+  readonly recordId: string;
+  readonly relationId: string;
+}
+
 export interface SharedListQueryRequest {
   readonly cursor: string | null;
   readonly effectivePageSize: number;
   readonly includeArchived: boolean;
   readonly matchMode: 'prefix' | 'substring';
   readonly pageOffset: number;
+  readonly parentScope: SharedListParentScope | null;
   readonly relationLabels: readonly SharedListRelationLabelRequest[];
   readonly requestedPageSize: number;
   readonly schemaVersion: typeof SHARED_LIST_QUERY_VERSION;
@@ -54,6 +70,13 @@ export interface SharedListCoverage {
   readonly matchMode: 'prefix' | 'substring';
   readonly nextCursor: string | null;
   readonly pageOffset: number;
+  /**
+   * The parent restriction the executor actually applied. It is echoed so a
+   * caller can require its filter to have been honoured: an executor that did
+   * not understand `parentScope` cannot report having applied one, which turns
+   * a silently ignored filter into an observable mismatch.
+   */
+  readonly parentScope: SharedListParentScope | null;
   readonly projectedSearchValueCount: number;
   readonly requestedPageSize: number;
   readonly returnedCount: number;
@@ -109,7 +132,12 @@ export function parseSharedListArguments(
   if (!isRecord(list)) {
     throw malformed('list must be an object');
   }
-  assertExactKeys(list, [
+  // `parentScope` is the one optional member. It is lifted out so the rest of
+  // the request keeps its exact closed-key contract: every required key must
+  // still be present and any unknown key is still refused. Widening
+  // `assertExactKeys` to tolerate absence would have relaxed the whole object.
+  const { parentScope: parentScopeValue, ...closedList } = list;
+  assertExactKeys(closedList, [
     'cursor',
     'matchMode',
     'pageSize',
@@ -118,6 +146,7 @@ export function parseSharedListArguments(
     'search',
     'sort',
   ]);
+  const parentScope = parseParentScope(parentScopeValue);
   if (list.schemaVersion !== SHARED_LIST_QUERY_VERSION) {
     throw malformed('list schemaVersion is not supported');
   }
@@ -149,6 +178,7 @@ export function parseSharedListArguments(
   const bindingDigest = sharedListBindingDigest(input.queryId, {
     includeArchived,
     matchMode: list.matchMode,
+    parentScope,
     relationLabels,
     search: list.search,
     sort,
@@ -160,6 +190,7 @@ export function parseSharedListArguments(
     includeArchived,
     matchMode: list.matchMode,
     pageOffset,
+    parentScope,
     relationLabels,
     requestedPageSize,
     schemaVersion: SHARED_LIST_QUERY_VERSION,
@@ -361,12 +392,21 @@ function sharedListBindingDigest(
   queryId: string,
   query: Pick<
     SharedListQueryRequest,
-    'includeArchived' | 'matchMode' | 'relationLabels' | 'search' | 'sort'
+    | 'includeArchived'
+    | 'matchMode'
+    | 'parentScope'
+    | 'relationLabels'
+    | 'search'
+    | 'sort'
   >,
 ): string {
   return digestCanonical({
     includeArchived: query.includeArchived,
     matchMode: query.matchMode,
+    // The parent belongs to cursor identity: a page window for parent A is
+    // meaningless against parent B or against a different relation, so a cursor
+    // minted under one parent scope must not decode under another.
+    parentScope: query.parentScope,
     queryId,
     relationLabels: query.relationLabels,
     search: query.search,
@@ -424,6 +464,27 @@ function assertExactKeys(
   ) {
     throw malformed('list object keys do not match the closed contract');
   }
+}
+
+function parseParentScope(
+  value: ImmutableJsonValue | undefined,
+): SharedListParentScope | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) {
+    throw malformed('list parentScope must be an object');
+  }
+  assertExactKeys(value, ['recordId', 'relationId']);
+  const { recordId, relationId } = value;
+  if (typeof relationId !== 'string' || !canonicalIdPattern.test(relationId)) {
+    throw malformed('list parentScope relationId must be a canonical id');
+  }
+  if (
+    typeof recordId !== 'string' ||
+    !canonicalRecordIdPattern.test(recordId)
+  ) {
+    throw malformed('list parentScope recordId must be a canonical uuid');
+  }
+  return Object.freeze({ recordId, relationId });
 }
 
 function malformed(message: string): SharedListContractError {

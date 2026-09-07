@@ -225,6 +225,7 @@ class ObservedListExecutor implements SemanticQueryExecutor {
         matchMode: query.matchMode,
         nextCursor: null,
         pageOffset: 0,
+        parentScope: null,
         projectedSearchValueCount: 3,
         requestedPageSize: query.requestedPageSize,
         returnedCount: 1,

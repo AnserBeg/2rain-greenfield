@@ -1143,6 +1143,7 @@ function previousPageHref(
           includeArchived: coverage.includeArchived,
           matchMode: coverage.matchMode,
           pageOffset: previousOffset,
+          parentScope: null,
           relationLabels: [],
           requestedPageSize: coverage.requestedPageSize,
           schemaVersion: SHARED_LIST_QUERY_VERSION,
