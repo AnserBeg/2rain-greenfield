@@ -1,14 +1,25 @@
-import { createHash } from 'node:crypto';
-
-import { canonicalize } from '@north-star/canonical-model';
-
 import type { ImmutableJsonValue } from '../request-runtime-view.js';
+import {
+  assertExactKeys,
+  isRecord,
+  malformed,
+  SharedListContractError,
+} from './contract.js';
+import {
+  decodeSharedListCursor,
+  parseNullableCursor,
+  sharedListBindingDigest,
+} from './cursor.js';
+
+// The closed-contract primitives and cursor identity moved to siblings; both
+// stay part of this module's public surface so no caller import changes.
+export { SharedListContractError } from './contract.js';
+export { encodeSharedListCursor } from './cursor.js';
 
 export const SHARED_LIST_QUERY_VERSION =
   'northstar.shared-list-query/v1' as const;
 export const SHARED_LIST_RESULT_VERSION =
   'northstar.shared-list-result/v1' as const;
-const SHARED_LIST_CURSOR_VERSION = 'northstar.shared-list-cursor/v1' as const;
 
 const canonicalIdPattern =
   /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
@@ -90,22 +101,6 @@ export interface SharedListCoverage {
 export interface SharedListResultLike<RecordValue = unknown> {
   readonly records: readonly RecordValue[];
   readonly listCoverage?: SharedListCoverage;
-}
-
-export class SharedListContractError extends Error {
-  override readonly name = 'SharedListContractError';
-
-  constructor(
-    readonly code:
-      | 'LIST_CURSOR_INVALID'
-      | 'LIST_FIELD_NOT_AUTHORIZED'
-      | 'LIST_INPUT_MALFORMED'
-      | 'LIST_RESULT_MALFORMED',
-    message: string,
-    readonly subjectId: string | null = null,
-  ) {
-    super(message);
-  }
 }
 
 export function parseSharedListArguments(
@@ -223,29 +218,6 @@ export function authorizeSharedListFields(
   }
 }
 
-export function encodeSharedListCursor(
-  queryId: string,
-  query: SharedListQueryRequest,
-  nextOffset: number,
-): string {
-  if (!Number.isSafeInteger(nextOffset) || nextOffset < 1) {
-    throw new SharedListContractError(
-      'LIST_CURSOR_INVALID',
-      'list cursor offset must be a positive safe integer',
-    );
-  }
-  const bindingDigest = sharedListBindingDigest(queryId, query);
-  const unsigned = {
-    bindingDigest,
-    offset: nextOffset,
-    schemaVersion: SHARED_LIST_CURSOR_VERSION,
-  };
-  const checksum = digestCanonical(unsigned);
-  return Buffer.from(canonicalize({ ...unsigned, checksum })).toString(
-    'base64url',
-  );
-}
-
 export function requireSharedListResult<RecordValue>(
   result: SharedListResultLike<RecordValue>,
 ): Readonly<{
@@ -347,93 +319,12 @@ function parseRelationLabels(
   );
 }
 
-function decodeSharedListCursor(
-  cursor: string,
-  expectedBindingDigest: string,
-): number {
-  try {
-    const decoded: unknown = JSON.parse(
-      Buffer.from(cursor, 'base64url').toString('utf8'),
-    );
-    if (!isRecord(decoded)) throw new Error('not an object');
-    assertExactKeys(decoded, [
-      'bindingDigest',
-      'checksum',
-      'offset',
-      'schemaVersion',
-    ]);
-    if (
-      decoded.schemaVersion !== SHARED_LIST_CURSOR_VERSION ||
-      decoded.bindingDigest !== expectedBindingDigest ||
-      typeof decoded.checksum !== 'string' ||
-      !Number.isSafeInteger(decoded.offset) ||
-      Number(decoded.offset) < 1
-    ) {
-      throw new Error('cursor values are invalid');
-    }
-    const expectedChecksum = digestCanonical({
-      bindingDigest: decoded.bindingDigest,
-      offset: decoded.offset,
-      schemaVersion: decoded.schemaVersion,
-    });
-    if (decoded.checksum !== expectedChecksum) {
-      throw new Error('cursor checksum is invalid');
-    }
-    return Number(decoded.offset);
-  } catch {
-    throw new SharedListContractError(
-      'LIST_CURSOR_INVALID',
-      'list cursor is malformed, altered, or belongs to another query shape',
-    );
-  }
-}
-
-function sharedListBindingDigest(
-  queryId: string,
-  query: Pick<
-    SharedListQueryRequest,
-    | 'includeArchived'
-    | 'matchMode'
-    | 'parentScope'
-    | 'relationLabels'
-    | 'search'
-    | 'sort'
-  >,
-): string {
-  return digestCanonical({
-    includeArchived: query.includeArchived,
-    matchMode: query.matchMode,
-    // The parent belongs to cursor identity: a page window for parent A is
-    // meaningless against parent B or against a different relation, so a cursor
-    // minted under one parent scope must not decode under another.
-    parentScope: query.parentScope,
-    queryId,
-    relationLabels: query.relationLabels,
-    search: query.search,
-    sort: query.sort,
-  });
-}
-
-function digestCanonical(value: unknown): string {
-  return createHash('sha256').update(canonicalize(value)).digest('hex');
-}
-
 function optionalBoolean(
   value: ImmutableJsonValue | undefined,
   name: string,
 ): boolean {
   if (value === undefined) return false;
   if (typeof value !== 'boolean') throw malformed(`${name} must be boolean`);
-  return value;
-}
-
-function parseNullableCursor(
-  value: ImmutableJsonValue | undefined,
-): string | null {
-  if (value === null) return null;
-  if (typeof value !== 'string' || value.length < 1 || value.length > 2_048) {
-    throw malformed('list cursor must be null or a bounded opaque string');
-  }
   return value;
 }
 
@@ -448,21 +339,6 @@ function assertCanonicalId(
     !canonicalIdPattern.test(value)
   ) {
     throw malformed(`${name} must be a canonical ID`);
-  }
-}
-
-function assertExactKeys(
-  value: Readonly<Record<string, unknown>>,
-  expected: readonly string[],
-  allowMissing = false,
-): void {
-  const actual = Object.keys(value).sort();
-  const expectedSorted = [...expected].sort();
-  if (
-    actual.some((key) => !expectedSorted.includes(key)) ||
-    (!allowMissing && actual.join('\0') !== expectedSorted.join('\0'))
-  ) {
-    throw malformed('list object keys do not match the closed contract');
   }
 }
 
@@ -485,18 +361,4 @@ function parseParentScope(
     throw malformed('list parentScope recordId must be a canonical uuid');
   }
   return Object.freeze({ recordId, relationId });
-}
-
-function malformed(message: string): SharedListContractError {
-  return new SharedListContractError('LIST_INPUT_MALFORMED', message);
-}
-
-function isRecord(
-  value: unknown,
-): value is Readonly<Record<string, ImmutableJsonValue | undefined>> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value) as unknown;
-  return prototype === Object.prototype || prototype === null;
 }
