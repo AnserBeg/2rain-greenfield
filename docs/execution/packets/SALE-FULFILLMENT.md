@@ -1,7 +1,7 @@
 # SALE-FULFILLMENT — reservation through shipment and correction
 
-Status: evidence_ready; published branch handoff. Tier: Critical, Band A for stored reservation/shipped projections. Stops: 0.
-Base: `4c058aa6487ae5196982e505fc82327f9e3d2ee6`. Executable head: `9ba0f7fcebae31534bbabc8c41c30b09b7fba900`.
+Status: accepted and integrated on `main` at `44bef7a36e5c0342671444595733ea725b4dd64b` (PR #4). Tier: Critical, Band A for stored reservation/shipped projections. Stops: 0.
+Base: `4c058aa6487ae5196982e505fc82327f9e3d2ee6`. Reviewed candidate: `d8f8d644c634f368405aeb2e745b9c859ce54327`, integrated as the merge's second parent. All seven CI jobs passed in hosted run `34643875446`, attempt 2; the independent review is closed. The earlier executable head `9ba0f7fcebae31534bbabc8c41c30b09b7fba900` is superseded by the F1/F2/F3 corrections the arm required.
 
 ## Claims for the Critical review
 
