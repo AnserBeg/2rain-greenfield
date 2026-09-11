@@ -314,6 +314,7 @@ export function inventoryModuleDefinition(
         20,
         enumeration(definitionIds, 'inventory_transaction_type', [
           'goodsReceipt',
+          'shipment',
           'opening',
           'adjustment',
           'transfer',
@@ -697,6 +698,7 @@ export function inventoryModuleDefinition(
         120,
         enumeration(definitionIds, 'inventory_posting_role', [
           'receipt',
+          'shipment',
           'adjustment',
           'transfer',
           'count',

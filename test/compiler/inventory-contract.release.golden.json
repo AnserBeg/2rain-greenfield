@@ -185,6 +185,22 @@
       },
       {
         "classification": "entityOwned",
+        "familyId": "reservation_balance"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "shipment"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "shipment_line"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "sales_order_shipped"
+      },
+      {
+        "classification": "entityOwned",
         "familyId": "stock_count"
       },
       {
@@ -260,6 +276,46 @@
       },
       {
         "semantics": "sameEntity",
+        "sourceFamilyId": "reservation",
+        "targetFamilyId": "sales_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "reservation_balance",
+        "targetFamilyId": "reservation"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "shipment",
+        "targetFamilyId": "sales_order"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "shipment",
+        "targetFamilyId": "shipment"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "shipment_line",
+        "targetFamilyId": "shipment"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "shipment_line",
+        "targetFamilyId": "sales_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "shipment_line",
+        "targetFamilyId": "reservation"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "sales_order_shipped",
+        "targetFamilyId": "sales_order_line"
+      },
+      {
+        "semantics": "sameEntity",
         "sourceFamilyId": "inventory_transaction_line",
         "targetFamilyId": "inventory_transaction"
       },
@@ -306,6 +362,16 @@
         "classification": "providerWritten",
         "familyId": "purchase_order_received",
         "maintainerId": "northstar.postgresql-module-provider:received-quantity/v1"
+      },
+      {
+        "classification": "providerWritten",
+        "familyId": "sales_order_shipped",
+        "maintainerId": "northstar.postgresql-module-provider:shipped-quantity/v1"
+      },
+      {
+        "classification": "providerWritten",
+        "familyId": "reservation_balance",
+        "maintainerId": "northstar.postgresql-module-provider:reservation-balance/v1"
       }
     ]
   },
@@ -354,7 +420,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "71fca6ec848cb6ee09abacb29d96365d12fbd99d301222c2d7a4a7fc61753b1a",
+  "releaseRoot": "566a4a3df7e6469af4a66fae766a5bc688af1ca7be3391a0609ead68b86fd981",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

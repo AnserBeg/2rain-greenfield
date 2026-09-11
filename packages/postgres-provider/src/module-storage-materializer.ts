@@ -38,6 +38,7 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import { aggregateGenerationLockKey } from './module-runtime-interpreter.js';
 import { rebuildReceivedQuantitiesOnClient } from './received-quantity-projection.js';
+import { rebuildFulfillmentProjectionsOnClient } from './fulfillment-projections.js';
 
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
@@ -821,6 +822,51 @@ export class PostgresModuleStorageMaterializer {
     }
   }
 
+  async rebuildFulfillmentProjections(
+    context: TrustedRequestContext,
+  ): Promise<number> {
+    const client = await this.materializerPool.connect();
+    try {
+      assertTrustedRequestContext(context);
+      await assertMaterializerSession(client);
+      await beginLocked(client);
+      await setMaterializerScope(client, context);
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [aggregateGenerationLockKey(context.tenantId, context.environmentId)],
+      );
+      const pointer = await requiredOne<{ release_id: string | null }>(
+        client,
+        'SELECT release_id FROM north_star_internal.module_storage_read_active_release_pointer($1,$2)',
+        [context.tenantId, context.environmentId],
+        'active release pointer',
+      );
+      if (!pointer.release_id)
+        throw failure(
+          'POSTED_STOCK_BALANCE_RELEASE_MISSING',
+          'Fulfillment rebuild requires an active release',
+        );
+      const release = await loadVerifiedReleaseStorage(
+        client,
+        context.tenantId,
+        context.environmentId,
+        pointer.release_id,
+      );
+      const count = await rebuildFulfillmentProjectionsOnClient(
+        client,
+        release.target,
+        context,
+      );
+      await client.query('COMMIT');
+      return count;
+    } catch (error) {
+      await rollbackQuietly(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   private async applyBackfill(
     command: ExecuteModuleStorageAttemptCommand,
     preparationId: string,
@@ -1423,11 +1469,16 @@ async function createManagedTable(
   const receivedProjection = entity.entityId.endsWith(
     ':entity.purchase_order_received',
   );
+  const shippedProjection =
+    entity.entityId.endsWith(':entity.sales_order_shipped') ||
+    entity.entityId.endsWith(':entity.reservation_balance');
   const mutationFence = postedStockProjection
     ? ' AND pg_trigger_depth() > 0'
     : receivedProjection
       ? " AND CURRENT_USER = 'north_star_receipt_projection_writer'::name"
-      : '';
+      : shippedProjection
+        ? " AND CURRENT_USER = 'north_star_fulfillment_projection_writer'::name"
+        : '';
   const relationColumns = target.relations
     .filter(
       (relation) =>
@@ -1572,7 +1623,7 @@ async function createManagedTable(
   if (entity.factStorage || entity.legalEntity || entity.legalEntityMaster) {
     await ensureMaterializerSelectPolicy(client, entity.physicalTableName);
   }
-  if (postedStockProjection || receivedProjection) {
+  if (postedStockProjection || receivedProjection || shippedProjection) {
     await ensureMaterializerProjectionMutationPolicies(
       client,
       entity.physicalTableName,
@@ -2091,6 +2142,7 @@ async function ensurePostedStockBalanceProjection(
   await ensurePostedStockBalanceFunction(client);
   await rebuildPostedStockBalanceOnClient(client, target, scope);
   await rebuildReceivedQuantitiesOnClient(client, target, scope);
+  await rebuildFulfillmentProjectionsOnClient(client, target, scope);
   await ensurePostedStockBalanceTrigger(client, target);
 }
 
@@ -4726,8 +4778,14 @@ function buildExpectedPolicies(
     const receivedProjection = entity.entityId.endsWith(
       ':entity.purchase_order_received',
     );
+    const shippedProjection =
+      entity.entityId.endsWith(':entity.sales_order_shipped') ||
+      entity.entityId.endsWith(':entity.reservation_balance');
     const receiptMutationPredicate = normalizePolicyExpression(
       `tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND CURRENT_USER = 'north_star_receipt_projection_writer'::name`,
+    );
+    const fulfillmentMutationPredicate = normalizePolicyExpression(
+      `tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND CURRENT_USER = 'north_star_fulfillment_projection_writer'::name`,
     );
     const triggerMutationPredicate = normalizePolicyExpression(
       `tenant_id = north_star_internal.trusted_tenant_id()
@@ -4764,7 +4822,11 @@ function buildExpectedPolicies(
                   tableName === entity.physicalTableName &&
                   command !== 'SELECT'
                 ? receiptMutationPredicate
-                : predicate;
+                : shippedProjection &&
+                    tableName === entity.physicalTableName &&
+                    command !== 'SELECT'
+                  ? fulfillmentMutationPredicate
+                  : predicate;
           return {
             command,
             name: managedPolicyName(tableName, command),
@@ -4805,7 +4867,7 @@ function buildExpectedPolicies(
             },
           ]
         : []),
-      ...(postedStockProjection || receivedProjection
+      ...(postedStockProjection || receivedProjection || shippedProjection
         ? (['INSERT', 'UPDATE'] as const).map((command) => ({
             command,
             name: managedMaterializerProjectionPolicyName(

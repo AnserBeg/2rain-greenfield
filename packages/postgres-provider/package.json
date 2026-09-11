@@ -7,6 +7,8 @@
     "./composed-application-runtime": "./src/composed-application-runtime.ts",
     "./current-policy": "./src/current-policy.ts",
     "./inventory-posting-capability-executor": "./src/inventory-posting-capability-executor.ts",
+    "./fulfillment-capability-executor": "./src/fulfillment-capability-executor.ts",
+    "./fulfillment-projections": "./src/fulfillment-projections.ts",
     "./receiving-capability-executor": "./src/receiving-capability-executor.ts",
     "./inventory-provider-error-mappings": "./src/inventory-provider-error-mappings.ts",
     "./readiness": "./src/readiness.ts",

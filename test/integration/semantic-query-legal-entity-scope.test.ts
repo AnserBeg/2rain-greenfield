@@ -467,6 +467,7 @@ class RecordingExecutor implements SemanticQueryExecutor {
               matchMode: request.list.query.matchMode,
               nextCursor: null,
               pageOffset: request.list.query.pageOffset,
+              parentScope: null,
               projectedSearchValueCount: 0,
               requestedPageSize: request.list.query.requestedPageSize,
               returnedCount: 0,

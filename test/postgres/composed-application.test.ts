@@ -1049,8 +1049,9 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    // Prior 51 + the Sales order and line list/detail/form surfaces.
-    assert.equal(surfaces.length, 57);
+    // Prior 51 + Sales order entry and the fulfillment document/read-model
+    // surfaces. Projection carriers deliberately omit editable forms.
+    assert.equal(surfaces.length, 70);
     for (const local of [
       'goods_receipt',
       'goods_receipt_line',
@@ -1082,12 +1083,33 @@ async function assertRealProductDefinition(
       APPLICATION_IDS.sales.lineListSurfaceId,
       APPLICATION_IDS.sales.lineDetailSurfaceId,
       APPLICATION_IDS.sales.lineFormSurfaceId,
+      'northstar.app:surface.reservation_list',
+      'northstar.app:surface.reservation_detail',
+      'northstar.app:surface.reservation_form',
+      'northstar.app:surface.reservation_balance_list',
+      'northstar.app:surface.reservation_balance_detail',
+      'northstar.app:surface.shipment_list',
+      'northstar.app:surface.shipment_detail',
+      'northstar.app:surface.shipment_form',
+      'northstar.app:surface.shipment_line_list',
+      'northstar.app:surface.shipment_line_detail',
+      'northstar.app:surface.shipment_line_form',
+      'northstar.app:surface.sales_order_shipped_list',
+      'northstar.app:surface.sales_order_shipped_detail',
     ]) {
       assert.ok(
         surfaces.includes(salesSurfaceId),
         `the composed product mounts ${salesSurfaceId}`,
       );
     }
+    assert.equal(
+      surfaces.includes('northstar.app:surface.reservation_balance_form'),
+      false,
+    );
+    assert.equal(
+      surfaces.includes('northstar.app:surface.sales_order_shipped_form'),
+      false,
+    );
     // Inventory only reaches a mounted runtime once its emitted-but-
     // unarrangeable verification scenarios are recorded as derivations.
     for (const inventorySurfaceId of [
@@ -3010,11 +3032,21 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
     (candidate) =>
       candidate.entityId === 'northstar.app:entity.purchase_order_received',
   );
+  const reservedCoverage = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === 'northstar.app:entity.reservation_balance',
+  );
+  const shippedQuantity = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === 'northstar.app:entity.sales_order_shipped',
+  );
   assert.ok(master?.legalEntityMaster);
   assert.ok(periodLock?.periodLock);
   assert.ok(ordinary);
   assert.ok(postedStockBalance);
   assert.ok(receivedQuantity);
+  assert.ok(reservedCoverage);
+  assert.ok(shippedQuantity);
 
   // The second tenant reached the same seeded state as the first.
   const periodLockScope = periodLock.legalEntity;
@@ -3057,7 +3089,9 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
   }
 
   // The insert policy exists for exactly the two seeded table classes and the
-  // two explicitly named provider-written projections.
+  // four explicitly named provider-written projections. Fulfillment adds the
+  // reserved-coverage and shipped-quantity read models, which the kernel
+  // maintains the same way it maintains posted stock and received quantity.
   const insertPolicies = await pool.query<{ tablename: string }>(
     `SELECT tablename
        FROM pg_catalog.pg_policies
@@ -3073,8 +3107,10 @@ async function assertMaterializerSeedingIsNarrowlyScoped(
       periodLock.physicalTableName,
       postedStockBalance.physicalTableName,
       receivedQuantity.physicalTableName,
+      reservedCoverage.physicalTableName,
+      shippedQuantity.physicalTableName,
     ].toSorted(),
-    'only the seeded table classes and named stock/received projections carry a materializer insert policy',
+    'only the seeded table classes and the named stock, received, reserved and shipped projections carry a materializer insert policy',
   );
 
   const materializerPool = new pg.Pool({
@@ -3345,13 +3381,15 @@ async function assertBoundedFreshTenantInstallEvidence(
   // structurally excluded from that contract. `projections.ts` declines to emit
   // either, which is ADR-0050 section 6 item 2 closed at the compiler. Not
   // emitting differs from skipping: nothing is admitted unexecuted.
-  // SALE adds another measured 24: 12 for the order and 12 for its line.
-  // `assertSalesVerificationCoverage` pins both entity contributions and the
-  // same server-owned lifecycle-field exclusion independently of this total.
+  // SALE entry adds 24: 12 for the order and 12 for its line. Fulfillment adds
+  // another measured 67 across reservation (14), reservation balance (10),
+  // shipment (19), shipment line (14), and shipped quantity (10).
+  // `assertSalesVerificationCoverage` pins every entity contribution and the
+  // server-owned lifecycle-field exclusion independently of this total.
   assert.equal(
     servingScenarioCount,
-    281,
-    'the release includes the prior 198 scenarios, 59 for receiving, and 24 for Sales',
+    348,
+    'the release includes the prior 198 scenarios, 59 for receiving, and 91 for Sales and fulfillment',
   );
 
   const intermediate = await pool.query<{
@@ -5541,17 +5579,21 @@ async function assertExactPartitionEvidence(
   );
   assert.ok(evidence.results.length > 0, 'real PostgreSQL probes still ran');
   assert.ok(derivations.length > 0);
-  // Measured on the combined governed release: 224 executed + 57 derived.
-  // The independent constructibility oracle below still verifies every member.
+  // Measured on the combined governed release: 271 executed + 77 derived.
+  // Fulfillment's 67 scenarios split exactly along operation ownership:
+  // reservation 14, shipment 19 and shipment line 14 execute, while the two
+  // operationless projection carriers derive. The partition assertion below
+  // still forces executed + derived to equal the emitted plan, and the
+  // independent constructibility oracle still verifies every member.
   assert.equal(
     evidence.results.length,
-    224,
-    'receiving adds 49 and Sales adds 24 executed scenarios to the prior 151',
+    271,
+    'fulfillment adds 47 executed scenarios to the prior 224',
   );
   assert.equal(
     derivations.length,
-    57,
-    'the 10 operationless received-projection scenarios join the prior 47 derivations',
+    77,
+    'the 20 operationless reserved-coverage and shipped-quantity scenarios join the prior 57 derivations',
   );
   assert.equal(
     binding.plan.scenarios.some(
@@ -5576,7 +5618,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    57,
+    77,
   );
   const executedScenarioIdSet = new Set(executedScenarioIds);
   const salesEntityIds = new Set<string>([
@@ -5788,12 +5830,20 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
   const { plan } = releaseVerificationBinding(
     parseCompiledApplication(compiledApplication).application.compiled,
   );
-  for (const local of ['sales_order', 'sales_order_line']) {
+  for (const [local, count] of Object.entries({
+    reservation: 14,
+    reservation_balance: 10,
+    sales_order: 12,
+    sales_order_line: 12,
+    sales_order_shipped: 10,
+    shipment: 19,
+    shipment_line: 14,
+  })) {
     assert.equal(
       plan.scenarios.filter(
         (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
       ).length,
-      12,
+      count,
       `the Sales entity ${local} contributes its measured verifier scenarios`,
     );
   }

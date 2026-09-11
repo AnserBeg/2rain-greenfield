@@ -273,6 +273,12 @@ const routedPressLawDebt: readonly RoutedPressLawDebt[] = [
     "receiptBinding('update', 'goods_receipt_update', 'goods_receipt'),",
   ),
   routedIdentityDebt(
+    'packages/postgres-provider/src/fulfillment.ts',
+    'sales',
+    'northstar.sales',
+    "'northstar.sales:capability.fulfillment' as const;",
+  ),
+  routedIdentityDebt(
     'packages/postgres-provider/src/goods-receipt.ts',
     'purchasing',
     'northstar.purchasing',

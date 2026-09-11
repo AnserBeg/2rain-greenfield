@@ -2,6 +2,9 @@ const version = 'v5' as const;
 const normalizationProfileVersion = 'northstar.normalization/v5' as const;
 
 export const SALES_NAMESPACE = 'northstar.sales' as const;
+export const FULFILLMENT_CAPABILITY_ID =
+  'northstar.sales:capability.fulfillment' as const;
+export const FULFILLMENT_CAPABILITY_VERSION = 1 as const;
 
 type FieldType = Record<string, unknown>;
 
@@ -22,7 +25,7 @@ const TRANSITIONS = [
   ['release', 'Release order', 10, 'draft', 'released', 'release', true],
   ['draft_cancel', 'Cancel order', 20, 'draft', 'cancelled', 'cancel', true],
   ['close', 'Close order', 30, 'released', 'closed', 'close', false],
-  ['cancel', 'Cancel order', 40, 'released', 'cancelled', 'cancel', true],
+  ['cancel', 'Cancel order', 40, 'released', 'cancelled', 'cancel', false],
 ] as const;
 
 type StateLocalId = (typeof STATES)[number][0];
@@ -37,6 +40,11 @@ const TRANSITION_PERMISSIONS = [
 const ENTITY_OWNED_QUERY_FAMILIES = new Set([
   'sales_order',
   'sales_order_line',
+  'reservation',
+  'reservation_balance',
+  'shipment',
+  'shipment_line',
+  'sales_order_shipped',
 ]);
 
 function ids(namespace: string) {
@@ -49,6 +57,11 @@ function ids(namespace: string) {
     entityIds: {
       salesOrder: entity('sales_order'),
       salesOrderLine: entity('sales_order_line'),
+      reservation: entity('reservation'),
+      reservationBalance: entity('reservation_balance'),
+      shipment: entity('shipment'),
+      shipmentLine: entity('shipment_line'),
+      shipped: entity('sales_order_shipped'),
     },
     fieldIds: {
       salesOrder: {
@@ -73,6 +86,14 @@ function ids(namespace: string) {
     packageId: `${namespace}:package.sales`,
     relationIds: {
       salesOrderLineOrder: `${namespace}:relation.sales_order_line_order`,
+      reservationOrderLine: `${namespace}:relation.reservation_order_line`,
+      reservationBalanceReservation: `${namespace}:relation.reservation_balance_reservation`,
+      shipmentOrder: `${namespace}:relation.shipment_order`,
+      shipmentSupersedes: `${namespace}:relation.shipment_supersedes`,
+      shipmentLineShipment: `${namespace}:relation.shipment_line_shipment`,
+      shipmentLineOrderLine: `${namespace}:relation.shipment_line_order_line`,
+      shipmentLineReservation: `${namespace}:relation.shipment_line_reservation`,
+      shippedOrderLine: `${namespace}:relation.sales_order_shipped_order_line`,
     },
     stateFieldId: derivedStateFieldId(machineId),
     stateIds: Object.fromEntries(
@@ -94,10 +115,7 @@ type SalesIds = ReturnType<typeof ids>;
 
 export const SALES_IDS = Object.freeze(ids(SALES_NAMESPACE));
 
-/**
- * Usable sales-order intent only. Shipment, reservation and derived fulfilment
- * facts are deliberately absent, so release/cancel cannot create stock effects.
- */
+/** Sales order entry plus the fulfillment documents and read-model carriers. */
 export function salesModuleDefinition(
   namespace: string = SALES_NAMESPACE,
 ): Record<string, unknown> {
@@ -107,6 +125,15 @@ export function salesModuleDefinition(
   const entities = [
     ['sales_order', 'Sales order', entityIds.salesOrder],
     ['sales_order_line', 'Sales order line', entityIds.salesOrderLine],
+    ['reservation', 'Reservation', entityIds.reservation],
+    [
+      'reservation_balance',
+      'Reservation coverage',
+      entityIds.reservationBalance,
+    ],
+    ['shipment', 'Shipment', entityIds.shipment],
+    ['shipment_line', 'Shipment line', entityIds.shipmentLine],
+    ['sales_order_shipped', 'Shipped quantity', entityIds.shipped],
   ] as const;
 
   return {
@@ -116,6 +143,24 @@ export function salesModuleDefinition(
         capabilityId: definitionIds.contentCapabilityId,
         capabilityVersion: 1,
         declaredEffects: ['read'],
+        kind: 'capabilityRequirement',
+        requiredProjections: [
+          'storage',
+          'policy',
+          'query',
+          'operation',
+          'surface',
+          'agent',
+          'reporting',
+          'verification',
+        ],
+        schemaVersion: version,
+        supportStatus: 'supported',
+      },
+      {
+        capabilityId: FULFILLMENT_CAPABILITY_ID,
+        capabilityVersion: FULFILLMENT_CAPABILITY_VERSION,
+        declaredEffects: ['appendFact'],
         kind: 'capabilityRequirement',
         requiredProjections: [
           'storage',
@@ -170,6 +215,7 @@ export function salesModuleDefinition(
         instant(),
         { optional: true },
       ),
+      ...fulfillmentFields(definitionIds),
       field(
         definitionIds,
         entityIds.salesOrder,
@@ -264,6 +310,30 @@ export function salesModuleDefinition(
         'sales_order_line',
         entityIds.salesOrderLine,
       ),
+      ...operations(
+        definitionIds,
+        'reservation',
+        entityIds.reservation,
+        fieldComparison(
+          `${namespace}:field.reservation_state`,
+          `${namespace}:option.reservation_state_draft`,
+        ),
+      ),
+      ...operations(
+        definitionIds,
+        'shipment',
+        entityIds.shipment,
+        fieldComparison(
+          `${namespace}:field.shipment_state`,
+          `${namespace}:option.shipment_state_draft`,
+        ),
+      ),
+      ...operations(definitionIds, 'shipment_line', entityIds.shipmentLine),
+      fulfillmentOperation(definitionIds, 'reservation', 'reserve'),
+      fulfillmentOperation(definitionIds, 'reservation', 'release'),
+      fulfillmentOperation(definitionIds, 'shipment', 'post'),
+      fulfillmentOperation(definitionIds, 'sales_order', 'close'),
+      fulfillmentOperation(definitionIds, 'sales_order', 'cancel'),
       ...DRIVEN_TRANSITIONS.map(([local, , , fromState, , permission]) =>
         transitionOperation(
           definitionIds,
@@ -283,11 +353,29 @@ export function salesModuleDefinition(
     },
     permissions: [
       ...entities.flatMap(([local, , entityId]) =>
-        permissions(definitionIds, local, entityId),
+        permissions(definitionIds, local, entityId).filter(
+          (permission) =>
+            !['sales_order_shipped', 'reservation_balance'].includes(local) ||
+            permission.action === 'read',
+        ),
       ),
       ...TRANSITION_PERMISSIONS.map((local) =>
         transitionPermission(definitionIds, local),
       ),
+      ...(
+        [
+          ['reservation', 'reserve'],
+          ['reservation', 'release'],
+          ['shipment', 'post'],
+        ] as const
+      ).map(([local, action]) => ({
+        action: 'transition',
+        kind: 'permissionDefinition',
+        label: `${local} ${action}`,
+        permissionId: `${namespace}:permission.${local}_${action}`,
+        resource: reference('entityReference', `${namespace}:entity.${local}`),
+        schemaVersion: version,
+      })),
     ],
     queries: entities.flatMap(([local, , entityId]) =>
       queries(
@@ -295,9 +383,7 @@ export function salesModuleDefinition(
         local,
         entityId,
         selectedFieldsForEntity(definitionIds, local),
-        local === 'sales_order'
-          ? fieldIds.salesOrder.number
-          : fieldIds.salesOrderLine.itemId,
+        resolveFieldForEntity(definitionIds, local),
       ),
     ),
     relations: [
@@ -307,6 +393,76 @@ export function salesModuleDefinition(
         entityIds.salesOrder,
         10,
       ),
+      {
+        ...relation(
+          definitionIds.relationIds.reservationOrderLine,
+          entityIds.reservation,
+          entityIds.salesOrderLine,
+          20,
+        ),
+        ownership: 'reference',
+      },
+      {
+        ...relation(
+          definitionIds.relationIds.reservationBalanceReservation,
+          entityIds.reservationBalance,
+          entityIds.reservation,
+          25,
+        ),
+        ownership: 'reference',
+      },
+      {
+        ...relation(
+          definitionIds.relationIds.shipmentOrder,
+          entityIds.shipment,
+          entityIds.salesOrder,
+          30,
+        ),
+        ownership: 'reference',
+      },
+      {
+        ...relation(
+          definitionIds.relationIds.shipmentSupersedes,
+          entityIds.shipment,
+          entityIds.shipment,
+          40,
+        ),
+        ownership: 'reference',
+        required: false,
+      },
+      relation(
+        definitionIds.relationIds.shipmentLineShipment,
+        entityIds.shipmentLine,
+        entityIds.shipment,
+        50,
+      ),
+      {
+        ...relation(
+          definitionIds.relationIds.shipmentLineOrderLine,
+          entityIds.shipmentLine,
+          entityIds.salesOrderLine,
+          60,
+        ),
+        ownership: 'reference',
+      },
+      {
+        ...relation(
+          definitionIds.relationIds.shipmentLineReservation,
+          entityIds.shipmentLine,
+          entityIds.reservation,
+          70,
+        ),
+        ownership: 'reference',
+      },
+      {
+        ...relation(
+          definitionIds.relationIds.shippedOrderLine,
+          entityIds.shipped,
+          entityIds.salesOrderLine,
+          80,
+        ),
+        ownership: 'reference',
+      },
     ],
     schemaVersion: version,
     stateMachines: [stateMachine(definitionIds)],
@@ -314,8 +470,133 @@ export function salesModuleDefinition(
       storageMapping(definitionIds, local, entityId),
     ),
     surfaces: entities.flatMap(([local, label]) =>
-      surfaces(definitionIds, local, label),
+      surfaces(definitionIds, local, label).filter(
+        (surface) =>
+          !['sales_order_shipped', 'reservation_balance'].includes(local) ||
+          surface.surfaceRole !== 'form',
+      ),
     ),
+  };
+}
+
+function fulfillmentFields(ids: SalesIds): Array<Record<string, unknown>> {
+  const enumType = (
+    local: string,
+    name: string,
+    options: readonly string[],
+  ): FieldType => ({
+    kind: 'enumFieldType',
+    schemaVersion: version,
+    options: options.map((value, index) => ({
+      kind: 'enumOption',
+      schemaVersion: version,
+      optionId: `${ids.namespace}:option.${local}_${name}_${value}`,
+      label: value.replaceAll('_', ' '),
+      orderKey: (index + 1) * 10,
+    })),
+  });
+  const specs: Array<readonly [string, string, string, FieldType, boolean?]> = [
+    ['reservation', 'number', 'Reservation number', text(60)],
+    [
+      'reservation',
+      'state',
+      'State',
+      enumType('reservation', 'state', [
+        'draft',
+        'active',
+        'partially_consumed',
+        'consumed',
+        'released',
+      ]),
+    ],
+    ['reservation', 'item_id', 'Item', text(80)],
+    ['reservation', 'location_id', 'Location', text(80)],
+    ['reservation', 'quantity', 'Quantity', decimal()],
+    ['reservation', 'unit_id', 'Base unit', text(32)],
+    ['reservation', 'reason', 'Release reason', text(1000), true],
+    [
+      'reservation_balance',
+      'remaining_quantity',
+      'Reserved quantity',
+      decimal(),
+    ],
+    ['reservation_balance', 'unit_id', 'Base unit', text(32)],
+    ['shipment', 'number', 'Shipment number', text(60)],
+    [
+      'shipment',
+      'state',
+      'State',
+      enumType('shipment', 'state', ['draft', 'posted']),
+    ],
+    [
+      'shipment',
+      'kind',
+      'Kind',
+      enumType('shipment', 'kind', ['initial', 'correction', 'reversal']),
+    ],
+    ['shipment', 'effective_at', 'Shipped at', instant()],
+    ['shipment', 'location_id', 'Ship-from location', text(80)],
+    ['shipment', 'external_reference', 'External reference', text(120), true],
+    ['shipment', 'reason_code', 'Reason code', text(80)],
+    ['shipment', 'reason_narrative', 'Reason', text(1000), true],
+    ['shipment_line', 'line_number', 'Line number', integer()],
+    ['shipment_line', 'item_id', 'Item', text(80)],
+    ['shipment_line', 'quantity', 'Quantity', decimal()],
+    ['shipment_line', 'unit_id', 'Base unit', text(32)],
+    [
+      'shipment_line',
+      'reversal_of_movement_id',
+      'Compensated movement',
+      text(80),
+      true,
+    ],
+    ['sales_order_shipped', 'shipped_quantity', 'Shipped quantity', decimal()],
+    ['sales_order_shipped', 'unit_id', 'Base unit', text(32)],
+  ];
+  return specs.map(([local, name, label, type, optional], index) =>
+    field(
+      ids,
+      `${ids.namespace}:entity.${local}`,
+      `${ids.namespace}:field.${local}_${name}`,
+      label,
+      (index + 1) * 10,
+      type,
+      {
+        optional: optional ?? false,
+        searchable: ['number', 'item_id', 'location_id', 'unit_id'].includes(
+          name,
+        ),
+        businessKey: name === 'number',
+      },
+    ),
+  );
+}
+
+function fulfillmentOperation(
+  ids: SalesIds,
+  local: string,
+  action: string,
+): Record<string, unknown> {
+  return {
+    confirmation: 'humanRequired',
+    effect: {
+      kind: 'registeredCapabilityEffect',
+      schemaVersion: version,
+      capability: reference('capabilityReference', FULFILLMENT_CAPABILITY_ID),
+    },
+    kind: 'operationDefinition',
+    module: reference('moduleReference', ids.moduleId),
+    operationId: `${ids.namespace}:operation.${local}_${action}`,
+    permission: reference(
+      'permissionReference',
+      `${ids.namespace}:permission.${local}_${action}`,
+    ),
+    readBack: reference(
+      'queryReference',
+      `${ids.namespace}:query.${local}_get`,
+    ),
+    schemaVersion: version,
+    tier: 'o1',
   };
 }
 
@@ -441,9 +722,61 @@ function selectedFieldsForEntity(
   ids: SalesIds,
   local: string,
 ): readonly string[] {
-  return local === 'sales_order'
-    ? [ids.stateFieldId, ...Object.values(ids.fieldIds.salesOrder)]
-    : Object.values(ids.fieldIds.salesOrderLine);
+  if (local === 'sales_order')
+    return [ids.stateFieldId, ...Object.values(ids.fieldIds.salesOrder)];
+  if (local === 'sales_order_line')
+    return Object.values(ids.fieldIds.salesOrderLine);
+  const fields: Record<string, readonly string[]> = {
+    reservation: [
+      'number',
+      'state',
+      'item_id',
+      'location_id',
+      'quantity',
+      'unit_id',
+      'reason',
+    ],
+    reservation_balance: ['remaining_quantity', 'unit_id'],
+    shipment: [
+      'number',
+      'state',
+      'kind',
+      'effective_at',
+      'location_id',
+      'external_reference',
+      'reason_code',
+      'reason_narrative',
+    ],
+    shipment_line: [
+      'line_number',
+      'item_id',
+      'quantity',
+      'unit_id',
+      'reversal_of_movement_id',
+    ],
+    sales_order_shipped: ['shipped_quantity', 'unit_id'],
+  };
+  return (fields[local] ?? []).map(
+    (name) => `${ids.namespace}:field.${local}_${name}`,
+  );
+}
+
+function resolveFieldForEntity(ids: SalesIds, local: string): string {
+  const name =
+    local === 'sales_order'
+      ? 'sales_order_number'
+      : local === 'sales_order_line'
+        ? 'sales_order_line_item_id'
+        : local === 'reservation'
+          ? 'reservation_number'
+          : local === 'reservation_balance'
+            ? 'reservation_balance_unit_id'
+            : local === 'shipment'
+              ? 'shipment_number'
+              : local === 'shipment_line'
+                ? 'shipment_line_item_id'
+                : 'sales_order_shipped_unit_id';
+  return `${ids.namespace}:field.${name}`;
 }
 
 function entity(

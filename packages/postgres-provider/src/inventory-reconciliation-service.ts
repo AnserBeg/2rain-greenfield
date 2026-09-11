@@ -13,6 +13,8 @@ import {
 import { withTrustedRequestTransaction } from './request-context.js';
 import { receiptBinding } from './goods-receipt.js';
 import { reconcileReceivedQuantities } from './received-quantity-projection.js';
+import { fulfillmentBinding } from './fulfillment.js';
+import { reconcileFulfillmentProjections } from './fulfillment-projections.js';
 
 export const INVENTORY_RECONCILIATION_REPORT_VERSION =
   'northstar.inventory-reconciliation-report/v1' as const;
@@ -30,7 +32,9 @@ export type InventoryReconciliationArmIdV1 =
   | 'aggregateAnchors'
   | 'postedStockBalances'
   | 'sourceDocuments'
-  | 'receivedQuantities';
+  | 'receivedQuantities'
+  | 'reservationCoverage'
+  | 'salesOrderShipped';
 
 /**
  * Three outcomes, never two. ADR-0044's rule applied to reconciliation:
@@ -51,6 +55,8 @@ export type InventoryReconciliationAxisV1 = 'balance' | 'integrity';
 
 export type InventoryReconciliationFindingCodeV1 =
   | 'RECEIVED_QUANTITY_LEDGER_DIVERGED'
+  | 'RESERVATION_COVERAGE_DIVERGED'
+  | 'SALES_ORDER_SHIPPED_DIVERGED'
   | 'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED'
   | 'AGGREGATE_ANCHOR_DIGEST_DIVERGED'
   | 'AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE'
@@ -546,6 +552,67 @@ export class PostgresInventoryReconciliationService {
             });
           }
           arms.push(arm.freeze());
+        }
+        const fulfillment = fulfillmentBinding(this.registration.storageTarget);
+        if (fulfillment) {
+          const comparison = await reconcileFulfillmentProjections(
+            client,
+            fulfillment,
+            { ...context, legalEntityIds },
+          );
+          for (const family of ['reservation', 'shipped'] as const) {
+            const arm = new ArmAccumulator(
+              family === 'reservation'
+                ? 'reservationCoverage'
+                : 'salesOrderShipped',
+            );
+            const divergent = new Set(
+              comparison.discrepancies
+                .filter(
+                  (row) =>
+                    (family === 'reservation'
+                      ? fulfillment.reservationBalance.entityId
+                      : fulfillment.shipped.entityId) ===
+                    row.projectionEntityId,
+                )
+                .map((row) => JSON.stringify(row.subjectIdentity)),
+            );
+            for (const row of comparison.expected.filter(
+              (candidate) => candidate.family === family,
+            )) {
+              const subjectId = JSON.stringify([
+                context.tenantId,
+                context.environmentId,
+                row.legalEntityId,
+                row.recordId,
+              ]);
+              arm.examined(subjectId, 'balance');
+              arm.examined(subjectId, 'integrity');
+              if (!divergent.has(subjectId)) arm.consistent(subjectId);
+            }
+            for (const row of comparison.discrepancies.filter(
+              (candidate) =>
+                candidate.projectionEntityId ===
+                (family === 'reservation'
+                  ? fulfillment.reservationBalance.entityId
+                  : fulfillment.shipped.entityId),
+            )) {
+              const subjectId = JSON.stringify(row.subjectIdentity);
+              arm.examined(subjectId, 'balance');
+              arm.discrepant(subjectId, {
+                axis: 'balance',
+                code:
+                  family === 'reservation'
+                    ? 'RESERVATION_COVERAGE_DIVERGED'
+                    : 'SALES_ORDER_SHIPPED_DIVERGED',
+                severity: 'discrepant',
+                declaredValue: JSON.stringify(row.stored),
+                observedValue: JSON.stringify(row.recomputed),
+                detail: { projectionEntityId: row.projectionEntityId },
+              });
+            }
+            arms.push(arm.freeze());
+          }
         }
         const findings = arms.flatMap((arm) => arm.findings);
         const subjectCount = arms.reduce(

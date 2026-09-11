@@ -80,9 +80,11 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     moduleId: 'northstar.sales:module.sales',
     packageId: 'northstar.sales:package.sales',
     sourceDirectory: 'sales',
-    // Measured from Sales' two ordinary list/detail/form document shapes. The
-    // 23 residuals are the already-known shared childTables/activity and list
-    // affordance gaps; no new violation kind or renderer exemption is added.
-    violationCount: 23,
+    // Measured from the composed release because fulfillment now consumes the
+    // registered Inventory contract. Sales' nineteen order, reservation,
+    // shipment and read-model surfaces carry 66 instances of the already-known
+    // childTables/activity and list-affordance gaps. No new violation kind or
+    // renderer exemption is introduced by this ratchet move.
+    violationCount: 66,
   }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);

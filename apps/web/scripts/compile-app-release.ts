@@ -43,12 +43,14 @@ const experimentalOutputProtocol =
 const truncateInvalidLineage = process.argv.includes(
   '--truncate-invalid-lineage',
 );
+const preTenantRebaseline = process.argv.includes('--pre-tenant-rebaseline');
 const checkOnly = process.argv.includes('--check');
 
-if (truncateInvalidLineage && checkOnly) {
-  throw new Error(
-    '--truncate-invalid-lineage writes a new lineage and cannot be combined with --check',
-  );
+if ((truncateInvalidLineage || preTenantRebaseline) && checkOnly) {
+  throw new Error('lineage rewrite options cannot be combined with --check');
+}
+if (truncateInvalidLineage && preTenantRebaseline) {
+  throw new Error('choose truncation or the ADR-0066 pre-tenant rebaseline');
 }
 
 const authored = parseAuthoredApplicationPackageJson(
@@ -104,9 +106,10 @@ function recordedAcknowledgement(
     new Set(recorded.permissions.map((permission) => permission.permissionId)),
   );
 }
-const existing = existsSync(outputPath)
-  ? (JSON.parse(readFileSync(outputPath, 'utf8')) as unknown)
-  : null;
+const existing =
+  !preTenantRebaseline && existsSync(outputPath)
+    ? (JSON.parse(readFileSync(outputPath, 'utf8')) as unknown)
+    : null;
 const verified = existing
   ? truncateInvalidLineage
     ? longestValidExperimentalLineagePrefix(existing)

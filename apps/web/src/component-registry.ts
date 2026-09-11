@@ -20,7 +20,10 @@ import {
   type ReceivingNavigation,
   type ReceivingSection,
 } from './receiving-section.js';
-import type { SalesOrderSection } from './sales-section.js';
+import type {
+  SalesOrderSection,
+  ShipmentPackingDocument,
+} from './sales-section.js';
 import { sharedListView } from './list-runtime.js';
 import type { QueryDiagnosticCode } from './message-catalog.js';
 import {
@@ -101,6 +104,7 @@ export type SurfaceDataRenderState =
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
       readonly salesOrder?: SalesOrderSection;
+      readonly packingDocument?: ShipmentPackingDocument;
       readonly result?: SemanticQueryResultEnvelope;
       readonly status: 'READY';
     }
@@ -769,7 +773,7 @@ function renderSections(context: SurfaceComponentContext): string {
     return slotPanel(
       context,
       record
-        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
+        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
         : dataDiagnostic('QUERY_NOT_FOUND'),
       'sections-slot',
     );
@@ -815,10 +819,26 @@ function renderSalesOrderSection(section: SalesOrderSection): string {
   const rows = section.lines
     .map(
       (line) =>
-        `<tr data-sales-order-line="${escapeHtml(line.recordId)}"><td><a href="${link('sales_order_line_detail', line.recordId)}">${escapeHtml(line.lineNumber)}</a></td><td>${escapeHtml(line.item)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(line.unit)}</td><td>${escapeHtml(line.unitPrice)}</td></tr>`,
+        `<tr data-sales-order-line="${escapeHtml(line.recordId)}"><td><a href="${link('sales_order_line_detail', line.recordId)}">${escapeHtml(line.lineNumber)}</a></td><td>${escapeHtml(line.item)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(line.reservationCoverage)}</td><td>${escapeHtml(line.netShipped)}</td><td>${escapeHtml(line.openToShip)}</td><td>${escapeHtml(line.unit)}</td><td>${escapeHtml(line.unitPrice)}</td></tr>`,
     )
     .join('');
-  return `<section class="panel data-panel" data-sales-order-lines><h2>Order lines</h2><p><a href="${link('sales_order_line_form')}">Add sales order line</a> · <a href="${link('sales_order_line_list')}">View all sales order lines</a></p><table><thead><tr><th>Line</th><th>Item</th><th>Quantity</th><th>Unit</th><th>Unit price</th></tr></thead><tbody>${rows}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<p>Release accepts the order without reserving stock. Shipment, reservation and fulfilment quantities are not part of this increment.</p></section>`;
+  const stock = section.stock
+    .map(
+      (row) =>
+        `<tr data-stock-identity="${escapeHtml(`${row.item}:${row.location}`)}"><td>${escapeHtml(row.item)}</td><td>${escapeHtml(row.location)}</td><td>${escapeHtml(row.onHand)}</td><td>${escapeHtml(row.reserved)}</td><td>${escapeHtml(row.available)}</td></tr>`,
+    )
+    .join('');
+  return `<section class="panel data-panel" data-sales-order-lines><h2>Fulfillment</h2><p><a href="${link('reservation_form')}">Create reservation</a> · <a href="${link('reservation_list')}">View reservations</a> · <a href="${link('shipment_form')}">Create shipment</a> · <a href="${link('shipment_list')}">View shipments and corrections</a></p><p>Reserve a manually selected item, location and exact quantity. Shortages are refused. Ship only against selected live reservations; allocation and unreserved shipping are not available.</p><table><thead><tr><th>Line</th><th>Item</th><th>Ordered</th><th>Reservation coverage</th><th>Net shipped</th><th>Open to ship</th><th>Unit</th><th>Unit price</th></tr></thead><tbody>${rows}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<h3>Stock coverage</h3><table><thead><tr><th>Item</th><th>Location</th><th>On hand</th><th>Reserved</th><th>Available</th></tr></thead><tbody>${stock}</tbody></table>${section.stock.length === 0 ? '<p>Create a reservation to show its selected stock identity.</p>' : ''}<p>Corrections append compensating movements. A released reservation is never silently resurrected; create a new reservation if more stock must be committed.</p></section>`;
+}
+
+function renderPackingDocument(document: ShipmentPackingDocument): string {
+  const rows = document.lines
+    .map(
+      (line) =>
+        `<tr><td>${escapeHtml(line.lineNumber)}</td><td>${escapeHtml(line.item)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(line.unit)}</td></tr>`,
+    )
+    .join('');
+  return `<section class="panel data-panel packing-document" data-packing-document><div class="panel__heading"><div><h2>Packing document ${escapeHtml(document.shipmentNumber)}</h2><p>Printable committed shipment facts</p></div></div><dl class="key-fact-grid"><div><dt>Sales order</dt><dd>${escapeHtml(document.orderId)}</dd></div><div><dt>Ship-from location</dt><dd>${escapeHtml(document.location)}</dd></div><div><dt>Shipped at</dt><dd>${escapeHtml(document.effectiveAt)}</dd></div><div><dt>External reference</dt><dd>${escapeHtml(document.externalReference)}</dd></div></dl><table><thead><tr><th>Line</th><th>Item</th><th>Quantity</th><th>Unit</th></tr></thead><tbody>${rows}</tbody></table><p class="print-guidance">Use the browser print command to print or save this packing document.</p></section>`;
 }
 
 type FormAdmissionDecision =
@@ -1123,6 +1143,7 @@ function previousPageHref(
           includeArchived: coverage.includeArchived,
           matchMode: coverage.matchMode,
           pageOffset: previousOffset,
+          parentScope: null,
           relationLabels: [],
           requestedPageSize: coverage.requestedPageSize,
           schemaVersion: SHARED_LIST_QUERY_VERSION,

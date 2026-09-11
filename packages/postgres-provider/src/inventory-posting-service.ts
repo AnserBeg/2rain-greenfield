@@ -58,6 +58,22 @@ import {
   type GoodsReceiptCommand,
   type DerivedGoodsReceiptCommand,
 } from './goods-receipt.js';
+import {
+  FULFILLMENT_CAPABILITY_ID,
+  FULFILLMENT_CAPABILITY_VERSION,
+  fulfillmentBinding,
+  fulfillmentColumn,
+  fulfillmentDecimal,
+  fulfillmentOption,
+  fulfillmentProjectionIdentity,
+  fulfillmentQuantity,
+  fulfillmentRelation,
+  fulfillmentTable,
+  quoteFulfillmentIdentifier,
+  type DerivedShipmentCommand,
+  type FulfillmentBinding,
+  type ShipmentCommand,
+} from './fulfillment.js';
 
 /**
  * The version this provider IMPLEMENTS, imported from the frozen contract that
@@ -119,7 +135,9 @@ interface PostingFamilyCompanionDeclarationV1 {
 
 interface PostingFamilyDeclarationV1 {
   readonly capabilityId:
-    typeof INVENTORY_POSTING_CAPABILITY_ID | typeof RECEIVING_CAPABILITY_ID;
+    | typeof INVENTORY_POSTING_CAPABILITY_ID
+    | typeof RECEIVING_CAPABILITY_ID
+    | typeof FULFILLMENT_CAPABILITY_ID;
   readonly companion: PostingFamilyCompanionDeclarationV1 | null;
   readonly familyId: string;
   readonly origin: 'authored' | 'companion';
@@ -130,6 +148,26 @@ interface PostingFamilyDeclarationV1 {
 }
 
 const INVENTORY_POSTING_FAMILIES_V1 = Object.freeze([
+  Object.freeze({
+    capabilityId: FULFILLMENT_CAPABILITY_ID,
+    companion: {
+      companionEntitySuffix: 'inventory_transaction',
+      companionLineEntitySuffix: 'inventory_transaction_line',
+      numberPrefix: 'SH',
+      sourceLineEntitySuffix: 'shipment_line',
+    },
+    familyId: 'shipment',
+    origin: 'companion',
+    roles: [
+      {
+        movementOption: 'shipment',
+        postingRole: 'shipment' as const,
+        transactionTypeOption: 'shipment',
+      },
+    ],
+    sourceEntitySuffix: 'shipment',
+    sourceType: 'shipment',
+  }),
   Object.freeze({
     capabilityId: RECEIVING_CAPABILITY_ID,
     companion: {
@@ -284,10 +322,13 @@ export interface InventoryRecordedAtAuthority {
 
 export interface InventoryPostingRegistrationV1 {
   readonly capabilityId:
-    typeof INVENTORY_POSTING_CAPABILITY_ID | typeof RECEIVING_CAPABILITY_ID;
+    | typeof INVENTORY_POSTING_CAPABILITY_ID
+    | typeof RECEIVING_CAPABILITY_ID
+    | typeof FULFILLMENT_CAPABILITY_ID;
   readonly capabilityVersion:
     | typeof INVENTORY_POSTING_CAPABILITY_VERSION
-    | typeof RECEIVING_CAPABILITY_VERSION;
+    | typeof RECEIVING_CAPABILITY_VERSION
+    | typeof FULFILLMENT_CAPABILITY_VERSION;
   readonly dependencySetRoot: typeof INVENTORY_POSTING_DEPENDENCY_SET_ROOT;
   readonly releaseContentHash: string;
   readonly releaseId: string;
@@ -419,6 +460,7 @@ interface DerivedStockCountCommand extends Omit<
 
 export type InventoryPostingCommandV1 =
   | GoodsReceiptCommand
+  | ShipmentCommand
   | InventoryAdjustmentPostingCommandV1
   | InventoryStockCountPostingCommandV2
   | InventoryTransferPostingCommandV1;
@@ -431,12 +473,13 @@ export type InventoryPostingCommandV1 =
  */
 type DerivedPostingCommand =
   | DerivedGoodsReceiptCommand
+  | DerivedShipmentCommand
   | InventoryAdjustmentPostingCommandV1
   | DerivedStockCountCommand
   | InventoryTransferPostingCommandV1;
 
 export type InventoryPostingRoleV1 =
-  'adjustment' | 'correction' | 'count' | 'transfer' | 'receipt';
+  'adjustment' | 'correction' | 'count' | 'transfer' | 'receipt' | 'shipment';
 
 export interface InventoryMovementOrderEntryV1 {
   readonly effectiveAt: string;
@@ -504,7 +547,8 @@ export interface InventoryPostingResultV1 {
   readonly capabilityId: string;
   readonly capabilityVersion:
     | typeof INVENTORY_POSTING_CAPABILITY_VERSION
-    | typeof RECEIVING_CAPABILITY_VERSION;
+    | typeof RECEIVING_CAPABILITY_VERSION
+    | typeof FULFILLMENT_CAPABILITY_VERSION;
   readonly movements: readonly PostedInventoryMovementV1[];
   readonly negativeStockFlag: boolean;
   readonly recordedAt: string;
@@ -702,6 +746,7 @@ interface MovementEffectReservationBinding {
 
 interface PostingStorageBinding {
   receipt: ReceiptBinding | null;
+  fulfillment: FulfillmentBinding | null;
   item: EntityBinding;
   itemBaseUnitColumn: string;
   legalEntity: EntityBinding;
@@ -832,7 +877,8 @@ interface VersionedInputDigest {
   readonly version:
     | typeof standardInventoryPostingInputDigestVersion
     | typeof companionDerivedInventoryPostingInputDigestVersion
-    | 5;
+    | 5
+    | 6;
 }
 
 interface EvidenceIds {
@@ -849,6 +895,11 @@ interface EvidenceIds {
 // reselected one by posting role inside `#post`, so the pair-keyed binding was
 // not what executed and the reviewer was right that the key was decorative.
 type ParsedPosting =
+  | {
+      readonly command: DerivedShipmentCommand;
+      readonly family: ResolvedPostingFamily;
+      readonly postingRole: 'shipment';
+    }
   | {
       readonly command: DerivedGoodsReceiptCommand;
       readonly family: ResolvedPostingFamily;
@@ -1050,6 +1101,102 @@ export class PostgresInventoryPostingService {
     });
   }
 
+  async postShipment(
+    context: TrustedRequestContext,
+    actorEnvelope: TrustedActorEnvelope,
+    command: ShipmentCommand,
+  ): Promise<InventoryPostingResultV1> {
+    const family = this.#familyFor('shipment');
+    validateCommandEnvelope(
+      command,
+      [
+        'kind',
+        'shipmentNumber',
+        'orderId',
+        'locationId',
+        'supersedesShipmentId',
+      ],
+      family,
+    );
+    requiredUuid(command.orderId, 'orderId');
+    requiredUuid(command.locationId, 'locationId');
+    requiredUuid(command.sourceId, 'sourceId');
+    requiredText(command.shipmentNumber, 'shipmentNumber', 60);
+    if (
+      command.sourceType !== 'shipment' ||
+      !['initial', 'correction', 'reversal'].includes(command.kind) ||
+      command.lines.length === 0 ||
+      (command.kind === 'initial') !== (command.supersedesShipmentId === null)
+    )
+      throw inputError('Invalid shipment source or correction link');
+    if (command.supersedesShipmentId !== null)
+      requiredUuid(command.supersedesShipmentId, 'supersedesShipmentId');
+    const normalized = {
+      ...normalizeCommandEnvelope(structuredClone(command)),
+      sourceId: command.sourceId.toLowerCase(),
+      orderId: command.orderId.toLowerCase(),
+      locationId: command.locationId.toLowerCase(),
+      supersedesShipmentId: command.supersedesShipmentId?.toLowerCase() ?? null,
+      lines: command.lines.map((line) => ({
+        ...line,
+        shipmentLineId: line.shipmentLineId.toLowerCase(),
+        orderLineId: line.orderLineId.toLowerCase(),
+        reservationId: line.reservationId.toLowerCase(),
+        itemId: line.itemId.toLowerCase(),
+        reversalOfMovementId: line.reversalOfMovementId?.toLowerCase() ?? null,
+      })),
+    };
+    const ids = new Set<string>();
+    const derived: DerivedShipmentCommand = {
+      ...normalized,
+      transactionId: deriveInventoryPostingCompanionId({
+        capabilityId: FULFILLMENT_CAPABILITY_ID,
+        familyId: 'shipment',
+        companionFamilyId: family.companion!.companionEntityId,
+        sourceRecordId: normalized.sourceId,
+      }),
+      lines: normalized.lines.map((line) => {
+        for (const [value, label] of [
+          [line.shipmentLineId, 'shipmentLineId'],
+          [line.orderLineId, 'orderLineId'],
+          [line.reservationId, 'reservationId'],
+          [line.itemId, 'itemId'],
+        ] as const)
+          requiredUuid(value, label);
+        requiredText(line.sourceLine, 'sourceLine', 80);
+        requiredText(line.unitId, 'unitId', 32);
+        if (ids.has(line.shipmentLineId))
+          throw inputError('Duplicate shipment line');
+        ids.add(line.shipmentLineId);
+        const quantity = fulfillmentQuantity(line.quantityDelta);
+        if (
+          quantity === 0n ||
+          (normalized.kind === 'initial'
+            ? quantity > 0n || line.reversalOfMovementId !== null
+            : quantity < 0n || line.reversalOfMovementId === null)
+        )
+          throw inputError(
+            'Ship positive entered quantities; corrections must restore a named shipment movement',
+          );
+        return {
+          ...line,
+          quantityDelta: fulfillmentDecimal(quantity),
+          transactionLineId: deriveInventoryPostingCompanionId({
+            capabilityId: FULFILLMENT_CAPABILITY_ID,
+            familyId: 'shipment',
+            companionFamilyId: family.companion!.companionLineEntityId,
+            sourceRecordId: line.shipmentLineId,
+          }),
+        };
+      }),
+    };
+    return this.#post(context, actorEnvelope, {
+      command: derived,
+      family,
+      postingRole: 'shipment',
+    });
+  }
+
   #familyFor(familyId: string): ResolvedPostingFamily {
     return requiredPostingFamily(
       this.#binding,
@@ -1181,6 +1328,15 @@ export class PostgresInventoryPostingService {
               posting.command,
             )
           : null;
+      const shipmentEvidence =
+        posting.postingRole === 'shipment'
+          ? await lockShipment(
+              client,
+              this.#binding.fulfillment!,
+              context,
+              posting.command,
+            )
+          : null;
       // PUR-2a. Execution is selected by the compiled family binding the entry
       // point resolved by `(capabilityId, familyId)`, not by a source-type
       // literal and not by a second lookup keyed on the role. An
@@ -1271,6 +1427,26 @@ export class PostgresInventoryPostingService {
             },
           );
       }
+      if (posting.postingRole === 'shipment') {
+        await assertShipmentBounds(
+          client,
+          this.#binding.fulfillment!,
+          context,
+          posting.command,
+          shipmentEvidence!,
+        );
+        await assertShipmentCompensation(
+          client,
+          this.#binding.fulfillment!,
+          context,
+          posting.command,
+        );
+        if (dateOrdinal(businessPeriod) > dateOrdinal(recordedPeriod))
+          throw postingError(
+            'FULFILLMENT_SHIPMENT_INVALID',
+            'Shipments cannot be posted after the current tenant business day',
+          );
+      }
       if (isStockCountPosting(posting)) {
         await assertStockCountCompensationAvailable(
           client,
@@ -1293,6 +1469,12 @@ export class PostgresInventoryPostingService {
         parsed.legalEntityId,
         configuration,
         ordered,
+        posting.postingRole === 'shipment'
+          ? {
+              binding: this.#binding.fulfillment!,
+              command: posting.command,
+            }
+          : null,
       );
       enforceReasonAndApproval(configuration, actorEnvelope.actor, posting);
       enforceBackdate(configuration, businessPeriod, recordedPeriod);
@@ -1326,7 +1508,9 @@ export class PostgresInventoryPostingService {
         // The companion must exist before the movements that reference it.
         if (
           companionOrigin &&
-          (isStockCountPosting(posting) || posting.postingRole === 'receipt')
+          (isStockCountPosting(posting) ||
+            posting.postingRole === 'receipt' ||
+            posting.postingRole === 'shipment')
         ) {
           transactionRevision = await writeCompanionTransaction(
             client,
@@ -1382,6 +1566,18 @@ export class PostgresInventoryPostingService {
             coverage,
           );
           stockCountRevision = parsed.sourceRevision + 1;
+        }
+        if (posting.postingRole === 'shipment') {
+          stockCountRevision = await writeShipmentConsequences(
+            client,
+            this.#binding,
+            context,
+            posting,
+            shipmentEvidence!,
+            actorEnvelope.actor.executionPrincipal.principalId,
+            recordedAt,
+            coverage,
+          );
         }
         if (!companionOrigin) {
           transactionRevision = await transitionTransactionToPosted(
@@ -1648,7 +1844,9 @@ function validateRegistration(
         registration.capabilityVersion ===
           INVENTORY_POSTING_CAPABILITY_VERSION) ||
       (registration.capabilityId === RECEIVING_CAPABILITY_ID &&
-        registration.capabilityVersion === RECEIVING_CAPABILITY_VERSION)
+        registration.capabilityVersion === RECEIVING_CAPABILITY_VERSION) ||
+      (registration.capabilityId === FULFILLMENT_CAPABILITY_ID &&
+        registration.capabilityVersion === FULFILLMENT_CAPABILITY_VERSION)
     ) ||
     registration.dependencySetRoot !== INVENTORY_POSTING_DEPENDENCY_SET_ROOT
   ) {
@@ -1822,7 +2020,11 @@ function resolvePostingStorage(
       .filter(
         (entity) =>
           entity.entityId.endsWith(':entity.goods_receipt') ||
-          entity.entityId.endsWith(':entity.purchase_order_received'),
+          entity.entityId.endsWith(':entity.purchase_order_received') ||
+          entity.entityId.endsWith(':entity.shipment') ||
+          entity.entityId.endsWith(':entity.reservation') ||
+          entity.entityId.endsWith(':entity.reservation_balance') ||
+          entity.entityId.endsWith(':entity.sales_order_shipped'),
       )
       .map((entity) => entity.entityId),
     movementEntity.entityId,
@@ -1850,6 +2052,18 @@ function resolvePostingStorage(
         .map((entity) => ({
           relation: entity.physicalTableName,
           verifiedBy: [verifyGoodsReceiptPosting],
+        })),
+      ...target.entities
+        .filter(
+          (entity) =>
+            entity.entityId.endsWith(':entity.shipment') ||
+            entity.entityId.endsWith(':entity.reservation') ||
+            entity.entityId.endsWith(':entity.reservation_balance') ||
+            entity.entityId.endsWith(':entity.sales_order_shipped'),
+        )
+        .map((entity) => ({
+          relation: entity.physicalTableName,
+          verifiedBy: [verifyShipmentPosting],
         })),
       { relation: movement.tableName, verifiedBy: [readBackMovements] },
       // A routed row is observed by reading the PARTITIONED PARENT, which is the
@@ -1880,6 +2094,7 @@ function resolvePostingStorage(
           assertCompanionIdentitiesPersisted,
           assertAuthoredTransactionPersisted,
           verifyGoodsReceiptPosting,
+          verifyShipmentPosting,
         ],
       },
       {
@@ -1887,6 +2102,7 @@ function resolvePostingStorage(
         verifiedBy: [
           assertCompanionIdentitiesPersisted,
           verifyGoodsReceiptPosting,
+          verifyShipmentPosting,
         ],
       },
       ...(postedStockBalanceEntity
@@ -1902,6 +2118,7 @@ function resolvePostingStorage(
   return Object.freeze({
     families,
     receipt: receiptBinding(target),
+    fulfillment: fulfillmentBinding(target),
     movementPostingRoleByOption,
     postingRoles,
     item,
@@ -2371,6 +2588,13 @@ function resolvePostingFamilies(
       declaration.familyId === 'goods_receipt' &&
       !target.entities.some((entry) =>
         entry.entityId.endsWith(':entity.goods_receipt'),
+      )
+    )
+      continue;
+    if (
+      declaration.familyId === 'shipment' &&
+      !target.entities.some((entry) =>
+        entry.entityId.endsWith(':entity.shipment'),
       )
     )
       continue;
@@ -3047,6 +3271,19 @@ function plannedMovements(
         line.reversalOfMovementId,
       ),
     );
+  if (posting.postingRole === 'shipment')
+    return posting.command.lines.map((line) =>
+      plannedMovement(
+        posting.command,
+        line,
+        posting.command.locationId,
+        line.quantityDelta,
+        line.shipmentLineId,
+        'shipment',
+        mintUuid,
+        line.reversalOfMovementId,
+      ),
+    );
   if (posting.postingRole === 'adjustment') {
     return posting.command.lines.map((line) =>
       plannedMovement(
@@ -3102,7 +3339,8 @@ function plannedMovement(
     | InventoryAdjustmentLineV1
     | DerivedStockCountLine
     | InventoryTransferLineV1
-    | DerivedGoodsReceiptCommand['lines'][number],
+    | DerivedGoodsReceiptCommand['lines'][number]
+    | DerivedShipmentCommand['lines'][number],
   locationId: string,
   quantityDelta: string,
   sourceLine: string,
@@ -3499,7 +3737,7 @@ function enforceReasonAndApproval(
 ): void {
   const { command } = posting;
   const postingRole =
-    posting.postingRole === 'receipt'
+    posting.postingRole === 'receipt' || posting.postingRole === 'shipment'
       ? posting.command.kind === 'initial'
         ? 'adjustment'
         : 'correction'
@@ -3523,7 +3761,9 @@ function enforceReasonAndApproval(
   if (threshold === null) return;
   const scaledThreshold = decimalToScaled(threshold, 'approval threshold');
   const exceeds =
-    posting.postingRole === 'adjustment' || posting.postingRole === 'receipt'
+    posting.postingRole === 'adjustment' ||
+    posting.postingRole === 'receipt' ||
+    posting.postingRole === 'shipment'
       ? posting.command.lines.some(
           (line) =>
             absolute(decimalToScaled(line.quantityDelta, 'quantity')) >
@@ -3611,6 +3851,10 @@ async function enforceNegativeStock(
   legalEntityId: string,
   configuration: InventoryPostingConfiguration,
   movements: readonly PlannedMovement[],
+  shipment: {
+    readonly binding: FulfillmentBinding;
+    readonly command: DerivedShipmentCommand;
+  } | null = null,
 ): Promise<boolean> {
   let flagged = false;
   const grouped = Map.groupBy(
@@ -3751,8 +3995,156 @@ async function enforceNegativeStock(
       }
       if (configuration.negativeStock === 'allowWithFlag') flagged = true;
     }
+    const reservedBefore = await currentReservedAtIdentity(
+      client,
+      shipment?.binding ?? binding.fulfillment,
+      context,
+      legalEntityId,
+      identity.itemId,
+      identity.locationId,
+    );
+    if (reservedBefore !== null) {
+      let relief = 0n;
+      if (shipment) {
+        for (const line of shipment.command.lines.filter(
+          (candidate) =>
+            candidate.itemId === identity.itemId &&
+            shipment.command.locationId === identity.locationId,
+        )) {
+          const selected = await fulfillmentRowForPosting(
+            client,
+            shipment.binding,
+            context,
+            legalEntityId,
+            line.reservationId,
+          );
+          const released =
+            selected[
+              fulfillmentColumn(
+                shipment.binding.reservation,
+                'reservation_state',
+              )
+            ] ===
+            fulfillmentOption(
+              shipment.binding.reservation,
+              'reservation_state',
+              'released',
+            );
+          if (!released) relief += -fulfillmentQuantity(line.quantityDelta);
+        }
+      }
+      const finalOnHand = ordered.reduce(
+        (sum, movement) => sum + movement.quantityScaled,
+        0n,
+      );
+      const reservedAfter = reservedBefore - relief;
+      if (
+        reservedAfter < 0n ||
+        (reservedAfter > 0n && finalOnHand < reservedAfter)
+      )
+        throw postingError(
+          'FULFILLMENT_RESERVATION_SHORTAGE',
+          'Stock-reducing posting would consume inventory held by live reservations',
+          {
+            itemId: identity.itemId,
+            locationId: identity.locationId,
+            onHandAfter: scaledToDecimal(finalOnHand),
+            reservedAfter: scaledToDecimal(reservedAfter),
+          },
+        );
+    }
   }
   return flagged;
+}
+
+async function currentReservedAtIdentity(
+  client: PoolClient,
+  fulfillment: FulfillmentBinding | null,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  itemId: string,
+  locationId: string,
+): Promise<bigint | null> {
+  if (!fulfillment) return null;
+  const states = ['active', 'partially_consumed', 'consumed'].map((state) =>
+    fulfillmentOption(fulfillment.reservation, 'reservation_state', state),
+  );
+  const rows = await client.query<Record<string, unknown>>(
+    `SELECT * FROM ${fulfillmentTable(fulfillment.reservation)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoteFulfillmentIdentifier(fulfillment.reservation.legalEntity!.column)}=$3
+        AND ${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.reservation, 'reservation_item_id'))}=$4
+        AND ${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.reservation, 'reservation_location_id'))}=$5
+        AND ${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.reservation, 'reservation_state'))}=ANY($6::text[])
+        AND archived_at IS NULL ORDER BY record_id FOR NO KEY UPDATE`,
+    [
+      context.tenantId,
+      context.environmentId,
+      legalEntityId,
+      itemId,
+      locationId,
+      states,
+    ],
+  );
+  let total = 0n;
+  for (const reservation of rows.rows) {
+    const consumed = await client.query<{ quantity: string }>(
+      `SELECT coalesce(sum(-m.${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.movement, 'inventory_movement_quantity_delta'))}),0)::text AS quantity
+         FROM ${fulfillmentTable(fulfillment.movement)} m
+         JOIN ${fulfillmentTable(fulfillment.shipmentLine)} sl
+           ON sl.tenant_id=m.tenant_id AND sl.environment_id=m.environment_id
+          AND sl.${quoteFulfillmentIdentifier(fulfillment.shipmentLine.legalEntity!.column)}=m.${quoteFulfillmentIdentifier(fulfillment.movement.legalEntity!.column)}
+          AND sl.record_id::text=m.${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.movement, 'inventory_movement_source_line'))}
+        WHERE m.tenant_id=$1 AND m.environment_id=$2
+          AND m.${quoteFulfillmentIdentifier(fulfillment.movement.legalEntity!.column)}=$3
+          AND sl.${quoteFulfillmentIdentifier(fulfillmentRelation(fulfillment, fulfillment.shipmentLine, 'shipment_line_reservation'))}=$4
+          AND m.${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.movement, 'inventory_movement_source_type'))}='shipment'
+          AND m.archived_at IS NULL`,
+      [
+        context.tenantId,
+        context.environmentId,
+        legalEntityId,
+        reservation.record_id,
+      ],
+    );
+    const remaining =
+      fulfillmentQuantity(
+        String(
+          reservation[
+            fulfillmentColumn(fulfillment.reservation, 'reservation_quantity')
+          ],
+        ),
+      ) - fulfillmentQuantity(consumed.rows[0]!.quantity);
+    if (remaining < 0n)
+      throw postingError(
+        'FULFILLMENT_RESERVATION_STATE_CONFLICT',
+        'Reservation history reconstructs a negative remaining quantity',
+      );
+    total += remaining;
+  }
+  return total;
+}
+
+async function fulfillmentRowForPosting(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  recordId: string,
+): Promise<Record<string, unknown>> {
+  const result = await client.query<Record<string, unknown>>(
+    `SELECT * FROM ${fulfillmentTable(binding.reservation)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoteFulfillmentIdentifier(binding.reservation.legalEntity!.column)}=$3
+        AND record_id=$4`,
+    [context.tenantId, context.environmentId, legalEntityId, recordId],
+  );
+  if (result.rows.length !== 1)
+    throw postingError(
+      'FULFILLMENT_RESERVATION_STATE_CONFLICT',
+      'Selected reservation is missing',
+    );
+  return result.rows[0]!;
 }
 
 /**
@@ -4142,6 +4534,1156 @@ async function assertReceiptCompensation(
     );
 }
 
+interface LockedShipment {
+  readonly header: Record<string, unknown>;
+  readonly lines: readonly Record<string, unknown>[];
+  readonly order: Record<string, unknown>;
+  readonly orderLines: ReadonlyMap<string, Record<string, unknown>>;
+  readonly reservations: ReadonlyMap<string, Record<string, unknown>>;
+  readonly priorReservationBalances: ReadonlyMap<
+    string,
+    Record<string, unknown> | null
+  >;
+  readonly priorProgress: ReadonlyMap<string, Record<string, unknown> | null>;
+}
+
+async function fulfillmentRowForEntity(
+  client: PoolClient,
+  entity: StorageEntityTarget,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  recordId: string,
+  lock: boolean,
+): Promise<Record<string, unknown>> {
+  const result = await client.query<Record<string, unknown>>(
+    `SELECT row.*, (SELECT relname FROM pg_class WHERE oid=row.tableoid) AS "__relation"
+       FROM ${fulfillmentTable(entity)} row
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoteFulfillmentIdentifier(entity.legalEntity!.column)}=$3
+        AND record_id=$4 ${lock ? 'FOR NO KEY UPDATE OF row' : ''}`,
+    [context.tenantId, context.environmentId, legalEntityId, recordId],
+  );
+  if (result.rows.length !== 1)
+    throw postingError(
+      'FULFILLMENT_SHIPMENT_INVALID',
+      'Fulfillment record is missing or outside the legal-entity scope',
+      { recordId },
+    );
+  return result.rows[0]!;
+}
+
+function assertReleasedSalesOrder(
+  binding: FulfillmentBinding,
+  order: Record<string, unknown>,
+): void {
+  if (
+    order.archived_at !== null ||
+    !String(
+      order[
+        fulfillmentColumn(
+          binding.order,
+          'derived_state_field.machine.sales_order_lifecycle',
+        )
+      ],
+    ).endsWith(':state.sales_order_released')
+  )
+    throw postingError(
+      'FULFILLMENT_ORDER_NOT_RELEASED',
+      'Shipments require a released sales order',
+    );
+}
+
+async function assertShipmentCustomer(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  order: Record<string, unknown>,
+): Promise<void> {
+  const partyId = String(
+    order[fulfillmentColumn(binding.order, 'sales_order_customer_party_id')],
+  );
+  const result = await client.query(
+    `SELECT 1 FROM ${fulfillmentTable(binding.party)} p
+      JOIN ${fulfillmentTable(binding.partyRole)} r
+        ON r.tenant_id=p.tenant_id AND r.environment_id=p.environment_id
+       AND r.${quoteFulfillmentIdentifier(fulfillmentRelation(binding, binding.partyRole, 'party_role_party'))}=p.record_id
+      WHERE p.tenant_id=$1 AND p.environment_id=$2 AND p.record_id=$3
+        AND p.archived_at IS NULL AND r.archived_at IS NULL
+        AND r.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.partyRole, 'party_role_kind'))}=$4
+        AND r.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.partyRole, 'party_role_status'))}=$5
+      LIMIT 1 FOR NO KEY UPDATE OF p, r`,
+    [
+      context.tenantId,
+      context.environmentId,
+      partyId,
+      fulfillmentOption(binding.partyRole, 'party_role_kind', 'customer'),
+      fulfillmentOption(binding.partyRole, 'party_role_status', 'active'),
+    ],
+  );
+  if (result.rows.length !== 1)
+    throw postingError(
+      'FULFILLMENT_CUSTOMER_INELIGIBLE',
+      'Shipment customer must be an active, unarchived customer party',
+      { partyId },
+    );
+}
+
+async function reservationRemainingForPosting(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  reservation: Record<string, unknown>,
+): Promise<bigint> {
+  const original = fulfillmentQuantity(
+    String(
+      reservation[
+        fulfillmentColumn(binding.reservation, 'reservation_quantity')
+      ],
+    ),
+  );
+  const consumed = await client.query<{ quantity: string }>(
+    `SELECT coalesce(sum(-m.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_quantity_delta'))}),0)::text AS quantity
+       FROM ${fulfillmentTable(binding.movement)} m
+       JOIN ${fulfillmentTable(binding.shipmentLine)} sl
+         ON sl.tenant_id=m.tenant_id AND sl.environment_id=m.environment_id
+        AND sl.${quoteFulfillmentIdentifier(binding.shipmentLine.legalEntity!.column)}=m.${quoteFulfillmentIdentifier(binding.movement.legalEntity!.column)}
+        AND sl.record_id::text=m.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_source_line'))}
+      WHERE m.tenant_id=$1 AND m.environment_id=$2
+        AND m.${quoteFulfillmentIdentifier(binding.movement.legalEntity!.column)}=$3
+        AND sl.${quoteFulfillmentIdentifier(fulfillmentRelation(binding, binding.shipmentLine, 'shipment_line_reservation'))}=$4
+        AND m.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_source_type'))}='shipment'
+        AND m.archived_at IS NULL`,
+    [
+      context.tenantId,
+      context.environmentId,
+      legalEntityId,
+      reservation.record_id,
+    ],
+  );
+  return original - fulfillmentQuantity(consumed.rows[0]!.quantity);
+}
+
+async function shippedLedger(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  orderLineId: string,
+): Promise<{ quantity: bigint; unit: string | null; count: number }> {
+  const result = await client.query<{
+    quantity: string;
+    unit: string | null;
+    count: string;
+    units: string;
+  }>(
+    `SELECT coalesce(sum(-m.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_quantity_delta'))}),0)::text AS quantity,
+            min(m.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_unit_id'))}) AS unit,
+            count(*)::text AS count,
+            count(DISTINCT m.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_unit_id'))})::text AS units
+       FROM ${fulfillmentTable(binding.movement)} m
+       JOIN ${fulfillmentTable(binding.shipmentLine)} sl
+         ON sl.tenant_id=m.tenant_id AND sl.environment_id=m.environment_id
+        AND sl.${quoteFulfillmentIdentifier(binding.shipmentLine.legalEntity!.column)}=m.${quoteFulfillmentIdentifier(binding.movement.legalEntity!.column)}
+        AND sl.record_id::text=m.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_source_line'))}
+      WHERE m.tenant_id=$1 AND m.environment_id=$2
+        AND m.${quoteFulfillmentIdentifier(binding.movement.legalEntity!.column)}=$3
+        AND sl.${quoteFulfillmentIdentifier(fulfillmentRelation(binding, binding.shipmentLine, 'shipment_line_order_line'))}=$4
+        AND m.${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_source_type'))}='shipment'
+        AND m.archived_at IS NULL`,
+    [context.tenantId, context.environmentId, legalEntityId, orderLineId],
+  );
+  if (Number(result.rows[0]!.units) > 1)
+    throw postingError(
+      'FULFILLMENT_SHIPMENT_INVALID',
+      'Order-line shipment ledger contains multiple base units',
+    );
+  return {
+    quantity: fulfillmentQuantity(result.rows[0]!.quantity),
+    unit: result.rows[0]!.unit,
+    count: Number(result.rows[0]!.count),
+  };
+}
+
+async function lockShipment(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedShipmentCommand,
+): Promise<LockedShipment> {
+  const qf = quoteFulfillmentIdentifier;
+  const header = await fulfillmentRowForEntity(
+    client,
+    binding.shipment,
+    context,
+    command.legalEntityId,
+    command.sourceId,
+    false,
+  );
+  const candidateLines = await client.query<Record<string, unknown>>(
+    `SELECT * FROM ${fulfillmentTable(binding.shipmentLine)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${qf(binding.shipmentLine.legalEntity!.column)}=$3
+        AND ${qf(fulfillmentRelation(binding, binding.shipmentLine, 'shipment_line_shipment'))}=$4
+        AND archived_at IS NULL ORDER BY record_id`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+    ],
+  );
+  const order = await fulfillmentRowForEntity(
+    client,
+    binding.order,
+    context,
+    command.legalEntityId,
+    command.orderId,
+    true,
+  );
+  assertReleasedSalesOrder(binding, order);
+  await assertShipmentCustomer(client, binding, context, order);
+  const orderLines = new Map<string, Record<string, unknown>>();
+  for (const id of [
+    ...new Set(command.lines.map((line) => line.orderLineId)),
+  ].sort())
+    orderLines.set(
+      id,
+      await fulfillmentRowForEntity(
+        client,
+        binding.orderLine,
+        context,
+        command.legalEntityId,
+        id,
+        true,
+      ),
+    );
+  const reservations = new Map<string, Record<string, unknown>>();
+  const priorReservationBalances = new Map<
+    string,
+    Record<string, unknown> | null
+  >();
+  for (const id of [
+    ...new Set(command.lines.map((line) => line.reservationId)),
+  ].sort())
+    reservations.set(
+      id,
+      await fulfillmentRowForEntity(
+        client,
+        binding.reservation,
+        context,
+        command.legalEntityId,
+        id,
+        true,
+      ),
+    );
+  for (const id of reservations.keys()) {
+    const balanceId = fulfillmentProjectionIdentity(
+      context,
+      command.legalEntityId,
+      'reservation',
+      id,
+    );
+    await client.query(
+      'SET LOCAL ROLE north_star_fulfillment_projection_writer',
+    );
+    const prior = await client.query<Record<string, unknown>>(
+      `SELECT * FROM ${fulfillmentTable(binding.reservationBalance)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${qf(binding.reservationBalance.legalEntity!.column)}=$3
+          AND record_id=$4 FOR NO KEY UPDATE`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        balanceId,
+      ],
+    );
+    await client.query('SET LOCAL ROLE north_star_module_runtime');
+    priorReservationBalances.set(id, prior.rows[0] ?? null);
+  }
+  const lockedHeader = await fulfillmentRowForEntity(
+    client,
+    binding.shipment,
+    context,
+    command.legalEntityId,
+    command.sourceId,
+    true,
+  );
+  const linesResult = await client.query<Record<string, unknown>>(
+    `SELECT line.*, (SELECT relname FROM pg_class WHERE oid=line.tableoid) AS "__relation"
+       FROM ${fulfillmentTable(binding.shipmentLine)} line
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${qf(binding.shipmentLine.legalEntity!.column)}=$3
+        AND ${qf(fulfillmentRelation(binding, binding.shipmentLine, 'shipment_line_shipment'))}=$4
+        AND archived_at IS NULL ORDER BY record_id FOR NO KEY UPDATE OF line`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+    ],
+  );
+  if (
+    candidateLines.rows.length !== linesResult.rows.length ||
+    linesResult.rows.length !== command.lines.length ||
+    header.revision !== lockedHeader.revision
+  )
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Shipment line set changed while posting locks were acquired',
+    );
+  const priorProgress = new Map<string, Record<string, unknown> | null>();
+  for (const orderLineId of orderLines.keys()) {
+    const identity = fulfillmentProjectionIdentity(
+      context,
+      command.legalEntityId,
+      'shipped',
+      orderLineId,
+    );
+    await client.query(
+      'SET LOCAL ROLE north_star_fulfillment_projection_writer',
+    );
+    const progress = await client.query<Record<string, unknown>>(
+      `SELECT * FROM ${fulfillmentTable(binding.shipped)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${qf(binding.shipped.legalEntity!.column)}=$3 AND record_id=$4
+        FOR NO KEY UPDATE`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        identity,
+      ],
+    );
+    await client.query('SET LOCAL ROLE north_star_module_runtime');
+    priorProgress.set(orderLineId, progress.rows[0] ?? null);
+  }
+  return {
+    header: lockedHeader,
+    lines: linesResult.rows,
+    order,
+    orderLines,
+    reservations,
+    priorReservationBalances,
+    priorProgress,
+  };
+}
+
+async function assertShipmentBounds(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedShipmentCommand,
+  locked: LockedShipment,
+): Promise<void> {
+  const stateColumn = fulfillmentColumn(binding.shipment, 'shipment_state');
+  if (
+    locked.header.archived_at !== null ||
+    Number(locked.header.revision) !== command.sourceRevision ||
+    locked.header[stateColumn] !==
+      fulfillmentOption(binding.shipment, 'shipment_state', 'draft')
+  )
+    throw postingError(
+      'FULFILLMENT_SHIPMENT_INVALID',
+      'Only a current draft shipment can be posted',
+    );
+  const expectedHeader = [
+    ['number', command.shipmentNumber],
+    [
+      'kind',
+      fulfillmentOption(binding.shipment, 'shipment_kind', command.kind),
+    ],
+    ['location_id', command.locationId],
+    ['reason_code', command.reason.code],
+    ['reason_narrative', command.reason.narrative],
+  ] as const;
+  for (const [name, value] of expectedHeader)
+    if (
+      locked.header[fulfillmentColumn(binding.shipment, `shipment_${name}`)] !==
+      value
+    )
+      throw postingError(
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+        `Shipment ${name} changed`,
+      );
+  const effectiveAt =
+    locked.header[fulfillmentColumn(binding.shipment, 'shipment_effective_at')];
+  if (
+    (effectiveAt instanceof Date
+      ? effectiveAt.toISOString()
+      : new Date(String(effectiveAt)).toISOString()) !== command.effectiveAt ||
+    locked.header[
+      fulfillmentRelation(binding, binding.shipment, 'shipment_order')
+    ] !== command.orderId ||
+    locked.header[
+      fulfillmentRelation(binding, binding.shipment, 'shipment_supersedes')
+    ] !== command.supersedesShipmentId
+  )
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Shipment attribution or effective instant changed',
+    );
+
+  const attemptedByReservation = new Map<string, bigint>();
+  const attemptedByOrderLine = new Map<string, bigint>();
+  for (const line of command.lines) {
+    const stored = locked.lines.find(
+      (row) => row.record_id === line.shipmentLineId,
+    );
+    const orderLine = locked.orderLines.get(line.orderLineId);
+    const reservation = locked.reservations.get(line.reservationId);
+    if (!stored || !orderLine || !reservation)
+      throw postingError(
+        'FULFILLMENT_SHIPMENT_INVALID',
+        'Shipment attribution is missing',
+      );
+    const storedQuantity = fulfillmentQuantity(
+      String(
+        stored[
+          fulfillmentColumn(binding.shipmentLine, 'shipment_line_quantity')
+        ],
+      ),
+    );
+    const requested = -fulfillmentQuantity(line.quantityDelta);
+    if (
+      storedQuantity <= 0n ||
+      (command.kind === 'initial'
+        ? requested !== storedQuantity
+        : requested !== -storedQuantity) ||
+      stored[
+        fulfillmentRelation(
+          binding,
+          binding.shipmentLine,
+          'shipment_line_order_line',
+        )
+      ] !== line.orderLineId ||
+      stored[
+        fulfillmentRelation(
+          binding,
+          binding.shipmentLine,
+          'shipment_line_reservation',
+        )
+      ] !== line.reservationId ||
+      orderLine[
+        fulfillmentRelation(
+          binding,
+          binding.orderLine,
+          'sales_order_line_order',
+        )
+      ] !== command.orderId ||
+      reservation[
+        fulfillmentRelation(
+          binding,
+          binding.reservation,
+          'reservation_order_line',
+        )
+      ] !== line.orderLineId ||
+      stored[
+        fulfillmentColumn(binding.shipmentLine, 'shipment_line_item_id')
+      ] !== line.itemId ||
+      stored[
+        fulfillmentColumn(binding.shipmentLine, 'shipment_line_unit_id')
+      ] !== line.unitId ||
+      stored[
+        fulfillmentColumn(
+          binding.shipmentLine,
+          'shipment_line_reversal_of_movement_id',
+        )
+      ] !== line.reversalOfMovementId ||
+      orderLine[
+        fulfillmentColumn(binding.orderLine, 'sales_order_line_item_id')
+      ] !== line.itemId ||
+      orderLine[
+        fulfillmentColumn(binding.orderLine, 'sales_order_line_unit_id')
+      ] !== line.unitId ||
+      reservation[
+        fulfillmentColumn(binding.reservation, 'reservation_item_id')
+      ] !== line.itemId ||
+      reservation[
+        fulfillmentColumn(binding.reservation, 'reservation_location_id')
+      ] !== command.locationId ||
+      reservation[
+        fulfillmentColumn(binding.reservation, 'reservation_unit_id')
+      ] !== line.unitId
+    )
+      throw postingError(
+        'FULFILLMENT_SHIPMENT_INVALID',
+        'Shipment must preserve selected reservation, order-line, item, location, unit, quantity and correction attribution',
+      );
+    if (command.kind === 'initial') {
+      const state =
+        reservation[
+          fulfillmentColumn(binding.reservation, 'reservation_state')
+        ];
+      const live = ['active', 'partially_consumed'].map((value) =>
+        fulfillmentOption(binding.reservation, 'reservation_state', value),
+      );
+      if (!live.includes(String(state)))
+        throw postingError(
+          'FULFILLMENT_RESERVATION_STATE_CONFLICT',
+          'Initial shipment lines must select a live reservation',
+        );
+      attemptedByReservation.set(
+        line.reservationId,
+        (attemptedByReservation.get(line.reservationId) ?? 0n) + storedQuantity,
+      );
+      attemptedByOrderLine.set(
+        line.orderLineId,
+        (attemptedByOrderLine.get(line.orderLineId) ?? 0n) + storedQuantity,
+      );
+    }
+  }
+  if (command.kind === 'initial') {
+    for (const [id, quantity] of attemptedByReservation) {
+      const remaining = await reservationRemainingForPosting(
+        client,
+        binding,
+        context,
+        command.legalEntityId,
+        locked.reservations.get(id)!,
+      );
+      if (quantity > remaining)
+        throw postingError(
+          'FULFILLMENT_RESERVATION_SHORTAGE',
+          'Shipment exceeds the selected live reservation',
+          {
+            reservationId: id,
+            remaining: fulfillmentDecimal(remaining),
+            requested: fulfillmentDecimal(quantity),
+          },
+        );
+    }
+    for (const [id, quantity] of attemptedByOrderLine) {
+      const line = locked.orderLines.get(id)!;
+      const ordered = fulfillmentQuantity(
+        String(
+          line[
+            fulfillmentColumn(
+              binding.orderLine,
+              'sales_order_line_ordered_quantity',
+            )
+          ],
+        ),
+      );
+      const shipped = await shippedLedger(
+        client,
+        binding,
+        context,
+        command.legalEntityId,
+        id,
+      );
+      if (shipped.quantity + quantity > ordered)
+        throw postingError(
+          'FULFILLMENT_QUANTITY_OUT_OF_BOUNDS',
+          'Shipment exceeds the order-line open-to-ship quantity',
+          { orderLineId: id },
+        );
+    }
+  }
+}
+
+async function assertShipmentCompensation(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedShipmentCommand,
+): Promise<void> {
+  if (command.kind === 'initial') return;
+  const originalHeader = await fulfillmentRowForEntity(
+    client,
+    binding.shipment,
+    context,
+    command.legalEntityId,
+    command.supersedesShipmentId!,
+    false,
+  );
+  if (
+    originalHeader[fulfillmentColumn(binding.shipment, 'shipment_state')] !==
+      fulfillmentOption(binding.shipment, 'shipment_state', 'posted') ||
+    originalHeader[
+      fulfillmentRelation(binding, binding.shipment, 'shipment_order')
+    ] !== command.orderId
+  )
+    throw postingError(
+      'FULFILLMENT_SHIPMENT_INVALID',
+      'Correction must name a posted shipment of the same order',
+    );
+  const movements = await client.query<Record<string, unknown>>(
+    `SELECT * FROM ${fulfillmentTable(binding.movement)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoteFulfillmentIdentifier(binding.movement.legalEntity!.column)}=$3
+        AND ${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_source_type'))}='shipment'
+        AND ${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_source_id'))}=$4
+        AND archived_at IS NULL ORDER BY record_id`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.supersedesShipmentId,
+    ],
+  );
+  const used = new Set<string>();
+  const remaining = new Map<string, bigint>();
+  for (const movement of movements.rows) {
+    const compensated = await client.query<{ quantity: string }>(
+      `SELECT coalesce(sum(${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_quantity_delta'))}),0)::text AS quantity
+         FROM ${fulfillmentTable(binding.movement)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoteFulfillmentIdentifier(binding.movement.legalEntity!.column)}=$3
+          AND ${quoteFulfillmentIdentifier(fulfillmentColumn(binding.movement, 'inventory_movement_reversal_of_movement_id'))}=$4
+          AND archived_at IS NULL`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        movement.record_id,
+      ],
+    );
+    remaining.set(
+      String(movement.record_id),
+      -fulfillmentQuantity(
+        String(
+          movement[
+            fulfillmentColumn(
+              binding.movement,
+              'inventory_movement_quantity_delta',
+            )
+          ],
+        ),
+      ) - fulfillmentQuantity(compensated.rows[0]!.quantity),
+    );
+  }
+  for (const line of command.lines) {
+    if (used.has(line.reversalOfMovementId!))
+      throw postingError(
+        'FULFILLMENT_SHIPMENT_INVALID',
+        'A correction can reference an original movement only once',
+      );
+    used.add(line.reversalOfMovementId!);
+    const original = movements.rows.find(
+      (row) => row.record_id === line.reversalOfMovementId,
+    );
+    if (!original)
+      throw postingError(
+        'FULFILLMENT_SHIPMENT_INVALID',
+        'Compensated movement is not part of the linked shipment',
+      );
+    const originalLine = await fulfillmentRowForEntity(
+      client,
+      binding.shipmentLine,
+      context,
+      command.legalEntityId,
+      String(
+        original[
+          fulfillmentColumn(binding.movement, 'inventory_movement_source_line')
+        ],
+      ),
+      false,
+    );
+    if (
+      originalLine[
+        fulfillmentRelation(
+          binding,
+          binding.shipmentLine,
+          'shipment_line_order_line',
+        )
+      ] !== line.orderLineId ||
+      originalLine[
+        fulfillmentRelation(
+          binding,
+          binding.shipmentLine,
+          'shipment_line_reservation',
+        )
+      ] !== line.reservationId ||
+      original[
+        fulfillmentColumn(binding.movement, 'inventory_movement_item_id')
+      ] !== line.itemId ||
+      original[
+        fulfillmentColumn(binding.movement, 'inventory_movement_location_id')
+      ] !== command.locationId ||
+      original[
+        fulfillmentColumn(binding.movement, 'inventory_movement_unit_id')
+      ] !== line.unitId
+    )
+      throw postingError(
+        'FULFILLMENT_SHIPMENT_INVALID',
+        'Correction must preserve original order-line, reservation, item, location and unit attribution',
+      );
+    const available = remaining.get(String(original.record_id))!;
+    const attempted = fulfillmentQuantity(line.quantityDelta);
+    if (
+      attempted <= 0n ||
+      attempted > available ||
+      (command.kind === 'reversal' && attempted !== available)
+    )
+      throw postingError(
+        'FULFILLMENT_SHIPMENT_INVALID',
+        'Correction exceeds the uncompensated shipped quantity',
+      );
+  }
+  if (
+    command.kind === 'reversal' &&
+    movements.rows.some(
+      (row) =>
+        remaining.get(String(row.record_id))! > 0n &&
+        !used.has(String(row.record_id)),
+    )
+  )
+    throw postingError(
+      'FULFILLMENT_SHIPMENT_INVALID',
+      'Reversal must include every uncompensated movement from the linked shipment',
+    );
+}
+
+async function writeShipmentConsequences(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'shipment' }>,
+  locked: LockedShipment,
+  actorId: string,
+  recordedAt: string,
+  coverage: ExecutedVerifierCoverage,
+): Promise<number> {
+  const fulfillment = binding.fulfillment!;
+  const command = posting.command;
+  const posted = fulfillmentOption(
+    fulfillment.shipment,
+    'shipment_state',
+    'posted',
+  );
+  const changed = await client.query<{ revision: number }>(
+    `UPDATE ${fulfillmentTable(fulfillment.shipment)}
+        SET ${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.shipment, 'shipment_state'))}=$5,
+            revision=revision+1
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoteFulfillmentIdentifier(fulfillment.shipment.legalEntity!.column)}=$3
+        AND record_id=$4 AND revision=$6 RETURNING revision`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+      posted,
+      command.sourceRevision,
+    ],
+  );
+  if (changed.rows.length !== 1)
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Shipment changed while its posting consequences were written',
+    );
+
+  await client.query('SET LOCAL ROLE north_star_fulfillment_projection_writer');
+  for (const orderLineId of locked.orderLines.keys()) {
+    const ledger = await shippedLedger(
+      client,
+      fulfillment,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const identity = fulfillmentProjectionIdentity(
+      context,
+      command.legalEntityId,
+      'shipped',
+      orderLineId,
+    );
+    await client.query(
+      `INSERT INTO ${fulfillmentTable(fulfillment.shipped)} AS progress
+        (tenant_id,environment_id,${quoteFulfillmentIdentifier(fulfillment.shipped.legalEntity!.column)},record_id,revision,archived_at,
+         ${quoteFulfillmentIdentifier(fulfillmentRelation(fulfillment, fulfillment.shipped, 'sales_order_shipped_order_line'))},
+         ${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.shipped, 'sales_order_shipped_shipped_quantity'))},
+         ${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.shipped, 'sales_order_shipped_unit_id'))})
+       VALUES ($1,$2,$3,$4,1,NULL,$5,$6,$7)
+       ON CONFLICT (tenant_id,environment_id,${quoteFulfillmentIdentifier(fulfillment.shipped.legalEntity!.column)},record_id)
+       DO UPDATE SET revision=progress.revision+1,archived_at=NULL,
+         ${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.shipped, 'sales_order_shipped_shipped_quantity'))}=EXCLUDED.${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.shipped, 'sales_order_shipped_shipped_quantity'))},
+         ${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.shipped, 'sales_order_shipped_unit_id'))}=EXCLUDED.${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.shipped, 'sales_order_shipped_unit_id'))}`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        identity,
+        orderLineId,
+        fulfillmentDecimal(ledger.quantity),
+        ledger.unit,
+      ],
+    );
+  }
+  await client.query('SET LOCAL ROLE north_star_module_runtime');
+
+  for (const reservation of locked.reservations.values()) {
+    const currentState = String(
+      reservation[
+        fulfillmentColumn(fulfillment.reservation, 'reservation_state')
+      ],
+    );
+    const released = fulfillmentOption(
+      fulfillment.reservation,
+      'reservation_state',
+      'released',
+    );
+    if (currentState === released) continue;
+    const original = fulfillmentQuantity(
+      String(
+        reservation[
+          fulfillmentColumn(fulfillment.reservation, 'reservation_quantity')
+        ],
+      ),
+    );
+    const remaining = await reservationRemainingForPosting(
+      client,
+      fulfillment,
+      context,
+      command.legalEntityId,
+      reservation,
+    );
+    if (remaining < 0n || remaining > original)
+      throw postingError(
+        'FULFILLMENT_RESERVATION_STATE_CONFLICT',
+        'Shipment consequences would put a reservation outside zero and its original quantity',
+        { reservationId: String(reservation.record_id) },
+      );
+    const state = fulfillmentOption(
+      fulfillment.reservation,
+      'reservation_state',
+      remaining === 0n
+        ? 'consumed'
+        : remaining === original
+          ? 'active'
+          : 'partially_consumed',
+    );
+    const updated = await client.query(
+      `UPDATE ${fulfillmentTable(fulfillment.reservation)}
+          SET ${quoteFulfillmentIdentifier(fulfillmentColumn(fulfillment.reservation, 'reservation_state'))}=$5,
+              revision=revision+1
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoteFulfillmentIdentifier(fulfillment.reservation.legalEntity!.column)}=$3
+          AND record_id=$4 AND revision=$6`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        reservation.record_id,
+        state,
+        reservation.revision,
+      ],
+    );
+    if (updated.rowCount !== 1)
+      throw postingError(
+        'FULFILLMENT_RESERVATION_STATE_CONFLICT',
+        'Reservation changed while shipment consequences were applied',
+      );
+    await writeReservationBalanceForPosting(
+      client,
+      fulfillment,
+      context,
+      command.legalEntityId,
+      String(reservation.record_id),
+      fulfillmentDecimal(remaining),
+      String(
+        reservation[
+          fulfillmentColumn(fulfillment.reservation, 'reservation_unit_id')
+        ],
+      ),
+    );
+  }
+  await verifyShipmentPosting(
+    client,
+    binding,
+    context,
+    posting,
+    locked,
+    actorId,
+    recordedAt,
+    coverage,
+  );
+  return Number(changed.rows[0]!.revision);
+}
+
+async function writeReservationBalanceForPosting(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  reservationId: string,
+  remainingQuantity: string,
+  unitId: string,
+): Promise<void> {
+  const entity = binding.reservationBalance;
+  const id = fulfillmentProjectionIdentity(
+    context,
+    legalEntityId,
+    'reservation',
+    reservationId,
+  );
+  await client.query('SET LOCAL ROLE north_star_fulfillment_projection_writer');
+  await client.query(
+    `INSERT INTO ${fulfillmentTable(entity)} AS balance
+      (tenant_id,environment_id,${quoteFulfillmentIdentifier(entity.legalEntity!.column)},record_id,revision,archived_at,
+       ${quoteFulfillmentIdentifier(fulfillmentRelation(binding, entity, 'reservation_balance_reservation'))},
+       ${quoteFulfillmentIdentifier(fulfillmentColumn(entity, 'reservation_balance_remaining_quantity'))},
+       ${quoteFulfillmentIdentifier(fulfillmentColumn(entity, 'reservation_balance_unit_id'))})
+     VALUES ($1,$2,$3,$4,1,NULL,$5,$6,$7)
+     ON CONFLICT (tenant_id,environment_id,${quoteFulfillmentIdentifier(entity.legalEntity!.column)},record_id)
+     DO UPDATE SET revision=balance.revision+1,archived_at=NULL,
+       ${quoteFulfillmentIdentifier(fulfillmentColumn(entity, 'reservation_balance_remaining_quantity'))}=EXCLUDED.${quoteFulfillmentIdentifier(fulfillmentColumn(entity, 'reservation_balance_remaining_quantity'))},
+       ${quoteFulfillmentIdentifier(fulfillmentColumn(entity, 'reservation_balance_unit_id'))}=EXCLUDED.${quoteFulfillmentIdentifier(fulfillmentColumn(entity, 'reservation_balance_unit_id'))}`,
+    [
+      context.tenantId,
+      context.environmentId,
+      legalEntityId,
+      id,
+      reservationId,
+      remainingQuantity,
+      unitId,
+    ],
+  );
+  await client.query('SET LOCAL ROLE north_star_module_runtime');
+}
+
+async function verifyShipmentPosting(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'shipment' }>,
+  locked: LockedShipment,
+  actorId: string,
+  recordedAt: string,
+  coverage: ExecutedVerifierCoverage,
+): Promise<void> {
+  const command = posting.command;
+  const fulfillment = binding.fulfillment!;
+  const verify = async (
+    entity: EntityBinding,
+    id: string,
+    expected: Record<string, unknown>,
+  ) => {
+    const result = await client.query<Record<string, unknown>>(
+      `SELECT row.*, (SELECT relname FROM pg_class WHERE oid=row.tableoid) AS "__relation"
+         FROM ${table(binding, entity)} row
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(entity.legalEntityColumn!)}=$3
+          AND ${quoted(entity.recordIdColumn)}=$4`,
+      [context.tenantId, context.environmentId, command.legalEntityId, id],
+    );
+    if (result.rows.length !== 1)
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        'Shipment posting read-back row is missing',
+        { recordId: id },
+      );
+    const { __relation, ...actual } = result.rows[0]!;
+    const equals = (value: unknown, wanted: unknown): boolean =>
+      value instanceof Date
+        ? value.toISOString() ===
+          (wanted instanceof Date ? wanted.toISOString() : wanted)
+        : value === wanted;
+    assertPersistedRowVerified(
+      `shipment posting ${id}`,
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      entity,
+      actual,
+      { recordId: id },
+      Object.entries(expected)
+        .filter(
+          ([column]) =>
+            column !== '__relation' &&
+            !entity.foldedColumns.some((folded) => folded.name === column),
+        )
+        .map(([column, value]) =>
+          verified(
+            column,
+            equals(actual[column], value),
+            'differs from committed shipment fact',
+          ),
+        ),
+    );
+    coverage.observed(verifyShipmentPosting, __relation);
+  };
+  const base = (id: string) => ({
+    tenant_id: context.tenantId,
+    environment_id: context.environmentId,
+    legal_entity_id: command.legalEntityId,
+    record_id: id,
+    revision: '1',
+    archived_at: null,
+  });
+  const numeric = (value: string) => {
+    const scaled = fulfillmentQuantity(value);
+    const abs = scaled < 0n ? -scaled : scaled;
+    return `${scaled < 0n ? '-' : ''}${abs / 10n ** 18n}.${(abs % 10n ** 18n).toString().padStart(18, '0')}`;
+  };
+  await verify(bindEntity(fulfillment.shipment), command.sourceId, {
+    ...locked.header,
+    revision: String(command.sourceRevision + 1),
+    [fulfillmentColumn(fulfillment.shipment, 'shipment_state')]:
+      fulfillmentOption(fulfillment.shipment, 'shipment_state', 'posted'),
+  });
+  const transaction: Record<string, unknown> = base(command.transactionId);
+  for (const [name, value] of [
+    [
+      'number',
+      companionTransactionNumber(posting.family, command.transactionId),
+    ],
+    ['type', transactionType(posting.family, 'shipment')],
+    ['state', binding.transactionPostedState],
+    ['reason_code', command.reason.code],
+    ['reason_narrative', command.reason.narrative],
+    ['source_type', 'shipment'],
+    ['source_id', command.sourceId],
+    ['effective_at', command.effectiveAt],
+    ['recorded_at', recordedAt],
+    ['actor_id', actorId],
+  ] as const)
+    transaction[
+      requiredField(binding.transaction, `inventory_transaction_${name}`).name
+    ] = value;
+  await verify(binding.transaction, command.transactionId, transaction);
+  for (const line of command.lines) {
+    const expected: Record<string, unknown> = {
+      ...base(line.transactionLineId),
+      [binding.transactionLineRelationToTransactionColumn]:
+        command.transactionId,
+    };
+    for (const [name, value] of [
+      ['line_number', line.sourceLine],
+      ['item_id', line.itemId],
+      [
+        'from_location_id',
+        line.quantityDelta.startsWith('-') ? command.locationId : null,
+      ],
+      [
+        'to_location_id',
+        line.quantityDelta.startsWith('-') ? null : command.locationId,
+      ],
+      ['quantity', numeric(line.quantityDelta)],
+      ['unit_id', line.unitId],
+    ] as const)
+      expected[
+        requiredField(
+          binding.transactionLine,
+          `inventory_transaction_line_${name}`,
+        ).name
+      ] = value;
+    await verify(binding.transactionLine, line.transactionLineId, expected);
+  }
+  for (const reservation of locked.reservations.values()) {
+    const before = String(
+      reservation[
+        fulfillmentColumn(fulfillment.reservation, 'reservation_state')
+      ],
+    );
+    if (
+      before ===
+      fulfillmentOption(
+        fulfillment.reservation,
+        'reservation_state',
+        'released',
+      )
+    )
+      continue;
+    const original = fulfillmentQuantity(
+      String(
+        reservation[
+          fulfillmentColumn(fulfillment.reservation, 'reservation_quantity')
+        ],
+      ),
+    );
+    const remaining = await reservationRemainingForPosting(
+      client,
+      fulfillment,
+      context,
+      command.legalEntityId,
+      reservation,
+    );
+    const expectedState = fulfillmentOption(
+      fulfillment.reservation,
+      'reservation_state',
+      remaining === 0n
+        ? 'consumed'
+        : remaining === original
+          ? 'active'
+          : 'partially_consumed',
+    );
+    await verify(
+      bindEntity(fulfillment.reservation),
+      String(reservation.record_id),
+      {
+        ...reservation,
+        revision: String(Number(reservation.revision) + 1),
+        [fulfillmentColumn(fulfillment.reservation, 'reservation_state')]:
+          expectedState,
+      },
+    );
+    const balanceId = fulfillmentProjectionIdentity(
+      context,
+      command.legalEntityId,
+      'reservation',
+      String(reservation.record_id),
+    );
+    await verify(bindEntity(fulfillment.reservationBalance), balanceId, {
+      ...base(balanceId),
+      revision: String(
+        Number(
+          locked.priorReservationBalances.get(String(reservation.record_id))
+            ?.revision ?? 0,
+        ) + 1,
+      ),
+      [fulfillmentRelation(
+        fulfillment,
+        fulfillment.reservationBalance,
+        'reservation_balance_reservation',
+      )]: reservation.record_id,
+      [fulfillmentColumn(
+        fulfillment.reservationBalance,
+        'reservation_balance_remaining_quantity',
+      )]: numeric(fulfillmentDecimal(remaining)),
+      [fulfillmentColumn(
+        fulfillment.reservationBalance,
+        'reservation_balance_unit_id',
+      )]:
+        reservation[
+          fulfillmentColumn(fulfillment.reservation, 'reservation_unit_id')
+        ],
+    });
+  }
+  for (const orderLineId of locked.orderLines.keys()) {
+    const ledger = await shippedLedger(
+      client,
+      fulfillment,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const id = fulfillmentProjectionIdentity(
+      context,
+      command.legalEntityId,
+      'shipped',
+      orderLineId,
+    );
+    await verify(bindEntity(fulfillment.shipped), id, {
+      ...base(id),
+      revision: String(
+        Number(locked.priorProgress.get(orderLineId)?.revision ?? 0) + 1,
+      ),
+      [fulfillmentRelation(
+        fulfillment,
+        fulfillment.shipped,
+        'sales_order_shipped_order_line',
+      )]: orderLineId,
+      [fulfillmentColumn(
+        fulfillment.shipped,
+        'sales_order_shipped_shipped_quantity',
+      )]: numeric(fulfillmentDecimal(ledger.quantity)),
+      [fulfillmentColumn(fulfillment.shipped, 'sales_order_shipped_unit_id')]:
+        ledger.unit,
+    });
+  }
+}
+
 async function verifyGoodsReceiptPosting(
   client: PoolClient,
   binding: PostingStorageBinding,
@@ -4303,7 +5845,7 @@ async function writeCompanionTransaction(
   family: ResolvedPostingFamily,
   posting: Extract<
     ParsedPosting,
-    { postingRole: 'correction' | 'count' | 'receipt' }
+    { postingRole: 'correction' | 'count' | 'receipt' | 'shipment' }
   >,
   recordedAt: string,
 ): Promise<number> {
@@ -5194,7 +6736,10 @@ async function assertInventoryLineSet(
         line.transactionLineId,
       );
     }
-  } else if (posting.postingRole !== 'receipt') {
+  } else if (
+    posting.postingRole !== 'receipt' &&
+    posting.postingRole !== 'shipment'
+  ) {
     for (const line of posting.command.lines) {
       assertInventoryLineMatches(
         stockCountTransactionLineMatches(
@@ -7315,6 +8860,23 @@ async function persistAcceptedEvidence(
     lineCount: classified('INTERNAL', command.lines.length),
     negativeStockFlag: classified('INTERNAL', result.negativeStockFlag),
     requestKind: classified('INTERNAL', `inventory-${postingRole}-posting`),
+    ...(postingRole === 'shipment'
+      ? {
+          reservationConsequences: classified(
+            'INTERNAL',
+            command.lines.map((line) => ({
+              orderLineId: line.orderLineId,
+              quantityDelta: line.quantityDelta,
+              reservationId: line.reservationId,
+            })),
+          ),
+          shipmentKind: classified('INTERNAL', command.kind),
+          supersedesShipmentId: classified(
+            'INTERNAL',
+            command.supersedesShipmentId,
+          ),
+        }
+      : {}),
   });
   const policyInputs = redactEvidenceMetadata({
     legalEntityId: classified('INTERNAL', command.legalEntityId),
@@ -7355,6 +8917,25 @@ async function persistAcceptedEvidence(
           ),
         ]
       : []),
+    ...(postingRole === 'shipment'
+      ? [
+          businessChange(
+            'reservationCoverageConsumed',
+            null,
+            command.lines.map((line) => ({
+              orderLineId: line.orderLineId,
+              quantityDelta: line.quantityDelta,
+              reservationId: line.reservationId,
+            })),
+          ),
+          businessChange('shipmentKind', null, command.kind),
+          businessChange(
+            'supersedesShipmentId',
+            null,
+            command.supersedesShipmentId,
+          ),
+        ]
+      : []),
   ];
   const changes = redactBusinessChanges(changesInput);
   const eventPayload = redactEvidenceMetadata({
@@ -7367,6 +8948,23 @@ async function persistAcceptedEvidence(
     negativeStockFlag: classified('INTERNAL', result.negativeStockFlag),
     recordedAt: classified('INTERNAL', result.recordedAt),
     stockCountEvidence: classified('INTERNAL', result.stockCountEvidence),
+    ...(postingRole === 'shipment'
+      ? {
+          reservationConsequences: classified(
+            'INTERNAL',
+            command.lines.map((line) => ({
+              orderLineId: line.orderLineId,
+              quantityDelta: line.quantityDelta,
+              reservationId: line.reservationId,
+            })),
+          ),
+          shipmentKind: classified('INTERNAL', command.kind),
+          supersedesShipmentId: classified(
+            'INTERNAL',
+            command.supersedesShipmentId,
+          ),
+        }
+      : {}),
     transactionId: classified('INTERNAL', command.transactionId),
   });
   const actorColumns = resolvedActorColumns(actor);
@@ -7449,7 +9047,7 @@ async function persistAcceptedEvidence(
       recordType,
       isStockCountPosting(posting)
         ? posting.command.stockCountId
-        : postingRole === 'receipt'
+        : postingRole === 'receipt' || postingRole === 'shipment'
           ? command.sourceId
           : command.transactionId,
       transactionRevision,
@@ -7611,6 +9209,10 @@ function effectDeduplicationKey(posting: ParsedPosting): string {
 function naturalEffects(
   posting: ParsedPosting,
 ): readonly { readonly sourceLine: string }[] {
+  if (posting.postingRole === 'shipment')
+    return posting.command.lines.map((line) => ({
+      sourceLine: line.shipmentLineId,
+    }));
   if (posting.postingRole === 'receipt')
     return posting.command.lines.map((line) => ({
       sourceLine: line.receiptLineId,
@@ -7633,8 +9235,10 @@ function naturalEffects(
 
 function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
   const version =
-    posting.postingRole === 'receipt'
-      ? 5
+    posting.postingRole === 'receipt' || posting.postingRole === 'shipment'
+      ? posting.postingRole === 'receipt'
+        ? 5
+        : 6
       : isStockCountPosting(posting)
         ? companionDerivedInventoryPostingInputDigestVersion
         : standardInventoryPostingInputDigestVersion;
@@ -7645,6 +9249,22 @@ function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
 }
 
 function digestCommand(posting: ParsedPosting, version: number): string {
+  if (version === 6 && posting.postingRole === 'shipment') {
+    const { idempotencyKey, transactionId, lines, ...input } = posting.command;
+    void idempotencyKey;
+    void transactionId;
+    return createHash('sha256')
+      .update(
+        canonicalize({
+          ...input,
+          lines: lines.map(({ transactionLineId, ...line }) => {
+            void transactionLineId;
+            return line;
+          }),
+        }),
+      )
+      .digest('hex');
+  }
   if (version === 5 && posting.postingRole === 'receipt') {
     const { idempotencyKey, transactionId, lines, ...input } = posting.command;
     void idempotencyKey;
@@ -7695,7 +9315,8 @@ function recordedResultForReplay(
     version !== standardInventoryPostingInputDigestVersion &&
     version !== stockCountInventoryPostingInputDigestVersion &&
     version !== companionDerivedInventoryPostingInputDigestVersion &&
-    version !== 5
+    version !== 5 &&
+    version !== 6
   ) {
     return unsupportedReceiptVersion(version);
   }
@@ -7731,6 +9352,7 @@ function requiredRecordedPostingRole(
   version: number,
 ): InventoryPostingRoleV1 {
   if (version === 5 && postingRole === 'receipt') return postingRole;
+  if (version === 6 && postingRole === 'shipment') return postingRole;
   if (
     version === standardInventoryPostingInputDigestVersion &&
     (postingRole === 'adjustment' || postingRole === 'transfer')

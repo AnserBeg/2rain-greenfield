@@ -377,7 +377,11 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           assert.equal(report.outcome, 'indeterminate');
           assert.deepEqual(
             report.findings.map((row) => [row.armId, row.code]),
-            [['receivedQuantities', 'SCOPE_OBSERVED_NO_SUBJECTS']],
+            [
+              ['receivedQuantities', 'SCOPE_OBSERVED_NO_SUBJECTS'],
+              ['reservationCoverage', 'SCOPE_OBSERVED_NO_SUBJECTS'],
+              ['salesOrderShipped', 'SCOPE_OBSERVED_NO_SUBJECTS'],
+            ],
           );
           assert.equal(arm(report, 'receivedQuantities').subjectCount, 0);
           const sourceDocuments = arm(report, 'sourceDocuments');
@@ -942,6 +946,8 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           assert.deepEqual(
             report.findings.map((finding) => finding.code),
             [
+              'SCOPE_OBSERVED_NO_SUBJECTS',
+              'SCOPE_OBSERVED_NO_SUBJECTS',
               'SCOPE_OBSERVED_NO_SUBJECTS',
               'SCOPE_OBSERVED_NO_SUBJECTS',
               'SCOPE_OBSERVED_NO_SUBJECTS',

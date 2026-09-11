@@ -91,6 +91,16 @@ export const INVENTORY_PROVIDER_WRITTEN_READ_MODELS_V1 = Object.freeze([
     familyId: 'purchase_order_received',
     maintainerId: 'northstar.postgresql-module-provider:received-quantity/v1',
   },
+  {
+    classification: 'providerWritten',
+    familyId: 'sales_order_shipped',
+    maintainerId: 'northstar.postgresql-module-provider:shipped-quantity/v1',
+  },
+  {
+    classification: 'providerWritten',
+    familyId: 'reservation_balance',
+    maintainerId: 'northstar.postgresql-module-provider:reservation-balance/v1',
+  },
 ] as const satisfies readonly InventoryProviderWrittenReadModelRuleV1[]);
 
 export const INVENTORY_STORAGE_REFERENCES_V1 = Object.freeze([
@@ -172,6 +182,10 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'sales_order' },
   { classification: 'entityOwned', familyId: 'sales_order_line' },
   { classification: 'entityOwned', familyId: 'reservation' },
+  { classification: 'entityOwned', familyId: 'reservation_balance' },
+  { classification: 'entityOwned', familyId: 'shipment' },
+  { classification: 'entityOwned', familyId: 'shipment_line' },
+  { classification: 'entityOwned', familyId: 'sales_order_shipped' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const satisfies readonly LegalEntityFamilyRuleV1[]);
@@ -241,6 +255,46 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'sales_order_line',
     targetFamilyId: 'sales_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'reservation',
+    targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'reservation_balance',
+    targetFamilyId: 'reservation',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment',
+    targetFamilyId: 'sales_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment',
+    targetFamilyId: 'shipment',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment_line',
+    targetFamilyId: 'shipment',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment_line',
+    targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'shipment_line',
+    targetFamilyId: 'reservation',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'sales_order_shipped',
+    targetFamilyId: 'sales_order_line',
   },
   {
     semantics: 'sameEntity',

@@ -32,7 +32,7 @@ substance survives in the rules above.
 | G0, G1 | complete |
 | G2 | complete in substance (party, catalog, location, composed app, forms, pickers) |
 | G3 | inventory alpha: 14 of 17 gate criteria met (`rulings/g3-completion.md`); posting kernel hardened by `posting-kernel-admission` and `enum-widen` on 2026-09-04 |
-| G4 | purchase order accepted; RECEIPT and scoped AUTH landed through PR #1 at `c30e951` by owner-authorized integration. No final independent approval was reissued, and this does not claim production authentication |
+| G4 | purchase order accepted; RECEIPT and scoped AUTH landed through PR #1 at `c30e951`; SALE order intent landed through PR #3 at `4c058aa`; SALE-FULFILLMENT is evidence-ready on its published packet branch, awaiting one Critical arm and full PR CI. No production-authentication claim |
 | G5–G8, N1–N7 | not started; no agent package, no customization engine |
 
 Plan §13: 21 of 38 work packages done. The office-worker loop — receive and ship — is
@@ -47,7 +47,7 @@ The landed tree includes exact AUTH correction `9d70c749752006ab21d1b9df9516b1cb
 | step | vertical | lane | contents | review |
 |---|---|---|---|---|
 | 1 | **RECEIPT** | BUILD | landed through PR #1 at `c30e951` with scoped AUTH by owner-authorized integration; limitations above remain explicit | no new approval inferred |
-| 2 | **SALE** | BUILD | current user-visible increment: sales order + parent-scoped lines, draft edit, release and eligible cancellation only. Reservation, shipment, correction, shipped quantity/open-to-ship and packing document remain future scope | no Critical-set arm unless the final diff enters that set |
+| 2 | **SALE-FULFILLMENT** | BUILD | evidence-ready at `9ba0f7f`: exact reserve/release, partial shipment posting, correction/reversal, safe cancellation/closure, derived stock/order progress and packing document; published branch, draft PR creation blocked only by token Pull Requests permission | one fresh naive Critical arm owed; full PR CI pending |
 | 3 | **AUTH** | BUILD | scoped evaluator/bindings landed at `c30e951`; production authentication and remaining hardening stay separate future scope, not a SALE dependency | one arm only if trust substrate changes |
 | 4 | **AGENT** | BUILD | plan §13 A-01..A-03 over the loop above | one arm if it writes through the posting kernel |
 | ∥ | SUPPORT | SUPPORT | program reviews at stage boundaries; rulings; the `first-tenant` ruling when it comes; small correctives on paths BUILD does not hold | — |

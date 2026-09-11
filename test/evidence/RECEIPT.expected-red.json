@@ -176,8 +176,8 @@
       "name": "receipt-received-verifier-vacuous",
       "claim": "A received writer corrupting its output is refused before any business or trust effects commit.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "equals(actual[column], value),",
-      "replacement": "true,",
+      "original": "equals(actual[column], value),\n            'differs from the posted fact',",
+      "replacement": "true,\n            'differs from the posted fact',",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],
         "namePattern": "RECEIPT posts"

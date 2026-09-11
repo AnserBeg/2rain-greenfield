@@ -27,17 +27,32 @@ import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../../../packages/runtime/src
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 const applicationNamespace = 'northstar.app';
+// Bounded integration-test allowances, not latency assertions. Every journey
+// below is dominated by real page loads: a traced run of the grouped-navigation
+// journey measured 3.8-6.0s per navigation against 336ms for all 31 of its
+// assertions combined, so a journey's cost is its navigation count and the
+// per-navigation cost is the composed application's, not this packet's: the
+// packet changes `surface-runtime.ts` by one line. Each bound is ~2x the
+// duration measured for its slowest journey with the bounds
+// lifted; all nine then passed on their assertions, so every prior failure was
+// the bound rather than a defect: navigation 34.4s, on-hand 20.9s, scoped
+// inventory 37.2s, posting route 49.4s, scoped form persistence 78s, focus
+// ring 36.6s. The doubling absorbs hosted-runner and contention variance.
+// Semantic assertions and the 5s expect timeout are unchanged.
 const journeyTimeoutMilliseconds = Object.freeze({
-  focusRing: 40_000,
-  inventoryNavigation: 20_000,
-  onHandLookup: 20_000,
-  // This multi-form lifecycle now performs real current-policy reads/writes.
-  // Like repairedFormAnatomy, it needs a bounded integration-test allowance;
-  // this is not a latency assertion, and all semantic assertions stay intact.
-  partyLifecycle: 60_000,
-  postingRoute: 20_000,
-  repairedFormAnatomy: 60_000,
-  scopedInventory: 20_000,
+  focusRing: 75_000,
+  inventoryNavigation: 70_000,
+  onHandLookup: 45_000,
+  // This multi-form lifecycle now performs real current-policy reads/writes
+  // and restarts the composed application, so it is the most variable journey
+  // here. It measured 56.4s against its previous 60s bound in an uncontended
+  // run -- passing, but with 6% of headroom on a suite that inflates 1.5-1.7x
+  // under worker contention. Same allowance as the rest; not a latency
+  // assertion, and all semantic assertions stay intact.
+  partyLifecycle: 115_000,
+  postingRoute: 100_000,
+  repairedFormAnatomy: 160_000,
+  scopedInventory: 75_000,
 });
 const sharedSetupTimeoutMilliseconds = 180_000;
 
@@ -123,10 +138,43 @@ composedTest.describe('composed application journeys', () => {
   );
 
   composedTest(
+    'opens grouped master, stock, and purchasing lists',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.inventoryNavigation);
+      await inventoryRecordNavigationJourney(
+        page,
+        composedApplication.currentBaseUrl(),
+      );
+    },
+  );
+
+  composedTest(
+    'refuses incomplete and duplicate on-hand scopes',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.onHandLookup);
+      await onHandLookupRefusalJourney(
+        page,
+        composedApplication.currentBaseUrl(),
+      );
+    },
+  );
+
+  composedTest(
     'looks up on-hand stock in the selected legal entity',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.onHandLookup);
       await onHandLookupJourney(page, composedApplication.currentBaseUrl());
+    },
+  );
+
+  composedTest(
+    'scopes immutable Inventory movement lists',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.scopedInventory);
+      await scopedInventoryListJourney(
+        page,
+        composedApplication.currentBaseUrl(),
+      );
     },
   );
 
@@ -139,10 +187,21 @@ composedTest.describe('composed application journeys', () => {
   );
 
   composedTest(
-    'renders repaired forms and saves two required scoped relations',
+    'renders repaired forms through their real controls',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.repairedFormAnatomy);
       await repairedFormAnatomyJourney(
+        page,
+        composedApplication.currentBaseUrl(),
+      );
+    },
+  );
+
+  composedTest(
+    'saves scoped forms and two required scoped relations',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.repairedFormAnatomy);
+      await scopedFormPersistenceJourney(
         page,
         composedApplication.currentBaseUrl(),
       );
@@ -174,6 +233,17 @@ composedTest.describe('composed application journeys', () => {
           exact: true,
         }),
       ).toBeVisible();
+    },
+  );
+
+  composedTest(
+    'renders one staged adjustment and its authored edit submission',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.postingRoute);
+      await postingRouteDraftJourney(
+        page,
+        composedApplication.currentBaseUrl(),
+      );
     },
   );
 
@@ -546,6 +616,9 @@ async function readFocusRingCoverage(
   ];
 
   for (const state of states) {
+    await page.setViewportSize({ height: 720, width: 1280 });
+    await state.go();
+    if (injected) await page.addStyleTag({ content: injected });
     for (const viewport of [
       { height: 720, label: 'wide', width: 1280 },
       { height: 844, label: 'compact', width: 390 },
@@ -554,8 +627,6 @@ async function readFocusRingCoverage(
         height: viewport.height,
         width: viewport.width,
       });
-      await state.go();
-      if (injected) await page.addStyleTag({ content: injected });
       const pass = await page.evaluate((label: string) => {
         for (const details of document.querySelectorAll('details')) {
           details.open = true;
@@ -870,8 +941,13 @@ async function inventoryNavigationJourney(
     'Purchase order line',
     'Purchase order',
     'Received quantity',
+    'Reservation coverage',
+    'Reservation',
     'Sales order line',
     'Sales order',
+    'Shipped quantity',
+    'Shipment line',
+    'Shipment',
   ]);
   await expect(
     navigation.getByRole('link', { name: /detail|form/i }),
@@ -930,8 +1006,13 @@ async function inventoryNavigationJourney(
   ]);
   await salesNavigation.getByText('Sales', { exact: true }).click();
   await expect(salesNavigation.locator('a > span:nth-child(2)')).toHaveText([
+    'Reservation coverage',
+    'Reservation',
     'Sales order line',
     'Sales order',
+    'Shipped quantity',
+    'Shipment line',
+    'Shipment',
   ]);
   await salesNavigation.getByText('Sales', { exact: true }).click();
   await purchasingNavigation.getByText('Purchasing', { exact: true }).click();
@@ -998,6 +1079,27 @@ async function inventoryNavigationJourney(
     ),
   ).toBe(true);
   await page.setViewportSize({ height: 720, width: 1280 });
+}
+
+async function inventoryRecordNavigationJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
+  await page.goto(surfaceUrl(baseUrl, 'party_list'));
+  const navigation = page.getByRole('navigation', {
+    name: 'Release navigation',
+  });
+  const primaryEntries = navigation.locator('.navigation-tree > li');
+  const inventoryNavigation = primaryEntries
+    .getByRole('group')
+    .filter({ hasText: 'Inventory' });
+  const moreNavigation = primaryEntries
+    .getByRole('group')
+    .filter({ hasText: 'More' });
+  await moreNavigation.getByText('More', { exact: true }).click();
+  const purchasingNavigation = moreNavigation
+    .getByRole('group')
+    .filter({ hasText: 'Purchasing' });
 
   await navigation.getByRole('link', { name: 'Catalog', exact: true }).click();
   await expect(
@@ -1062,7 +1164,10 @@ async function inventoryNavigationJourney(
   ).toBeVisible();
 }
 
-async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
+async function onHandLookupRefusalJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
   const onHandLookup = await loadOnHandLookupProjection();
   const onHandValues = new Map<string, string>([
     [onHandLookup.legalEntityParameterId, browserLegalEntityId],
@@ -1114,6 +1219,17 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
     page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
   ).toBeVisible();
   await expect(page.locator('[data-aggregate-value]')).toHaveCount(0);
+}
+
+async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
+  const onHandLookup = await loadOnHandLookupProjection();
+  const onHandValues = new Map<string, string>([
+    [onHandLookup.legalEntityParameterId, browserLegalEntityId],
+    [onHandLookup.inputParameters[0]!.parameterId, demoItemId],
+    [onHandLookup.inputParameters[1]!.parameterId, demoLocationId],
+    [onHandLookup.inputParameters[2]!.parameterId, browserPostingInstant],
+    [onHandLookup.inputParameters[3]!.parameterId, browserPostingInstant],
+  ]);
 
   const blankFirstDuplicateScopeUrl = new URL(
     surfaceUrl(baseUrl, 'inventory_on_hand_lookup'),
@@ -1243,7 +1359,7 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(balance).toHaveText('5');
 }
 
-async function scopedInventoryJourney(
+async function scopedInventoryListJourney(
   page: Page,
   baseUrl: string,
 ): Promise<void> {
@@ -1326,6 +1442,39 @@ async function scopedInventoryJourney(
   await expect(
     page.getByRole('link', { name: 'New', exact: true }),
   ).toHaveCount(0);
+}
+
+async function scopedInventoryJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
+  const inventoryScopeParameters = {
+    movementDetail: await loadSurfaceScopeParameterId(
+      'inventory_movement_detail',
+    ),
+    movementList: await loadSurfaceScopeParameterId('inventory_movement_list'),
+    transactionDetail: await loadSurfaceScopeParameterId(
+      'inventory_transaction_detail',
+    ),
+    transactionForm: await loadSurfaceScopeParameterId(
+      'inventory_transaction_form',
+    ),
+    transactionList: await loadSurfaceScopeParameterId(
+      'inventory_transaction_list',
+    ),
+  } as const;
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_movement_list',
+      inventoryScopeParameters.movementList,
+      browserLegalEntityId,
+    ),
+  );
+  const movementRow = page.locator('tr', {
+    hasText: 'browser-posted-adjustment',
+  });
+  await expect(movementRow).toBeVisible();
   await movementRow.getByRole('link').click();
   expect(
     new URL(page.url()).searchParams.get(
@@ -1590,7 +1739,12 @@ async function repairedFormAnatomyJourney(
   // The untouched twin, through the same helper.
   await page.goto(surfaceUrl(baseUrl, 'party_form'));
   await expectRenderedRecordForm(page, 'New Party');
+}
 
+async function scopedFormPersistenceJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
   const scopeParameterId = await loadSurfaceScopeParameterId(
     'inventory_transaction_form',
   );
@@ -1913,7 +2067,10 @@ const inventoryFormHeadings = Object.freeze({
   stock_count_line_form: 'Stock count line',
 });
 
-async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
+async function postingRouteDraftJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
   const scopeParameterId = await loadSurfaceScopeParameterId(
     'inventory_transaction_detail',
   );
@@ -1924,6 +2081,47 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     browserLegalEntityId,
   )}&record=${encodeURIComponent(browserRouteTransactionId)}`;
   await expectRoutePostingEffect(page, baseUrl, 0, '5');
+  await page.goto(detailUrl);
+  const edit = page.getByRole('link', { name: 'Edit', exact: true });
+  await expect(edit).toHaveCount(1);
+  const editHref = await edit.getAttribute('href');
+  expect(editHref).not.toBeNull();
+  await page.goto(new URL(editHref ?? '', baseUrl).href);
+  await expect(
+    page.getByRole('heading', {
+      level: 1,
+      name: 'Edit Inventory transaction',
+    }),
+  ).toBeVisible();
+  const form = page.locator('form#surface-record-form');
+  await expect(form).toHaveCount(1);
+  const updateSubmission = await form.evaluate((recordForm) =>
+    Object.fromEntries(
+      [...new FormData(recordForm as HTMLFormElement).entries()].map(
+        ([name, value]) => [name, String(value)],
+      ),
+    ),
+  );
+  expect(updateSubmission.operationId).toBe(
+    `${applicationNamespace}:operation.inventory_transaction_update`,
+  );
+  expect(
+    updateSubmission[
+      `value:${applicationNamespace}:field.inventory_transaction_state`
+    ],
+  ).toBe(`${applicationNamespace}:option.inventory_transaction_state_draft`);
+}
+
+async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
+  const scopeParameterId = await loadSurfaceScopeParameterId(
+    'inventory_transaction_detail',
+  );
+  const detailUrl = `${scopedSurfaceUrl(
+    baseUrl,
+    'inventory_transaction_detail',
+    scopeParameterId,
+    browserLegalEntityId,
+  )}&record=${encodeURIComponent(browserRouteTransactionId)}`;
   await page.goto(detailUrl);
   await expect(page.getByText(/Active · revision 1/)).toBeVisible();
   const edit = page.getByRole('link', { name: 'Edit', exact: true });

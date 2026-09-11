@@ -166,10 +166,15 @@ export class PostgresTrustService {
     actorEnvelope: TrustedActorEnvelope,
     binding: IdempotentMutationBinding,
     mutate: IdempotentBusinessMutation<TMutationResult>,
+    serializeBeforeIdempotency?: BusinessMutation<void>,
   ): Promise<AcceptedMutationReceipt<TMutationResult>> {
     assertExecutionAuthority(context, actorEnvelope);
     validateIdempotencyBinding(binding);
     return withTrustedRequestTransaction(this.pool, context, async (client) => {
+      // Stock-affecting domain capabilities must establish the canonical stock
+      // serializer before any request-key or row lock. Ordinary trust callers
+      // omit this hook and retain the existing transaction order.
+      await serializeBeforeIdempotency?.(client);
       await lockIdempotencyBinding(client, context, binding);
       const existing = await findIdempotencyReceipt<TMutationResult>(
         client,
