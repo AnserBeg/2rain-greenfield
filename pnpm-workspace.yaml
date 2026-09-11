@@ -7,9 +7,10 @@ allowBuilds:
 
 overrides:
   brace-expansion: 5.0.9
-  # GHSA-5p4m-2wfm-xmqj / CVE-2026-59870 — quadratic CPU in !!omap resolution.
-  # Dev-only reach (eslint / typescript-eslint); patched from 4.3.1. Held inside
-  # the 4.x major deliberately: a bare '>=4.3.1' resolves to 5.2.3, and a major
-  # bump of eslint's YAML config loader is a wider change than this advisory asks
-  # for.
-  js-yaml: '>=4.3.1 <5'
+  # GHSA-5p4m-2wfm-xmqj / CVE-2026-59870 — quadratic CPU in !!omap resolution,
+  # patched from 4.3.1. GHSA-2883-xcg3-v3hh then reached 4.3.1 itself and is
+  # patched in 4.3.2, so the floor moves rather than the bound.
+  # Dev-only reach (eslint / typescript-eslint). Held inside the 4.x major
+  # deliberately: a bare '>=4.3.2' resolves to 5.2.3, and a major bump of
+  # eslint's YAML config loader is a wider change than either advisory asks for.
+  js-yaml: '>=4.3.2 <5'

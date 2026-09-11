@@ -141,6 +141,7 @@ const suiteDefinitions = [
       'test/postgres/module-runtime.test.ts',
       'test/postgres/module-storage-transition.test.ts',
       'test/postgres/observability-health.test.ts',
+      'test/postgres/packing-retrieval.test.ts',
       'test/postgres/party-runtime.test.ts',
       'test/postgres/predicate-absent-semantics.test.ts',
       'test/postgres/predicate-parity-corpus.test.ts',
