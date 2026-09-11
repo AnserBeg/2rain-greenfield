@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `SALE` — usable sales orders only | evidence_ready on `packet/SALE`; executable head `96b4892` includes the focused CI correction. RECEIPT and scoped AUTH landed through PR #1 at `c30e951` by owner-authorized integration; no final independent approval was reissued and no production-authentication claim is made. SALE does not wait on the former pending wording |
+| **BUILD** | — | idle. SALE integrated through PR #3 at `4c058aa`; SALE-FULFILLMENT integrated through PR #4 at `44bef7a`, Critical arm closed and all seven CI jobs green. No next vertical assigned |
 | **SUPPORT** | — | idle |
 
 
