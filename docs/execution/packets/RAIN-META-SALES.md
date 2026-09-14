@@ -3,6 +3,7 @@
 Status: blocked on one canonical surface-contract decision; no product implementation.
 Owner: sole local BUILD; review online only; no merge or deployment.
 Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6` (main and origin/main after fetch).
+Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/5 (decision only).
 Branch: `packet/RAIN-META-SALES`; worktree: `/home/rvham/2rain-greenfield-rain-meta-sales`.
 Reference: `AnserBeg/temp_inventory@d057daffd17a199309675a6b0a31c8bdbca05282`.
 Reference checkout has local edits; all source reads used `git show` at that pin.
