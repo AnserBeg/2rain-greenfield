@@ -128,7 +128,7 @@ function displayFieldValue(
   const result = record.displayValues?.[fieldId] ?? text(value);
   if (
     field &&
-    ['decimalFieldType', 'quantityFieldType'].includes(field.kind) &&
+    ['exactDecimalFieldType', 'quantityFieldType'].includes(field.kind) &&
     /^-?\d+\.\d+$/.test(result)
   )
     return result.replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1');
@@ -437,7 +437,7 @@ export function renderCompositionActions(
   const back = returnTo?.startsWith('/?')
     ? `<p><a href="${h(returnTo)}">Back to order</a></p>`
     : '';
-  return `${back}<section class="panel command-bar" aria-label="Selected record actions">${actions || compositionMessage('COMPOSITION_SELECTION_REQUIRED')}</section>`;
+  return `<div class="composition-actions">${back}${surface.composition!.actions.length ? `<section class="panel command-bar" aria-label="Selected record actions">${actions || compositionMessage('COMPOSITION_SELECTION_REQUIRED')}</section>` : ''}</div>`;
 }
 
 interface TaskSession {

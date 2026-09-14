@@ -325,7 +325,9 @@ function surfaceComponentRenderer(
     slot.slot === 'childTables' &&
     !surface.composition
   )
-    return undefined;
+    return Object.hasOwn(componentRegistry, slot.contentReferenceId)
+      ? componentRegistry[slot.contentReferenceId]
+      : undefined;
   const slotKey = `${surface.archetype}:${slot.slot}`;
   if (Object.hasOwn(surfaceSlotRegistry, slotKey)) {
     return surfaceSlotRegistry[slotKey]?.renderer;
