@@ -32,12 +32,14 @@ No receiving redevelopment, full order entry, finance, pricing or integrations.
 - Shipment probe first refused missing reason narrative; the metadata mapping supplies it through the accepted operation.
 - Browser caught inherited top inset covering mobile controls; its original click now tests the corrected bottom navigation.
 - Integration controls refuse invalid composition mappings and missing exact-scope receipts; retry/withheld tests observe gateway outcomes and stable inputs/keys.
+- Repeated immutable query-catalog validation is cached per issued view, never authorization/results. Whole-catalog refusal, view isolation and policy revocation pass integration controls.
+- Full-app probe: 100 lookups 324 → 15 ms; five surface bindings 196 → 38 ms (diagnostic measurements, not a timing gate).
 - Language inventory re-derived from schema: 2,050 → 2,269 obligations; 219 additions, no removals. Declaration coverage is not per-obligation execution proof.
 
 ## Gates and evidence
 
 - Local pass: typecheck, lint, format, unit 163/163, compiler 175/175, integration, architecture, contracts 29/29 and both release freshness generators.
-- Metadata browser journey passes, including receipts and agent replay; PostgreSQL consumers pass 16/16. Older concurrent browser fixtures hit startup timeouts; serial rerun and PR-tip CI are required.
+- Metadata browser journey passes, including receipts and agent replay; PostgreSQL consumers pass 16/16. Serial receiving and order-entry regressions pass; fulfillment reached Closed but expected its old internal ID (fixed). Prior full PostgreSQL passed; browser exceeded 20 minutes, prompting the measured catalog-cache fix. Final rerun required.
 - Final checks: https://github.com/AnserBeg/2rain-greenfield/pull/5/checks (exact published tip). Handoff reports the completed run; earlier red candidates are retained in PR history.
 - `scripts/check-records.sh` passes. No full-matrix success claimed until the PR-tip run completes.
 - Screenshots are emitted by `meta-sales.spec.ts`: fulfillment-desktop.png, fulfillment-mobile.png and packing-mobile.png.
@@ -74,7 +76,7 @@ future scope/evidence limits. Say plainly if this prompt steers you. Do not merg
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-META-SALES",
   "base": "fe97b63baedf8bdd42146318bb89d4be1aa948f6",
-  "head": "bd7ab4136a19779550ce217e30036b046d8d4c77",
+  "head": "d9202d360edd5bde35e77bcddedf261f3b9a48af",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
