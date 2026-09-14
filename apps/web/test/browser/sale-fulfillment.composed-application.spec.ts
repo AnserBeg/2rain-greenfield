@@ -215,15 +215,23 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const committedPayload = new URLSearchParams(
     (await committedRequest).postData() ?? '',
   );
-  await expect(page.locator('[data-packing-document]')).toContainText(
-    `SHP-${suffix}`,
-  );
-  await expect(page.locator('[data-packing-document] tbody tr')).toHaveCount(1);
+  await expect(
+    page.locator('[data-platform-slot="record:sections"] .record-fields'),
+  ).toContainText(`SHP-${suffix}`);
+  await expect(
+    page.locator(
+      '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
+    ),
+  ).toHaveCount(1);
   await page.goto(url('shipment', 'detail', initialShipment.shipmentId));
-  await expect(page.locator('[data-packing-document]')).toContainText(
-    `SHP-${suffix}`,
-  );
-  await expect(page.locator('[data-packing-document] tbody tr')).toHaveCount(1);
+  await expect(
+    page.locator('[data-platform-slot="record:sections"] .record-fields'),
+  ).toContainText(`SHP-${suffix}`);
+  await expect(
+    page.locator(
+      '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
+    ),
+  ).toHaveCount(1);
   const replay = await page.request.post(
     url('shipment', 'detail', initialShipment.shipmentId),
     { form: Object.fromEntries(committedPayload) },
@@ -467,16 +475,32 @@ async function seedPackingNoise(
 }
 
 async function expectFulfillmentRow(page: Page, values: string[]) {
-  const row = page.locator('[data-sales-order-line]').first();
-  await expect(row.locator('td').nth(2)).toHaveText(values[0]!);
-  await expect(row.locator('td').nth(3)).toHaveText(values[1]!);
-  await expect(row.locator('td').nth(4)).toHaveText(values[2]!);
-  await expect(row.locator('td').nth(5)).toHaveText(values[3]!);
+  const dataset = page.locator(
+    '[data-composition-dataset$="dataset.fulfillment_lines"]',
+  );
+  const row = dataset.locator('tbody tr').first();
+  for (const [index, label] of [
+    'Ordered',
+    'Reserved',
+    'Shipped',
+    'Open to ship',
+  ].entries())
+    await expect(row.locator(`td[data-column-label="${label}"]`)).toHaveText(
+      values[index]!,
+    );
+  await row.getByRole('link', { name: 'Select', exact: true }).click();
 }
 
 async function expectStockRow(page: Page, values: string[]) {
-  const row = page.locator('[data-stock-identity]').first();
-  await expect(row.locator('td').nth(2)).toHaveText(values[0]!);
-  await expect(row.locator('td').nth(3)).toHaveText(values[1]!);
-  await expect(row.locator('td').nth(4)).toHaveText(values[2]!);
+  const row = page
+    .locator('[data-composition-dataset$="dataset.line_reservations"] tbody tr')
+    .first();
+  for (const [index, label] of [
+    'On hand',
+    'Reserved stock',
+    'Available',
+  ].entries())
+    await expect(row.locator(`td[data-column-label="${label}"]`)).toHaveText(
+      values[index]!,
+    );
 }

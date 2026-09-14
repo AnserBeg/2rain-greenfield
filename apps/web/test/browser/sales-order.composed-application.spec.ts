@@ -214,18 +214,21 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.goto(lineFormUrl);
   const releasedLineAttempt = await formPayload(page);
   await page.goto(url('sales_order', 'detail', orderId));
-  await expect(
-    page.locator(`[data-sales-order-line="${lineId}"] td`),
-  ).toHaveText([
-    '1',
-    itemId,
-    '10',
-    '0',
-    '0',
-    '10',
-    'EA',
-    '12.500000000000000000',
-  ]);
+  const lineRow = page.locator(
+    `[data-composition-dataset$="dataset.fulfillment_lines"] [data-record-id="${lineId}"]`,
+  );
+  for (const [label, value] of Object.entries({
+    Line: '1',
+    Item: 'Field notebook',
+    Ordered: '10',
+    Reserved: '0',
+    Shipped: '0',
+    'Open to ship': '10',
+    Unit: 'EA',
+  }))
+    await expect(
+      lineRow.locator(`td[data-column-label="${label}"]`),
+    ).toHaveText(value);
   await page.getByRole('button', { name: 'Release', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Release complete');
   expect(await snapshot()).toEqual(initialStock);

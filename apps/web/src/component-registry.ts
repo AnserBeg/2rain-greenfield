@@ -649,18 +649,16 @@ function listRecordTitle(
 }
 
 function renderCommandBar(context: SurfaceComponentContext): string {
-  if (context.data?.status === 'READY' && context.data.composition)
-    return slotPanel(
-      context,
-      context.data.compositionTask
-        ? ''
-        : renderCompositionActions(
-            context.surface,
-            context.data.composition,
-            context.view,
-          ),
-      'command-bar-slot',
-    );
+  if (context.data?.status === 'READY' && context.data.compositionTask)
+    return slotPanel(context, '', 'command-bar-slot');
+  const compositionActions =
+    context.data?.status === 'READY' && context.data.composition
+      ? renderCompositionActions(
+          context.surface,
+          context.data.composition,
+          context.view,
+        )
+      : '';
   const record = recordFrom(context.data);
   if (context.surface.surfaceRole === 'form') {
     const admission = resolveFormAdmission(context, record);
@@ -706,7 +704,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   ].join('');
   return slotPanel(
     context,
-    `<div class="command-bar" aria-label="Record commands">${actions}</div>`,
+    `${compositionActions}<div class="command-bar" aria-label="Record commands">${actions}</div>`,
     'command-bar-slot',
   );
 }
