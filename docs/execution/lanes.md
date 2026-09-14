@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RAIN-META-SALES` | active: v6 composition approved, implementation and validation; isolated `packet/RAIN-META-SALES`, base `fe97b63`; [record](packets/RAIN-META-SALES.md); online review only, no merge |
+| **BUILD** | `RAIN-META-SALES` | evidence_ready: metadata journey and PostgreSQL consumers pass; final CI/online review pending; isolated `packet/RAIN-META-SALES`, base `fe97b63`; [record](packets/RAIN-META-SALES.md); online review only, no merge |
 | **SUPPORT** | — | idle |
 
 
