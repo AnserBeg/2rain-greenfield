@@ -1,4 +1,8 @@
 import {
+  QueryReadModelSchema,
+  type QueryReadModel,
+} from '../../canonical-model/src/index.js';
+import {
   FieldTypeSchema,
   PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_LOWERING_PLAN_VERSION,
@@ -156,6 +160,7 @@ interface RegisteredQueryDefinitionBase {
 }
 
 export interface RegisteredQueryDefinition extends RegisteredQueryDefinitionBase {
+  readonly readModel?: QueryReadModel;
   readonly parameters?: readonly RegisteredQueryParameterDefinition[];
   readonly infrastructure?: {
     readonly archive: 'nullableArchivedAt';
@@ -326,6 +331,14 @@ export class UnsupportedSemanticAggregateQueryError extends Error {
 }
 
 /** Sole application read ingress for the request-pinned semantic contract. */
+export type SemanticQueryReadModelExecutor = (request: {
+  readonly view: IssuedRequestRuntimeView;
+  readonly definition: RegisteredQueryDefinition;
+  readonly arguments: ImmutableJsonValue;
+  readonly result: SemanticQueryResultEnvelope;
+  readonly gateway: SemanticQueryGateway;
+}) => Promise<SemanticQueryResultEnvelope>;
+
 export class SemanticQueryGateway {
   constructor(
     private readonly currentPolicy: CurrentPolicyGateway,
@@ -338,6 +351,9 @@ export class SemanticQueryGateway {
       RegisteredQueryLatencyInstrumentation | undefined = undefined,
     private readonly denialRecorder:
       SemanticQueryDenialRecorder | undefined = undefined,
+    private readonly readModels: Readonly<
+      Record<string, SemanticQueryReadModelExecutor>
+    > = {},
   ) {}
 
   async invoke(
@@ -628,6 +644,21 @@ export class SemanticQueryGateway {
           view,
         }),
       );
+    }
+    if (
+      definition.queryType !== 'aggregate' &&
+      definition.readModel &&
+      result.kind === 'semanticQueryResult'
+    ) {
+      const execute = this.readModels[definition.readModel.capability.targetId];
+      if (!execute) throw new NoSuchRegisteredQueryError(request.queryId, view);
+      result = await execute({
+        view,
+        definition,
+        arguments: request.arguments,
+        result,
+        gateway: this,
+      });
     }
     if (list) {
       if (result.kind !== 'semanticQueryResult') {
@@ -966,6 +997,10 @@ function parseQueryDefinition(
     throw invalid('pinned query definition must be an object');
   }
   const aggregate = value.queryType === 'aggregate';
+  if (Object.hasOwn(value, 'readModel')) {
+    if (aggregate) throw invalid('aggregate read models are unsupported');
+    QueryReadModelSchema.parse(value.readModel);
+  }
   const expectedKeys = [
     ...(aggregate
       ? ['aggregate', 'aggregatePlan', 'parameters', 'resultContract']
@@ -988,6 +1023,7 @@ function parseQueryDefinition(
     value,
     [
       ...expectedKeys,
+      ...(Object.hasOwn(value, 'readModel') ? ['readModel'] : []),
       ...(hasLegalEntityScope ? ['legalEntityScope'] : []),
       ...(hasParameters ? ['parameters'] : []),
       ...(hasFilterPlan ? ['filterPlan'] : []),

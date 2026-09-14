@@ -1,3 +1,8 @@
+import {
+  salesWorkspace,
+  salesWorkspaceQueries,
+  packingWorkspace,
+} from '../sales/workspace.js';
 import { catalogModuleDefinition } from '../catalog/definition.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
@@ -5,8 +10,8 @@ import { partyModuleDefinition } from '../party/definition.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
 
-const version = 'v5' as const;
-const normalizationProfileVersion = 'northstar.normalization/v5' as const;
+const version = 'v6' as const;
+const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
 export const APPLICATION_NAMESPACE = 'northstar.app' as const;
 
@@ -137,12 +142,46 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       version: '1.0.0',
     },
     permissions: merged(definitions, 'permissions'),
-    queries: merged(definitions, 'queries'),
+    queries: salesWorkspaceQueries(
+      APPLICATION_NAMESPACE,
+      merged(definitions, 'queries') as Record<string, unknown>[],
+    ),
     relations: merged(definitions, 'relations'),
     schemaVersion: version,
     stateMachines: merged(definitions, 'stateMachines'),
     storageMappings: merged(definitions, 'storageMappings'),
-    surfaces: merged(definitions, 'surfaces'),
+    surfaces: merged(definitions, 'surfaces').map((surface) => {
+      if (!isRecord(surface)) throw new TypeError('surface must be an object');
+      if (
+        surface.surfaceId !==
+          `${APPLICATION_NAMESPACE}:surface.sales_order_detail` &&
+        surface.surfaceId !== `${APPLICATION_NAMESPACE}:surface.shipment_detail`
+      )
+        return surface;
+      return {
+        ...surface,
+        composition:
+          surface.surfaceId ===
+          `${APPLICATION_NAMESPACE}:surface.sales_order_detail`
+            ? salesWorkspace(APPLICATION_NAMESPACE)
+            : packingWorkspace(APPLICATION_NAMESPACE),
+        slots: [
+          ...(surface.slots as Record<string, unknown>[]),
+          {
+            kind: 'surfaceSlot',
+            schemaVersion: version,
+            slot: 'childTables',
+            slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_children`,
+            orderKey: 60,
+            content: {
+              kind: 'opaqueSurfaceContentReference',
+              schemaVersion: version,
+              targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
+            },
+          },
+        ],
+      };
+    }),
   };
 }
 

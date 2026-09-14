@@ -93,6 +93,8 @@ export function sharedListBindingDigest(
     | 'includeArchived'
     | 'matchMode'
     | 'parentScope'
+    | 'referenceScope'
+    | 'fieldFilters'
     | 'relationLabels'
     | 'search'
     | 'sort'
@@ -105,6 +107,8 @@ export function sharedListBindingDigest(
     // meaningless against parent B or against a different relation, so a cursor
     // minted under one parent scope must not decode under another.
     parentScope: query.parentScope,
+    ...(query.referenceScope ? { referenceScope: query.referenceScope } : {}),
+    ...(query.fieldFilters ? { fieldFilters: query.fieldFilters } : {}),
     queryId,
     relationLabels: query.relationLabels,
     search: query.search,

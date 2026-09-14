@@ -1,3 +1,10 @@
+import type { SurfaceComposition } from '../../packages/canonical-model/src/index.js';
+import {
+  loadSurfaceComposition,
+  renderCompositionFields,
+  renderCompositionChildren,
+  renderCompositionActions,
+} from '../../apps/web/src/surface-composition.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
@@ -3262,3 +3269,268 @@ function asRecord(value: unknown): Record<string, unknown> {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+// RAIN-META-SALES: an unrelated package, with every product identity renamed.
+function workshopComposition(label: string): Record<string, unknown> {
+  const definition = JSON.parse(
+    JSON.stringify(ordinaryModuleV1())
+      .replaceAll('northstar.modulefixture', 'workshop.jobs')
+      .replaceAll('master_role', 'assignment')
+      .replaceAll('master', 'job')
+      .replaceAll('"v3"', '"v6"')
+      .replaceAll('northstar.normalization/v3', 'northstar.normalization/v6'),
+  ) as Record<string, unknown>;
+  const surfaces = definition.surfaces as Array<Record<string, unknown>>;
+  const surface = surfaces.find(
+    (value) => value.surfaceId === 'workshop.jobs:surface.job_record',
+  )!;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  surface.composition = {
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    fields: [
+      {
+        columnId: 'workshop.jobs:column.name',
+        label,
+        orderKey: 10,
+        field: 'workshop.jobs:field.job_name',
+      },
+    ],
+    children: [
+      {
+        datasetId: 'workshop.jobs:dataset.assignments',
+        label: 'Assigned work',
+        orderKey: 10,
+        query: ref('queryReference', 'workshop.jobs:query.assignment_list'),
+        parent: {
+          relationId: 'workshop.jobs:relation.assignment_parent',
+          ownership: 'parentScopedChild',
+          value: { source: 'record', field: 'recordId' },
+        },
+        columns: [
+          {
+            columnId: 'workshop.jobs:column.role',
+            label: 'Responsibility',
+            orderKey: 10,
+            field: 'workshop.jobs:field.assignment_kind',
+          },
+        ],
+      },
+    ],
+    actions: [
+      {
+        actionId: 'workshop.jobs:action.retire',
+        label: 'Retire assignment',
+        description: 'Archive this assignment.',
+        orderKey: 10,
+        datasetId: 'workshop.jobs:dataset.assignments',
+        conditions: [],
+        inputs: [],
+        steps: [
+          {
+            stepId: 'workshop.jobs:step.archive',
+            operation: ref(
+              'operationReference',
+              'workshop.jobs:operation.assignment_archive',
+            ),
+            bindings: [
+              {
+                path: ['recordId'],
+                value: { source: 'selected', field: 'recordId' },
+              },
+              {
+                path: ['expectedRevision'],
+                value: { source: 'selected', field: 'revision' },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  (surface.slots as unknown[]).push(
+    ...['sections', 'commandBar'].map((slot, index) => ({
+      kind: 'surfaceSlot',
+      schemaVersion: 'v6',
+      slot,
+      slotId: `workshop.jobs:slot.extra_${index}`,
+      orderKey: 20 + index,
+      content: ref(
+        'opaqueSurfaceContentReference',
+        'workshop.jobs:capability.standard_surface_content',
+      ),
+    })),
+  );
+  (surface.slots as unknown[]).push({
+    kind: 'surfaceSlot',
+    schemaVersion: 'v6',
+    slot: 'childTables',
+    slotId: 'workshop.jobs:slot.children',
+    orderKey: 60,
+    content: ref(
+      'opaqueSurfaceContentReference',
+      'workshop.jobs:capability.standard_surface_content',
+    ),
+  });
+  return definition;
+}
+
+test('v6 composition renders two compiled presentation revisions and renamed non-Sales child actions through the same runtime', async () => {
+  const first = compileFixture(workshopComposition('Work title'));
+  const second = compileFixture(workshopComposition('Assignment heading'));
+  assert.notEqual(first.releaseRoot, second.releaseRoot);
+  const policy = new RecordingPolicy('ALLOW');
+  const root: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.job',
+    recordId: randomUUID(),
+    revision: 1,
+    archived: false,
+    values: { 'workshop.jobs:field.job_name': 'Warehouse audit' },
+  };
+  const child: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.assignment',
+    recordId: randomUUID(),
+    revision: 7,
+    archived: false,
+    values: { 'workshop.jobs:field.assignment_kind': 'Supervisor' },
+  };
+  const observed: SemanticQueryExecutionRequest[] = [];
+  const executor = new InMemoryGenericExecutor();
+  let gateways: SurfaceRuntimeGateways = {
+    ...semanticGateways(policy, executor),
+    queryGateway: new SemanticQueryGateway(policy, {
+      async execute(request) {
+        observed.push(request);
+        return {
+          kind: 'semanticQueryResult',
+          schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+          queryId: request.definition.queryId,
+          outcome: 'exact',
+          unsupportedReason: null,
+          records: request.list ? [child] : [root],
+          ...(request.list
+            ? {
+                listCoverage: {
+                  ...listCoverage(request, 1),
+                  parentScope: request.list.query.parentScope,
+                },
+              }
+            : {}),
+        };
+      },
+    }),
+  };
+  for (const [compiled, label] of [
+    [first, 'Work title'],
+    [second, 'Assignment heading'],
+  ] as const) {
+    const view = await issuedView(
+      runtimeEntry(compiled, policy, {
+        a: identity(tenantA, environmentA, principalA),
+      }),
+      'a',
+    );
+    const surface = readCompiledSurfaceManifest(view).surfaces.find(
+      (value) => value.surfaceId === 'workshop.jobs:surface.job_record',
+    )!;
+    const url = new URL('http://fixture/');
+    url.searchParams.set('surface', surface.surfaceId);
+    url.searchParams.set('record', root.recordId);
+    url.searchParams.set('dataset', 'workshop.jobs:dataset.assignments');
+    url.searchParams.set(
+      'select:workshop.jobs:dataset.assignments',
+      child.recordId,
+    );
+    const data = await loadSurfaceComposition(
+      view,
+      surface,
+      root,
+      url.href,
+      null,
+      gateways,
+    );
+    assert.equal(data.children[0]?.status, 'ready');
+    assert.equal(data.selected?.recordId, child.recordId);
+    assert.match(renderCompositionFields(surface, data), new RegExp(label));
+    assert.match(renderCompositionChildren(data), /Supervisor/);
+    assert.match(
+      renderCompositionActions(surface, data, view),
+      /Retire assignment/,
+    );
+    assert.deepEqual(observed.at(-1)?.list?.query.parentScope, {
+      relationId: 'workshop.jobs:relation.assignment_parent',
+      recordId: root.recordId,
+    });
+  }
+  // Removing the provider's exact-scope receipt must fail the child, never show a broad list.
+  const view = await issuedView(
+    runtimeEntry(first, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const surface = readCompiledSurfaceManifest(view).surfaces.find(
+    (value) => value.surfaceId === 'workshop.jobs:surface.job_record',
+  )!;
+  gateways = { ...gateways, queryGateway: fixedQueryGateway('exact', [child]) };
+  const refused = await loadSurfaceComposition(
+    view,
+    surface,
+    root,
+    '/',
+    null,
+    gateways,
+  );
+  assert.equal(refused.children[0]?.status, 'failed');
+  assert.deepEqual(refused.children[0]?.rows, []);
+  assert.doesNotMatch(
+    renderCompositionActions(surface, refused, view),
+    /Retire assignment/,
+  );
+});
+
+test('v6 composition refuses undeclared context, operation fields and cyclic child dependencies', () => {
+  const valid = workshopComposition('Work title');
+  normalizeApplicationPackage(valid);
+  for (const mutate of [
+    (composition: SurfaceComposition) => {
+      composition.fields[0]!.field = 'workshop.jobs:field.missing';
+    },
+    (composition: SurfaceComposition) => {
+      composition.actions[0]!.conditions = [
+        {
+          value: { source: 'input', inputId: composition.actions[0]!.actionId },
+          operator: 'equals',
+          compare: 'x',
+        },
+      ];
+    },
+    (composition: SurfaceComposition) => {
+      composition.children[0]!.parent!.value = {
+        source: 'selected',
+        datasetId: composition.children[0]!.datasetId,
+        field: 'recordId',
+      };
+    },
+    (composition: SurfaceComposition) => {
+      composition.actions[0]!.steps[0]!.bindings[0]!.path = [
+        'values',
+        'workshop.jobs:field.job_name',
+      ];
+    },
+  ]) {
+    const candidate = structuredClone(valid);
+    const surface = (candidate.surfaces as Array<Record<string, unknown>>).find(
+      (value) => value.composition,
+    )!;
+    mutate(surface.composition as SurfaceComposition);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      /CANON_SCHEMA_INVALID/,
+    );
+  }
+});

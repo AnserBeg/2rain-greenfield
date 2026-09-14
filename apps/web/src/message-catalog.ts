@@ -90,6 +90,87 @@ export interface SurfaceMessage {
 }
 
 export const SURFACE_MESSAGE_CATALOG = Object.freeze({
+  COMPOSITION_CHILD_FAILED: {
+    sentence: 'Section unavailable',
+    detail:
+      'This declared child query could not be completed. Other sections remain available.',
+    nextAction: 'Refresh to retry.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_CHILD_EMPTY: {
+    sentence: 'No child records',
+    detail:
+      'There are no matching records, or the required parent selection is empty.',
+    nextAction:
+      'Select a parent record when this section depends on a selection.',
+    consequence: 'advisory',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_SELECTION_REQUIRED: {
+    sentence: 'Select a record',
+    detail: 'Actions depend on the selected record and its current state.',
+    nextAction: 'Select an applicable row.',
+    consequence: 'advisory',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_TASK_UNAVAILABLE: {
+    sentence: 'Task unavailable',
+    detail:
+      'This task is expired, unavailable, or no longer applies to this record.',
+    nextAction:
+      'Reopen the record and check its current state before starting again.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_BUSY: {
+    sentence: 'Task is running',
+    detail: 'The same task is already executing.',
+    nextAction: 'Return to the record and check its state before retrying.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_INPUT_INVALID: {
+    sentence: 'Check the task inputs',
+    detail:
+      'Complete required inputs, use a positive exact quantity and choose an available reference.',
+    nextAction: 'Correct the inputs and review the task again.',
+    consequence: 'advisory',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_COMMITTED_WITHHELD: {
+    sentence: 'Operation committed',
+    detail: 'Read-back is withheld. Further steps were not run.',
+    nextAction: 'Check the record before starting further work.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_UNCERTAIN: {
+    sentence: 'Task stopped',
+    detail:
+      'Earlier steps may have committed. The latest operation could not be verified.',
+    nextAction:
+      'Retry uses the same inputs and request keys. Check the record before starting a new task.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_COMPLETE: {
+    sentence: 'Task complete',
+    detail: 'The registered operations committed successfully.',
+    nextAction: 'Return to the record to read its current state.',
+    consequence: 'advisory',
+    placements: ['slot'],
+    subject: null,
+  },
+
   AUTHENTICATION_REQUIRED: {
     consequence: 'blocking',
     detail:

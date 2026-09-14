@@ -40,6 +40,12 @@ export {
   type CanonicalDiagnostic,
 } from './diagnostics.js';
 export {
+  QueryReadModelSchema,
+  type QueryReadModel,
+  SurfaceCompositionSchema,
+  type SurfaceComposition,
+  type V6AuthoredApplicationPackage,
+  type V6NormalizedApplicationPackage,
   AuthoredApplicationPackageSchema,
   CanonicalDecimalStringSchema,
   CanonicalSignedDecimalStringSchema,

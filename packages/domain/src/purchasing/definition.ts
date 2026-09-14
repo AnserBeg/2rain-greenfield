@@ -26,8 +26,8 @@
 // seam exists now, it runs at `tier: 'o0'` through the generic press, and this
 // module is what ADR-0050:150 called "the moment any module adopts one" --
 // release roots move and normalized bytes change, by design.
-const version = 'v5' as const;
-const normalizationProfileVersion = 'northstar.normalization/v5' as const;
+const version = 'v6' as const;
+const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
 export const PURCHASING_NAMESPACE = 'northstar.purchasing' as const;
 

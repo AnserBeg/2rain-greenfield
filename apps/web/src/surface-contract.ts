@@ -1,7 +1,12 @@
+import {
+  SurfaceCompositionSchema,
+  type SurfaceComposition,
+} from '../../../packages/canonical-model/src/index.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import {
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
 } from '../../../packages/compiler/src/protocol.js';
@@ -259,6 +264,7 @@ export interface CompiledSurfaceSlot {
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly composition?: SurfaceComposition;
   readonly archetype: CompiledSurfaceArchetype;
   readonly dataSourceQueryId: string;
   readonly fieldIds: readonly string[];
@@ -669,9 +675,17 @@ export function readCompiledSurfaceManifest(
     );
   }
   const navigation =
-    payloadSchemaVersion === GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION
+    payload.navigation !== undefined
       ? parseNavigationTree(payload.navigation, surfaces)
       : null;
+  if (
+    payloadSchemaVersion !== COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION &&
+    surfaces.some((surface) => surface.composition)
+  )
+    throw new SurfaceProjectionError(
+      'UNSUPPORTED_SURFACE_VERSION',
+      'composition requires the v2 surface envelope',
+    );
   validateNavigationReachability(navigation, surfaces);
 
   return Object.freeze({
@@ -863,6 +877,9 @@ function parseSurface(
   const fields = parseSurfaceFields(value, index);
 
   return Object.freeze({
+    ...(value.composition === undefined
+      ? {}
+      : { composition: SurfaceCompositionSchema.parse(value.composition) }),
     archetype,
     dataSourceQueryId: value.dataSourceQueryId,
     fieldIds: Object.freeze([...value.fieldIds]),

@@ -1,3 +1,4 @@
+import { validateSurfaceCompositions } from './surface-composition.js';
 import { ZodError } from 'zod';
 
 import { canonicalize } from './canonicalize.js';
@@ -35,6 +36,7 @@ import {
   type V3NormalizedApplicationPackage,
   type V4AuthoredApplicationPackage,
   type V5AuthoredApplicationPackage,
+  type V6AuthoredApplicationPackage,
   type V4NormalizedApplicationPackage,
   type VersionedAuthoredApplicationPackage,
   type VersionedNormalizedApplicationPackage,
@@ -64,7 +66,8 @@ function authoredHasV3Families(
 ): authored is
   | V3AuthoredApplicationPackage
   | V4AuthoredApplicationPackage
-  | V5AuthoredApplicationPackage {
+  | V5AuthoredApplicationPackage
+  | V6AuthoredApplicationPackage {
   return languageHasV3Features(authored.languageVersion);
 }
 
@@ -143,6 +146,7 @@ export function parseNormalizedApplicationPackageJson(
   }
   enforceFamilyBounds(normalized);
   validateSemantics(normalized);
+  validateSurfaceCompositions(normalized);
   enforceValueBounds(normalized);
   validateNormalizedDerivation(normalized);
   return deepFreeze(normalized);
@@ -452,6 +456,7 @@ export function normalizeApplicationPackage(
     throw error;
   }
   validateSemantics(normalized);
+  validateSurfaceCompositions(normalized);
   enforceValueBounds(normalized);
   const normalizedBytes = new TextEncoder().encode(canonicalize(normalized));
   if (
@@ -2236,7 +2241,8 @@ function languageHasV2Features(
     featureLevel === 'v2' ||
     featureLevel === 'v3' ||
     featureLevel === 'v4' ||
-    featureLevel === 'v5'
+    featureLevel === 'v5' ||
+    featureLevel === 'v6'
   );
 }
 

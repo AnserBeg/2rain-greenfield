@@ -1,3 +1,4 @@
+import { fulfillmentReadModel } from './fulfillment-read-model.js';
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
@@ -669,6 +670,7 @@ export async function createComposedApplicationRuntime(
         options.monotonicMilliseconds,
       ),
       new PostgresSemanticQueryDenialRecorder(runtimePool, actorIssuer),
+      { 'northstar.sales:capability.fulfillment': fulfillmentReadModel },
     );
     const capabilityExecutors = createRegisteredCapabilityExecutors(
       options.capabilityOperationExecutorFactories ?? [],

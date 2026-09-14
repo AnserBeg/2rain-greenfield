@@ -1,3 +1,9 @@
+import {
+  renderCompositionFields,
+  renderCompositionActions,
+  renderCompositionChildren,
+  type CompositionData,
+} from './surface-composition.js';
 import { randomUUID } from 'node:crypto';
 
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
@@ -103,6 +109,8 @@ export type SurfaceDataRenderState =
       readonly records: readonly SemanticRecordDto[];
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
+      readonly composition?: CompositionData;
+      readonly compositionTask?: string;
       readonly salesOrder?: SalesOrderSection;
       readonly packingDocument?: ShipmentPackingDocument;
       readonly result?: SemanticQueryResultEnvelope;
@@ -205,6 +213,15 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       mutationIntents: { record: ['archive', 'restore'] },
       ownsDataResolution: true,
       renderer: renderKeyFacts,
+    },
+    'record:childTables': {
+      className: 'child-tables-slot',
+      ownsDataResolution: true,
+      renderer: (context) =>
+        context.data?.status === 'READY' && context.data.composition
+          ? (context.data.compositionTask ??
+            renderCompositionChildren(context.data.composition))
+          : '',
     },
     'record:sections': {
       className: 'sections-slot',
@@ -624,6 +641,18 @@ function listRecordTitle(
 }
 
 function renderCommandBar(context: SurfaceComponentContext): string {
+  if (context.data?.status === 'READY' && context.data.composition)
+    return slotPanel(
+      context,
+      context.data.compositionTask
+        ? ''
+        : renderCompositionActions(
+            context.surface,
+            context.data.composition,
+            context.view,
+          ),
+      'command-bar-slot',
+    );
   const record = recordFrom(context.data);
   if (context.surface.surfaceRole === 'form') {
     const admission = resolveFormAdmission(context, record);
@@ -761,6 +790,8 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
 }
 
 function renderSections(context: SurfaceComponentContext): string {
+  if (context.data?.status === 'READY' && context.data.composition)
+    return renderCompositionFields(context.surface, context.data.composition);
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'sections-slot');

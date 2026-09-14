@@ -1,3 +1,7 @@
+import {
+  loadSurfaceComposition,
+  submitCompositionAction,
+} from './surface-composition.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -242,6 +246,24 @@ export async function renderSurfaceRuntimeWithData(
       data = dataState(result);
       if (
         data.status === 'READY' &&
+        selection.selected.composition &&
+        data.records[0]
+      ) {
+        data = {
+          ...data,
+          composition: await loadSurfaceComposition(
+            view,
+            selection.selected,
+            data.records[0],
+            requestUrl,
+            legalEntitySelection[0] ?? null,
+            gateways,
+          ),
+        };
+      }
+      if (
+        data.status === 'READY' &&
+        !selection.selected.composition &&
         selection.selected.surfaceRole === 'record' &&
         gateways.applicationExtension
       ) {
@@ -306,6 +328,41 @@ export async function submitSurfaceRuntimeIntent(
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
   } catch {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+  }
+  if (selection.selected.composition && submission.compositionAction) {
+    return submitCompositionAction(
+      view,
+      selection.selected,
+      requestUrl,
+      submission,
+      gateways,
+      (html, data) =>
+        data
+          ? renderSelectedSurface(
+              view,
+              selection,
+              {
+                status: 'READY',
+                records: [data.record],
+                composition: data,
+                compositionTask: html,
+              },
+              null,
+              binding.operations,
+              200,
+              data.scope ? [data.scope] : [],
+            )
+          : {
+              statusCode: 422,
+              html: shellDocument(
+                view,
+                selection.surfaces,
+                selection.navigation,
+                selection.selected,
+                html,
+              ),
+            },
+    );
   }
   const operation = boundOperation(binding, submission.operationId);
   if (
@@ -1649,6 +1706,11 @@ body{padding-bottom:72px}
 .command-bar,.task-primary-action{position:sticky;z-index:3;bottom:80px;box-shadow:var(--elevation-overlay)}
 .task-primary-action{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
 .task-primary-action button{width:100%}
+.composition-inputs{display:grid;gap:var(--space-4);max-width:40rem}
+.composition-inputs label{display:grid;gap:var(--space-2)}
+[data-composition-task] button,[data-composition-task] input,[data-composition-task] select,[data-composition-dataset] a{min-height:44px}
+[data-composition-dataset] td{overflow-wrap:anywhere}
+[data-composition-dataset] a{display:inline-flex;align-items:center}
 .record-section-group:not([open]){padding-bottom:var(--space-3)}
 .data-table-wrap{overflow:visible}
 .data-table-wrap table,.data-table-wrap tbody{display:block}
