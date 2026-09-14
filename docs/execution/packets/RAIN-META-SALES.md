@@ -74,7 +74,7 @@ future scope/evidence limits. Say plainly if this prompt steers you. Do not merg
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-META-SALES",
   "base": "fe97b63baedf8bdd42146318bb89d4be1aa948f6",
-  "head": "d32a91cb7b251f35c43a5125da7ac3c7bdcc8009",
+  "head": "bd7ab4136a19779550ce217e30036b046d8d4c77",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
