@@ -4,10 +4,13 @@ import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticRecordDto,
+  type SemanticQueryGateway,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import {
   parsePinnedOperationCatalog,
   SEMANTIC_OPERATION_REQUEST_VERSION,
+  type SemanticOperationGateway,
+  type SemanticOperationMediationAuthority,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   SHARED_LIST_QUERY_VERSION,
@@ -17,12 +20,12 @@ import type {
   ImmutableJsonValue,
   RequestRuntimeView,
 } from '../../../packages/runtime/src/request-runtime-view.js';
-import type {
-  SurfaceRuntimeGateways,
-  SurfaceRuntimeSubmission,
-  SurfaceRuntimeResponse,
-} from './surface-runtime.js';
-import type { CompiledSurfaceDefinition } from './surface-contract.js';
+
+import {
+  readCompiledSurfaceManifest,
+  type CompiledSurfaceDefinition,
+  type CompiledSurfaceField,
+} from './surface-contract.js';
 import { escapeHtml as h } from './html.js';
 import { operationMessageRef } from './gateway-error-codes.js';
 import { messageAttributes, messageBody } from './message-render.js';
@@ -43,6 +46,7 @@ type Row = {
 export interface CompositionData {
   record: SemanticRecordDto;
   fields: Row;
+  fieldsFailed: boolean;
   children: {
     definition: SurfaceComposition['children'][number];
     rows: Row[];
@@ -61,7 +65,7 @@ const recordValue = (
   record: SemanticRecordDto | null,
   field: string,
 ): ImmutableJsonValue => {
-  if (!record) throw new Error('Select a record before continuing.');
+  if (!record) throw new Error('COMPOSITION_RECORD_REQUIRED');
   if (field === 'recordId') return record.recordId;
   if (field === 'revision') return record.revision;
   if (Object.hasOwn(record.values, field)) return record.values[field]!;
@@ -74,7 +78,7 @@ const text = (value: ImmutableJsonValue): string =>
 
 async function query(
   view: RequestRuntimeView,
-  gateways: SurfaceRuntimeGateways,
+  gateways: CompositionGateways,
   queryId: string,
   scope: string | null,
   args: Record<string, ImmutableJsonValue>,
@@ -96,9 +100,44 @@ async function query(
   });
 }
 
+const presentedFields = new WeakMap<
+  RequestRuntimeView,
+  Map<string, CompiledSurfaceField>
+>();
+function displayFieldValue(
+  view: RequestRuntimeView,
+  record: SemanticRecordDto,
+  fieldId: string,
+  value: ImmutableJsonValue,
+): string {
+  let fields = presentedFields.get(view);
+  if (!fields) {
+    fields = new Map(
+      readCompiledSurfaceManifest(view).surfaces.flatMap((surface) =>
+        (surface.fields ?? []).map((field) => [field.fieldId, field] as const),
+      ),
+    );
+    presentedFields.set(view, fields);
+  }
+  const field = fields.get(fieldId);
+  if (field?.kind === 'enumFieldType')
+    return (
+      field.options.find((option) => option.optionId === value)?.label ??
+      text(value)
+    );
+  const result = record.displayValues?.[fieldId] ?? text(value);
+  if (
+    field &&
+    ['decimalFieldType', 'quantityFieldType'].includes(field.kind) &&
+    /^-?\d+\.\d+$/.test(result)
+  )
+    return result.replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1');
+  return result;
+}
+
 async function present(
   view: RequestRuntimeView,
-  gateways: SurfaceRuntimeGateways,
+  gateways: CompositionGateways,
   scope: string | null,
   record: SemanticRecordDto,
   columns: readonly Column[],
@@ -107,8 +146,12 @@ async function present(
   for (const column of columns) {
     const value = recordValue(record, column.field);
     if (!column.reference || value === null) {
-      cells[column.columnId] =
-        record.displayValues?.[column.field] ?? text(value);
+      cells[column.columnId] = displayFieldValue(
+        view,
+        record,
+        column.field,
+        value,
+      );
       continue;
     }
     const result = await query(
@@ -133,13 +176,14 @@ export async function loadSurfaceComposition(
   record: SemanticRecordDto,
   requestUrl: string,
   scope: string | null,
-  gateways: SurfaceRuntimeGateways,
+  gateways: CompositionGateways,
 ): Promise<CompositionData> {
   const composition = surface.composition!;
   const url = new URL(requestUrl, 'http://surface-runtime.local');
   const data: CompositionData = {
     record,
-    fields: await present(view, gateways, scope, record, composition.fields),
+    fields: { record, cells: {} },
+    fieldsFailed: false,
     children: [],
     selections: {},
     selected: null,
@@ -147,6 +191,17 @@ export async function loadSurfaceComposition(
     url: url.pathname + url.search,
     scope,
   };
+  try {
+    data.fields = await present(
+      view,
+      gateways,
+      scope,
+      record,
+      composition.fields,
+    );
+  } catch {
+    data.fieldsFailed = true;
+  }
   for (const definition of ordered(composition.children)) {
     const child: CompositionData['children'][number] = {
       definition,
@@ -231,7 +286,7 @@ export async function loadSurfaceComposition(
     } catch {
       child.rows = [];
       child.status = 'failed';
-      child.error = 'This section could not be loaded. Refresh to retry.';
+      child.error = 'COMPOSITION_CHILD_FAILED';
     }
   }
   const activeDataset = url.searchParams.get('dataset');
@@ -307,6 +362,8 @@ export function renderCompositionFields(
   surface: CompiledSurfaceDefinition,
   data: CompositionData,
 ): string {
+  if (data.fieldsFailed)
+    return compositionMessage('COMPOSITION_CHILD_FAILED', 'alert');
   return `<section class="panel"><h2>${h(surface.label)}</h2><dl class="record-fields">${ordered(
     surface.composition!.fields,
   )
@@ -385,6 +442,7 @@ export function renderCompositionActions(
 
 interface TaskSession {
   action: Action;
+  surfaceId: string;
   data: CompositionData;
   identity: string;
   inputs: Record<string, string>;
@@ -413,26 +471,56 @@ export async function submitCompositionAction(
   view: RequestRuntimeView,
   surface: CompiledSurfaceDefinition,
   requestUrl: string,
-  submission: SurfaceRuntimeSubmission,
-  gateways: SurfaceRuntimeGateways,
+  submission: Readonly<Record<string, string>>,
+  gateways: CompositionGateways,
   renderTask: (
     html: string,
     data: CompositionData | null,
-  ) => SurfaceRuntimeResponse,
-): Promise<SurfaceRuntimeResponse> {
+  ) => CompositionResponse,
+): Promise<CompositionResponse> {
   let renderData: CompositionData | null = null;
-  const taskDocument = (html: string) =>
-    renderTask(
-      `<section class="panel" data-composition-task>${html}</section>`,
+  const taskDocument = (html: string) => {
+    const selection =
+      renderData?.children
+        .flatMap((child) => {
+          const selected = renderData?.selections[child.definition.datasetId];
+          const row = child.rows.find(
+            (row) => row.record.recordId === selected?.recordId,
+          );
+          return row
+            ? [
+                `<section><h3>${h(child.definition.label)}</h3><dl class="record-fields">${ordered(
+                  child.definition.columns,
+                )
+                  .map(
+                    (column) =>
+                      `<div><dt>${h(column.label)}</dt><dd>${h(row.cells[column.columnId] ?? '—')}</dd></div>`,
+                  )
+                  .join('')}</dl></section>`,
+              ]
+            : [];
+        })
+        .join('') ?? '';
+    return renderTask(
+      `<section class="panel" data-composition-task>${html}${selection ? `<details open><summary>Selection at task start</summary>${selection}</details>` : ''}</section>`,
       renderData,
     );
+  };
   const now = performance.now();
   for (const [key, session] of sessions)
     if (!session.busy && now - session.created > 3_600_000)
       sessions.delete(key);
   let token = submission.taskToken;
   let session = token ? sessions.get(token) : undefined;
-  if (token && (!session || session.identity !== identity(view)))
+  if (
+    token &&
+    (!session ||
+      session.identity !== identity(view) ||
+      session.surfaceId !== surface.surfaceId ||
+      new URL(requestUrl, 'http://surface-runtime.local').searchParams.get(
+        'record',
+      ) !== session.data.record.recordId)
+  )
     return taskDocument(
       compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
     );
@@ -478,6 +566,7 @@ export async function submitCompositionAction(
     token = randomUUID();
     session = {
       action,
+      surfaceId: surface.surfaceId,
       data,
       identity: identity(view),
       inputs: {},
@@ -498,6 +587,8 @@ export async function submitCompositionAction(
   renderData = current.data;
   const url = current.data.url;
   const back = `<p><a href="${h(url)}">Back to order</a></p>`;
+  const previewInputs = () =>
+    `<dl>${current.action.inputs.map((input) => `<dt>${h(input.label)}</dt><dd>${h(current.inputLabels[input.inputId] ?? current.inputs[input.inputId] ?? '')}</dd>`).join('')}</dl>`;
   const hidden = `<input type="hidden" name="taskToken" value="${h(token!)}"><input type="hidden" name="compositionAction" value="${h(current.action.actionId)}">`;
   if (current.busy)
     return taskDocument(
@@ -635,7 +726,7 @@ export async function submitCompositionAction(
       error =
         'The operation could not be verified. Earlier steps may have committed. Retry uses the same inputs and request keys; inspect the order if needed.';
       return taskDocument(
-        `<h1>${h(current.action.label)}</h1><div role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Operation', 'h2')}</div>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
+        `<h1>${h(current.action.label)}</h1><div role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Operation', 'h2')}</div>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
       );
     } finally {
       current.busy = false;
@@ -643,7 +734,7 @@ export async function submitCompositionAction(
   }
   if (current.confirmed)
     return taskDocument(
-      `<h1>${h(current.action.label)}</h1>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
+      `<h1>${h(current.action.label)}</h1>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
     );
   const controls: string[] = [];
   for (const input of ordered(current.action.inputs)) {
@@ -667,7 +758,7 @@ export async function submitCompositionAction(
 
 async function referenceChoices(
   view: RequestRuntimeView,
-  gateways: SurfaceRuntimeGateways,
+  gateways: CompositionGateways,
   scope: string | null,
   input: Action['inputs'][number],
 ): Promise<SemanticRecordDto[]> {
@@ -708,4 +799,14 @@ async function referenceChoices(
     cursor = page.listCoverage.nextCursor;
   } while (cursor !== null);
   return records;
+}
+
+interface CompositionGateways {
+  readonly queryGateway: SemanticQueryGateway;
+  readonly operationGateway: SemanticOperationGateway;
+  readonly operationMediation: SemanticOperationMediationAuthority;
+}
+interface CompositionResponse {
+  readonly html: string;
+  readonly statusCode: number;
 }

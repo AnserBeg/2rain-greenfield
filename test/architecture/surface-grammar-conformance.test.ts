@@ -29,7 +29,7 @@ import {
 import {
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
-  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   MODULE_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
@@ -224,7 +224,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   assert.equal(flatManifest.navigation, null);
   assert.equal(
     flatManifest.payloadSchemaVersion,
-    FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+    COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
   // 1 -> 3 BY `profile-v2-adoption`, and this is a real compatibility move
   // rather than a re-derived digest. The floor is
@@ -243,7 +243,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // no consumer refuses a manifest whose floor exceeds what it supports. So the
   // number is currently a declaration, not a gate. Filed, not fixed -- see
   // `current-plan.md`, `runtime-capability-floor-unenforced`.
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 3);
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 4);
   assert.equal(flatCompact.navigationEntryIds.length, 4);
   assert.deepEqual(
     navigationRuleIds(
@@ -266,7 +266,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   assert.equal(groupedManifest.surfaces.length, 70);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
-    GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+    COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
   // 2 -> 3 BY `profile-v2-adoption`. The grouped arm read 2 because
   // `navigation` bumped it; field kinds outrank that, so both arms now read 3
@@ -278,7 +278,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // behaviour itself is still gated -- by `payloadSchemaVersion` immediately
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 3);
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 4);
   // 13 + Purchasing's six lists + Sales' seven lists.
   assert.equal(navigationSurfaceIds(grouped.entries).length, 26);
   // Sales is the sixth module, so the compiler groups Purchasing and Sales
@@ -943,17 +943,31 @@ function withoutModule(
     const source = module[collectionName];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
+    const idKey = {
+      assertions: 'assertionId',
+      entities: 'entityId',
+      fields: 'fieldId',
+      operations: 'operationId',
+      permissions: 'permissionId',
+      queries: 'queryId',
+      relations: 'relationId',
+      stateMachines: 'machineId',
+      storageMappings: 'storageMappingId',
+      surfaces: 'surfaceId',
+    }[collectionName];
+    const ids = new Set(source.map((entry) => entry[idKey]));
+    for (const id of ids)
+      assert.equal(
+        target.filter((candidate) => candidate[idKey] === id).length,
+        1,
+        `flat fixture must identify each ${label} ${collectionName} entry exactly once`,
+      );
+    // Composition may change presentation/query bodies and add module-owned dependencies.
+    // Remove by canonical identity and declared module ownership, never byte equality.
     composed[collectionName] = target.filter(
       (candidate) =>
-        !source.some(
-          (sourceEntry) =>
-            JSON.stringify(candidate) === JSON.stringify(sourceEntry),
-        ),
-    );
-    assert.equal(
-      target.length - (composed[collectionName] as unknown[]).length,
-      source.length,
-      `flat fixture must remove every ${label} ${collectionName} entry exactly once`,
+        !ids.has(candidate[idKey]) &&
+        candidate.module?.targetId !== `northstar.app:module.${label}`,
     );
   }
   const modules = composed.modules;

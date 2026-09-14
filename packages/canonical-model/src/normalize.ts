@@ -1,4 +1,7 @@
-import { validateSurfaceCompositions } from './surface-composition.js';
+import {
+  validateSurfaceCompositions,
+  normalizeSurfaceComposition,
+} from './surface-composition.js';
 import { ZodError } from 'zod';
 
 import { canonicalize } from './canonicalize.js';
@@ -371,6 +374,9 @@ export function normalizeApplicationPackage(
     })),
     surfaces: authored.surfaces.map((entry) => ({
       ...entry,
+      ...('composition' in entry && entry.composition
+        ? { composition: normalizeSurfaceComposition(entry.composition) }
+        : {}),
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
       slots: sortByOrderAndId(entry.slots, 'slotId'),
       statusRoles: sortedStrings(entry.statusRoles),

@@ -17,6 +17,7 @@ import {
   parseNormalizedApplicationPackageJson,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   HASH_ALGORITHM,
@@ -142,7 +143,7 @@ test('the capability comparison binds the family to its capability, then compare
   const surface = PROJECTION_FAMILY_IDS.surfaceManifest;
   const requirement = {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    minimumVersion: 3,
+    minimumVersion: 4,
   };
   const registryAt = (maximumSupportedVersion: number) => ({
     [surface]: {
@@ -154,19 +155,19 @@ test('the capability comparison binds the family to its capability, then compare
   // The one the orchestrator named: the SAME floor that serves in production
   // must refuse against a runtime declaring less.
   assert.match(
-    unsupportedRuntimeCapability(surface, requirement, registryAt(2)) ?? '',
-    /requires version 3 and this runtime supports 2/,
+    unsupportedRuntimeCapability(surface, requirement, registryAt(3)) ?? '',
+    /requires version 4 and this runtime supports 3/,
   );
 
   // Admission twins at the boundary, so the refusal is discriminating rather
   // than a wall: equal serves, and greater serves, because a floor is a MINIMUM
   // and support is cumulative.
   assert.equal(
-    unsupportedRuntimeCapability(surface, requirement, registryAt(3)),
+    unsupportedRuntimeCapability(surface, requirement, registryAt(4)),
     null,
   );
   assert.equal(
-    unsupportedRuntimeCapability(surface, requirement, registryAt(4)),
+    unsupportedRuntimeCapability(surface, requirement, registryAt(5)),
     null,
   );
 
@@ -207,7 +208,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: 3,
+    maximumSupportedVersion: 4,
   });
 });
 
@@ -490,6 +491,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             assert.equal(viewB.pointer.fence, 1);
             assert.equal(
               viewA.projections.surface.payloadSchemaVersion,
+              COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
               FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
             );
             assert.equal(Object.isFrozen(viewA), true);
@@ -680,7 +682,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         );
 
         await t.test(
-          'persisted grouped surface payload propagates its v1 artifact version',
+          'persisted grouped surface payload propagates its v2 artifact version',
           async () => {
             await activateRelease(
               runtimePool,
@@ -696,12 +698,12 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             ).load(versionContext);
             assert.equal(
               loaded.projections.surface.payloadSchemaVersion,
-              GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+              COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
             );
             const payload = mutableRecord(loaded.projections.surface.payload);
             assert.equal(
               payload.schemaVersion,
-              GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+              COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
             );
             assert.ok(payload.navigation);
           },
@@ -780,7 +782,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               loaded.projections.surface.requiredRuntimeCapability,
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                minimumVersion: 3,
+                minimumVersion: 4,
               },
             );
             // All FIVE loaded families carry their requirement, not just the
@@ -808,7 +810,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: 3,
+                maximumSupportedVersion: 4,
               },
             );
           },
@@ -832,7 +834,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 3/,
+              /requires version 999 and this runtime supports 4/,
             );
           },
         );
@@ -861,7 +863,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 3/,
+              /requires version 999 and this runtime supports 4/,
             );
           },
         );

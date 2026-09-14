@@ -328,7 +328,7 @@ test('sales is the sixth compiled navigation group and fulfillment is registered
   assert.deepEqual(composed.modules.at(-1), {
     composition: {
       kind: 'compositionSeam',
-      schemaVersion: 'v5',
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       status: 'unsupported',
     },
     kind: 'moduleDefinition',
@@ -336,7 +336,7 @@ test('sales is the sixth compiled navigation group and fulfillment is registered
     moduleId: 'northstar.app:module.sales',
     orderKey: 60,
     ownerPackageId: 'northstar.app:package.application',
-    schemaVersion: 'v5',
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
   });
   const salesOperations = composed.operations.filter((operation) =>
     operation.operationId.includes(':operation.sales_order'),

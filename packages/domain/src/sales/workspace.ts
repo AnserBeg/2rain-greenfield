@@ -1,3 +1,7 @@
+export const FULFILLMENT_READ_MODEL_BINDINGS = Object.freeze({
+  line: 'northstar.sales:read_model.line',
+  reservation: 'northstar.sales:read_model.reservation',
+});
 /** RAIN-META-SALES: product composition; the runtime interprets the same data for any module. */
 export function salesWorkspace(namespace: string): Record<string, unknown> {
   const id = (type: string, name: string) => `${namespace}:${type}.${name}`;
@@ -98,6 +102,12 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     schemaVersion: 'v6',
     fields: [
       column('order_number', 'Sales order', 10, field('sales_order_number')),
+      column(
+        'order_state',
+        'Order state',
+        15,
+        `${namespace}:derived_state_field.machine.sales_order_lifecycle`,
+      ),
       column(
         'customer',
         'Customer',
@@ -383,7 +393,7 @@ export function salesWorkspaceQueries(
             'capabilityReference',
             'northstar.sales:capability.fulfillment',
           ),
-          binding: `northstar.sales:read_model.${name}`,
+          binding: FULFILLMENT_READ_MODEL_BINDINGS[name],
           queries: Object.fromEntries(
             Object.entries(dependencies).map(([key, value]) => [
               key,

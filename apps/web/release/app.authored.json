@@ -25478,6 +25478,12 @@
             "field": "northstar.app:field.sales_order_number"
           },
           {
+            "columnId": "northstar.app:column.order_state",
+            "label": "Order state",
+            "orderKey": 15,
+            "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+          },
+          {
             "columnId": "northstar.app:column.customer",
             "label": "Customer",
             "orderKey": 20,

@@ -381,3 +381,42 @@ export function validateSurfaceCompositions(
     }
   }
 }
+
+/** Presentation collections are ordered sets; operation steps remain an authored sequence. */
+export function normalizeSurfaceComposition(
+  composition: SurfaceComposition,
+): SurfaceComposition {
+  const ordered = <T extends { orderKey: number }>(
+    entries: T[],
+    key: keyof T,
+  ): T[] =>
+    [...entries].sort(
+      (a, b) =>
+        a.orderKey - b.orderKey ||
+        (String(a[key]) < String(b[key])
+          ? -1
+          : String(a[key]) > String(b[key])
+            ? 1
+            : 0),
+    );
+  return {
+    ...composition,
+    fields: ordered(composition.fields, 'columnId'),
+    children: ordered(composition.children, 'datasetId').map((child) => ({
+      ...child,
+      columns: ordered(child.columns, 'columnId'),
+    })),
+    actions: ordered(composition.actions, 'actionId').map((action) => ({
+      ...action,
+      inputs: ordered(action.inputs, 'inputId'),
+      steps: action.steps.map((step) => ({
+        ...step,
+        bindings: [...step.bindings].sort((a, b) => {
+          const x = a.path.join('.'),
+            y = b.path.join('.');
+          return x < y ? -1 : x > y ? 1 : 0;
+        }),
+      })),
+    })),
+  };
+}

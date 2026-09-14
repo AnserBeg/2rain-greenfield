@@ -320,6 +320,12 @@ function surfaceComponentRenderer(
   surface: CompiledSurfaceDefinition,
   slot: CompiledSurfaceSlot,
 ): SurfaceComponentRenderer | undefined {
+  if (
+    surface.archetype === 'record' &&
+    slot.slot === 'childTables' &&
+    !surface.composition
+  )
+    return undefined;
   const slotKey = `${surface.archetype}:${slot.slot}`;
   if (Object.hasOwn(surfaceSlotRegistry, slotKey)) {
     return surfaceSlotRegistry[slotKey]?.renderer;

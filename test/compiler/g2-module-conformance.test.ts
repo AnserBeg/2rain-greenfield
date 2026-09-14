@@ -632,18 +632,18 @@ test('sales compiler scenarios execute input refinements and operation/storage e
   assert.deepEqual(release.effect, {
     entity: {
       kind: 'entityReference',
-      schemaVersion: 'v5',
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: 'northstar.app:entity.sales_order',
     },
     fromStateId: 'northstar.app:state.sales_order_draft',
     kind: 'transitionStateEffect',
-    schemaVersion: 'v5',
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
     stateFieldId:
       'northstar.app:derived_state_field.machine.sales_order_lifecycle',
     toStateId: 'northstar.app:state.sales_order_released',
     transition: {
       kind: 'transitionReference',
-      schemaVersion: 'v5',
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: 'northstar.app:transition.sales_order_release',
     },
   });
@@ -2591,10 +2591,10 @@ function composedPermission(
     permissionId,
     resource: {
       kind: 'entityReference',
-      schemaVersion: 'v5',
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: resource,
     },
-    schemaVersion: 'v5',
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
   };
 }
 

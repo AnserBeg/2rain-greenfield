@@ -1,3 +1,4 @@
+import { FULFILLMENT_READ_MODEL_BINDINGS } from '../../domain/src/sales/workspace.js';
 import {
   fulfillmentDecimal,
   fulfillmentProjectionIdentity,
@@ -144,7 +145,7 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
       if (!field) throw new Error('Read-model output is undeclared');
       values[field] = fulfillmentDecimal(value);
     };
-    if (model.binding === 'northstar.sales:read_model.line') {
+    if (model.binding === FULFILLMENT_READ_MODEL_BINDINGS.line) {
       const reservations = await list(
         'reservations',
         {},
@@ -182,7 +183,7 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
       emit('coverage', covered);
       emit('shipped', quantity);
       emit('open_to_ship', ordered - quantity);
-    } else if (model.binding === 'northstar.sales:read_model.reservation') {
+    } else if (model.binding === FULFILLMENT_READ_MODEL_BINDINGS.reservation) {
       const item = row.values[`${ns}:field.reservation_item_id`]!;
       const location = row.values[`${ns}:field.reservation_location_id`]!;
       const reservations = await list('stockReservations', {

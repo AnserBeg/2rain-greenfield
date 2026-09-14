@@ -5672,17 +5672,31 @@ function withoutModuleForTransition(
     const source = module[collection];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
+    const idKey = {
+      assertions: 'assertionId',
+      entities: 'entityId',
+      fields: 'fieldId',
+      operations: 'operationId',
+      permissions: 'permissionId',
+      queries: 'queryId',
+      relations: 'relationId',
+      stateMachines: 'machineId',
+      storageMappings: 'storageMappingId',
+      surfaces: 'surfaceId',
+    }[collection];
+    const ids = new Set(source.map((entry) => entry[idKey]));
+    for (const id of ids)
+      assert.equal(
+        target.filter((candidate) => candidate[idKey] === id).length,
+        1,
+        `transition fixture must identify each ${label} ${collection} entry exactly once`,
+      );
+    // Composition may change presentation/query bodies and add module-owned dependencies.
+    // Remove by canonical identity and declared module ownership, never byte equality.
     application[collection] = target.filter(
       (candidate) =>
-        !source.some(
-          (sourceEntry) =>
-            canonicalize(candidate) === canonicalize(sourceEntry),
-        ),
-    );
-    assert.equal(
-      target.length - (application[collection] as unknown[]).length,
-      source.length,
-      `transition fixture must remove every ${label} ${collection} entry exactly once`,
+        !ids.has(candidate[idKey]) &&
+        candidate.module?.targetId !== `northstar.app:module.${label}`,
     );
   }
   const modules = application.modules;

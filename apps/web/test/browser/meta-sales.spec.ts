@@ -7,7 +7,7 @@ test.use({ screenshot: 'only-on-failure', trace: 'retain-on-failure' });
 
 test('metadata workspace reserves, partially ships, releases and opens complete packing', async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(480_000);
   page.setDefaultTimeout(30000);
   await withBrowserFixture(async (url) => {
@@ -25,18 +25,31 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
       page.locator('[data-composition-dataset$="dataset.line_reservations"]');
     const shipments = () =>
       page.locator('[data-composition-dataset$="dataset.order_shipments"]');
-    await lines().getByRole('link', { name: 'Select', exact: true }).click();
+    await lines().getByRole('link', { name: 'Select', exact: true }).focus();
+    await page.keyboard.press('Enter');
     const task = () => page.locator('[data-composition-task]');
     await page
       .getByRole('button', { name: 'Reserve stock', exact: true })
       .click();
-    await page.getByLabel('Quantity', { exact: true }).fill('8');
+    await page.getByLabel('Quantity', { exact: true }).fill('-2');
     await page
       .getByLabel('Stock location')
       .selectOption({ label: 'Calgary warehouse' });
     await page
       .getByRole('button', { name: 'Review Reserve stock', exact: true })
       .click();
+    await expect(task()).toContainText('Check the task inputs');
+    await expect(page.getByLabel('Quantity', { exact: true })).toHaveValue(
+      '-2',
+    );
+    await expect(page.getByLabel('Stock location')).toHaveValue(
+      '71000000-0000-4000-8000-000000000021',
+    );
+    await page.getByLabel('Quantity', { exact: true }).fill('8');
+    await page
+      .getByRole('button', { name: 'Review Reserve stock', exact: true })
+      .focus();
+    await page.keyboard.press('Enter');
     await expect(task()).toContainText('Calgary warehouse');
     await page
       .getByRole('button', { name: 'Confirm Reserve stock', exact: true })
@@ -91,6 +104,10 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
       .getByRole('link', { name: 'Back to order', exact: true })
       .click();
     await totals(['5', '0', '5']);
+    await page.screenshot({
+      path: testInfo.outputPath('fulfillment-desktop.png'),
+      fullPage: true,
+    });
     await expect(
       page.getByRole('button', { name: 'Release remainder', exact: true }),
     ).toHaveCount(0);
@@ -108,6 +125,10 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
     await shipments()
       .getByRole('link', { name: 'Select', exact: true })
       .click();
+    await page.screenshot({
+      path: testInfo.outputPath('fulfillment-mobile.png'),
+      fullPage: true,
+    });
     await page.getByRole('link', { name: 'Open packing', exact: true }).click();
     const packed = page.locator(
       '[data-composition-dataset$="dataset.packing_lines"]',
@@ -115,8 +136,12 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
     await expect(packed).toHaveAttribute('data-resolution', 'ready');
     await expect(packed.locator('tbody tr')).toHaveCount(1);
     await expect(packed).toContainText('Field notebook');
+    await page.screenshot({
+      path: testInfo.outputPath('packing-mobile.png'),
+      fullPage: true,
+    });
     await expect(packed.locator('td[data-column-label="Quantity"]')).toHaveText(
-      '5.000000000000000000',
+      '5',
     );
     await expect(
       page.getByText('Calgary warehouse', { exact: true }),

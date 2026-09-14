@@ -908,7 +908,8 @@ test('the message catalog honours the vocabulary it declares', () => {
   // is pinned so
   // registering a code is a deliberate, visible edit; moving it is the intended
   // cost of adding one, not a symptom.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 34);
+  // RAIN-META-SALES adds nine generic composition task/dataset treatments.
+  assert.equal(SURFACE_MESSAGE_CODES.length, 43);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];
@@ -989,6 +990,7 @@ test('no user-facing sentence is written outside the catalog', () => {
     'list-runtime.ts',
     'message-render.ts',
     'surface-contract.ts',
+    'surface-composition.ts',
     'surface-runtime.ts',
   ];
   const contents = new Map(
@@ -1029,6 +1031,7 @@ test('every registered code has a raise site outside the catalog', () => {
     'component-registry.ts',
     'gateway-error-codes.ts',
     'surface-contract.ts',
+    'surface-composition.ts',
     'surface-runtime.ts',
   ].map((name) =>
     stripComments(readFileSync(`${webRoot}/src/${name}`, 'utf8')),

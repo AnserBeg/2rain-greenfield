@@ -85,6 +85,8 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // shipment and read-model surfaces carry 66 instances of the already-known
     // childTables/activity and list-affordance gaps. No new violation kind or
     // renderer exemption is introduced by this ratchet move.
-    violationCount: 66,
+    // RAIN-META-SALES supplies childTables on order and shipment details,
+    // removing exactly SG003 + SG009 on each of those two compiled surfaces.
+    violationCount: 62,
   }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);

@@ -1688,7 +1688,7 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 @media(max-width:800px){
 body{padding-bottom:72px}
 .app-shell{display:block}
-.sidebar{position:fixed;z-index:4;right:0;bottom:0;left:0;width:100%;height:auto;padding:var(--space-1);border-top:1px solid var(--line-on-rail);background:var(--surface-rail)}
+.sidebar{position:fixed;z-index:4;top:auto;right:0;bottom:0;left:0;width:100%;height:auto;padding:var(--space-1);border-top:1px solid var(--line-on-rail);background:var(--surface-rail)}
 .brand,.release-card,.nav-label{display:none}
 .sidebar .navigation-tree{display:grid;grid-template-columns:repeat(var(--compact-nav-count,4),minmax(0,1fr));gap:var(--space-1);margin:0;overflow:visible}
 .navigation-tree>li{min-width:0}

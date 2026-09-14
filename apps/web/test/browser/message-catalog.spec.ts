@@ -598,6 +598,24 @@ const REAL_PATH_DRIVERS: Readonly<
 const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
   Partial<Record<SurfaceMessageCode, string>>
 > = {
+  COMPOSITION_BUSY:
+    'Requires two concurrent confirmations of one process-local task. The generic census observes text; this file does not own that concurrency fixture.',
+  COMPOSITION_CHILD_EMPTY:
+    'The initially empty reservation and shipment datasets are exercised by meta-sales.spec.ts against real PostgreSQL; this census observes catalog text.',
+  COMPOSITION_CHILD_FAILED:
+    'A missing exact-scope receipt is driven in test/integration/surface-data-binding.test.ts; the catalog census is not a second query fixture.',
+  COMPOSITION_COMMITTED_WITHHELD:
+    'The generic gateway task integration test observes a committed withheld readback and no later step. This census observes its catalog treatment.',
+  COMPOSITION_COMPLETE:
+    'The real reserve, ship and release paths render this in meta-sales.spec.ts; the independent census checks its registered message text.',
+  COMPOSITION_INPUT_INVALID:
+    'Negative quantity retention is driven through the browser task in meta-sales.spec.ts. This census checks the catalog treatment independently.',
+  COMPOSITION_SELECTION_REQUIRED:
+    'Requires a composed child action before any selected row. The census observes text; a separate real-path browser driver is not claimed here.',
+  COMPOSITION_TASK_UNAVAILABLE:
+    'Requires an expired, foreign or lost process-local task token. The census observes text; no expiration browser driver is claimed here.',
+  COMPOSITION_UNCERTAIN:
+    'The task integration test injects a gateway transport failure and observes stable inputs and idempotency keys on retry. This census observes text.',
   OPERATION_COMMITTED_READBACK_WITHHELD:
     'Driven through the real receiving gateway and evaluator in ' +
     'receiving.composed-application.spec.ts: a commit-time read-grant revocation ' +

@@ -1,6 +1,7 @@
 import type { SurfaceComposition } from '../../packages/canonical-model/src/index.js';
 import {
   loadSurfaceComposition,
+  submitCompositionAction,
   renderCompositionFields,
   renderCompositionChildren,
   renderCompositionActions,
@@ -3532,5 +3533,229 @@ test('v6 composition refuses undeclared context, operation fields and cyclic chi
       () => normalizeApplicationPackage(candidate),
       /CANON_SCHEMA_INVALID/,
     );
+  }
+});
+
+test('composed tasks retain reviewed inputs and retry keys, and stop on committed withheld read-back', async () => {
+  for (const withheld of [false, true]) {
+    const definition = workshopComposition('Work title');
+    const authoredSurface = (
+      definition.surfaces as Array<Record<string, unknown>>
+    ).find((surface) => surface.composition)!;
+    const composition = authoredSurface.composition as SurfaceComposition;
+    const ref = (kind: string, targetId: string) => ({
+      kind,
+      schemaVersion: 'v6',
+      targetId,
+    });
+    // Mutate authored data, then compile; no HTML or pinned projection is fabricated.
+    (authoredSurface.composition as unknown as { actions: unknown[] }).actions =
+      [
+        {
+          actionId: 'workshop.jobs:action.rename',
+          label: 'Rename work',
+          description: 'Update the work title.',
+          orderKey: 10,
+          conditions: [],
+          inputs: [
+            {
+              inputId: 'workshop.jobs:input.title',
+              label: 'New title',
+              orderKey: 10,
+              type: 'text',
+              required: true,
+            },
+          ],
+          steps: [
+            {
+              stepId: 'workshop.jobs:step.rename',
+              operation: ref(
+                'operationReference',
+                'workshop.jobs:operation.job_update',
+              ),
+              bindings: [
+                {
+                  path: ['recordId'],
+                  value: { source: 'record', field: 'recordId' },
+                },
+                {
+                  path: ['expectedRevision'],
+                  value: { source: 'record', field: 'revision' },
+                },
+                {
+                  path: ['patch', 'workshop.jobs:field.job_name'],
+                  value: {
+                    source: 'input',
+                    inputId: 'workshop.jobs:input.title',
+                  },
+                },
+              ],
+            },
+            ...(withheld
+              ? [
+                  {
+                    stepId: 'workshop.jobs:step.after',
+                    operation: ref(
+                      'operationReference',
+                      'workshop.jobs:operation.job_archive',
+                    ),
+                    bindings: [
+                      {
+                        path: ['recordId'],
+                        value: {
+                          source: 'step',
+                          stepId: 'workshop.jobs:step.rename',
+                          field: 'recordId',
+                        },
+                      },
+                      {
+                        path: ['expectedRevision'],
+                        value: {
+                          source: 'step',
+                          stepId: 'workshop.jobs:step.rename',
+                          field: 'revision',
+                        },
+                      },
+                    ],
+                  },
+                ]
+              : []),
+          ],
+        },
+      ];
+    composition.children = [];
+    const operation = (
+      definition.operations as Array<Record<string, unknown>>
+    ).find(
+      (operation) =>
+        operation.operationId === 'workshop.jobs:operation.job_update',
+    )!;
+    operation.confirmation = 'humanRequired';
+    const compiled = compileFixture(definition);
+    const policy = new RecordingPolicy('ALLOW');
+    const view = await issuedView(
+      runtimeEntry(compiled, policy, {
+        a: identity(tenantA, environmentA, principalA),
+      }),
+      'a',
+    );
+    const surface = readCompiledSurfaceManifest(view).surfaces.find(
+      (surface) => surface.surfaceId === 'workshop.jobs:surface.job_record',
+    )!;
+    const root: SemanticRecordDto = {
+      entityId: 'workshop.jobs:entity.job',
+      recordId: randomUUID(),
+      revision: 3,
+      archived: false,
+      values: { 'workshop.jobs:field.job_name': 'Original' },
+    };
+    const calls: SemanticOperationExecutionRequest[] = [];
+    const mediation = new SemanticOperationMediationAuthority();
+    const gateways: SurfaceRuntimeGateways = {
+      queryGateway: fixedQueryGateway('exact', [root]),
+      operationMediation: mediation,
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        {
+          async execute(request) {
+            calls.push(request);
+            if (!withheld && calls.length === 1)
+              throw new Error('Simulated lost transport after acceptance');
+            return {
+              kind: 'semanticOperationResult',
+              schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+              operationId: request.definition.operationId,
+              outcome: 'succeeded',
+              readBack: withheld ? null : { ...root, revision: 4 },
+              unsupportedReason: null,
+              trust: {
+                invocationId: randomUUID(),
+                changeDocumentId: randomUUID(),
+                domainEventId: randomUUID(),
+                outboxId: randomUUID(),
+              },
+            };
+          },
+          async recordNonAccepted() {},
+        },
+        mediation,
+      ),
+    };
+    const url = `/?surface=${encodeURIComponent(surface.surfaceId)}&record=${root.recordId}`;
+    const submit = (body: Record<string, string>) =>
+      submitCompositionAction(
+        view,
+        surface,
+        url,
+        { compositionAction: 'workshop.jobs:action.rename', ...body },
+        gateways,
+        (html) => ({ statusCode: 200, html }),
+      );
+    const initial = await submit({});
+    const taskToken = hiddenValue(initial.html, 'taskToken');
+    const invalid = await submit({
+      taskToken,
+      taskStage: 'prepare',
+      'workshop.jobs:input.title': '',
+    });
+    assert.match(invalid.html, /COMPOSITION_INPUT_INVALID/);
+    assert.equal(calls.length, 0);
+    const preview = await submit({
+      taskToken,
+      taskStage: 'prepare',
+      'workshop.jobs:input.title': 'Reviewed title',
+    });
+    assert.match(preview.html, /Reviewed title/);
+    assert.equal(calls.length, 0);
+    await assert.rejects(() =>
+      gateways.operationGateway.invoke(
+        view,
+        {
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          operationId: 'workshop.jobs:operation.job_update',
+          input: {
+            recordId: root.recordId,
+            expectedRevision: 3,
+            patch: { 'workshop.jobs:field.job_name': 'Bypass' },
+          },
+          idempotencyKey: randomUUID(),
+          confirmationGrant: null,
+        },
+        mediation.issueInvocation(view, 'AGENT'),
+      ),
+    );
+    assert.equal(
+      calls.length,
+      0,
+      'the actual gateway rejects missing confirmation',
+    );
+    const result = await submit({ taskToken, taskStage: 'confirm' });
+    assert.equal(calls.length, 1);
+    if (withheld) {
+      assert.match(result.html, /COMPOSITION_COMMITTED_WITHHELD/);
+      await submit({ taskToken, taskStage: 'retry' });
+      assert.equal(
+        calls.length,
+        1,
+        'no dependent step runs after withheld read-back',
+      );
+    } else {
+      assert.match(result.html, /COMPOSITION_UNCERTAIN/);
+      assert.match(result.html, /Reviewed title/);
+      const done = await submit({
+        taskToken,
+        taskStage: 'retry',
+        'workshop.jobs:input.title': 'Tampered',
+      });
+      assert.match(done.html, /COMPOSITION_COMPLETE/);
+      assert.equal(calls.length, 2);
+      assert.deepEqual(calls[1]!.input, calls[0]!.input);
+      assert.equal(calls[1]!.idempotencyKey, calls[0]!.idempotencyKey);
+      assert.deepEqual(calls[1]!.input, {
+        recordId: root.recordId,
+        expectedRevision: 3,
+        patch: { 'workshop.jobs:field.job_name': 'Reviewed title' },
+      });
+    }
   }
 });

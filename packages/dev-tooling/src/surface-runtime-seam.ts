@@ -37,6 +37,7 @@ const paths = Object.freeze({
   plan: 'docs/greenfield-north-star-erp-platform-plan.md',
   skill: '.agents/skills/ux-grammar/SKILL.md',
   surfaceContract: 'apps/web/src/surface-contract.ts',
+  surfaceComposition: 'apps/web/src/surface-composition.ts',
   surfaceRuntime: 'apps/web/src/surface-runtime.ts',
 });
 
@@ -611,6 +612,8 @@ function scanForBypass(
     return;
   }
   const allowedMarkup = new Set<string>([
+    // Generic v6 interpreter delegated only by SurfaceRuntime and its registry.
+    paths.surfaceComposition,
     paths.componentRegistry,
     paths.surfaceRuntime,
     // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
@@ -618,6 +621,7 @@ function scanForBypass(
     'apps/web/src/receiving-section.ts',
   ]);
   const allowedSurfaceConsumers = new Set<string>([
+    paths.surfaceComposition,
     paths.componentRegistry,
     paths.surfaceRuntime,
   ]);
@@ -637,6 +641,17 @@ function scanForBypass(
   for (const file of sourceFiles(sourceRoot)) {
     const repoPath = normalize(relative(root, file));
     const source = readFileSync(file, 'utf8');
+    if (
+      repoPath !== paths.surfaceRuntime &&
+      repoPath !== paths.componentRegistry &&
+      /from ['"][^'"]*surface-composition\.js['"]/.test(source)
+    )
+      add(
+        violations,
+        repoPath,
+        'SURF001_RUNTIME_BYPASS',
+        'only SurfaceRuntime and its closed registry may delegate to the composition interpreter',
+      );
     if (!allowedMarkup.has(repoPath) && structuralMarkup.test(source)) {
       add(
         violations,

@@ -1355,17 +1355,17 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       operationId: `${namespace}:operation.received_illegal_${tier}`,
       readBack: {
         kind: 'queryReference',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         targetId: `${namespace}:query.purchase_order_received_get`,
       },
       ...(tier === 'o0'
         ? {
             effect: {
               kind: 'updateRecordEffect',
-              schemaVersion: 'v5',
+              schemaVersion: ADOPTED_LANGUAGE_VERSION,
               entity: {
                 kind: 'entityReference',
-                schemaVersion: 'v5',
+                schemaVersion: ADOPTED_LANGUAGE_VERSION,
                 targetId: entityId,
               },
             },
@@ -1384,7 +1384,7 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       ) as Record<string, unknown>;
       machine.entity = {
         kind: 'entityReference',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         targetId: entityId,
       };
       machines.push(machine);
@@ -1392,16 +1392,16 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       operation.tier = 'o0';
       operation.effect = {
         kind: 'transitionStateEffect',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         transition: {
           kind: 'transitionReference',
-          schemaVersion: 'v5',
+          schemaVersion: ADOPTED_LANGUAGE_VERSION,
           targetId: `${namespace}:transition.received_illegal_release`,
         },
       };
       operation.permission = {
         kind: 'permissionReference',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         targetId: `${namespace}:permission.purchase_order_release`,
       };
       for (const transition of machine.transitions as Array<
@@ -1409,7 +1409,7 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       >)
         transition.permission = {
           kind: 'permissionReference',
-          schemaVersion: 'v5',
+          schemaVersion: ADOPTED_LANGUAGE_VERSION,
           targetId: `${namespace}:permission.purchase_order_release`,
         };
     }

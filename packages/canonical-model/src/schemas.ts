@@ -697,6 +697,12 @@ const authoredSurfaceDefinition = normalizedSurfaceDefinition.extend({
 });
 
 /** v6 composition: data and actions are authored, grammar remains platform-owned. */
+const compositionReference = <T extends string>(kind: T) =>
+  z.strictObject({
+    kind: z.literal(kind),
+    schemaVersion: v6NodeVersion,
+    targetId: CanonicalIdSchema,
+  });
 const compositionValue = z.discriminatedUnion('source', [
   z.strictObject({
     source: z.literal('literal'),
@@ -726,8 +732,8 @@ const compositionColumn = z.strictObject({
   field: z.string().min(1),
   reference: z
     .strictObject({
-      query: CanonicalReferenceSchema,
-      labelField: CanonicalReferenceSchema,
+      query: compositionReference('queryReference'),
+      labelField: compositionReference('fieldReference'),
     })
     .optional(),
 });
@@ -742,12 +748,12 @@ const compositionInput = z.strictObject({
   orderKey: boundedOrderKey,
   type: z.enum(['text', 'quantity', 'instant', 'reference']),
   required: z.boolean(),
-  query: CanonicalReferenceSchema.optional(),
-  labelField: CanonicalReferenceSchema.optional(),
+  query: compositionReference('queryReference').optional(),
+  labelField: compositionReference('fieldReference').optional(),
 });
 const compositionStep = z.strictObject({
   stepId: CanonicalIdSchema,
-  operation: CanonicalReferenceSchema,
+  operation: compositionReference('operationReference'),
   bindings: z
     .array(
       z.strictObject({
@@ -769,8 +775,8 @@ const compositionAction = z.strictObject({
   steps: z.array(compositionStep).max(5),
   navigate: z
     .strictObject({
-      surface: CanonicalReferenceSchema,
-      query: CanonicalReferenceSchema,
+      surface: compositionReference('surfaceReference'),
+      query: compositionReference('queryReference'),
       record: compositionValue,
     })
     .optional(),
@@ -779,7 +785,7 @@ const compositionDataset = z.strictObject({
   datasetId: CanonicalIdSchema,
   label: LabelSchema,
   orderKey: boundedOrderKey,
-  query: CanonicalReferenceSchema,
+  query: compositionReference('queryReference'),
   parent: z
     .strictObject({
       relationId: CanonicalIdSchema,
@@ -1257,9 +1263,9 @@ const v5NormalizedShape = {
 } as const;
 
 export const QueryReadModelSchema = z.strictObject({
-  capability: CanonicalReferenceSchema,
+  capability: compositionReference('capabilityReference'),
   binding: CanonicalIdSchema,
-  queries: z.record(z.string().min(1), CanonicalReferenceSchema),
+  queries: z.record(z.string().min(1), compositionReference('queryReference')),
   resultFields: z.record(z.string().min(1), CanonicalIdSchema),
 });
 export type QueryReadModel = z.infer<typeof QueryReadModelSchema>;
