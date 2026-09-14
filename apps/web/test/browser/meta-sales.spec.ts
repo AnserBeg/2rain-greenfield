@@ -50,6 +50,9 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
       .getByRole('button', { name: 'Review Reserve stock', exact: true })
       .focus();
     await page.keyboard.press('Enter');
+    await expect(
+      page.getByRole('button', { name: 'Confirm Reserve stock', exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
     await expect(task()).toContainText('Calgary warehouse');
     await page
       .getByRole('button', { name: 'Confirm Reserve stock', exact: true })
