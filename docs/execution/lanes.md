@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | — | idle. SALE integrated through PR #3 at `4c058aa`; SALE-FULFILLMENT integrated through PR #4 at `44bef7a`, Critical arm closed and all seven CI jobs green. No next vertical assigned |
+| **BUILD** | `RAIN-META-SALES` | blocked on canonical surface-composition decision; isolated `packet/RAIN-META-SALES`, base `fe97b63`; [record](packets/RAIN-META-SALES.md); online review only, no merge |
 | **SUPPORT** | — | idle |
 
 
@@ -29,7 +29,7 @@ writer is holding those paths right now.
 | Lane | Current packet | Status |
 |---|---|---|
 | **FIX** | `Q1-P4` — issued legal-entity read scope | **matrix-green at `29ba2ae`, both review arms PASS.** Owes a merge of main and a re-run before integration: main advanced 26 files / 3,967 insertions with `G3-P4a` and `G3-P6c`, so the docs-only exception does not apply. |
-| **BUILD** | — | **STALE ROW CORRECTED 2026-09-01: `G3-P6a` is ACCEPTED in the ledger and has no branch; this row had said `active` since 2026-07-30.** Historical detail retained: **it found five structural defects, all real:** Has found five structural defects, all real: three fixture double-mounts, provisioning ordered after materialization, `abiFunctionChecks` omitted from the additive strip list, preparation filtering on kind instead of classification, and generic fixture generation ignoring compiled constraints. |
+| **BUILD** | `RAIN-META-SALES` | blocked on canonical surface-composition decision; isolated `packet/RAIN-META-SALES`, base `fe97b63`; [record](packets/RAIN-META-SALES.md); online review only, no merge |
 | **CANON** *(Opus)* | — | **STALE ROW CORRECTED 2026-09-01: `Q1-P5` is ACCEPTED in the ledger and has no branch; this row had said `active` since 2026-07-30.** Historical detail retained: First non-Codex writer lane. Same review chain: Codex for everything, Fable on Critical. Holding its frozen candidate while `Q1-P4` takes the slot; authoring the deferred gateway binding meanwhile. |
 | **KERNEL** | — | idle since `G3-P2b-4` (2026-07-29). |
 | **DEPLOY** | — | idle since `1g2` (2026-07-29). |
