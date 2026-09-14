@@ -1,109 +1,132 @@
 # RAIN-META-SALES — metadata-composed fulfillment workspace
 
-Status: blocked on one canonical surface-contract decision; no product implementation.
-Owner: sole local BUILD; review online only; no merge or deployment.
-Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6` (main and origin/main after fetch).
-Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/5 (decision only).
-Branch: `packet/RAIN-META-SALES`; worktree: `/home/rvham/2rain-greenfield-rain-meta-sales`.
+Status: active; implementation checkpoint, validation continuing. Stops taken: 1, resolved.
+Owner: sole local BUILD; independent review online only; no local review, merge or deployment.
+Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6`; branch: `packet/RAIN-META-SALES`.
+Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/5
+Worktree: `/home/rvham/2rain-greenfield-rain-meta-sales`.
 Reference: `AnserBeg/temp_inventory@d057daffd17a199309675a6b0a31c8bdbca05282`.
-Reference checkout has local edits; all source reads used `git show` at that pin.
+Reference checkout has local edits; source inspection used `git show` at the pin only.
 
 ## Charter
 
 Outcome: open a released stocked order; read customer/item/location labels and line
 progress; reserve 8 of stock 10, ship 5, release 3, and open complete packing.
 Slices: metadata-rendered order/lines; contextual fulfillment tasks; parity and usability.
-Application composition belongs to canonical definitions; shared interpretation belongs
-in runtime code. Reuse accepted fulfillment, policy, exact quantities, retry and audit.
-Planned paths: canonical-model/compiler/domain/application/runtime/postgres-provider,
-web runtime/release/scripts, affected tests and inventories, and execution records.
-Those directories exist; the current BUILD and SUPPORT rows are idle. No other worktree
-is modified. Critical paths are not changed; touching them would require online review.
-Gates after implementation: focused tests, generators, affected suites including PostgreSQL,
-real-gateway fixture, two compiled presentation variants, renamed-ID reuse and browser checks.
-Stop: necessary canonical version/invariant decision, as explicitly required by the user.
-No receiving/fulfillment redevelopment, whole-order authoring, pricing, finance or integrations.
+Owned paths: canonical-model/compiler/domain/runtime/provider, web runtime/release,
+affected tests/inventories and execution records. Existing posting kernel remains authoritative.
+Gates: focused tests, generators, affected suites including PostgreSQL, real-gateway
+fixture, two compiled presentation variants, renamed-ID reuse and browser checks.
+No receiving redevelopment, whole-order authoring, pricing, finance or integrations.
 Live customization and actual AI execution remain the next milestone before ERP expansion.
 
-## Supported / missing map at the base
+## Claims under validation
 
-| Behavior | Existing symbol | Remaining work |
-|---|---|---|
-| Canonical Sales graph | `salesModuleDefinition`, `surfaces` in domain Sales definition | Surface composition currently declares one data source and opaque slots only |
-| Compiled fields and commands | `surfaceManifestPayload`; `readCompiledSurfaceDataBinding` | Fields equal query selections; commands inferred by source entity; no authored child/context/action carrier |
-| Registered grammar | `renderSurfaceRuntime`; `surfaceSlotRegistry` | Shared child/task interpretation must replace Sales-specific section rendering |
-| Current order workspace | `loadSalesOrderSection`; `renderSalesOrderSection` | Company-wide reservation/projection reads, UI arithmetic, raw references and handwritten links |
-| Exact packing children | `loadShipmentPackingDocument` and shared-list `parentScope` | Reuse exact-parent restriction and coverage check through declared composition |
-| Accepted stock mutation | `FulfillmentCapabilityExecutor.prepareAuthorization`, `executeFulfillmentLifecycle`, `PostgresInventoryPostingService` | Reuse gateways; preserve current policy, trusted scope/revision, confirmation and replay |
-| Agent projection | compiler `agentDiscoveryPayload` | Inspect emitted contracts and prove UI-free gateway parity after implementation; no LLM claim |
-| PaneFlow reference | `SalesOrdersView`, `SalesOrderDetail`, `SalesStageQueue`, reference-picker and CSS | Reference only: connected order actions, readable labels, explicit effect previews and responsive controls |
+1. v6 canonical composition declares fields, exact child queries, contextual inputs and operation steps; shared SurfaceRuntime renders it without Sales dispatch.
+2. Registered fulfillment read models use declared policy-governed dependency queries, exact relation/field restrictions and existing persisted projections; UI performs no stock arithmetic.
+3. Tasks invoke existing operations through current authorization, confirmation, revision checks and idempotency; retries retain per-step inputs/keys and stop on withheld read-back.
+4. Historical releases reproduce; new composition/read-model output has capability floors; two metadata revisions and a renamed non-Sales fixture share the same runtime.
+5. Browser and agent-channel acceptance evidence is in progress; no completed browser, AI-model execution or full-matrix claim yet.
 
-## One decision request
+## Decisions
 
-Approve a versioned, reusable canonical surface-composition extension for this packet.
-Recommended carrier: a new readable language version with matching compiler/runtime
-capability fencing, preserving historical release reproduction. Keep the five archetypes.
-The bounded extension declares ordered labeled field/relation columns; child query bindings
-with exact parent scope; operation/navigation actions with explicit order, narrowing
-conditions and typed input mappings from the current record, selected child and task inputs.
-Mapped input remains untrusted: the existing gateway resolves scope/revision and checks
-policy, confirmation and idempotency. No metadata can replace those checks.
-Each child binding resolves independently as pending/ready/empty/failed; a failed binding
-renders its error and disables dependent actions while successful siblings remain visible.
-This also resolves the multiple-binding question explicitly reserved by ux-grammar.
-Alternative: retain the existing language and defer this workspace. Bespoke Sales branches
-or an opaque renderer reference cannot satisfy the selected requirement.
-The exact schema spelling is implementation work after approval; the decision is to admit
-this bounded contract and its version boundary, not a broader customization product.
+- User approved the bounded versioned composition recommendation on 2026-09-14: “yes go ahead with recomendation”. This resolves the only decision stop.
+- Carrier: v6 `surfaceComposition`; existing five archetypes; each child binding resolves independently; failure suppresses that binding's rows and dependent actions.
+- Surface payload v2 / runtime capability 4; query read-model capability 2. Historical envelope readers remain strict.
+- The v6 physical dispatch retains v5 scalar-default representation: a language stamp alone must not request a storage retype. No database reset or lineage deletion.
+- Task plans are bounded sequential registered operations, not an atomic transaction. Earlier drafts may persist after refusal; they remain visible.
+- Task tokens are bound to principal/environment/tenant/release and held in memory for one hour measured monotonically. Process loss requires inspecting the record before a new task.
+- Read-model summaries are gateway-authorized reads, not a claimed cross-query transaction snapshot; posting rechecks authoritative stock.
+- Reference only: PaneFlow connected order actions, readable selections, explicit effect preview and responsive controls. No quarry code copied.
 
-## Evidence and reason for stopping
+## Slices and evidence
 
-`normalizedSurfaceDefinition` (`packages/canonical-model/src/schemas.ts:674`) is strict;
-its slot content has no child queries, columns, action bindings or context mappings.
-`surfaceManifestPayload` (`packages/compiler/src/projections.ts:663`) projects a single
-query's selections. `readCompiledSurfaceDataBinding` requires those exact selections.
-The reserved renderer escape hatch is refused as `COMPILER_RENDERER_FORM_UNSUPPORTED`
-in `packages/compiler/src/conformance.ts`; it would also violate the user's composition rule.
-ADR-0056 requires a new carrier decision when the next multi-command workflow needs a
-primary action other than Release. ADR-0054 section 2 and ux-grammar's slot-resolution
-section reserve the question of independent resolution when a surface gains another binding.
-This is a demonstrated contract gap, not a request for ordinary implementation permission.
+- Order/lines: isolated real PostgreSQL demo showed Alpine Office Supply and Field notebook, with exact child scope and quantity progress.
+- Actions: manual reserve observed 10/8/2. Browser subsequently observed ship 5/3/2 and release 5/0/5; final compact packing navigation timed out and is being corrected.
+- First shipment probe exposed missing reason narrative; accepted posting refused with `INVENTORY_ADJUSTMENT_REASON_REQUIRED`. Mapping fixed; later browser shipment committed.
+- Renamed non-Sales composition and two compiled presentation revisions: focused integration tests pass, including missing scope-receipt and invalid-binding controls.
+- No local reviewer or whole-program review ran. This is an implementation checkpoint, not a stage boundary.
 
-## Reproduce the schema measurement
+## Gates
 
-From the packet worktree, after `corepack pnpm install --offline --frozen-lockfile`:
+- Historical lineage generation passed; typecheck/lint and affected suites are being completed.
+- Browser `meta-sales.spec.ts`: current run pending; previous run timed out after stock assertions, before complete packing.
+- Hosted CI: pending publication of implementation checkpoint. Full acceptance is not claimed.
+
+## Test it yourself
+
+From `/home/rvham/2rain-greenfield-rain-meta-sales` in Ubuntu/WSL:
 
 ```sh
-node --import tsx --input-type=module <<'JS'
-import { VersionedAuthoredApplicationPackageSchema as schema } from './packages/canonical-model/src/index.ts';
-import { salesModuleDefinition } from './packages/domain/src/sales/definition.ts';
-const base = salesModuleDefinition();
-const cases = [['base', base, true]];
-const renamed = structuredClone(base);
-renamed.surfaces[0].label = 'Fulfillment workspace';
-cases.push(['label variation', renamed, true]);
-for (const key of ['fields', 'columns', 'children', 'actionBindings', 'contextMappings']) {
-  const candidate = structuredClone(base);
-  candidate.surfaces[0][key] = [];
-  cases.push([key, candidate, false]);
-}
-for (const [label, candidate, expected] of cases) {
-  const result = schema.safeParse(candidate);
-  console.log(label, result.success, result.success ? [] : result.error.issues);
-  if (result.success !== expected) process.exitCode = 1;
-}
-JS
+corepack pnpm install --offline --frozen-lockfile
+node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/meta-sales-fixture.ts --serve
 ```
 
-Measured 2026-09-14: exit 0; base and label variation admitted; all five new keys
-rejected with `unrecognized_keys` at `surfaces[0]`. This proves schema rejection,
-not the correctness of a future schema, compiler or UI.
-Formatting of the four changed Markdown files passed; `scripts/check-records.sh`
-passed (146 records, 166 unique ledger rows). Log: `/tmp/rain-meta-sales-records.log`.
-Docker preflight succeeded: server 29.5.2. Offline dependency installation exited 0.
-No containers, databases, demonstrations or reference files were changed.
-No acceptance journey, browser screenshot, stock result, customization or agent execution
-is claimed. No product URL exists for this packet yet. No local review or stage review ran;
-this is a pre-implementation decision boundary, not a stabilized stage milestone.
-Record-only changes need no executable record-claim block. Publication is a draft decision
-checkpoint on the requested branch, to be continued by implementation after the ruling.
+Open the printed `META_SALES_URL`. The fixture owns a new disposable container; Ctrl-C
+closes only that fixture. Existing worktrees, databases and demos are preserved.
+Select the order line, Reserve stock, quantity 8, Calgary warehouse, Review, Confirm.
+Return to the order: on hand/reserved/available = 10/8/2.
+Select its reservation; Ship reserved stock, quantity 5, Review, Confirm; return: 5/3/2.
+Release remainder, Review, Confirm; return: 5/0/5. Select the posted shipment and Open packing.
+Packing must show its location and every exact shipment line; Back returns to the same order.
+Repeat at 390 px. No customer/item/location/line identifier must be typed or pasted.
+
+## Review handoff
+
+Publication remains one draft PR. Final SHA, complete gates and bounded online review
+prompt will replace this checkpoint after the outstanding checks are complete.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "RAIN-META-SALES",
+  "base": "fe97b63baedf8bdd42146318bb89d4be1aa948f6",
+  "head": "67f6109e4ed56fc814be9a2cefd7bbd069e163c7",
+  "changedPaths": [
+    "apps/web/release/app.authored.json",
+    "apps/web/release/app.compiled.json",
+    "apps/web/src/component-registry.ts",
+    "apps/web/src/message-catalog.ts",
+    "apps/web/src/surface-composition.ts",
+    "apps/web/src/surface-contract.ts",
+    "apps/web/src/surface-runtime.ts",
+    "apps/web/test/browser/meta-sales.spec.ts",
+    "packages/canonical-model/src/constants.ts",
+    "packages/canonical-model/src/index.ts",
+    "packages/canonical-model/src/normalize.ts",
+    "packages/canonical-model/src/schemas.ts",
+    "packages/canonical-model/src/surface-composition.ts",
+    "packages/compiler/src/compiler.ts",
+    "packages/compiler/src/projections.ts",
+    "packages/compiler/src/protocol.ts",
+    "packages/domain/src/app/builder.ts",
+    "packages/domain/src/catalog/definition.ts",
+    "packages/domain/src/inventory/definition.ts",
+    "packages/domain/src/location/definition.ts",
+    "packages/domain/src/party/definition.ts",
+    "packages/domain/src/platform/definition.ts",
+    "packages/domain/src/purchasing/definition.ts",
+    "packages/domain/src/sales/definition.ts",
+    "packages/domain/src/sales/workspace.ts",
+    "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/fulfillment-read-model.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/runtime/src/list-behavior/cursor.ts",
+    "packages/runtime/src/list-behavior/index.ts",
+    "packages/runtime/src/request-runtime-view.ts",
+    "packages/runtime/src/semantic-query-gateway.ts",
+    "test/helpers/meta-sales-fixture.ts",
+    "test/integration/surface-data-binding.test.ts"
+  ],
+  "symbols": [
+    {
+      "path": "apps/web/src/surface-composition.ts",
+      "name": "loadSurfaceComposition"
+    },
+    {
+      "path": "packages/domain/src/sales/workspace.ts",
+      "name": "salesWorkspace"
+    }
+  ]
+}
+```
