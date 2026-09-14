@@ -940,10 +940,20 @@ export function registeredQueryFromPinnedView(
   return definition?.queryType === 'aggregate' ? undefined : definition;
 }
 
+// A request view is issued with deeply immutable projections. Cache only the
+// validated catalog, never policy decisions, legal scopes, query results or DTOs.
+const pinnedQueryCatalogs = new WeakMap<
+  IssuedRequestRuntimeView,
+  ReadonlyMap<string, RegisteredSemanticQueryDefinition>
+>();
+
 export function registeredSemanticQueryFromPinnedView(
   view: IssuedRequestRuntimeView,
   queryId: string,
 ): RegisteredSemanticQueryDefinition | undefined {
+  assertRequestRuntimeView(view);
+  const cached = pinnedQueryCatalogs.get(view);
+  if (cached) return cached.get(queryId);
   const projection = view.projections.query;
   if (
     projection.familyId !== REQUEST_RUNTIME_PROJECTION_FAMILIES.query ||
@@ -974,7 +984,7 @@ export function registeredSemanticQueryFromPinnedView(
     );
   }
   const queryIds = new Set<string>();
-  let selected: RegisteredSemanticQueryDefinition | undefined;
+  const catalog = new Map<string, RegisteredSemanticQueryDefinition>();
   for (const query of payload.queries) {
     const definition = parseQueryDefinition(query);
     if (queryIds.has(definition.queryId)) {
@@ -983,9 +993,12 @@ export function registeredSemanticQueryFromPinnedView(
       );
     }
     queryIds.add(definition.queryId);
-    if (definition.queryId === queryId) selected = definition;
+    catalog.set(definition.queryId, definition);
   }
-  return selected;
+  // Publish only after every entry and duplicate check passed. A failed first
+  // lookup must not make a later lookup see a partially validated catalog.
+  pinnedQueryCatalogs.set(view, catalog);
+  return catalog.get(queryId);
 }
 
 function parseQueryDefinition(

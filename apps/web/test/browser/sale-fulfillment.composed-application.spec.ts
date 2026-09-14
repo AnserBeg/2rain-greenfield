@@ -350,7 +350,11 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await command('Post');
   await page.goto(url('sales_order', 'detail', closureOrderId));
   await command('Close');
-  await expect(page.getByText(/sales_order_closed/)).toBeVisible();
+  await expect(
+    page
+      .locator('[data-platform-slot="record:sections"] .record-fields')
+      .getByText('Closed', { exact: true }),
+  ).toBeVisible();
 
   console.log(
     `SALE_FULFILLMENT_WALKTHROUGH ${JSON.stringify({ closureOrderId, closureShipmentId: closureShipment.shipmentId, correctionShipmentId: correction.shipmentId, initialShipmentId: initialShipment.shipmentId, movementId, orderId, orderLineId, packingDocument: true, partialShipment: '5', reservationId, reserveSequence: ['10/8/2', '5/3/2', '5/0/5'], shortageRefused: true, silentReservationResurrection: false })}`,

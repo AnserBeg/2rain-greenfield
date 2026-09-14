@@ -41,6 +41,8 @@ import {
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   SEMANTIC_QUERY_RESULT_VERSION,
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  registeredSemanticQueryFromPinnedView,
   SemanticQueryGateway,
   type SemanticQueryExecutionRequest,
   type SemanticQueryExecutor,
@@ -3758,4 +3760,56 @@ test('composed tasks retain reviewed inputs and retry keys, and stop on committe
       });
     }
   }
+});
+
+test('cached pinned query catalogs keep whole-catalog refusal, view isolation and current policy', async () => {
+  const compiled = compileFixture();
+  let allowed = true;
+  const policy = new RecordingPolicy(() => (allowed ? 'ALLOW' : 'DENY'));
+  const identities = { a: identity(tenantA, environmentA, principalA) };
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, identities),
+    'a',
+  );
+  const queryId = `${FIXTURE_IDS.namespace}:query.master_get`;
+  assert.ok(registeredSemanticQueryFromPinnedView(view, queryId));
+  assert.ok(registeredSemanticQueryFromPinnedView(view, queryId));
+  const gateway = new SemanticQueryGateway(
+    policy,
+    new InMemoryGenericExecutor(),
+  );
+  const request = {
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    queryId,
+    arguments: {
+      recordId: 'a6000000-0000-4000-8000-000000000006',
+      includeArchived: false,
+    },
+  };
+  await gateway.invoke(view, request);
+  allowed = false;
+  await assert.rejects(
+    () => gateway.invoke(view, request),
+    /permission|denied/i,
+  );
+  const malformed = await issuedView(
+    runtimeEntry(compiled, policy, identities, (projections) => {
+      const payload = structuredClone(projections.query.payload) as {
+        queries: unknown[];
+      };
+      payload.queries.push(payload.queries[0]);
+      return {
+        ...projections,
+        query: { ...projections.query, payload: payload as ImmutableJsonValue },
+      };
+    }),
+    'a',
+  );
+  // A valid first match must not bypass a duplicate later in another view's
+  // catalog; failure must not publish a partially validated cache either.
+  for (const id of [queryId, `${FIXTURE_IDS.namespace}:query.master_list`])
+    assert.throws(
+      () => registeredSemanticQueryFromPinnedView(malformed, id),
+      /duplicate queryId/,
+    );
 });
