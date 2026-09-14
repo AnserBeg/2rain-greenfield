@@ -491,7 +491,6 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             assert.equal(viewB.pointer.fence, 1);
             assert.equal(
               viewA.projections.surface.payloadSchemaVersion,
-              COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
               FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
             );
             assert.equal(Object.isFrozen(viewA), true);

@@ -1706,6 +1706,9 @@ body{padding-bottom:72px}
 .command-bar,.task-primary-action{position:sticky;z-index:3;bottom:80px;box-shadow:var(--elevation-overlay)}
 .task-primary-action{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
 .task-primary-action button{width:100%}
+.composition-actions{width:100%;min-width:0}
+.composition-actions .command-bar{flex-wrap:wrap;position:static;box-shadow:none}
+.composition-actions a.button{display:inline-flex;align-items:center;min-height:44px;padding:var(--space-2) var(--space-4);border:1px solid var(--line);border-radius:var(--radius-control)}
 .composition-inputs{display:grid;gap:var(--space-4);max-width:40rem}
 .composition-inputs label{display:grid;gap:var(--space-2)}
 [data-composition-task] button,[data-composition-task] input,[data-composition-task] select,[data-composition-dataset] a{min-height:44px}

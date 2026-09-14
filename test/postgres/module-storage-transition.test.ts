@@ -5696,7 +5696,8 @@ function withoutModuleForTransition(
     application[collection] = target.filter(
       (candidate) =>
         !ids.has(candidate[idKey]) &&
-        candidate.module?.targetId !== `northstar.app:module.${label}`,
+        candidate.module?.targetId !==
+          `${APPLICATION_NAMESPACE}:module.${label}`,
     );
   }
   const modules = application.modules;
@@ -5746,56 +5747,11 @@ function composedApplicationWithoutInventoryForTransition(): Record<
     salesModuleDefinition(APPLICATION_NAMESPACE),
     'sales',
   );
-  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
-  for (const collection of [
-    'assertions',
-    'entities',
-    'fields',
-    'operations',
-    'permissions',
-    'queries',
-    'relations',
-    'stateMachines',
-    'storageMappings',
-    'surfaces',
-  ] as const) {
-    const target = application[collection];
-    const source = inventory[collection];
-    assert.ok(Array.isArray(target));
-    assert.ok(Array.isArray(source));
-    application[collection] = target.filter(
-      (candidate) =>
-        !source.some(
-          (sourceEntry) =>
-            canonicalize(candidate) === canonicalize(sourceEntry),
-        ),
-    );
-    assert.equal(
-      target.length - (application[collection] as unknown[]).length,
-      source.length,
-      `transition fixture must remove every inventory ${collection} entry exactly once`,
-    );
-  }
-  const modules = application.modules;
-  const inventoryModules = inventory.modules;
-  assert.ok(Array.isArray(modules));
-  assert.ok(Array.isArray(inventoryModules));
-  const inventoryModule = inventoryModules[0];
-  assert.ok(inventoryModule && typeof inventoryModule === 'object');
-  assert.ok('moduleId' in inventoryModule);
-  application.modules = modules.filter(
-    (candidate) =>
-      candidate === null ||
-      typeof candidate !== 'object' ||
-      !('moduleId' in candidate) ||
-      candidate.moduleId !== inventoryModule.moduleId,
+  return withoutModuleForTransition(
+    application,
+    inventoryModuleDefinition(APPLICATION_NAMESPACE),
+    'inventory',
   );
-  assert.equal(
-    modules.length - (application.modules as unknown[]).length,
-    1,
-    'transition fixture must remove the inventory module exactly once',
-  );
-  return application;
 }
 
 function collectPlanRelationNames(value: unknown): string[] {

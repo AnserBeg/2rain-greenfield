@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { FULFILLMENT_CAPABILITY_ID } from '../../packages/domain/src/sales/definition.js';
 import type { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
 import {
@@ -183,19 +184,22 @@ if (process.argv.includes('--serve')) {
       process.once('SIGINT', () => resolve());
     });
     if (process.argv.includes('--verify')) {
-      const { rows } = await fixture.pool.query(
-        `SELECT action_id FROM platform.semantic_operation_receipts WHERE action_id IN ('northstar.app:operation.reservation_reserve','northstar.app:operation.shipment_post','northstar.app:operation.reservation_release')`,
-      );
+      // Lifecycle receipts use operation IDs; shipment posting is receipted by
+      // the accepted kernel under its capability ID, linked to its trust document.
       const expected = [
         'northstar.app:operation.reservation_release',
         'northstar.app:operation.reservation_reserve',
-        'northstar.app:operation.shipment_post',
-      ];
-      if (
-        JSON.stringify(rows.map((row) => row.action_id).sort()) !==
-        JSON.stringify(expected)
-      )
-        throw new Error('Unexpected committed fulfillment receipts');
+        FULFILLMENT_CAPABILITY_ID,
+      ].sort();
+      const { rows } = await fixture.pool.query(
+        `SELECT receipt.action_id FROM platform.semantic_operation_receipts receipt
+         JOIN platform.trust_business_change_documents document
+           ON document.tenant_id=receipt.tenant_id AND document.environment_id=receipt.environment_id
+          AND document.change_document_id=receipt.change_document_id
+         WHERE receipt.action_id=ANY($1::text[])`,
+        [expected],
+      );
+      assert.deepEqual(rows.map((row) => row.action_id).sort(), expected);
       await fixture.app.runtime.entry.run({ headers: {} }, async (view) => {
         const discovery = view.projections.agent.payload as {
           readonly queries: readonly {
