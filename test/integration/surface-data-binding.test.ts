@@ -8,6 +8,7 @@ import {
   renderCompositionActions,
 } from '../../apps/web/src/surface-composition.js';
 import assert from 'node:assert/strict';
+import { CanonicalModelError } from '@north-star/canonical-model';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import test from 'node:test';
@@ -3386,6 +3387,7 @@ function workshopComposition(label: string): Record<string, unknown> {
 function presentedWorkshop(
   label: string,
   reverse = false,
+  dialog = false,
 ): Record<string, unknown> {
   const value = workshopComposition(label);
   const surface = (value.surfaces as Array<Record<string, unknown>>).find(
@@ -3397,10 +3399,22 @@ function presentedWorkshop(
     context: { label, description: 'Select an assignment to retire it.' },
     recordActions: 'progressive',
     technicalDetails: 'progressive',
+    ...(dialog
+      ? { task: { mode: 'nativeDialog' as const, fallback: 'page' as const } }
+      : {}),
   };
   const child = composition.children[0]!;
+  if (dialog)
+    child.sort = [
+      {
+        fieldId: child.columns[0]!
+          .field as SurfaceComposition['fields'][number]['columnId'],
+        direction: 'ascending',
+      },
+    ];
   child.presentation = {
     selection: 'explicit',
+    ...(dialog ? { compact: 'scrollTable' as const } : {}),
     description: 'Assignments scoped to this workshop job.',
   };
   child.columns[0]!.presentation = { role: 'primary', priority: 0 };
@@ -3434,6 +3448,9 @@ test('v6 composition renders two compiled presentation revisions and renamed non
   assert.notEqual(first.releaseRoot, second.releaseRoot);
   const presented = compileFixture(presentedWorkshop('Assignments'));
   const varied = compileFixture(presentedWorkshop('Responsibilities', true));
+  const dialog = compileFixture(
+    presentedWorkshop('Dialog assignments', false, true),
+  );
   assert.notEqual(presented.releaseRoot, varied.releaseRoot);
   const policy = new RecordingPolicy('ALLOW');
   const root: SemanticRecordDto = {
@@ -3481,6 +3498,7 @@ test('v6 composition renders two compiled presentation revisions and renamed non
     [second, 'Assignment heading'],
     [presented, 'Assignments'],
     [varied, 'Responsibilities'],
+    [dialog, 'Dialog assignments'],
   ] as const) {
     const view = await issuedView(
       runtimeEntry(compiled, policy, {
@@ -3516,8 +3534,7 @@ test('v6 composition renders two compiled presentation revisions and renamed non
       );
       const children = renderCompositionChildren(data, surface, view);
       assert.match(children, /<strong>Supervisor<\/strong>/);
-      assert.match(children, /Selected record actions/);
-      assert.match(children, /Retire assignment/);
+      assert.doesNotMatch(children, /Selected record actions/);
       assert.match(
         children,
         compiled === varied
@@ -3538,6 +3555,13 @@ test('v6 composition renders two compiled presentation revisions and renamed non
       relationId: 'workshop.jobs:relation.assignment_parent',
       recordId: root.recordId,
     });
+    if (compiled === dialog)
+      assert.deepEqual(observed.at(-1)?.list?.query.sort, [
+        {
+          fieldId: 'workshop.jobs:field.assignment_kind',
+          direction: 'ascending',
+        },
+      ]);
   }
   // Removing the provider's exact-scope receipt must fail the child, never show a broad list.
   const view = await issuedView(
@@ -3593,6 +3617,40 @@ test('Record presentation refuses unresolved headers, ambiguous hierarchy and im
     );
     assert.throws(() => normalizeApplicationPackage(authored));
   }
+});
+
+test('Task presentation requires explicit page fallback and declared child sorting', () => {
+  for (const policy of [
+    { mode: 'nativeDialog' },
+    { mode: 'nativeDialog', fallback: 'hidden' },
+    { mode: 'salesDialog', fallback: 'page' },
+  ]) {
+    const definition = presentedWorkshop('Assignments');
+    const surface = (
+      definition.surfaces as Array<Record<string, unknown>>
+    ).find((surface) => surface.composition)!;
+    (surface.composition as SurfaceComposition).presentation!.task =
+      policy as NonNullable<SurfaceComposition['presentation']>['task'];
+    assert.throws(
+      () => normalizeApplicationPackage(definition),
+      CanonicalModelError,
+    );
+  }
+  const definition = presentedWorkshop('Assignments', false, true);
+  const surface = (definition.surfaces as Array<Record<string, unknown>>).find(
+    (surface) => surface.composition,
+  )!;
+  (surface.composition as SurfaceComposition).children[0]!.sort = [
+    {
+      fieldId:
+        'workshop.jobs:field.unavailable' as SurfaceComposition['fields'][number]['columnId'],
+      direction: 'ascending',
+    },
+  ];
+  assert.throws(
+    () => normalizeApplicationPackage(definition),
+    CanonicalModelError,
+  );
 });
 
 test('v6 composition refuses undeclared context, operation fields and cyclic child dependencies', () => {
@@ -3939,8 +3997,8 @@ function deferredSignal() {
   return { promise, resolve };
 }
 
-async function correctionTaskFixture() {
-  const definition = presentedWorkshop('Work title');
+async function correctionTaskFixture(dialog = false) {
+  const definition = presentedWorkshop('Work title', false, dialog);
   const surface = (definition.surfaces as Array<Record<string, unknown>>).find(
     (value) => value.composition,
   )!;
@@ -4249,6 +4307,36 @@ const assertTaskRedacted = (response: { html: string }) => {
     'the complete response must not redisclose protected cached data',
   );
 };
+
+test('native Task policy reuses non-Sales forms, fresh Record context and exact prepared identity', async () => {
+  const fixture = await correctionTaskFixture(true);
+  const review = await fixture.prepare('8', fixture.locations[0]!.recordId);
+  assert.equal((review.html.match(/<dialog /g) ?? []).length, 1);
+  assert.match(review.html, /data-task-fallback="page"/);
+  assert.match(review.html, /data-task-phase="review"/);
+  assert.match(
+    review.html,
+    /data-composition-dataset="workshop.jobs:dataset.assignments"/,
+  );
+  assert.equal((review.html.match(/name="preparedId"/g) ?? []).length, 1);
+  assert.equal(fixture.calls.length, 0);
+  const replacement = await fixture.prepare(
+    '5',
+    fixture.locations[1]!.recordId,
+  );
+  await fixture.submit(fixture.confirmation(review.html));
+  assert.equal(fixture.calls.length, 0);
+  const result = await fixture.submit(fixture.confirmation(replacement.html));
+  assert.match(result.html, /data-task-phase="result"/);
+  assert.match(result.html, /Closing this task does not undo submitted work/);
+  assert.equal(fixture.calls.length, 2);
+  await fixture.submit(fixture.confirmation(replacement.html));
+  assert.equal(fixture.calls.length, 2);
+  fixture.denied.add('workshop.jobs:permission.assignment_read');
+  const denied = await fixture.submit(fixture.confirmation(replacement.html));
+  assertTaskRedacted(denied);
+  assert.doesNotMatch(denied.html, /<dialog /);
+});
 
 test('P1 task response rechecks root, child and label reads and redacts committed withheld repeats', async (t) => {
   for (const permission of [

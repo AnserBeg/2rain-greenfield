@@ -1,4 +1,4 @@
-# ADR-0036: Minimum client capability — one owned script, four behaviours, no framework
+# ADR-0036: Minimum client capability — one owned script, five behaviours, no framework
 
 Date: 2026-08-02
 Status: accepted — ruled by the orchestrator reconciling the `U3` two-arm debate. The
@@ -36,13 +36,27 @@ with no third-party dependency. It is inlined into the served document and
 Pinning matters: the CSP currently blocks everything, and admitting script must be a
 deliberate, hash-bound exception rather than a relaxation that later admits anything.
 
-### 2. Exactly four behaviours — a closed set
+### 2. Exactly five behaviours — a closed set (amended 2026-09-15)
 
 1. Pending-state toggling.
 2. Polling **one** operation-status resource to drive server-rendered determinate progress.
 3. Applying compiled optimistic transitions read from definition-derived data attributes,
    with rollback.
 4. Advisory inline validation, requested from the server.
+5. Native Task-dialog presentation: promote one server-rendered Task container
+   inside its originating Record, close/reopen that same container, and manage
+   focus. A typed compiled policy must explicitly declare `fallback: page`.
+   Forms, preparation, confirmation, execution, outcomes and fresh Record reads
+   remain server-owned. Closing dispatches nothing and never implies rollback.
+   No fetching, replay, retry, routing, business rendering or client task state.
+
+The owner approved this bounded amendment for RAIN-META-SALES on 2026-09-15:
+document context is essential while reserving and partially shipping. Native HTML
+and server navigation deliver the full-page fallback, but do not deliver the
+contained modal focus and in-context dismissal of a native `showModal()` dialog.
+The same Task/action flow remains one Task archetype; there is no sixth archetype.
+This is **Task presentation**, not `modal` MESSAGE placement: ADR-0048's named
+refusal remains in force. No notification, access-request or toast system enters.
 
 Closed, not illustrative. This programme governs by closed vocabularies and exact
 partitions everywhere else; an open licence to "progressively enhance" is how one script
@@ -71,9 +85,10 @@ separate domains with their own delivery, their own CSP consequences, and their 
 one-way doors. Each needs its own decision, and §3's "no second script" is a rule about
 *this* script's domain, not a veto the plan's launch commitments must be argued around.
 
-**The amendment test, so the set can close without freezing.** A fifth behaviour is
+**The amendment test, so the set can close without freezing.** A further behaviour is
 admitted to §2 only when all four hold: it belongs to this script's domain; the
-behaviour it enables cannot be delivered by a server navigation or by native HTML; the
+required interaction cannot be delivered by server navigation or native HTML alone
+(an explicit, usable full-page fallback does not disqualify an in-context Task dialog); the
 capability it depends on already exists (per §6's ordering); and it ships with the gate
 that observes it. Anything failing one of those is refused by name with what would admit
 it — the pattern ADR-0048 §4 uses for `toast` and `modal`.
@@ -103,10 +118,13 @@ around. ADR-0005 is not superseded and does not need to be.
 ### 6. Build order — determinate progress comes LAST
 
 1. **Native HTML constraint validation** — no script at all.
-2. **The pending-state script**, carrying the full gate harness from §3 and §4.
-3. **Determinate progress**, and only once a real async job substrate exists.
+2. **Native Task-dialog presentation**, carrying the script-count/CSP and JS-on/off
+   browser gates, keyboard containment, close/reopen and prepared-confirmation checks.
+   This ships first; it has no pending-state or async substrate dependency.
+3. **The pending-state behaviour**, carrying the same gate harness.
+4. **Determinate progress**, and only once a real async job substrate exists.
 
-Step 3 is deliberately last because **no job substrate exists in `packages/runtime`
+Step 4 is deliberately last because **no job substrate exists in `packages/runtime`
 today**, and ADR-0032 §3a already forbids a progress bar without real data. Building the
 bar first would mean animating a fiction. This ordering is not a preference; it is an
 existing rule applied to a fact one arm went and checked.
@@ -117,7 +135,7 @@ Frameworks; hypermedia libraries as the default; hydration; client routing or st
 client rendering of business data; executable client validation; tenant-authored client
 code; component-emitting compiler output; script-created interactive elements; any second
 script; **client-side timing collection or beaconing** — added 2026-08-08, because
-measurement is not one of the four behaviours and
+measurement is not one of the five behaviours and
 [ADR-0032](ADR-0032-feedback-ladder-and-loading-states.md) §2c records the standing
 temptation to admit it as instrumentation rather than as capability. Wanting to observe
 the user's real wait is a good reason to amend this ADR under §2a's test, and not a

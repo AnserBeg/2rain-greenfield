@@ -25476,10 +25476,11 @@
           },
           "context": {
             "label": "Fulfillment",
-            "description": "Choose an order line to reserve stock, or a reservation to ship or release its remainder."
+            "description": "Select a line to reserve stock, or a reservation to ship."
           },
           "recordActions": "progressive",
-          "technicalDetails": "progressive"
+          "technicalDetails": "progressive",
+          "task": { "mode": "nativeDialog", "fallback": "page" }
         },
         "fields": [
           {
@@ -25522,7 +25523,10 @@
         "children": [
           {
             "datasetId": "northstar.app:dataset.fulfillment_lines",
-            "presentation": { "selection": "explicit" },
+            "presentation": {
+              "selection": "explicit",
+              "compact": "scrollTable"
+            },
             "label": "Order lines",
             "orderKey": 10,
             "query": {
@@ -25530,6 +25534,12 @@
               "schemaVersion": "v6",
               "targetId": "northstar.app:query.sales_order_line_list"
             },
+            "sort": [
+              {
+                "fieldId": "northstar.app:field.sales_order_line_line_number",
+                "direction": "ascending"
+              }
+            ],
             "parent": {
               "relationId": "northstar.app:relation.sales_order_line_order",
               "value": { "source": "record", "field": "recordId" },
@@ -25540,8 +25550,7 @@
                 "columnId": "northstar.app:column.line",
                 "label": "Line",
                 "orderKey": 10,
-                "field": "northstar.app:field.sales_order_line_line_number",
-                "presentation": { "role": "secondary", "priority": 0 }
+                "field": "northstar.app:field.sales_order_line_line_number"
               },
               {
                 "columnId": "northstar.app:column.item",
@@ -25560,42 +25569,61 @@
                     "targetId": "northstar.app:field.item_name"
                   }
                 },
-                "presentation": { "role": "primary", "priority": 1 }
+                "presentation": { "role": "primary", "priority": 20 }
+              },
+              {
+                "columnId": "northstar.app:column.sku",
+                "label": "SKU",
+                "orderKey": 25,
+                "field": "northstar.app:field.sales_order_line_item_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.item_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.item_sku"
+                  }
+                },
+                "presentation": { "role": "secondary", "priority": 25 }
               },
               {
                 "columnId": "northstar.app:column.ordered",
                 "label": "Ordered",
                 "orderKey": 30,
                 "field": "northstar.app:field.sales_order_line_ordered_quantity",
-                "presentation": { "role": "quantity", "priority": 2 }
+                "presentation": { "role": "quantity", "priority": 30 }
               },
               {
                 "columnId": "northstar.app:column.unit",
                 "label": "Unit",
                 "orderKey": 40,
                 "field": "northstar.app:field.sales_order_line_unit_id",
-                "presentation": { "role": "secondary", "priority": 3 }
+                "presentation": { "role": "secondary", "priority": 40 }
               },
               {
                 "columnId": "northstar.app:column.coverage",
                 "label": "Reserved",
                 "orderKey": 50,
                 "field": "northstar.app:metric.coverage",
-                "presentation": { "role": "quantity", "priority": 4 }
+                "presentation": { "role": "quantity", "priority": 50 }
               },
               {
                 "columnId": "northstar.app:column.shipped",
                 "label": "Shipped",
                 "orderKey": 60,
                 "field": "northstar.app:metric.shipped",
-                "presentation": { "role": "quantity", "priority": 5 }
+                "presentation": { "role": "quantity", "priority": 60 }
               },
               {
                 "columnId": "northstar.app:column.open",
                 "label": "Open to ship",
                 "orderKey": 70,
                 "field": "northstar.app:metric.open_to_ship",
-                "presentation": { "role": "quantity", "priority": 6 }
+                "presentation": { "role": "quantity", "priority": 70 }
               }
             ]
           },
@@ -25603,9 +25631,10 @@
             "datasetId": "northstar.app:dataset.line_reservations",
             "presentation": {
               "selection": "explicit",
+              "compact": "scrollTable",
               "description": "Reservation-scoped availability for this item and location. Missing or unavailable data is not zero stock."
             },
-            "label": "Selected line reservations",
+            "label": "Reservations and stock",
             "orderKey": 20,
             "query": {
               "kind": "queryReference",
@@ -25627,7 +25656,7 @@
                 "label": "Reservation",
                 "orderKey": 10,
                 "field": "northstar.app:field.reservation_number",
-                "presentation": { "role": "detail", "priority": 0 }
+                "presentation": { "role": "detail", "priority": 10 }
               },
               {
                 "columnId": "northstar.app:column.location",
@@ -25646,62 +25675,62 @@
                     "targetId": "northstar.app:field.location_name"
                   }
                 },
-                "presentation": { "role": "primary", "priority": 1 }
+                "presentation": { "role": "primary", "priority": 20 }
               },
               {
                 "columnId": "northstar.app:column.quantity",
                 "label": "Original quantity",
                 "orderKey": 30,
                 "field": "northstar.app:field.reservation_quantity",
-                "presentation": { "role": "detail", "priority": 2 }
+                "presentation": { "role": "detail", "priority": 30 }
               },
               {
                 "columnId": "northstar.app:column.state",
                 "label": "State",
                 "orderKey": 40,
                 "field": "northstar.app:field.reservation_state",
-                "presentation": { "role": "secondary", "priority": 3 }
+                "presentation": { "role": "secondary", "priority": 40 }
               },
               {
                 "columnId": "northstar.app:column.reservation_unit",
                 "label": "Unit",
                 "orderKey": 45,
                 "field": "northstar.app:field.reservation_unit_id",
-                "presentation": { "role": "secondary", "priority": 4 }
+                "presentation": { "role": "secondary", "priority": 45 }
               },
               {
                 "columnId": "northstar.app:column.remaining",
                 "label": "Remaining",
                 "orderKey": 50,
                 "field": "northstar.app:metric.remaining",
-                "presentation": { "role": "quantity", "priority": 5 }
+                "presentation": { "role": "quantity", "priority": 50 }
               },
               {
                 "columnId": "northstar.app:column.on_hand",
                 "label": "On hand",
                 "orderKey": 60,
                 "field": "northstar.app:metric.on_hand",
-                "presentation": { "role": "quantity", "priority": 6 }
+                "presentation": { "role": "quantity", "priority": 60 }
               },
               {
                 "columnId": "northstar.app:column.reserved_total",
                 "label": "Reserved stock",
                 "orderKey": 70,
                 "field": "northstar.app:metric.reserved",
-                "presentation": { "role": "quantity", "priority": 7 }
+                "presentation": { "role": "quantity", "priority": 70 }
               },
               {
                 "columnId": "northstar.app:column.available",
                 "label": "Available",
                 "orderKey": 80,
                 "field": "northstar.app:metric.available",
-                "presentation": { "role": "quantity", "priority": 8 }
+                "presentation": { "role": "quantity", "priority": 80 }
               }
             ]
           },
           {
             "datasetId": "northstar.app:dataset.order_shipments",
-            "presentation": { "selection": "none" },
+            "presentation": { "selection": "none", "compact": "scrollTable" },
             "label": "Shipments and packing",
             "orderKey": 30,
             "query": {
@@ -25741,7 +25770,7 @@
             "actionId": "northstar.app:action.reserve_stock",
             "presentation": { "placement": "selection" },
             "label": "Reserve stock",
-            "description": "Create a reservation and reserve this exact quantity. On hand stays unchanged; available stock decreases.",
+            "description": "Reserve this quantity at the chosen location. On hand stays unchanged; available stock decreases.",
             "orderKey": 10,
             "datasetId": "northstar.app:dataset.fulfillment_lines",
             "conditions": [
@@ -25902,7 +25931,7 @@
             "actionId": "northstar.app:action.ship_reserved",
             "presentation": { "placement": "selection" },
             "label": "Ship reserved stock",
-            "description": "Create and post a partial shipment against the selected reservation. On hand and reserved stock decrease by the shipped quantity.",
+            "description": "Post this quantity against the selected reservation. On hand and reserved stock decrease by the shipped quantity.",
             "orderKey": 20,
             "datasetId": "northstar.app:dataset.line_reservations",
             "conditions": [
@@ -27080,7 +27109,7 @@
           {
             "datasetId": "northstar.app:dataset.packing_lines",
             "label": "Packed lines",
-            "presentation": { "selection": "none" },
+            "presentation": { "selection": "none", "compact": "scrollTable" },
             "orderKey": 10,
             "query": {
               "kind": "queryReference",

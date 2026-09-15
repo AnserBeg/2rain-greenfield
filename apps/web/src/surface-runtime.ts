@@ -30,6 +30,7 @@ import {
   type SurfaceRelationPickerState,
 } from './component-registry.js';
 import { DESIGN_TOKENS } from './design-tokens.js';
+import { SURFACE_CLIENT_SCRIPT } from './surface-client.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
   operationMessageRef,
@@ -1369,6 +1370,7 @@ function shellDocument(
         <main id="surface-content" tabindex="-1">${body}</main>
       </div>
     </div>
+    <script>${SURFACE_CLIENT_SCRIPT}</script>
   </body>
 </html>`;
 }
@@ -1737,10 +1739,11 @@ body{padding-bottom:72px}
 .composition-section-links[open] summary::before{content:'▾'}
 @media(max-width:800px){.composition-task-layout{grid-template-columns:minmax(0,1fr)}.composition-task-layout .record-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 /* Canonical composition presentation; shared across every Record module. */
-.composition-header{grid-column:1/-1;padding:var(--space-2) 0}
-.composition-heading{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}
+.composition-header{grid-column:1/-1;padding:var(--space-5);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
+.composition-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap}
 .composition-heading h1{margin:0;font-size:var(--text-title);overflow-wrap:anywhere}
 .composition-business-status{border:1px solid var(--line);border-radius:var(--radius-control);padding:var(--space-1) var(--space-2);font-weight:var(--weight-emphasis)}
+.composition-business-status::before{content:'●';margin-right:var(--space-2);color:var(--ink-muted)}
 .composition-subtitle{margin:var(--space-2) 0;font-size:var(--text-body)}
 .composition-header-facts{display:flex;flex-wrap:wrap;gap:var(--space-3);margin:0}
 .composition-header-facts div{display:flex;gap:var(--space-2);flex-wrap:wrap}
@@ -1750,6 +1753,8 @@ body{padding-bottom:72px}
 .composition-context h2{font-size:var(--text-section);margin:0}
 .composition-context p{margin:var(--space-1) 0}
 .composition-context nav{display:flex;flex-wrap:wrap;gap:var(--space-3)}
+.composition-context-overflow summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--ink-muted)}
+.composition-context-overflow[open]{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control)}
 .composition-back{grid-column:1/-1;width:fit-content}
 .composition-context a,.composition-back{display:inline-flex;align-items:center;min-height:44px}
 .composition-record-actions{grid-column:1/-1}
@@ -1763,17 +1768,51 @@ body{padding-bottom:72px}
 .composition-cell-secondary>span{display:block}
 .composition-quantity,.composition-collection td[data-cell-role=quantity]{text-align:right;font-variant-numeric:tabular-nums}
 .composition-description{color:var(--ink-muted);margin:var(--space-2) 0}
-.composition-local-actions{border-top:1px solid var(--line);padding-top:var(--space-3);margin-top:var(--space-3);display:flex;flex-wrap:wrap;gap:var(--space-4)}
+.composition-context-heading,.composition-collection-heading{display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap}
+.composition-local-actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}
 .composition-local-actions>div{flex:1 1 16rem}
 .composition-local-actions p{margin:var(--space-2) 0;color:var(--ink-muted)}
 .composition-collection td[data-cell-role=actions] a,.composition-collection summary{display:inline-flex;align-items:center;min-height:44px}
 .composition-collection tr[data-selected=true]{background:var(--surface-sunken)}
 .composition-collection [data-resolution=empty] h2{font-size:var(--text-body)}
+.composition-collection{padding:var(--space-4)}
+.composition-collection .data-table-wrap{margin:var(--space-2) calc(-1 * var(--space-4)) calc(-1 * var(--space-4));padding-bottom:var(--space-2)}
+.composition-collection td[data-cell-role=primary]{min-width:12rem}
+.composition-collection th,.composition-collection td{white-space:nowrap;overflow-wrap:normal}
+.composition-cell-secondary{font-size:var(--text-micro);color:var(--ink-muted)}
+.composition-task-resume{grid-column:1/-1;display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
+.composition-task-resume[hidden]{display:none}
+.composition-task-resume>div{flex:1}.composition-task-resume span{display:block;color:var(--ink-muted)}
+.composition-task-dialog{grid-column:1/-1;position:static;width:100%;max-width:44rem;box-sizing:border-box;margin:0 auto;padding:0;color:var(--ink);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
+.composition-task-dialog:modal{position:fixed;margin:auto;max-height:calc(100dvh - 32px);width:calc(100vw - 32px);overflow-y:auto;overscroll-behavior:contain;box-shadow:var(--elevation-overlay)}
+.composition-task-dialog::backdrop{background:rgba(0,0,0,.45)}
+.composition-task-header{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;gap:var(--space-3);padding:var(--space-4);border-bottom:1px solid var(--line);background:var(--surface-panel)}
+.composition-task-header p{margin:0 0 var(--space-1);font-size:var(--text-micro);color:var(--ink-muted)}
+.composition-task-header h2{margin:0 0 var(--space-1);font-size:var(--text-section)}
+.composition-task-header button{flex:none;align-self:flex-start;font-size:var(--text-section)}
+.composition-task-header button[hidden]{display:none}
+.composition-task-body{padding:var(--space-4)}
+.composition-task-context{padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken);margin-bottom:var(--space-4)}
+.composition-task-context h3{font-size:var(--text-micro);margin:0 0 var(--space-2);color:var(--ink-muted)}
+.composition-task-context .record-fields{display:flex;flex-wrap:wrap;gap:var(--space-3);margin:0}
+.composition-task-context .record-fields div{padding:0;background:transparent;min-width:5rem}
+.composition-task-context .record-fields dt{font-size:var(--text-micro);letter-spacing:0;text-transform:none;font-weight:var(--weight-body)}
+.composition-task-context .record-fields dd{font-size:var(--text-body)}
+.composition-task-context section+section{margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--line)}
+.composition-task-consequence{margin:var(--space-3) 0;color:var(--ink-muted)}
+.composition-inputs{display:grid;gap:var(--space-4)}
+.composition-inputs .field{display:grid;gap:var(--space-2);font-weight:var(--weight-emphasis)}
+.composition-inputs input,.composition-inputs select{width:100%;box-sizing:border-box;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
+.composition-reviewed-inputs{display:flex;gap:var(--space-5);flex-wrap:wrap;margin:var(--space-4) 0}
+.composition-reviewed-inputs dt{color:var(--ink-muted);font-size:var(--text-micro)}
+.composition-reviewed-inputs dd{margin:var(--space-1) 0;font-weight:var(--weight-emphasis)}
+.composition-task-footer{position:sticky;bottom:0;z-index:1;display:flex;justify-content:flex-end;gap:var(--space-2);padding:var(--space-3) 0;background:var(--surface-panel);flex-wrap:wrap}
+.composition-task-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--text-micro)}
 @media(max-width:800px){
 .composition-heading{gap:var(--space-2)}
 .composition-heading h1{font-size:var(--text-title)}
 .composition-header-facts{font-size:var(--text-body)}
-.composition-context nav{gap:0 var(--space-3)}
+.composition-context nav{gap:var(--space-3);flex-wrap:nowrap;overflow-x:auto;white-space:nowrap}
 .composition-record-actions .command-bar{position:static;flex-wrap:wrap;box-shadow:none}
 .data-table-wrap tr[data-presented-row=true]{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .data-table-wrap tr[data-presented-row=true] td{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-1);min-width:0}
@@ -1781,7 +1820,17 @@ body{padding-bottom:72px}
 .data-table-wrap tr[data-presented-row=true] td[data-cell-role=primary]::before{display:none}
 .data-table-wrap tr[data-presented-row=true] td[data-cell-role=detail],.data-table-wrap tr[data-presented-row=true] td[data-cell-role=actions]{grid-column:1/-1}
 .data-table-wrap tr[data-presented-row=true] td[data-cell-role=detail]::before,.data-table-wrap tr[data-presented-row=true] td[data-cell-role=actions]::before{display:none}
-.composition-local-actions{display:grid}
+.composition-local-actions{display:flex;align-items:center}
 .composition-local-actions button{width:100%;min-height:44px}
+.composition-task-dialog:modal{max-height:calc(100dvh - 16px);width:calc(100vw - 16px)}
+.composition-task-footer button{flex:1;min-height:44px}
+.data-table-wrap[data-compact=scrollTable]{overflow-x:auto}
+.data-table-wrap[data-compact=scrollTable] table{display:table;width:100%}
+.data-table-wrap[data-compact=scrollTable] tbody{display:table-row-group}
+.data-table-wrap[data-compact=scrollTable] thead{display:table-header-group;position:static;width:auto;height:auto;overflow:visible;clip:auto}
+.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true]{display:table-row;margin:0;padding:0;border:0;background:transparent}
+.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td{display:table-cell;height:var(--row-height);padding:0 var(--space-3);border-bottom:1px solid var(--line);text-align:left}
+.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td[data-cell-role=quantity]{text-align:right}
+.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td::before{display:none}
 }
 `;

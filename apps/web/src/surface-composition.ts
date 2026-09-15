@@ -132,6 +132,22 @@ function displayFieldValue(
     /^-?\d+\.\d+$/.test(result)
   )
     return result.replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1');
+  if (field?.kind === 'dateFieldType' && /^\d{4}-\d{2}-\d{2}$/.test(result))
+    return new Intl.DateTimeFormat('en', {
+      dateStyle: 'medium',
+      timeZone: 'UTC',
+    }).format(new Date(`${result}T00:00:00Z`));
+  if (
+    field?.kind === 'dateTimeFieldType' &&
+    Number.isFinite(Date.parse(result))
+  )
+    return (
+      new Intl.DateTimeFormat('en', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: 'UTC',
+      }).format(new Date(result)) + ' UTC'
+    );
   return result;
 }
 
@@ -247,7 +263,7 @@ export async function loadSurfaceComposition(
               matchMode: 'substring',
               pageSize: registered.maximumResultCount,
               search: '',
-              sort: [],
+              sort: definition.sort ?? [],
               relationLabels: [],
               [scopeKey]: restriction,
             },
@@ -373,7 +389,7 @@ export function renderCompositionHeader(
       surface.composition!.fields.find((column) => column.columnId === id)!
         .label,
     );
-  return `<header class="composition-header"><div class="composition-heading"><h1>${cell(header.title)}</h1>${header.status ? `<span class="composition-business-status">${cell(header.status)}</span>` : ''}</div><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p><dl class="composition-header-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl></header>`;
+  return `<header class="composition-header"><p class="eyebrow">${h(surface.label)}</p><div class="composition-heading"><div><h1>${cell(header.title)}</h1><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p></div>${header.status ? `<span class="composition-business-status">${cell(header.status)}</span>` : ''}</div><dl class="composition-header-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl></header>`;
 }
 function selectionUrl(
   data: CompositionData,
@@ -436,23 +452,12 @@ function renderPresentedChild(
     (column) => column.presentation?.role === 'detail',
   );
   const displayed = primary
-    ? [
-        primary,
-        ...columns.filter(
-          (column) =>
-            column !== primary &&
-            !secondary.includes(column) &&
-            !detail.includes(column),
-        ),
-      ]
+    ? columns.filter(
+        (column) => !secondary.includes(column) && !detail.includes(column),
+      )
     : columns;
   const actions = ordered(surface.composition!.actions).filter(
     (action) => action.datasetId === definition.datasetId,
-  );
-  const selectedActions = actions.filter(
-    (action) =>
-      action.presentation?.placement === 'selection' &&
-      applicable(action, data),
   );
   const rowActions = actions.filter(
     (action) => action.presentation?.placement === 'row',
@@ -469,7 +474,7 @@ function renderPresentedChild(
       ? compositionMessage('COMPOSITION_CHILD_FAILED', 'alert')
       : child.status === 'empty'
         ? compositionMessage('COMPOSITION_CHILD_EMPTY')
-        : `<div class="data-table-wrap"><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>`).join('')}${detail.length ? '<th scope="col">Details</th>' : ''}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
+        : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>`).join('')}${detail.length ? '<th scope="col">Details</th>' : ''}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
             .map((row) => {
               const selected =
                 data.selected?.recordId === row.record.recordId &&
@@ -499,7 +504,7 @@ function renderPresentedChild(
               }</tr>`;
             })
             .join('')}</tbody></table></div>`;
-  return `<section id="${h(definition.datasetId)}" class="panel data-panel composition-collection" data-composition-dataset="${h(definition.datasetId)}" data-resolution="${child.status}"><h2>${h(definition.label)}</h2>${definition.presentation?.description ? `<p class="composition-description">${h(definition.presentation.description)}</p>` : ''}${body}${selectedActions.length ? `<div class="composition-local-actions" id="composition-selected-actions" aria-label="Selected record actions">${selectedActions.map((action) => `<div>${actionLink(action, data, view)}<p>${h(action.description)}</p></div>`).join('')}</div>` : ''}</section>`;
+  return `<section id="${h(definition.datasetId)}" class="panel data-panel composition-collection" data-composition-dataset="${h(definition.datasetId)}" data-resolution="${child.status}"><div class="composition-collection-heading"><h2>${h(definition.label)}</h2>${definition.presentation?.description ? `<details><summary>About these quantities</summary><p class="composition-description">${h(definition.presentation.description)}</p></details>` : ''}</div>${body}</section>`;
 }
 export function renderCompositionFields(
   surface: CompiledSurfaceDefinition,
@@ -577,12 +582,34 @@ export function renderCompositionActions(
       ? `<a class="composition-back" href="${h(returnTo)}">Back to order</a>`
       : '';
     const context = presentation.context;
-    const action = ordered(surface.composition!.actions).find(
+    const actions = ordered(surface.composition!.actions).filter(
       (value) =>
         value.presentation?.placement === 'selection' &&
         applicable(value, data),
     );
-    return `${back}${context ? `<section class="composition-context"><h2>${h(context.label)}</h2><p>${h(action?.description ?? context.description)}</p>${action ? `<a href="#composition-selected-actions">${h(action.label)} ↓</a>` : ''}<details class="composition-section-links"><summary>Related sections</summary><nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav></details></section>` : ''}`;
+    const selectedChild = data.children.find(
+      (child) => child.definition.datasetId === data.selectedDatasetId,
+    );
+    const selectedRow = selectedChild?.rows.find(
+      (row) => row.record.recordId === data.selected?.recordId,
+    );
+    const primary = selectedChild?.definition.columns.find(
+      (column) => column.presentation?.role === 'primary',
+    );
+    const selection =
+      primary && selectedRow
+        ? `${selectedChild!.definition.label} · ${selectedRow.cells[primary.columnId]}`
+        : null;
+    const controls = actions.length
+      ? actionLink(actions[0]!, data, view) +
+        (actions.length > 1
+          ? `<details class="composition-context-overflow"><summary>More actions (${actions.length - 1})</summary>${actions
+              .slice(1)
+              .map((action) => actionLink(action, data, view))
+              .join('')}</details>`
+          : '')
+      : '';
+    return `${back}${context ? `<section class="composition-context"><div class="composition-context-heading"><div><h2>${h(context.label)}</h2><p>${h(selection ?? context.description)}</p></div><div class="composition-local-actions" aria-label="Selected record actions">${controls}</div></div><nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav></section>` : ''}`;
   }
   const actions = ordered(surface.composition!.actions)
     .filter((action) => applicable(action, data))
@@ -744,6 +771,7 @@ export async function submitCompositionAction(
         );
       }
     }
+    const dialogPolicy = surface.composition?.presentation?.task;
     const selection =
       renderData?.children
         .flatMap((child) => {
@@ -756,6 +784,13 @@ export async function submitCompositionAction(
                 `<section><h3>${h(child.definition.label)}</h3><dl class="record-fields">${ordered(
                   child.definition.columns,
                 )
+                  .filter(
+                    (column) =>
+                      !dialogPolicy ||
+                      ['primary', 'secondary', 'quantity'].includes(
+                        column.presentation?.role ?? '',
+                      ),
+                  )
                   .map(
                     (column) =>
                       `<div><dt>${h(column.label)}</dt><dd>${h(row.cells[column.columnId] ?? '—')}</dd></div>`,
@@ -765,8 +800,30 @@ export async function submitCompositionAction(
             : [];
         })
         .join('') ?? '';
+    if (dialogPolicy && renderData && session) {
+      const header = surface.composition!.presentation!.header;
+      const phase = session.committedWithheld
+        ? 'recovery'
+        : session.next === session.action.steps.length
+          ? 'result'
+          : session.confirmed
+            ? 'recovery'
+            : session.prepared && submission.taskStage !== 'edit'
+              ? 'review'
+              : 'entry';
+      const title = renderData.fields.cells[header.title] ?? surface.label;
+      const context = header.subtitle
+        .map((id) => renderData!.fields.cells[id])
+        .filter(Boolean)
+        .join(' · ');
+      return renderTask(
+        `<section class="composition-task-resume" data-task-resume hidden><div><strong>${h(session.action.label)}</strong><span>${session.confirmed ? 'Closing does not undo submitted work.' : 'This task has not been submitted.'}</span></div><button type="button" data-task-open>${phase === 'result' || phase === 'recovery' ? 'View task outcome' : 'Continue task'}</button><a href="${h(renderData.url)}">Refresh record</a></section><dialog open id="composition-task" class="composition-task-dialog" data-composition-task data-task-fallback="${h(dialogPolicy.fallback)}" data-task-phase="${phase}" aria-labelledby="composition-task-heading"><header class="composition-task-header"><div><p>${h(title)}${context ? ` · ${h(context)}` : ''}</p><h2 id="composition-task-heading" data-task-heading tabindex="-1"${phase === 'entry' ? '' : ' data-task-initial-focus'}>${h(session.action.label)}</h2><span class="muted">${phase === 'entry' ? '1 · Enter details' : phase === 'review' ? '2 · Review and confirm' : phase === 'result' ? '3 · Result' : 'Outcome and recovery'}</span></div><button type="button" class="secondary-action" data-task-close hidden aria-label="Close task">×</button></header><div class="composition-task-body">${selection ? `<section class="composition-task-context" aria-label="Current selection">${selection}</section>` : ''}${html()}</div></dialog>`,
+        renderData,
+        200,
+      );
+    }
     return renderTask(
-      `<section class="panel" data-composition-task><div class="composition-task-layout"><div>${html()}</div>${selection ? `<section class="composition-task-context"><h2>Current selection</h2>${selection}</section>` : ''}</div></section>`,
+      `<section class="panel" data-composition-task>${session ? `<h1>${h(session.action.label)}</h1>` : ''}<div class="composition-task-layout"><div>${html()}</div>${selection ? `<section class="composition-task-context"><h2>Current selection</h2>${selection}</section>` : ''}</div></section>`,
       renderData,
       renderData ? 200 : 422,
     );
@@ -856,7 +913,7 @@ export async function submitCompositionAction(
   const url = current.data.url;
   const back = `<p><a href="${h(url)}">Back to order</a></p>`;
   const previewInputs = () =>
-    `<dl>${current.action.inputs.map((input) => `<dt>${h(input.label)}</dt><dd>${h(displayInputs[input.inputId] ?? '')}</dd>`).join('')}</dl>`;
+    `<dl class="composition-reviewed-inputs">${current.action.inputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(displayInputs[input.inputId] ?? '')}</dd></div>`).join('')}</dl>`;
   const hidden = `<input type="hidden" name="taskToken" value="${h(token!)}"><input type="hidden" name="compositionAction" value="${h(current.action.actionId)}">`;
   if (current.busy)
     return taskDocument(
@@ -925,7 +982,7 @@ export async function submitCompositionAction(
       current.prepared = prepared;
       return taskDocument(
         () =>
-          `<h1>Confirm ${h(current.action.label)}</h1><p>${h(current.action.description)}</p>${previewInputs()}<form method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button name="taskStage" value="confirm">Confirm ${h(current.action.label)}</button><button name="taskStage" value="edit">Edit inputs</button></form>${back}`,
+          `<p class="composition-task-consequence">${h(current.action.description)}</p>${previewInputs()}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">Confirm ${h(current.action.label)}</button></form>${back}`,
         inputs,
       );
     }
@@ -1014,7 +1071,7 @@ export async function submitCompositionAction(
       }
       return taskDocument(
         () =>
-          `<h1>${h(current.action.label)}</h1>${compositionMessage('COMPOSITION_COMPLETE', 'status')}${back}`,
+          `${compositionMessage('COMPOSITION_COMPLETE', 'status')}<p>Closing this task does not undo submitted work.</p>${current.receipt ? `<details><summary>Recovery receipt</summary><pre>${h(current.receipt)}</pre></details>` : ''}${back}`,
       );
     } catch (failure) {
       const ref = operationMessageRef(failure);
@@ -1022,7 +1079,7 @@ export async function submitCompositionAction(
         'The operation could not be verified. Earlier steps may have committed. Retry uses the same inputs and request keys; inspect the order if needed.';
       return taskDocument(
         () =>
-          `<h1>${h(current.action.label)}</h1><div role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Operation', 'h2')}</div>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
+          `<div role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Operation', 'h2')}</div>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
       );
     } finally {
       current.busy = false;
@@ -1031,7 +1088,7 @@ export async function submitCompositionAction(
   if (current.confirmed)
     return taskDocument(
       () =>
-        `<h1>${h(current.action.label)}</h1>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
+        `${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
     );
   return taskDocument(() => {
     const controls = ordered(current.action.inputs).map((input) => {
@@ -1041,7 +1098,7 @@ export async function submitCompositionAction(
           : `<input name="${h(input.inputId)}" value="${h(displayInputs[input.inputId] ?? '')}" ${input.required ? 'required' : ''} ${input.type === 'quantity' ? 'inputmode="decimal"' : ''}>`;
       return `<label class="field">${h(input.label)}${control}</label>`;
     });
-    return `<h1>${h(current.action.label)}</h1><p>${h(current.action.description)}</p>${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${controls.join('')}<button name="taskStage" value="prepare">Review ${h(current.action.label)}</button></form>${back}`;
+    return `<p class="composition-task-consequence">${h(current.action.description)}</p>${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${controls.join('')}<footer class="composition-task-footer"><button name="taskStage" value="prepare">Review ${h(current.action.label)}</button></footer></form>${back}`;
   });
 }
 

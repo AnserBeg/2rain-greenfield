@@ -220,12 +220,15 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       ownsDataResolution: true,
       renderer: (context) =>
         context.data?.status === 'READY' && context.data.composition
-          ? (context.data.compositionTask ??
-            renderCompositionChildren(
-              context.data.composition,
-              context.surface,
-              context.view,
-            ))
+          ? context.data.compositionTask &&
+            !context.surface.composition?.presentation?.task
+            ? context.data.compositionTask
+            : (context.data.compositionTask ?? '') +
+              renderCompositionChildren(
+                context.data.composition,
+                context.surface,
+                context.view,
+              )
           : '',
     },
     'record:sections': {

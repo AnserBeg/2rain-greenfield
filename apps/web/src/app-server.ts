@@ -7,6 +7,7 @@ import {
 } from '@north-star/runtime/request-context';
 import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
+import { SURFACE_CLIENT_CSP_HASH } from './surface-client.js';
 
 import {
   renderApplicationDiagnostic,
@@ -38,7 +39,7 @@ async function handleRequest(
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
     'content-security-policy',
-    `default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
+    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
   );
   response.setHeader('x-content-type-options', 'nosniff');
 

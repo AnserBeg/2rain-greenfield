@@ -164,8 +164,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    // 5 honours optional Record presentation; prior composition readers support 4.
-    maximumSupportedVersion: 5,
+    // 6 honours typed Task dialog/page fallback, child sorting and compact tables.
+    maximumSupportedVersion: 6,
   },
 });
 

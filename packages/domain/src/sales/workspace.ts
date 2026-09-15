@@ -41,19 +41,32 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
   ) =>
     columns.map((value, index) => ({
       ...value,
-      presentation: {
-        role:
-          value.columnId === id('column', primary)
-            ? 'primary'
-            : secondary.some((name) => value.columnId === id('column', name))
-              ? 'secondary'
-              : quantities.some((name) => value.columnId === id('column', name))
-                ? 'quantity'
-                : details.some((name) => value.columnId === id('column', name))
-                  ? 'detail'
-                  : 'secondary',
-        priority: index,
-      },
+      ...(value.columnId === id('column', primary) ||
+      [...secondary, ...quantities, ...details].some(
+        (name) => value.columnId === id('column', name),
+      )
+        ? {
+            presentation: {
+              role:
+                value.columnId === id('column', primary)
+                  ? 'primary'
+                  : secondary.some(
+                        (name) => value.columnId === id('column', name),
+                      )
+                    ? 'secondary'
+                    : quantities.some(
+                          (name) => value.columnId === id('column', name),
+                        )
+                      ? 'quantity'
+                      : details.some(
+                            (name) => value.columnId === id('column', name),
+                          )
+                        ? 'detail'
+                        : 'secondary',
+              priority: value.orderKey,
+            },
+          }
+        : {}),
     }));
   const selected = (name: string) => ({ source: 'selected', field: name });
   const record = (name: string) => ({ source: 'record', field: name });
@@ -133,10 +146,11 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       context: {
         label: 'Fulfillment',
         description:
-          'Choose an order line to reserve stock, or a reservation to ship or release its remainder.',
+          'Select a line to reserve stock, or a reservation to ship.',
       },
       recordActions: 'progressive',
       technicalDetails: 'progressive',
+      task: { mode: 'nativeDialog', fallback: 'page' },
     },
     fields: [
       column('order_number', 'Sales order', 10, field('sales_order_number')),
@@ -163,10 +177,16 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     children: [
       {
         datasetId: lines,
-        presentation: { selection: 'explicit' },
+        presentation: { selection: 'explicit', compact: 'scrollTable' },
         label: 'Order lines',
         orderKey: 10,
         query: q('sales_order_line_list'),
+        sort: [
+          {
+            fieldId: field('sales_order_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
         parent: {
           relationId: id('relation', 'sales_order_line_order'),
           value: record('recordId'),
@@ -178,6 +198,10 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             column('item', 'Item', 20, field('sales_order_line_item_id'), [
               'item_get',
               'item_name',
+            ]),
+            column('sku', 'SKU', 25, field('sales_order_line_item_id'), [
+              'item_get',
+              'item_sku',
             ]),
             column(
               'ordered',
@@ -191,7 +215,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             column('open', 'Open to ship', 70, id('metric', 'open_to_ship')),
           ],
           'item',
-          ['line', 'unit'],
+          ['sku', 'unit'],
           ['ordered', 'coverage', 'shipped', 'open'],
         ),
       },
@@ -199,10 +223,11 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         datasetId: reservations,
         presentation: {
           selection: 'explicit',
+          compact: 'scrollTable',
           description:
             'Reservation-scoped availability for this item and location. Missing or unavailable data is not zero stock.',
         },
-        label: 'Selected line reservations',
+        label: 'Reservations and stock',
         orderKey: 20,
         query: q('reservation_list'),
         parent: {
@@ -256,7 +281,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       },
       {
         datasetId: shipments,
-        presentation: { selection: 'none' },
+        presentation: { selection: 'none', compact: 'scrollTable' },
         label: 'Shipments and packing',
         orderKey: 30,
         query: q('shipment_list'),
@@ -283,7 +308,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         presentation: { placement: 'selection' },
         label: 'Reserve stock',
         description:
-          'Create a reservation and reserve this exact quantity. On hand stays unchanged; available stock decreases.',
+          'Reserve this quantity at the chosen location. On hand stays unchanged; available stock decreases.',
         orderKey: 10,
         datasetId: lines,
         conditions: [released],
@@ -322,7 +347,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         presentation: { placement: 'selection' },
         label: 'Ship reserved stock',
         description:
-          'Create and post a partial shipment against the selected reservation. On hand and reserved stock decrease by the shipped quantity.',
+          'Post this quantity against the selected reservation. On hand and reserved stock decrease by the shipped quantity.',
         orderKey: 20,
         datasetId: reservations,
         conditions: [released, active],
@@ -541,7 +566,7 @@ export function packingWorkspace(namespace: string): Record<string, unknown> {
       {
         datasetId: `${namespace}:dataset.packing_lines`,
         label: 'Packed lines',
-        presentation: { selection: 'none' },
+        presentation: { selection: 'none', compact: 'scrollTable' },
         orderKey: 10,
         query: ref('queryReference', `${namespace}:query.shipment_line_list`),
         parent: {

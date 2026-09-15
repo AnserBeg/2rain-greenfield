@@ -797,12 +797,22 @@ const compositionDataset = z.strictObject({
     .strictObject({
       description: LabelSchema.optional(),
       selection: z.enum(['explicit', 'none']),
+      compact: z.literal('scrollTable').optional(),
     })
     .optional(),
   datasetId: CanonicalIdSchema,
   label: LabelSchema,
   orderKey: boundedOrderKey,
   query: compositionReference('queryReference'),
+  sort: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        direction: z.enum(['ascending', 'descending']),
+      }),
+    )
+    .max(3)
+    .optional(),
   parent: z
     .strictObject({
       relationId: CanonicalIdSchema,
@@ -826,6 +836,12 @@ export const SurfaceCompositionSchema = z.strictObject({
         .optional(),
       recordActions: z.literal('progressive'),
       technicalDetails: z.literal('progressive'),
+      task: z
+        .strictObject({
+          mode: z.literal('nativeDialog'),
+          fallback: z.literal('page'),
+        })
+        .optional(),
     })
     .optional(),
   kind: z.literal('surfaceComposition'),

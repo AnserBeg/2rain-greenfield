@@ -162,6 +162,18 @@ export function validateSurfaceCompositions(
         fail(surface.surfaceId, 'header presentation requires titleStatus');
     }
     for (const child of composition.children) {
+      if (
+        child.sort?.some(
+          (entry) =>
+            !fieldsFor(child.query.targetId).has(entry.fieldId) ||
+            ['recordId', 'revision'].includes(entry.fieldId),
+        )
+      )
+        fail(surface.surfaceId, 'child sorting requires declared query fields');
+      unique(
+        (child.sort ?? []).map((entry) => entry.fieldId),
+        surface.surfaceId,
+      );
       if (child.presentation && !presentation)
         fail(
           surface.surfaceId,
