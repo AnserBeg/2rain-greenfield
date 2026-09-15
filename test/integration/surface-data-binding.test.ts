@@ -3774,6 +3774,20 @@ test('cached pinned query catalogs keep whole-catalog refusal, view isolation an
   const queryId = `${FIXTURE_IDS.namespace}:query.master_get`;
   assert.ok(registeredSemanticQueryFromPinnedView(view, queryId));
   assert.ok(registeredSemanticQueryFromPinnedView(view, queryId));
+  const mutablePayload = structuredClone(view.projections.query.payload) as {
+    queries: unknown[];
+  };
+  const projectionOnly = {
+    projections: {
+      query: { ...view.projections.query, payload: mutablePayload },
+    },
+  } as unknown as RequestRuntimeView;
+  assert.ok(registeredSemanticQueryFromPinnedView(projectionOnly, queryId));
+  mutablePayload.queries.push(mutablePayload.queries[0]);
+  assert.throws(
+    () => registeredSemanticQueryFromPinnedView(projectionOnly, queryId),
+    /duplicate queryId/,
+  );
   const gateway = new SemanticQueryGateway(
     policy,
     new InMemoryGenericExecutor(),

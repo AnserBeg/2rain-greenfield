@@ -951,8 +951,17 @@ export function registeredSemanticQueryFromPinnedView(
   view: IssuedRequestRuntimeView,
   queryId: string,
 ): RegisteredSemanticQueryDefinition | undefined {
-  assertRequestRuntimeView(view);
-  const cached = pinnedQueryCatalogs.get(view);
+  // Projection consumers also use this pure catalog reader with projection-only
+  // fixtures. Preserve that uncached validation path; only issued views promise
+  // deep immutability. Execution still requires an issued view at the gateway.
+  let cacheable = false;
+  try {
+    assertRequestRuntimeView(view);
+    cacheable = true;
+  } catch {
+    cacheable = false;
+  }
+  const cached = cacheable ? pinnedQueryCatalogs.get(view) : undefined;
   if (cached) return cached.get(queryId);
   const projection = view.projections.query;
   if (
@@ -997,7 +1006,7 @@ export function registeredSemanticQueryFromPinnedView(
   }
   // Publish only after every entry and duplicate check passed. A failed first
   // lookup must not make a later lookup see a partially validated catalog.
-  pinnedQueryCatalogs.set(view, catalog);
+  if (cacheable) pinnedQueryCatalogs.set(view, catalog);
   return catalog.get(queryId);
 }
 
