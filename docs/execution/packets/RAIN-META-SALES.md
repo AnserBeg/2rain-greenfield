@@ -1,10 +1,12 @@
 # RAIN-META-SALES — metadata-composed fulfillment workspace
 
-Status: presentation evidence_ready; local evidence complete. Candidate CI and bounded online review pending. No merge or deployment.
+Status: visual evidence_ready; owner acceptance pending. Latest approved Task-dialog checkpoint: [actual captures and bounded evidence](RAIN-META-SALES-task-dialog-visual.md). No new reviewer, merge or deployment.
 Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6`; branch `packet/RAIN-META-SALES`; [draft PR #5](https://github.com/AnserBeg/2rain-greenfield/pull/5).
 Reviewed correction baseline: `f10c502571ed040d66ee0b965f14ceca237beb40`; P1/P2 closed by the online reviewer.
 Sole local BUILD; independent review online only. Worktree `/home/rvham/2rain-greenfield-rain-meta-sales`.
-Reference `AnserBeg/temp_inventory@d057daffd17a199309675a6b0a31c8bdbca05282` was read-only/source-derived; no startup, copied business logic or production data.
+Initial comparison was source-derived from `AnserBeg/temp_inventory@d057daffd17a199309675a6b0a31c8bdbca05282`. The latest checkpoint uses the owner-authorized pinned disposable rendering on 4301; the live reference checkout and owner port 3000 remain untouched.
+
+The prose claims and gates below record the pre-dialog presentation. They are historical evidence, not a full-CI claim for the latest visual candidate; its capability floor, checks and serving identity are in the linked checkpoint. The machine-readable record claim covers the combined executable footprint through that checkpoint.
 
 ## Charter and claims
 
@@ -46,9 +48,11 @@ Select reservation → Ship reserved stock → 5 → Review → Confirm → Back
 Release remainder → Review → Confirm → Back: 5/0/5. Open packing beside the shipment: exact location/date and Field notebook 5 EA; Back restores order context.
 Repeat at 390×844; desktop is 1280×800. Ctrl-C closes only the disposable fixture. Process loss requires inspecting records before starting a new task.
 
-## Bounded online review prompt
+## Historical bounded online review prompt
 
-Review only the presentation diff from `f10c502571ed040d66ee0b965f14ceca237beb40` to the executable head below, plus this record's claims 2–6.
+Retained for the pre-dialog candidate; do not launch it at the owner-acceptance visual checkpoint.
+
+Historical charter: review only the presentation diff from `f10c502571ed040d66ee0b965f14ceca237beb40` to pre-dialog head `b365f22bff9127e0a92ea5baf26fe0139a058c3a`, plus the historical claims 2–6.
 Boundaries: optional canonical presentation and validation; emitted capability floor; shared header/collection/task rendering; Sales/Packing declarations; related tests and generated release.
 Check metadata-only variation/non-Sales reuse, action context/visibility, responsive disclosure, historical reproduction and preservation of existing governed task semantics.
 P1/P2 are closed: use their retained checks for changed callers; do not rerun the inherited audit or broaden into fulfillment/kernel/financial redesign.
@@ -59,12 +63,14 @@ Identify production defects under those boundaries; separate future scope and ev
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-META-SALES",
   "base": "fe97b63baedf8bdd42146318bb89d4be1aa948f6",
-  "head": "b365f22bff9127e0a92ea5baf26fe0139a058c3a",
+  "head": "0ea80ab581aaade82074455ce758e9a4d125db9d",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
+    "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts",
     "apps/web/src/message-catalog.ts",
+    "apps/web/src/surface-client.ts",
     "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts",
     "apps/web/src/surface-runtime.ts",
@@ -102,6 +108,7 @@ Identify production defects under those boundaries; separate future scope and ev
     "test/architecture/surface-grammar-conformance.baseline.ts",
     "test/architecture/surface-grammar-conformance.test.ts",
     "test/architecture/surface-runtime-seam.test.ts",
+    "test/architecture/ux-grammar-skill.test.ts",
     "test/compiler/g2-module-conformance.test.ts",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
     "test/helpers/meta-sales-fixture.ts",
