@@ -12,6 +12,7 @@ import { CanonicalModelError } from '@north-star/canonical-model';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import test from 'node:test';
+import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 
 import {
   canonicalize,
@@ -3997,7 +3998,7 @@ function deferredSignal() {
   return { promise, resolve };
 }
 
-async function correctionTaskFixture(dialog = false) {
+async function correctionTaskFixture(dialog = false, summary = false) {
   const definition = presentedWorkshop('Work title', false, dialog);
   const surface = (definition.surfaces as Array<Record<string, unknown>>).find(
     (value) => value.composition,
@@ -4151,6 +4152,78 @@ async function correctionTaskFixture(dialog = false) {
       ],
     },
   ] as unknown as SurfaceComposition['actions'];
+  if (summary) {
+    const child = composition.children[0]!;
+    const source = fields.find(
+      (value) => value.fieldId === 'workshop.jobs:field.assignment_kind',
+    )!;
+    for (const [index, suffix] of ['amount', 'unit'].entries()) {
+      fields.push({
+        ...structuredClone(source),
+        fieldId: `workshop.jobs:field.assignment_${suffix}`,
+        fieldType: {
+          kind: 'textFieldType',
+          schemaVersion: 'v6',
+          maximumLength: 240,
+        },
+        label: suffix,
+        orderKey: 120 + index,
+      });
+      for (const query of queries.filter(
+        (value) =>
+          (value.sourceEntity as { targetId: string }).targetId ===
+          'workshop.jobs:entity.assignment',
+      ))
+        (query.selections as unknown[]).push({
+          kind: 'querySelection',
+          schemaVersion: 'v6',
+          selectionId: `workshop.jobs:selection.assignment_${suffix}_${query.queryType}`,
+          field: ref(
+            'fieldReference',
+            `workshop.jobs:field.assignment_${suffix}`,
+          ),
+          orderKey: 120 + index,
+        });
+      child.columns.push({
+        columnId: `workshop.jobs:column.${suffix}`,
+        label: suffix,
+        orderKey: 120 + index,
+        field: `workshop.jobs:field.assignment_${suffix}`,
+        presentation: {
+          role: suffix === 'amount' ? 'quantity' : 'secondary',
+          priority: 120 + index,
+        },
+      } as SurfaceComposition['fields'][number]);
+    }
+    const column = (columnId: string) => ({
+      datasetId: child.datasetId,
+      columnId: `workshop.jobs:column.${columnId}`,
+    });
+    composition.actions[0]!.presentation = {
+      placement: 'selection',
+      task: {
+        summary: {
+          identity: column('role'),
+          quantity: {
+            value: column('amount'),
+            unit: column('unit'),
+            label: 'hours assigned',
+          },
+        },
+        confirmation: {
+          title: 'Assign',
+          reviewLabel: 'Review assignment',
+          confirmLabel: 'Confirm assignment',
+          quantity: {
+            source: 'input',
+            inputId: 'workshop.jobs:input.quantity',
+          },
+          unit: column('unit'),
+          context: { source: 'input', inputId: 'workshop.jobs:input.location' },
+        },
+      },
+    } as NonNullable<SurfaceComposition['actions'][number]['presentation']>;
+  }
   (definition.operations as Array<Record<string, unknown>>).find(
     (value) => value.operationId === 'workshop.jobs:operation.job_update',
   )!.confirmation = 'humanRequired';
@@ -4179,6 +4252,12 @@ async function correctionTaskFixture(dialog = false) {
     archived: false,
     values: {
       'workshop.jobs:field.assignment_kind': 'PROTECTED_CHILD_SENTINEL',
+      ...(summary
+        ? {
+            'workshop.jobs:field.assignment_amount': '12',
+            'workshop.jobs:field.assignment_unit': 'hours',
+          }
+        : {}),
     },
   };
   const locations = ['A', 'B'].map((suffix) => ({
@@ -4279,6 +4358,7 @@ async function correctionTaskFixture(dialog = false) {
     preparedId: /name="preparedId" value="([^"]*)"/.exec(html)?.[1] ?? '',
   });
   return {
+    initial,
     submit,
     prepare,
     confirmation,
@@ -4287,6 +4367,11 @@ async function correctionTaskFixture(dialog = false) {
     calls,
     effects,
     locations,
+    renameChild(value: string) {
+      (child.values as Record<string, string>)[
+        'workshop.jobs:field.assignment_kind'
+      ] = value;
+    },
     trust,
     beforeReferences(value: typeof beforeReferenceList) {
       beforeReferenceList = value;
@@ -4306,6 +4391,113 @@ const assertTaskRedacted = (response: { html: string }) => {
     /PROTECTED_(?:ROOT_SENTINEL|CHILD_SENTINEL|LOCATION_[AB])/,
     'the complete response must not redisclose protected cached data',
   );
+};
+
+test('explicit Task summary and frozen proposal reuse non-Sales declarations in dialog and page', async (t) => {
+  for (const dialog of [true, false])
+    await t.test(dialog ? 'native dialog' : 'page', async () => {
+      const fixture = await correctionTaskFixture(dialog, true);
+      const summary =
+        fixture.initial.html.match(
+          /<section class="composition-task-summary"[^>]*>[\s\S]*?<\/section>/,
+        )?.[0] ?? '';
+      assert.match(summary, /PROTECTED_CHILD_SENTINEL/);
+      assert.match(summary, /12 hours/);
+      assert.doesNotMatch(summary, /Version/);
+      assert.match(
+        fixture.initial.html,
+        /<summary>Supporting details<\/summary>/,
+      );
+      let reads = 0;
+      fixture.beforeReferences(async () => {
+        if (++reads === 2) {
+          fixture.renameChild('CURRENT_ASSIGNMENT_LABEL');
+          (fixture.locations[0]!.values as Record<string, string>)[
+            'workshop.jobs:field.job_name'
+          ] = 'CURRENT_LOCATION_LABEL';
+        }
+      });
+      const review = await fixture.prepare('8', fixture.locations[0]!.recordId);
+      const proposed =
+        review.html.match(
+          /<section class="composition-task-confirmation"[^>]*>[\s\S]*?<\/section>/,
+        )?.[0] ?? '';
+      assert.match(proposed, /Assign <strong>8 hours<\/strong>/);
+      assert.match(proposed, /PROTECTED_CHILD_SENTINEL/);
+      assert.match(proposed, /PROTECTED_LOCATION_A/);
+      assert.doesNotMatch(proposed, /CURRENT_LOCATION_LABEL/);
+      assert.match(review.html, />Confirm assignment<\/button>/);
+      assert.equal(fixture.calls.length, 0);
+      await fixture.submit({
+        ...fixture.confirmation(review.html),
+        'workshop.jobs:input.quantity': '99',
+        'workshop.jobs:input.location': fixture.locations[1]!.recordId,
+      });
+      assert.equal(fixture.calls.length, 2);
+      assert.equal(
+        (fixture.calls[0]!.input as { patch: Record<string, string> }).patch[
+          'workshop.jobs:field.job_amount'
+        ],
+        '8',
+      );
+      await fixture.submit(fixture.confirmation(review.html));
+      assert.equal(fixture.calls.length, 2);
+      fixture.denied.add('workshop.jobs:permission.assignment_read');
+      assertTaskRedacted(
+        await fixture.submit(fixture.confirmation(review.html)),
+      );
+    });
+});
+
+test('Task summaries refuse foreign selections, mismatched scope and undeclared confirmation inputs', () => {
+  for (const change of [
+    (task: TaskSummary) => {
+      task.summary.identity.datasetId = 'northstar.app:dataset.order_shipments';
+    },
+    (task: TaskSummary) => {
+      task.summary.quantity!.unit.datasetId =
+        'northstar.app:dataset.fulfillment_lines';
+    },
+    (task: TaskSummary) => {
+      task.confirmation.quantity = {
+        source: 'input',
+        inputId: 'northstar.app:input.location',
+      };
+    },
+    (task: TaskSummary) => {
+      task.summary.identity.columnId = 'northstar.app:column.missing';
+    },
+  ]) {
+    const definition = composedApplicationDefinition();
+    const surface = (
+      definition.surfaces as Array<{ composition?: SurfaceComposition }>
+    ).find((value) =>
+      value.composition?.actions.some(
+        (action) => action.actionId === 'northstar.app:action.ship_reserved',
+      ),
+    )!;
+    const task = surface.composition!.actions.find(
+      (action) => action.actionId === 'northstar.app:action.ship_reserved',
+    )!.presentation!.task!;
+    change(task as unknown as TaskSummary);
+    assert.throws(
+      () => compileFixture(definition),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        /task/.test(JSON.stringify(error)),
+    );
+  }
+});
+type TaskSummary = {
+  summary: {
+    identity: { datasetId: string; columnId: string };
+    quantity?: { unit: { datasetId: string } };
+  };
+  confirmation: {
+    quantity:
+      | { source: 'input'; inputId: string }
+      | { source: 'column'; datasetId: string; columnId: string };
+  };
 };
 
 test('native Task policy reuses non-Sales forms, fresh Record context and exact prepared identity', async () => {

@@ -91,16 +91,12 @@ for (const javaScriptEnabled of [true, false]) {
         expect(
           await task().evaluate((element) => element.matches(':modal')),
         ).toBe(javaScriptEnabled);
-        await capture(
-          'reserve-entry',
-          'Reserve entry; no dispatch; order remains in context',
-        );
         const entryToken = await task()
           .locator('[name=taskToken]')
           .inputValue();
         if (javaScriptEnabled) {
           await expect(
-            page.getByLabel('Quantity', { exact: true }),
+            page.getByLabel(/^Quantity to (?:reserve|ship)$/),
           ).toBeFocused();
           await page.keyboard.press('Escape');
           await expect(task()).not.toBeVisible();
@@ -113,28 +109,32 @@ for (const javaScriptEnabled of [true, false]) {
             entryToken,
           );
         }
-        await page.getByLabel('Quantity', { exact: true }).fill('-2');
+        await capture(
+          'reserve-entry',
+          'Reserve entry; no dispatch; order remains in context',
+        );
+        await page.getByLabel(/^Quantity to (?:reserve|ship)$/).fill('-2');
         await page
           .getByLabel('Stock location')
           .selectOption({ label: 'Calgary warehouse' });
         await page
-          .getByRole('button', { name: 'Review Reserve stock', exact: true })
+          .getByRole('button', { name: 'Review reservation', exact: true })
           .click();
         await expect(task()).toContainText('Check the task inputs');
-        await expect(page.getByLabel('Quantity', { exact: true })).toHaveValue(
-          '-2',
-        );
+        await expect(
+          page.getByLabel(/^Quantity to (?:reserve|ship)$/),
+        ).toHaveValue('-2');
         await expect(page.getByLabel('Stock location')).toHaveValue(
           '71000000-0000-4000-8000-000000000021',
         );
-        await page.getByLabel('Quantity', { exact: true }).fill('8');
+        await page.getByLabel(/^Quantity to (?:reserve|ship)$/).fill('8');
         await page
-          .getByRole('button', { name: 'Review Reserve stock', exact: true })
+          .getByRole('button', { name: 'Review reservation', exact: true })
           .focus();
         await page.keyboard.press('Enter');
         await expect(
           page.getByRole('button', {
-            name: 'Confirm Reserve stock',
+            name: 'Confirm reservation',
             exact: true,
           }),
         ).toBeVisible({ timeout: 30_000 });
@@ -175,7 +175,7 @@ for (const javaScriptEnabled of [true, false]) {
           .getByRole('button', { name: 'Edit inputs', exact: true })
           .click();
         await page
-          .getByRole('button', { name: 'Review Reserve stock', exact: true })
+          .getByRole('button', { name: 'Review reservation', exact: true })
           .click();
         const replacementId = await task()
           .locator('[name=preparedId]')
@@ -207,7 +207,7 @@ for (const javaScriptEnabled of [true, false]) {
           'Review reserve 8 EA at Calgary; not confirmed',
         );
         await page
-          .getByRole('button', { name: 'Confirm Reserve stock', exact: true })
+          .getByRole('button', { name: 'Confirm reservation', exact: true })
           .click();
         await expect(task()).toContainText('complete');
         if (javaScriptEnabled) {
@@ -244,10 +244,10 @@ for (const javaScriptEnabled of [true, false]) {
         await page
           .getByRole('button', { name: 'Ship reserved stock', exact: true })
           .click();
-        await page.getByLabel('Quantity', { exact: true }).fill('5');
+        await page.getByLabel(/^Quantity to (?:reserve|ship)$/).fill('5');
         await page
           .getByRole('button', {
-            name: 'Review Ship reserved stock',
+            name: 'Review shipment',
             exact: true,
           })
           .click();
@@ -257,7 +257,7 @@ for (const javaScriptEnabled of [true, false]) {
         );
         await page
           .getByRole('button', {
-            name: 'Confirm Ship reserved stock',
+            name: 'Confirm shipment',
             exact: true,
           })
           .click();
@@ -273,19 +273,53 @@ for (const javaScriptEnabled of [true, false]) {
         await expect(
           lines().locator('td[data-column-label="Shipped"]'),
         ).toHaveText('5');
+        await page
+          .getByRole('button', { name: 'Ship reserved stock', exact: true })
+          .click();
+        await expect(task().locator('.composition-task-summary')).toContainText(
+          '3 EA remaining in this reservation',
+        );
+        await expect(
+          task().locator('.composition-task-summary'),
+        ).not.toContainText('Ordered');
+        await page.getByLabel('Quantity to ship', { exact: true }).fill('2');
+        await capture(
+          'partial-ship-entry',
+          'Entry ship 2 EA; selected reservation remaining 3 EA; not dispatched',
+        );
+        await page
+          .getByRole('button', { name: 'Review shipment', exact: true })
+          .click();
+        await expect(
+          task().locator('.composition-task-confirmation'),
+        ).toContainText('Ship 2 EA');
+        await expect(
+          task().locator('.composition-task-confirmation'),
+        ).toContainText('Field notebook');
+        await expect(
+          task().locator('.composition-task-confirmation'),
+        ).toContainText('Calgary warehouse');
+        await capture(
+          'partial-ship-review',
+          'Review ship 2 EA; selected reservation remaining 3 EA; not confirmed',
+        );
+        await page
+          .getByRole('link', { name: 'Back to order', exact: true })
+          .click();
+        await totals(['5', '3', '2']);
         await page.locator('.composition-context-overflow summary').click();
         await page
           .getByRole('button', { name: 'Release remainder', exact: true })
           .click();
         await page
           .getByRole('button', {
-            name: 'Review Release remainder',
+            name: 'Review release',
             exact: true,
           })
           .click();
         await page
           .getByRole('button', {
-            name: 'Confirm Release remainder',
+            name: 'Confirm release',
             exact: true,
           })
           .click();

@@ -477,10 +477,20 @@ function renderPresentedChild(
         : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>`).join('')}${detail.length ? '<th scope="col">Details</th>' : ''}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
             .map((row) => {
               const selected =
-                data.selected?.recordId === row.record.recordId &&
-                data.selectedDatasetId === definition.datasetId;
+                data.selections[definition.datasetId]?.recordId ===
+                row.record.recordId;
+              const active =
+                selected && data.selectedDatasetId === definition.datasetId;
+              const url = selectionUrl(
+                data,
+                definition.datasetId,
+                row.record.recordId,
+              );
               const rowData: CompositionData = {
                 ...data,
+                // A Task POST keeps selection in its query, without a fragment
+                // that could override the dialog's initial focus after navigation.
+                url: url.pathname + url.search,
                 selected: row.record,
                 selectedDatasetId: definition.datasetId,
                 selections: {
@@ -488,15 +498,18 @@ function renderPresentedChild(
                   [definition.datasetId]: row.record,
                 },
               };
-              const url = selectionUrl(
-                data,
-                definition.datasetId,
-                row.record.recordId,
-              );
+              const selectedActions =
+                active && definition.presentation?.selectedActions === 'row'
+                  ? actions.filter(
+                      (action) =>
+                        action.presentation?.placement === 'selection' &&
+                        applicable(action, rowData),
+                    )
+                  : [];
               return `<tr data-compact-card="true" data-presented-row="true" data-record-id="${h(row.record.recordId)}" ${selected ? 'data-selected="true"' : ''}>${displayed.map((column) => `<td data-column-label="${h(column.label)}" data-column-priority="${column.presentation?.priority ?? column.orderKey}" data-cell-role="${column.presentation?.role ?? 'value'}">${column === primary ? `<strong>${h(row.cells[column.columnId] ?? '—')}</strong><div class="composition-cell-secondary">${cells(row, secondary)}</div>` : h(row.cells[column.columnId] ?? '—')}</td>`).join('')}${detail.length ? `<td data-cell-role="detail" data-column-label="Details"><details><summary>Supporting details</summary><div class="composition-cell-secondary">${cells(row, detail)}</div></details></td>` : ''}${
                 definition.presentation?.selection !== 'none' ||
                 rowActions.length
-                  ? `<td data-cell-role="actions" data-column-label="Actions">${definition.presentation?.selection !== 'none' ? `<a href="${h(url.pathname + url.search + url.hash)}" ${selected ? 'aria-current="true"' : ''}>${selected ? 'Selected' : 'Select'}</a>` : ''}${rowActions
+                  ? `<td data-cell-role="actions" data-column-label="Actions">${selectedActions.map((action) => actionLink(action, rowData, view)).join('')}${definition.presentation?.selection !== 'none' ? `<a href="${h(url.pathname + url.search + url.hash)}" ${active ? 'aria-current="true"' : ''}>${active ? 'Selected' : 'Select'}</a>` : ''}${rowActions
                       .filter((action) => applicable(action, rowData))
                       .map((action) => actionLink(action, rowData, view))
                       .join('')}</td>`
@@ -585,6 +598,9 @@ export function renderCompositionActions(
     const actions = ordered(surface.composition!.actions).filter(
       (value) =>
         value.presentation?.placement === 'selection' &&
+        data.children.find(
+          (child) => child.definition.datasetId === value.datasetId,
+        )?.definition.presentation?.selectedActions !== 'row' &&
         applicable(value, data),
     );
     const selectedChild = data.children.find(
@@ -621,7 +637,7 @@ export function renderCompositionActions(
               .join('')}</details>`
           : '')
       : '';
-    return `${back}${context ? `<section class="composition-context"><div class="composition-context-heading"><div><h2>${h(context.label)}</h2><p>${h(selection ?? context.description)}</p></div><div class="composition-local-actions" aria-label="Selected record actions">${controls}</div></div><nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav></section>` : ''}`;
+    return `${back}${context ? `<section class="composition-context">${controls ? `<div class="composition-context-heading"><div><h2>${h(context.label)}</h2><p>${h(selection ?? context.description)}</p></div><div class="composition-local-actions" aria-label="Selected record actions">${controls}</div></div>` : ''}<nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav></section>` : ''}`;
   }
   const actions = ordered(surface.composition!.actions)
     .filter((action) => applicable(action, data))
@@ -658,6 +674,40 @@ export function renderCompositionActions(
   return `<div class="composition-actions">${back}${surface.composition!.actions.length ? `<section class="panel command-bar" aria-label="Selected record actions">${actions || compositionMessage('COMPOSITION_SELECTION_REQUIRED')}</section>` : ''}</div>`;
 }
 
+type TaskPresentation = NonNullable<
+  NonNullable<Action['presentation']>['task']
+>;
+type TaskColumn = TaskPresentation['summary']['identity'];
+interface TaskConfirmationSnapshot {
+  readonly identity: string;
+  readonly secondary: string | null;
+  readonly quantity: string;
+  readonly unit: string;
+  readonly context: string | null;
+}
+function taskColumnText(data: CompositionData, reference: TaskColumn): string {
+  const child = data.children.find(
+    (child) => child.definition.datasetId === reference.datasetId,
+  );
+  const row = child?.rows.find(
+    (row) =>
+      row.record.recordId === data.selections[reference.datasetId]?.recordId,
+  );
+  return row?.cells[reference.columnId] ?? '—';
+}
+function renderTaskSummary(
+  data: CompositionData,
+  task: TaskPresentation,
+): string {
+  const summary = task.summary;
+  return `<section class="composition-task-summary" aria-label="Task selection"><strong>${h(taskColumnText(data, summary.identity))}</strong>${summary.secondary ? `<span class="muted">${h(taskColumnText(data, summary.secondary))}</span>` : ''}${summary.context ? `<p>${h(taskColumnText(data, summary.context))}</p>` : ''}${summary.quantity ? `<p><strong>${h(taskColumnText(data, summary.quantity.value))} ${h(taskColumnText(data, summary.quantity.unit))}</strong> ${h(summary.quantity.label)}</p>` : ''}</section>`;
+}
+function renderTaskConfirmation(
+  task: TaskPresentation,
+  snapshot: TaskConfirmationSnapshot,
+): string {
+  return `<section class="composition-task-confirmation" aria-label="Proposed action"><h3>${h(task.confirmation.title)} <strong>${h(snapshot.quantity)} ${h(snapshot.unit)}</strong></h3><p><strong>${h(snapshot.identity)}</strong>${snapshot.secondary ? ` <span class="muted">${h(snapshot.secondary)}</span>` : ''}</p>${snapshot.context ? `<p>${h(snapshot.context)}</p>` : ''}</section>`;
+}
 interface TaskSession {
   action: Action;
   surfaceId: string;
@@ -674,6 +724,7 @@ interface TaskSession {
   prepared: {
     readonly id: string;
     readonly inputs: Readonly<Record<string, string>>;
+    readonly presentation: TaskConfirmationSnapshot | null;
   } | null;
   receipt: string | null;
   created: number;
@@ -710,6 +761,7 @@ export async function submitCompositionAction(
   const taskDocument = async (
     html: () => string,
     inputs = session?.inputs ?? {},
+    preparation: TaskSession['prepared'] = null,
   ) => {
     renderData = null;
     displayInputs = { ...inputs };
@@ -783,7 +835,27 @@ export async function submitCompositionAction(
         );
       }
     }
+    if (preparation && session?.prepared !== preparation)
+      return renderTask(
+        compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
+        renderData,
+        422,
+      );
     const dialogPolicy = surface.composition?.presentation?.task;
+    const taskPolicy = session?.action.presentation?.task;
+    const mainReferences = taskPolicy
+      ? [
+          taskPolicy.summary.identity,
+          taskPolicy.summary.secondary,
+          taskPolicy.summary.context,
+          taskPolicy.summary.quantity?.value,
+          taskPolicy.summary.quantity?.unit,
+          taskPolicy.confirmation.unit,
+          taskPolicy.confirmation.context?.source === 'column'
+            ? taskPolicy.confirmation.context
+            : undefined,
+        ].filter((value): value is TaskColumn => Boolean(value))
+      : [];
     const selection =
       renderData?.children
         .flatMap((child) => {
@@ -796,12 +868,18 @@ export async function submitCompositionAction(
                 `<section><h3>${h(child.definition.label)}</h3><dl class="record-fields">${ordered(
                   child.definition.columns,
                 )
-                  .filter(
-                    (column) =>
-                      !dialogPolicy ||
-                      ['primary', 'secondary', 'quantity'].includes(
-                        column.presentation?.role ?? '',
-                      ),
+                  .filter((column) =>
+                    taskPolicy
+                      ? !mainReferences.some(
+                          (reference) =>
+                            reference.datasetId ===
+                              child.definition.datasetId &&
+                            reference.columnId === column.columnId,
+                        )
+                      : !dialogPolicy ||
+                        ['primary', 'secondary', 'quantity'].includes(
+                          column.presentation?.role ?? '',
+                        ),
                   )
                   .map(
                     (column) =>
@@ -829,13 +907,13 @@ export async function submitCompositionAction(
         .filter(Boolean)
         .join(' · ');
       return renderTask(
-        `<section class="composition-task-resume" data-task-resume hidden><div><strong>${h(session.action.label)}</strong><span>Closing dismisses the dialog; it does not cancel submitted work.</span></div><button type="button" data-task-open>${phase === 'result' || phase === 'recovery' ? 'View task outcome' : 'Continue task'}</button><a href="${h(renderData.url)}">Refresh record</a></section><dialog open id="composition-task" class="composition-task-dialog" data-composition-task data-task-fallback="${h(dialogPolicy.fallback)}" data-task-phase="${phase}" aria-labelledby="composition-task-heading"><header class="composition-task-header"><div><p>${h(title)}${context ? ` · ${h(context)}` : ''}</p><h2 id="composition-task-heading" data-task-heading tabindex="-1"${phase === 'entry' ? '' : ' data-task-initial-focus'}>${h(session.action.label)}</h2><span class="muted">${phase === 'entry' ? '1 · Enter details' : phase === 'review' ? '2 · Review and confirm' : phase === 'result' ? '3 · Result' : 'Outcome and recovery'}</span></div><button type="button" class="secondary-action" data-task-close hidden aria-label="Close task">×</button></header><div class="composition-task-body">${selection ? `<section class="composition-task-context" aria-label="Current selection">${selection}</section>` : ''}${html()}</div></dialog>`,
+        `<section class="composition-task-resume" data-task-resume hidden><div><strong>${h(session.action.label)}</strong><span>Closing dismisses the dialog; it does not cancel submitted work.</span></div><button type="button" data-task-open>${phase === 'result' || phase === 'recovery' ? 'View task outcome' : 'Continue task'}</button><a href="${h(renderData.url)}">Refresh record</a></section><dialog open id="composition-task" class="composition-task-dialog" data-composition-task data-task-fallback="${h(dialogPolicy.fallback)}" data-task-phase="${phase}" aria-labelledby="composition-task-heading"><header class="composition-task-header"><div><p>${h(title)}${context ? ` · ${h(context)}` : ''}</p><h2 id="composition-task-heading" data-task-heading tabindex="-1"${phase === 'entry' ? '' : ' data-task-initial-focus'}>${h(session.action.label)}</h2><span class="muted">${phase === 'entry' ? '1 · Enter details' : phase === 'review' ? '2 · Review and confirm' : phase === 'result' ? '3 · Result' : 'Outcome and recovery'}</span></div><button type="button" class="secondary-action" data-task-close hidden aria-label="Close task">×</button></header><div class="composition-task-body">${taskPolicy && phase === 'entry' ? renderTaskSummary(renderData, taskPolicy) : ''}${!taskPolicy && selection ? `<section class="composition-task-context" aria-label="Current selection">${selection}</section>` : ''}${html()}${taskPolicy && selection ? `<details class="composition-task-support"><summary>Supporting details</summary>${selection}</details>` : ''}</div></dialog>`,
         renderData,
         200,
       );
     }
     return renderTask(
-      `<section class="panel" data-composition-task>${session ? `<h1>${h(session.action.label)}</h1>` : ''}<div class="composition-task-layout"><div>${html()}</div>${selection ? `<section class="composition-task-context"><h2>Current selection</h2>${selection}</section>` : ''}</div></section>`,
+      `<section class="panel" data-composition-task>${session ? `<h1>${h(session.action.label)}</h1>` : ''}${taskPolicy && renderData && !session?.prepared ? renderTaskSummary(renderData, taskPolicy) : ''}<div class="composition-task-layout"><div>${html()}${taskPolicy && selection ? `<details class="composition-task-support"><summary>Supporting details</summary>${selection}</details>` : ''}</div>${!taskPolicy && selection ? `<section class="composition-task-context"><h2>Current selection</h2>${selection}</section>` : ''}</div></section>`,
       renderData,
       renderData ? 200 : 422,
     );
@@ -925,7 +1003,12 @@ export async function submitCompositionAction(
   const url = current.data.url;
   const back = `<p><a href="${h(url)}">Back to order</a></p>`;
   const previewInputs = () =>
-    `<dl class="composition-reviewed-inputs">${current.action.inputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(displayInputs[input.inputId] ?? '')}</dd></div>`).join('')}</dl>`;
+    current.action.presentation?.task && current.prepared?.presentation
+      ? renderTaskConfirmation(
+          current.action.presentation.task,
+          current.prepared.presentation,
+        )
+      : `<dl class="composition-reviewed-inputs">${current.action.inputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(displayInputs[input.inputId] ?? '')}</dd></div>`).join('')}</dl>`;
   const hidden = `<input type="hidden" name="taskToken" value="${h(token!)}"><input type="hidden" name="compositionAction" value="${h(current.action.actionId)}">`;
   if (current.busy)
     return taskDocument(
@@ -948,6 +1031,7 @@ export async function submitCompositionAction(
         ]),
       ),
     );
+    const referenceLabels: Record<string, string> = { ...inputs };
     if (
       current.action.inputs.some(
         (input) => input.required && !inputs[input.inputId],
@@ -974,10 +1058,14 @@ export async function submitCompositionAction(
           current.data.scope,
           input,
         );
-        if (
-          !choices.some((choice) => choice.recordId === inputs[input.inputId])
-        )
-          error = 'Choose an available reference.';
+        const choice = choices.find(
+          (choice) => choice.recordId === inputs[input.inputId],
+        );
+        if (!choice) error = 'Choose an available reference.';
+        else
+          referenceLabels[input.inputId] = text(
+            recordValue(choice, input.labelField!.targetId),
+          );
       }
     } catch {
       error = 'Choose an available reference.';
@@ -990,12 +1078,39 @@ export async function submitCompositionAction(
       );
     current.inputs = inputs;
     if (!error) {
-      const prepared = Object.freeze({ id: randomUUID(), inputs });
+      const task = current.action.presentation?.task;
+      const previewValue = (
+        value: TaskPresentation['confirmation']['quantity'],
+      ) =>
+        value.source === 'input'
+          ? (referenceLabels[value.inputId] ?? '')
+          : taskColumnText(current.data, value);
+      // Display copy is captured with the reviewed plan, never reconstructed from
+      // mutable edits or fresh background DTOs. Current governed reads still gate disclosure.
+      const presentation = task
+        ? Object.freeze({
+            identity: taskColumnText(current.data, task.summary.identity),
+            secondary: task.summary.secondary
+              ? taskColumnText(current.data, task.summary.secondary)
+              : null,
+            quantity: previewValue(task.confirmation.quantity),
+            unit: taskColumnText(current.data, task.confirmation.unit),
+            context: task.confirmation.context
+              ? previewValue(task.confirmation.context)
+              : null,
+          })
+        : null;
+      const prepared = Object.freeze({
+        id: randomUUID(),
+        inputs,
+        presentation,
+      });
       current.prepared = prepared;
       return taskDocument(
         () =>
-          `<p class="composition-task-consequence">${h(current.action.description)}</p>${previewInputs()}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">Confirm ${h(current.action.label)}</button></form>${back}`,
+          `${previewInputs()}<p class="composition-task-consequence">${h(current.action.description)}</p><form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(current.action.presentation?.task?.confirmation.confirmLabel ?? `Confirm ${current.action.label}`)}</button></form>${back}`,
         inputs,
+        prepared,
       );
     }
   }
@@ -1110,7 +1225,7 @@ export async function submitCompositionAction(
           : `<input name="${h(input.inputId)}" value="${h(displayInputs[input.inputId] ?? '')}" ${input.required ? 'required' : ''} ${input.type === 'quantity' ? 'inputmode="decimal"' : ''}>`;
       return `<label class="field">${h(input.label)}${control}</label>`;
     });
-    return `<p class="composition-task-consequence">${h(current.action.description)}</p>${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${controls.join('')}<footer class="composition-task-footer"><button name="taskStage" value="prepare">Review ${h(current.action.label)}</button></footer></form>${back}`;
+    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${controls.join('')}<p class="composition-task-consequence">${h(current.action.description)}</p><footer class="composition-task-footer"><button name="taskStage" value="prepare">${h(current.action.presentation?.task?.confirmation.reviewLabel ?? `Review ${current.action.label}`)}</button></footer></form>${back}`;
   });
 }
 

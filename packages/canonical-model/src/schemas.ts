@@ -770,10 +770,42 @@ const compositionStep = z.strictObject({
     .min(1)
     .max(60),
 });
+const compositionTaskColumn = z.strictObject({
+  datasetId: CanonicalIdSchema,
+  columnId: CanonicalIdSchema,
+});
+const compositionTaskValue = z.discriminatedUnion('source', [
+  z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
+  compositionTaskColumn.extend({ source: z.literal('column') }),
+]);
 const compositionAction = z.strictObject({
   presentation: z
     .strictObject({
       placement: z.enum(['selection', 'row']),
+      task: z
+        .strictObject({
+          summary: z.strictObject({
+            identity: compositionTaskColumn,
+            secondary: compositionTaskColumn.optional(),
+            context: compositionTaskColumn.optional(),
+            quantity: z
+              .strictObject({
+                value: compositionTaskColumn,
+                unit: compositionTaskColumn,
+                label: LabelSchema,
+              })
+              .optional(),
+          }),
+          confirmation: z.strictObject({
+            title: LabelSchema,
+            reviewLabel: LabelSchema,
+            confirmLabel: LabelSchema,
+            quantity: compositionTaskValue,
+            unit: compositionTaskColumn,
+            context: compositionTaskValue.optional(),
+          }),
+        })
+        .optional(),
     })
     .optional(),
   actionId: CanonicalIdSchema,
@@ -797,6 +829,7 @@ const compositionDataset = z.strictObject({
     .strictObject({
       description: LabelSchema.optional(),
       selection: z.enum(['explicit', 'none']),
+      selectedActions: z.literal('row').optional(),
       compact: z.literal('scrollTable').optional(),
     })
     .optional(),

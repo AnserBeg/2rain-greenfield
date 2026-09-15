@@ -140,9 +140,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const more = navigation
     .locator('.navigation-tree > li')
     .getByRole('group')
-    .filter({ hasText: 'More' });
-  await more.getByText('More', { exact: true }).click();
-  const sales = more.getByRole('group').filter({ hasText: 'Sales' });
+    .filter({ hasText: 'Sales' });
+  const sales = more;
   await sales.getByText('Sales', { exact: true }).click();
   await sales.getByRole('link', { name: 'Sales order', exact: true }).click();
   await expect(

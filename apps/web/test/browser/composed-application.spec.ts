@@ -908,20 +908,28 @@ async function inventoryNavigationJourney(
     name: 'Release navigation',
   });
   const primaryEntries = navigation.locator('.navigation-tree > li');
-  // Sales is the sixth module group. The compiled navigation keeps the first
-  // four groups primary and places both Purchasing and Sales under the fifth
-  // `More` entry, preserving the fixed primary-navigation budget.
+  // Business modules lead compiled navigation; supporting masters share More.
+  // All leaves remain reachable within the five-entry compact budget.
   await expect(primaryEntries).toHaveCount(5);
   await expect(
     primaryEntries.locator(
-      ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2)',
+      ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2) > .nav-group-label',
     ),
-  ).toHaveText(['Party', 'Catalog', 'Location', 'Inventory', 'More']);
+  ).toHaveText(['Sales', 'Purchasing', 'Inventory', 'Party', 'More']);
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
-    'Party',
-    'Party role',
-    'Catalog',
-    'Location',
+    'Reservation coverage',
+    'Reservation',
+    'Sales order line',
+    'Sales order',
+    'Shipped quantity',
+    'Shipment line',
+    'Shipment',
+    'Receipt line',
+    'Goods receipt',
+    'Order quantity amendment request',
+    'Purchase order line',
+    'Purchase order',
+    'Received quantity',
     'Inventory movement',
     'On-hand lookup',
     'Inventory period lock',
@@ -931,23 +939,10 @@ async function inventoryNavigationJourney(
     'Posted stock',
     'Stock count line',
     'Stock count',
-    'Receipt line',
-    'Goods receipt',
-    'Order quantity amendment request',
-    // Normalization sorts surfaces by id, and
-    // `surface.purchase_order_line_list` precedes `surface.purchase_order_list`
-    // -- 'n' before 's' at the first differing code unit -- so the line list
-    // leads its group.
-    'Purchase order line',
-    'Purchase order',
-    'Received quantity',
-    'Reservation coverage',
-    'Reservation',
-    'Sales order line',
-    'Sales order',
-    'Shipped quantity',
-    'Shipment line',
-    'Shipment',
+    'Party',
+    'Party role',
+    'Catalog',
+    'Location',
   ]);
   await expect(
     navigation.getByRole('link', { name: /detail|form/i }),
@@ -985,10 +980,10 @@ async function inventoryNavigationJourney(
     .filter({ hasText: 'More' });
   await expect(moreNavigation).toBeVisible();
   await moreNavigation.getByText('More', { exact: true }).click();
-  const purchasingNavigation = moreNavigation
+  const purchasingNavigation = primaryEntries
     .getByRole('group')
     .filter({ hasText: 'Purchasing' });
-  const salesNavigation = moreNavigation
+  const salesNavigation = primaryEntries
     .getByRole('group')
     .filter({ hasText: 'Sales' });
   await expect(purchasingNavigation).toBeVisible();
@@ -1097,7 +1092,7 @@ async function inventoryRecordNavigationJourney(
     .getByRole('group')
     .filter({ hasText: 'More' });
   await moreNavigation.getByText('More', { exact: true }).click();
-  const purchasingNavigation = moreNavigation
+  const purchasingNavigation = primaryEntries
     .getByRole('group')
     .filter({ hasText: 'Purchasing' });
 
@@ -1121,6 +1116,7 @@ async function inventoryRecordNavigationJourney(
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
+  await moreNavigation.getByText('More', { exact: true }).click();
   await inventoryNavigation.getByText('Inventory', { exact: true }).click();
   await inventoryNavigation
     .getByRole('link', { name: 'Posted stock', exact: true })
@@ -1147,7 +1143,6 @@ async function inventoryRecordNavigationJourney(
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
-  await moreNavigation.getByText('More', { exact: true }).click();
   await purchasingNavigation.getByText('Purchasing', { exact: true }).click();
   await purchasingNavigation
     .getByRole('link', { name: 'Purchase order', exact: true })

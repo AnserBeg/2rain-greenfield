@@ -313,19 +313,19 @@ test('sales queries and storage are explicitly entity-owned', () => {
   );
 });
 
-test('sales is the sixth compiled navigation group and fulfillment is registered behavior', () => {
+test('sales leads compiled business navigation and fulfillment is registered behavior', () => {
   assert.deepEqual(COMPOSED_MODULE_NAMES, [
+    'sales',
+    'purchasing',
+    'inventory',
     'party',
     'catalog',
     'location',
-    'inventory',
-    'purchasing',
-    'sales',
   ]);
   const composed = composedApplicationDefinition() as unknown as Definition & {
     modules: Array<{ label: string; orderKey: number }>;
   };
-  assert.deepEqual(composed.modules.at(-1), {
+  assert.deepEqual(composed.modules.at(0), {
     composition: {
       kind: 'compositionSeam',
       schemaVersion: ADOPTED_LANGUAGE_VERSION,
@@ -334,7 +334,7 @@ test('sales is the sixth compiled navigation group and fulfillment is registered
     kind: 'moduleDefinition',
     label: 'Sales',
     moduleId: 'northstar.app:module.sales',
-    orderKey: 60,
+    orderKey: 10,
     ownerPackageId: 'northstar.app:package.application',
     schemaVersion: ADOPTED_LANGUAGE_VERSION,
   });

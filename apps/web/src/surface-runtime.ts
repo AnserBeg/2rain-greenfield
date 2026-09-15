@@ -1337,6 +1337,12 @@ function shellDocument(
 ): string {
   const title = selected?.label ?? 'Release diagnostic';
   const navigation = navigationEntries(surfaces, compiledNavigation);
+  const activeDestination = currentNavigationDestination(
+    view,
+    navigation,
+    surfaces,
+    selected,
+  );
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -1356,16 +1362,13 @@ function shellDocument(
           <p class="nav-label">Application</p>
           <ul class="navigation-tree">${navigation.map((entry) => navigationItem(view, entry, surfaces, selected, workspaceContext)).join('')}</ul>
         </nav>
-        <div class="release-card">
-          <span class="release-card__pulse" aria-hidden="true"></span>
-          <div><small>Pinned release</small><strong>${escapeHtml(shortIdentity(view.release.releaseId))}</strong><span>Fence ${view.pointer.fence}</span></div>
-        </div>
       </aside>
       <div class="workspace">
         <header class="topbar">
-          <div><span class="topbar__context">${escapeHtml(shortIdentity(view.tenantId))}</span><span class="topbar__divider">/</span><span>${escapeHtml(shortIdentity(view.environmentId))}</span></div>
+          <strong class="topbar__context">${escapeHtml(activeDestination ?? selected?.label ?? 'Workspace')}</strong>
           ${workspaceContext ? renderWorkspaceContextBar(workspaceContext) : ''}
-          <div class="principal" aria-label="Signed-in principal"><span class="principal__avatar" aria-hidden="true">${escapeHtml(view.principalId.slice(0, 2).toUpperCase())}</span><span><small>Signed in</small><strong>${escapeHtml(shortIdentity(view.principalId))}</strong></span></div>
+          <div class="principal" aria-label="Signed-in principal">Signed in</div>
+          <details class="shell-diagnostics"><summary>Diagnostics</summary><dl><dt>Tenant</dt><dd>${escapeHtml(view.tenantId)}</dd><dt>Environment</dt><dd>${escapeHtml(view.environmentId)}</dd><dt>Principal</dt><dd>${escapeHtml(view.principalId)}</dd><dt>Pinned release</dt><dd>${escapeHtml(view.release.releaseId)}</dd><dt>Release root</dt><dd>${escapeHtml(view.release.contentHash)}</dd><dt>Fence</dt><dd>${view.pointer.fence}</dd></dl></details>
         </header>
         <main id="surface-content" tabindex="-1">${body}</main>
       </div>
@@ -1384,6 +1387,12 @@ function navigationItem(
 ): string {
   if (entry.kind === 'navigationGroup') {
     const current = navigationEntryIsCurrent(view, entry, surfaces, selected);
+    const destination = currentNavigationDestination(
+      view,
+      entry.children,
+      surfaces,
+      selected,
+    );
     if (
       entry.children.length === 1 &&
       entry.children[0]?.kind === 'navigationSurface'
@@ -1391,7 +1400,7 @@ function navigationItem(
       const surface = surfaceForNavigation(surfaces, entry.children[0]);
       return `<li class="navigation-node navigation-node--direct">${navigationLink(view, surface, selected, entry.label, workspaceContext)}</li>`;
     }
-    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${escapeHtml(entry.label.slice(0, 1).toUpperCase())}</span><span>${escapeHtml(entry.label)}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${entry.children.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`;
+    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${escapeHtml(entry.label.slice(0, 1).toUpperCase())}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${entry.children.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`;
   }
   const surface = surfaceForNavigation(surfaces, entry);
   return `<li class="navigation-node navigation-node--surface">${navigationLink(view, surface, selected, navigationLabel(surface), workspaceContext)}</li>`;
@@ -1461,6 +1470,26 @@ function navigationEntries(
   );
 }
 
+function currentNavigationDestination(
+  view: RuntimeViewContract.RequestRuntimeView,
+  entries: readonly CompiledNavigationEntry[],
+  surfaces: readonly CompiledSurfaceDefinition[],
+  selected: CompiledSurfaceDefinition | null,
+): string | null {
+  for (const entry of entries) {
+    if (entry.kind === 'navigationGroup') {
+      const label = currentNavigationDestination(
+        view,
+        entry.children,
+        surfaces,
+        selected,
+      );
+      if (label) return label;
+    } else if (navigationEntryIsCurrent(view, entry, surfaces, selected))
+      return navigationLabel(surfaceForNavigation(surfaces, entry));
+  }
+  return null;
+}
 function navigationEntryIsCurrent(
   view: RuntimeViewContract.RequestRuntimeView,
   entry: CompiledNavigationEntry,
@@ -1553,6 +1582,7 @@ th,td,.fact-grid dd,.key-fact-grid dd,.record-fields dd,.task-decision output,.s
 .sidebar a[aria-current=page] .nav-icon,.navigation-group[data-current=true]>summary .nav-icon{background:var(--brand);color:var(--ink-on-brand)}
 .nav-arrow{font-size:var(--text-section);color:var(--ink-on-rail-muted)}
 .navigation-group[open]>summary .nav-arrow{transform:rotate(90deg)}
+.nav-text small{display:block;font-size:var(--text-micro);font-weight:var(--weight-body)}
 .release-card{display:flex;gap:var(--space-2);align-items:flex-start;margin-top:auto;padding:var(--space-3);border:1px solid var(--line-on-rail);border-radius:var(--radius-container)}
 .release-card__pulse{width:6px;height:6px;margin-top:6px;border-radius:50%;background:var(--brand)}
 .release-card small,.release-card strong,.release-card span{display:block}
@@ -1560,7 +1590,11 @@ th,td,.fact-grid dd,.key-fact-grid dd,.record-fields dd,.task-decision output,.s
 .release-card strong{margin:var(--space-1) 0;color:var(--ink-on-rail)}
 .release-card span{color:var(--ink-on-rail-muted);font-size:var(--text-micro)}
 .workspace{min-width:0}
-.topbar{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);padding:var(--space-2) var(--page-padding);border-bottom:1px solid var(--line);background:var(--surface-panel);color:var(--ink-muted);font-size:var(--text-body)}
+.topbar{position:relative;min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);padding:var(--space-2) var(--page-padding);border-bottom:1px solid var(--line);background:var(--surface-panel);color:var(--ink-muted);font-size:var(--text-body)}
+.shell-diagnostics summary{display:flex;align-items:center;min-height:44px;cursor:pointer;font-size:var(--text-micro)}
+.shell-diagnostics dl{position:absolute;z-index:5;top:100%;right:var(--page-padding);width:min(36rem,calc(100vw - 32px));max-height:70dvh;overflow:auto;background:var(--surface-panel);border:1px solid var(--line);border-radius:var(--radius-container);padding:var(--space-4);box-shadow:var(--elevation-overlay);margin:0}
+.shell-diagnostics dt{font-weight:var(--weight-emphasis)}
+.shell-diagnostics dd{font-family:var(--font-mono);font-size:var(--text-micro);margin:0 0 var(--space-2);overflow-wrap:anywhere}
 .topbar__context{color:var(--ink);font-weight:var(--weight-emphasis)}
 .topbar__divider{padding:0 var(--space-2);color:var(--line-strong)}
 .principal{display:flex;align-items:center;gap:var(--space-2)}
@@ -1800,6 +1834,13 @@ body{padding-bottom:72px}
 .composition-task-context .record-fields dd{font-size:var(--text-body)}
 .composition-task-context section+section{margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--line)}
 .composition-task-consequence{margin:var(--space-3) 0;color:var(--ink-muted)}
+.composition-task-summary,.composition-task-confirmation{margin-bottom:var(--space-4);padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken)}
+.composition-task-summary>strong{margin-right:var(--space-2)}
+.composition-task-summary p,.composition-task-confirmation p{margin:var(--space-2) 0 0}
+.composition-task-confirmation h3{font-size:var(--text-title);margin:0}
+.composition-task-support{margin-top:var(--space-3)}
+.composition-task-support>summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--ink-muted)}
+.composition-task-support .record-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .composition-inputs{display:grid;gap:var(--space-4)}
 .composition-inputs .field{display:grid;gap:var(--space-2);font-weight:var(--weight-emphasis)}
 .composition-inputs input,.composition-inputs select{width:100%;box-sizing:border-box;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
@@ -1812,7 +1853,7 @@ body{padding-bottom:72px}
 .composition-heading{gap:var(--space-2)}
 .composition-heading h1{font-size:var(--text-title)}
 .composition-header-facts{font-size:var(--text-body)}
-.composition-context nav{gap:var(--space-3);flex-wrap:nowrap;overflow-x:auto;white-space:nowrap}
+.composition-context nav{gap:var(--space-2);flex-wrap:wrap}
 .composition-record-actions .command-bar{position:static;flex-wrap:wrap;box-shadow:none}
 .data-table-wrap tr[data-presented-row=true]{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .data-table-wrap tr[data-presented-row=true] td{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-1);min-width:0}
@@ -1820,6 +1861,9 @@ body{padding-bottom:72px}
 .data-table-wrap tr[data-presented-row=true] td[data-cell-role=primary]::before{display:none}
 .data-table-wrap tr[data-presented-row=true] td[data-cell-role=detail],.data-table-wrap tr[data-presented-row=true] td[data-cell-role=actions]{grid-column:1/-1}
 .data-table-wrap tr[data-presented-row=true] td[data-cell-role=detail]::before,.data-table-wrap tr[data-presented-row=true] td[data-cell-role=actions]::before{display:none}
+.composition-collection .data-table-wrap:not([data-compact=scrollTable]) td{white-space:normal;overflow-wrap:anywhere}
+.composition-collection .data-table-wrap:not([data-compact=scrollTable]) td[data-cell-role=actions]{display:flex;flex-direction:row;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.composition-collection .data-table-wrap:not([data-compact=scrollTable]) td[data-cell-role=actions] form{flex:1}
 .composition-local-actions{display:flex;align-items:center}
 .composition-local-actions button{width:100%;min-height:44px}
 .composition-task-dialog:modal{max-height:calc(100dvh - 16px);width:calc(100vw - 16px)}

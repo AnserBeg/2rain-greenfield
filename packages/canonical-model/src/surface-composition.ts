@@ -163,6 +163,14 @@ export function validateSurfaceCompositions(
     }
     for (const child of composition.children) {
       if (
+        child.presentation?.selectedActions &&
+        child.presentation.selection !== 'explicit'
+      )
+        fail(
+          surface.surfaceId,
+          'selected row actions require explicit selection',
+        );
+      if (
         child.sort?.some(
           (entry) =>
             !fieldsFor(child.query.targetId).has(entry.fieldId) ||
@@ -346,6 +354,83 @@ export function validateSurfaceCompositions(
         action.inputs.map((input) => input.inputId),
         surface.surfaceId,
       );
+      const task = action.presentation?.task;
+      if (task) {
+        if (
+          action.presentation?.placement !== 'selection' ||
+          !action.steps.length
+        )
+          fail(
+            surface.surfaceId,
+            'task summaries require a selected operation',
+          );
+        const ancestry = new Set<string>();
+        let dataset = action.datasetId;
+        while (dataset && !ancestry.has(dataset)) {
+          ancestry.add(dataset);
+          const parent = children.get(dataset)?.parent?.value;
+          dataset =
+            parent?.source === 'selected' ? parent.datasetId : undefined;
+        }
+        const taskColumn = (reference: {
+          datasetId: string;
+          columnId: string;
+        }) => {
+          const column = children
+            .get(reference.datasetId)
+            ?.columns.find((value) => value.columnId === reference.columnId);
+          if (!ancestry.has(reference.datasetId) || !column)
+            fail(
+              surface.surfaceId,
+              'task summaries require columns from the selected dataset or its parent context',
+            );
+          return column!;
+        };
+        const taskValue = (
+          value: NonNullable<
+            NonNullable<
+              SurfaceComposition['actions'][number]['presentation']
+            >['task']
+          >['confirmation']['quantity'],
+          type: 'quantity' | 'reference',
+        ) => {
+          if (value.source === 'column') {
+            const column = taskColumn(value);
+            if (type === 'quantity' && column.presentation?.role !== 'quantity')
+              fail(
+                surface.surfaceId,
+                'task confirmation quantity requires a quantity column',
+              );
+          } else if (
+            !action.inputs.some(
+              (input) => input.inputId === value.inputId && input.type === type,
+            )
+          )
+            fail(
+              surface.surfaceId,
+              'task confirmation requires a declared input of the matching type',
+            );
+        };
+        taskColumn(task.summary.identity);
+        if (task.summary.secondary) taskColumn(task.summary.secondary);
+        if (task.summary.context) taskColumn(task.summary.context);
+        if (task.summary.quantity) {
+          const quantity = task.summary.quantity;
+          if (
+            quantity.value.datasetId !== quantity.unit.datasetId ||
+            taskColumn(quantity.value).presentation?.role !== 'quantity'
+          )
+            fail(
+              surface.surfaceId,
+              'task summary quantity and unit require the same selected dataset scope',
+            );
+          taskColumn(quantity.unit);
+        }
+        taskValue(task.confirmation.quantity, 'quantity');
+        taskColumn(task.confirmation.unit);
+        if (task.confirmation.context)
+          taskValue(task.confirmation.context, 'reference');
+      }
       unique(
         action.steps.map((step) => step.stepId),
         surface.surfaceId,

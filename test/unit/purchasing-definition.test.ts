@@ -1086,17 +1086,17 @@ test('the composed application derives its modules from an ordered registry', ()
   // rather than any separately maintained literal.
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(COMPOSED_MODULE_NAMES, [
+    'sales',
+    'purchasing',
+    'inventory',
     'party',
     'catalog',
     'location',
-    'inventory',
-    'purchasing',
-    'sales',
   ]);
   assert.equal(composed.modules.length, COMPOSED_MODULE_NAMES.length);
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing', 'Sales'],
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'Catalog', 'Location'],
   );
   // `orderKey` is derived from registry POSITION, which is what makes order the
   // only thing the registry has to declare.
@@ -1112,19 +1112,19 @@ test('the composed application derives its modules from an ordered registry', ()
   );
 });
 
-test('Purchasing remains fifth when Sales mounts sixth', () => {
+test('Purchasing and Sales lead the business navigation within budget', () => {
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing', 'Sales'],
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'Catalog', 'Location'],
   );
 
   const navigation = surfaceManifest(compile(composed)).navigation;
   assert.ok(navigation, 'the composed application emits no navigation tree');
   assert.deepEqual(
     navigation.entries.map((entry) => entry.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'More'],
-    'the sixth module belongs under the compiled overflow group',
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'More'],
+    'supporting masters belong under the compiled overflow group',
   );
 });
 

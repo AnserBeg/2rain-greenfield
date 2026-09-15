@@ -44,15 +44,15 @@ type CollectionName =
  * tree groups by module in that order.
  */
 const MODULE_REGISTRY = Object.freeze([
-  Object.freeze({ create: partyModuleDefinition, moduleName: 'party' }),
-  Object.freeze({ create: catalogModuleDefinition, moduleName: 'catalog' }),
-  Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),
-  Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
+  Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
   Object.freeze({
     create: purchasingModuleDefinition,
     moduleName: 'purchasing',
   }),
-  Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
+  Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
+  Object.freeze({ create: partyModuleDefinition, moduleName: 'party' }),
+  Object.freeze({ create: catalogModuleDefinition, moduleName: 'catalog' }),
+  Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),
 ] as const);
 
 /** The mounted module names, in composition order, for callers that assert on the set. */

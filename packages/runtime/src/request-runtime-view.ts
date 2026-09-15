@@ -164,8 +164,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    // 6 honours typed Task dialog/page fallback, child sorting and compact tables.
-    maximumSupportedVersion: 6,
+    // 7 honours explicit task summaries, frozen action previews and selected row controls.
+    maximumSupportedVersion: 7,
   },
 });
 

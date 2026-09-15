@@ -797,30 +797,36 @@ function surfaceManifestPayload(
       capabilityId: 'northstar.runtime:capability.surface-manifest',
       minimumVersion: [...compositions.values()].some(
         (value) =>
-          value?.presentation?.task ||
-          value?.children.some(
-            (child) => child.sort?.length || child.presentation?.compact,
-          ),
+          value?.actions.some((action) => action.presentation?.task) ||
+          value?.children.some((child) => child.presentation?.selectedActions),
       )
-        ? 6
+        ? 7
         : [...compositions.values()].some(
               (value) =>
-                value?.presentation ||
+                value?.presentation?.task ||
                 value?.children.some(
-                  (child) =>
-                    child.presentation ||
-                    child.columns.some((column) => column.presentation),
-                ) ||
-                value?.actions.some((action) => action.presentation),
+                  (child) => child.sort?.length || child.presentation?.compact,
+                ),
             )
-          ? 5
-          : composed
-            ? 4
-            : emitsFieldKinds
-              ? 3
-              : navigation
-                ? 2
-                : 1,
+          ? 6
+          : [...compositions.values()].some(
+                (value) =>
+                  value?.presentation ||
+                  value?.children.some(
+                    (child) =>
+                      child.presentation ||
+                      child.columns.some((column) => column.presentation),
+                  ) ||
+                  value?.actions.some((action) => action.presentation),
+              )
+            ? 5
+            : composed
+              ? 4
+              : emitsFieldKinds
+                ? 3
+                : navigation
+                  ? 2
+                  : 1,
     },
   };
 }

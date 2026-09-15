@@ -114,6 +114,57 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
   const lines = id('dataset', 'fulfillment_lines');
   const reservations = id('dataset', 'line_reservations');
   const shipments = id('dataset', 'order_shipments');
+  const taskColumn = (datasetId: string, name: string) => ({
+    datasetId,
+    columnId: id('column', name),
+  });
+  const taskPresentation = (kind: 'reserve' | 'ship' | 'release') => {
+    const reserving = kind === 'reserve';
+    const reservationQuantity = {
+      value: taskColumn(reservations, 'remaining'),
+      unit: taskColumn(reservations, 'reservation_unit'),
+      label: 'remaining in this reservation',
+    };
+    return {
+      placement: 'selection',
+      task: {
+        summary: {
+          identity: taskColumn(lines, 'item'),
+          secondary: taskColumn(lines, 'sku'),
+          ...(!reserving
+            ? {
+                context: taskColumn(reservations, 'location'),
+                quantity: reservationQuantity,
+              }
+            : {}),
+        },
+        confirmation: {
+          title: reserving ? 'Reserve' : kind === 'ship' ? 'Ship' : 'Release',
+          reviewLabel: reserving
+            ? 'Review reservation'
+            : kind === 'ship'
+              ? 'Review shipment'
+              : 'Review release',
+          confirmLabel: reserving
+            ? 'Confirm reservation'
+            : kind === 'ship'
+              ? 'Confirm shipment'
+              : 'Confirm release',
+          quantity:
+            kind === 'release'
+              ? { source: 'column', ...reservationQuantity.value }
+              : input('quantity'),
+          unit: taskColumn(
+            reserving ? lines : reservations,
+            reserving ? 'unit' : 'reservation_unit',
+          ),
+          context: reserving
+            ? input('location')
+            : { source: 'column', ...taskColumn(reservations, 'location') },
+        },
+      },
+    };
+  };
   const released = {
     value: record(
       `${namespace}:derived_state_field.machine.sales_order_lifecycle`,
@@ -177,7 +228,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     children: [
       {
         datasetId: lines,
-        presentation: { selection: 'explicit', compact: 'scrollTable' },
+        presentation: { selection: 'explicit', selectedActions: 'row' },
         label: 'Order lines',
         orderKey: 10,
         query: q('sales_order_line_list'),
@@ -305,15 +356,14 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     actions: [
       {
         actionId: id('action', 'reserve_stock'),
-        presentation: { placement: 'selection' },
+        presentation: taskPresentation('reserve'),
         label: 'Reserve stock',
-        description:
-          'Reserve this quantity at the chosen location. On hand stays unchanged; available stock decreases.',
+        description: 'On hand stays unchanged; available stock decreases.',
         orderKey: 10,
         datasetId: lines,
         conditions: [released],
         inputs: [
-          quantityInput,
+          { ...quantityInput, label: 'Quantity to reserve' },
           {
             inputId: id('input', 'location'),
             label: 'Stock location',
@@ -344,14 +394,14 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       },
       {
         actionId: id('action', 'ship_reserved'),
-        presentation: { placement: 'selection' },
+        presentation: taskPresentation('ship'),
         label: 'Ship reserved stock',
         description:
-          'Post this quantity against the selected reservation. On hand and reserved stock decrease by the shipped quantity.',
+          'On hand and reserved stock decrease by the shipped quantity.',
         orderKey: 20,
         datasetId: reservations,
         conditions: [released, active],
-        inputs: [quantityInput],
+        inputs: [{ ...quantityInput, label: 'Quantity to ship' }],
         steps: [
           create(
             'shipment_draft',
@@ -393,10 +443,10 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       },
       {
         actionId: id('action', 'release_remaining'),
-        presentation: { placement: 'selection' },
+        presentation: taskPresentation('release'),
         label: 'Release remainder',
         description:
-          'Release the remaining reservation. On hand stays unchanged; the unused stock becomes available.',
+          'On hand stays unchanged; the remaining reservation becomes available.',
         orderKey: 30,
         datasetId: reservations,
         conditions: [released, active],
