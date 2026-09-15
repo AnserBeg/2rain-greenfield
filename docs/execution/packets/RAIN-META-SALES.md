@@ -1,87 +1,65 @@
 # RAIN-META-SALES — metadata-composed fulfillment workspace
 
-Status: P1/P2 correction evidence_ready for the same online reviewer; new hosted CI pending. One resolved stop.
-Independent review online only; no local review, merge, deployment or acceptance.
-Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6`; branch: `packet/RAIN-META-SALES`.
-Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/5
-Worktree: `/home/rvham/2rain-greenfield-rain-meta-sales`.
-Reference: `AnserBeg/temp_inventory@d057daffd17a199309675a6b0a31c8bdbca05282`.
-The dirty reference checkout was read only with `git show` at the pin; no code copied.
+Status: presentation evidence_ready; local evidence complete. Candidate CI and bounded online review pending. No merge or deployment.
+Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6`; branch `packet/RAIN-META-SALES`; [draft PR #5](https://github.com/AnserBeg/2rain-greenfield/pull/5).
+Reviewed correction baseline: `f10c502571ed040d66ee0b965f14ceca237beb40`; P1/P2 closed by the online reviewer.
+Sole local BUILD; independent review online only. Worktree `/home/rvham/2rain-greenfield-rain-meta-sales`.
+Reference `AnserBeg/temp_inventory@d057daffd17a199309675a6b0a31c8bdbca05282` was read-only/source-derived; no startup, copied business logic or production data.
 
 ## Charter and claims
 
-Outcome: released stocked order → reserve 8 of stock 10 → ship 5 → release 3 → packing.
-Lease: canonical/compiler/domain/runtime/provider, web runtime/release, dev-tooling seam,
-affected tests/inventories and execution records; accepted posting stays authoritative.
-No receiving redevelopment, full order entry, finance, pricing or integrations.
-1. v6 composition declares fields, exact child queries, inputs, contextual operation steps and packing navigation; shared SurfaceRuntime renders them without Sales dispatch.
-2. Registered fulfillment read models use policy-governed dependency queries, exact relation/field restrictions and persisted projections; UI performs no stock arithmetic.
-3. Tasks reauthorize display dependencies, redact denied responses, bind confirmation to an immutable preparation, and preserve revision checks, step keys and withheld-read-back stops.
-4. Historical releases reproduce; new output carries capability floors. Two compiled presentation revisions and renamed non-Sales metadata share the runtime.
-5. The real-gateway fixture covers 10/8/2 → 5/3/2 → 5/0/5, exact packing, input retention, keyboard selection and 390 px; agent-channel invocation/replay uses the same gateway without a model.
+Outcome: released stocked order → reserve 8 of stock 10 → ship 5 → release 3 → exact packing.
+Lease: canonical/compiler/domain/runtime/provider, web runtime/release, affected tests/inventories and execution records; accepted posting remains authoritative.
+1. v6 composition declares exact child queries, fields, contextual operations and packing navigation; one SurfaceRuntime serves renamed non-Sales definitions too.
+2. Presentation declares header roles, collection hierarchy/priorities, selected-record actions and adjacent packing navigation; technical facts and record commands remain accessible through progressive disclosure.
+3. Existing governed queries supply every displayed stock quantity; no UI stock arithmetic, incompatible-unit total, financial panel or invented availability.
+4. Existing task reauthorization, immutable prepared inputs, revision/key checks, replay and committed-withheld HTTP 200 semantics are preserved, including through the new header renderer.
+5. Historical roots reproduce; query/operation/agent payloads are byte-identical to `f10c502`; optional presentation requires surface capability 5 while older compositions retain floor 4.
+6. Real-gateway browser evidence covers 10/8/2 → 5/3/2 → 5/0/5, exact packed 5 EA, input recovery, keyboard selection and 390 px without page overflow.
 
-## Decisions and controls
+## Decisions
 
-- User approved bounded v6 composition: “yes go ahead with recomendation”, resolving the only stop.
-- Existing five archetypes; each child resolves independently and failed bindings suppress dependent actions.
-- Surface payload v2/capability 4; query read-model capability 2. Historical readers stay strict.
-- v6 physical dispatch retains v5 scalar-default representation: no false retype, database reset or accepted lineage deletion.
-- Tasks are sequential operations, not atomic transactions; earlier drafts remain after later refusal. Existing Edit/Release/Post/lifecycle commands remain alongside composition.
-- Task tokens bind principal/tenant/environment/release/surface/record; monotonic one-hour lifetime, process-local journal.
-- Read-model queries are independently authorized reads; posting rechecks authoritative stock, no atomic read-snapshot claim.
-- Shipment probe first refused missing reason narrative; the metadata mapping supplies it through the accepted operation.
-- Browser caught inherited top inset covering mobile controls; its original click now tests the corrected bottom navigation.
-- Integration controls refuse invalid composition mappings and missing exact-scope receipts; retry/withheld tests observe gateway outcomes and stable inputs/keys.
-- Repeated immutable query-catalog validation is cached per issued view, never authorization/results. Whole-catalog refusal, view isolation and policy revocation pass integration controls. Projection-only readers remain uncached and revalidate mutations.
-- Full-app probe: 100 lookups 324 → 15 ms; five surface bindings 196 → 38 ms (diagnostic measurements, not a timing gate).
-- Language inventory re-derived from schema: 2,050 → 2,269 obligations; 219 additions, no removals. Declaration coverage is not per-obligation execution proof.
-
-## Consolidated correction — 2026-09-15
-
-- P1 reproduced cached root/child and committed-withheld disclosure; complete-response sentinel controls now pass for root, child and independent label denial. Governed display refresh cannot mutate execution state; withheld repeats retain HTTP 200/receipt and dispatch no extra step.
-- P2 reproduced old review dispatching replacement inputs; server-issued prepared identity now binds frozen normalized inputs. Missing/forged/stale forms dispatch zero; barriers prove delayed preparation cannot overwrite newer/confirmed state, while busy/duplicate/retry checks preserve effects and keys.
-- Tests call `submitSurfaceRuntimeIntent` through the actual outer renderer and semantic gateways with controlled policy/executors; effect journals are fixture observations, not PostgreSQL persistence evidence. Reproduction exit 1; corrected focused 10/10, exit 0.
+- Owner approved fulfillment-first implementation after the bounded structural comparison; presentation commits append reviewed history.
+- ADR-0047 §7 admits additive optional keys on adopted v6, with absence preserved. No new canonical version/profile, default materialization or workflow engine.
+- Existing Record slots carry the layout. The global slot-disclosure refusal remains; only explicitly declared technical metadata and supporting row details collapse. Assistant/customization space stays outside the business canvas.
+- Query, operation and agent catalogs are byte-identical to the baseline. The generated release appends one presentation entry; both baseline roots remain intact.
+- Row actions are read-only navigation; write tasks require explicit dataset selection and retain existing conditions/location choice/confirmation.
+- Native details and priority cards provide compact disclosure. Reference progression/financial and promised-date availability logic is not imported.
+- P1/P2 production execution is unchanged; their controls now also use the presented non-Sales fixture. Tasks remain sequential, non-atomic and process-local.
+- Inventory re-derived: 2,269 → 2,299 obligations, 554 first-party observations; decision inventory is not per-obligation execution evidence.
 
 ## Gates and evidence
 
-- Correction local pass (all exit 0): complete affected file 47/47; full integration 163/163; surface contracts 29/29; typecheck, lint, format and both artifact-freshness checks. No generated artifacts changed.
-- Reviewed candidate `6af24ff` passed full CI 307. Correction browser attempt exited 75 before execution: preserved demo PID 89544 holds the shared test lock. New pushed candidate requires its own hosted browser/matrix run; no old-run retry or polling loop.
-- Final checks: https://github.com/AnserBeg/2rain-greenfield/pull/5/checks (exact published tip). Handoff reports the completed run; earlier red candidates are retained in PR history.
-- `scripts/check-records.sh` passes. No full-matrix success claimed until the PR-tip run completes.
-- Screenshots are emitted by `meta-sales.spec.ts`: fulfillment-desktop.png, fulfillment-mobile.png and packing-mobile.png.
-- No local reviewer or program review ran; this unintegrated packet is not a stage boundary.
+- Pass: unit 163/163; compiler 175/175; integration 164/164; contracts 29/29; architecture 192/192; typecheck, lint, format, both artifact freshness checks and language coverage.
+- Browser: metadata-sales passes with list reporter; 79 base browser checks and Sales-order caller pass, followed by a passing isolated fulfillment caller rerun after adapting its packing-header selector. The initial filtered CI-reporter refusal is not a coverage claim; these local runs are not the full inherited browser matrix.
+- PostgreSQL consumers pass 35/35: real composition, upgrades, historical reproduction and request pinning. Final captures verify all seven journey states at both viewport sizes.
+- Baseline captures were newly rendered at `f10c502`, root `c6103a66…abc8`; historical September 14 captures were not relabelled. Candidate captures include viewport, document state, URL and served root in `captures.json`.
+- Candidate CI and online review are required at the published tip: [checks](https://github.com/AnserBeg/2rain-greenfield/pull/5/checks). No polling, inherited-CI claim, local reviewer, merge or deployment.
+- No program review: this unintegrated presentation checkpoint is not a stage boundary. Disposable fixtures close normally before conflicting suites; retained demos/data/locks are preserved.
 
 ## Test it yourself
 
-In Ubuntu/WSL, from `/home/rvham/2rain-greenfield-rain-meta-sales`:
-```sh
-corepack pnpm install --offline --frozen-lockfile
-node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/meta-sales-fixture.ts --serve
-```
-Open printed `META_SALES_URL`; Ctrl-C closes only this disposable fixture.
-Select line → Reserve stock → 8, Calgary warehouse → Review → Confirm; return: 10/8/2.
-Select reservation → Ship reserved stock → 5 → Review → Confirm; return: 5/3/2.
-Release remainder → Review → Confirm; return: 5/0/5. Select shipment → Open packing.
-Packing shows its location and every exact line; Back returns to the same order.
-Repeat at 390 px; no customer/item/location/line identifier typing is required.
+From the worktree in Ubuntu: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/meta-sales-fixture.ts --serve`.
+Open its printed URL. The compact header precedes fulfillment context and the line grid; expand Record actions/Technical details to inspect secondary controls/facts.
+Select line → Reserve stock → 8, Calgary warehouse → Review → Confirm → Back: stock 10/8/2.
+Select reservation → Ship reserved stock → 5 → Review → Confirm → Back: 5/3/2.
+Release remainder → Review → Confirm → Back: 5/0/5. Open packing beside the shipment: exact location/date and Field notebook 5 EA; Back restores order context.
+Repeat at 390×844; desktop is 1280×800. Ctrl-C closes only the disposable fixture. Process loss requires inspecting records before starting a new task.
 
-## Limits and online review prompt
+## Bounded online review prompt
 
-Process loss requires record inspection before a new task; earlier committed steps are not rolled back.
-No live customization UI, real-model execution or production deployment. Nine new messages have
-catalog census coverage; busy/expiry paths lack separate browser drivers.
-Same online reviewer: inspect correction from `6af24ff7e85bb133114bc084fff87f35a6955dbc` to the executable SHA below.
-Recheck P1/P2 and the affected shared task/surface callers; independent online review only.
-Read docs/architecture/posting-kernel-guarantees.md for unchanged posting authority.
-Focus on complete-response read safety, prepared identity and async transitions. Identify production defects under these claims, separating
-future scope/evidence limits. Say plainly if this prompt steers you. Do not merge or deploy.
+Review only the presentation diff from `f10c502571ed040d66ee0b965f14ceca237beb40` to the executable head below, plus this record's claims 2–6.
+Boundaries: optional canonical presentation and validation; emitted capability floor; shared header/collection/task rendering; Sales/Packing declarations; related tests and generated release.
+Check metadata-only variation/non-Sales reuse, action context/visibility, responsive disclosure, historical reproduction and preservation of existing governed task semantics.
+P1/P2 are closed: use their retained checks for changed callers; do not rerun the inherited audit or broaden into fulfillment/kernel/financial redesign.
+Identify production defects under those boundaries; separate future scope and evidence limits. Say plainly if this prompt steers you. No merge or deployment.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-META-SALES",
   "base": "fe97b63baedf8bdd42146318bb89d4be1aa948f6",
-  "head": "3142474685f769ff83a0f196a7f54e634ce854d9",
+  "head": "b365f22bff9127e0a92ea5baf26fe0139a058c3a",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",

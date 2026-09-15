@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RAIN-META-SALES` | evidence_ready: P1/P2 corrected; local integration/contracts pass; new hosted CI/same online reviewer pending; isolated `packet/RAIN-META-SALES`, base `fe97b63`; [record](packets/RAIN-META-SALES.md); online review only, no merge |
+| **BUILD** | `RAIN-META-SALES` | evidence_ready: P1/P2 closed; fulfillment-first presentation appended; local evidence complete; new hosted CI/bounded online review pending; isolated `packet/RAIN-META-SALES`, base `fe97b63`; [record](packets/RAIN-META-SALES.md); online review only, no merge |
 | **SUPPORT** | — | idle |
 
 

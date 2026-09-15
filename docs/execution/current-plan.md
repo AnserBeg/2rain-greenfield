@@ -26,7 +26,7 @@ The 2026-09-01 QUEUE FREEZE and the previous operating model are in the archive;
 substance survives in the rules above.
 
 **Selected 2026-09-14: RAIN-META-SALES** — sole local BUILD on
-`packet/RAIN-META-SALES`; one consolidated P1/P2 correction published for the same online reviewer; bounded v6 composition remains approved
+`packet/RAIN-META-SALES`; P1/P2 closed at `f10c502`; owner-approved fulfillment-first presentation implemented with optional v6 metadata; local evidence complete; candidate CI and bounded online review pending; bounded v6 composition remains approved
 in [the packet record](packets/RAIN-META-SALES.md). Accepted fulfillment stays the base;
 live customization and actual AI execution follow this workspace before broader expansion.
 Publication stops at one draft PR; review online only, no local integration or deployment.
