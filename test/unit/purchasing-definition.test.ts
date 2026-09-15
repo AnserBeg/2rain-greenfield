@@ -1086,17 +1086,17 @@ test('the composed application derives its modules from an ordered registry', ()
   // rather than any separately maintained literal.
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(COMPOSED_MODULE_NAMES, [
+    'sales',
+    'purchasing',
+    'inventory',
     'party',
     'catalog',
     'location',
-    'inventory',
-    'purchasing',
-    'sales',
   ]);
   assert.equal(composed.modules.length, COMPOSED_MODULE_NAMES.length);
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing', 'Sales'],
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'Catalog', 'Location'],
   );
   // `orderKey` is derived from registry POSITION, which is what makes order the
   // only thing the registry has to declare.
@@ -1112,19 +1112,19 @@ test('the composed application derives its modules from an ordered registry', ()
   );
 });
 
-test('Purchasing remains fifth when Sales mounts sixth', () => {
+test('Purchasing and Sales lead the business navigation within budget', () => {
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing', 'Sales'],
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'Catalog', 'Location'],
   );
 
   const navigation = surfaceManifest(compile(composed)).navigation;
   assert.ok(navigation, 'the composed application emits no navigation tree');
   assert.deepEqual(
     navigation.entries.map((entry) => entry.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'More'],
-    'the sixth module belongs under the compiled overflow group',
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'More'],
+    'supporting masters belong under the compiled overflow group',
   );
 });
 
@@ -1355,17 +1355,17 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       operationId: `${namespace}:operation.received_illegal_${tier}`,
       readBack: {
         kind: 'queryReference',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         targetId: `${namespace}:query.purchase_order_received_get`,
       },
       ...(tier === 'o0'
         ? {
             effect: {
               kind: 'updateRecordEffect',
-              schemaVersion: 'v5',
+              schemaVersion: ADOPTED_LANGUAGE_VERSION,
               entity: {
                 kind: 'entityReference',
-                schemaVersion: 'v5',
+                schemaVersion: ADOPTED_LANGUAGE_VERSION,
                 targetId: entityId,
               },
             },
@@ -1384,7 +1384,7 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       ) as Record<string, unknown>;
       machine.entity = {
         kind: 'entityReference',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         targetId: entityId,
       };
       machines.push(machine);
@@ -1392,16 +1392,16 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       operation.tier = 'o0';
       operation.effect = {
         kind: 'transitionStateEffect',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         transition: {
           kind: 'transitionReference',
-          schemaVersion: 'v5',
+          schemaVersion: ADOPTED_LANGUAGE_VERSION,
           targetId: `${namespace}:transition.received_illegal_release`,
         },
       };
       operation.permission = {
         kind: 'permissionReference',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         targetId: `${namespace}:permission.purchase_order_release`,
       };
       for (const transition of machine.transitions as Array<
@@ -1409,7 +1409,7 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       >)
         transition.permission = {
           kind: 'permissionReference',
-          schemaVersion: 'v5',
+          schemaVersion: ADOPTED_LANGUAGE_VERSION,
           targetId: `${namespace}:permission.purchase_order_release`,
         };
     }

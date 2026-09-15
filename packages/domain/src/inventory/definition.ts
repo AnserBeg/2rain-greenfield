@@ -4,8 +4,8 @@
 // move with the language.
 import { INVENTORY_CONTRACT_V1 } from './contracts.js';
 
-const version = 'v5' as const;
-const normalizationProfileVersion = 'northstar.normalization/v5' as const;
+const version = 'v6' as const;
+const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
 export const INVENTORY_NAMESPACE = 'northstar.inventory' as const;
 

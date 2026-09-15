@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | — | idle. SALE integrated through PR #3 at `4c058aa`; SALE-FULFILLMENT integrated through PR #4 at `44bef7a`, Critical arm closed and all seven CI jobs green. No next vertical assigned |
+| **BUILD** | `RAIN-META-SALES` | visual evidence_ready at `d05651c8`: corrected explicit Task summary, frozen proposal, mobile lines and business navigation; serving `b7ffe632` on 38637; [actual checkpoint](packets/RAIN-META-SALES-task-context-visual.md); stop for owner visual decision, no new reviewer or merge |
 | **SUPPORT** | — | idle |
 
 

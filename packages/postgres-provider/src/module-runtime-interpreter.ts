@@ -2055,7 +2055,7 @@ function parentScopePlan(
   entity: StorageEntity,
   list: AuthorizedSharedListRequest,
 ): ListParentScopePlan | null {
-  const requested = list.query.parentScope;
+  const requested = list.query.parentScope ?? list.query.referenceScope;
   if (!requested) return null;
   const relation = storage.relations.find(
     (candidate) => candidate.relationId === requested.relationId,
@@ -2063,7 +2063,8 @@ function parentScopePlan(
   if (
     !relation ||
     relation.sourceEntityId !== entity.entityId ||
-    relation.ownership !== 'parentScopedChild'
+    relation.ownership !==
+      (list.query.referenceScope ? 'reference' : 'parentScopedChild')
   ) {
     throw failure(
       'MODULE_LIST_PARENT_SCOPE_INVALID',
@@ -2160,6 +2161,20 @@ async function listSharedRecords(
       )}::uuid`,
     );
   }
+  for (const filter of list.query.fieldFilters ?? []) {
+    const column = selectedColumns.find(
+      (column) => column.canonicalFieldId === filter.fieldId,
+    );
+    if (!column)
+      throw failure(
+        'MODULE_LIST_FIELD_INVALID',
+        'Exact filters must name a selected field',
+        filter.fieldId,
+      );
+    predicates.push(
+      `${qualified(sourceAlias, column.physicalName)}::text = ${parameter(values, filter.value)}`,
+    );
+  }
   const whereSql = predicates.length > 0 ? predicates.join(' AND ') : 'true';
   const count = await client.query<{ total_count: string }>(
     `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
@@ -2205,6 +2220,12 @@ async function listSharedRecords(
       : null,
     pageOffset: list.query.pageOffset,
     parentScope: list.query.parentScope,
+    ...(list.query.referenceScope
+      ? { referenceScope: list.query.referenceScope }
+      : {}),
+    ...(list.query.fieldFilters
+      ? { fieldFilters: list.query.fieldFilters }
+      : {}),
     projectedSearchValueCount:
       list.query.search.trim() === '' ? 0 : searchExpressions.length,
     requestedPageSize: list.query.requestedPageSize,

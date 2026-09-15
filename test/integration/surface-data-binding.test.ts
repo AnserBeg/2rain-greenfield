@@ -1,7 +1,18 @@
+import type { SurfaceComposition } from '../../packages/canonical-model/src/index.js';
+import {
+  loadSurfaceComposition,
+  submitCompositionAction,
+  renderCompositionFields,
+  renderCompositionHeader,
+  renderCompositionChildren,
+  renderCompositionActions,
+} from '../../apps/web/src/surface-composition.js';
 import assert from 'node:assert/strict';
+import { CanonicalModelError } from '@north-star/canonical-model';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import test from 'node:test';
+import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 
 import {
   canonicalize,
@@ -33,6 +44,8 @@ import {
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   SEMANTIC_QUERY_RESULT_VERSION,
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  registeredSemanticQueryFromPinnedView,
   SemanticQueryGateway,
   type SemanticQueryExecutionRequest,
   type SemanticQueryExecutor,
@@ -3262,3 +3275,1451 @@ function asRecord(value: unknown): Record<string, unknown> {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+// RAIN-META-SALES: an unrelated package, with every product identity renamed.
+function workshopComposition(label: string): Record<string, unknown> {
+  const definition = JSON.parse(
+    JSON.stringify(ordinaryModuleV1())
+      .replaceAll('northstar.modulefixture', 'workshop.jobs')
+      .replaceAll('master_role', 'assignment')
+      .replaceAll('master', 'job')
+      .replaceAll('"v3"', '"v6"')
+      .replaceAll('northstar.normalization/v3', 'northstar.normalization/v6'),
+  ) as Record<string, unknown>;
+  const surfaces = definition.surfaces as Array<Record<string, unknown>>;
+  const surface = surfaces.find(
+    (value) => value.surfaceId === 'workshop.jobs:surface.job_record',
+  )!;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  surface.composition = {
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    fields: [
+      {
+        columnId: 'workshop.jobs:column.name',
+        label,
+        orderKey: 10,
+        field: 'workshop.jobs:field.job_name',
+      },
+    ],
+    children: [
+      {
+        datasetId: 'workshop.jobs:dataset.assignments',
+        label: 'Assigned work',
+        orderKey: 10,
+        query: ref('queryReference', 'workshop.jobs:query.assignment_list'),
+        parent: {
+          relationId: 'workshop.jobs:relation.assignment_parent',
+          ownership: 'parentScopedChild',
+          value: { source: 'record', field: 'recordId' },
+        },
+        columns: [
+          {
+            columnId: 'workshop.jobs:column.role',
+            label: 'Responsibility',
+            orderKey: 10,
+            field: 'workshop.jobs:field.assignment_kind',
+          },
+        ],
+      },
+    ],
+    actions: [
+      {
+        actionId: 'workshop.jobs:action.retire',
+        label: 'Retire assignment',
+        description: 'Archive this assignment.',
+        orderKey: 10,
+        datasetId: 'workshop.jobs:dataset.assignments',
+        conditions: [],
+        inputs: [],
+        steps: [
+          {
+            stepId: 'workshop.jobs:step.archive',
+            operation: ref(
+              'operationReference',
+              'workshop.jobs:operation.assignment_archive',
+            ),
+            bindings: [
+              {
+                path: ['recordId'],
+                value: { source: 'selected', field: 'recordId' },
+              },
+              {
+                path: ['expectedRevision'],
+                value: { source: 'selected', field: 'revision' },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  (surface.slots as unknown[]).push(
+    ...['sections', 'commandBar'].map((slot, index) => ({
+      kind: 'surfaceSlot',
+      schemaVersion: 'v6',
+      slot,
+      slotId: `workshop.jobs:slot.extra_${index}`,
+      orderKey: 20 + index,
+      content: ref(
+        'opaqueSurfaceContentReference',
+        'workshop.jobs:capability.standard_surface_content',
+      ),
+    })),
+  );
+  (surface.slots as unknown[]).push({
+    kind: 'surfaceSlot',
+    schemaVersion: 'v6',
+    slot: 'childTables',
+    slotId: 'workshop.jobs:slot.children',
+    orderKey: 60,
+    content: ref(
+      'opaqueSurfaceContentReference',
+      'workshop.jobs:capability.standard_surface_content',
+    ),
+  });
+  return definition;
+}
+
+function presentedWorkshop(
+  label: string,
+  reverse = false,
+  dialog = false,
+): Record<string, unknown> {
+  const value = workshopComposition(label);
+  const surface = (value.surfaces as Array<Record<string, unknown>>).find(
+    (surface) => surface.composition,
+  )!;
+  const composition = surface.composition as SurfaceComposition;
+  composition.presentation = {
+    header: { title: composition.fields[0]!.columnId, subtitle: [], facts: [] },
+    context: { label, description: 'Select an assignment to retire it.' },
+    recordActions: 'progressive',
+    technicalDetails: 'progressive',
+    ...(dialog
+      ? { task: { mode: 'nativeDialog' as const, fallback: 'page' as const } }
+      : {}),
+  };
+  const child = composition.children[0]!;
+  if (dialog)
+    child.sort = [
+      {
+        fieldId: child.columns[0]!
+          .field as SurfaceComposition['fields'][number]['columnId'],
+        direction: 'ascending',
+      },
+    ];
+  child.presentation = {
+    selection: 'explicit',
+    ...(dialog ? { compact: 'scrollTable' as const } : {}),
+    description: 'Assignments scoped to this workshop job.',
+  };
+  child.columns[0]!.presentation = { role: 'primary', priority: 0 };
+  child.columns.push({
+    columnId:
+      'workshop.jobs:column.revision' as SurfaceComposition['fields'][number]['columnId'],
+    label: 'Version',
+    field: 'revision',
+    orderKey: 20,
+    presentation: { role: reverse ? 'detail' : 'quantity', priority: 1 },
+  });
+  composition.actions[0]!.presentation = { placement: 'selection' };
+  (surface.slots as Array<Record<string, unknown>>).push({
+    kind: 'surfaceSlot',
+    schemaVersion: 'v6',
+    slot: 'titleStatus',
+    slotId: 'workshop.jobs:slot.header',
+    orderKey: 1,
+    content: {
+      kind: 'opaqueSurfaceContentReference',
+      schemaVersion: 'v6',
+      targetId: 'workshop.jobs:capability.standard_surface_content',
+    },
+  });
+  return value;
+}
+
+test('v6 composition renders two compiled presentation revisions and renamed non-Sales child actions through the same runtime', async () => {
+  const first = compileFixture(workshopComposition('Work title'));
+  const second = compileFixture(workshopComposition('Assignment heading'));
+  assert.notEqual(first.releaseRoot, second.releaseRoot);
+  const presented = compileFixture(presentedWorkshop('Assignments'));
+  const varied = compileFixture(presentedWorkshop('Responsibilities', true));
+  const dialog = compileFixture(
+    presentedWorkshop('Dialog assignments', false, true),
+  );
+  assert.notEqual(presented.releaseRoot, varied.releaseRoot);
+  const policy = new RecordingPolicy('ALLOW');
+  const root: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.job',
+    recordId: randomUUID(),
+    revision: 1,
+    archived: false,
+    values: { 'workshop.jobs:field.job_name': 'Warehouse audit' },
+  };
+  const child: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.assignment',
+    recordId: randomUUID(),
+    revision: 7,
+    archived: false,
+    values: { 'workshop.jobs:field.assignment_kind': 'Supervisor' },
+  };
+  const observed: SemanticQueryExecutionRequest[] = [];
+  const executor = new InMemoryGenericExecutor();
+  let gateways: SurfaceRuntimeGateways = {
+    ...semanticGateways(policy, executor),
+    queryGateway: new SemanticQueryGateway(policy, {
+      async execute(request) {
+        observed.push(request);
+        return {
+          kind: 'semanticQueryResult',
+          schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+          queryId: request.definition.queryId,
+          outcome: 'exact',
+          unsupportedReason: null,
+          records: request.list ? [child] : [root],
+          ...(request.list
+            ? {
+                listCoverage: {
+                  ...listCoverage(request, 1),
+                  parentScope: request.list.query.parentScope,
+                },
+              }
+            : {}),
+        };
+      },
+    }),
+  };
+  for (const [compiled, label] of [
+    [first, 'Work title'],
+    [second, 'Assignment heading'],
+    [presented, 'Assignments'],
+    [varied, 'Responsibilities'],
+    [dialog, 'Dialog assignments'],
+  ] as const) {
+    const view = await issuedView(
+      runtimeEntry(compiled, policy, {
+        a: identity(tenantA, environmentA, principalA),
+      }),
+      'a',
+    );
+    const surface = readCompiledSurfaceManifest(view).surfaces.find(
+      (value) => value.surfaceId === 'workshop.jobs:surface.job_record',
+    )!;
+    const url = new URL('http://fixture/');
+    url.searchParams.set('surface', surface.surfaceId);
+    url.searchParams.set('record', root.recordId);
+    url.searchParams.set('dataset', 'workshop.jobs:dataset.assignments');
+    url.searchParams.set(
+      'select:workshop.jobs:dataset.assignments',
+      child.recordId,
+    );
+    const data = await loadSurfaceComposition(
+      view,
+      surface,
+      root,
+      url.href,
+      null,
+      gateways,
+    );
+    assert.equal(data.children[0]?.status, 'ready');
+    assert.equal(data.selected?.recordId, child.recordId);
+    if (surface.composition?.presentation) {
+      assert.match(
+        renderCompositionHeader(surface, data),
+        /<h1>Warehouse audit<\/h1>/,
+      );
+      const children = renderCompositionChildren(data, surface, view);
+      assert.match(children, /<strong>Supervisor<\/strong>/);
+      assert.doesNotMatch(children, /Selected record actions/);
+      assert.match(
+        children,
+        compiled === varied
+          ? /Supporting details/
+          : /data-cell-role="quantity"/,
+      );
+      const html = await renderSurfaceRuntimeWithData(view, url.href, gateways);
+      assert.match(html.html, /composition-header/);
+      assert.match(html.html, /composition-local-actions/);
+    } else
+      assert.match(renderCompositionFields(surface, data), new RegExp(label));
+    assert.match(renderCompositionChildren(data), /Supervisor/);
+    assert.match(
+      renderCompositionActions(surface, data, view),
+      /Retire assignment/,
+    );
+    assert.deepEqual(observed.at(-1)?.list?.query.parentScope, {
+      relationId: 'workshop.jobs:relation.assignment_parent',
+      recordId: root.recordId,
+    });
+    if (compiled === dialog)
+      assert.deepEqual(observed.at(-1)?.list?.query.sort, [
+        {
+          fieldId: 'workshop.jobs:field.assignment_kind',
+          direction: 'ascending',
+        },
+      ]);
+  }
+  // Removing the provider's exact-scope receipt must fail the child, never show a broad list.
+  const view = await issuedView(
+    runtimeEntry(first, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const surface = readCompiledSurfaceManifest(view).surfaces.find(
+    (value) => value.surfaceId === 'workshop.jobs:surface.job_record',
+  )!;
+  gateways = { ...gateways, queryGateway: fixedQueryGateway('exact', [child]) };
+  const refused = await loadSurfaceComposition(
+    view,
+    surface,
+    root,
+    '/',
+    null,
+    gateways,
+  );
+  assert.equal(refused.children[0]?.status, 'failed');
+  assert.deepEqual(refused.children[0]?.rows, []);
+  assert.doesNotMatch(
+    renderCompositionActions(surface, refused, view),
+    /Retire assignment/,
+  );
+});
+
+test('Record presentation refuses unresolved headers, ambiguous hierarchy and implicit write selection', () => {
+  for (const mutate of [
+    (value: SurfaceComposition) => {
+      value.presentation!.header.title =
+        'workshop.jobs:column.absent' as SurfaceComposition['fields'][number]['columnId'];
+    },
+    (value: SurfaceComposition) => {
+      value.children[0]!.columns[1]!.presentation!.role = 'primary';
+    },
+    (value: SurfaceComposition) => {
+      value.actions[0]!.presentation!.placement = 'row';
+    },
+    (value: SurfaceComposition) => {
+      value.children[0]!.presentation!.selection = 'none';
+    },
+    (value: SurfaceComposition) => {
+      delete value.presentation;
+    },
+  ]) {
+    const authored = presentedWorkshop('Assignments');
+    mutate(
+      (authored.surfaces as Array<{ composition?: SurfaceComposition }>).find(
+        (value) => value.composition,
+      )!.composition!,
+    );
+    assert.throws(() => normalizeApplicationPackage(authored));
+  }
+});
+
+test('Task presentation requires explicit page fallback and declared child sorting', () => {
+  for (const policy of [
+    { mode: 'nativeDialog' },
+    { mode: 'nativeDialog', fallback: 'hidden' },
+    { mode: 'salesDialog', fallback: 'page' },
+  ]) {
+    const definition = presentedWorkshop('Assignments');
+    const surface = (
+      definition.surfaces as Array<Record<string, unknown>>
+    ).find((surface) => surface.composition)!;
+    (surface.composition as SurfaceComposition).presentation!.task =
+      policy as NonNullable<SurfaceComposition['presentation']>['task'];
+    assert.throws(
+      () => normalizeApplicationPackage(definition),
+      CanonicalModelError,
+    );
+  }
+  const definition = presentedWorkshop('Assignments', false, true);
+  const surface = (definition.surfaces as Array<Record<string, unknown>>).find(
+    (surface) => surface.composition,
+  )!;
+  (surface.composition as SurfaceComposition).children[0]!.sort = [
+    {
+      fieldId:
+        'workshop.jobs:field.unavailable' as SurfaceComposition['fields'][number]['columnId'],
+      direction: 'ascending',
+    },
+  ];
+  assert.throws(
+    () => normalizeApplicationPackage(definition),
+    CanonicalModelError,
+  );
+});
+
+test('v6 composition refuses undeclared context, operation fields and cyclic child dependencies', () => {
+  const valid = workshopComposition('Work title');
+  normalizeApplicationPackage(valid);
+  for (const mutate of [
+    (composition: SurfaceComposition) => {
+      composition.fields[0]!.field = 'workshop.jobs:field.missing';
+    },
+    (composition: SurfaceComposition) => {
+      composition.actions[0]!.conditions = [
+        {
+          value: { source: 'input', inputId: composition.actions[0]!.actionId },
+          operator: 'equals',
+          compare: 'x',
+        },
+      ];
+    },
+    (composition: SurfaceComposition) => {
+      composition.children[0]!.parent!.value = {
+        source: 'selected',
+        datasetId: composition.children[0]!.datasetId,
+        field: 'recordId',
+      };
+    },
+    (composition: SurfaceComposition) => {
+      composition.actions[0]!.steps[0]!.bindings[0]!.path = [
+        'values',
+        'workshop.jobs:field.job_name',
+      ];
+    },
+  ]) {
+    const candidate = structuredClone(valid);
+    const surface = (candidate.surfaces as Array<Record<string, unknown>>).find(
+      (value) => value.composition,
+    )!;
+    mutate(surface.composition as SurfaceComposition);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      /CANON_SCHEMA_INVALID/,
+    );
+  }
+});
+
+test('composed tasks retain reviewed inputs and retry keys, and stop on committed withheld read-back', async () => {
+  for (const withheld of [false, true]) {
+    const definition = workshopComposition('Work title');
+    const authoredSurface = (
+      definition.surfaces as Array<Record<string, unknown>>
+    ).find((surface) => surface.composition)!;
+    const composition = authoredSurface.composition as SurfaceComposition;
+    const ref = (kind: string, targetId: string) => ({
+      kind,
+      schemaVersion: 'v6',
+      targetId,
+    });
+    // Mutate authored data, then compile; no HTML or pinned projection is fabricated.
+    (authoredSurface.composition as unknown as { actions: unknown[] }).actions =
+      [
+        {
+          actionId: 'workshop.jobs:action.rename',
+          label: 'Rename work',
+          description: 'Update the work title.',
+          orderKey: 10,
+          conditions: [],
+          inputs: [
+            {
+              inputId: 'workshop.jobs:input.title',
+              label: 'New title',
+              orderKey: 10,
+              type: 'text',
+              required: true,
+            },
+          ],
+          steps: [
+            {
+              stepId: 'workshop.jobs:step.rename',
+              operation: ref(
+                'operationReference',
+                'workshop.jobs:operation.job_update',
+              ),
+              bindings: [
+                {
+                  path: ['recordId'],
+                  value: { source: 'record', field: 'recordId' },
+                },
+                {
+                  path: ['expectedRevision'],
+                  value: { source: 'record', field: 'revision' },
+                },
+                {
+                  path: ['patch', 'workshop.jobs:field.job_name'],
+                  value: {
+                    source: 'input',
+                    inputId: 'workshop.jobs:input.title',
+                  },
+                },
+              ],
+            },
+            ...(withheld
+              ? [
+                  {
+                    stepId: 'workshop.jobs:step.after',
+                    operation: ref(
+                      'operationReference',
+                      'workshop.jobs:operation.job_archive',
+                    ),
+                    bindings: [
+                      {
+                        path: ['recordId'],
+                        value: {
+                          source: 'step',
+                          stepId: 'workshop.jobs:step.rename',
+                          field: 'recordId',
+                        },
+                      },
+                      {
+                        path: ['expectedRevision'],
+                        value: {
+                          source: 'step',
+                          stepId: 'workshop.jobs:step.rename',
+                          field: 'revision',
+                        },
+                      },
+                    ],
+                  },
+                ]
+              : []),
+          ],
+        },
+      ];
+    composition.children = [];
+    const operation = (
+      definition.operations as Array<Record<string, unknown>>
+    ).find(
+      (operation) =>
+        operation.operationId === 'workshop.jobs:operation.job_update',
+    )!;
+    operation.confirmation = 'humanRequired';
+    const compiled = compileFixture(definition);
+    const policy = new RecordingPolicy('ALLOW');
+    const view = await issuedView(
+      runtimeEntry(compiled, policy, {
+        a: identity(tenantA, environmentA, principalA),
+      }),
+      'a',
+    );
+    const surface = readCompiledSurfaceManifest(view).surfaces.find(
+      (surface) => surface.surfaceId === 'workshop.jobs:surface.job_record',
+    )!;
+    const root: SemanticRecordDto = {
+      entityId: 'workshop.jobs:entity.job',
+      recordId: randomUUID(),
+      revision: 3,
+      archived: false,
+      values: { 'workshop.jobs:field.job_name': 'Original' },
+    };
+    const calls: SemanticOperationExecutionRequest[] = [];
+    const mediation = new SemanticOperationMediationAuthority();
+    const gateways: SurfaceRuntimeGateways = {
+      queryGateway: fixedQueryGateway('exact', [root]),
+      operationMediation: mediation,
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        {
+          async execute(request) {
+            calls.push(request);
+            if (!withheld && calls.length === 1)
+              throw new Error('Simulated lost transport after acceptance');
+            return {
+              kind: 'semanticOperationResult',
+              schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+              operationId: request.definition.operationId,
+              outcome: 'succeeded',
+              readBack: withheld ? null : { ...root, revision: 4 },
+              unsupportedReason: null,
+              trust: {
+                invocationId: randomUUID(),
+                changeDocumentId: randomUUID(),
+                domainEventId: randomUUID(),
+                outboxId: randomUUID(),
+              },
+            };
+          },
+          async recordNonAccepted() {},
+        },
+        mediation,
+      ),
+    };
+    const url = `/?surface=${encodeURIComponent(surface.surfaceId)}&record=${root.recordId}`;
+    const submit = (body: Record<string, string>) =>
+      submitCompositionAction(
+        view,
+        surface,
+        url,
+        { compositionAction: 'workshop.jobs:action.rename', ...body },
+        gateways,
+        (html) => ({ statusCode: 200, html }),
+      );
+    const initial = await submit({});
+    const taskToken = hiddenValue(initial.html, 'taskToken');
+    const invalid = await submit({
+      taskToken,
+      taskStage: 'prepare',
+      'workshop.jobs:input.title': '',
+    });
+    assert.match(invalid.html, /COMPOSITION_INPUT_INVALID/);
+    assert.equal(calls.length, 0);
+    const preview = await submit({
+      taskToken,
+      taskStage: 'prepare',
+      'workshop.jobs:input.title': 'Reviewed title',
+    });
+    assert.match(preview.html, /Reviewed title/);
+    assert.equal(calls.length, 0);
+    await assert.rejects(() =>
+      gateways.operationGateway.invoke(
+        view,
+        {
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          operationId: 'workshop.jobs:operation.job_update',
+          input: {
+            recordId: root.recordId,
+            expectedRevision: 3,
+            patch: { 'workshop.jobs:field.job_name': 'Bypass' },
+          },
+          idempotencyKey: randomUUID(),
+          confirmationGrant: null,
+        },
+        mediation.issueInvocation(view, 'AGENT'),
+      ),
+    );
+    assert.equal(
+      calls.length,
+      0,
+      'the actual gateway rejects missing confirmation',
+    );
+    const result = await submit({
+      taskToken,
+      taskStage: 'confirm',
+      preparedId: hiddenValue(preview.html, 'preparedId'),
+    });
+    assert.equal(calls.length, 1);
+    if (withheld) {
+      assert.match(result.html, /COMPOSITION_COMMITTED_WITHHELD/);
+      await submit({ taskToken, taskStage: 'retry' });
+      assert.equal(
+        calls.length,
+        1,
+        'no dependent step runs after withheld read-back',
+      );
+    } else {
+      assert.match(result.html, /COMPOSITION_UNCERTAIN/);
+      assert.match(result.html, /Reviewed title/);
+      const done = await submit({
+        taskToken,
+        taskStage: 'retry',
+        'workshop.jobs:input.title': 'Tampered',
+      });
+      assert.match(done.html, /COMPOSITION_COMPLETE/);
+      assert.equal(calls.length, 2);
+      assert.deepEqual(calls[1]!.input, calls[0]!.input);
+      assert.equal(calls[1]!.idempotencyKey, calls[0]!.idempotencyKey);
+      assert.deepEqual(calls[1]!.input, {
+        recordId: root.recordId,
+        expectedRevision: 3,
+        patch: { 'workshop.jobs:field.job_name': 'Reviewed title' },
+      });
+    }
+  }
+});
+
+test('cached pinned query catalogs keep whole-catalog refusal, view isolation and current policy', async () => {
+  const compiled = compileFixture();
+  let allowed = true;
+  const policy = new RecordingPolicy(() => (allowed ? 'ALLOW' : 'DENY'));
+  const identities = { a: identity(tenantA, environmentA, principalA) };
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, identities),
+    'a',
+  );
+  const queryId = `${FIXTURE_IDS.namespace}:query.master_get`;
+  assert.ok(registeredSemanticQueryFromPinnedView(view, queryId));
+  assert.ok(registeredSemanticQueryFromPinnedView(view, queryId));
+  const mutablePayload = structuredClone(view.projections.query.payload) as {
+    queries: unknown[];
+  };
+  const projectionOnly = {
+    projections: {
+      query: { ...view.projections.query, payload: mutablePayload },
+    },
+  } as unknown as RequestRuntimeView;
+  assert.ok(registeredSemanticQueryFromPinnedView(projectionOnly, queryId));
+  mutablePayload.queries.push(mutablePayload.queries[0]);
+  assert.throws(
+    () => registeredSemanticQueryFromPinnedView(projectionOnly, queryId),
+    /duplicate queryId/,
+  );
+  const gateway = new SemanticQueryGateway(
+    policy,
+    new InMemoryGenericExecutor(),
+  );
+  const request = {
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    queryId,
+    arguments: {
+      recordId: 'a6000000-0000-4000-8000-000000000006',
+      includeArchived: false,
+    },
+  };
+  await gateway.invoke(view, request);
+  allowed = false;
+  await assert.rejects(
+    () => gateway.invoke(view, request),
+    /permission|denied/i,
+  );
+  const malformed = await issuedView(
+    runtimeEntry(compiled, policy, identities, (projections) => {
+      const payload = structuredClone(projections.query.payload) as {
+        queries: unknown[];
+      };
+      payload.queries.push(payload.queries[0]);
+      return {
+        ...projections,
+        query: { ...projections.query, payload: payload as ImmutableJsonValue },
+      };
+    }),
+    'a',
+  );
+  // A valid first match must not bypass a duplicate later in another view's
+  // catalog; failure must not publish a partially validated cache either.
+  for (const id of [queryId, `${FIXTURE_IDS.namespace}:query.master_list`])
+    assert.throws(
+      () => registeredSemanticQueryFromPinnedView(malformed, id),
+      /duplicate queryId/,
+    );
+});
+
+function deferredSignal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function correctionTaskFixture(dialog = false, summary = false) {
+  const definition = presentedWorkshop('Work title', false, dialog);
+  const surface = (definition.surfaces as Array<Record<string, unknown>>).find(
+    (value) => value.composition,
+  )!;
+  const composition = surface.composition as SurfaceComposition;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  // A separate declared permission lets a label dependency fail while root and child reads remain allowed.
+  const fields = definition.fields as Array<Record<string, unknown>>;
+  const nameField = fields.find(
+    (value) => value.fieldId === 'workshop.jobs:field.job_name',
+  )!;
+  for (const [index, suffix] of ['amount', 'notes', 'utc_instant'].entries())
+    fields.push({
+      ...structuredClone(nameField),
+      fieldId: `workshop.jobs:field.job_${suffix}`,
+      label: suffix,
+      orderKey: 100 + index,
+      presence: 'optional',
+    });
+  const queries = definition.queries as Array<Record<string, unknown>>;
+  for (const type of ['get', 'list']) {
+    const source = queries.find(
+      (value) => value.queryId === `workshop.jobs:query.job_${type}`,
+    )!;
+    queries.push({
+      ...JSON.parse(
+        JSON.stringify(source).replaceAll(
+          ':selection.job_',
+          ':selection.location_',
+        ),
+      ),
+      queryId: `workshop.jobs:query.location_${type}`,
+      permission: ref(
+        'permissionReference',
+        type === 'get'
+          ? 'workshop.jobs:permission.location_label_read'
+          : 'workshop.jobs:permission.location_read',
+      ),
+    });
+  }
+  for (const suffix of ['location_read', 'location_label_read'])
+    (definition.permissions as unknown[]).push({
+      kind: 'permissionDefinition',
+      schemaVersion: 'v6',
+      permissionId: `workshop.jobs:permission.${suffix}`,
+      label: 'Read location labels',
+      action: 'read',
+      resource: ref('entityReference', 'workshop.jobs:entity.job'),
+    });
+  composition.fields.push({
+    columnId: 'workshop.jobs:column.location',
+    label: 'Location',
+    orderKey: 20,
+    field: 'recordId',
+    reference: {
+      query: ref('queryReference', 'workshop.jobs:query.location_get'),
+      labelField: ref('fieldReference', 'workshop.jobs:field.job_name'),
+    },
+  } as SurfaceComposition['fields'][number]);
+  composition.actions = [
+    {
+      actionId: 'workshop.jobs:action.change',
+      label: 'Change assignment',
+      description: 'Review assignment inputs.',
+      orderKey: 10,
+      datasetId: 'workshop.jobs:dataset.assignments',
+      conditions: [],
+      inputs: [
+        {
+          inputId: 'workshop.jobs:input.quantity',
+          label: 'Quantity',
+          orderKey: 10,
+          type: 'quantity',
+          required: true,
+        },
+        {
+          inputId: 'workshop.jobs:input.location',
+          label: 'Location',
+          orderKey: 20,
+          type: 'reference',
+          required: true,
+          query: ref('queryReference', 'workshop.jobs:query.location_list'),
+          labelField: ref('fieldReference', 'workshop.jobs:field.job_name'),
+        },
+      ],
+      steps: [
+        {
+          stepId: 'workshop.jobs:step.change',
+          operation: ref(
+            'operationReference',
+            'workshop.jobs:operation.job_update',
+          ),
+          bindings: [
+            {
+              path: ['recordId'],
+              value: { source: 'record', field: 'recordId' },
+            },
+            {
+              path: ['expectedRevision'],
+              value: { source: 'record', field: 'revision' },
+            },
+            {
+              path: ['patch', 'workshop.jobs:field.job_amount'],
+              value: {
+                source: 'input',
+                inputId: 'workshop.jobs:input.quantity',
+              },
+            },
+            {
+              path: ['patch', 'workshop.jobs:field.job_notes'],
+              value: {
+                source: 'input',
+                inputId: 'workshop.jobs:input.location',
+              },
+            },
+            {
+              path: ['patch', 'workshop.jobs:field.job_utc_instant'],
+              value: { source: 'generated', value: 'instant' },
+            },
+          ],
+        },
+        {
+          stepId: 'workshop.jobs:step.after',
+          operation: ref(
+            'operationReference',
+            'workshop.jobs:operation.job_archive',
+          ),
+          bindings: [
+            {
+              path: ['recordId'],
+              value: {
+                source: 'step',
+                stepId: 'workshop.jobs:step.change',
+                field: 'recordId',
+              },
+            },
+            {
+              path: ['expectedRevision'],
+              value: {
+                source: 'step',
+                stepId: 'workshop.jobs:step.change',
+                field: 'revision',
+              },
+            },
+          ],
+        },
+      ],
+    },
+  ] as unknown as SurfaceComposition['actions'];
+  if (summary) {
+    const child = composition.children[0]!;
+    const source = fields.find(
+      (value) => value.fieldId === 'workshop.jobs:field.assignment_kind',
+    )!;
+    for (const [index, suffix] of ['amount', 'unit'].entries()) {
+      fields.push({
+        ...structuredClone(source),
+        fieldId: `workshop.jobs:field.assignment_${suffix}`,
+        fieldType: {
+          kind: 'textFieldType',
+          schemaVersion: 'v6',
+          maximumLength: 240,
+        },
+        label: suffix,
+        orderKey: 120 + index,
+      });
+      for (const query of queries.filter(
+        (value) =>
+          (value.sourceEntity as { targetId: string }).targetId ===
+          'workshop.jobs:entity.assignment',
+      ))
+        (query.selections as unknown[]).push({
+          kind: 'querySelection',
+          schemaVersion: 'v6',
+          selectionId: `workshop.jobs:selection.assignment_${suffix}_${query.queryType}`,
+          field: ref(
+            'fieldReference',
+            `workshop.jobs:field.assignment_${suffix}`,
+          ),
+          orderKey: 120 + index,
+        });
+      child.columns.push({
+        columnId: `workshop.jobs:column.${suffix}`,
+        label: suffix,
+        orderKey: 120 + index,
+        field: `workshop.jobs:field.assignment_${suffix}`,
+        presentation: {
+          role: suffix === 'amount' ? 'quantity' : 'secondary',
+          priority: 120 + index,
+        },
+      } as SurfaceComposition['fields'][number]);
+    }
+    const column = (columnId: string) => ({
+      datasetId: child.datasetId,
+      columnId: `workshop.jobs:column.${columnId}`,
+    });
+    composition.actions[0]!.presentation = {
+      placement: 'selection',
+      task: {
+        summary: {
+          identity: column('role'),
+          quantity: {
+            value: column('amount'),
+            unit: column('unit'),
+            label: 'hours assigned',
+          },
+        },
+        confirmation: {
+          title: 'Assign',
+          reviewLabel: 'Review assignment',
+          confirmLabel: 'Confirm assignment',
+          quantity: {
+            source: 'input',
+            inputId: 'workshop.jobs:input.quantity',
+          },
+          unit: column('unit'),
+          context: { source: 'input', inputId: 'workshop.jobs:input.location' },
+        },
+      },
+    } as NonNullable<SurfaceComposition['actions'][number]['presentation']>;
+  }
+  (definition.operations as Array<Record<string, unknown>>).find(
+    (value) => value.operationId === 'workshop.jobs:operation.job_update',
+  )!.confirmation = 'humanRequired';
+  const compiled = compileFixture(definition);
+  const denied = new Set<string>();
+  const policy = new RecordingPolicy((request) =>
+    denied.has(request.permissionId) ? 'DENY' : 'ALLOW',
+  );
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const root: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.job',
+    recordId: randomUUID(),
+    revision: 3,
+    archived: false,
+    values: { 'workshop.jobs:field.job_name': 'PROTECTED_ROOT_SENTINEL' },
+  };
+  const child: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.assignment',
+    recordId: randomUUID(),
+    revision: 7,
+    archived: false,
+    values: {
+      'workshop.jobs:field.assignment_kind': 'PROTECTED_CHILD_SENTINEL',
+      ...(summary
+        ? {
+            'workshop.jobs:field.assignment_amount': '12',
+            'workshop.jobs:field.assignment_unit': 'hours',
+          }
+        : {}),
+    },
+  };
+  const locations = ['A', 'B'].map((suffix) => ({
+    ...root,
+    recordId: randomUUID(),
+    values: { 'workshop.jobs:field.job_name': `PROTECTED_LOCATION_${suffix}` },
+  }));
+  const calls: SemanticOperationExecutionRequest[] = [];
+  const effects: string[] = [];
+  let beforeReferenceList: (() => Promise<void>) | undefined;
+  let execute:
+    ((request: SemanticOperationExecutionRequest) => Promise<void>) | undefined;
+  let withheld = false;
+  const mediation = new SemanticOperationMediationAuthority();
+  const trust = {
+    invocationId: randomUUID(),
+    changeDocumentId: randomUUID(),
+    domainEventId: randomUUID(),
+    outboxId: randomUUID(),
+  };
+  const gateways: SurfaceRuntimeGateways = {
+    queryGateway: new SemanticQueryGateway(policy, {
+      async execute(request) {
+        if (request.definition.queryId === 'workshop.jobs:query.location_list')
+          await beforeReferenceList?.();
+        const records = request.definition.queryId.includes(':query.location_')
+          ? request.list
+            ? locations
+            : [locations[0]!]
+          : request.list
+            ? [child]
+            : [root];
+        return {
+          kind: 'semanticQueryResult',
+          schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+          queryId: request.definition.queryId,
+          outcome: 'exact',
+          unsupportedReason: null,
+          records,
+          ...(request.list
+            ? {
+                listCoverage: {
+                  ...listCoverage(request, records.length),
+                  parentScope: request.list.query.parentScope,
+                },
+              }
+            : {}),
+        };
+      },
+    }),
+    operationMediation: mediation,
+    operationGateway: new SemanticOperationGateway(
+      policy,
+      {
+        async execute(request) {
+          calls.push(request);
+          if (!effects.includes(request.idempotencyKey))
+            effects.push(request.idempotencyKey);
+          await execute?.(request);
+          return {
+            kind: 'semanticOperationResult',
+            schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+            operationId: request.definition.operationId,
+            outcome: 'succeeded',
+            readBack: withheld ? null : { ...root, revision: 4 },
+            unsupportedReason: null,
+            trust,
+          };
+        },
+        async recordNonAccepted() {},
+      },
+      mediation,
+    ),
+  };
+  const url = `/?surface=workshop.jobs%3Asurface.job_record&record=${root.recordId}&dataset=workshop.jobs%3Adataset.assignments&select:workshop.jobs:dataset.assignments=${child.recordId}`;
+  const submit = (body: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      view,
+      url,
+      { compositionAction: 'workshop.jobs:action.change', ...body },
+      gateways,
+    );
+  const initial = await submit({});
+  assert.match(initial.html, /PROTECTED_ROOT_SENTINEL/);
+  assert.match(initial.html, /PROTECTED_CHILD_SENTINEL/);
+  assert.match(initial.html, /PROTECTED_LOCATION_A/);
+  const taskToken = hiddenValue(initial.html, 'taskToken');
+  const prepare = (quantity: string, location: string) =>
+    submit({
+      taskToken,
+      taskStage: 'prepare',
+      'workshop.jobs:input.quantity': quantity,
+      'workshop.jobs:input.location': location,
+    });
+  const confirmation = (html: string) => ({
+    taskToken,
+    taskStage: 'confirm',
+    preparedId: /name="preparedId" value="([^"]*)"/.exec(html)?.[1] ?? '',
+  });
+  return {
+    initial,
+    submit,
+    prepare,
+    confirmation,
+    taskToken,
+    denied,
+    calls,
+    effects,
+    locations,
+    renameChild(value: string) {
+      (child.values as Record<string, string>)[
+        'workshop.jobs:field.assignment_kind'
+      ] = value;
+    },
+    trust,
+    beforeReferences(value: typeof beforeReferenceList) {
+      beforeReferenceList = value;
+    },
+    onExecute(value: typeof execute) {
+      execute = value;
+    },
+    setWithheld() {
+      withheld = true;
+    },
+  };
+}
+
+const assertTaskRedacted = (response: { html: string }) => {
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /PROTECTED_(?:ROOT_SENTINEL|CHILD_SENTINEL|LOCATION_[AB])/,
+    'the complete response must not redisclose protected cached data',
+  );
+};
+
+test('explicit Task summary and frozen proposal reuse non-Sales declarations in dialog and page', async (t) => {
+  for (const dialog of [true, false])
+    await t.test(dialog ? 'native dialog' : 'page', async () => {
+      const fixture = await correctionTaskFixture(dialog, true);
+      const summary =
+        fixture.initial.html.match(
+          /<section class="composition-task-summary"[^>]*>[\s\S]*?<\/section>/,
+        )?.[0] ?? '';
+      assert.match(summary, /PROTECTED_CHILD_SENTINEL/);
+      assert.match(summary, /12 hours/);
+      assert.doesNotMatch(summary, /Version/);
+      assert.match(
+        fixture.initial.html,
+        /<summary>Supporting details<\/summary>/,
+      );
+      let reads = 0;
+      fixture.beforeReferences(async () => {
+        if (++reads === 2) {
+          fixture.renameChild('CURRENT_ASSIGNMENT_LABEL');
+          (fixture.locations[0]!.values as Record<string, string>)[
+            'workshop.jobs:field.job_name'
+          ] = 'CURRENT_LOCATION_LABEL';
+        }
+      });
+      const review = await fixture.prepare('8', fixture.locations[0]!.recordId);
+      const proposed =
+        review.html.match(
+          /<section class="composition-task-confirmation"[^>]*>[\s\S]*?<\/section>/,
+        )?.[0] ?? '';
+      assert.match(proposed, /Assign <strong>8 hours<\/strong>/);
+      assert.match(proposed, /PROTECTED_CHILD_SENTINEL/);
+      assert.match(proposed, /PROTECTED_LOCATION_A/);
+      assert.doesNotMatch(proposed, /CURRENT_LOCATION_LABEL/);
+      assert.match(review.html, />Confirm assignment<\/button>/);
+      assert.equal(fixture.calls.length, 0);
+      await fixture.submit({
+        ...fixture.confirmation(review.html),
+        'workshop.jobs:input.quantity': '99',
+        'workshop.jobs:input.location': fixture.locations[1]!.recordId,
+      });
+      assert.equal(fixture.calls.length, 2);
+      assert.equal(
+        (fixture.calls[0]!.input as { patch: Record<string, string> }).patch[
+          'workshop.jobs:field.job_amount'
+        ],
+        '8',
+      );
+      await fixture.submit(fixture.confirmation(review.html));
+      assert.equal(fixture.calls.length, 2);
+      fixture.denied.add('workshop.jobs:permission.assignment_read');
+      assertTaskRedacted(
+        await fixture.submit(fixture.confirmation(review.html)),
+      );
+    });
+});
+
+test('Task summaries refuse foreign selections, mismatched scope and undeclared confirmation inputs', () => {
+  for (const change of [
+    (task: TaskSummary) => {
+      task.summary.identity.datasetId = 'northstar.app:dataset.order_shipments';
+    },
+    (task: TaskSummary) => {
+      task.summary.quantity!.unit.datasetId =
+        'northstar.app:dataset.fulfillment_lines';
+    },
+    (task: TaskSummary) => {
+      task.confirmation.quantity = {
+        source: 'input',
+        inputId: 'northstar.app:input.location',
+      };
+    },
+    (task: TaskSummary) => {
+      task.summary.identity.columnId = 'northstar.app:column.missing';
+    },
+  ]) {
+    const definition = composedApplicationDefinition();
+    const surface = (
+      definition.surfaces as Array<{ composition?: SurfaceComposition }>
+    ).find((value) =>
+      value.composition?.actions.some(
+        (action) => action.actionId === 'northstar.app:action.ship_reserved',
+      ),
+    )!;
+    const task = surface.composition!.actions.find(
+      (action) => action.actionId === 'northstar.app:action.ship_reserved',
+    )!.presentation!.task!;
+    change(task as unknown as TaskSummary);
+    assert.throws(
+      () => compileFixture(definition),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        /task/.test(JSON.stringify(error)),
+    );
+  }
+});
+type TaskSummary = {
+  summary: {
+    identity: { datasetId: string; columnId: string };
+    quantity?: { unit: { datasetId: string } };
+  };
+  confirmation: {
+    quantity:
+      | { source: 'input'; inputId: string }
+      | { source: 'column'; datasetId: string; columnId: string };
+  };
+};
+
+test('native Task policy reuses non-Sales forms, fresh Record context and exact prepared identity', async () => {
+  const fixture = await correctionTaskFixture(true);
+  const review = await fixture.prepare('8', fixture.locations[0]!.recordId);
+  assert.equal((review.html.match(/<dialog /g) ?? []).length, 1);
+  assert.match(review.html, /data-task-fallback="page"/);
+  assert.match(review.html, /data-task-phase="review"/);
+  assert.match(
+    review.html,
+    /data-composition-dataset="workshop.jobs:dataset.assignments"/,
+  );
+  assert.equal((review.html.match(/name="preparedId"/g) ?? []).length, 1);
+  assert.equal(fixture.calls.length, 0);
+  const replacement = await fixture.prepare(
+    '5',
+    fixture.locations[1]!.recordId,
+  );
+  await fixture.submit(fixture.confirmation(review.html));
+  assert.equal(fixture.calls.length, 0);
+  const result = await fixture.submit(fixture.confirmation(replacement.html));
+  assert.match(result.html, /data-task-phase="result"/);
+  assert.match(result.html, /Closing this task does not undo submitted work/);
+  assert.equal(fixture.calls.length, 2);
+  await fixture.submit(fixture.confirmation(replacement.html));
+  assert.equal(fixture.calls.length, 2);
+  fixture.denied.add('workshop.jobs:permission.assignment_read');
+  const denied = await fixture.submit(fixture.confirmation(replacement.html));
+  assertTaskRedacted(denied);
+  assert.doesNotMatch(denied.html, /<dialog /);
+});
+
+test('P1 task response rechecks root, child and label reads and redacts committed withheld repeats', async (t) => {
+  for (const permission of [
+    'job_read',
+    'assignment_read',
+    'location_label_read',
+  ])
+    await t.test(permission, async () => {
+      const fixture = await correctionTaskFixture();
+      const preview = await fixture.prepare(
+        '8',
+        fixture.locations[0]!.recordId,
+      );
+      assert.match(preview.html, /PROTECTED_LOCATION_A/);
+      fixture.denied.add(`workshop.jobs:permission.${permission}`);
+      const denied = await fixture.submit({
+        taskToken: fixture.taskToken,
+        taskStage: 'edit',
+      });
+      assertTaskRedacted(denied);
+      assert.equal(fixture.calls.length, 0);
+    });
+  await t.test('committed withheld and repeated requests', async () => {
+    const fixture = await correctionTaskFixture();
+    const preview = await fixture.prepare('8', fixture.locations[0]!.recordId);
+    fixture.setWithheld();
+    fixture.onExecute(async () => {
+      fixture.denied.add('workshop.jobs:permission.location_read');
+    });
+    for (const body of [
+      fixture.confirmation(preview.html),
+      { taskToken: fixture.taskToken, taskStage: 'retry' },
+      fixture.confirmation(preview.html),
+    ]) {
+      const response = await fixture.submit(body);
+      assert.equal(
+        response.statusCode,
+        200,
+        'a committed operation remains success when display is withheld',
+      );
+      assert.match(response.html, /COMPOSITION_COMMITTED_WITHHELD/);
+      assertTaskRedacted(response);
+      assert.equal(fixture.calls.length, 1);
+      assert.equal(fixture.effects.length, 1);
+    }
+  });
+});
+
+test('P2 stale review cannot confirm replacement inputs', async () => {
+  const fixture = await correctionTaskFixture();
+  const first = await fixture.prepare('8', fixture.locations[0]!.recordId);
+  const latest = await fixture.prepare('5', fixture.locations[1]!.recordId);
+  await fixture.submit(fixture.confirmation(first.html));
+  assert.equal(
+    fixture.calls.length,
+    0,
+    'stale review form must not dispatch the latest session values',
+  );
+  await fixture.submit(fixture.confirmation(latest.html));
+  assert.equal(fixture.calls.length, 2);
+  assert.deepEqual(
+    (asRecord(fixture.calls[0]!.input).patch as Record<string, unknown>)[
+      'workshop.jobs:field.job_amount'
+    ],
+    '5',
+  );
+  assert.deepEqual(
+    (asRecord(fixture.calls[0]!.input).patch as Record<string, unknown>)[
+      'workshop.jobs:field.job_notes'
+    ],
+    fixture.locations[1]!.recordId,
+  );
+});
+
+test('P2 missing forged and unprepared confirmations never dispatch', async () => {
+  const fixture = await correctionTaskFixture();
+  for (const preparedId of ['', 'forged'])
+    await fixture.submit({
+      taskToken: fixture.taskToken,
+      taskStage: 'confirm',
+      preparedId,
+    });
+  assert.equal(fixture.calls.length, 0);
+  const valid = await fixture.prepare('5', fixture.locations[1]!.recordId);
+  for (const preparedId of ['', 'forged'])
+    await fixture.submit({
+      taskToken: fixture.taskToken,
+      taskStage: 'confirm',
+      preparedId,
+    });
+  assert.equal(fixture.calls.length, 0);
+  await fixture.submit(fixture.confirmation(valid.html));
+  await fixture.submit(fixture.confirmation(valid.html));
+  assert.equal(
+    fixture.calls.length,
+    2,
+    'completed confirmation cannot repost either step',
+  );
+  assert.equal(fixture.effects.length, 2);
+});
+
+test('P2 deferred preparation cannot overwrite newer confirmed inputs and retry keeps exact keys', async () => {
+  const fixture = await correctionTaskFixture();
+  const validating = deferredSignal();
+  const finishValidation = deferredSignal();
+  let referenceReads = 0;
+  fixture.beforeReferences(async () => {
+    if (referenceReads++ === 0) {
+      validating.resolve();
+      await finishValidation.promise;
+    }
+  });
+  const older = fixture.prepare('8', fixture.locations[0]!.recordId);
+  await validating.promise;
+  const latest = await fixture.prepare('5', fixture.locations[1]!.recordId);
+  const executing = deferredSignal();
+  const finishExecution = deferredSignal();
+  fixture.onExecute(async () => {
+    if (fixture.calls.length === 1) {
+      executing.resolve();
+      await finishExecution.promise;
+      throw new Error('Controlled response loss after fixture effect');
+    }
+  });
+  const confirmed = fixture.submit(fixture.confirmation(latest.html));
+  await executing.promise;
+  finishValidation.resolve();
+  const superseded = await older;
+  assert.match(superseded.html, /COMPOSITION_TASK_UNAVAILABLE/);
+  const duplicate = await fixture.submit(fixture.confirmation(latest.html));
+  assert.match(duplicate.html, /COMPOSITION_BUSY/);
+  await fixture.prepare('9', fixture.locations[0]!.recordId);
+  assert.equal(fixture.calls.length, 1);
+  finishExecution.resolve();
+  assert.match((await confirmed).html, /COMPOSITION_UNCERTAIN/);
+  const retried = await fixture.submit({
+    taskToken: fixture.taskToken,
+    taskStage: 'retry',
+    'workshop.jobs:input.quantity': '99',
+  });
+  assert.match(retried.html, /COMPOSITION_COMPLETE/);
+  assert.equal(fixture.calls.length, 3);
+  assert.deepEqual(
+    fixture.calls[1]!.input,
+    fixture.calls[0]!.input,
+    'generated instant, reviewed values and revision are unchanged',
+  );
+  assert.equal(
+    fixture.calls[1]!.idempotencyKey,
+    fixture.calls[0]!.idempotencyKey,
+  );
+  const patch = asRecord(fixture.calls[1]!.input).patch as Record<
+    string,
+    unknown
+  >;
+  assert.equal(patch['workshop.jobs:field.job_amount'], '5');
+  assert.equal(
+    patch['workshop.jobs:field.job_notes'],
+    fixture.locations[1]!.recordId,
+  );
+  assert.equal(
+    fixture.effects.length,
+    2,
+    'same-key retry adds no second fixture effect',
+  );
+});
+
+test('P1 uncertain response redacts preview inputs after dependency revocation and permits same-key recovery', async () => {
+  const fixture = await correctionTaskFixture();
+  const prepared = await fixture.prepare('5', fixture.locations[1]!.recordId);
+  fixture.onExecute(async () => {
+    if (fixture.calls.length === 1) {
+      fixture.denied.add('workshop.jobs:permission.location_read');
+      throw new Error('Controlled response loss');
+    }
+  });
+  const uncertain = await fixture.submit(fixture.confirmation(prepared.html));
+  assert.match(uncertain.html, /COMPOSITION_UNCERTAIN/);
+  assertTaskRedacted(uncertain);
+  assert.equal(fixture.calls.length, 1);
+  fixture.denied.clear();
+  const recovered = await fixture.submit({
+    taskToken: fixture.taskToken,
+    taskStage: 'retry',
+  });
+  assert.equal(recovered.statusCode, 200);
+  assert.match(recovered.html, /PROTECTED_ROOT_SENTINEL/);
+  assert.match(recovered.html, /COMPOSITION_COMPLETE/);
+  assert.deepEqual(fixture.calls[1]!.input, fixture.calls[0]!.input);
+  assert.equal(
+    fixture.calls[1]!.idempotencyKey,
+    fixture.calls[0]!.idempotencyKey,
+  );
+});

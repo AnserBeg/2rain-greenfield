@@ -15,6 +15,7 @@ import {
 import {
   COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   COMPILER_SEMANTIC_PROFILE_VERSION,
+  COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   HASH_DOMAINS,
@@ -164,6 +165,7 @@ export function lowerBaseProjectionPayloads(
     packageRevision,
     queryById,
     compilerSemanticProfileVersion,
+    verificationPackageRevision,
   );
   const plans = [
     plan(
@@ -213,7 +215,7 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.agentDiscovery,
       namespace,
       packageScope,
-      agentDiscoveryPayload(packageRevision),
+      agentDiscoveryPayload(packageRevision, verificationPackageRevision),
     ),
     plan(
       PROJECTION_FAMILY_IDS.verificationPlan,
@@ -664,11 +666,13 @@ function surfaceManifestPayload(
   packageRevision: NormalizedApplicationPackage,
   queryById: Map<string, NormalizedApplicationPackage['queries'][number]>,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
+  original: VersionedNormalizedApplicationPackage,
 ): {
   readonly payload: unknown;
   readonly payloadSchemaVersion:
     | typeof FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION
-    | typeof GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION;
+    | typeof GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION
+    | typeof COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION;
   readonly requiredRuntimeCapability: RuntimeCapabilityRequirement;
 } {
   const navigation = surfaceNavigationTree(packageRevision);
@@ -681,9 +685,18 @@ function surfaceManifestPayload(
     compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION;
   // Load-bearing compatibility fence: labelling grouped output as v0 lets
   // v0 readers ignore the tree and silently reconstruct unreachable overflow.
-  const payloadSchemaVersion = navigation
-    ? GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION
-    : FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION;
+  const composed = original.languageVersion === 'v6';
+  const compositions = new Map(
+    original.surfaces.map((surface) => [
+      surface.surfaceId,
+      'composition' in surface ? surface.composition : undefined,
+    ]),
+  );
+  const payloadSchemaVersion = composed
+    ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
+    : navigation
+      ? GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION
+      : FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION;
   return {
     payload: {
       kind: 'surfaceManifestPayload',
@@ -695,6 +708,9 @@ function surfaceManifestPayload(
             .get(surface.dataSource.targetId)
             ?.selections.map((selection) => selection.field.targetId) ?? [];
         return {
+          ...(compositions.get(surface.surfaceId)
+            ? { composition: compositions.get(surface.surfaceId) }
+            : {}),
           archetype: surface.archetype,
           dataSourceQueryId: surface.dataSource.targetId,
           fieldIds,
@@ -779,7 +795,38 @@ function surfaceManifestPayload(
     // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
-      minimumVersion: emitsFieldKinds ? 3 : navigation ? 2 : 1,
+      minimumVersion: [...compositions.values()].some(
+        (value) =>
+          value?.actions.some((action) => action.presentation?.task) ||
+          value?.children.some((child) => child.presentation?.selectedActions),
+      )
+        ? 7
+        : [...compositions.values()].some(
+              (value) =>
+                value?.presentation?.task ||
+                value?.children.some(
+                  (child) => child.sort?.length || child.presentation?.compact,
+                ),
+            )
+          ? 6
+          : [...compositions.values()].some(
+                (value) =>
+                  value?.presentation ||
+                  value?.children.some(
+                    (child) =>
+                      child.presentation ||
+                      child.columns.some((column) => column.presentation),
+                  ) ||
+                  value?.actions.some((action) => action.presentation),
+              )
+            ? 5
+            : composed
+              ? 4
+              : emitsFieldKinds
+                ? 3
+                : navigation
+                  ? 2
+                  : 1,
     },
   };
 }
@@ -903,7 +950,11 @@ function policyReferencesPayload(
 
 function agentDiscoveryPayload(
   packageRevision: NormalizedApplicationPackage,
+  original: VersionedNormalizedApplicationPackage,
 ): unknown {
+  const declared = new Map(
+    original.queries.map((query) => [String(query.queryId), query]),
+  );
   return {
     kind: 'agentDiscoveryPayload',
     operations: packageRevision.operations.map((operation) => ({
@@ -911,7 +962,15 @@ function agentDiscoveryPayload(
       readBackQueryId: operation.readBack.targetId,
     })),
     queries: packageRevision.queries.map((query) => ({
-      fieldIds: query.selections.map((selection) => selection.field.targetId),
+      fieldIds: [
+        ...query.selections.map((selection) => selection.field.targetId),
+        ...(() => {
+          const source = declared.get(query.queryId);
+          return source && 'readModel' in source && source.readModel
+            ? Object.values(source.readModel.resultFields)
+            : [];
+        })(),
+      ],
       queryId: query.queryId,
     })),
     schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.agentDiscovery],

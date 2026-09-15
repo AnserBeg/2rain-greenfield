@@ -144,3 +144,22 @@ function seamFixture(): Record<string, string> {
     seamPaths.map((path) => [path, readFileSync(path, 'utf8')]),
   );
 }
+
+test('the composition interpreter cannot be called directly by the app server', () => {
+  const files = seamFixture();
+  files['apps/web/src/app-server.ts'] =
+    "import {submitCompositionAction} from './surface-composition.js';\n" +
+    files['apps/web/src/app-server.ts'];
+  const root = createArchitectureFixture(files);
+  try {
+    assert.ok(
+      checkSurfaceRuntimeSeam(root).violations.some(
+        (violation) =>
+          violation.ruleId === 'SURF001_RUNTIME_BYPASS' &&
+          violation.message.includes('delegate'),
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});

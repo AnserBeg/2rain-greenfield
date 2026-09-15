@@ -1680,6 +1680,12 @@ including ones that do not exist yet.
 | List | title, saved-view tabs, spreadsheet-grade grid (sort, filter, all-visible-value search, paging), bulk bar |
 | Record | breadcrumb; title + status chip; command bar (primary action first, destructive behind overflow); key facts; sections and child tables; activity rail |
 | Task | one decision per screen, scan-first input, large touch targets; receiving, picking, shipping, counting |
+
+Task presentation may retain its originating Record context using the bounded
+native-dialog policy of ADR-0036 §2.5 (owner-approved 2026-09-15). The existing
+compiled Task/action flow declares both native dialog and full-page fallback;
+it adds no archetype, slot, application model, client business state or MESSAGE
+modality. Preparation, confirmation and execution remain server-authoritative.
 | Builder | operate/customize mode switch, edit-in-place selection, right properties drawer, visible draft banner, publish diff |
 
 Shell contract:

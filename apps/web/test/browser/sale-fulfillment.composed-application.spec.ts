@@ -86,6 +86,10 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     return id;
   };
   const command = async (label: string, confirmed = true) => {
+    const secondary = page.locator(
+      '.composition-record-actions:not([open]) > summary',
+    );
+    if (await secondary.count()) await secondary.click();
     await page.getByRole('button', { name: label, exact: true }).click();
     if (confirmed) {
       await expect(
@@ -215,15 +219,23 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const committedPayload = new URLSearchParams(
     (await committedRequest).postData() ?? '',
   );
-  await expect(page.locator('[data-packing-document]')).toContainText(
+  await expect(page.locator('.composition-header')).toContainText(
     `SHP-${suffix}`,
   );
-  await expect(page.locator('[data-packing-document] tbody tr')).toHaveCount(1);
+  await expect(
+    page.locator(
+      '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
+    ),
+  ).toHaveCount(1);
   await page.goto(url('shipment', 'detail', initialShipment.shipmentId));
-  await expect(page.locator('[data-packing-document]')).toContainText(
+  await expect(page.locator('.composition-header')).toContainText(
     `SHP-${suffix}`,
   );
-  await expect(page.locator('[data-packing-document] tbody tr')).toHaveCount(1);
+  await expect(
+    page.locator(
+      '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
+    ),
+  ).toHaveCount(1);
   const replay = await page.request.post(
     url('shipment', 'detail', initialShipment.shipmentId),
     { form: Object.fromEntries(committedPayload) },
@@ -342,7 +354,9 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await command('Post');
   await page.goto(url('sales_order', 'detail', closureOrderId));
   await command('Close');
-  await expect(page.getByText(/sales_order_closed/)).toBeVisible();
+  await expect(
+    page.locator('.composition-header').getByText('Closed', { exact: true }),
+  ).toBeVisible();
 
   console.log(
     `SALE_FULFILLMENT_WALKTHROUGH ${JSON.stringify({ closureOrderId, closureShipmentId: closureShipment.shipmentId, correctionShipmentId: correction.shipmentId, initialShipmentId: initialShipment.shipmentId, movementId, orderId, orderLineId, packingDocument: true, partialShipment: '5', reservationId, reserveSequence: ['10/8/2', '5/3/2', '5/0/5'], shortageRefused: true, silentReservationResurrection: false })}`,
@@ -467,16 +481,32 @@ async function seedPackingNoise(
 }
 
 async function expectFulfillmentRow(page: Page, values: string[]) {
-  const row = page.locator('[data-sales-order-line]').first();
-  await expect(row.locator('td').nth(2)).toHaveText(values[0]!);
-  await expect(row.locator('td').nth(3)).toHaveText(values[1]!);
-  await expect(row.locator('td').nth(4)).toHaveText(values[2]!);
-  await expect(row.locator('td').nth(5)).toHaveText(values[3]!);
+  const dataset = page.locator(
+    '[data-composition-dataset$="dataset.fulfillment_lines"]',
+  );
+  const row = dataset.locator('tbody tr').first();
+  for (const [index, label] of [
+    'Ordered',
+    'Reserved',
+    'Shipped',
+    'Open to ship',
+  ].entries())
+    await expect(row.locator(`td[data-column-label="${label}"]`)).toHaveText(
+      values[index]!,
+    );
+  await row.getByRole('link', { name: 'Select', exact: true }).click();
 }
 
 async function expectStockRow(page: Page, values: string[]) {
-  const row = page.locator('[data-stock-identity]').first();
-  await expect(row.locator('td').nth(2)).toHaveText(values[0]!);
-  await expect(row.locator('td').nth(3)).toHaveText(values[1]!);
-  await expect(row.locator('td').nth(4)).toHaveText(values[2]!);
+  const row = page
+    .locator('[data-composition-dataset$="dataset.line_reservations"] tbody tr')
+    .first();
+  for (const [index, label] of [
+    'On hand',
+    'Reserved stock',
+    'Available',
+  ].entries())
+    await expect(row.locator(`td[data-column-label="${label}"]`)).toHaveText(
+      values[index]!,
+    );
 }

@@ -1,3 +1,10 @@
+import {
+  renderCompositionFields,
+  renderCompositionActions,
+  renderCompositionChildren,
+  renderCompositionHeader,
+  type CompositionData,
+} from './surface-composition.js';
 import { randomUUID } from 'node:crypto';
 
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
@@ -103,6 +110,8 @@ export type SurfaceDataRenderState =
       readonly records: readonly SemanticRecordDto[];
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
+      readonly composition?: CompositionData;
+      readonly compositionTask?: string;
       readonly salesOrder?: SalesOrderSection;
       readonly packingDocument?: ShipmentPackingDocument;
       readonly result?: SemanticQueryResultEnvelope;
@@ -206,6 +215,22 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       ownsDataResolution: true,
       renderer: renderKeyFacts,
     },
+    'record:childTables': {
+      className: 'child-tables-slot',
+      ownsDataResolution: true,
+      renderer: (context) =>
+        context.data?.status === 'READY' && context.data.composition
+          ? context.data.compositionTask &&
+            !context.surface.composition?.presentation?.task
+            ? context.data.compositionTask
+            : (context.data.compositionTask ?? '') +
+              renderCompositionChildren(
+                context.data.composition,
+                context.surface,
+                context.view,
+              )
+          : '',
+    },
     'record:sections': {
       className: 'sections-slot',
       mutationIntents: { form: ['create', 'update'] },
@@ -303,6 +328,14 @@ function surfaceComponentRenderer(
   surface: CompiledSurfaceDefinition,
   slot: CompiledSurfaceSlot,
 ): SurfaceComponentRenderer | undefined {
+  if (
+    surface.archetype === 'record' &&
+    slot.slot === 'childTables' &&
+    !surface.composition
+  )
+    return Object.hasOwn(componentRegistry, slot.contentReferenceId)
+      ? componentRegistry[slot.contentReferenceId]
+      : undefined;
   const slotKey = `${surface.archetype}:${slot.slot}`;
   if (Object.hasOwn(surfaceSlotRegistry, slotKey)) {
     return surfaceSlotRegistry[slotKey]?.renderer;
@@ -559,6 +592,17 @@ function renderBreadcrumb(context: SurfaceComponentContext): string {
 }
 
 function renderTitleStatus(context: SurfaceComponentContext): string {
+  if (
+    context.data?.status === 'READY' &&
+    context.data.composition &&
+    context.surface.composition?.presentation
+  )
+    return slotPanel(
+      context,
+      renderCompositionHeader(context.surface, context.data.composition) +
+        feedbackHtml(context.feedback),
+      'title-status-slot',
+    );
   const record = recordFrom(context.data);
   const form = context.surface.surfaceRole === 'form';
   const title = form
@@ -624,6 +668,16 @@ function listRecordTitle(
 }
 
 function renderCommandBar(context: SurfaceComponentContext): string {
+  if (context.data?.status === 'READY' && context.data.compositionTask)
+    return slotPanel(context, '', 'command-bar-slot');
+  const compositionActions =
+    context.data?.status === 'READY' && context.data.composition
+      ? renderCompositionActions(
+          context.surface,
+          context.data.composition,
+          context.view,
+        )
+      : '';
   const record = recordFrom(context.data);
   if (context.surface.surfaceRole === 'form') {
     const admission = resolveFormAdmission(context, record);
@@ -669,7 +723,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   ].join('');
   return slotPanel(
     context,
-    `<div class="command-bar" aria-label="Record commands">${actions}</div>`,
+    `${compositionActions}${context.surface.composition?.presentation?.recordActions === 'progressive' ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}</div></details>` : `<div class="command-bar" aria-label="Record commands">${actions}</div>`}`,
     'command-bar-slot',
   );
 }
@@ -725,6 +779,20 @@ function renderCapabilityCommand(
 }
 
 function renderKeyFacts(context: SurfaceComponentContext): string {
+  if (
+    context.surface.composition?.presentation?.technicalDetails ===
+    'progressive'
+  ) {
+    const record = recordFrom(context.data);
+    return slotPanel(
+      context,
+      record
+        ? `<details class="panel composition-technical"><summary>Technical details · record identity, activity and revision</summary><dl class="record-fields"><div><dt>Record</dt><dd>${escapeHtml(record.recordId)}</dd></div><div><dt>Activity</dt><dd>${record.archived ? 'Archived' : 'Active'}</dd></div><div><dt>Revision</dt><dd>${record.revision}</dd></div></dl></details>`
+        : '',
+      'key-facts-slot',
+    );
+  }
+
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'key-facts-slot');
@@ -761,6 +829,8 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
 }
 
 function renderSections(context: SurfaceComponentContext): string {
+  if (context.data?.status === 'READY' && context.data.composition)
+    return renderCompositionFields(context.surface, context.data.composition);
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'sections-slot');

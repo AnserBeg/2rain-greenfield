@@ -1,5 +1,5 @@
-const version = 'v5' as const;
-const normalizationProfileVersion = 'northstar.normalization/v5' as const;
+const version = 'v6' as const;
+const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
 export const LOCATION_NAMESPACE = 'northstar.location' as const;
 

@@ -57,6 +57,11 @@ export interface SharedListQueryRequest {
   readonly matchMode: 'prefix' | 'substring';
   readonly pageOffset: number;
   readonly parentScope: SharedListParentScope | null;
+  readonly referenceScope?: SharedListParentScope;
+  readonly fieldFilters?: readonly {
+    readonly fieldId: string;
+    readonly value: string;
+  }[];
   readonly relationLabels: readonly SharedListRelationLabelRequest[];
   readonly requestedPageSize: number;
   readonly schemaVersion: typeof SHARED_LIST_QUERY_VERSION;
@@ -88,6 +93,11 @@ export interface SharedListCoverage {
    * a silently ignored filter into an observable mismatch.
    */
   readonly parentScope: SharedListParentScope | null;
+  readonly referenceScope?: SharedListParentScope;
+  readonly fieldFilters?: readonly {
+    readonly fieldId: string;
+    readonly value: string;
+  }[];
   readonly projectedSearchValueCount: number;
   readonly requestedPageSize: number;
   readonly returnedCount: number;
@@ -131,7 +141,12 @@ export function parseSharedListArguments(
   // the request keeps its exact closed-key contract: every required key must
   // still be present and any unknown key is still refused. Widening
   // `assertExactKeys` to tolerate absence would have relaxed the whole object.
-  const { parentScope: parentScopeValue, ...closedList } = list;
+  const {
+    parentScope: parentScopeValue,
+    fieldFilters: fieldFiltersValue,
+    referenceScope: referenceScopeValue,
+    ...closedList
+  } = list;
   assertExactKeys(closedList, [
     'cursor',
     'matchMode',
@@ -142,6 +157,33 @@ export function parseSharedListArguments(
     'sort',
   ]);
   const parentScope = parseParentScope(parentScopeValue);
+  const referenceScope = parseParentScope(referenceScopeValue);
+  const fieldFilters =
+    fieldFiltersValue === undefined
+      ? undefined
+      : (() => {
+          if (
+            !Array.isArray(fieldFiltersValue) ||
+            fieldFiltersValue.length === 0 ||
+            fieldFiltersValue.length > 4
+          )
+            throw malformed('one to four exact field filters required');
+          return fieldFiltersValue.map((value) => {
+            if (!isRecord(value))
+              throw malformed('field filter must be an object');
+            assertExactKeys(value, ['fieldId', 'value']);
+            if (
+              typeof value.fieldId !== 'string' ||
+              !canonicalIdPattern.test(value.fieldId) ||
+              typeof value.value !== 'string' ||
+              value.value.length > 240
+            )
+              throw malformed('invalid exact field filter');
+            return { fieldId: value.fieldId, value: value.value };
+          });
+        })();
+  if (parentScope && referenceScope)
+    throw malformed('one exact relation scope is allowed');
   if (list.schemaVersion !== SHARED_LIST_QUERY_VERSION) {
     throw malformed('list schemaVersion is not supported');
   }
@@ -174,6 +216,8 @@ export function parseSharedListArguments(
     includeArchived,
     matchMode: list.matchMode,
     parentScope,
+    ...(referenceScope ? { referenceScope } : {}),
+    ...(fieldFilters ? { fieldFilters } : {}),
     relationLabels,
     search: list.search,
     sort,
@@ -186,6 +230,8 @@ export function parseSharedListArguments(
     matchMode: list.matchMode,
     pageOffset,
     parentScope,
+    ...(referenceScope ? { referenceScope } : {}),
+    ...(fieldFilters ? { fieldFilters } : {}),
     relationLabels,
     requestedPageSize,
     schemaVersion: SHARED_LIST_QUERY_VERSION,

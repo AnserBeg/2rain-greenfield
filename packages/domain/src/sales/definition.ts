@@ -1,5 +1,5 @@
-const version = 'v5' as const;
-const normalizationProfileVersion = 'northstar.normalization/v5' as const;
+const version = 'v6' as const;
+const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
 export const SALES_NAMESPACE = 'northstar.sales' as const;
 export const FULFILLMENT_CAPABILITY_ID =

@@ -140,9 +140,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const more = navigation
     .locator('.navigation-tree > li')
     .getByRole('group')
-    .filter({ hasText: 'More' });
-  await more.getByText('More', { exact: true }).click();
-  const sales = more.getByRole('group').filter({ hasText: 'Sales' });
+    .filter({ hasText: 'Sales' });
+  const sales = more;
   await sales.getByText('Sales', { exact: true }).click();
   await sales.getByRole('link', { name: 'Sales order', exact: true }).click();
   await expect(
@@ -214,18 +213,28 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.goto(lineFormUrl);
   const releasedLineAttempt = await formPayload(page);
   await page.goto(url('sales_order', 'detail', orderId));
-  await expect(
-    page.locator(`[data-sales-order-line="${lineId}"] td`),
-  ).toHaveText([
-    '1',
-    itemId,
-    '10',
-    '0',
-    '0',
-    '10',
-    'EA',
-    '12.500000000000000000',
-  ]);
+  const lineRow = page.locator(
+    `[data-composition-dataset$="dataset.fulfillment_lines"] [data-record-id="${lineId}"]`,
+  );
+  for (const [label, value] of Object.entries({
+    Ordered: '10',
+    Reserved: '0',
+    Shipped: '0',
+    'Open to ship': '10',
+  }))
+    await expect(
+      lineRow.locator(`td[data-column-label="${label}"]`),
+    ).toHaveText(value);
+  await expect(lineRow.locator('[data-cell-role="primary"] strong')).toHaveText(
+    'Field notebook',
+  );
+  await expect(lineRow.locator('.composition-cell-secondary')).toContainText(
+    'Line 1',
+  );
+  await expect(lineRow.locator('.composition-cell-secondary')).toContainText(
+    'Unit EA',
+  );
+  await page.locator('.composition-record-actions > summary').click();
   await page.getByRole('button', { name: 'Release', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Release complete');
   expect(await snapshot()).toEqual(initialStock);
@@ -256,6 +265,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   expect(await snapshot()).toEqual(initialStock);
 
   await page.goto(url('sales_order', 'detail', orderId));
+  await page.locator('.composition-record-actions > summary').click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page
     .getByRole('button', { name: 'Confirm Cancel', exact: true })

@@ -160,14 +160,12 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
-    maximumSupportedVersion: 1,
+    maximumSupportedVersion: 2,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    // 3 because this runtime understands `fields` (per-field kinds) and renders
-    // a control per declared kind. Raised from 2 by `profile-v2-adoption`, the
-    // packet that made the compiler start emitting them.
-    maximumSupportedVersion: 3,
+    // 7 honours explicit task summaries, frozen action previews and selected row controls.
+    maximumSupportedVersion: 7,
   },
 });
 

@@ -21,15 +21,16 @@ const legacyNodeVersion = z.enum(['v0-experimental', 'v1', 'v2']);
 // the node schema admits both; `CANON_VERSION_MIXED` in normalize.ts is what
 // keeps a package's nodes on the package's own version, exactly as it already
 // does for the `nodeVersion` enum above.
-const v3PlusNodeVersion = z.enum(['v3', 'v4', 'v5']);
+const v3PlusNodeVersion = z.enum(['v3', 'v4', 'v5', 'v6']);
 const v3NodeVersion = z.literal('v3');
 // The v4 family's own node spelling. v5 reads every v4 node -- it changes no
 // node shape, only what normalization DERIVES -- so the family schema admits
 // both and `CANON_VERSION_MIXED` keeps a package on its own version, exactly
 // as `v3PlusNodeVersion` already does one line above.
-const v4PlusNodeVersion = z.enum(['v4', 'v5']);
+const v4PlusNodeVersion = z.enum(['v4', 'v5', 'v6']);
 const v4NodeVersion = z.literal('v4');
 const v5NodeVersion = z.literal('v5');
+const v6NodeVersion = z.literal('v6');
 const boundedOrderKey = z.int().min(0).max(1_000_000);
 const boundedCount = z.int().min(1).max(1_000_000);
 const positiveVersion = z.int().min(1).max(1_000_000);
@@ -144,7 +145,7 @@ export type PredicateExpression = PredicateExpressionShape<
   CanonicalScalar
 >;
 export type PredicateExpressionV3 = PredicateExpressionShape<
-  'v3' | 'v4' | 'v5',
+  'v3' | 'v4' | 'v5' | 'v6',
   V3PredicateOperator,
   CanonicalScalar | QueryParameterReference
 >;
@@ -155,7 +156,7 @@ export type VersionedPredicateExpression =
 export interface QueryParameterReference {
   readonly kind: 'queryParameterReference';
   readonly parameterId: z.infer<typeof CanonicalIdSchema>;
-  readonly schemaVersion: 'v3' | 'v4' | 'v5';
+  readonly schemaVersion: 'v3' | 'v4' | 'v5' | 'v6';
 }
 
 export type CanonicalScalar =
@@ -695,6 +696,201 @@ const authoredSurfaceDefinition = normalizedSurfaceDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
 });
 
+/** v6 composition: data and actions are authored, grammar remains platform-owned. */
+const compositionReference = <T extends string>(kind: T) =>
+  z.strictObject({
+    kind: z.literal(kind),
+    schemaVersion: v6NodeVersion,
+    targetId: CanonicalIdSchema,
+  });
+const compositionValue = z.discriminatedUnion('source', [
+  z.strictObject({
+    source: z.literal('literal'),
+    value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  }),
+  z.strictObject({ source: z.literal('record'), field: z.string().min(1) }),
+  z.strictObject({
+    source: z.literal('selected'),
+    field: z.string().min(1),
+    datasetId: CanonicalIdSchema.optional(),
+  }),
+  z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
+  z.strictObject({
+    source: z.literal('step'),
+    stepId: CanonicalIdSchema,
+    field: z.string().min(1),
+  }),
+  z.strictObject({
+    source: z.literal('generated'),
+    value: z.enum(['uuid', 'instant', 'scope']),
+  }),
+]);
+const compositionColumn = z.strictObject({
+  columnId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  field: z.string().min(1),
+  presentation: z
+    .strictObject({
+      role: z.enum(['primary', 'secondary', 'quantity', 'detail']),
+      priority: boundedOrderKey,
+    })
+    .optional(),
+  reference: z
+    .strictObject({
+      query: compositionReference('queryReference'),
+      labelField: compositionReference('fieldReference'),
+    })
+    .optional(),
+});
+const compositionCondition = z.strictObject({
+  value: compositionValue,
+  operator: z.enum(['equals', 'notEquals', 'positive']),
+  compare: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+});
+const compositionInput = z.strictObject({
+  inputId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  type: z.enum(['text', 'quantity', 'instant', 'reference']),
+  required: z.boolean(),
+  query: compositionReference('queryReference').optional(),
+  labelField: compositionReference('fieldReference').optional(),
+});
+const compositionStep = z.strictObject({
+  stepId: CanonicalIdSchema,
+  operation: compositionReference('operationReference'),
+  bindings: z
+    .array(
+      z.strictObject({
+        path: z.array(z.string().min(1)).min(1).max(3),
+        value: compositionValue,
+      }),
+    )
+    .min(1)
+    .max(60),
+});
+const compositionTaskColumn = z.strictObject({
+  datasetId: CanonicalIdSchema,
+  columnId: CanonicalIdSchema,
+});
+const compositionTaskValue = z.discriminatedUnion('source', [
+  z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
+  compositionTaskColumn.extend({ source: z.literal('column') }),
+]);
+const compositionAction = z.strictObject({
+  presentation: z
+    .strictObject({
+      placement: z.enum(['selection', 'row']),
+      task: z
+        .strictObject({
+          summary: z.strictObject({
+            identity: compositionTaskColumn,
+            secondary: compositionTaskColumn.optional(),
+            context: compositionTaskColumn.optional(),
+            quantity: z
+              .strictObject({
+                value: compositionTaskColumn,
+                unit: compositionTaskColumn,
+                label: LabelSchema,
+              })
+              .optional(),
+          }),
+          confirmation: z.strictObject({
+            title: LabelSchema,
+            reviewLabel: LabelSchema,
+            confirmLabel: LabelSchema,
+            quantity: compositionTaskValue,
+            unit: compositionTaskColumn,
+            context: compositionTaskValue.optional(),
+          }),
+        })
+        .optional(),
+    })
+    .optional(),
+  actionId: CanonicalIdSchema,
+  label: LabelSchema,
+  description: LabelSchema,
+  orderKey: boundedOrderKey,
+  datasetId: CanonicalIdSchema.optional(),
+  conditions: z.array(compositionCondition).max(12),
+  inputs: z.array(compositionInput).max(12),
+  steps: z.array(compositionStep).max(5),
+  navigate: z
+    .strictObject({
+      surface: compositionReference('surfaceReference'),
+      query: compositionReference('queryReference'),
+      record: compositionValue,
+    })
+    .optional(),
+});
+const compositionDataset = z.strictObject({
+  presentation: z
+    .strictObject({
+      description: LabelSchema.optional(),
+      selection: z.enum(['explicit', 'none']),
+      selectedActions: z.literal('row').optional(),
+      compact: z.literal('scrollTable').optional(),
+    })
+    .optional(),
+  datasetId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  query: compositionReference('queryReference'),
+  sort: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        direction: z.enum(['ascending', 'descending']),
+      }),
+    )
+    .max(3)
+    .optional(),
+  parent: z
+    .strictObject({
+      relationId: CanonicalIdSchema,
+      value: compositionValue,
+      ownership: z.enum(['parentScopedChild', 'reference']),
+    })
+    .optional(),
+  columns: z.array(compositionColumn).min(1).max(30),
+});
+export const SurfaceCompositionSchema = z.strictObject({
+  presentation: z
+    .strictObject({
+      header: z.strictObject({
+        title: CanonicalIdSchema,
+        subtitle: z.array(CanonicalIdSchema).max(4),
+        facts: z.array(CanonicalIdSchema).max(6),
+        status: CanonicalIdSchema.optional(),
+      }),
+      context: z
+        .strictObject({ label: LabelSchema, description: LabelSchema })
+        .optional(),
+      recordActions: z.literal('progressive'),
+      technicalDetails: z.literal('progressive'),
+      task: z
+        .strictObject({
+          mode: z.literal('nativeDialog'),
+          fallback: z.literal('page'),
+        })
+        .optional(),
+    })
+    .optional(),
+  kind: z.literal('surfaceComposition'),
+  schemaVersion: v6NodeVersion,
+  fields: z.array(compositionColumn).max(30),
+  children: z.array(compositionDataset).max(8),
+  actions: z.array(compositionAction).max(12),
+});
+export type SurfaceComposition = z.infer<typeof SurfaceCompositionSchema>;
+const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
+  composition: SurfaceCompositionSchema.optional(),
+});
+const authoredV6SurfaceDefinition = normalizedV6SurfaceDefinition.extend({
+  lifecycle: z.enum(['active', 'retired']).optional(),
+});
+
 const querySelection = z.strictObject({
   field: CanonicalReferenceSchema,
   kind: z.literal('querySelection'),
@@ -1147,6 +1343,34 @@ const v5NormalizedShape = {
   languageVersion: v5NodeVersion,
 } as const;
 
+export const QueryReadModelSchema = z.strictObject({
+  capability: compositionReference('capabilityReference'),
+  binding: CanonicalIdSchema,
+  queries: z.record(z.string().min(1), compositionReference('queryReference')),
+  resultFields: z.record(z.string().min(1), CanonicalIdSchema),
+});
+export type QueryReadModel = z.infer<typeof QueryReadModelSchema>;
+const normalizedV6QueryDefinition = z.union([
+  normalizedV4RowQueryDefinition.extend({
+    readModel: QueryReadModelSchema.optional(),
+  }),
+  normalizedV4AggregateQueryDefinition,
+]);
+const authoredV6QueryDefinition = z.union([
+  authoredV4RowQueryDefinition.extend({
+    readModel: QueryReadModelSchema.optional(),
+  }),
+  authoredV4AggregateQueryDefinition,
+]);
+
+const v6NormalizedShape = {
+  ...v5NormalizedShape,
+  queries: z.array(normalizedV6QueryDefinition),
+  languageVersion: v6NodeVersion,
+  surfaces: z.array(normalizedV6SurfaceDefinition),
+} as const;
+const V6NormalizedApplicationPackageSchema = z.strictObject(v6NormalizedShape);
+
 const V3NormalizedApplicationPackageSchema = z.strictObject(v3NormalizedShape);
 const V4NormalizedApplicationPackageSchema = z.strictObject(v4NormalizedShape);
 const V5NormalizedApplicationPackageSchema = z.strictObject(v5NormalizedShape);
@@ -1212,6 +1436,7 @@ export const VersionedNormalizedApplicationPackageSchema =
       V3NormalizedApplicationPackageSchema,
       V4NormalizedApplicationPackageSchema,
       V5NormalizedApplicationPackageSchema,
+      V6NormalizedApplicationPackageSchema,
     ]),
   );
 export const NormalizedApplicationPackageSchema =
@@ -1263,6 +1488,14 @@ const v5AuthoredShape = {
   languageVersion: v5NodeVersion,
 } as const;
 
+const v6AuthoredShape = {
+  ...v5AuthoredShape,
+  queries: z.array(authoredV6QueryDefinition),
+  languageVersion: v6NodeVersion,
+  surfaces: z.array(authoredV6SurfaceDefinition),
+} as const;
+const V6AuthoredApplicationPackageSchema = z.strictObject(v6AuthoredShape);
+
 const LegacyAuthoredApplicationPackageSchema =
   z.strictObject(legacyAuthoredShape);
 const V3AuthoredApplicationPackageSchema = z.strictObject(v3AuthoredShape);
@@ -1275,6 +1508,7 @@ export const VersionedAuthoredApplicationPackageSchema = withNodeVersionPurity(
     V3AuthoredApplicationPackageSchema,
     V4AuthoredApplicationPackageSchema,
     V5AuthoredApplicationPackageSchema,
+    V6AuthoredApplicationPackageSchema,
   ]),
 );
 export const AuthoredApplicationPackageSchema =
@@ -1305,17 +1539,25 @@ export type V5AuthoredApplicationPackage = z.infer<
 export type V5NormalizedApplicationPackage = z.infer<
   typeof V5NormalizedApplicationPackageSchema
 >;
+export type V6AuthoredApplicationPackage = z.infer<
+  typeof V6AuthoredApplicationPackageSchema
+>;
+export type V6NormalizedApplicationPackage = z.infer<
+  typeof V6NormalizedApplicationPackageSchema
+>;
 export type QueryLegalEntityScope = z.infer<typeof queryLegalEntityScope>;
 export type VersionedAuthoredApplicationPackage =
   | AuthoredApplicationPackage
   | V3AuthoredApplicationPackage
   | V4AuthoredApplicationPackage
-  | V5AuthoredApplicationPackage;
+  | V5AuthoredApplicationPackage
+  | V6AuthoredApplicationPackage;
 export type VersionedNormalizedApplicationPackage =
   | NormalizedApplicationPackage
   | V3NormalizedApplicationPackage
   | V4NormalizedApplicationPackage
-  | V5NormalizedApplicationPackage;
+  | V5NormalizedApplicationPackage
+  | V6NormalizedApplicationPackage;
 export type CanonicalId = z.infer<typeof CanonicalIdSchema>;
 
 function isValidIsoDate(value: string): boolean {
