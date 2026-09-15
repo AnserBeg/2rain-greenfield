@@ -86,6 +86,10 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     return id;
   };
   const command = async (label: string, confirmed = true) => {
+    const secondary = page.locator(
+      '.composition-record-actions:not([open]) > summary',
+    );
+    if (await secondary.count()) await secondary.click();
     await page.getByRole('button', { name: label, exact: true }).click();
     if (confirmed) {
       await expect(
@@ -215,18 +219,18 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const committedPayload = new URLSearchParams(
     (await committedRequest).postData() ?? '',
   );
-  await expect(
-    page.locator('[data-platform-slot="record:sections"] .record-fields'),
-  ).toContainText(`SHP-${suffix}`);
+  await expect(page.locator('.composition-header')).toContainText(
+    `SHP-${suffix}`,
+  );
   await expect(
     page.locator(
       '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
     ),
   ).toHaveCount(1);
   await page.goto(url('shipment', 'detail', initialShipment.shipmentId));
-  await expect(
-    page.locator('[data-platform-slot="record:sections"] .record-fields'),
-  ).toContainText(`SHP-${suffix}`);
+  await expect(page.locator('.composition-header')).toContainText(
+    `SHP-${suffix}`,
+  );
   await expect(
     page.locator(
       '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
@@ -351,9 +355,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.goto(url('sales_order', 'detail', closureOrderId));
   await command('Close');
   await expect(
-    page
-      .locator('[data-platform-slot="record:sections"] .record-fields')
-      .getByText('Closed', { exact: true }),
+    page.locator('.composition-header').getByText('Closed', { exact: true }),
   ).toBeVisible();
 
   console.log(

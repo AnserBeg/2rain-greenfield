@@ -218,17 +218,24 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     `[data-composition-dataset$="dataset.fulfillment_lines"] [data-record-id="${lineId}"]`,
   );
   for (const [label, value] of Object.entries({
-    Line: '1',
-    Item: 'Field notebook',
     Ordered: '10',
     Reserved: '0',
     Shipped: '0',
     'Open to ship': '10',
-    Unit: 'EA',
   }))
     await expect(
       lineRow.locator(`td[data-column-label="${label}"]`),
     ).toHaveText(value);
+  await expect(lineRow.locator('[data-cell-role="primary"] strong')).toHaveText(
+    'Field notebook',
+  );
+  await expect(lineRow.locator('.composition-cell-secondary')).toContainText(
+    'Line 1',
+  );
+  await expect(lineRow.locator('.composition-cell-secondary')).toContainText(
+    'Unit EA',
+  );
+  await page.locator('.composition-record-actions > summary').click();
   await page.getByRole('button', { name: 'Release', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Release complete');
   expect(await snapshot()).toEqual(initialStock);
@@ -259,6 +266,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   expect(await snapshot()).toEqual(initialStock);
 
   await page.goto(url('sales_order', 'detail', orderId));
+  await page.locator('.composition-record-actions > summary').click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page
     .getByRole('button', { name: 'Confirm Cancel', exact: true })
