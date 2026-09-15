@@ -26,8 +26,8 @@ The 2026-09-01 QUEUE FREEZE and the previous operating model are in the archive;
 substance survives in the rules above.
 
 **Selected 2026-09-14: RAIN-META-SALES** — sole local BUILD on
-`packet/RAIN-META-SALES`; P1/P2 closed at `f10c502`; owner-approved generic Task-dialog amendment and Sales presentation implemented at `0ea80ab5`; focused JS-on/off evidence and actual pinned reference/Rain PNGs ready; stop for owner visual acceptance
-in [the visual checkpoint](packets/RAIN-META-SALES-task-dialog-visual.md). Accepted fulfillment stays the base;
+`packet/RAIN-META-SALES`; P1/P2 closed at `f10c502`; owner-requested Task context/mobile/navigation correction at `d05651c8`; serving source `b7ffe632` on 38637; matched reference/Rain and JS-off evidence ready; stop for owner visual acceptance
+in [the corrected visual checkpoint](packets/RAIN-META-SALES-task-context-visual.md). Accepted fulfillment stays the base;
 live customization and actual AI execution follow this workspace before broader expansion.
 Publication stops at one draft PR; review online only, no local integration or deployment.
 

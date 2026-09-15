@@ -1,6 +1,6 @@
 # RAIN-META-SALES — metadata-composed fulfillment workspace
 
-Status: visual evidence_ready; owner acceptance pending. Latest approved Task-dialog checkpoint: [actual captures and bounded evidence](RAIN-META-SALES-task-dialog-visual.md). No new reviewer, merge or deployment.
+Status: visual evidence_ready; owner acceptance pending. Latest context correction: [actual captures and bounded evidence](RAIN-META-SALES-task-context-visual.md). Previous dialog layout was not accepted as reference-equivalent. No new reviewer, merge or deployment.
 Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6`; branch `packet/RAIN-META-SALES`; [draft PR #5](https://github.com/AnserBeg/2rain-greenfield/pull/5).
 Reviewed correction baseline: `f10c502571ed040d66ee0b965f14ceca237beb40`; P1/P2 closed by the online reviewer.
 Sole local BUILD; independent review online only. Worktree `/home/rvham/2rain-greenfield-rain-meta-sales`.
@@ -63,7 +63,7 @@ Identify production defects under those boundaries; separate future scope and ev
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-META-SALES",
   "base": "fe97b63baedf8bdd42146318bb89d4be1aa948f6",
-  "head": "0ea80ab581aaade82074455ce758e9a4d125db9d",
+  "head": "d05651c8e7e908b036da72f9aa57822199465c7c",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -74,11 +74,13 @@ Identify production defects under those boundaries; separate future scope and ev
     "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts",
     "apps/web/src/surface-runtime.ts",
+    "apps/web/test/browser/composed-application.spec.ts",
     "apps/web/test/browser/message-catalog.spec.ts",
     "apps/web/test/browser/meta-sales.spec.ts",
     "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
     "apps/web/test/browser/sales-order.composed-application.spec.ts",
     "apps/web/test/surface-runtime-contract.test.ts",
+    "learnings.md",
     "packages/canonical-model/src/constants.ts",
     "packages/canonical-model/src/index.ts",
     "packages/canonical-model/src/normalize.ts",

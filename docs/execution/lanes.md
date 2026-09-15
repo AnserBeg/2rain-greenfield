@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RAIN-META-SALES` | visual evidence_ready at `0ea80ab5`: approved generic Task dialog/page fallback and Sales layout; focused JS-on/off checks pass; [actual visual checkpoint](packets/RAIN-META-SALES-task-dialog-visual.md); owner acceptance pending, no new reviewer or merge |
+| **BUILD** | `RAIN-META-SALES` | visual evidence_ready at `d05651c8`: corrected explicit Task summary, frozen proposal, mobile lines and business navigation; serving `b7ffe632` on 38637; [actual checkpoint](packets/RAIN-META-SALES-task-context-visual.md); stop for owner visual decision, no new reviewer or merge |
 | **SUPPORT** | — | idle |
 
 

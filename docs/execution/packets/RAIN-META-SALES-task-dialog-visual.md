@@ -1,6 +1,6 @@
 # RAIN-META-SALES — approved Task-dialog visual checkpoint
 
-Status: visual evidence_ready; stop for owner acceptance. Sole LOCAL author; same draft PR #5. No new reviewer, full matrix, merge or deployment.
+Status: superseded by the [context correction](RAIN-META-SALES-task-context-visual.md); owner rejected reference equivalence for this earlier arrangement. Sole LOCAL author; same draft PR #5. No new reviewer, full matrix, merge or deployment.
 Base: `42237a7f1e6cb3d0e3ad2943abbb08891b8b7555`; executable head: `0ea80ab581aaade82074455ce758e9a4d125db9d`; branch `packet/RAIN-META-SALES`.
 Owner approval: attachment `7262c645-b069-4beb-81f7-36946161f90b`, explicitly authorizing the narrow ADR-0036/UX/plan amendment and native Task-dialog implementation.
 
