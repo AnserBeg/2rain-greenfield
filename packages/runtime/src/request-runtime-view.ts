@@ -164,10 +164,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    // 3 because this runtime understands `fields` (per-field kinds) and renders
-    // a control per declared kind. Raised from 2 by `profile-v2-adoption`, the
-    // packet that made the compiler start emitting them.
-    maximumSupportedVersion: 4,
+    // 5 honours optional Record presentation; prior composition readers support 4.
+    maximumSupportedVersion: 5,
   },
 });
 

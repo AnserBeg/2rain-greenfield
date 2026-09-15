@@ -166,7 +166,10 @@ export function composedApplicationDefinition(): Record<string, unknown> {
             ? salesWorkspace(APPLICATION_NAMESPACE)
             : packingWorkspace(APPLICATION_NAMESPACE),
         slots: [
-          ...(surface.slots as Record<string, unknown>[]),
+          ...(surface.slots as Record<string, unknown>[]).map((slot) => ({
+            ...slot,
+            ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
+          })),
           {
             kind: 'surfaceSlot',
             schemaVersion: version,

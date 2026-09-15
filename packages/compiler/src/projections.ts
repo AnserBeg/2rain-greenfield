@@ -795,7 +795,24 @@ function surfaceManifestPayload(
     // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
-      minimumVersion: composed ? 4 : emitsFieldKinds ? 3 : navigation ? 2 : 1,
+      minimumVersion: [...compositions.values()].some(
+        (value) =>
+          value?.presentation ||
+          value?.children.some(
+            (child) =>
+              child.presentation ||
+              child.columns.some((column) => column.presentation),
+          ) ||
+          value?.actions.some((action) => action.presentation),
+      )
+        ? 5
+        : composed
+          ? 4
+          : emitsFieldKinds
+            ? 3
+            : navigation
+              ? 2
+              : 1,
     },
   };
 }

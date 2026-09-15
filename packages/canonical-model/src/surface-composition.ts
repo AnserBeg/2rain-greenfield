@@ -134,6 +134,83 @@ export function validateSurfaceCompositions(
       }
     };
     columns(composition.fields, surface.dataSource.targetId);
+    if (composition.fields.some((column) => column.presentation))
+      fail(
+        surface.surfaceId,
+        'cell hierarchy belongs to dataset columns; root fields use header roles',
+      );
+    const presentation = composition.presentation;
+    if (presentation) {
+      const header = presentation.header;
+      const ids = [
+        header.title,
+        ...header.subtitle,
+        ...header.facts,
+        ...(header.status ? [header.status] : []),
+      ];
+      unique(ids, surface.surfaceId);
+      if (
+        ids.some(
+          (id) => !composition.fields.some((column) => column.columnId === id),
+        )
+      )
+        fail(
+          surface.surfaceId,
+          'header roles require declared composition columns',
+        );
+      if (!surface.slots.some((slot) => slot.slot === 'titleStatus'))
+        fail(surface.surfaceId, 'header presentation requires titleStatus');
+    }
+    for (const child of composition.children) {
+      if (child.presentation && !presentation)
+        fail(
+          surface.surfaceId,
+          'dataset presentation requires record presentation',
+        );
+      const primaries = child.columns.filter(
+        (column) => column.presentation?.role === 'primary',
+      );
+      if (
+        child.columns.some((column) => column.presentation) &&
+        primaries.length !== 1
+      )
+        fail(
+          surface.surfaceId,
+          'column hierarchy requires exactly one primary',
+        );
+      if (
+        child.columns.some((column) => column.presentation) &&
+        !child.presentation
+      )
+        fail(
+          surface.surfaceId,
+          'column hierarchy requires dataset presentation',
+        );
+    }
+    for (const action of composition.actions) {
+      if (action.presentation && (!presentation || !action.datasetId))
+        fail(
+          surface.surfaceId,
+          'contextual actions require record presentation and a dataset',
+        );
+      if (
+        action.presentation?.placement === 'selection' &&
+        children.get(action.datasetId!)?.presentation?.selection !== 'explicit'
+      )
+        fail(
+          surface.surfaceId,
+          'contextual operations require an explicitly selectable dataset',
+        );
+      if (
+        action.presentation?.placement === 'row' &&
+        (!action.navigate || action.steps.length)
+      )
+        fail(
+          surface.surfaceId,
+          'row placement is read-only navigation; operations require explicit selection',
+        );
+    }
+
     const contextValue = (
       value: SurfaceComposition['actions'][number]['steps'][number]['bindings'][number]['value'],
       datasetId?: string,

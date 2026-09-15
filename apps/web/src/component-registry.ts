@@ -2,6 +2,7 @@ import {
   renderCompositionFields,
   renderCompositionActions,
   renderCompositionChildren,
+  renderCompositionHeader,
   type CompositionData,
 } from './surface-composition.js';
 import { randomUUID } from 'node:crypto';
@@ -220,7 +221,11 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       renderer: (context) =>
         context.data?.status === 'READY' && context.data.composition
           ? (context.data.compositionTask ??
-            renderCompositionChildren(context.data.composition))
+            renderCompositionChildren(
+              context.data.composition,
+              context.surface,
+              context.view,
+            ))
           : '',
     },
     'record:sections': {
@@ -584,6 +589,17 @@ function renderBreadcrumb(context: SurfaceComponentContext): string {
 }
 
 function renderTitleStatus(context: SurfaceComponentContext): string {
+  if (
+    context.data?.status === 'READY' &&
+    context.data.composition &&
+    context.surface.composition?.presentation
+  )
+    return slotPanel(
+      context,
+      renderCompositionHeader(context.surface, context.data.composition) +
+        feedbackHtml(context.feedback),
+      'title-status-slot',
+    );
   const record = recordFrom(context.data);
   const form = context.surface.surfaceRole === 'form';
   const title = form
@@ -704,7 +720,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   ].join('');
   return slotPanel(
     context,
-    `${compositionActions}<div class="command-bar" aria-label="Record commands">${actions}</div>`,
+    `${compositionActions}${context.surface.composition?.presentation?.recordActions === 'progressive' ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}</div></details>` : `<div class="command-bar" aria-label="Record commands">${actions}</div>`}`,
     'command-bar-slot',
   );
 }
@@ -760,6 +776,20 @@ function renderCapabilityCommand(
 }
 
 function renderKeyFacts(context: SurfaceComponentContext): string {
+  if (
+    context.surface.composition?.presentation?.technicalDetails ===
+    'progressive'
+  ) {
+    const record = recordFrom(context.data);
+    return slotPanel(
+      context,
+      record
+        ? `<details class="panel composition-technical"><summary>Technical details · record identity, activity and revision</summary><dl class="record-fields"><div><dt>Record</dt><dd>${escapeHtml(record.recordId)}</dd></div><div><dt>Activity</dt><dd>${record.archived ? 'Archived' : 'Active'}</dd></div><div><dt>Revision</dt><dd>${record.revision}</dd></div></dl></details>`
+        : '',
+      'key-facts-slot',
+    );
+  }
+
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'key-facts-slot');

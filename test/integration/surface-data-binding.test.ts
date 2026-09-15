@@ -3,6 +3,7 @@ import {
   loadSurfaceComposition,
   submitCompositionAction,
   renderCompositionFields,
+  renderCompositionHeader,
   renderCompositionChildren,
   renderCompositionActions,
 } from '../../apps/web/src/surface-composition.js';
@@ -3382,10 +3383,58 @@ function workshopComposition(label: string): Record<string, unknown> {
   return definition;
 }
 
+function presentedWorkshop(
+  label: string,
+  reverse = false,
+): Record<string, unknown> {
+  const value = workshopComposition(label);
+  const surface = (value.surfaces as Array<Record<string, unknown>>).find(
+    (surface) => surface.composition,
+  )!;
+  const composition = surface.composition as SurfaceComposition;
+  composition.presentation = {
+    header: { title: composition.fields[0]!.columnId, subtitle: [], facts: [] },
+    context: { label, description: 'Select an assignment to retire it.' },
+    recordActions: 'progressive',
+    technicalDetails: 'progressive',
+  };
+  const child = composition.children[0]!;
+  child.presentation = {
+    selection: 'explicit',
+    description: 'Assignments scoped to this workshop job.',
+  };
+  child.columns[0]!.presentation = { role: 'primary', priority: 0 };
+  child.columns.push({
+    columnId:
+      'workshop.jobs:column.revision' as SurfaceComposition['fields'][number]['columnId'],
+    label: 'Version',
+    field: 'revision',
+    orderKey: 20,
+    presentation: { role: reverse ? 'detail' : 'quantity', priority: 1 },
+  });
+  composition.actions[0]!.presentation = { placement: 'selection' };
+  (surface.slots as Array<Record<string, unknown>>).push({
+    kind: 'surfaceSlot',
+    schemaVersion: 'v6',
+    slot: 'titleStatus',
+    slotId: 'workshop.jobs:slot.header',
+    orderKey: 1,
+    content: {
+      kind: 'opaqueSurfaceContentReference',
+      schemaVersion: 'v6',
+      targetId: 'workshop.jobs:capability.standard_surface_content',
+    },
+  });
+  return value;
+}
+
 test('v6 composition renders two compiled presentation revisions and renamed non-Sales child actions through the same runtime', async () => {
   const first = compileFixture(workshopComposition('Work title'));
   const second = compileFixture(workshopComposition('Assignment heading'));
   assert.notEqual(first.releaseRoot, second.releaseRoot);
+  const presented = compileFixture(presentedWorkshop('Assignments'));
+  const varied = compileFixture(presentedWorkshop('Responsibilities', true));
+  assert.notEqual(presented.releaseRoot, varied.releaseRoot);
   const policy = new RecordingPolicy('ALLOW');
   const root: SemanticRecordDto = {
     entityId: 'workshop.jobs:entity.job',
@@ -3430,6 +3479,8 @@ test('v6 composition renders two compiled presentation revisions and renamed non
   for (const [compiled, label] of [
     [first, 'Work title'],
     [second, 'Assignment heading'],
+    [presented, 'Assignments'],
+    [varied, 'Responsibilities'],
   ] as const) {
     const view = await issuedView(
       runtimeEntry(compiled, policy, {
@@ -3458,7 +3509,26 @@ test('v6 composition renders two compiled presentation revisions and renamed non
     );
     assert.equal(data.children[0]?.status, 'ready');
     assert.equal(data.selected?.recordId, child.recordId);
-    assert.match(renderCompositionFields(surface, data), new RegExp(label));
+    if (surface.composition?.presentation) {
+      assert.match(
+        renderCompositionHeader(surface, data),
+        /<h1>Warehouse audit<\/h1>/,
+      );
+      const children = renderCompositionChildren(data, surface, view);
+      assert.match(children, /<strong>Supervisor<\/strong>/);
+      assert.match(children, /Selected record actions/);
+      assert.match(children, /Retire assignment/);
+      assert.match(
+        children,
+        compiled === varied
+          ? /Supporting details/
+          : /data-cell-role="quantity"/,
+      );
+      const html = await renderSurfaceRuntimeWithData(view, url.href, gateways);
+      assert.match(html.html, /composition-header/);
+      assert.match(html.html, /composition-local-actions/);
+    } else
+      assert.match(renderCompositionFields(surface, data), new RegExp(label));
     assert.match(renderCompositionChildren(data), /Supervisor/);
     assert.match(
       renderCompositionActions(surface, data, view),
@@ -3494,6 +3564,35 @@ test('v6 composition renders two compiled presentation revisions and renamed non
     renderCompositionActions(surface, refused, view),
     /Retire assignment/,
   );
+});
+
+test('Record presentation refuses unresolved headers, ambiguous hierarchy and implicit write selection', () => {
+  for (const mutate of [
+    (value: SurfaceComposition) => {
+      value.presentation!.header.title =
+        'workshop.jobs:column.absent' as SurfaceComposition['fields'][number]['columnId'];
+    },
+    (value: SurfaceComposition) => {
+      value.children[0]!.columns[1]!.presentation!.role = 'primary';
+    },
+    (value: SurfaceComposition) => {
+      value.actions[0]!.presentation!.placement = 'row';
+    },
+    (value: SurfaceComposition) => {
+      value.children[0]!.presentation!.selection = 'none';
+    },
+    (value: SurfaceComposition) => {
+      delete value.presentation;
+    },
+  ]) {
+    const authored = presentedWorkshop('Assignments');
+    mutate(
+      (authored.surfaces as Array<{ composition?: SurfaceComposition }>).find(
+        (value) => value.composition,
+      )!.composition!,
+    );
+    assert.throws(() => normalizeApplicationPackage(authored));
+  }
 });
 
 test('v6 composition refuses undeclared context, operation fields and cyclic child dependencies', () => {
@@ -3841,7 +3940,7 @@ function deferredSignal() {
 }
 
 async function correctionTaskFixture() {
-  const definition = workshopComposition('Work title');
+  const definition = presentedWorkshop('Work title');
   const surface = (definition.surfaces as Array<Record<string, unknown>>).find(
     (value) => value.composition,
   )!;

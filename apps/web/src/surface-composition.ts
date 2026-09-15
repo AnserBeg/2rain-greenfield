@@ -358,14 +358,170 @@ function applicable(action: Action, data: CompositionData): boolean {
   }
 }
 
+/** Presentation consumes refreshed, governed cells; it never derives business quantities. */
+export function renderCompositionHeader(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+): string {
+  const header = surface.composition?.presentation?.header;
+  if (!header) return '';
+  if (data.fieldsFailed)
+    return compositionMessage('COMPOSITION_CHILD_FAILED', 'alert');
+  const cell = (id: string) => h(data.fields.cells[id] ?? '—');
+  const label = (id: string) =>
+    h(
+      surface.composition!.fields.find((column) => column.columnId === id)!
+        .label,
+    );
+  return `<header class="composition-header"><div class="composition-heading"><h1>${cell(header.title)}</h1>${header.status ? `<span class="composition-business-status">${cell(header.status)}</span>` : ''}</div><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p><dl class="composition-header-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl></header>`;
+}
+function selectionUrl(
+  data: CompositionData,
+  datasetId: string,
+  recordId: string,
+): URL {
+  const url = new URL(data.url, 'http://surface-runtime.local');
+  url.searchParams.set('dataset', datasetId);
+  url.searchParams.set('selected', recordId);
+  url.searchParams.set(`select:${datasetId}`, recordId);
+  url.hash = datasetId;
+  return url;
+}
+function actionLink(
+  action: Action,
+  data: CompositionData,
+  view: RequestRuntimeView,
+): string {
+  if (action.navigate) {
+    const url = new URL(data.url, 'http://surface-runtime.local');
+    url.hash = '';
+    url.searchParams.set('surface', action.navigate.surface.targetId);
+    url.searchParams.set(
+      'record',
+      String(resolveValue(action.navigate.record, data, {}, {}, {})),
+    );
+    url.searchParams.set('returnTo', data.url);
+    const target = registeredSemanticQueryFromPinnedView(
+      view,
+      action.navigate.query.targetId,
+    );
+    if (target?.legalEntityScope && data.scope)
+      url.searchParams.set(
+        target.legalEntityScope.operand.parameterId,
+        data.scope,
+      );
+    return `<a class="button" href="${h(url.pathname + url.search)}">${h(action.label)}</a>`;
+  }
+  return `<form method="post" action="${h(data.url)}"><input type="hidden" name="compositionAction" value="${h(action.actionId)}"><button type="submit">${h(action.label)}</button></form>`;
+}
+function renderPresentedChild(
+  child: CompositionData['children'][number],
+  data: CompositionData,
+  surface: CompiledSurfaceDefinition,
+  view: RequestRuntimeView,
+): string {
+  const definition = child.definition;
+  const columns = [...definition.columns].sort(
+    (a, b) =>
+      (a.presentation?.priority ?? a.orderKey) -
+      (b.presentation?.priority ?? b.orderKey),
+  );
+  const primary = columns.find(
+    (column) => column.presentation?.role === 'primary',
+  );
+  const secondary = primary
+    ? columns.filter((column) => column.presentation?.role === 'secondary')
+    : [];
+  const detail = columns.filter(
+    (column) => column.presentation?.role === 'detail',
+  );
+  const displayed = primary
+    ? [
+        primary,
+        ...columns.filter(
+          (column) =>
+            column !== primary &&
+            !secondary.includes(column) &&
+            !detail.includes(column),
+        ),
+      ]
+    : columns;
+  const actions = ordered(surface.composition!.actions).filter(
+    (action) => action.datasetId === definition.datasetId,
+  );
+  const selectedActions = actions.filter(
+    (action) =>
+      action.presentation?.placement === 'selection' &&
+      applicable(action, data),
+  );
+  const rowActions = actions.filter(
+    (action) => action.presentation?.placement === 'row',
+  );
+  const cells = (row: Row, values: Column[]) =>
+    values
+      .map(
+        (column) =>
+          `<span><span class="composition-cell-label">${h(column.label)}</span> ${h(row.cells[column.columnId] ?? '—')}</span>`,
+      )
+      .join('');
+  const body =
+    child.status === 'failed'
+      ? compositionMessage('COMPOSITION_CHILD_FAILED', 'alert')
+      : child.status === 'empty'
+        ? compositionMessage('COMPOSITION_CHILD_EMPTY')
+        : `<div class="data-table-wrap"><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>`).join('')}${detail.length ? '<th scope="col">Details</th>' : ''}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
+            .map((row) => {
+              const selected =
+                data.selected?.recordId === row.record.recordId &&
+                data.selectedDatasetId === definition.datasetId;
+              const rowData: CompositionData = {
+                ...data,
+                selected: row.record,
+                selectedDatasetId: definition.datasetId,
+                selections: {
+                  ...data.selections,
+                  [definition.datasetId]: row.record,
+                },
+              };
+              const url = selectionUrl(
+                data,
+                definition.datasetId,
+                row.record.recordId,
+              );
+              return `<tr data-compact-card="true" data-presented-row="true" data-record-id="${h(row.record.recordId)}" ${selected ? 'data-selected="true"' : ''}>${displayed.map((column) => `<td data-column-label="${h(column.label)}" data-column-priority="${column.presentation?.priority ?? column.orderKey}" data-cell-role="${column.presentation?.role ?? 'value'}">${column === primary ? `<strong>${h(row.cells[column.columnId] ?? '—')}</strong><div class="composition-cell-secondary">${cells(row, secondary)}</div>` : h(row.cells[column.columnId] ?? '—')}</td>`).join('')}${detail.length ? `<td data-cell-role="detail" data-column-label="Details"><details><summary>Supporting details</summary><div class="composition-cell-secondary">${cells(row, detail)}</div></details></td>` : ''}${
+                definition.presentation?.selection !== 'none' ||
+                rowActions.length
+                  ? `<td data-cell-role="actions" data-column-label="Actions">${definition.presentation?.selection !== 'none' ? `<a href="${h(url.pathname + url.search + url.hash)}" ${selected ? 'aria-current="true"' : ''}>${selected ? 'Selected' : 'Select'}</a>` : ''}${rowActions
+                      .filter((action) => applicable(action, rowData))
+                      .map((action) => actionLink(action, rowData, view))
+                      .join('')}</td>`
+                  : ''
+              }</tr>`;
+            })
+            .join('')}</tbody></table></div>`;
+  return `<section id="${h(definition.datasetId)}" class="panel data-panel composition-collection" data-composition-dataset="${h(definition.datasetId)}" data-resolution="${child.status}"><h2>${h(definition.label)}</h2>${definition.presentation?.description ? `<p class="composition-description">${h(definition.presentation.description)}</p>` : ''}${body}${selectedActions.length ? `<div class="composition-local-actions" id="composition-selected-actions" aria-label="Selected record actions">${selectedActions.map((action) => `<div>${actionLink(action, data, view)}<p>${h(action.description)}</p></div>`).join('')}</div>` : ''}</section>`;
+}
 export function renderCompositionFields(
   surface: CompiledSurfaceDefinition,
   data: CompositionData,
 ): string {
   if (data.fieldsFailed)
     return compositionMessage('COMPOSITION_CHILD_FAILED', 'alert');
+  const header = surface.composition!.presentation?.header;
+  const assigned = header
+    ? [
+        header.title,
+        ...header.subtitle,
+        ...header.facts,
+        ...(header.status ? [header.status] : []),
+      ]
+    : [];
+  const fields = surface.composition!.fields.filter(
+    (column) => !assigned.includes(column.columnId),
+  );
+  if (!fields.length) return '';
   return `<section class="panel"><h2>${h(surface.label)}</h2><dl class="record-fields">${ordered(
-    surface.composition!.fields,
+    fields,
   )
     .map(
       (column) =>
@@ -373,9 +529,15 @@ export function renderCompositionFields(
     )
     .join('')}</dl></section>`;
 }
-export function renderCompositionChildren(data: CompositionData): string {
+export function renderCompositionChildren(
+  data: CompositionData,
+  surface?: CompiledSurfaceDefinition,
+  view?: RequestRuntimeView,
+): string {
   const children = data.children
     .map((child) => {
+      if (child.definition.presentation && surface && view)
+        return renderPresentedChild(child, data, surface, view);
       const columns = ordered(child.definition.columns);
       return `<section class="panel data-panel" data-composition-dataset="${h(child.definition.datasetId)}" data-resolution="${child.status}"><h2>${h(child.definition.label)}</h2>${
         child.status === 'failed'
@@ -405,6 +567,23 @@ export function renderCompositionActions(
   data: CompositionData,
   view: RequestRuntimeView,
 ): string {
+  const presentation = surface.composition!.presentation;
+  if (presentation) {
+    const returnTo = new URL(
+      data.url,
+      'http://surface-runtime.local',
+    ).searchParams.get('returnTo');
+    const back = returnTo?.startsWith('/?')
+      ? `<a class="composition-back" href="${h(returnTo)}">Back to order</a>`
+      : '';
+    const context = presentation.context;
+    const action = ordered(surface.composition!.actions).find(
+      (value) =>
+        value.presentation?.placement === 'selection' &&
+        applicable(value, data),
+    );
+    return `${back}${context ? `<section class="composition-context"><h2>${h(context.label)}</h2><p>${h(action?.description ?? context.description)}</p>${action ? `<a href="#composition-selected-actions">${h(action.label)} ↓</a>` : ''}<details class="composition-section-links"><summary>Related sections</summary><nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav></details></section>` : ''}`;
+  }
   const actions = ordered(surface.composition!.actions)
     .filter((action) => applicable(action, data))
     .map((action) => {
@@ -587,7 +766,7 @@ export async function submitCompositionAction(
         })
         .join('') ?? '';
     return renderTask(
-      `<section class="panel" data-composition-task>${html()}${selection ? `<details open><summary>Current selection</summary>${selection}</details>` : ''}</section>`,
+      `<section class="panel" data-composition-task><div class="composition-task-layout"><div>${html()}</div>${selection ? `<section class="composition-task-context"><h2>Current selection</h2>${selection}</section>` : ''}</div></section>`,
       renderData,
       renderData ? 200 : 422,
     );

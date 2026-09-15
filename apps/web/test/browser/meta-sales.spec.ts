@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
+import { writeFile } from 'node:fs/promises';
 
 test.use({ screenshot: 'only-on-failure', trace: 'retain-on-failure' });
 
@@ -12,6 +13,42 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
   page.setDefaultTimeout(30000);
   await withBrowserFixture(async (url) => {
     const orderId = new URL(url).searchParams.get('record');
+    const captures: unknown[] = [];
+    const capture = async (name: string, state: string) => {
+      for (const [size, width, height] of [
+        ['desktop', 1280, 800],
+        ['mobile', 390, 844],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+        ).toBe(true);
+        const file = `${name}-${size}.png`;
+        await page.screenshot({
+          path: testInfo.outputPath(file),
+          fullPage: true,
+        });
+        await page.screenshot({
+          path: testInfo.outputPath(`${name}-${size}-viewport.png`),
+        });
+        captures.push({
+          file,
+          viewport: { width, height },
+          state,
+          url: page.url(),
+          releaseRoot: await page
+            .locator('.app-shell')
+            .getAttribute('data-release-content-hash'),
+          releaseId: await page
+            .locator('.app-shell')
+            .getAttribute('data-release-id'),
+        });
+      }
+      await page.setViewportSize({ width: 1280, height: 800 });
+    };
     await page.goto(url);
     await expect(
       page.getByText('Alpine Office Supply', { exact: true }),
@@ -25,6 +62,13 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
       page.locator('[data-composition-dataset$="dataset.line_reservations"]');
     const shipments = () =>
       page.locator('[data-composition-dataset$="dataset.order_shipments"]');
+    await capture(
+      'unreserved',
+      'Released; ordered 10 EA, reserved 0, shipped 0, open 10',
+    );
+    const lineTop = await lines().boundingBox();
+    expect(lineTop!.y).toBeLessThan(650);
+    await expect(page.locator('.composition-header')).toContainText('Released');
     await lines().getByRole('link', { name: 'Select', exact: true }).focus();
     await page.keyboard.press('Enter');
     const task = () => page.locator('[data-composition-task]');
@@ -54,6 +98,10 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
       page.getByRole('button', { name: 'Confirm Reserve stock', exact: true }),
     ).toBeVisible({ timeout: 30_000 });
     await expect(task()).toContainText('Calgary warehouse');
+    await capture(
+      'reserve-review',
+      'Review reserve 8 EA at Calgary; not confirmed',
+    );
     await page
       .getByRole('button', { name: 'Confirm Reserve stock', exact: true })
       .click();
@@ -72,6 +120,7 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
         ).toHaveText(expected[index]!);
     };
     await totals(['10', '8', '2']);
+    await capture('reserved', 'Released; stock 10/8/2; reservation 8 EA');
     await reservations()
       .getByRole('link', { name: 'Select', exact: true })
       .click();
@@ -82,6 +131,10 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
     await page
       .getByRole('button', { name: 'Review Ship reserved stock', exact: true })
       .click();
+    await capture(
+      'ship-review',
+      'Review ship 5 EA from explicit reservation; not confirmed',
+    );
     await page
       .getByRole('button', { name: 'Confirm Ship reserved stock', exact: true })
       .click();
@@ -90,6 +143,10 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
       .getByRole('link', { name: 'Back to order', exact: true })
       .click();
     await totals(['5', '3', '2']);
+    await capture(
+      'partially-shipped',
+      'Released; stock 5/3/2; shipped 5 EA, reservation remaining 3 EA',
+    );
     await expect(lines().locator('td[data-column-label="Shipped"]')).toHaveText(
       '5',
     );
@@ -107,6 +164,10 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
       .getByRole('link', { name: 'Back to order', exact: true })
       .click();
     await totals(['5', '0', '5']);
+    await capture(
+      'remainder-released',
+      'Released; stock 5/0/5; ordered 10 EA, shipped 5, open 5; reservation released',
+    );
     await page.screenshot({
       path: testInfo.outputPath('fulfillment-desktop.png'),
       fullPage: true,
@@ -125,9 +186,9 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    await shipments()
-      .getByRole('link', { name: 'Select', exact: true })
-      .click();
+    await expect(
+      shipments().getByRole('link', { name: 'Open packing', exact: true }),
+    ).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath('fulfillment-mobile.png'),
       fullPage: true,
@@ -139,6 +200,14 @@ test('metadata workspace reserves, partially ships, releases and opens complete 
     await expect(packed).toHaveAttribute('data-resolution', 'ready');
     await expect(packed.locator('tbody tr')).toHaveCount(1);
     await expect(packed).toContainText('Field notebook');
+    await capture(
+      'packing',
+      'Posted shipment; Calgary warehouse; one packed line, Field notebook 5 EA',
+    );
+    await writeFile(
+      testInfo.outputPath('captures.json'),
+      JSON.stringify(captures, null, 2),
+    );
     await page.screenshot({
       path: testInfo.outputPath('packing-mobile.png'),
       fullPage: true,

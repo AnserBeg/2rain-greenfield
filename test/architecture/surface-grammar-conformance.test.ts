@@ -278,7 +278,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // behaviour itself is still gated -- by `payloadSchemaVersion` immediately
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 4);
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 5);
   // 13 + Purchasing's six lists + Sales' seven lists.
   assert.equal(navigationSurfaceIds(grouped.entries).length, 26);
   // Sales is the sixth module, so the compiler groups Purchasing and Sales

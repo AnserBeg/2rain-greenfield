@@ -32,6 +32,29 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         }
       : {}),
   });
+  const hierarchy = (
+    columns: ReturnType<typeof column>[],
+    primary: string,
+    secondary: string[],
+    quantities: string[],
+    details: string[] = [],
+  ) =>
+    columns.map((value, index) => ({
+      ...value,
+      presentation: {
+        role:
+          value.columnId === id('column', primary)
+            ? 'primary'
+            : secondary.some((name) => value.columnId === id('column', name))
+              ? 'secondary'
+              : quantities.some((name) => value.columnId === id('column', name))
+                ? 'quantity'
+                : details.some((name) => value.columnId === id('column', name))
+                  ? 'detail'
+                  : 'secondary',
+        priority: index,
+      },
+    }));
   const selected = (name: string) => ({ source: 'selected', field: name });
   const record = (name: string) => ({ source: 'record', field: name });
   const literal = (value: string | number | null) => ({
@@ -100,6 +123,21 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
   return {
     kind: 'surfaceComposition',
     schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: id('column', 'order_number'),
+        subtitle: [id('column', 'customer')],
+        status: id('column', 'order_state'),
+        facts: [id('column', 'requested_date')],
+      },
+      context: {
+        label: 'Fulfillment',
+        description:
+          'Choose an order line to reserve stock, or a reservation to ship or release its remainder.',
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+    },
     fields: [
       column('order_number', 'Sales order', 10, field('sales_order_number')),
       column(
@@ -125,6 +163,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     children: [
       {
         datasetId: lines,
+        presentation: { selection: 'explicit' },
         label: 'Order lines',
         orderKey: 10,
         query: q('sales_order_line_list'),
@@ -133,26 +172,36 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           value: record('recordId'),
           ownership: 'parentScopedChild',
         },
-        columns: [
-          column('line', 'Line', 10, field('sales_order_line_line_number')),
-          column('item', 'Item', 20, field('sales_order_line_item_id'), [
-            'item_get',
-            'item_name',
-          ]),
-          column(
-            'ordered',
-            'Ordered',
-            30,
-            field('sales_order_line_ordered_quantity'),
-          ),
-          column('unit', 'Unit', 40, field('sales_order_line_unit_id')),
-          column('coverage', 'Reserved', 50, id('metric', 'coverage')),
-          column('shipped', 'Shipped', 60, id('metric', 'shipped')),
-          column('open', 'Open to ship', 70, id('metric', 'open_to_ship')),
-        ],
+        columns: hierarchy(
+          [
+            column('line', 'Line', 10, field('sales_order_line_line_number')),
+            column('item', 'Item', 20, field('sales_order_line_item_id'), [
+              'item_get',
+              'item_name',
+            ]),
+            column(
+              'ordered',
+              'Ordered',
+              30,
+              field('sales_order_line_ordered_quantity'),
+            ),
+            column('unit', 'Unit', 40, field('sales_order_line_unit_id')),
+            column('coverage', 'Reserved', 50, id('metric', 'coverage')),
+            column('shipped', 'Shipped', 60, id('metric', 'shipped')),
+            column('open', 'Open to ship', 70, id('metric', 'open_to_ship')),
+          ],
+          'item',
+          ['line', 'unit'],
+          ['ordered', 'coverage', 'shipped', 'open'],
+        ),
       },
       {
         datasetId: reservations,
+        presentation: {
+          selection: 'explicit',
+          description:
+            'Reservation-scoped availability for this item and location. Missing or unavailable data is not zero stock.',
+        },
         label: 'Selected line reservations',
         orderKey: 20,
         query: q('reservation_list'),
@@ -161,32 +210,53 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           value: { ...selected('recordId'), datasetId: lines },
           ownership: 'reference',
         },
-        columns: [
-          column('reservation', 'Reservation', 10, field('reservation_number')),
-          column('location', 'Location', 20, field('reservation_location_id'), [
-            'location_get',
-            'location_name',
-          ]),
-          column(
-            'quantity',
-            'Original quantity',
-            30,
-            field('reservation_quantity'),
-          ),
-          column('state', 'State', 40, field('reservation_state')),
-          column('remaining', 'Remaining', 50, id('metric', 'remaining')),
-          column('on_hand', 'On hand', 60, id('metric', 'on_hand')),
-          column(
-            'reserved_total',
-            'Reserved stock',
-            70,
-            id('metric', 'reserved'),
-          ),
-          column('available', 'Available', 80, id('metric', 'available')),
-        ],
+        columns: hierarchy(
+          [
+            column(
+              'reservation',
+              'Reservation',
+              10,
+              field('reservation_number'),
+            ),
+            column(
+              'location',
+              'Location',
+              20,
+              field('reservation_location_id'),
+              ['location_get', 'location_name'],
+            ),
+            column(
+              'quantity',
+              'Original quantity',
+              30,
+              field('reservation_quantity'),
+            ),
+            column('state', 'State', 40, field('reservation_state')),
+            column(
+              'reservation_unit',
+              'Unit',
+              45,
+              field('reservation_unit_id'),
+            ),
+            column('remaining', 'Remaining', 50, id('metric', 'remaining')),
+            column('on_hand', 'On hand', 60, id('metric', 'on_hand')),
+            column(
+              'reserved_total',
+              'Reserved stock',
+              70,
+              id('metric', 'reserved'),
+            ),
+            column('available', 'Available', 80, id('metric', 'available')),
+          ],
+          'location',
+          ['state', 'reservation_unit'],
+          ['remaining', 'on_hand', 'reserved_total', 'available'],
+          ['reservation', 'quantity'],
+        ),
       },
       {
         datasetId: shipments,
+        presentation: { selection: 'none' },
         label: 'Shipments and packing',
         orderKey: 30,
         query: q('shipment_list'),
@@ -210,6 +280,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     actions: [
       {
         actionId: id('action', 'reserve_stock'),
+        presentation: { placement: 'selection' },
         label: 'Reserve stock',
         description:
           'Create a reservation and reserve this exact quantity. On hand stays unchanged; available stock decreases.',
@@ -248,6 +319,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       },
       {
         actionId: id('action', 'ship_reserved'),
+        presentation: { placement: 'selection' },
         label: 'Ship reserved stock',
         description:
           'Create and post a partial shipment against the selected reservation. On hand and reserved stock decrease by the shipped quantity.',
@@ -296,6 +368,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       },
       {
         actionId: id('action', 'release_remaining'),
+        presentation: { placement: 'selection' },
         label: 'Release remainder',
         description:
           'Release the remaining reservation. On hand stays unchanged; the unused stock becomes available.',
@@ -312,6 +385,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       },
       {
         actionId: id('action', 'open_packing'),
+        presentation: { placement: 'row' },
         label: 'Open packing',
         description: 'Open the complete committed shipment document.',
         orderKey: 40,
@@ -444,6 +518,16 @@ export function packingWorkspace(namespace: string): Record<string, unknown> {
   return {
     kind: 'surfaceComposition',
     schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: `${namespace}:column.packing_number`,
+        subtitle: [`${namespace}:column.packing_location`],
+        facts: [`${namespace}:column.packing_date`],
+        status: `${namespace}:column.packing_state`,
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+    },
     fields: [
       column('number', 'Packing document', 10, 'shipment_number'),
       column('location', 'Ship-from location', 20, 'shipment_location_id', [
@@ -451,11 +535,13 @@ export function packingWorkspace(namespace: string): Record<string, unknown> {
         'location_name',
       ]),
       column('date', 'Shipped at', 30, 'shipment_effective_at'),
+      column('state', 'Shipment state', 40, 'shipment_state'),
     ],
     children: [
       {
         datasetId: `${namespace}:dataset.packing_lines`,
         label: 'Packed lines',
+        presentation: { selection: 'none' },
         orderKey: 10,
         query: ref('queryReference', `${namespace}:query.shipment_line_list`),
         parent: {
@@ -471,7 +557,18 @@ export function packingWorkspace(namespace: string): Record<string, unknown> {
           ]),
           column('quantity', 'Quantity', 30, 'shipment_line_quantity'),
           column('unit', 'Unit', 40, 'shipment_line_unit_id'),
-        ],
+        ].map((value) => ({
+          ...value,
+          presentation: {
+            role:
+              value.columnId === `${namespace}:column.packing_item`
+                ? 'primary'
+                : value.columnId === `${namespace}:column.packing_quantity`
+                  ? 'quantity'
+                  : 'secondary',
+            priority: value.orderKey,
+          },
+        })),
       },
     ],
     actions: [],

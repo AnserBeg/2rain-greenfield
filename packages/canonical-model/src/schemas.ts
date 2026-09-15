@@ -730,6 +730,12 @@ const compositionColumn = z.strictObject({
   label: LabelSchema,
   orderKey: boundedOrderKey,
   field: z.string().min(1),
+  presentation: z
+    .strictObject({
+      role: z.enum(['primary', 'secondary', 'quantity', 'detail']),
+      priority: boundedOrderKey,
+    })
+    .optional(),
   reference: z
     .strictObject({
       query: compositionReference('queryReference'),
@@ -765,6 +771,11 @@ const compositionStep = z.strictObject({
     .max(60),
 });
 const compositionAction = z.strictObject({
+  presentation: z
+    .strictObject({
+      placement: z.enum(['selection', 'row']),
+    })
+    .optional(),
   actionId: CanonicalIdSchema,
   label: LabelSchema,
   description: LabelSchema,
@@ -782,6 +793,12 @@ const compositionAction = z.strictObject({
     .optional(),
 });
 const compositionDataset = z.strictObject({
+  presentation: z
+    .strictObject({
+      description: LabelSchema.optional(),
+      selection: z.enum(['explicit', 'none']),
+    })
+    .optional(),
   datasetId: CanonicalIdSchema,
   label: LabelSchema,
   orderKey: boundedOrderKey,
@@ -796,6 +813,21 @@ const compositionDataset = z.strictObject({
   columns: z.array(compositionColumn).min(1).max(30),
 });
 export const SurfaceCompositionSchema = z.strictObject({
+  presentation: z
+    .strictObject({
+      header: z.strictObject({
+        title: CanonicalIdSchema,
+        subtitle: z.array(CanonicalIdSchema).max(4),
+        facts: z.array(CanonicalIdSchema).max(6),
+        status: CanonicalIdSchema.optional(),
+      }),
+      context: z
+        .strictObject({ label: LabelSchema, description: LabelSchema })
+        .optional(),
+      recordActions: z.literal('progressive'),
+      technicalDetails: z.literal('progressive'),
+    })
+    .optional(),
   kind: z.literal('surfaceComposition'),
   schemaVersion: v6NodeVersion,
   fields: z.array(compositionColumn).max(30),
