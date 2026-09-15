@@ -3731,7 +3731,11 @@ test('composed tasks retain reviewed inputs and retry keys, and stop on committe
       0,
       'the actual gateway rejects missing confirmation',
     );
-    const result = await submit({ taskToken, taskStage: 'confirm' });
+    const result = await submit({
+      taskToken,
+      taskStage: 'confirm',
+      preparedId: hiddenValue(preview.html, 'preparedId'),
+    });
     assert.equal(calls.length, 1);
     if (withheld) {
       assert.match(result.html, /COMPOSITION_COMMITTED_WITHHELD/);
@@ -3826,4 +3830,517 @@ test('cached pinned query catalogs keep whole-catalog refusal, view isolation an
       () => registeredSemanticQueryFromPinnedView(malformed, id),
       /duplicate queryId/,
     );
+});
+
+function deferredSignal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function correctionTaskFixture() {
+  const definition = workshopComposition('Work title');
+  const surface = (definition.surfaces as Array<Record<string, unknown>>).find(
+    (value) => value.composition,
+  )!;
+  const composition = surface.composition as SurfaceComposition;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  // A separate declared permission lets a label dependency fail while root and child reads remain allowed.
+  const fields = definition.fields as Array<Record<string, unknown>>;
+  const nameField = fields.find(
+    (value) => value.fieldId === 'workshop.jobs:field.job_name',
+  )!;
+  for (const [index, suffix] of ['amount', 'notes', 'utc_instant'].entries())
+    fields.push({
+      ...structuredClone(nameField),
+      fieldId: `workshop.jobs:field.job_${suffix}`,
+      label: suffix,
+      orderKey: 100 + index,
+      presence: 'optional',
+    });
+  const queries = definition.queries as Array<Record<string, unknown>>;
+  for (const type of ['get', 'list']) {
+    const source = queries.find(
+      (value) => value.queryId === `workshop.jobs:query.job_${type}`,
+    )!;
+    queries.push({
+      ...JSON.parse(
+        JSON.stringify(source).replaceAll(
+          ':selection.job_',
+          ':selection.location_',
+        ),
+      ),
+      queryId: `workshop.jobs:query.location_${type}`,
+      permission: ref(
+        'permissionReference',
+        type === 'get'
+          ? 'workshop.jobs:permission.location_label_read'
+          : 'workshop.jobs:permission.location_read',
+      ),
+    });
+  }
+  for (const suffix of ['location_read', 'location_label_read'])
+    (definition.permissions as unknown[]).push({
+      kind: 'permissionDefinition',
+      schemaVersion: 'v6',
+      permissionId: `workshop.jobs:permission.${suffix}`,
+      label: 'Read location labels',
+      action: 'read',
+      resource: ref('entityReference', 'workshop.jobs:entity.job'),
+    });
+  composition.fields.push({
+    columnId: 'workshop.jobs:column.location',
+    label: 'Location',
+    orderKey: 20,
+    field: 'recordId',
+    reference: {
+      query: ref('queryReference', 'workshop.jobs:query.location_get'),
+      labelField: ref('fieldReference', 'workshop.jobs:field.job_name'),
+    },
+  } as SurfaceComposition['fields'][number]);
+  composition.actions = [
+    {
+      actionId: 'workshop.jobs:action.change',
+      label: 'Change assignment',
+      description: 'Review assignment inputs.',
+      orderKey: 10,
+      datasetId: 'workshop.jobs:dataset.assignments',
+      conditions: [],
+      inputs: [
+        {
+          inputId: 'workshop.jobs:input.quantity',
+          label: 'Quantity',
+          orderKey: 10,
+          type: 'quantity',
+          required: true,
+        },
+        {
+          inputId: 'workshop.jobs:input.location',
+          label: 'Location',
+          orderKey: 20,
+          type: 'reference',
+          required: true,
+          query: ref('queryReference', 'workshop.jobs:query.location_list'),
+          labelField: ref('fieldReference', 'workshop.jobs:field.job_name'),
+        },
+      ],
+      steps: [
+        {
+          stepId: 'workshop.jobs:step.change',
+          operation: ref(
+            'operationReference',
+            'workshop.jobs:operation.job_update',
+          ),
+          bindings: [
+            {
+              path: ['recordId'],
+              value: { source: 'record', field: 'recordId' },
+            },
+            {
+              path: ['expectedRevision'],
+              value: { source: 'record', field: 'revision' },
+            },
+            {
+              path: ['patch', 'workshop.jobs:field.job_amount'],
+              value: {
+                source: 'input',
+                inputId: 'workshop.jobs:input.quantity',
+              },
+            },
+            {
+              path: ['patch', 'workshop.jobs:field.job_notes'],
+              value: {
+                source: 'input',
+                inputId: 'workshop.jobs:input.location',
+              },
+            },
+            {
+              path: ['patch', 'workshop.jobs:field.job_utc_instant'],
+              value: { source: 'generated', value: 'instant' },
+            },
+          ],
+        },
+        {
+          stepId: 'workshop.jobs:step.after',
+          operation: ref(
+            'operationReference',
+            'workshop.jobs:operation.job_archive',
+          ),
+          bindings: [
+            {
+              path: ['recordId'],
+              value: {
+                source: 'step',
+                stepId: 'workshop.jobs:step.change',
+                field: 'recordId',
+              },
+            },
+            {
+              path: ['expectedRevision'],
+              value: {
+                source: 'step',
+                stepId: 'workshop.jobs:step.change',
+                field: 'revision',
+              },
+            },
+          ],
+        },
+      ],
+    },
+  ] as unknown as SurfaceComposition['actions'];
+  (definition.operations as Array<Record<string, unknown>>).find(
+    (value) => value.operationId === 'workshop.jobs:operation.job_update',
+  )!.confirmation = 'humanRequired';
+  const compiled = compileFixture(definition);
+  const denied = new Set<string>();
+  const policy = new RecordingPolicy((request) =>
+    denied.has(request.permissionId) ? 'DENY' : 'ALLOW',
+  );
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const root: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.job',
+    recordId: randomUUID(),
+    revision: 3,
+    archived: false,
+    values: { 'workshop.jobs:field.job_name': 'PROTECTED_ROOT_SENTINEL' },
+  };
+  const child: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.assignment',
+    recordId: randomUUID(),
+    revision: 7,
+    archived: false,
+    values: {
+      'workshop.jobs:field.assignment_kind': 'PROTECTED_CHILD_SENTINEL',
+    },
+  };
+  const locations = ['A', 'B'].map((suffix) => ({
+    ...root,
+    recordId: randomUUID(),
+    values: { 'workshop.jobs:field.job_name': `PROTECTED_LOCATION_${suffix}` },
+  }));
+  const calls: SemanticOperationExecutionRequest[] = [];
+  const effects: string[] = [];
+  let beforeReferenceList: (() => Promise<void>) | undefined;
+  let execute:
+    ((request: SemanticOperationExecutionRequest) => Promise<void>) | undefined;
+  let withheld = false;
+  const mediation = new SemanticOperationMediationAuthority();
+  const trust = {
+    invocationId: randomUUID(),
+    changeDocumentId: randomUUID(),
+    domainEventId: randomUUID(),
+    outboxId: randomUUID(),
+  };
+  const gateways: SurfaceRuntimeGateways = {
+    queryGateway: new SemanticQueryGateway(policy, {
+      async execute(request) {
+        if (request.definition.queryId === 'workshop.jobs:query.location_list')
+          await beforeReferenceList?.();
+        const records = request.definition.queryId.includes(':query.location_')
+          ? request.list
+            ? locations
+            : [locations[0]!]
+          : request.list
+            ? [child]
+            : [root];
+        return {
+          kind: 'semanticQueryResult',
+          schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+          queryId: request.definition.queryId,
+          outcome: 'exact',
+          unsupportedReason: null,
+          records,
+          ...(request.list
+            ? {
+                listCoverage: {
+                  ...listCoverage(request, records.length),
+                  parentScope: request.list.query.parentScope,
+                },
+              }
+            : {}),
+        };
+      },
+    }),
+    operationMediation: mediation,
+    operationGateway: new SemanticOperationGateway(
+      policy,
+      {
+        async execute(request) {
+          calls.push(request);
+          if (!effects.includes(request.idempotencyKey))
+            effects.push(request.idempotencyKey);
+          await execute?.(request);
+          return {
+            kind: 'semanticOperationResult',
+            schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+            operationId: request.definition.operationId,
+            outcome: 'succeeded',
+            readBack: withheld ? null : { ...root, revision: 4 },
+            unsupportedReason: null,
+            trust,
+          };
+        },
+        async recordNonAccepted() {},
+      },
+      mediation,
+    ),
+  };
+  const url = `/?surface=workshop.jobs%3Asurface.job_record&record=${root.recordId}&dataset=workshop.jobs%3Adataset.assignments&select:workshop.jobs:dataset.assignments=${child.recordId}`;
+  const submit = (body: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      view,
+      url,
+      { compositionAction: 'workshop.jobs:action.change', ...body },
+      gateways,
+    );
+  const initial = await submit({});
+  assert.match(initial.html, /PROTECTED_ROOT_SENTINEL/);
+  assert.match(initial.html, /PROTECTED_CHILD_SENTINEL/);
+  assert.match(initial.html, /PROTECTED_LOCATION_A/);
+  const taskToken = hiddenValue(initial.html, 'taskToken');
+  const prepare = (quantity: string, location: string) =>
+    submit({
+      taskToken,
+      taskStage: 'prepare',
+      'workshop.jobs:input.quantity': quantity,
+      'workshop.jobs:input.location': location,
+    });
+  const confirmation = (html: string) => ({
+    taskToken,
+    taskStage: 'confirm',
+    preparedId: /name="preparedId" value="([^"]*)"/.exec(html)?.[1] ?? '',
+  });
+  return {
+    submit,
+    prepare,
+    confirmation,
+    taskToken,
+    denied,
+    calls,
+    effects,
+    locations,
+    trust,
+    beforeReferences(value: typeof beforeReferenceList) {
+      beforeReferenceList = value;
+    },
+    onExecute(value: typeof execute) {
+      execute = value;
+    },
+    setWithheld() {
+      withheld = true;
+    },
+  };
+}
+
+const assertTaskRedacted = (response: { html: string }) => {
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /PROTECTED_(?:ROOT_SENTINEL|CHILD_SENTINEL|LOCATION_[AB])/,
+    'the complete response must not redisclose protected cached data',
+  );
+};
+
+test('P1 task response rechecks root, child and label reads and redacts committed withheld repeats', async (t) => {
+  for (const permission of [
+    'job_read',
+    'assignment_read',
+    'location_label_read',
+  ])
+    await t.test(permission, async () => {
+      const fixture = await correctionTaskFixture();
+      const preview = await fixture.prepare(
+        '8',
+        fixture.locations[0]!.recordId,
+      );
+      assert.match(preview.html, /PROTECTED_LOCATION_A/);
+      fixture.denied.add(`workshop.jobs:permission.${permission}`);
+      const denied = await fixture.submit({
+        taskToken: fixture.taskToken,
+        taskStage: 'edit',
+      });
+      assertTaskRedacted(denied);
+      assert.equal(fixture.calls.length, 0);
+    });
+  await t.test('committed withheld and repeated requests', async () => {
+    const fixture = await correctionTaskFixture();
+    const preview = await fixture.prepare('8', fixture.locations[0]!.recordId);
+    fixture.setWithheld();
+    fixture.onExecute(async () => {
+      fixture.denied.add('workshop.jobs:permission.location_read');
+    });
+    for (const body of [
+      fixture.confirmation(preview.html),
+      { taskToken: fixture.taskToken, taskStage: 'retry' },
+      fixture.confirmation(preview.html),
+    ]) {
+      const response = await fixture.submit(body);
+      assert.equal(
+        response.statusCode,
+        200,
+        'a committed operation remains success when display is withheld',
+      );
+      assert.match(response.html, /COMPOSITION_COMMITTED_WITHHELD/);
+      assertTaskRedacted(response);
+      assert.equal(fixture.calls.length, 1);
+      assert.equal(fixture.effects.length, 1);
+    }
+  });
+});
+
+test('P2 stale review cannot confirm replacement inputs', async () => {
+  const fixture = await correctionTaskFixture();
+  const first = await fixture.prepare('8', fixture.locations[0]!.recordId);
+  const latest = await fixture.prepare('5', fixture.locations[1]!.recordId);
+  await fixture.submit(fixture.confirmation(first.html));
+  assert.equal(
+    fixture.calls.length,
+    0,
+    'stale review form must not dispatch the latest session values',
+  );
+  await fixture.submit(fixture.confirmation(latest.html));
+  assert.equal(fixture.calls.length, 2);
+  assert.deepEqual(
+    (asRecord(fixture.calls[0]!.input).patch as Record<string, unknown>)[
+      'workshop.jobs:field.job_amount'
+    ],
+    '5',
+  );
+  assert.deepEqual(
+    (asRecord(fixture.calls[0]!.input).patch as Record<string, unknown>)[
+      'workshop.jobs:field.job_notes'
+    ],
+    fixture.locations[1]!.recordId,
+  );
+});
+
+test('P2 missing forged and unprepared confirmations never dispatch', async () => {
+  const fixture = await correctionTaskFixture();
+  for (const preparedId of ['', 'forged'])
+    await fixture.submit({
+      taskToken: fixture.taskToken,
+      taskStage: 'confirm',
+      preparedId,
+    });
+  assert.equal(fixture.calls.length, 0);
+  const valid = await fixture.prepare('5', fixture.locations[1]!.recordId);
+  for (const preparedId of ['', 'forged'])
+    await fixture.submit({
+      taskToken: fixture.taskToken,
+      taskStage: 'confirm',
+      preparedId,
+    });
+  assert.equal(fixture.calls.length, 0);
+  await fixture.submit(fixture.confirmation(valid.html));
+  await fixture.submit(fixture.confirmation(valid.html));
+  assert.equal(
+    fixture.calls.length,
+    2,
+    'completed confirmation cannot repost either step',
+  );
+  assert.equal(fixture.effects.length, 2);
+});
+
+test('P2 deferred preparation cannot overwrite newer confirmed inputs and retry keeps exact keys', async () => {
+  const fixture = await correctionTaskFixture();
+  const validating = deferredSignal();
+  const finishValidation = deferredSignal();
+  let referenceReads = 0;
+  fixture.beforeReferences(async () => {
+    if (referenceReads++ === 0) {
+      validating.resolve();
+      await finishValidation.promise;
+    }
+  });
+  const older = fixture.prepare('8', fixture.locations[0]!.recordId);
+  await validating.promise;
+  const latest = await fixture.prepare('5', fixture.locations[1]!.recordId);
+  const executing = deferredSignal();
+  const finishExecution = deferredSignal();
+  fixture.onExecute(async () => {
+    if (fixture.calls.length === 1) {
+      executing.resolve();
+      await finishExecution.promise;
+      throw new Error('Controlled response loss after fixture effect');
+    }
+  });
+  const confirmed = fixture.submit(fixture.confirmation(latest.html));
+  await executing.promise;
+  finishValidation.resolve();
+  const superseded = await older;
+  assert.match(superseded.html, /COMPOSITION_TASK_UNAVAILABLE/);
+  const duplicate = await fixture.submit(fixture.confirmation(latest.html));
+  assert.match(duplicate.html, /COMPOSITION_BUSY/);
+  await fixture.prepare('9', fixture.locations[0]!.recordId);
+  assert.equal(fixture.calls.length, 1);
+  finishExecution.resolve();
+  assert.match((await confirmed).html, /COMPOSITION_UNCERTAIN/);
+  const retried = await fixture.submit({
+    taskToken: fixture.taskToken,
+    taskStage: 'retry',
+    'workshop.jobs:input.quantity': '99',
+  });
+  assert.match(retried.html, /COMPOSITION_COMPLETE/);
+  assert.equal(fixture.calls.length, 3);
+  assert.deepEqual(
+    fixture.calls[1]!.input,
+    fixture.calls[0]!.input,
+    'generated instant, reviewed values and revision are unchanged',
+  );
+  assert.equal(
+    fixture.calls[1]!.idempotencyKey,
+    fixture.calls[0]!.idempotencyKey,
+  );
+  const patch = asRecord(fixture.calls[1]!.input).patch as Record<
+    string,
+    unknown
+  >;
+  assert.equal(patch['workshop.jobs:field.job_amount'], '5');
+  assert.equal(
+    patch['workshop.jobs:field.job_notes'],
+    fixture.locations[1]!.recordId,
+  );
+  assert.equal(
+    fixture.effects.length,
+    2,
+    'same-key retry adds no second fixture effect',
+  );
+});
+
+test('P1 uncertain response redacts preview inputs after dependency revocation and permits same-key recovery', async () => {
+  const fixture = await correctionTaskFixture();
+  const prepared = await fixture.prepare('5', fixture.locations[1]!.recordId);
+  fixture.onExecute(async () => {
+    if (fixture.calls.length === 1) {
+      fixture.denied.add('workshop.jobs:permission.location_read');
+      throw new Error('Controlled response loss');
+    }
+  });
+  const uncertain = await fixture.submit(fixture.confirmation(prepared.html));
+  assert.match(uncertain.html, /COMPOSITION_UNCERTAIN/);
+  assertTaskRedacted(uncertain);
+  assert.equal(fixture.calls.length, 1);
+  fixture.denied.clear();
+  const recovered = await fixture.submit({
+    taskToken: fixture.taskToken,
+    taskStage: 'retry',
+  });
+  assert.equal(recovered.statusCode, 200);
+  assert.match(recovered.html, /PROTECTED_ROOT_SENTINEL/);
+  assert.match(recovered.html, /COMPOSITION_COMPLETE/);
+  assert.deepEqual(fixture.calls[1]!.input, fixture.calls[0]!.input);
+  assert.equal(
+    fixture.calls[1]!.idempotencyKey,
+    fixture.calls[0]!.idempotencyKey,
+  );
 });

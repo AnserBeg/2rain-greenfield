@@ -336,7 +336,7 @@ export async function submitSurfaceRuntimeIntent(
       requestUrl,
       submission,
       gateways,
-      (html, data) =>
+      (html, data, statusCode) =>
         data
           ? renderSelectedSurface(
               view,
@@ -349,11 +349,11 @@ export async function submitSurfaceRuntimeIntent(
               },
               null,
               binding.operations,
-              200,
+              statusCode,
               data.scope ? [data.scope] : [],
             )
           : {
-              statusCode: 422,
+              statusCode,
               html: shellDocument(
                 view,
                 selection.surfaces,

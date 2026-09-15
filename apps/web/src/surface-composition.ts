@@ -446,13 +446,18 @@ interface TaskSession {
   data: CompositionData;
   identity: string;
   inputs: Record<string, string>;
-  inputLabels: Record<string, string>;
   results: Record<string, SemanticRecordDto>;
   generated: Record<string, string>;
   keys: string[];
   stepInputs: Record<string, ImmutableJsonValue>[];
   next: number;
   confirmed: boolean;
+  preparation: number;
+  prepared: {
+    readonly id: string;
+    readonly inputs: Readonly<Record<string, string>>;
+  } | null;
+  receipt: string | null;
   created: number;
   busy: boolean;
   committedWithheld: boolean;
@@ -476,10 +481,90 @@ export async function submitCompositionAction(
   renderTask: (
     html: string,
     data: CompositionData | null,
+    statusCode: number,
   ) => CompositionResponse,
 ): Promise<CompositionResponse> {
   let renderData: CompositionData | null = null;
-  const taskDocument = (html: string) => {
+  let displayInputs: Record<string, string> = {};
+  let displayChoices: Record<string, SemanticRecordDto[]> = {};
+  // Presentation is reloaded through governed reads at every response boundary.
+  // Never refresh the frozen execution context, step inputs, keys or outcomes.
+  const taskDocument = async (
+    html: () => string,
+    inputs = session?.inputs ?? {},
+  ) => {
+    renderData = null;
+    displayInputs = { ...inputs };
+    displayChoices = {};
+    if (session) {
+      try {
+        const result = await query(
+          view,
+          gateways,
+          surface.dataSourceQueryId,
+          session.data.scope,
+          { recordId: session.data.record.recordId, includeArchived: false },
+        );
+        if (
+          result.outcome !== 'exact' ||
+          result.records.length !== 1 ||
+          result.records[0]!.recordId !== session.data.record.recordId
+        )
+          throw new Error('Task record is unavailable');
+        const fresh = await loadSurfaceComposition(
+          view,
+          surface,
+          result.records[0]!,
+          session.data.url,
+          session.data.scope,
+          gateways,
+        );
+        if (
+          fresh.fieldsFailed ||
+          fresh.children.some((child) => child.status === 'failed') ||
+          Object.entries(session.data.selections).some(
+            ([key, selected]) =>
+              fresh.selections[key]?.recordId !== selected.recordId,
+          )
+        )
+          throw new Error('Task context is unavailable');
+        for (const input of session.action.inputs.filter(
+          (input) => input.type === 'reference',
+        )) {
+          const choices = await referenceChoices(
+            view,
+            gateways,
+            session.data.scope,
+            input,
+          );
+          displayChoices[input.inputId] = choices;
+          if (inputs[input.inputId]) {
+            const selected = choices.find(
+              (choice) => choice.recordId === inputs[input.inputId],
+            );
+            if (!selected) throw new Error('Task reference is unavailable');
+            displayInputs[input.inputId] = text(
+              recordValue(selected, input.labelField!.targetId),
+            );
+          }
+        }
+        renderData = fresh;
+      } catch {
+        // Receipts are gateway-issued recovery information, never cached business DTOs.
+        const code = session.committedWithheld
+          ? 'COMPOSITION_COMMITTED_WITHHELD'
+          : session.next === session.action.steps.length
+            ? 'COMPOSITION_COMPLETE'
+            : session.confirmed
+              ? 'COMPOSITION_UNCERTAIN'
+              : 'COMPOSITION_TASK_UNAVAILABLE';
+        return renderTask(
+          `<section class="panel" data-composition-task>${compositionMessage(code, 'status')}${session.receipt ? `<pre>${h(session.receipt)}</pre>` : ''}</section>`,
+          null,
+          session.receipt ? 200 : 422,
+        );
+      }
+    }
     const selection =
       renderData?.children
         .flatMap((child) => {
@@ -502,8 +587,9 @@ export async function submitCompositionAction(
         })
         .join('') ?? '';
     return renderTask(
-      `<section class="panel" data-composition-task>${html}${selection ? `<details open><summary>Selection at task start</summary>${selection}</details>` : ''}</section>`,
+      `<section class="panel" data-composition-task>${html()}${selection ? `<details open><summary>Current selection</summary>${selection}</details>` : ''}</section>`,
       renderData,
+      renderData ? 200 : 422,
     );
   };
   const now = performance.now();
@@ -520,13 +606,15 @@ export async function submitCompositionAction(
       new URL(requestUrl, 'http://surface-runtime.local').searchParams.get(
         'record',
       ) !== session.data.record.recordId)
-  )
-    return taskDocument(
+  ) {
+    session = undefined;
+    return taskDocument(() =>
       compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
     );
+  }
   if (!session) {
     if (sessions.size >= 500)
-      return taskDocument(
+      return taskDocument(() =>
         compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
       );
     const action = surface.composition!.actions.find(
@@ -548,7 +636,7 @@ export async function submitCompositionAction(
       { recordId: url.searchParams.get('record'), includeArchived: false },
     );
     if (!action || !result.records[0])
-      return taskDocument(
+      return taskDocument(() =>
         compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
       );
     const data = await loadSurfaceComposition(
@@ -560,7 +648,7 @@ export async function submitCompositionAction(
       gateways,
     );
     if (!applicable(action, data) || !action.steps.length)
-      return taskDocument(
+      return taskDocument(() =>
         compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
       );
     token = randomUUID();
@@ -570,13 +658,15 @@ export async function submitCompositionAction(
       data,
       identity: identity(view),
       inputs: {},
-      inputLabels: {},
       results: {},
       generated: {},
       keys: action.steps.map(() => randomUUID()),
       stepInputs: [],
       next: 0,
       confirmed: false,
+      preparation: 0,
+      prepared: null,
+      receipt: null,
       created: now,
       busy: false,
       committedWithheld: false,
@@ -584,31 +674,35 @@ export async function submitCompositionAction(
     sessions.set(token, session);
   }
   const current = session;
-  renderData = current.data;
   const url = current.data.url;
   const back = `<p><a href="${h(url)}">Back to order</a></p>`;
   const previewInputs = () =>
-    `<dl>${current.action.inputs.map((input) => `<dt>${h(input.label)}</dt><dd>${h(current.inputLabels[input.inputId] ?? current.inputs[input.inputId] ?? '')}</dd>`).join('')}</dl>`;
+    `<dl>${current.action.inputs.map((input) => `<dt>${h(input.label)}</dt><dd>${h(displayInputs[input.inputId] ?? '')}</dd>`).join('')}</dl>`;
   const hidden = `<input type="hidden" name="taskToken" value="${h(token!)}"><input type="hidden" name="compositionAction" value="${h(current.action.actionId)}">`;
   if (current.busy)
     return taskDocument(
-      `${compositionMessage('COMPOSITION_BUSY', 'status')}${back}`,
+      () => `${compositionMessage('COMPOSITION_BUSY', 'status')}${back}`,
     );
   if (current.committedWithheld)
     return taskDocument(
-      `${compositionMessage('COMPOSITION_COMMITTED_WITHHELD', 'status')}${back}`,
+      () =>
+        `${compositionMessage('COMPOSITION_COMMITTED_WITHHELD', 'status')}${back}`,
     );
   let error = '';
   if (submission.taskStage === 'prepare' && !current.confirmed) {
-    current.inputs = Object.fromEntries(
-      current.action.inputs.map((input) => [
-        input.inputId,
-        submission[input.inputId] ?? '',
-      ]),
+    const generation = ++current.preparation;
+    current.prepared = null;
+    const inputs = Object.freeze(
+      Object.fromEntries(
+        current.action.inputs.map((input) => [
+          input.inputId,
+          (submission[input.inputId] ?? '').trim(),
+        ]),
+      ),
     );
     if (
       current.action.inputs.some(
-        (input) => input.required && !current.inputs[input.inputId]?.trim(),
+        (input) => input.required && !inputs[input.inputId],
       )
     )
       error = 'Complete the required inputs.';
@@ -617,39 +711,58 @@ export async function submitCompositionAction(
         (input) =>
           input.type === 'quantity' &&
           !/^(?:[1-9]\d*(?:\.\d+)?|0\.\d*[1-9]\d*)$/.test(
-            current.inputs[input.inputId] ?? '',
+            inputs[input.inputId] ?? '',
           ),
       )
     )
       error = 'Enter a positive exact quantity.';
-    current.inputLabels = { ...current.inputs };
-    for (const input of current.action.inputs.filter(
-      (input) => input.type === 'reference',
-    )) {
-      const choices = await referenceChoices(
-        view,
-        gateways,
-        current.data.scope,
-        input,
-      );
-      const choice = choices.find(
-        (record) => record.recordId === current.inputs[input.inputId],
-      );
-      if (!choice) error = 'Choose an available reference.';
-      else
-        current.inputLabels[input.inputId] = text(
-          recordValue(choice, input.labelField!.targetId),
+    try {
+      for (const input of current.action.inputs.filter(
+        (input) => input.type === 'reference',
+      )) {
+        const choices = await referenceChoices(
+          view,
+          gateways,
+          current.data.scope,
+          input,
         );
+        if (
+          !choices.some((choice) => choice.recordId === inputs[input.inputId])
+        )
+          error = 'Choose an available reference.';
+      }
+    } catch {
+      error = 'Choose an available reference.';
     }
-    if (!error)
-      return taskDocument(
-        `<h1>Confirm ${h(current.action.label)}</h1><p>${h(current.action.description)}</p><dl>${current.action.inputs.map((input) => `<dt>${h(input.label)}</dt><dd>${h(current.inputLabels[input.inputId]!)}</dd>`).join('')}</dl><form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="confirm">Confirm ${h(current.action.label)}</button><button name="taskStage" value="edit">Edit inputs</button></form>${back}`,
+    // An older asynchronous validation cannot overwrite a later preparation or
+    // a plan that has already crossed its synchronous confirmation boundary.
+    if (generation !== current.preparation || current.confirmed)
+      return taskDocument(() =>
+        compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
       );
+    current.inputs = inputs;
+    if (!error) {
+      const prepared = Object.freeze({ id: randomUUID(), inputs });
+      current.prepared = prepared;
+      return taskDocument(
+        () =>
+          `<h1>Confirm ${h(current.action.label)}</h1><p>${h(current.action.description)}</p>${previewInputs()}<form method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button name="taskStage" value="confirm">Confirm ${h(current.action.label)}</button><button name="taskStage" value="edit">Edit inputs</button></form>${back}`,
+        inputs,
+      );
+    }
   }
+  if (
+    submission.taskStage === 'confirm' &&
+    (!current.prepared || submission.preparedId !== current.prepared.id)
+  )
+    return taskDocument(() =>
+      compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
+    );
   if (
     submission.taskStage === 'confirm' ||
     (submission.taskStage === 'retry' && current.confirmed)
   ) {
+    current.inputs = current.prepared!.inputs;
     current.confirmed = true;
     current.busy = true;
     try {
@@ -710,23 +823,27 @@ export async function submitCompositionAction(
         );
         if (result.outcome !== 'succeeded')
           throw new Error('The operation was refused.');
+        current.receipt = JSON.stringify(result.trust);
         if (!result.readBack) {
           current.committedWithheld = true;
           return taskDocument(
-            `${compositionMessage('COMPOSITION_COMMITTED_WITHHELD', 'status')}<pre>${h(JSON.stringify(result.trust))}</pre>${back}`,
+            () =>
+              `${compositionMessage('COMPOSITION_COMMITTED_WITHHELD', 'status')}<pre>${h(JSON.stringify(result.trust))}</pre>${back}`,
           );
         }
         current.results[step.stepId] = result.readBack;
       }
       return taskDocument(
-        `<h1>${h(current.action.label)}</h1>${compositionMessage('COMPOSITION_COMPLETE', 'status')}${back}`,
+        () =>
+          `<h1>${h(current.action.label)}</h1>${compositionMessage('COMPOSITION_COMPLETE', 'status')}${back}`,
       );
     } catch (failure) {
       const ref = operationMessageRef(failure);
       error =
         'The operation could not be verified. Earlier steps may have committed. Retry uses the same inputs and request keys; inspect the order if needed.';
       return taskDocument(
-        `<h1>${h(current.action.label)}</h1><div role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Operation', 'h2')}</div>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
+        () =>
+          `<h1>${h(current.action.label)}</h1><div role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Operation', 'h2')}</div>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
       );
     } finally {
       current.busy = false;
@@ -734,26 +851,19 @@ export async function submitCompositionAction(
   }
   if (current.confirmed)
     return taskDocument(
-      `<h1>${h(current.action.label)}</h1>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
+      () =>
+        `<h1>${h(current.action.label)}</h1>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
     );
-  const controls: string[] = [];
-  for (const input of ordered(current.action.inputs)) {
-    let control: string;
-    if (input.type === 'reference' && input.query && input.labelField) {
-      const choices = await referenceChoices(
-        view,
-        gateways,
-        current.data.scope,
-        input,
-      );
-      control = `<select name="${h(input.inputId)}" ${input.required ? 'required' : ''}><option value="">Select…</option>${choices.map((record) => `<option value="${h(record.recordId)}" ${current.inputs[input.inputId] === record.recordId ? 'selected' : ''}>${h(text(recordValue(record, input.labelField!.targetId)))}</option>`).join('')}</select>`;
-    } else
-      control = `<input name="${h(input.inputId)}" value="${h(current.inputs[input.inputId] ?? '')}" ${input.required ? 'required' : ''} ${input.type === 'quantity' ? 'inputmode="decimal"' : ''}>`;
-    controls.push(`<label class="field">${h(input.label)}${control}</label>`);
-  }
-  return taskDocument(
-    `<h1>${h(current.action.label)}</h1><p>${h(current.action.description)}</p>${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${controls.join('')}<button name="taskStage" value="prepare">Review ${h(current.action.label)}</button></form>${back}`,
-  );
+  return taskDocument(() => {
+    const controls = ordered(current.action.inputs).map((input) => {
+      const control =
+        input.type === 'reference' && input.query && input.labelField
+          ? `<select name="${h(input.inputId)}" ${input.required ? 'required' : ''}><option value="">Select…</option>${(displayChoices[input.inputId] ?? []).map((record) => `<option value="${h(record.recordId)}" ${current.inputs[input.inputId] === record.recordId ? 'selected' : ''}>${h(text(recordValue(record, input.labelField!.targetId)))}</option>`).join('')}</select>`
+          : `<input name="${h(input.inputId)}" value="${h(displayInputs[input.inputId] ?? '')}" ${input.required ? 'required' : ''} ${input.type === 'quantity' ? 'inputmode="decimal"' : ''}>`;
+      return `<label class="field">${h(input.label)}${control}</label>`;
+    });
+    return `<h1>${h(current.action.label)}</h1><p>${h(current.action.description)}</p>${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${controls.join('')}<button name="taskStage" value="prepare">Review ${h(current.action.label)}</button></form>${back}`;
+  });
 }
 
 async function referenceChoices(
