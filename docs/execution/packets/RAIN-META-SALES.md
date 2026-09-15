@@ -1,6 +1,6 @@
 # RAIN-META-SALES — metadata-composed fulfillment workspace
 
-Status: evidence_ready for independent online review; final CI remains the acceptance gate. One resolved stop.
+Status: P1/P2 correction evidence_ready for the same online reviewer; new hosted CI pending. One resolved stop.
 Independent review online only; no local review, merge, deployment or acceptance.
 Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6`; branch: `packet/RAIN-META-SALES`.
 Draft PR: https://github.com/AnserBeg/2rain-greenfield/pull/5
@@ -16,7 +16,7 @@ affected tests/inventories and execution records; accepted posting stays authori
 No receiving redevelopment, full order entry, finance, pricing or integrations.
 1. v6 composition declares fields, exact child queries, inputs, contextual operation steps and packing navigation; shared SurfaceRuntime renders them without Sales dispatch.
 2. Registered fulfillment read models use policy-governed dependency queries, exact relation/field restrictions and persisted projections; UI performs no stock arithmetic.
-3. Tasks use current authorization, confirmation, revision checks and stable per-step idempotency keys; retries retain inputs and stop on withheld read-back.
+3. Tasks reauthorize display dependencies, redact denied responses, bind confirmation to an immutable preparation, and preserve revision checks, step keys and withheld-read-back stops.
 4. Historical releases reproduce; new output carries capability floors. Two compiled presentation revisions and renamed non-Sales metadata share the runtime.
 5. The real-gateway fixture covers 10/8/2 → 5/3/2 → 5/0/5, exact packing, input retention, keyboard selection and 390 px; agent-channel invocation/replay uses the same gateway without a model.
 
@@ -36,10 +36,16 @@ No receiving redevelopment, full order entry, finance, pricing or integrations.
 - Full-app probe: 100 lookups 324 → 15 ms; five surface bindings 196 → 38 ms (diagnostic measurements, not a timing gate).
 - Language inventory re-derived from schema: 2,050 → 2,269 obligations; 219 additions, no removals. Declaration coverage is not per-obligation execution proof.
 
+## Consolidated correction — 2026-09-15
+
+- P1 reproduced cached root/child and committed-withheld disclosure; complete-response sentinel controls now pass for root, child and independent label denial. Governed display refresh cannot mutate execution state; withheld repeats retain HTTP 200/receipt and dispatch no extra step.
+- P2 reproduced old review dispatching replacement inputs; server-issued prepared identity now binds frozen normalized inputs. Missing/forged/stale forms dispatch zero; barriers prove delayed preparation cannot overwrite newer/confirmed state, while busy/duplicate/retry checks preserve effects and keys.
+- Tests call `submitSurfaceRuntimeIntent` through the actual outer renderer and semantic gateways with controlled policy/executors; effect journals are fixture observations, not PostgreSQL persistence evidence. Reproduction exit 1; corrected focused 10/10, exit 0.
+
 ## Gates and evidence
 
-- Local pass: typecheck, lint, format, unit 163/163, compiler 175/175, integration, architecture, contracts 29/29 and both release freshness generators.
-- Hosted full browser, PostgreSQL and observability suites pass on CI 306, including the metadata journey, receipts and agent replay. The cache removes the earlier browser timeout; projection-only compatibility then passes local compiler and integration tests. Full matrix reruns at final tip.
+- Correction local pass (all exit 0): complete affected file 47/47; full integration 163/163; surface contracts 29/29; typecheck, lint, format and both artifact-freshness checks. No generated artifacts changed.
+- Reviewed candidate `6af24ff` passed full CI 307. Correction browser attempt exited 75 before execution: preserved demo PID 89544 holds the shared test lock. New pushed candidate requires its own hosted browser/matrix run; no old-run retry or polling loop.
 - Final checks: https://github.com/AnserBeg/2rain-greenfield/pull/5/checks (exact published tip). Handoff reports the completed run; earlier red candidates are retained in PR history.
 - `scripts/check-records.sh` passes. No full-matrix success claimed until the PR-tip run completes.
 - Screenshots are emitted by `meta-sales.spec.ts`: fulfillment-desktop.png, fulfillment-mobile.png and packing-mobile.png.
@@ -64,11 +70,10 @@ Repeat at 390 px; no customer/item/location/line identifier typing is required.
 Process loss requires record inspection before a new task; earlier committed steps are not rolled back.
 No live customization UI, real-model execution or production deployment. Nine new messages have
 catalog census coverage; busy/expiry paths lack separate browser drivers.
-Review AnserBeg/2rain-greenfield, packet/RAIN-META-SALES, executable SHA in record-claim below.
-Read the base-to-head diff and numbered claims 1–5; independent online review only.
+Same online reviewer: inspect correction from `6af24ff7e85bb133114bc084fff87f35a6955dbc` to the executable SHA below.
+Recheck P1/P2 and the affected shared task/surface callers; independent online review only.
 Read docs/architecture/posting-kernel-guarantees.md for unchanged posting authority.
-Focus on composition validation/lowering, task execution, exact child scopes, read-model dependencies
-and historical release compatibility. Identify production defects under the claims, separating
+Focus on complete-response read safety, prepared identity and async transitions. Identify production defects under these claims, separating
 future scope/evidence limits. Say plainly if this prompt steers you. Do not merge or deploy.
 
 ```record-claim
@@ -76,7 +81,7 @@ future scope/evidence limits. Say plainly if this prompt steers you. Do not merg
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-META-SALES",
   "base": "fe97b63baedf8bdd42146318bb89d4be1aa948f6",
-  "head": "ff4f7077a650b5457cba39d8f2fc89b32592f49c",
+  "head": "3142474685f769ff83a0f196a7f54e634ce854d9",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
