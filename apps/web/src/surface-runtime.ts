@@ -1824,6 +1824,7 @@ body{padding-bottom:72px}
 .composition-local-actions button{width:100%;min-height:44px}
 .composition-task-dialog:modal{max-height:calc(100dvh - 16px);width:calc(100vw - 16px)}
 .composition-task-footer button{flex:1;min-height:44px}
+.composition-task-dialog:not(:modal) .composition-task-footer{bottom:80px}
 .data-table-wrap[data-compact=scrollTable]{overflow-x:auto}
 .data-table-wrap[data-compact=scrollTable] table{display:table;width:100%}
 .data-table-wrap[data-compact=scrollTable] tbody{display:table-row-group}

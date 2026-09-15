@@ -72,7 +72,9 @@ test('owned document script is singular and exactly hash-pinned by served CSP', 
     const response = await fetch(baseUrl);
     const html = await response.text();
     const assertPinned = (document: string, csp: string) => {
-      const scripts = [...document.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+      const scripts = [
+        ...document.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g),
+      ];
       assert.equal(scripts.length, 1);
       const hash = `sha256-${createHash('sha256').update(scripts[0]![1]!).digest('base64')}`;
       assert.equal(csp.match(/script-src ([^;]+)/)?.[1], `'${hash}'`);
@@ -83,6 +85,15 @@ test('owned document script is singular and exactly hash-pinned by served CSP', 
     assert.throws(() =>
       assertPinned(
         html.replace('</body>', '<script>void 0</script></body>'),
+        csp,
+      ),
+    );
+    assert.throws(() =>
+      assertPinned(
+        html.replace(
+          '</body>',
+          '<script src="/unexpected.js"></script></body>',
+        ),
         csp,
       ),
     );

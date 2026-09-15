@@ -53,6 +53,7 @@ for (const javaScriptEnabled of [true, false]) {
           await page.setViewportSize({ width: 1280, height: 800 });
         };
         await page.goto(url);
+        await expect(page.locator('script')).toHaveCount(1);
         await expect(
           page.getByText('Alpine Office Supply', { exact: true }),
         ).toBeVisible();
