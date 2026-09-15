@@ -598,7 +598,19 @@ export function renderCompositionActions(
     );
     const selection =
       primary && selectedRow
-        ? `${selectedChild!.definition.label} · ${selectedRow.cells[primary.columnId]}`
+        ? data.children
+            .flatMap((child) => {
+              const row = child.rows.find(
+                (row) =>
+                  row.record.recordId ===
+                  data.selections[child.definition.datasetId]?.recordId,
+              );
+              const identity = child.definition.columns.find(
+                (column) => column.presentation?.role === 'primary',
+              );
+              return row && identity ? [row.cells[identity.columnId]] : [];
+            })
+            .join(' · ')
         : null;
     const controls = actions.length
       ? actionLink(actions[0]!, data, view) +

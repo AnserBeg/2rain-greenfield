@@ -324,9 +324,19 @@ for (const javaScriptEnabled of [true, false]) {
           path: testInfo.outputPath('fulfillment-mobile.png'),
           fullPage: true,
         });
-        await page
-          .getByRole('link', { name: 'Open packing', exact: true })
-          .click();
+        const packingLink = page.getByRole('link', {
+          name: 'Open packing',
+          exact: true,
+        });
+        // Focus scrolls the local table; scroll the document clear of fixed shell navigation.
+        await packingLink.focus();
+        await page.evaluate(() => window.scrollBy(0, 128));
+        const packingBounds = await packingLink.boundingBox();
+        const navBounds = await page.locator('.sidebar').boundingBox();
+        expect(packingBounds!.y + packingBounds!.height).toBeLessThan(
+          navBounds!.y,
+        );
+        await packingLink.click();
         const packed = page.locator(
           '[data-composition-dataset$="dataset.packing_lines"]',
         );
