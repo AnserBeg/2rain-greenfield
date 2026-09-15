@@ -950,12 +950,17 @@ async function inventoryNavigationJourney(
   await expect(
     primaryEntries.getByRole('group').filter({ hasText: 'Party' }),
   ).toBeVisible();
+  const moreNavigation = primaryEntries
+    .getByRole('group')
+    .filter({ hasText: 'More' });
+  await moreNavigation.getByText('More', { exact: true }).click();
   await expect(
     navigation.getByRole('link', { name: 'Catalog', exact: true }),
   ).toBeVisible();
   await expect(
     navigation.getByRole('link', { name: 'Location', exact: true }),
   ).toBeVisible();
+  await moreNavigation.getByText('More', { exact: true }).click();
   const inventoryNavigation = primaryEntries
     .getByRole('group')
     .filter({ hasText: 'Inventory' });
@@ -975,9 +980,6 @@ async function inventoryNavigationJourney(
     ],
   );
   await inventoryNavigation.getByText('Inventory', { exact: true }).click();
-  const moreNavigation = primaryEntries
-    .getByRole('group')
-    .filter({ hasText: 'More' });
   await expect(moreNavigation).toBeVisible();
   await moreNavigation.getByText('More', { exact: true }).click();
   const purchasingNavigation = primaryEntries
@@ -1106,6 +1108,7 @@ async function inventoryRecordNavigationJourney(
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
+  await moreNavigation.getByText('More', { exact: true }).click();
   await navigation.getByRole('link', { name: 'Location', exact: true }).click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Location' }),
@@ -1116,7 +1119,6 @@ async function inventoryRecordNavigationJourney(
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
-  await moreNavigation.getByText('More', { exact: true }).click();
   await inventoryNavigation.getByText('Inventory', { exact: true }).click();
   await inventoryNavigation
     .getByRole('link', { name: 'Posted stock', exact: true })
