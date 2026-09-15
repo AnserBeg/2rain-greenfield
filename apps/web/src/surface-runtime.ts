@@ -1750,6 +1750,7 @@ body{padding-bottom:72px}
 .composition-context h2{font-size:var(--text-section);margin:0}
 .composition-context p{margin:var(--space-1) 0}
 .composition-context nav{display:flex;flex-wrap:wrap;gap:var(--space-3)}
+.composition-back{grid-column:1/-1;width:fit-content}
 .composition-context a,.composition-back{display:inline-flex;align-items:center;min-height:44px}
 .composition-record-actions{grid-column:1/-1}
 .composition-record-actions>summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--ink-muted)}
