@@ -558,12 +558,25 @@ composedTest.describe('focus ring coverage', () => {
         result.grounds.some((ground) => ground.includes('#0f5f8c')),
         `rail-raised was never measured; grounds were ${result.grounds.join(' | ')}`,
       );
-      // Both focus subjects on the raised navigation ground red now that the
-      // compiler emits the More disclosure: its summary and its child links.
-      // --b500 still clears 3:1 on the rail itself (3.61:1) and fails on the
-      // raised overlay (2.08:1). That is the exact state §2.1 asserted was fine.
+      const summaryGrounds = observed.measurements
+        .filter(
+          (measurement) =>
+            measurement.selector ===
+            '.navigation-group > summary:focus-visible',
+        )
+        .map((measurement) => parseComputedColor(measurement.groundColor).hex);
+      const linkGrounds = observed.measurements
+        .filter(
+          (measurement) => measurement.selector === '.sidebar a:focus-visible',
+        )
+        .map((measurement) => parseComputedColor(measurement.groundColor).hex);
+      // An outline with positive offset lands outside the summary on its
+      // details/rail ground. Child-link outlines in the open More flyout land
+      // on rail-raised. --b500 clears the former (3.61:1) and fails the latter
+      // (2.08:1), so this control pins both observed grounds before the exact red.
+      assert.ok(summaryGrounds.includes('#0b3a55'));
+      assert.ok(linkGrounds.includes('#0f5f8c'));
       assert.deepEqual(result.violations, [
-        'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -917,21 +930,9 @@ async function inventoryNavigationJourney(
     ),
   ).toHaveText(['Sales', 'Purchasing', 'Inventory', 'Party', 'More']);
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
-    'Reservation coverage',
-    'Reservation',
-    'Sales order line',
-    'Sales order',
-    'Shipped quantity',
-    'Shipment line',
-    'Shipment',
-    'Receipt line',
-    'Goods receipt',
-    'Order quantity amendment request',
-    'Purchase order line',
-    'Purchase order',
-    'Received quantity',
+    'Sales',
+    'Purchasing',
     'Inventory movement',
-    'On-hand lookup',
     'Inventory period lock',
     'Inventory transaction line',
     'Inventory transaction',
@@ -944,6 +945,45 @@ async function inventoryNavigationJourney(
     'Catalog',
     'Location',
   ]);
+  const salesOwner = navigation.getByRole('link', {
+    name: 'Sales',
+    exact: true,
+  });
+  const purchasingOwner = navigation.getByRole('link', {
+    name: 'Purchasing',
+    exact: true,
+  });
+  await expect(salesOwner).toHaveAttribute(
+    'href',
+    /surface=northstar\.app%3Asurface\.sales_order_list/u,
+  );
+  await expect(purchasingOwner).toHaveAttribute(
+    'href',
+    /surface=northstar\.app%3Asurface\.purchase_order_list/u,
+  );
+  await expect(
+    navigation.getByRole('link', {
+      name: /Reservation|Sales order line|Shipment|Goods receipt|Purchase order line/u,
+    }),
+  ).toHaveCount(0);
+  const reservationScope =
+    await loadSurfaceScopeParameterId('reservation_list');
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'reservation_list',
+      reservationScope,
+      browserLegalEntityId,
+    ),
+  );
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Reservation' }),
+  ).toBeVisible();
+  await expect(salesOwner).toHaveAttribute('aria-current', 'page');
+  expect(new URL(page.url()).searchParams.get(reservationScope)).toBe(
+    browserLegalEntityId,
+  );
+  await page.goto(surfaceUrl(baseUrl, 'party_list'));
   await expect(
     navigation.getByRole('link', { name: /detail|form/i }),
   ).toHaveCount(0);
@@ -969,7 +1009,6 @@ async function inventoryNavigationJourney(
   await expect(inventoryNavigation.locator('a > span:nth-child(2)')).toHaveText(
     [
       'Inventory movement',
-      'On-hand lookup',
       'Inventory period lock',
       'Inventory transaction line',
       'Inventory transaction',
@@ -981,39 +1020,6 @@ async function inventoryNavigationJourney(
   );
   await inventoryNavigation.getByText('Inventory', { exact: true }).click();
   await expect(moreNavigation).toBeVisible();
-  await moreNavigation.getByText('More', { exact: true }).click();
-  const purchasingNavigation = primaryEntries
-    .getByRole('group')
-    .filter({ hasText: 'Purchasing' });
-  const salesNavigation = primaryEntries
-    .getByRole('group')
-    .filter({ hasText: 'Sales' });
-  await expect(purchasingNavigation).toBeVisible();
-  await expect(salesNavigation).toBeVisible();
-  await purchasingNavigation.getByText('Purchasing', { exact: true }).click();
-  await expect(
-    purchasingNavigation.locator('a > span:nth-child(2)'),
-  ).toHaveText([
-    'Receipt line',
-    'Goods receipt',
-    'Order quantity amendment request',
-    'Purchase order line',
-    'Purchase order',
-    'Received quantity',
-  ]);
-  await salesNavigation.getByText('Sales', { exact: true }).click();
-  await expect(salesNavigation.locator('a > span:nth-child(2)')).toHaveText([
-    'Reservation coverage',
-    'Reservation',
-    'Sales order line',
-    'Sales order',
-    'Shipped quantity',
-    'Shipment line',
-    'Shipment',
-  ]);
-  await salesNavigation.getByText('Sales', { exact: true }).click();
-  await purchasingNavigation.getByText('Purchasing', { exact: true }).click();
-  await moreNavigation.getByText('More', { exact: true }).click();
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
@@ -1094,9 +1100,16 @@ async function inventoryRecordNavigationJourney(
     .getByRole('group')
     .filter({ hasText: 'More' });
   await moreNavigation.getByText('More', { exact: true }).click();
-  const purchasingNavigation = primaryEntries
-    .getByRole('group')
-    .filter({ hasText: 'Purchasing' });
+  const purchasingNavigation = navigation.getByRole('link', {
+    name: 'Purchasing',
+    exact: true,
+  });
+  const postedStockScope = await loadSurfaceScopeParameterId(
+    'posted_stock_balance_list',
+  );
+  const purchasingScope = await loadSurfaceScopeParameterId(
+    'purchase_order_list',
+  );
 
   await navigation.getByRole('link', { name: 'Catalog', exact: true }).click();
   await expect(
@@ -1126,7 +1139,26 @@ async function inventoryRecordNavigationJourney(
   await expect(
     page.getByRole('heading', { level: 1, name: 'Posted stock' }),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'DEFAULT', exact: true }).click();
+  const company = page.getByRole('navigation', { name: 'Company' });
+  await expect(company).toHaveAttribute(
+    'data-scope-parameter-id',
+    postedStockScope,
+  );
+  const defaultCompany = company.getByRole('link', {
+    name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityName,
+    exact: true,
+  });
+  const defaultCompanyHref = await defaultCompany.getAttribute('href');
+  expect(defaultCompanyHref).not.toBeNull();
+  expect(
+    new URL(defaultCompanyHref ?? '', baseUrl).searchParams.get(
+      postedStockScope,
+    ),
+  ).toBe(browserLegalEntityId);
+  await defaultCompany.click();
+  expect(new URL(page.url()).searchParams.get(postedStockScope)).toBe(
+    browserLegalEntityId,
+  );
   await expect(
     page.locator('[data-platform-slot="list:dataGrid"]'),
   ).toBeVisible();
@@ -1145,14 +1177,21 @@ async function inventoryRecordNavigationJourney(
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
-  await purchasingNavigation.getByText('Purchasing', { exact: true }).click();
-  await purchasingNavigation
-    .getByRole('link', { name: 'Purchase order', exact: true })
-    .click();
-  await page
-    .getByRole('navigation', { name: 'Legal entity' })
-    .getByRole('link', { name: 'DEFAULT', exact: true })
-    .click();
+  const purchasingHref = await purchasingNavigation.getAttribute('href');
+  expect(purchasingHref).not.toBeNull();
+  expect(
+    new URL(purchasingHref ?? '', baseUrl).searchParams.get(purchasingScope),
+  ).toBe(browserLegalEntityId);
+  await purchasingNavigation.click();
+  expect(new URL(page.url()).searchParams.get(purchasingScope)).toBe(
+    browserLegalEntityId,
+  );
+  await expect(
+    page.getByRole('navigation', { name: 'Company' }).getByRole('link', {
+      name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityName,
+      exact: true,
+    }),
+  ).toHaveAttribute('aria-current', 'true');
   await expect(
     page.getByRole('heading', { level: 1, name: 'Purchase order' }),
   ).toBeVisible();
@@ -1261,7 +1300,7 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
   ).toBeVisible();
   await expect(
     page
-      .getByRole('navigation', { name: 'Legal entity' })
+      .getByRole('navigation', { name: 'Company' })
       .locator('[aria-current="true"]'),
   ).toHaveCount(0);
   await expect(
@@ -1295,11 +1334,14 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
     onHandLookup.surfaceId,
   );
   await page
-    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('navigation', { name: 'Company' })
     .getByRole('link', {
       name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityCode,
     })
     .click();
+  expect(
+    new URL(page.url()).searchParams.get(onHandLookup.legalEntityParameterId),
+  ).toBe(browserLegalEntityId);
   const onHandForm = page.locator('[data-platform-slot="task:scanInput"] form');
   await expect(
     page.locator('[data-platform-slot="task:decision"]'),
@@ -1319,7 +1361,7 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
       ),
   ).toEqual(onHandLookup.parameterIds);
   await expect(
-    page.getByRole('navigation', { name: 'Legal entity' }),
+    page.getByRole('navigation', { name: 'Company' }),
   ).toHaveAttribute(
     'data-scope-parameter-id',
     onHandLookup.legalEntityParameterId,
@@ -1335,7 +1377,7 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(balance).toHaveAttribute('data-aggregate-value', '5');
 
   await page
-    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('navigation', { name: 'Company' })
     .getByRole('link', { name: browserAlternateInventoryScope.entityCode })
     .click();
   await expect(balance).toHaveText('0');
@@ -1348,7 +1390,7 @@ async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
     );
   }
   await page
-    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('navigation', { name: 'Company' })
     .getByRole('link', {
       name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityCode,
     })
@@ -1382,7 +1424,7 @@ async function scopedInventoryListJourney(
     page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
   ).toBeVisible();
   const legalEntityPicker = page.getByRole('navigation', {
-    name: 'Legal entity',
+    name: 'Company',
   });
   await expect(legalEntityPicker).toBeVisible();
   await expect(legalEntityPicker).toHaveAttribute(
@@ -1418,7 +1460,7 @@ async function scopedInventoryListJourney(
   });
   await expect(movementRow).toBeVisible();
   await page
-    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('navigation', { name: 'Company' })
     .getByRole('link', { name: browserAlternateInventoryScope.entityCode })
     .click();
   await expect(
@@ -1429,7 +1471,7 @@ async function scopedInventoryListJourney(
     new URL(page.url()).searchParams.get(inventoryScopeParameters.movementList),
   ).toBe(browserAlternateLegalEntityId);
   await page
-    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('navigation', { name: 'Company' })
     .getByRole('link', {
       name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityCode,
     })

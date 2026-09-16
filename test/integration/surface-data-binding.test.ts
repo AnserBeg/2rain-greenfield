@@ -5083,6 +5083,7 @@ test('native Task policy reuses non-Sales forms, fresh Record context and exact 
   const fixture = await correctionTaskFixture(true);
   const review = await fixture.prepare('8', fixture.locations[0]!.recordId);
   assert.equal((review.html.match(/<dialog /g) ?? []).length, 1);
+  assert.equal((review.html.match(/<script\b/g) ?? []).length, 1);
   assert.match(review.html, /data-task-fallback="page"/);
   assert.match(review.html, /data-task-phase="review"/);
   assert.match(

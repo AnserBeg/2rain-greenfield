@@ -53,7 +53,7 @@ for (const javaScriptEnabled of [true, false]) {
           await page.setViewportSize({ width: 1280, height: 800 });
         };
         await page.goto(url);
-        await expect(page.locator('script')).toHaveCount(1);
+        await expect(page.locator('script')).toHaveCount(0);
         await expect(
           page.getByText('Alpine Office Supply', { exact: true }),
         ).toBeVisible();
@@ -87,6 +87,7 @@ for (const javaScriptEnabled of [true, false]) {
         await page
           .getByRole('button', { name: 'Reserve stock', exact: true })
           .click();
+        await expect(page.locator('script')).toHaveCount(1);
         await expect(task()).toHaveAttribute('data-task-fallback', 'page');
         expect(
           await task().evaluate((element) => element.matches(':modal')),

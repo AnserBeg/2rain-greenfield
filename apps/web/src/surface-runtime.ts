@@ -683,6 +683,11 @@ function renderSelectedSurface(
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
       ${renderedSlots.map((result) => result.html).join('')}
     </div>`;
+  const enhanceTaskDialog =
+    data.status === 'READY' &&
+    selected.composition?.presentation?.task?.mode === 'nativeDialog' &&
+    data.compositionTask?.includes('<dialog ') === true &&
+    data.compositionTask.includes('data-composition-task');
 
   return Object.freeze({
     html: shellDocument(
@@ -692,6 +697,7 @@ function renderSelectedSurface(
       selected,
       body,
       workspaceContext,
+      enhanceTaskDialog,
     ),
     statusCode,
   });
@@ -1478,6 +1484,7 @@ function shellDocument(
   selected: CompiledSurfaceDefinition | null,
   body: string,
   workspaceContext: WorkspaceContextBar | null = null,
+  enhanceTaskDialog = false,
 ): string {
   const title = selected?.label ?? 'Release diagnostic';
   const navigation = navigationEntries(surfaces, compiledNavigation);
@@ -1517,7 +1524,7 @@ function shellDocument(
         <main id="surface-content" tabindex="-1">${body}</main>
       </div>
     </div>
-    <script>${SURFACE_CLIENT_SCRIPT}</script>
+    ${enhanceTaskDialog ? `<script>${SURFACE_CLIENT_SCRIPT}</script>` : ''}
   </body>
 </html>`;
 }

@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { SURFACE_CLIENT_CSP_HASH } from '../src/surface-client.js';
+import {
+  SURFACE_CLIENT_CSP_HASH,
+  SURFACE_CLIENT_SCRIPT,
+} from '../src/surface-client.js';
 
 import { STATUS_ROLES } from '@north-star/canonical-model';
 import {
@@ -65,12 +68,13 @@ import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
 const APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT =
   "import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';\n";
 
-test('owned document script is singular and exactly hash-pinned by served CSP', async () => {
+test('script-free pages retain a CSP that exactly pins the owned Task enhancement', async () => {
   const server = createSurfaceRuntimeServer(demoEntry());
   const baseUrl = await listen(server);
   try {
     const response = await fetch(baseUrl);
     const html = await response.text();
+    assert.doesNotMatch(html, /<script\b/u);
     const assertPinned = (document: string, csp: string) => {
       const scripts = [
         ...document.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g),
@@ -81,16 +85,20 @@ test('owned document script is singular and exactly hash-pinned by served CSP', 
       assert.equal(hash, SURFACE_CLIENT_CSP_HASH);
     };
     const csp = response.headers.get('content-security-policy')!;
-    assertPinned(html, csp);
+    const enhanced = html.replace(
+      '</body>',
+      `<script>${SURFACE_CLIENT_SCRIPT}</script></body>`,
+    );
+    assertPinned(enhanced, csp);
     assert.throws(() =>
       assertPinned(
-        html.replace('</body>', '<script>void 0</script></body>'),
+        enhanced.replace('</body>', '<script>void 0</script></body>'),
         csp,
       ),
     );
     assert.throws(() =>
       assertPinned(
-        html.replace(
+        enhanced.replace(
           '</body>',
           '<script src="/unexpected.js"></script></body>',
         ),
@@ -98,10 +106,13 @@ test('owned document script is singular and exactly hash-pinned by served CSP', 
       ),
     );
     assert.throws(() =>
-      assertPinned(html.replace('<script>', '<script>void 0;'), csp),
+      assertPinned(enhanced.replace('<script>', '<script>void 0;'), csp),
     );
     assert.throws(() =>
-      assertPinned(html, csp.replace(SURFACE_CLIENT_CSP_HASH, 'sha256-forged')),
+      assertPinned(
+        enhanced,
+        csp.replace(SURFACE_CLIENT_CSP_HASH, 'sha256-forged'),
+      ),
     );
     assert.deepEqual(REFUSED_MESSAGE_PLACEMENTS, ['modal', 'toast']);
   } finally {
