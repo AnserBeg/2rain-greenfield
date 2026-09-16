@@ -34,11 +34,13 @@ const paths = Object.freeze({
   appServer: 'apps/web/src/app-server.ts',
   canonicalConstants: 'packages/canonical-model/src/constants.ts',
   componentRegistry: 'apps/web/src/component-registry.ts',
+  documentEditor: 'apps/web/src/document-editor.ts',
   plan: 'docs/greenfield-north-star-erp-platform-plan.md',
   skill: '.agents/skills/ux-grammar/SKILL.md',
   surfaceContract: 'apps/web/src/surface-contract.ts',
   surfaceComposition: 'apps/web/src/surface-composition.ts',
   surfaceRuntime: 'apps/web/src/surface-runtime.ts',
+  workspaceEntry: 'apps/web/src/workspace-entry.ts',
 });
 
 const expectedPinIdentity = Object.freeze({
@@ -615,6 +617,7 @@ function scanForBypass(
     // Generic v6 interpreter delegated only by SurfaceRuntime and its registry.
     paths.surfaceComposition,
     paths.componentRegistry,
+    paths.documentEditor,
     paths.surfaceRuntime,
     // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
     // only by the closed registry; it is not an alternate surface authority.
@@ -623,7 +626,14 @@ function scanForBypass(
   const allowedSurfaceConsumers = new Set<string>([
     paths.surfaceComposition,
     paths.componentRegistry,
+    paths.documentEditor,
     paths.surfaceRuntime,
+    paths.workspaceEntry,
+  ]);
+  const allowedRuntimeTypeImports = new Set<string>([
+    // The generic editor imports only SurfaceRuntime's gateway/submission
+    // types; SurfaceRuntime remains its sole production caller.
+    paths.documentEditor,
   ]);
   const structuralMarkup =
     /<\s*(?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])(?:\s|>)|createElement\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|(?:jsx|jsxs|jsxDEV)\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|data-surface-archetype\s*=|data-component\s*=/i;
@@ -673,9 +683,18 @@ function scanForBypass(
         'only SurfaceRuntime may consume the surface contract or component registry',
       );
     }
+    const runtimeImports = [
+      ...source.matchAll(
+        /import\s+(type\s+)?[^;]*?from\s+['"][^'"]*surface-runtime\.js['"]/gu,
+      ),
+    ];
     if (
       repoPath !== paths.appServer &&
-      /from ['"][^'"]*surface-runtime\.js['"]/.test(source)
+      runtimeImports.length > 0 &&
+      !(
+        allowedRuntimeTypeImports.has(repoPath) &&
+        runtimeImports.every((entry) => entry[1] === 'type ')
+      )
     ) {
       add(
         violations,
