@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; CI integration correction complete at `2902c12d96b8ed4bb28d3ccf7f40f9351a03c037`; sole LOCAL author; stacked draft PR handoff. Fresh CI/owner acceptance pending; no merge/deployment.
+Status: evidence_ready; CI integration correction complete at `a838e385af95183f553b854e67dc3a1973c50dd1`; sole LOCAL author; stacked draft PR handoff. Fresh CI/owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -43,7 +43,7 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 - Pass: browser 3/3 (shared Sales/Purchase authoring with reopened editing and released guards, retained fulfillment JS on/off): exact two owned lines, unchanged draft movements/balances, 10/8/2 → 5/3/2 → 5/0/5, packing 5 EA, receiving 2 EA at entered 2.45 CAD.
 - Final committed-source browser 1/1 at `20e5c1d4f389b1bcb887c6e71cf51d9e056cb731`: same complete journey, two-tab scope pin, Sales-read revocation after completion, HTTP 200 receipt with order data redacted, second persisted stock measurement unchanged. Initial diagnostic expectation used the wrong success case; corrected to existing Task-complete contract, no kernel change.
 - CI attempt `35049655167` exposed one lint finding, three catalog codes without path drivers, stale Inventory composition equality, stale capability-7 expectations and a performance run indeterminate at 34.4% CPU idle. The correction removes the unused argument, drives all three messages through real requests, admits only the exact typed workspace addition while preserving every protected Inventory binding, and pins capability 8. Performance code, budget and timeouts are unchanged.
-- Correction gates: complete message catalog 17/17 with 18/46 real path drivers; all seven affected PostgreSQL files 95/95, with Inventory posting independently 19/19; retained browser order-entry/meta-sales 3/3, Sales order 1/1, fulfillment 1/1 and receiving 1/1. Full lint, Prettier, both TypeScript checks, authored/release freshness and boundaries (204 files) pass.
+- Correction gates: complete message catalog 17/17 with 18/46 real path drivers; all seven affected PostgreSQL files 95/95, with Inventory posting independently 19/19; retained browser order-entry/meta-sales 3/3, Sales order 1/1, fulfillment 1/1 and receiving 1/1. Full lint, Prettier, both TypeScript checks, authored/release freshness and boundaries (204 files) pass. The final copy correction also passes workspace contracts 4/4 and the two affected architecture files 50/50 through the shared lock.
 - Fresh candidate CI starts through the same stacked draft PR after push. No full local matrix, inherited audit, dependency installation or CI polling; CI/ONLINE verdict required and not claimed green.
 
 ## Test it yourself
@@ -80,7 +80,7 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-84
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "2902c12d96b8ed4bb28d3ccf7f40f9351a03c037",
+  "head": "a838e385af95183f553b854e67dc3a1973c50dd1",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/web/release/app.authored.json",
