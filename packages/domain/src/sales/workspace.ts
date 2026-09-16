@@ -197,7 +197,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       context: {
         label: 'Fulfillment',
         description:
-          'Select a line to reserve stock, or a reservation to ship.',
+          'Choose a line to reserve stock, or a reservation to ship.',
       },
       recordActions: 'progressive',
       technicalDetails: 'progressive',

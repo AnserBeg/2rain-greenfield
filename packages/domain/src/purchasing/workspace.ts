@@ -191,7 +191,7 @@ export function purchasingWorkspace(
       context: {
         label: 'Receiving',
         description:
-          'Select an order line to receive it. Actual cost is entered explicitly; draft editing and Release remain separate.',
+          'Choose an order line to receive it. Actual cost is entered explicitly; draft editing and Release remain separate.',
       },
       recordActions: 'progressive',
       technicalDetails: 'progressive',
