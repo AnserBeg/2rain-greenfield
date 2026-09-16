@@ -966,8 +966,9 @@ test('the message catalog honours the vocabulary it declares', () => {
   // registering a code is a deliberate, visible edit; moving it is the intended
   // cost of adding one, not a symptom.
   // RAIN-META-SALES adds nine generic composition task/dataset treatments.
-  // RAIN-ORDER-ENTRY adds company refusal and shared draft conflict/lock treatments.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 46);
+  // RAIN-ORDER-ENTRY adds company refusal, shared draft conflict/lock treatments,
+  // and the redacted partial-commit outcome.
+  assert.equal(SURFACE_MESSAGE_CODES.length, 47);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];

@@ -4514,7 +4514,10 @@ class OrderEntryExecutor
   readonly owners = new Map<string, string>();
   readonly calls: SemanticOperationExecutionRequest[] = [];
   readonly receipts = new Map<string, SemanticOperationResultEnvelope>();
+  readonly failingQueries = new Set<string>();
   failAt = 0;
+  failAfterCommitAt = 0;
+  onControlledFailure: (() => void) | null = null;
   withheld = false;
   namespace = 'northstar.app';
   seed(
@@ -4544,6 +4547,8 @@ class OrderEntryExecutor
     request: SemanticQueryExecutionRequest | SemanticOperationExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope | SemanticOperationResultEnvelope> {
     if ('arguments' in request) {
+      if (this.failingQueries.has(request.definition.queryId))
+        throw new Error('Isolated provider read failure');
       const args = asRecord(request.arguments);
       const scope = request.definition.legalEntityScope
         ? args[request.definition.legalEntityScope.operand.parameterId]
@@ -4579,8 +4584,10 @@ class OrderEntryExecutor
       };
     }
     this.calls.push(request);
-    if (this.failAt === this.calls.length)
+    if (this.failAt === this.calls.length) {
+      this.onControlledFailure?.();
       throw new Error('Isolated line failure');
+    }
     const cached = this.receipts.get(request.idempotencyKey);
     if (cached) return cached;
     const input = asRecord(request.input);
@@ -4591,6 +4598,26 @@ class OrderEntryExecutor
         'MODULE_REVISION_CONFLICT',
         'Isolated stale line',
       );
+    if (
+      previous?.archived &&
+      request.definition.effect.kind === 'archiveRecordEffect'
+    )
+      throw new ModuleRuntimeInterpreterError(
+        'MODULE_MUTATION_CONFLICT',
+        'Isolated duplicate archive',
+      );
+    if (
+      Object.entries(asRecord(input.values ?? input.patch ?? {})).some(
+        ([fieldId, value]) =>
+          fieldId.endsWith('_ordered_quantity') && value === 'invalid',
+      )
+    ) {
+      this.onControlledFailure?.();
+      throw new ModuleRuntimeInterpreterError(
+        'MODULE_FIELD_VALUE_INVALID',
+        'Isolated invalid quantity',
+      );
+    }
     const local =
       request.definition.effect.entity.targetId.split(':entity.')[1]!;
     const stored = operationRecord(request, previous, recordId, {
@@ -4621,6 +4648,10 @@ class OrderEntryExecutor
       },
     };
     this.receipts.set(request.idempotencyKey, result);
+    if (this.failAfterCommitAt === this.calls.length) {
+      this.onControlledFailure?.();
+      throw new Error('Isolated response failure after commit');
+    }
     return result;
   }
 }
@@ -4762,6 +4793,47 @@ async function orderEntryWitness(variant = false) {
     values,
   };
 }
+
+type OrderEntryWitness = Awaited<ReturnType<typeof orderEntryWitness>>;
+
+async function persistedDraft(f: OrderEntryWitness, lineCount = 1) {
+  let editor = (await f.open())!;
+  for (let index = 1; index < lineCount; index++)
+    editor = (await f.post(editor, 'add', f.values(editor)))!;
+  const saved = (await f.post(editor, 'save', f.values(editor)))!;
+  assert.equal(saved.statusCode, 303);
+  const recordId = new URL(
+    saved.location!,
+    'http://fixture.local',
+  ).searchParams.get('record')!;
+  f.url.searchParams.set('record', recordId);
+  return { editor: (await f.open())!, recordId };
+}
+
+function draftField(
+  values: Record<string, string>,
+  rowId: string,
+  suffix: string,
+) {
+  const field = Object.keys(values).find(
+    (candidate) => candidate.includes(rowId) && candidate.endsWith(suffix),
+  );
+  assert.ok(field, `missing ${suffix} input for ${rowId}`);
+  return field;
+}
+
+const assertDraftOutcomeRedacted = (response: {
+  html: string;
+  statusCode: number;
+}) => {
+  assert.equal(response.statusCode, 200);
+  assert.match(response.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
+  assert.doesNotMatch(
+    response.html,
+    /PROTECTED_(?:ROOT|CHILD)_SENTINEL|<form\b|<button\b|data-draft-line/,
+  );
+};
+
 test('order entry: unrelated metadata renders the shared editor; partial save freezes exact retry and duplicate replay', async () => {
   const f = await orderEntryWitness(true);
   let form = (await f.open())!;
@@ -4816,6 +4888,241 @@ test('order entry: unrelated metadata renders the shared editor; partial save fr
         f.executor.owners.get(row.recordId) === f.scopes[0],
     ),
   );
+});
+
+test('order entry F1: a receipt-persisted header update bypasses only the fresh-edit check and retries its exact frozen request', async () => {
+  const f = await orderEntryWitness();
+  const { editor, recordId } = await persistedDraft(f);
+  const line = [...f.executor.rows.values()].find((candidate) =>
+    candidate.entityId.endsWith(':entity.sales_order_line'),
+  )!;
+  const changed = f.values(editor);
+  changed[draftField(changed, recordId, '_notes')] = 'recovered header';
+  changed[draftField(changed, line.recordId, '_ordered_quantity')] = '11';
+  f.executor.failAfterCommitAt = f.executor.calls.length + 1;
+  const failed = (await f.post(editor, 'save', changed))!;
+  assert.equal(failed.statusCode, 422);
+  const failedCall = f.executor.calls.at(-1)!;
+  assert.ok(f.executor.receipts.has(failedCall.idempotencyKey));
+  assert.equal(f.executor.rows.get(recordId)!.revision, 2);
+  f.executor.failAfterCommitAt = 0;
+  const retried = await f.post(
+    failed,
+    'retry',
+    Object.fromEntries(Object.keys(changed).map((key) => [key, 'forged'])),
+  );
+  assert.equal(retried!.statusCode, 303);
+  const replay = f.executor.calls.at(-2)!;
+  assert.equal(replay.idempotencyKey, failedCall.idempotencyKey);
+  assert.deepEqual(replay.input, failedCall.input);
+  assert.equal(f.executor.rows.get(recordId)!.revision, 2);
+  assert.equal(
+    f.executor.rows.get(line.recordId)!.values[
+      `${f.ns}:field.sales_order_line_ordered_quantity`
+    ],
+    '11',
+  );
+
+  const denied = await orderEntryWitness();
+  const deniedDraft = await persistedDraft(denied);
+  const deniedValues = denied.values(deniedDraft.editor);
+  deniedValues[draftField(deniedValues, deniedDraft.recordId, '_notes')] =
+    'authorized once';
+  denied.executor.failAfterCommitAt = denied.executor.calls.length + 1;
+  const deniedFailure = (await denied.post(
+    deniedDraft.editor,
+    'save',
+    deniedValues,
+  ))!;
+  const deniedRequest = denied.executor.calls.at(-1)!;
+  denied.deniedReads.add(deniedRequest.definition.permissionId);
+  denied.executor.failAfterCommitAt = 0;
+  const callCount = denied.executor.calls.length;
+  const refused = await denied.post(deniedFailure, 'retry');
+  assert.equal(refused!.statusCode, 422);
+  assert.equal(denied.executor.calls.length, callCount);
+});
+
+test('order entry F2: a completed archive is reconciled after correctable line input while an unexecuted removal still confirms', async () => {
+  const f = await orderEntryWitness();
+  let { editor } = await persistedDraft(f, 2);
+  const lines = [...f.executor.rows.values()].filter((candidate) =>
+    candidate.entityId.endsWith(':entity.sales_order_line'),
+  );
+  const [removed, corrected] = lines;
+  const invalid = f.values(editor);
+  invalid[draftField(invalid, corrected!.recordId, '_ordered_quantity')] =
+    'invalid';
+  editor = (await f.post(editor, `remove:${removed!.recordId}`, invalid))!;
+  const review = (await f.post(editor, 'save', invalid))!;
+  assert.match(review.slots!.commandBar!, /Confirm removal and save/);
+  const failed = (await f.post(review, 'confirm'))!;
+  assert.equal(failed.statusCode, 422);
+  assert.equal(f.executor.rows.get(removed!.recordId)!.archived, true);
+  const repaired = f.values(failed);
+  repaired[draftField(repaired, corrected!.recordId, '_ordered_quantity')] =
+    '12';
+  const completed = await f.post(failed, 'save', repaired);
+  assert.equal(completed!.statusCode, 303);
+  assert.equal(
+    f.executor.calls.filter(
+      (call) => call.definition.effect.kind === 'archiveRecordEffect',
+    ).length,
+    1,
+  );
+  assert.equal(
+    f.executor.rows.get(corrected!.recordId)!.values[
+      `${f.ns}:field.sales_order_line_ordered_quantity`
+    ],
+    '12',
+  );
+
+  const pending = await orderEntryWitness();
+  ({ editor } = await persistedDraft(pending, 2));
+  const pendingLines = [...pending.executor.rows.values()].filter((candidate) =>
+    candidate.entityId.endsWith(':entity.sales_order_line'),
+  );
+  const [invalidLine, stillRemoved] = pendingLines;
+  const pendingValues = pending.values(editor);
+  pendingValues[
+    draftField(pendingValues, invalidLine!.recordId, '_ordered_quantity')
+  ] = 'invalid';
+  editor = (await pending.post(
+    editor,
+    `remove:${stillRemoved!.recordId}`,
+    pendingValues,
+  ))!;
+  const pendingReview = (await pending.post(editor, 'save', pendingValues))!;
+  const pendingFailure = (await pending.post(pendingReview, 'confirm'))!;
+  const correctedValues = pending.values(pendingFailure);
+  correctedValues[
+    draftField(correctedValues, invalidLine!.recordId, '_ordered_quantity')
+  ] = '12';
+  const secondReview = (await pending.post(
+    pendingFailure,
+    'save',
+    correctedValues,
+  ))!;
+  assert.match(secondReview.slots!.commandBar!, /Confirm removal and save/);
+  assert.equal(
+    pending.executor.calls.filter(
+      (call) => call.definition.effect.kind === 'archiveRecordEffect',
+    ).length,
+    0,
+  );
+});
+
+test('order entry F3: post-execution read refusal returns a redacted partial-commit outcome without another mutation', async (t) => {
+  const exercise = async (readFailure: 'authorization' | 'provider') => {
+    const f = await orderEntryWitness();
+    const { editor, recordId } = await persistedDraft(f);
+    const line = [...f.executor.rows.values()].find((candidate) =>
+      candidate.entityId.endsWith(':entity.sales_order_line'),
+    )!;
+    const changed = f.values(editor);
+    changed[draftField(changed, recordId, '_notes')] =
+      'PROTECTED_ROOT_SENTINEL';
+    changed[draftField(changed, line.recordId, '_ordered_quantity')] = '13';
+    f.executor.failAt = f.executor.calls.length + 2;
+    f.executor.onControlledFailure = () => {
+      if (readFailure === 'authorization') {
+        f.deniedReads.add(`${f.ns}:permission.sales_order_read`);
+        f.deniedReads.add(`${f.ns}:permission.sales_order_line_read`);
+      } else f.executor.failingQueries.add(f.form.dataSourceQueryId);
+    };
+    const submission = {
+      draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+      draftAction: 'save',
+      ...changed,
+    };
+    const response = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      submission,
+      f.gateways,
+    );
+    assertDraftOutcomeRedacted(response);
+    const calls = f.executor.calls.length;
+    const repeated = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      submission,
+      f.gateways,
+    );
+    assertDraftOutcomeRedacted(repeated);
+    assert.equal(f.executor.calls.length, calls);
+  };
+  await t.test('authorization withdrawn', () => exercise('authorization'));
+  await t.test('provider read failure', () => exercise('provider'));
+
+  await t.test(
+    'correctable failure clears pending but retains commitment',
+    async () => {
+      const f = await orderEntryWitness();
+      let { editor } = await persistedDraft(f, 2);
+      const lines = [...f.executor.rows.values()].filter((candidate) =>
+        candidate.entityId.endsWith(':entity.sales_order_line'),
+      );
+      const [removed, invalidLine] = lines;
+      const invalid = f.values(editor);
+      invalid[draftField(invalid, invalidLine!.recordId, '_ordered_quantity')] =
+        'invalid';
+      editor = (await f.post(editor, `remove:${removed!.recordId}`, invalid))!;
+      const review = (await f.post(editor, 'save', invalid))!;
+      f.executor.onControlledFailure = () => {
+        f.deniedReads.add(`${f.ns}:permission.sales_order_read`);
+        f.deniedReads.add(`${f.ns}:permission.sales_order_line_read`);
+      };
+      const confirmation = {
+        draftSession: hiddenValue(review.slots!.keyFacts!, 'draftSession'),
+        draftVersion: hiddenValue(review.slots!.keyFacts!, 'draftVersion'),
+        draftAction: 'confirm',
+      };
+      const response = await submitSurfaceRuntimeIntent(
+        f.view,
+        f.url.pathname + f.url.search,
+        confirmation,
+        f.gateways,
+      );
+      assertDraftOutcomeRedacted(response);
+      const calls = f.executor.calls.length;
+      assert.equal(f.executor.rows.get(removed!.recordId)!.archived, true);
+      assertDraftOutcomeRedacted(
+        await submitSurfaceRuntimeIntent(
+          f.view,
+          f.url.pathname + f.url.search,
+          confirmation,
+          f.gateways,
+        ),
+      );
+      assert.equal(f.executor.calls.length, calls);
+    },
+  );
+
+  const unknown = await orderEntryWitness();
+  const unknownDraft = await persistedDraft(unknown);
+  unknown.executor.failingQueries.add(unknown.form.dataSourceQueryId);
+  const calls = unknown.executor.calls.length;
+  const refused = await submitSurfaceRuntimeIntent(
+    unknown.view,
+    unknown.url.pathname + unknown.url.search,
+    {
+      draftSession: hiddenValue(
+        unknownDraft.editor.slots!.keyFacts!,
+        'draftSession',
+      ),
+      draftVersion: hiddenValue(
+        unknownDraft.editor.slots!.keyFacts!,
+        'draftVersion',
+      ),
+      draftAction: 'save',
+      ...unknown.values(unknownDraft.editor),
+    },
+    unknown.gateways,
+  );
+  assert.equal(refused.statusCode, 422);
+  assert.equal(unknown.executor.calls.length, calls);
 });
 test('order entry: choice, advisory preference invalidation, foreign scope and identity separation never retarget an open buffer', async () => {
   const f = await orderEntryWitness();

@@ -9,7 +9,10 @@ import {
   registeredSemanticQueryFromPinnedView,
   type SemanticRecordDto,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
-import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  SEMANTIC_OPERATION_REQUEST_VERSION,
+  type SemanticOperationResultEnvelope,
+} from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type { SurfaceDocumentEditor } from '../../../packages/canonical-model/src/schemas.js';
 import {
   readCompiledSurfaceDataBinding,
@@ -49,6 +52,10 @@ type SaveStep = {
   row: DraftRow;
   done: boolean;
 };
+type AcknowledgedStep = {
+  key: string;
+  receipt: SemanticOperationResultEnvelope['trust'];
+};
 type Buffer = {
   id: string;
   owner: string;
@@ -61,11 +68,12 @@ type Buffer = {
   header: DraftRow;
   lines: DraftRow[];
   pending: SaveStep[] | null;
+  acknowledged: AcknowledgedStep[];
   busy: boolean;
   version: number;
   touched: number;
   notice: string;
-  withheld: boolean;
+  withheld: 'none' | 'operation' | 'partial';
 };
 const buffers = new Map<string, Buffer>();
 const expiry = 60 * 60 * 1000;
@@ -179,7 +187,12 @@ export async function documentEditor(
     html: warning({ code: 'OPERATION_COMMITTED_READBACK_WITHHELD' }),
     statusCode: 200,
   });
-  if (continuation?.withheld) return committed();
+  const partialCommitted = () => ({
+    html: warning({ code: 'DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD' }),
+    statusCode: 200,
+  });
+  if (continuation?.withheld === 'operation') return committed();
+  if (continuation?.withheld === 'partial') return partialCommitted();
   if (continuation?.completedLocation) {
     try {
       const entry = await resolveWorkspaceEntry(
@@ -240,11 +253,12 @@ export async function documentEditor(
       header: row(current),
       lines: [],
       pending: null,
+      acknowledged: [],
       busy: false,
       version: 0,
       touched: performance.now(),
       notice: '',
-      withheld: false,
+      withheld: 'none',
     };
     if (current)
       buffer.lines = (
@@ -308,15 +322,19 @@ export async function documentEditor(
     } else {
       buffer.busy = true;
       try {
-        if (!buffer.pending && !buffer.withheld) {
+        if (!buffer.pending && buffer.withheld === 'none') {
           capture(buffer.header, definition.headerFields, submission);
           for (const line of buffer.lines)
             if (!line.removed) capture(line, definition.lineFields, submission);
         }
-        if (current && buffer.header.record?.revision !== current.revision) {
+        if (
+          !buffer.pending &&
+          current &&
+          buffer.header.record?.revision !== current.revision
+        ) {
           buffer.notice = warning({ code: 'DRAFT_EDITOR_CONFLICT' });
           statusCode = 409;
-        } else if (!buffer.withheld) {
+        } else if (buffer.withheld === 'none') {
           if (!buffer.pending) {
             if (submission.draftAction === 'add' && buffer.lines.length < 40)
               buffer.lines.push(row());
@@ -371,11 +389,12 @@ export async function documentEditor(
                   if (result.outcome !== 'succeeded')
                     throw new Error('Save step returned non-success');
                   step.done = true;
+                  acknowledge(buffer, step, result.trust);
                   if (
                     !result.readBack ||
                     result.readBack.recordId !== step.row.id
                   ) {
-                    buffer.withheld = true;
+                    buffer.withheld = 'operation';
                     buffer.notice = warning({
                       code: 'OPERATION_COMMITTED_READBACK_WITHHELD',
                     });
@@ -398,14 +417,18 @@ export async function documentEditor(
                       'MODULE_REQUIRED_FIELD_MISSING',
                     ].includes(String(error.code))
                   ) {
-                    buffer.notice += `<p>${buffer.pending.filter((value) => value.done).length} save operations committed. Correct the invalid values and save the remaining changes.</p>`;
+                    const completed = buffer.pending.filter(
+                      (value) => value.done,
+                    );
+                    buffer.notice += `<p>${completed.length} save operations committed. Correct the invalid values and save the remaining changes.</p>`;
+                    reconcileCompletedRemovals(buffer, completed);
                     buffer.pending = null;
                   }
                   break;
                 }
               }
               if (
-                !buffer.withheld &&
+                buffer.withheld === 'none' &&
                 buffer.pending?.every((step) => step.done)
               ) {
                 buffer.pending = null;
@@ -442,61 +465,93 @@ export async function documentEditor(
       }
     }
   }
-  if (buffer.withheld)
+  if (buffer.withheld === 'operation')
     return {
       html: warning({ code: 'OPERATION_COMMITTED_READBACK_WITHHELD' }),
       statusCode: 200,
     };
-  await authorizePersisted();
-  // After partial creation the URL owns the committed parent, so retries cannot
-  // silently retarget or recreate it. Form action uses that exact context.
-  const action = new URL(url);
-  if (buffer.recordId) action.searchParams.set('record', buffer.recordId);
-  const scopeQuery = readCompiledSurfaceDataBinding(view, surface).query
-    .legalEntityScope!;
-  action.searchParams.set(scopeQuery.operand.parameterId, scope);
-  const frozen = buffer.pending !== null || buffer.withheld;
-  const header = await fieldsHtml(
-    view,
-    gateways,
-    surfaces,
-    definition.headerFormSurfaceId,
-    buffer.header,
-    definition.headerFields,
-    scope,
-    frozen,
-  );
-  const lines = await Promise.all(
-    buffer.lines.map(
-      async (
-        line,
-        index,
-      ) => `<fieldset data-draft-line="${h(line.id)}"><legend>Line ${index + 1}${line.removed ? ' · removed' : ''}</legend>
+  if (buffer.withheld === 'partial') return partialCommitted();
+  try {
+    await authorizePersisted();
+    // After partial creation the URL owns the committed parent, so retries cannot
+    // silently retarget or recreate it. Form action uses that exact context.
+    const action = new URL(url);
+    if (buffer.recordId) action.searchParams.set('record', buffer.recordId);
+    const scopeQuery = readCompiledSurfaceDataBinding(view, surface).query
+      .legalEntityScope!;
+    action.searchParams.set(scopeQuery.operand.parameterId, scope);
+    const frozen = buffer.pending !== null || buffer.withheld !== 'none';
+    const header = await fieldsHtml(
+      view,
+      gateways,
+      surfaces,
+      definition.headerFormSurfaceId,
+      buffer.header,
+      definition.headerFields,
+      scope,
+      frozen,
+    );
+    const lines = await Promise.all(
+      buffer.lines.map(
+        async (
+          line,
+          index,
+        ) => `<fieldset data-draft-line="${h(line.id)}"><legend>Line ${index + 1}${line.removed ? ' · removed' : ''}</legend>
     ${line.removed ? '<p>Pending governed archive</p>' : ''}<div class="form-fields">${await fieldsHtml(view, gateways, surfaces, definition.lineFormSurfaceId, line.removed && line.record ? { ...line, values: { ...line.record.values } } : line, definition.lineFields, scope, frozen || line.removed)}</div>
     ${!frozen && !line.removed ? `<button form="draft-editor-form" class="secondary-action" name="draftAction" value="remove:${h(line.id)}" formnovalidate>Remove line ${index + 1}</button>` : ''}</fieldset>`,
-    ),
-  );
-  const steps = buffer.pending
-    ? `<ol data-save-progress>${buffer.pending.map((step) => `<li>${h(step.label)} · ${step.done ? 'committed' : 'pending'}</li>`).join('')}</ol>`
-    : '';
-  const commands = buffer.withheld
-    ? ''
-    : buffer.pending
+      ),
+    );
+    const steps = buffer.pending
+      ? `<ol data-save-progress>${buffer.pending.map((step) => `<li>${h(step.label)} · ${step.done ? 'committed' : 'pending'}</li>`).join('')}</ol>`
+      : '';
+    const commands = buffer.pending
       ? `<button form="draft-editor-form" name="draftAction" value="${buffer.pending.some((step) => step.grant && !step.done) ? 'confirm' : 'retry'}">${buffer.pending.some((step) => step.grant && !step.done) ? 'Confirm removal and save' : 'Retry save'}</button>`
       : '<button form="draft-editor-form" name="draftAction" value="save">Save draft</button>';
-  return {
-    statusCode,
-    html: '',
-    ...(current ? { record: current } : {}),
-    slots: {
-      titleStatus: `<header class="surface-heading surface-heading--slot"><h1>${current ? 'Edit' : 'New'} ${h(recordSurface.label.replace(/ detail$/i, ''))}</h1><span class="status-pill" data-status-role="inProgress">Draft</span></header>`,
-      keyFacts: `<section class="panel">${buffer.notice}${steps}<form id="draft-editor-form" method="post" action="${h(action.pathname + action.search)}" data-document-editor>
+    return {
+      statusCode,
+      html: '',
+      ...(current ? { record: current } : {}),
+      slots: {
+        titleStatus: `<header class="surface-heading surface-heading--slot"><h1>${current ? 'Edit' : 'New'} ${h(recordSurface.label.replace(/ detail$/i, ''))}</h1><span class="status-pill" data-status-role="inProgress">Draft</span></header>`,
+        keyFacts: `<section class="panel">${buffer.notice}${steps}<form id="draft-editor-form" method="post" action="${h(action.pathname + action.search)}" data-document-editor>
       <input type="hidden" name="draftSession" value="${h(buffer.id)}"><input type="hidden" name="draftVersion" value="${buffer.version}">
       <fieldset><legend>${h(definition.headerLabel ?? 'Document details')}</legend><div class="form-fields">${header}</div></fieldset></form></section>`,
-      sections: `<section class="panel" aria-label="${h(definition.linesLabel ?? 'Lines')}"><div class="panel__heading"><h2>${h(definition.linesLabel ?? 'Lines')}</h2>${!frozen ? '<button form="draft-editor-form" class="secondary-action" name="draftAction" value="add" formnovalidate>Add line</button>' : ''}</div>${lines.join('')}</section>`,
-      commandBar: `<section class="panel"><div class="command-bar"><p data-save-boundary>${h(definition.saveDescription ?? 'Save commits this document and each line in sequence.')}</p>${commands}</div></section>`,
-    },
-  };
+        sections: `<section class="panel" aria-label="${h(definition.linesLabel ?? 'Lines')}"><div class="panel__heading"><h2>${h(definition.linesLabel ?? 'Lines')}</h2>${!frozen ? '<button form="draft-editor-form" class="secondary-action" name="draftAction" value="add" formnovalidate>Add line</button>' : ''}</div>${lines.join('')}</section>`,
+        commandBar: `<section class="panel"><div class="command-bar"><p data-save-boundary>${h(definition.saveDescription ?? 'Save commits this document and each line in sequence.')}</p>${commands}</div></section>`,
+      },
+    };
+  } catch (error) {
+    if (buffer.acknowledged.length > 0) {
+      buffer.withheld = 'partial';
+      return partialCommitted();
+    }
+    throw error;
+  }
+}
+
+function acknowledge(
+  buffer: Buffer,
+  step: SaveStep,
+  receipt: SemanticOperationResultEnvelope['trust'],
+) {
+  if (buffer.acknowledged.some((value) => value.key === step.key)) return;
+  buffer.acknowledged.push({
+    key: step.key,
+    receipt,
+  });
+}
+
+function reconcileCompletedRemovals(
+  buffer: Buffer,
+  completed: readonly SaveStep[],
+) {
+  const archived = new Set(
+    completed
+      .filter((step) => step.operation.intent === 'archive')
+      .map((step) => step.row.id),
+  );
+  if (archived.size > 0)
+    buffer.lines = buffer.lines.filter((line) => !archived.has(line.id));
 }
 function capture(
   row: DraftRow,

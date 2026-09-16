@@ -108,6 +108,16 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     placements: ['slot'],
     subject: null,
   },
+  DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD: {
+    sentence: 'Some draft changes committed',
+    detail:
+      'At least one save operation committed. The complete draft save was not confirmed, and the current document cannot be displayed.',
+    nextAction:
+      'Do not submit this save again until the document can be read and its current state checked.',
+    consequence: 'blocking',
+    placements: ['page'],
+    subject: null,
+  },
   COMPOSITION_CHILD_FAILED: {
     sentence: 'Section unavailable',
     detail:

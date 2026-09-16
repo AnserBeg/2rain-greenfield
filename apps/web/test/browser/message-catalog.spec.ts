@@ -723,6 +723,8 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'Requires an expired, foreign or lost process-local task token. The census observes text; no expiration browser driver is claimed here.',
   COMPOSITION_UNCERTAIN:
     'The task integration test injects a gateway transport failure and observes stable inputs and idempotency keys on retry. This census observes text.',
+  DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD:
+    'The shared editor integration test drives acknowledged mutation success followed by authorization and provider read failures through the actual SurfaceRuntime submission path. This census observes the registered message text.',
   OPERATION_COMMITTED_READBACK_WITHHELD:
     'Driven through the real receiving gateway and evaluator in ' +
     'receiving.composed-application.spec.ts: a commit-time read-grant revocation ' +
