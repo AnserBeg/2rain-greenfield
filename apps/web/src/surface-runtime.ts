@@ -1790,6 +1790,8 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .record-breadcrumb a{color:var(--accent-ink)}
 .command-bar{display:flex;gap:var(--space-2);align-items:center;min-height:56px;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
 .command-bar .action-overflow{margin-left:auto}
+.command-bar:has([data-save-boundary]){flex-wrap:wrap}
+.command-bar [data-save-boundary]{flex-basis:100%;margin:0}
 .action-overflow{width:max-content}
 .action-overflow summary{display:grid;place-items:center;min-height:44px;padding:var(--space-2) var(--space-4);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--accent-ink);font-weight:var(--weight-emphasis);cursor:pointer;list-style:none}
 .action-overflow summary::-webkit-details-marker{display:none}

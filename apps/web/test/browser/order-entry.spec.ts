@@ -24,6 +24,20 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
             () => document.documentElement.scrollWidth <= innerWidth,
           ),
         ).toBe(true);
+        if (name.endsWith('draft-editor')) {
+          const boundary = await page
+            .getByText(
+              'Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.',
+              { exact: true },
+            )
+            .boundingBox();
+          const save = await page
+            .getByRole('button', { name: 'Save draft', exact: true })
+            .boundingBox();
+          expect(boundary).not.toBeNull();
+          expect(save).not.toBeNull();
+          expect(boundary!.y + boundary!.height).toBeLessThanOrEqual(save!.y);
+        }
         await page.screenshot({
           path: testInfo.outputPath(`${name}-${size}.png`),
           fullPage: true,

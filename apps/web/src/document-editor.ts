@@ -412,7 +412,7 @@ export async function documentEditor(
       <input type="hidden" name="draftSession" value="${h(buffer.id)}"><input type="hidden" name="draftVersion" value="${buffer.version}">
       <fieldset><legend>${h(definition.headerLabel ?? 'Document details')}</legend><div class="form-fields">${header}</div></fieldset></form></section>`,
       sections: `<section class="panel" aria-label="${h(definition.linesLabel ?? 'Lines')}"><div class="panel__heading"><h2>${h(definition.linesLabel ?? 'Lines')}</h2>${!frozen ? '<button form="draft-editor-form" class="secondary-action" name="draftAction" value="add" formnovalidate>Add line</button>' : ''}</div>${lines.join('')}</section>`,
-      commandBar: `<section class="panel"><p>${h(definition.saveDescription ?? 'Save commits this document and each line in sequence.')}</p><div class="command-bar">${commands}</div></section>`,
+      commandBar: `<section class="panel"><div class="command-bar"><p data-save-boundary>${h(definition.saveDescription ?? 'Save commits this document and each line in sequence.')}</p>${commands}</div></section>`,
     },
   };
 }
