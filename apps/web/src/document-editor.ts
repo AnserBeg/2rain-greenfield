@@ -20,7 +20,11 @@ import type {
   SurfaceRuntimeGateways,
   SurfaceRuntimeSubmission,
 } from './surface-runtime.js';
-import { workspaceList, workspacePrincipalKey } from './workspace-entry.js';
+import {
+  resolveWorkspaceEntry,
+  workspaceList,
+  workspacePrincipalKey,
+} from './workspace-entry.js';
 import { escapeHtml as h } from './html.js';
 import { operationMessageRef } from './gateway-error-codes.js';
 import {
@@ -151,7 +155,67 @@ export async function documentEditor(
   const definition = surface.documentEditor!;
   const recordSurface = surfaceFor(surfaces, definition.recordSurfaceId);
   const recordId = url.searchParams.get('record');
-  const current = recordId
+  for (const [key, value] of buffers)
+    if (!value.busy && performance.now() - value.touched > expiry)
+      buffers.delete(key);
+  const continuation = submission?.draftSession
+    ? buffers.get(submission.draftSession)
+    : null;
+  if (
+    submission?.draftSession &&
+    (!continuation ||
+      continuation.owner !== workspacePrincipalKey(view) ||
+      continuation.release !== view.release.contentHash ||
+      continuation.scope !== scope ||
+      (continuation.recordId !== recordId &&
+        continuation.openedRecordId !== recordId) ||
+      continuation.definition.recordSurfaceId !== definition.recordSurfaceId)
+  )
+    return {
+      html: warning({ code: 'OPERATION_INPUT_INVALID' }),
+      statusCode: 422,
+    };
+  const committed = () => ({
+    html: warning({ code: 'OPERATION_COMMITTED_READBACK_WITHHELD' }),
+    statusCode: 200,
+  });
+  if (continuation?.withheld) return committed();
+  if (continuation?.completedLocation) {
+    try {
+      const entry = await resolveWorkspaceEntry(
+        view,
+        surface,
+        url,
+        gateways.queryGateway,
+      );
+      if (entry?.invalid) return committed();
+      await getRecord(
+        view,
+        gateways,
+        recordSurface,
+        continuation.header.id,
+        scope,
+      );
+      await workspaceList(
+        view,
+        gateways.queryGateway,
+        definition.lineQueryId,
+        scope,
+        {
+          relationId: definition.parentRelationId,
+          recordId: continuation.header.id,
+        },
+      );
+      return {
+        html: '',
+        statusCode: 303,
+        location: continuation.completedLocation,
+      };
+    } catch {
+      return committed();
+    }
+  }
+  let current = recordId
     ? await getRecord(view, gateways, recordSurface, recordId, scope)
     : null;
   if (current && !editable(definition, current)) {
@@ -160,29 +224,9 @@ export async function documentEditor(
       statusCode: 422,
     };
   }
-  for (const [key, value] of buffers)
-    if (!value.busy && performance.now() - value.touched > expiry)
-      buffers.delete(key);
   let buffer: Buffer;
   if (submission?.draftSession) {
-    const saved = buffers.get(submission.draftSession);
-    if (
-      !saved ||
-      saved.owner !== workspacePrincipalKey(view) ||
-      saved.release !== view.release.contentHash ||
-      saved.scope !== scope ||
-      (saved.recordId !== recordId && saved.openedRecordId !== recordId) ||
-      saved.definition.recordSurfaceId !== definition.recordSurfaceId
-    )
-      return {
-        html: warning({ code: 'OPERATION_INPUT_INVALID' }),
-        statusCode: 422,
-      };
-    buffer = saved;
-    if (buffer.completedLocation) {
-      await getRecord(view, gateways, recordSurface, buffer.header.id, scope);
-      return { html: '', statusCode: 303, location: buffer.completedLocation };
-    }
+    buffer = continuation!;
   } else {
     buffer = {
       id: randomUUID(),
@@ -219,6 +263,38 @@ export async function documentEditor(
     else buffer.lines.push(row());
     buffers.set(buffer.id, buffer);
   }
+  const entry = await resolveWorkspaceEntry(
+    view,
+    surface,
+    url,
+    gateways.queryGateway,
+  );
+  if (entry?.invalid)
+    return {
+      html: warning({ code: 'WORKSPACE_COMPANY_UNAVAILABLE' }),
+      statusCode: 422,
+    };
+  const authorizePersisted = async () => {
+    if (!buffer.recordId) return;
+    current = await getRecord(
+      view,
+      gateways,
+      recordSurface,
+      buffer.recordId,
+      scope,
+    );
+    await workspaceList(
+      view,
+      gateways.queryGateway,
+      definition.lineQueryId,
+      scope,
+      {
+        relationId: definition.parentRelationId,
+        recordId: buffer.recordId,
+      },
+    );
+  };
+  await authorizePersisted();
   let statusCode = 200;
   if (submission) {
     if (buffer.busy)
@@ -366,6 +442,12 @@ export async function documentEditor(
       }
     }
   }
+  if (buffer.withheld)
+    return {
+      html: warning({ code: 'OPERATION_COMMITTED_READBACK_WITHHELD' }),
+      statusCode: 200,
+    };
+  await authorizePersisted();
   // After partial creation the URL owns the committed parent, so retries cannot
   // silently retarget or recreate it. Form action uses that exact context.
   const action = new URL(url);
@@ -390,7 +472,7 @@ export async function documentEditor(
         line,
         index,
       ) => `<fieldset data-draft-line="${h(line.id)}"><legend>Line ${index + 1}${line.removed ? ' · removed' : ''}</legend>
-    ${line.removed ? '<p>Pending governed archive</p>' : `<div class="form-fields">${await fieldsHtml(view, gateways, surfaces, definition.lineFormSurfaceId, line, definition.lineFields, scope, frozen)}</div>`}
+    ${line.removed ? '<p>Pending governed archive</p>' : ''}<div class="form-fields">${await fieldsHtml(view, gateways, surfaces, definition.lineFormSurfaceId, line.removed && line.record ? { ...line, values: { ...line.record.values } } : line, definition.lineFields, scope, frozen || line.removed)}</div>
     ${!frozen && !line.removed ? `<button form="draft-editor-form" class="secondary-action" name="draftAction" value="remove:${h(line.id)}" formnovalidate>Remove line ${index + 1}</button>` : ''}</fieldset>`,
     ),
   );

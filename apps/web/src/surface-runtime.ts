@@ -388,12 +388,20 @@ export async function submitSurfaceRuntimeIntent(
   } catch {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
-  const entry = await resolveWorkspaceEntry(
-    view,
-    selection.selected,
-    new URL(requestUrl, 'http://surface-runtime.local'),
-    gateways.queryGateway,
-  );
+  // Existing continuations carry their own pinned authority and reauthorization.
+  // Entry must not turn a committed, redacted Task/draft replay into a new failure.
+  const entry =
+    (selection.selected.composition &&
+      submission.compositionAction &&
+      submission.taskToken) ||
+    (selection.selected.documentEditor && submission.draftSession)
+      ? null
+      : await resolveWorkspaceEntry(
+          view,
+          selection.selected,
+          new URL(requestUrl, 'http://surface-runtime.local'),
+          gateways.queryGateway,
+        );
   if (entry?.invalid)
     return renderApplicationDiagnostic(422, {
       code: 'WORKSPACE_COMPANY_UNAVAILABLE',
@@ -486,7 +494,9 @@ export async function submitSurfaceRuntimeIntent(
           )
         : editor;
     } catch (error) {
-      return renderApplicationDiagnostic(422, operationMessageRef(error));
+      return renderApplicationDiagnostic(422, {
+        code: queryMessageCode(error),
+      });
     }
   }
   const operation = boundOperation(binding, submission.operationId);

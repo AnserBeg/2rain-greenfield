@@ -183,6 +183,19 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       .click();
     const token = await task().locator('[name=taskToken]').inputValue();
     const prepared = await task().locator('[name=preparedId]').inputValue();
+    const preparedUrl = page.url();
+    const preparedReplay = await task()
+      .locator('[name=preparedId]')
+      .evaluate((input) => {
+        const form = input.closest('form')!;
+        return Object.fromEntries(
+          [...new FormData(form).entries()].map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        );
+      });
+    preparedReplay.taskStage = 'confirm';
     const second = await measure('second_company');
     const other = await page.context().newPage();
     await other.goto(url);
@@ -302,6 +315,18 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       .click();
     await measure('received');
     await capture('purchase-received');
+    await measure('revoke_sales_read');
+    const replay = await page.request.post(preparedUrl, {
+      form: preparedReplay,
+    });
+    expect(replay.status()).toBe(200);
+    const redacted = await replay.text();
+    // This task completed with readable results before revocation. Its existing
+    // replay contract retains the completion receipt and withholds record DTOs.
+    expect(redacted).toContain('COMPOSITION_COMPLETE');
+    expect(redacted).not.toContain('Field notebook');
+    expect(redacted).not.toContain('SO-ENTRY-BROWSER');
+    await measure('received');
     await writeFile(
       testInfo.outputPath('captures.json'),
       JSON.stringify(captures, null, 2),

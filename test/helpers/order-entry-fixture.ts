@@ -165,6 +165,22 @@ async function seed(
     orderId?: string,
     purchaseId?: string,
   ) => {
+    if (phase === 'revoke_sales_read') {
+      const revoked = await pool.query(
+        `UPDATE platform.current_policy_permission_grants SET revoked_at=transaction_timestamp()
+         WHERE tenant_id=$1 AND environment_id=$2 AND permission_id=$3 AND resource_id=$4 AND revoked_at IS NULL
+         RETURNING permission_id, revoked_at`,
+        [
+          app.runtime.identity.tenantId,
+          app.runtime.identity.environmentId,
+          `${ns}:permission.sales_order_read`,
+          `${ns}:entity.sales_order`,
+        ],
+      );
+      assert.ok(revoked.rows.length > 0);
+      assert.ok(revoked.rows.every((row) => row.revoked_at !== null));
+      return { phase, revokedCount: revoked.rows.length, observed: true };
+    }
     if (phase === 'second_company') {
       const company = await create(
         'legal_entity',

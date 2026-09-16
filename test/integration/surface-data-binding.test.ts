@@ -4644,10 +4644,12 @@ async function orderEntryWitness(variant = false) {
   const ns = executor.namespace;
   const scopes = [randomUUID(), randomUUID()];
   const allowed = new Set<string>(scopes);
+  const deniedReads = new Set<string>();
   const policy = new RecordingPolicy((request) => {
     const input = asRecord(request.decisionInput);
-    return input.kind === 'legalEntityReadScopePolicyInput' &&
-      !allowed.has(String(input.legalEntityId))
+    return deniedReads.has(request.permissionId) ||
+      (input.kind === 'legalEntityReadScopePolicyInput' &&
+        !allowed.has(String(input.legalEntityId)))
       ? 'DENY'
       : 'ALLOW';
   });
@@ -4747,6 +4749,7 @@ async function orderEntryWitness(variant = false) {
     ns,
     scopes,
     allowed,
+    deniedReads,
     entry,
     view,
     surfaces,
@@ -5000,11 +5003,18 @@ test('order entry: stale edits retain inputs, released documents stay locked, pe
   const line = [...f.executor.rows.values()].find((row) =>
     row.entityId.endsWith(':entity.sales_order_line'),
   )!;
-  editor = (await f.post(editor, `remove:${line.recordId}`, f.values(editor)))!;
+  const removalValues = f.values(editor);
+  removalValues[
+    Object.keys(removalValues).find(
+      (key) => key.includes(line.recordId) && key.endsWith('_ordered_quantity'),
+    )!
+  ] = '999';
+  editor = (await f.post(editor, `remove:${line.recordId}`, removalValues))!;
   const before = f.executor.calls.length;
   const review = (await f.post(editor, 'save', f.values(editor)))!;
   assert.equal(f.executor.calls.length, before);
   assert.match(review.slots!.commandBar!, /Confirm removal and save/);
+  assert.doesNotMatch(review.slots!.sections!, /value="999"/);
   await f.post(review, 'confirm', {
     [`draft:${line.recordId}:${f.ns}:field.sales_order_line_ordered_quantity`]:
       '999',
@@ -5025,13 +5035,48 @@ test('order entry: stale edits retain inputs, released documents stay locked, pe
   const open = (await g.open())!;
   g.executor.withheld = true;
   const committed = (await g.post(open, 'save', g.values(open)))!;
-  assert.match(
-    committed.slots!.keyFacts!,
-    /OPERATION_COMMITTED_READBACK_WITHHELD/,
+  assert.equal(committed.statusCode, 200);
+  assert.match(committed.html, /OPERATION_COMMITTED_READBACK_WITHHELD/);
+  assert.doesNotMatch(
+    committed.html,
+    /Readable customer|Readable product|Retry save/,
   );
-  assert.doesNotMatch(committed.slots!.commandBar!, /Retry save/);
-  await g.post(committed, 'retry');
+  g.deniedReads.add(`${g.ns}:permission.sales_order_read`);
+  g.deniedReads.add(`${g.ns}:permission.sales_order_line_read`);
+  assert.equal((await g.post(open, 'retry'))!.statusCode, 200);
   assert.equal(g.executor.calls.length, 1);
+});
+
+test('order entry: buffered persisted lines recheck read authority before edits and redact withheld repeats', async () => {
+  const f = await orderEntryWitness();
+  const initial = (await f.open())!;
+  const saved = (await f.post(initial, 'save', f.values(initial)))!;
+  f.url.searchParams.set(
+    'record',
+    new URL(saved.location!, 'http://fixture.local').searchParams.get(
+      'record',
+    )!,
+  );
+  const editor = (await f.open())!;
+  f.deniedReads.add(`${f.ns}:permission.sales_order_line_read`);
+  const before = f.executor.calls.length;
+  const denied = await submitSurfaceRuntimeIntent(
+    f.view,
+    f.url.pathname + f.url.search,
+    {
+      draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+      draftAction: 'save',
+      ...f.values(editor),
+    },
+    f.gateways,
+  );
+  assert.equal(denied.statusCode, 422);
+  assert.doesNotMatch(
+    denied.html,
+    /Readable customer|Readable product|<fieldset[^>]*data-draft-line/,
+  );
+  assert.equal(f.executor.calls.length, before);
 });
 
 test('native Task policy reuses non-Sales forms, fresh Record context and exact prepared identity', async () => {
