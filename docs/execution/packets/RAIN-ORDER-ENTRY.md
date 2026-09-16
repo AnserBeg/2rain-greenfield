@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; CI integration correction complete at `a838e385af95183f553b854e67dc3a1973c50dd1`; sole LOCAL author; stacked draft PR handoff. Fresh CI/owner acceptance pending; no merge/deployment.
+Status: evidence_ready; consolidated CI integration correction complete at `32b219280225d9c50221695d87f5edc110fdbc80`; sole LOCAL author; stacked draft PR handoff. Fresh CI/owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -44,6 +44,8 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 - Final committed-source browser 1/1 at `20e5c1d4f389b1bcb887c6e71cf51d9e056cb731`: same complete journey, two-tab scope pin, Sales-read revocation after completion, HTTP 200 receipt with order data redacted, second persisted stock measurement unchanged. Initial diagnostic expectation used the wrong success case; corrected to existing Task-complete contract, no kernel change.
 - CI attempt `35049655167` exposed one lint finding, three catalog codes without path drivers, stale Inventory composition equality, stale capability-7 expectations and a performance run indeterminate at 34.4% CPU idle. The correction removes the unused argument, drives all three messages through real requests, admits only the exact typed workspace addition while preserving every protected Inventory binding, and pins capability 8. Performance code, budget and timeouts are unchanged.
 - Correction gates: complete message catalog 17/17 with 18/46 real path drivers; all seven affected PostgreSQL files 95/95, with Inventory posting independently 19/19; retained browser order-entry/meta-sales 3/3, Sales order 1/1, fulfillment 1/1 and receiving 1/1. Full lint, Prettier, both TypeScript checks, authored/release freshness and boundaries (204 files) pass. The final copy correction also passes workspace contracts 4/4 and the two affected architecture files 50/50 through the shared lock.
+- CI run `35060214443` passed PostgreSQL, locale, catalog and the order-entry/meta-sales/Sales/fulfillment/receiving journeys, then exposed one ordinary-form script assertion, five obsolete composed-browser expectations and skipped quality-tail checks. The consolidated correction emits the CSP-pinned client enhancement only for a rendered eligible native Task dialog; ordinary native-picker pages are script-free. Browser expectations now prove owner navigation, contextual deep links, explicit company scope/continuity and the actual rail/raised-overlay focus grounds. Workspace-aware conformance preserves required owner/setup reachability while contextual surfaces remain reachable through their owner or deep links; the generic editor remains a typed SurfaceRuntime delegate and its value-import red control fails closed.
+- Complete correction evidence: `surface-data-binding.test.ts` 58/58; integration 174/174; browser 104/104 through the unfiltered supported wrapper with every project/dependency; architecture 194/194; agent 3/3; surface contracts 30/30; expected-red 139/139 plus 38 self-controls; format, lint, typecheck, build, demo/app release freshness and language coverage pass. The prior CI PostgreSQL/locale pass was retained. The CPU-idle performance result was not retried and no budget, threshold, timeout or compiler code changed, as directed.
 - Fresh candidate CI starts through the same stacked draft PR after push. No full local matrix, inherited audit, dependency installation or CI polling; CI/ONLINE verdict required and not claimed green.
 
 ## Test it yourself
@@ -80,7 +82,7 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-84
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "a838e385af95183f553b854e67dc3a1973c50dd1",
+  "head": "32b219280225d9c50221695d87f5edc110fdbc80",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/web/release/app.authored.json",
@@ -92,7 +94,9 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-84
     "apps/web/src/surface-contract.ts",
     "apps/web/src/surface-runtime.ts",
     "apps/web/src/workspace-entry.ts",
+    "apps/web/test/browser/composed-application.spec.ts",
     "apps/web/test/browser/message-catalog.spec.ts",
+    "apps/web/test/browser/meta-sales.spec.ts",
     "apps/web/test/browser/order-entry.spec.ts",
     "apps/web/test/browser/receiving.composed-application.spec.ts",
     "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
@@ -111,11 +115,16 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-84
     "packages/canonical-model/src/schemas.ts",
     "packages/canonical-model/src/surface-workspace.ts",
     "packages/compiler/src/projections.ts",
+    "packages/dev-tooling/src/surface-grammar-conformance/index.ts",
+    "packages/dev-tooling/src/surface-runtime-seam.ts",
     "packages/domain/src/app/builder.ts",
     "packages/domain/src/app/order-entry.ts",
     "packages/domain/src/purchasing/workspace.ts",
     "packages/domain/src/sales/workspace.ts",
     "packages/runtime/src/request-runtime-view.ts",
+    "test/architecture/surface-grammar-conformance.baseline.ts",
+    "test/architecture/surface-grammar-conformance.test.ts",
+    "test/architecture/surface-runtime-seam.test.ts",
     "test/compiler/adopted-language-shape.test.ts",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
     "test/helpers/assert-composed-inventory.ts",

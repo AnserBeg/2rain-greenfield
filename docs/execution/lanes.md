@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RAIN-ORDER-ENTRY` | CI integration correction complete at `a838e385`; sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / owner acceptance; stopped without integration; retained demos preserved |
+| **BUILD** | `RAIN-ORDER-ENTRY` | consolidated CI integration correction complete at `32b21928`; sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / owner acceptance; stopped without integration; retained demos preserved |
 | **SUPPORT** | — | idle |
 
 
