@@ -5124,6 +5124,183 @@ test('order entry F3: post-execution read refusal returns a redacted partial-com
   assert.equal(refused.statusCode, 422);
   assert.equal(unknown.executor.calls.length, calls);
 });
+
+test('order entry F3: read loss between partial-save submissions redacts acknowledged work before retry', async (t) => {
+  const partialFailure = async (pending: 'cleared' | 'retained') => {
+    const f = await orderEntryWitness();
+    const { editor, recordId } = await persistedDraft(f);
+    const line = [...f.executor.rows.values()].find((candidate) =>
+      candidate.entityId.endsWith(':entity.sales_order_line'),
+    )!;
+    const changed = f.values(editor);
+    changed[draftField(changed, recordId, '_notes')] =
+      'PROTECTED_ROOT_SENTINEL';
+    changed[draftField(changed, line.recordId, '_unit_id')] =
+      'PROTECTED_CHILD_SENTINEL';
+    const quantity = draftField(changed, line.recordId, '_ordered_quantity');
+    changed[quantity] = pending === 'cleared' ? 'invalid' : '13';
+    if (pending === 'retained') f.executor.failAt = f.executor.calls.length + 2;
+
+    const first = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      {
+        draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+        draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+        draftAction: 'save',
+        ...changed,
+      },
+      f.gateways,
+    );
+    assert.equal(first.statusCode, 422);
+    assert.match(first.html, /PROTECTED_ROOT_SENTINEL/);
+    assert.match(first.html, /PROTECTED_CHILD_SENTINEL/);
+    assert.match(first.html, /<form\b[^>]*data-document-editor/);
+    assert.doesNotMatch(first.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
+    if (pending === 'cleared') {
+      assert.match(first.html, /1 save operations committed/);
+      assert.match(first.html, />Save draft<\/button>/);
+    } else {
+      assert.match(first.html, /data-save-progress/);
+      assert.match(first.html, />Retry save<\/button>/);
+    }
+
+    const retryValues = { ...changed, [quantity]: '12' };
+    return {
+      f,
+      retry: {
+        draftSession: hiddenValue(first.html, 'draftSession'),
+        draftVersion: hiddenValue(first.html, 'draftVersion'),
+        draftAction: pending === 'cleared' ? 'save' : 'retry',
+        ...retryValues,
+      },
+    };
+  };
+
+  for (const scenario of [
+    {
+      name: 'cleared pending, header policy denial',
+      pending: 'cleared',
+      read: 'header',
+      failure: 'policy',
+    },
+    {
+      name: 'cleared pending, child provider failure',
+      pending: 'cleared',
+      read: 'child',
+      failure: 'provider',
+    },
+    {
+      name: 'retained pending, child policy denial',
+      pending: 'retained',
+      read: 'child',
+      failure: 'policy',
+    },
+    {
+      name: 'retained pending, header provider failure',
+      pending: 'retained',
+      read: 'header',
+      failure: 'provider',
+    },
+  ] as const) {
+    await t.test(scenario.name, async () => {
+      const { f, retry } = await partialFailure(scenario.pending);
+      if (scenario.failure === 'policy')
+        f.deniedReads.add(
+          `${f.ns}:permission.sales_order${scenario.read === 'child' ? '_line' : ''}_read`,
+        );
+      else
+        f.executor.failingQueries.add(
+          scenario.read === 'header'
+            ? f.form.dataSourceQueryId
+            : f.form.documentEditor!.lineQueryId,
+        );
+      const calls = f.executor.calls.length;
+      const second = await submitSurfaceRuntimeIntent(
+        f.view,
+        f.url.pathname + f.url.search,
+        retry,
+        f.gateways,
+      );
+      assertDraftOutcomeRedacted(second);
+      assert.equal(f.executor.calls.length, calls);
+      assertDraftOutcomeRedacted(
+        await submitSurfaceRuntimeIntent(
+          f.view,
+          f.url.pathname + f.url.search,
+          retry,
+          f.gateways,
+        ),
+      );
+      assert.equal(f.executor.calls.length, calls);
+    });
+  }
+
+  await t.test('authorized retained retry still completes', async () => {
+    const { f, retry } = await partialFailure('retained');
+    f.executor.failAt = 0;
+    const completed = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      retry,
+      f.gateways,
+    );
+    assert.equal(completed.statusCode, 303);
+  });
+
+  await t.test('invalid and foreign continuations remain refused', async () => {
+    const { f, retry } = await partialFailure('retained');
+    const calls = f.executor.calls.length;
+    for (const [view, submission] of [
+      [f.view, { ...retry, draftSession: randomUUID() }],
+      [await issuedView(f.entry, 'd'), retry],
+    ] as const) {
+      const refused = await submitSurfaceRuntimeIntent(
+        view,
+        f.url.pathname + f.url.search,
+        submission,
+        f.gateways,
+      );
+      assert.equal(refused.statusCode, 422);
+      assert.doesNotMatch(refused.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
+    }
+    assert.equal(f.executor.calls.length, calls);
+  });
+
+  await t.test(
+    'uncertain-only execution retains ordinary refusal',
+    async () => {
+      const f = await orderEntryWitness();
+      const { editor, recordId } = await persistedDraft(f);
+      const changed = f.values(editor);
+      changed[draftField(changed, recordId, '_notes')] = 'uncertain header';
+      f.executor.failAfterCommitAt = f.executor.calls.length + 1;
+      const first = (await f.post(editor, 'save', changed))!;
+      assert.equal(first.statusCode, 422);
+      assert.doesNotMatch(
+        Object.values(first.slots!).join(''),
+        /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/,
+      );
+      f.executor.failAfterCommitAt = 0;
+      f.executor.failingQueries.add(f.form.dataSourceQueryId);
+      const calls = f.executor.calls.length;
+      const refused = await submitSurfaceRuntimeIntent(
+        f.view,
+        f.url.pathname + f.url.search,
+        {
+          draftSession: hiddenValue(first.slots!.keyFacts!, 'draftSession'),
+          draftVersion: hiddenValue(first.slots!.keyFacts!, 'draftVersion'),
+          draftAction: 'retry',
+        },
+        f.gateways,
+      );
+      assert.equal(refused.statusCode, 422);
+      assert.doesNotMatch(refused.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
+      assert.equal(f.executor.calls.length, calls);
+    },
+  );
+});
+
 test('order entry: choice, advisory preference invalidation, foreign scope and identity separation never retarget an open buffer', async () => {
   const f = await orderEntryWitness();
   const entryUrl = new URL(

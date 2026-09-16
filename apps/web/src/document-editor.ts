@@ -191,6 +191,29 @@ export async function documentEditor(
     html: warning({ code: 'DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD' }),
     statusCode: 200,
   });
+  const redactAcknowledgedReadFailure = (buffer: Buffer | null | undefined) => {
+    if (!buffer || buffer.acknowledged.length === 0) return null;
+    buffer.withheld = 'partial';
+    return partialCommitted();
+  };
+  const requiredRead = async <T>(
+    buffer: Buffer | null | undefined,
+    read: () => Promise<T>,
+  ): Promise<
+    | { outcome: 'available'; value: T }
+    | {
+        outcome: 'redacted';
+        response: ReturnType<typeof partialCommitted>;
+      }
+  > => {
+    try {
+      return { outcome: 'available', value: await read() };
+    } catch (error) {
+      const response = redactAcknowledgedReadFailure(buffer);
+      if (response) return { outcome: 'redacted', response };
+      throw error;
+    }
+  };
   if (continuation?.withheld === 'operation') return committed();
   if (continuation?.withheld === 'partial') return partialCommitted();
   if (continuation?.completedLocation) {
@@ -228,9 +251,13 @@ export async function documentEditor(
       return committed();
     }
   }
-  let current = recordId
-    ? await getRecord(view, gateways, recordSurface, recordId, scope)
-    : null;
+  const initialRead = await requiredRead(continuation, async () =>
+    recordId
+      ? await getRecord(view, gateways, recordSurface, recordId, scope)
+      : null,
+  );
+  if (initialRead.outcome === 'redacted') return initialRead.response;
+  let current = initialRead.value;
   if (current && !editable(definition, current)) {
     return {
       html: warning({ code: 'DRAFT_EDITOR_LOCKED' }),
@@ -277,38 +304,44 @@ export async function documentEditor(
     else buffer.lines.push(row());
     buffers.set(buffer.id, buffer);
   }
-  const entry = await resolveWorkspaceEntry(
-    view,
-    surface,
-    url,
-    gateways.queryGateway,
+  const workspaceEntry = await requiredRead(buffer, () =>
+    resolveWorkspaceEntry(view, surface, url, gateways.queryGateway),
   );
-  if (entry?.invalid)
+  if (workspaceEntry.outcome === 'redacted') return workspaceEntry.response;
+  const entry = workspaceEntry.value;
+  if (entry?.invalid) {
+    const redacted = redactAcknowledgedReadFailure(buffer);
+    if (redacted) return redacted;
     return {
       html: warning({ code: 'WORKSPACE_COMPANY_UNAVAILABLE' }),
       statusCode: 422,
     };
+  }
   const authorizePersisted = async () => {
-    if (!buffer.recordId) return;
-    current = await getRecord(
-      view,
-      gateways,
-      recordSurface,
-      buffer.recordId,
-      scope,
-    );
-    await workspaceList(
-      view,
-      gateways.queryGateway,
-      definition.lineQueryId,
-      scope,
-      {
-        relationId: definition.parentRelationId,
-        recordId: buffer.recordId,
-      },
-    );
+    const authorization = await requiredRead(buffer, async () => {
+      if (!buffer.recordId) return;
+      current = await getRecord(
+        view,
+        gateways,
+        recordSurface,
+        buffer.recordId,
+        scope,
+      );
+      await workspaceList(
+        view,
+        gateways.queryGateway,
+        definition.lineQueryId,
+        scope,
+        {
+          relationId: definition.parentRelationId,
+          recordId: buffer.recordId,
+        },
+      );
+    });
+    return authorization.outcome === 'redacted' ? authorization.response : null;
   };
-  await authorizePersisted();
+  const authorization = await authorizePersisted();
+  if (authorization) return authorization;
   let statusCode = 200;
   if (submission) {
     if (buffer.busy)
@@ -472,7 +505,8 @@ export async function documentEditor(
     };
   if (buffer.withheld === 'partial') return partialCommitted();
   try {
-    await authorizePersisted();
+    const authorization = await authorizePersisted();
+    if (authorization) return authorization;
     // After partial creation the URL owns the committed parent, so retries cannot
     // silently retarget or recreate it. Form action uses that exact context.
     const action = new URL(url);
@@ -521,10 +555,8 @@ export async function documentEditor(
       },
     };
   } catch (error) {
-    if (buffer.acknowledged.length > 0) {
-      buffer.withheld = 'partial';
-      return partialCommitted();
-    }
+    const redacted = redactAcknowledgedReadFailure(buffer);
+    if (redacted) return redacted;
     throw error;
   }
 }
