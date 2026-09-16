@@ -1,5 +1,7 @@
 import type { Server } from 'node:http';
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -409,8 +411,15 @@ let shellUrl: string;
 let censusUrl: string;
 let methodProbeUrl: string;
 const realPathUrls = new Map<string, string>();
+let catalogFixture: ReturnType<typeof spawn>;
+let catalogFixtureExit: Promise<unknown[]>;
+let requestCatalogMeasurement: (
+  phase: string,
+  orderId?: string,
+) => Promise<Record<string, unknown>>;
 
 test.beforeAll(async () => {
+  test.setTimeout(120_000);
   shellUrl = await listen(createSurfaceRuntimeServer(demoEntry()));
   censusUrl = await censusServerUrl();
   methodProbeUrl = await listen(
@@ -511,9 +520,95 @@ test.beforeAll(async () => {
       },
     ),
   );
+  catalogFixture = spawn(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      'test/helpers/order-entry-fixture.ts',
+      '--serve',
+      '--verify',
+    ],
+    { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  catalogFixtureExit = once(catalogFixture, 'exit');
+  let output = '';
+  let consumed = '';
+  let resolveReady!: (url: string) => void;
+  let rejectReady!: (error: Error) => void;
+  let resolveMeasurement:
+    ((value: Record<string, unknown>) => void) | undefined;
+  let rejectMeasurement: ((error: Error) => void) | undefined;
+  const ready = new Promise<string>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  catalogFixture.stdout!.on('data', (chunk: Buffer) => {
+    const text = chunk.toString();
+    output += text;
+    consumed += text;
+    const match = /ORDER_ENTRY_URL=(.*)/.exec(output);
+    if (match) resolveReady(match[1]!);
+    const lines = consumed.split('\n');
+    consumed = lines.pop()!;
+    for (const line of lines)
+      if (line.startsWith('ORDER_ENTRY_MEASURED=')) {
+        resolveMeasurement?.(
+          JSON.parse(line.slice('ORDER_ENTRY_MEASURED='.length)) as Record<
+            string,
+            unknown
+          >,
+        );
+        resolveMeasurement = undefined;
+        rejectMeasurement = undefined;
+      }
+  });
+  catalogFixture.stderr!.on('data', (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  catalogFixture.once('error', rejectReady);
+  catalogFixture.once('exit', () => {
+    const error = new Error(`catalog fixture exited early\n${output}`);
+    rejectReady(error);
+    rejectMeasurement?.(error);
+  });
+  requestCatalogMeasurement = (phase, orderId) =>
+    new Promise<Record<string, unknown>>((resolve, reject) => {
+      if (resolveMeasurement)
+        return reject(new Error('catalog measurement already pending'));
+      resolveMeasurement = resolve;
+      rejectMeasurement = reject;
+      catalogFixture.stdin!.write(JSON.stringify({ phase, orderId }) + '\n');
+    });
+  const entryUrl = new URL(await ready);
+  const setup = await requestCatalogMeasurement('catalog_setup');
+  const form = (recordId: unknown) => {
+    const parameters = new URLSearchParams({
+      surface: 'northstar.app:surface.sales_order_form',
+      record: String(recordId),
+      'northstar.app:parameter.sales_order_get_legal_entity_scope': String(
+        setup.scope,
+      ),
+    });
+    return `${entryUrl.origin}/?${parameters}`;
+  };
+  realPathUrls.set('DRAFT_EDITOR_CONFLICT', form(setup.conflictId));
+  realPathUrls.set('DRAFT_EDITOR_LOCKED', form(setup.lockedId));
+  const unavailable = new URL(entryUrl.origin);
+  unavailable.searchParams.set(
+    'surface',
+    'northstar.app:surface.sales_order_list',
+  );
+  unavailable.searchParams.set(
+    'northstar.app:parameter.sales_order_list_legal_entity_scope',
+    '74000000-0000-4000-8000-000000000099',
+  );
+  realPathUrls.set('WORKSPACE_COMPANY_UNAVAILABLE', unavailable.href);
 });
 
 test.afterAll(async () => {
+  catalogFixture.kill('SIGTERM');
+  await catalogFixtureExit;
   for (const server of servers) {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
@@ -542,6 +637,16 @@ const REAL_PATH_DRIVERS: Readonly<
     page.goto(`${shellUrl}/?surface=${encodeURIComponent(rendererErrorId())}`),
   DUPLICATE_SURFACE_ID: (page) =>
     page.goto(realPathUrls.get('DUPLICATE_SURFACE_ID')!),
+  DRAFT_EDITOR_CONFLICT: async (page) => {
+    await page.goto(realPathUrls.get('DRAFT_EDITOR_CONFLICT')!);
+    await requestCatalogMeasurement(
+      'catalog_advance',
+      new URL(page.url()).searchParams.get('record')!,
+    );
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  },
+  DRAFT_EDITOR_LOCKED: (page) =>
+    page.goto(realPathUrls.get('DRAFT_EDITOR_LOCKED')!),
   INVALID_SURFACE_FIELD: (page) =>
     page.goto(realPathUrls.get('INVALID_SURFACE_FIELD')!),
   INVALID_SURFACE_MANIFEST: (page) =>
@@ -572,6 +677,8 @@ const REAL_PATH_DRIVERS: Readonly<
     await page.goto(shellUrl);
     await page.setExtraHTTPHeaders({});
   },
+  WORKSPACE_COMPANY_UNAVAILABLE: (page) =>
+    page.goto(realPathUrls.get('WORKSPACE_COMPANY_UNAVAILABLE')!),
 };
 
 /**
@@ -834,6 +941,7 @@ test('the slot renderer resolves the same catalog as the page renderer', async (
 test('real request paths render the sentence the catalog registers', async ({
   page,
 }) => {
+  test.setTimeout(120_000);
   const violations: string[] = [];
   for (const [code, drive] of Object.entries(REAL_PATH_DRIVERS)) {
     await drive(page);

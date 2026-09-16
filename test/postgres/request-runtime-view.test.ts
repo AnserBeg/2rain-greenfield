@@ -80,6 +80,7 @@ import {
   type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import { compilerInput, fixtureBytes } from '../compiler/helpers.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import {
   admitEmptyPlanRelease,
@@ -208,7 +209,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: 7,
+    maximumSupportedVersion: 8,
   });
 });
 
@@ -781,7 +782,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               loaded.projections.surface.requiredRuntimeCapability,
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                minimumVersion: 7,
+                minimumVersion: 8,
               },
             );
             // All FIVE loaded families carry their requirement, not just the
@@ -809,7 +810,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: 7,
+                maximumSupportedVersion: 8,
               },
             );
           },
@@ -833,7 +834,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 5/,
+              /requires version 999 and this runtime supports 8/,
             );
           },
         );
@@ -862,7 +863,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 5/,
+              /requires version 999 and this runtime supports 8/,
             );
           },
         );
@@ -1623,15 +1624,12 @@ function groupedNavigationDefinitionBytes(): Uint8Array {
     const source = inventory[collectionName];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
-    for (const entry of source) {
-      assert.equal(
-        target.filter(
-          (candidate) => canonicalize(candidate) === canonicalize(entry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collectionName} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collectionName,
+      target,
+      source,
+      'northstar.app',
+    );
   }
   const modules = definition.modules;
   const inventoryModules = inventory.modules;

@@ -134,22 +134,30 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await command('Post');
 
   await page.goto(url('sales_order', 'form'));
-  await fill('sales_order', 'number', `SO-FUL-${suffix}`);
-  await fill('sales_order', 'customer_party_id', customerPartyId);
-  await fill('sales_order', 'order_date', instant);
-  await fill('sales_order', 'requested_date', instant);
-  await fill('sales_order', 'currency', 'CAD');
-  await fill('sales_order', 'notes', 'Partial shipment and correction');
-  const orderId = await save();
-  await page.goto(url('sales_order_line', 'form'));
-  await fill('sales_order_line', 'line_number', '1');
-  await fill('sales_order_line', 'item_id', itemId);
-  await fill('sales_order_line', 'unit_id', 'EA');
-  await fill('sales_order_line', 'ordered_quantity', '10');
-  await fill('sales_order_line', 'unit_price', '12.5');
-  await relate('sales_order_line_order', orderId);
-  const orderLineId = await save();
-  await page.goto(url('sales_order', 'detail', orderId));
+  await page.getByLabel('Order number *').fill(`SO-FUL-${suffix}`);
+  await page
+    .getByLabel('Customer *')
+    .selectOption({ label: 'Alpine Office Supply' });
+  await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
+  await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
+  await page.getByLabel('Currency *').fill('CAD');
+  await page.getByLabel('Notes').fill('Partial shipment and correction');
+  const draftLine = page.getByRole('group', {
+    name: 'Line 1',
+    exact: true,
+  });
+  await draftLine.getByLabel('Product *').selectOption(itemId);
+  await draftLine.getByLabel('Quantity *').fill('10');
+  await draftLine.getByLabel('Unit *').fill('EA');
+  await draftLine.getByLabel('Unit price').fill('12.5');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/sales_order_detail/u);
+  const orderId = new URL(page.url()).searchParams.get('record')!;
+  const orderLineId = (await page
+    .locator('[data-composition-dataset$="dataset.fulfillment_lines"] tbody tr')
+    .filter({ hasText: 'Field notebook' })
+    .getAttribute('data-record-id'))!;
+  expect(orderLineId).toBeTruthy();
   await command('Release', false);
 
   // Eligibility is checked from current persisted party-role facts when the
@@ -314,21 +322,29 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   // A second, fully shipped order demonstrates explicit closure independently
   // of the cancelled-and-reversed order above.
   await page.goto(url('sales_order', 'form'));
-  await fill('sales_order', 'number', `SO-CLOSE-${suffix}`);
-  await fill('sales_order', 'customer_party_id', customerPartyId);
-  await fill('sales_order', 'order_date', instant);
-  await fill('sales_order', 'requested_date', instant);
-  await fill('sales_order', 'currency', 'CAD');
-  const closureOrderId = await save();
-  await page.goto(url('sales_order_line', 'form'));
-  await fill('sales_order_line', 'line_number', '1');
-  await fill('sales_order_line', 'item_id', itemId);
-  await fill('sales_order_line', 'unit_id', 'EA');
-  await fill('sales_order_line', 'ordered_quantity', '2');
-  await fill('sales_order_line', 'unit_price', '12.5');
-  await relate('sales_order_line_order', closureOrderId);
-  const closureLineId = await save();
-  await page.goto(url('sales_order', 'detail', closureOrderId));
+  await page.getByLabel('Order number *').fill(`SO-CLOSE-${suffix}`);
+  await page
+    .getByLabel('Customer *')
+    .selectOption({ label: 'Alpine Office Supply' });
+  await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
+  await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
+  await page.getByLabel('Currency *').fill('CAD');
+  const closureDraftLine = page.getByRole('group', {
+    name: 'Line 1',
+    exact: true,
+  });
+  await closureDraftLine.getByLabel('Product *').selectOption(itemId);
+  await closureDraftLine.getByLabel('Quantity *').fill('2');
+  await closureDraftLine.getByLabel('Unit *').fill('EA');
+  await closureDraftLine.getByLabel('Unit price').fill('12.5');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/sales_order_detail/u);
+  const closureOrderId = new URL(page.url()).searchParams.get('record')!;
+  const closureLineId = (await page
+    .locator('[data-composition-dataset$="dataset.fulfillment_lines"] tbody tr')
+    .filter({ hasText: 'Field notebook' })
+    .getAttribute('data-record-id'))!;
+  expect(closureLineId).toBeTruthy();
   await command('Release', false);
   await page.goto(url('reservation', 'form'));
   await fill('reservation', 'number', `RSV-CLOSE-${suffix}`);

@@ -160,11 +160,52 @@ async function seed(
   const initialStock = await stockSnapshot();
   assert.equal((await stored('sales_order')).length, 0);
   assert.equal((await stored('purchase_order')).length, 0);
+  let catalogConflict: Awaited<ReturnType<typeof create>> | null = null;
   const measure = async (
     phase: string,
     orderId?: string,
     purchaseId?: string,
   ) => {
+    if (phase === 'catalog_setup') {
+      const now = new Date().toISOString();
+      const order = (number: string) =>
+        create('sales_order', {
+          customer_party_id: customer,
+          order_date: now,
+          requested_date: now,
+          currency: 'CAD',
+          notes: 'Catalog real-path fixture',
+          number,
+        });
+      catalogConflict = await order('SO-CATALOG-CONFLICT');
+      const locked = await order('SO-CATALOG-LOCKED');
+      const released = await invoke('sales_order_release', {
+        recordId: locked.recordId,
+        expectedRevision: locked.revision,
+      });
+      assert.equal(released.outcome, 'succeeded');
+      return {
+        phase,
+        conflictId: catalogConflict.recordId,
+        lockedId: locked.recordId,
+        scope,
+        observed: true,
+      };
+    }
+    if (phase === 'catalog_advance') {
+      assert.ok(catalogConflict);
+      assert.equal(orderId, catalogConflict.recordId);
+      const changed = await invoke('sales_order_update', {
+        recordId: catalogConflict.recordId,
+        expectedRevision: catalogConflict.revision,
+        patch: {
+          [`${ns}:field.sales_order_notes`]:
+            'Changed after the browser opened its draft',
+        },
+      });
+      assert.equal(changed.outcome, 'succeeded');
+      return { phase, orderId, observed: true };
+    }
     if (phase === 'revoke_sales_read') {
       const revoked = await pool.query(
         `UPDATE platform.current_policy_permission_grants SET revoked_at=transaction_timestamp()

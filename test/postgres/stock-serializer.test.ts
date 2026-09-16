@@ -50,6 +50,7 @@ import {
   type AuthenticatedIdentity,
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const checkedInMigrations = resolve('db/migrations');
@@ -659,16 +660,12 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
       applicationMembers as readonly unknown[];
     const inventoryEntries: readonly unknown[] =
       inventoryMembers as readonly unknown[];
-    for (const inventoryMember of inventoryEntries) {
-      assert.equal(
-        composedEntries.filter(
-          (candidate) =>
-            canonicalize(candidate) === canonicalize(inventoryMember),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collection} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collection,
+      composedEntries,
+      inventoryEntries,
+      String(applicationBuilder.APPLICATION_NAMESPACE),
+    );
   }
   const applicationModules = definition.modules;
   const inventoryModules = inventory.modules;

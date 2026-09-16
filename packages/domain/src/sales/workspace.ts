@@ -39,7 +39,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     quantities: string[],
     details: string[] = [],
   ) =>
-    columns.map((value, index) => ({
+    columns.map((value) => ({
       ...value,
       ...(value.columnId === id('column', primary) ||
       [...secondary, ...quantities, ...details].some(
