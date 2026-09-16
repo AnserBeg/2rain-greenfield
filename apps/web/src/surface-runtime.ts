@@ -2,6 +2,8 @@ import {
   loadSurfaceComposition,
   submitCompositionAction,
 } from './surface-composition.js';
+import { resolveWorkspaceEntry } from './workspace-entry.js';
+import { documentEditor } from './document-editor.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -59,6 +61,7 @@ import {
 export interface SurfaceRuntimeResponse {
   readonly html: string;
   readonly statusCode: number;
+  readonly location?: string;
 }
 
 export interface SurfaceRuntimeGateways {
@@ -153,6 +156,18 @@ export async function renderSurfaceRuntimeWithData(
   }
 
   const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const entry = await resolveWorkspaceEntry(
+    view,
+    selection.selected,
+    url,
+    gateways.queryGateway,
+  );
+  if (entry?.redirect)
+    return { html: '', statusCode: 303, location: entry.redirect };
+  if (entry?.invalid)
+    return renderApplicationDiagnostic(422, {
+      code: 'WORKSPACE_COMPANY_UNAVAILABLE',
+    });
   const legalEntitySelection = legalEntitySelectionForSurface(binding, url);
   const queryParameterValues = queryParameterValuesForSurface(binding, url);
   const workspaceContext = await loadWorkspaceContextBar(
@@ -167,7 +182,13 @@ export async function renderSurfaceRuntimeWithData(
     return renderSelectedSurface(
       view,
       selection,
-      { code: 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED', status: 'DIAGNOSTIC' },
+      {
+        code:
+          entry?.options.length === 0
+            ? 'WORKSPACE_COMPANY_UNAVAILABLE'
+            : 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED',
+        status: 'DIAGNOSTIC',
+      },
       feedback,
       binding.operations,
       422,
@@ -176,6 +197,43 @@ export async function renderSurfaceRuntimeWithData(
       queryParameterValues,
       binding.relationInputs,
     );
+  }
+  if (
+    selection.selected.documentEditor &&
+    selection.selected.surfaceRole === 'form' &&
+    legalEntitySelection.length === 1
+  ) {
+    try {
+      const editor = await documentEditor(
+        view,
+        selection.selected,
+        selection.surfaces,
+        url,
+        legalEntitySelection[0]!,
+        gateways,
+      );
+      if (editor)
+        return editor.slots
+          ? renderSelectedSurface(
+              view,
+              selection,
+              {
+                status: 'READY',
+                records: editor.record ? [editor.record] : [],
+                documentEditorSlots: editor.slots,
+              },
+              null,
+              binding.operations,
+              editor.statusCode,
+              legalEntitySelection,
+              workspaceContext,
+            )
+          : editor;
+    } catch (error) {
+      return renderApplicationDiagnostic(422, {
+        code: queryMessageCode(error),
+      });
+    }
   }
   if (binding.query.queryType === 'aggregate') {
     const scopeParameterId =
@@ -330,7 +388,28 @@ export async function submitSurfaceRuntimeIntent(
   } catch {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
+  const entry = await resolveWorkspaceEntry(
+    view,
+    selection.selected,
+    new URL(requestUrl, 'http://surface-runtime.local'),
+    gateways.queryGateway,
+  );
+  if (entry?.invalid)
+    return renderApplicationDiagnostic(422, {
+      code: 'WORKSPACE_COMPANY_UNAVAILABLE',
+    });
   if (selection.selected.composition && submission.compositionAction) {
+    const workspaceContext = await loadWorkspaceContextBar(
+      view,
+      selection,
+      binding,
+      gateways.queryGateway,
+      legalEntitySelectionForSurface(
+        binding,
+        new URL(requestUrl, 'http://surface-runtime.local'),
+      ),
+      new URL(requestUrl, 'http://surface-runtime.local'),
+    );
     return submitCompositionAction(
       view,
       selection.selected,
@@ -352,6 +431,7 @@ export async function submitSurfaceRuntimeIntent(
               binding.operations,
               statusCode,
               data.scope ? [data.scope] : [],
+              workspaceContext,
             )
           : {
               statusCode,
@@ -364,6 +444,50 @@ export async function submitSurfaceRuntimeIntent(
               ),
             },
     );
+  }
+  if (selection.selected.documentEditor && submission.draftSession) {
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    const scope = legalEntitySelectionForSurface(binding, url);
+    if (scope.length !== 1)
+      return operationDiagnostic('OPERATION_INPUT_INVALID', 422);
+    try {
+      const editor = await documentEditor(
+        view,
+        selection.selected,
+        selection.surfaces,
+        url,
+        scope[0]!,
+        gateways,
+        submission,
+      );
+      if (!editor) return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+      const context = await loadWorkspaceContextBar(
+        view,
+        selection,
+        binding,
+        gateways.queryGateway,
+        scope,
+        url,
+      );
+      return editor.slots
+        ? renderSelectedSurface(
+            view,
+            selection,
+            {
+              status: 'READY',
+              records: editor.record ? [editor.record] : [],
+              documentEditorSlots: editor.slots,
+            },
+            null,
+            binding.operations,
+            editor.statusCode,
+            scope,
+            context,
+          )
+        : editor;
+    } catch (error) {
+      return renderApplicationDiagnostic(422, operationMessageRef(error));
+    }
   }
   const operation = boundOperation(binding, submission.operationId);
   if (
@@ -734,9 +858,16 @@ async function loadWorkspaceContextBar(
   if (!legalEntityList || legalEntityList.binding.query.legalEntityScope) {
     return null;
   }
-  const targetSurface =
-    selection.selected.surfaceRole === 'list' ||
-    selectedBinding.query.queryType === 'aggregate'
+  const owner = selection.selected.workspace?.ownerSurfaceId
+    ? selection.surfaces.find(
+        (surface) =>
+          surface.surfaceId === selection.selected.workspace!.ownerSurfaceId,
+      )
+    : null;
+  const targetSurface = owner
+    ? { surface: owner, binding: readCompiledSurfaceDataBinding(view, owner) }
+    : selection.selected.surfaceRole === 'list' ||
+        selectedBinding.query.queryType === 'aggregate'
       ? { binding: selectedBinding, surface: selection.selected }
       : selection.surfaces
           .filter((surface) => surface.surfaceRole === 'list')
@@ -755,12 +886,15 @@ async function loadWorkspaceContextBar(
     targetSurface?.binding.query.legalEntityScope?.operand.parameterId;
   if (!targetSurface || !parameterId) return null;
 
-  const enumeration = await recordPickerOptions(
+  const entry = await resolveWorkspaceEntry(
     view,
-    legalEntityList,
+    selection.selected,
+    currentUrl,
     queryGateway,
-    [],
   );
+  const enumeration = entry
+    ? { options: entry.options }
+    : await recordPickerOptions(view, legalEntityList, queryGateway, []);
   if (!enumeration) return null;
   return Object.freeze({
     options: enumeration.options,
@@ -1413,10 +1547,12 @@ function navigationLink(
   label: string,
   workspaceContext: WorkspaceContextBar | null,
 ): string {
-  const current = selected
-    ? surface.surfaceId === selected.surfaceId ||
-      sharesSurfaceEntity(view, surface, selected)
-    : false;
+  const current = selected?.workspace?.ownerSurfaceId
+    ? selected.workspace.ownerSurfaceId === surface.surfaceId
+    : selected
+      ? surface.surfaceId === selected.surfaceId ||
+        sharesSurfaceEntity(view, surface, selected)
+      : false;
   const parameters = new URLSearchParams({ surface: surface.surfaceId });
   if (workspaceContext?.selectedRecordId) {
     try {
@@ -1437,11 +1573,11 @@ function navigationLink(
 }
 
 function renderWorkspaceContextBar(context: WorkspaceContextBar): string {
-  return `<nav class="workspace-context-bar" aria-label="Legal entity" data-shell-region="workspace-context-bar" data-scope-parameter-id="${escapeHtml(context.parameterId)}">
-    <span class="workspace-context-bar__label">Legal entity</span>
+  return `<nav class="workspace-context-bar" aria-label="Company" data-shell-region="workspace-context-bar" data-scope-parameter-id="${escapeHtml(context.parameterId)}">
+    <span class="workspace-context-bar__label">Company</span>
     <span class="workspace-context-bar__options">${
       context.options.length === 0
-        ? '<span class="muted">No legal entities available</span>'
+        ? '<span class="muted">No authorized active companies available. Contact your administrator for access or setup.</span>'
         : context.options
             .map((option) => {
               const parameters = new URLSearchParams(
@@ -1528,13 +1664,13 @@ function navigationLabel(surface: CompiledSurfaceDefinition): string {
 }
 
 function isNavigationSurface(surface: CompiledSurfaceDefinition): boolean {
-  return (
-    surface.surfaceRole === 'list' ||
-    (surface.surfaceRole === null &&
-      (surface.archetype === 'list' ||
-        surface.archetype === 'home' ||
-        surface.archetype === 'task'))
-  );
+  return surface.workspace
+    ? surface.workspace.membership !== 'contextual'
+    : surface.surfaceRole === 'list' ||
+        (surface.surfaceRole === null &&
+          (surface.archetype === 'list' ||
+            surface.archetype === 'home' ||
+            surface.archetype === 'task'));
 }
 
 function sharesSurfaceEntity(
@@ -1692,6 +1828,7 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .form-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4);margin:var(--space-4) 0}
 .form-field{display:grid;align-content:start;gap:var(--space-2)}
 .form-fields label{display:grid;gap:var(--space-1)}
+[data-document-editor] fieldset,[data-draft-line]{min-width:0;margin:var(--space-4) 0;padding:var(--space-4);border:1px solid var(--line);border-radius:var(--radius-control)}
 .form-fields .form-empty-intent{padding-top:var(--space-1)}
 .form-unavailable-value{display:block;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken);color:var(--ink-muted);font-size:var(--text-body);line-height:1.45}
 .form-unavailable-value code{color:var(--ink);overflow-wrap:anywhere}

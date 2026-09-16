@@ -884,8 +884,54 @@ export const SurfaceCompositionSchema = z.strictObject({
   actions: z.array(compositionAction).max(12),
 });
 export type SurfaceComposition = z.infer<typeof SurfaceCompositionSchema>;
+/** Optional v6 workspace declarations; absence preserves historical bytes. */
+export const SurfaceWorkspaceSchema = z.strictObject({
+  membership: z.enum(['operational', 'setup', 'contextual']),
+  ownerSurfaceId: CanonicalIdSchema.optional(),
+  entry: z
+    .strictObject({
+      companyQueryId: CanonicalIdSchema,
+      authorizationQueryId: CanonicalIdSchema,
+      companyNameFieldId: CanonicalIdSchema,
+      companyStateFieldId: CanonicalIdSchema,
+      activeStateId: CanonicalIdSchema,
+      policy: z.literal('authorizedSingleOrPreference'),
+    })
+    .optional(),
+});
+export type SurfaceWorkspace = z.infer<typeof SurfaceWorkspaceSchema>;
+const editorField = z.strictObject({
+  fieldId: CanonicalIdSchema,
+  label: LabelSchema,
+  reference: z
+    .strictObject({
+      queryId: CanonicalIdSchema,
+      labelFieldIds: z.array(CanonicalIdSchema).min(1).max(3),
+    })
+    .optional(),
+});
+export const SurfaceDocumentEditorSchema = z.strictObject({
+  headerLabel: LabelSchema.optional(),
+  linesLabel: LabelSchema.optional(),
+  saveDescription: z.string().min(1).max(2000).optional(),
+  kind: z.literal('draftDocumentEditor'),
+  headerFormSurfaceId: CanonicalIdSchema,
+  recordSurfaceId: CanonicalIdSchema,
+  lineFormSurfaceId: CanonicalIdSchema,
+  lineQueryId: CanonicalIdSchema,
+  parentRelationId: CanonicalIdSchema,
+  stateFieldId: CanonicalIdSchema,
+  editableStateIds: z.array(CanonicalIdSchema).min(1),
+  headerFields: z.array(editorField).min(1).max(20),
+  lineFields: z.array(editorField).min(1).max(15),
+  lineNumberFieldId: CanonicalIdSchema,
+  saveMode: z.literal('sequential'),
+});
+export type SurfaceDocumentEditor = z.infer<typeof SurfaceDocumentEditorSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   composition: SurfaceCompositionSchema.optional(),
+  workspace: SurfaceWorkspaceSchema.optional(),
+  documentEditor: SurfaceDocumentEditorSchema.optional(),
 });
 const authoredV6SurfaceDefinition = normalizedV6SurfaceDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),

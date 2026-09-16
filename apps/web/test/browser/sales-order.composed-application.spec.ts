@@ -104,15 +104,33 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     return `${baseUrl}/?${parameters}`;
   };
   const field = async (local: string, name: string, value: string) => {
-    await page
-      .locator(`[name="value:northstar.app:field.${local}_${name}"]`)
-      .fill(value);
+    const control = page.locator(
+      `[name="value:northstar.app:field.${local}_${name}"], [name^="draft:"][name$=":field.${local}_${name}"]`,
+    );
+    const tag = await control.evaluate((element) => element.tagName);
+    if (tag === 'SELECT') await control.selectOption(value);
+    else
+      await control.fill(
+        (await control.getAttribute('type')) === 'datetime-local'
+          ? value.slice(0, 19)
+          : value,
+      );
   };
   const save = async () => {
-    const id = await page
-      .locator('form#surface-record-form input[name="recordId"]')
-      .inputValue();
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    const editor = page.locator('#draft-editor-form');
+    const id = (await editor.count())
+      ? (await page
+          .locator('[name^="draft:"][name$=":field.sales_order_number"]')
+          .getAttribute('name'))!.split(':')[1]!
+      : await page
+          .locator('form#surface-record-form input[name="recordId"]')
+          .inputValue();
+    await page
+      .getByRole('button', {
+        name: (await editor.count()) ? 'Save draft' : 'Save',
+        exact: true,
+      })
+      .click();
     return id;
   };
   const snapshot = async () => {
@@ -137,15 +155,9 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
   });
-  const more = navigation
-    .locator('.navigation-tree > li')
-    .getByRole('group')
-    .filter({ hasText: 'Sales' });
-  const sales = more;
-  await sales.getByText('Sales', { exact: true }).click();
-  await sales.getByRole('link', { name: 'Sales order', exact: true }).click();
+  await navigation.getByRole('link', { name: 'Sales', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Sales order', exact: true }),
+    page.getByRole('heading', { name: 'Sales orders', level: 1, exact: true }),
   ).toBeVisible();
 
   const suffix = randomUUID().slice(0, 8);
@@ -156,40 +168,45 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await field('sales_order', 'requested_date', new Date().toISOString());
   await field('sales_order', 'currency', 'CAD');
   await field('sales_order', 'notes', 'Initial sales order');
-  const orderId = await save();
-  await expect(page.getByRole('status')).toContainText('Create complete');
-  expect(await snapshot()).toEqual(initialStock);
-
-  await page.goto(url('sales_order_line', 'form'));
-  await field('sales_order_line', 'line_number', '1');
   await field('sales_order_line', 'item_id', itemId);
   await field('sales_order_line', 'unit_id', 'EA');
   await field('sales_order_line', 'ordered_quantity', '10');
   await field('sales_order_line', 'unit_price', '12.5');
-  await page
-    .locator(
-      'select[name="relation:northstar.app:relation.sales_order_line_order"]',
-    )
-    .selectOption(orderId);
-  const lineId = await save();
-  await expect(page.getByRole('status')).toContainText('Create complete');
+  const orderId = await save();
+  await expect(page.locator('.composition-header')).toContainText(
+    `SO-${suffix}`,
+  );
+  const parent = target.relations.find(
+    (value) =>
+      value.relationId === 'northstar.app:relation.sales_order_line_order',
+  )!.relationColumn.physicalName;
+  const savedLines = await pool.query(
+    `SELECT record_id FROM ${receiptTable(salesOrderLine)} WHERE tenant_id=$1 AND environment_id=$2 AND ${q(salesOrderLine.legalEntity!.column)}=$3 AND ${q(parent)}=$4`,
+    [...scopeValues, legalEntityId, orderId],
+  );
+  expect(savedLines.rows).toHaveLength(1);
+  const lineId = String(savedLines.rows[0]!.record_id);
   expect(await snapshot()).toEqual(initialStock);
 
   const orderFormUrl = url('sales_order', 'form', orderId);
   await page.goto(orderFormUrl);
-  await field('sales_order', 'notes', 'Edited while draft');
   const staleUpdate = await formPayload(page);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Update complete');
+  staleUpdate.draftAction = 'save';
+  await page.goto(orderFormUrl);
+  await field('sales_order', 'notes', 'Edited while draft');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page.locator('.composition-header')).toContainText(
+    `SO-${suffix}`,
+  );
   expect(await snapshot()).toEqual(initialStock);
 
   staleUpdate.idempotencyKey = randomUUID();
-  staleUpdate[`value:northstar.app:field.sales_order_notes`] =
+  staleUpdate[`draft:${orderId}:northstar.app:field.sales_order_notes`] =
     'Stale revision must not persist';
   const staleResponse = await page.request.post(orderFormUrl, {
     form: staleUpdate,
   });
-  expect(await staleResponse.text()).toContain('MODULE_REVISION_CONFLICT');
+  expect(await staleResponse.text()).toContain('DRAFT_EDITOR_CONFLICT');
 
   await page.goto(orderFormUrl);
   const deniedStateBefore = await businessState();
@@ -202,7 +219,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     [...scopeValues, scope.role_id],
   );
   await field('sales_order', 'notes', 'This denied value must not persist');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(
     page.locator('[data-diagnostic-code="OPERATION_PERMISSION_DENIED"]'),
   ).toHaveCount(1);
@@ -228,9 +245,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await expect(lineRow.locator('[data-cell-role="primary"] strong')).toHaveText(
     'Field notebook',
   );
-  await expect(lineRow.locator('.composition-cell-secondary')).toContainText(
-    'Line 1',
-  );
+  await expect(lineRow.locator('td[data-column-label="Line"]')).toHaveText('1');
   await expect(lineRow.locator('.composition-cell-secondary')).toContainText(
     'Unit EA',
   );
@@ -289,7 +304,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const foreignEntity = randomUUID();
   await page.goto(url('sales_order', 'list', undefined, foreignEntity));
   await expect(
-    page.locator('[data-diagnostic-code="QUERY_PERMISSION_DENIED"]'),
+    page.locator('[data-diagnostic-code="WORKSPACE_COMPANY_UNAVAILABLE"]'),
   ).toHaveCount(1);
   expect(await businessState()).toEqual({
     lineQuantity: '10.000000000000000000',
@@ -331,7 +346,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 async function formPayload(page: Page): Promise<Record<string, string>> {
   return Object.fromEntries(
     await page
-      .locator('form#surface-record-form')
+      .locator('form#surface-record-form, form#draft-editor-form')
       .evaluate((form) =>
         [...new FormData(form as HTMLFormElement).entries()].map(
           ([key, value]) => [key, String(value)],

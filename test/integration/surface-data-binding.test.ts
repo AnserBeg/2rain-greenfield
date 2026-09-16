@@ -1,4 +1,6 @@
 import type { SurfaceComposition } from '../../packages/canonical-model/src/index.js';
+import { documentEditor } from '../../apps/web/src/document-editor.js';
+import { resolveWorkspaceEntry } from '../../apps/web/src/workspace-entry.js';
 import {
   loadSurfaceComposition,
   submitCompositionAction,
@@ -2380,7 +2382,7 @@ class InMemoryGenericExecutor
 
 function semanticGateways(
   policy: CurrentPolicyGateway,
-  executor: InMemoryGenericExecutor,
+  executor: SemanticQueryExecutor & SemanticOperationExecutor,
 ): SurfaceRuntimeGateways {
   const operationMediation = new SemanticOperationMediationAuthority();
   return {
@@ -2834,7 +2836,11 @@ function compileFixture(
       normalizationProfileVersion: normalized.normalizationProfileVersion,
     },
   });
-  assert.equal(result.status, 'compiled');
+  assert.equal(
+    result.status,
+    'compiled',
+    JSON.stringify(result.status === 'failed' ? result.diagnostics : null),
+  );
   return result as CompileSuccess;
 }
 
@@ -4499,6 +4505,534 @@ type TaskSummary = {
       | { source: 'column'; datasetId: string; columnId: string };
   };
 };
+
+/** Bounded order-entry witnesses: real canonical contracts/gateways, synthetic storage. */
+class OrderEntryExecutor
+  implements SemanticQueryExecutor, SemanticOperationExecutor
+{
+  readonly rows = new Map<string, SemanticRecordDto>();
+  readonly owners = new Map<string, string>();
+  readonly calls: SemanticOperationExecutionRequest[] = [];
+  readonly receipts = new Map<string, SemanticOperationResultEnvelope>();
+  failAt = 0;
+  withheld = false;
+  namespace = 'northstar.app';
+  seed(
+    entity: string,
+    values: Record<string, ImmutableJsonValue>,
+    scope?: string,
+  ) {
+    const recordId = randomUUID();
+    this.rows.set(recordId, {
+      recordId,
+      entityId: `${this.namespace}:entity.${entity}`,
+      values,
+      revision: 1,
+      archived: false,
+    });
+    if (scope) this.owners.set(recordId, scope);
+    return recordId;
+  }
+  async recordNonAccepted() {}
+  execute(
+    request: SemanticQueryExecutionRequest,
+  ): Promise<SemanticQueryResultEnvelope>;
+  execute(
+    request: SemanticOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope>;
+  async execute(
+    request: SemanticQueryExecutionRequest | SemanticOperationExecutionRequest,
+  ): Promise<SemanticQueryResultEnvelope | SemanticOperationResultEnvelope> {
+    if ('arguments' in request) {
+      const args = asRecord(request.arguments);
+      const scope = request.definition.legalEntityScope
+        ? args[request.definition.legalEntityScope.operand.parameterId]
+        : null;
+      const parent = request.list?.query.parentScope;
+      const selected = [...this.rows.values()].filter(
+        (row) =>
+          row.entityId === request.definition.sourceEntityId &&
+          (!this.owners.has(row.recordId) ||
+            this.owners.get(row.recordId) === scope) &&
+          (!row.archived || args.includeArchived === true) &&
+          (!args.recordId || row.recordId === args.recordId) &&
+          (!parent || row.values[parent.relationId] === parent.recordId),
+      );
+      const records = request.list
+        ? selected.map((row) => projectedListRecord(request, row))
+        : selected;
+      return {
+        kind: 'semanticQueryResult',
+        schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+        queryId: request.definition.queryId,
+        outcome: records.length || request.list ? 'exact' : 'not-found',
+        records,
+        unsupportedReason: null,
+        ...(request.list
+          ? {
+              listCoverage: {
+                ...listCoverage(request, records.length),
+                parentScope: parent ?? null,
+              },
+            }
+          : {}),
+      };
+    }
+    this.calls.push(request);
+    if (this.failAt === this.calls.length)
+      throw new Error('Isolated line failure');
+    const cached = this.receipts.get(request.idempotencyKey);
+    if (cached) return cached;
+    const input = asRecord(request.input);
+    const recordId = String(input.recordId);
+    const previous = this.rows.get(recordId);
+    if (previous && input.expectedRevision !== previous.revision)
+      throw new ModuleRuntimeInterpreterError(
+        'MODULE_REVISION_CONFLICT',
+        'Isolated stale line',
+      );
+    const local =
+      request.definition.effect.entity.targetId.split(':entity.')[1]!;
+    const stored = operationRecord(request, previous, recordId, {
+      ...(!previous &&
+      ['sales_order', 'service_request', 'purchase_order'].includes(local)
+        ? {
+            [`${this.namespace}:derived_state_field.machine.${local}_lifecycle`]: `${this.namespace}:state.${local}_draft`,
+          }
+        : {}),
+      ...asRecord(input.values ?? input.patch ?? {}),
+      ...asRecord(input.relations ?? {}),
+    });
+    this.rows.set(recordId, stored);
+    if (input.legalEntityId)
+      this.owners.set(recordId, String(input.legalEntityId));
+    const result: SemanticOperationResultEnvelope = {
+      kind: 'semanticOperationResult',
+      schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+      operationId: request.definition.operationId,
+      outcome: 'succeeded',
+      readBack: this.withheld ? null : stored,
+      unsupportedReason: null,
+      trust: {
+        changeDocumentId: randomUUID(),
+        domainEventId: randomUUID(),
+        invocationId: randomUUID(),
+        outboxId: randomUUID(),
+      },
+    };
+    this.receipts.set(request.idempotencyKey, result);
+    return result;
+  }
+}
+async function orderEntryWitness(variant = false) {
+  const source = composedApplicationDefinition();
+  if (variant)
+    for (const surface of source.surfaces as Array<Record<string, unknown>>) {
+      if (String(surface.surfaceId).endsWith(':surface.purchase_order_detail'))
+        surface.label = 'Service procurement';
+      const editor = surface.documentEditor as
+        { lineFields: Array<{ fieldId: string; label: string }> } | undefined;
+      if (
+        editor &&
+        String(surface.surfaceId).includes(':surface.purchase_order_')
+      )
+        for (const field of editor.lineFields)
+          if (field.label === 'Quantity') field.label = 'Requested units';
+    }
+  const compiled = compileFixture(source);
+  const executor = new OrderEntryExecutor();
+  const ns = executor.namespace;
+  const scopes = [randomUUID(), randomUUID()];
+  const allowed = new Set<string>(scopes);
+  const policy = new RecordingPolicy((request) => {
+    const input = asRecord(request.decisionInput);
+    return input.kind === 'legalEntityReadScopePolicyInput' &&
+      !allowed.has(String(input.legalEntityId))
+      ? 'DENY'
+      : 'ALLOW';
+  });
+  for (const [index, scope] of scopes.entries())
+    executor.rows.set(scope, {
+      entityId: `${ns}:entity.legal_entity`,
+      recordId: scope,
+      revision: 1,
+      archived: false,
+      values: {
+        [`${ns}:field.legal_entity_name`]: `Company ${index + 1}`,
+        [`${ns}:field.legal_entity_status`]: `${ns}:option.legal_entity_status_active`,
+      },
+    });
+  const party = executor.seed('party', {
+    [`${ns}:field.party_name`]: 'Readable customer',
+  });
+  const item = executor.seed('item', {
+    [`${ns}:field.item_name`]: 'Readable product',
+    [`${ns}:field.item_sku`]: 'SKU-WITNESS',
+  });
+  const principal = randomUUID();
+  const entry = runtimeEntry(compiled, policy, {
+    a: identity(tenantA, environmentA, principal),
+    b: identity(tenantA, environmentB, principal),
+    c: identity(tenantB, environmentA, principal),
+    d: identity(tenantA, environmentA, randomUUID()),
+  });
+  const view = await issuedView(entry, 'a');
+  const surfaces = readCompiledSurfaceManifest(view).surfaces;
+  const local = variant ? 'purchase_order' : 'sales_order';
+  const form = surfaces.find(
+    (value) => value.surfaceId === `${ns}:surface.${local}_form`,
+  )!;
+  const list = surfaces.find(
+    (value) => value.surfaceId === `${ns}:surface.${local}_list`,
+  )!;
+  const gateways: SurfaceRuntimeGateways = {
+    ...semanticGateways(policy, executor),
+    queryGateway: new SemanticQueryGateway(
+      policy,
+      executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': async ({ result }) => result,
+      },
+    ),
+  };
+  const url = new URL(
+    `http://fixture.local/?surface=${encodeURIComponent(form.surfaceId)}&${encodeURIComponent(`${ns}:parameter.${local}_get_legal_entity_scope`)}=${scopes[0]}`,
+  );
+  const open = () =>
+    documentEditor(view, form, surfaces, url, scopes[0]!, gateways);
+  const post = (
+    rendered: NonNullable<Awaited<ReturnType<typeof open>>>,
+    action: string,
+    values: Record<string, string> = {},
+  ) =>
+    documentEditor(view, form, surfaces, url, scopes[0]!, gateways, {
+      draftSession: hiddenValue(rendered.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(rendered.slots!.keyFacts!, 'draftVersion'),
+      draftAction: action,
+      ...values,
+    });
+  const values = (rendered: NonNullable<Awaited<ReturnType<typeof open>>>) => {
+    const result: Record<string, string> = {};
+    const html = Object.values(rendered.slots!).join('');
+    for (const match of html.matchAll(/name="(draft:[^"]+)"/g)) {
+      const field = match[1]!;
+      const name = field.split(':field.')[1]!;
+      result[field] = name.endsWith('_number')
+        ? 'SO-WITNESS'
+        : name.endsWith('_customer_party_id') ||
+            name.endsWith('_supplier_party_id')
+          ? party
+          : name.endsWith('_item_id')
+            ? item
+            : name.endsWith('_order_date')
+              ? '2026-09-15T12:00'
+              : name.endsWith('_currency')
+                ? 'CAD'
+                : name.endsWith('_ordered_quantity')
+                  ? '10'
+                  : name.endsWith('_unit_id')
+                    ? 'EA'
+                    : name.endsWith('_unit_price')
+                      ? '12.5'
+                      : '';
+    }
+    return result;
+  };
+  return {
+    executor,
+    ns,
+    scopes,
+    allowed,
+    entry,
+    view,
+    surfaces,
+    form,
+    list,
+    gateways,
+    url,
+    open,
+    post,
+    values,
+  };
+}
+test('order entry: unrelated metadata renders the shared editor; partial save freezes exact retry and duplicate replay', async () => {
+  const f = await orderEntryWitness(true);
+  let form = (await f.open())!;
+  assert.match(form.slots!.sections!, /Readable product · SKU-WITNESS/);
+  assert.match(form.slots!.sections!, /Requested units/);
+  form = (await f.post(form, 'add', f.values(form)))!;
+  const values = f.values(form);
+  f.executor.failAt = 3;
+  const failed = (await f.post(form, 'save', values))!;
+  assert.equal(failed.statusCode, 422);
+  assert.match(failed.slots!.keyFacts!, /committed/);
+  assert.match(failed.slots!.commandBar!, /Retry save/);
+  assert.equal(
+    [...f.executor.rows.values()].filter((row) =>
+      row.entityId.endsWith(':entity.purchase_order_line'),
+    ).length,
+    1,
+  );
+  const failedCall = f.executor.calls[2]!;
+  const input = structuredClone(failedCall.input);
+  f.executor.failAt = 0;
+  f.url.searchParams.set(
+    'record',
+    String(asRecord(f.executor.calls[0]!.input).recordId),
+  );
+  const completed = await f.post(
+    failed,
+    'retry',
+    Object.fromEntries(Object.keys(values).map((key) => [key, 'forged'])),
+  );
+  assert.equal(completed!.statusCode, 303);
+  assert.deepEqual(f.executor.calls[3]!.input, input);
+  assert.equal(f.executor.calls[3]!.idempotencyKey, failedCall.idempotencyKey);
+  assert.equal(
+    f.executor.calls.filter((call) =>
+      call.definition.operationId.endsWith('.purchase_order_create'),
+    ).length,
+    1,
+  );
+  const duplicate = await f.post(failed, 'retry');
+  assert.equal(duplicate!.location, completed!.location);
+  assert.equal(f.executor.calls.length, 4);
+  const lines = [...f.executor.rows.values()].filter((row) =>
+    row.entityId.endsWith(':entity.purchase_order_line'),
+  );
+  assert.equal(lines.length, 2);
+  assert.ok(
+    lines.every(
+      (row) =>
+        row.values[`${f.ns}:relation.purchase_order_line_order`] ===
+          f.url.searchParams.get('record') &&
+        f.executor.owners.get(row.recordId) === f.scopes[0],
+    ),
+  );
+});
+test('order entry: choice, advisory preference invalidation, foreign scope and identity separation never retarget an open buffer', async () => {
+  const f = await orderEntryWitness();
+  const entryUrl = new URL(
+    `http://fixture.local/?surface=${encodeURIComponent(f.list.surfaceId)}`,
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.selected,
+    null,
+  );
+  const explicit = new URL(entryUrl);
+  explicit.searchParams.set(
+    `${f.ns}:parameter.sales_order_list_legal_entity_scope`,
+    f.scopes[1]!,
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      explicit,
+      f.gateways.queryGateway,
+    ))!.selected,
+    f.scopes[1],
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.selected,
+    f.scopes[1],
+  );
+  for (const token of ['b', 'c', 'd'])
+    assert.equal(
+      (await resolveWorkspaceEntry(
+        await issuedView(f.entry, token),
+        f.list,
+        new URL(entryUrl),
+        f.gateways.queryGateway,
+      ))!.selected,
+      null,
+    );
+  const duplicate = new URL(explicit);
+  duplicate.searchParams.append(
+    `${f.ns}:parameter.sales_order_list_legal_entity_scope`,
+    f.scopes[0]!,
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      duplicate,
+      f.gateways.queryGateway,
+    ))!.invalid,
+    true,
+  );
+  const company = f.executor.rows.get(f.scopes[1]!)!;
+  f.executor.rows.set(company.recordId, {
+    ...company,
+    values: {
+      ...company.values,
+      [`${f.ns}:field.legal_entity_status`]: `${f.ns}:option.legal_entity_status_inactive`,
+    },
+  });
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.selected,
+    f.scopes[0],
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      explicit,
+      f.gateways.queryGateway,
+    ))!.invalid,
+    true,
+  );
+  f.executor.rows.set(company.recordId, company);
+  await assert.rejects(
+    f.gateways.queryGateway.invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: `${f.ns}:query.sales_order_list`,
+      arguments: { includeArchived: false },
+    }),
+  );
+  const draft = (await f.open())!;
+  f.allowed.delete(f.scopes[1]!);
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.selected,
+    f.scopes[0],
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      explicit,
+      f.gateways.queryGateway,
+    ))!.invalid,
+    true,
+  );
+  explicit.searchParams.set(
+    `${f.ns}:parameter.sales_order_list_legal_entity_scope`,
+    randomUUID(),
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      explicit,
+      f.gateways.queryGateway,
+    ))!.invalid,
+    true,
+  );
+  const saved = await f.post(draft, 'save', f.values(draft));
+  assert.equal(saved!.statusCode, 303);
+  assert.equal(
+    f.executor.owners.get(
+      String(asRecord(f.executor.calls[0]!.input).recordId),
+    ),
+    f.scopes[0],
+  );
+  const pinned = (await f.open())!;
+  f.allowed.delete(f.scopes[0]!);
+  const beforeRevocation = f.executor.calls.length;
+  const denied = await submitSurfaceRuntimeIntent(
+    f.view,
+    f.url.pathname + f.url.search,
+    {
+      draftSession: hiddenValue(pinned.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(pinned.slots!.keyFacts!, 'draftVersion'),
+      draftAction: 'save',
+      ...f.values(pinned),
+    },
+    f.gateways,
+  );
+  assert.equal(denied.statusCode, 422);
+  assert.match(denied.html, /WORKSPACE_COMPANY_UNAVAILABLE/);
+  assert.equal(f.executor.calls.length, beforeRevocation);
+  f.allowed.clear();
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.options.length,
+    0,
+  );
+});
+test('order entry: stale edits retain inputs, released documents stay locked, persisted removal confirms immutable archive and committed readback never retries', async () => {
+  const f = await orderEntryWitness();
+  let editor = (await f.open())!;
+  const initial = await f.post(editor, 'save', f.values(editor));
+  const id = new URL(
+    initial!.location!,
+    'http://fixture.local',
+  ).searchParams.get('record')!;
+  f.url.searchParams.set('record', id);
+  editor = (await f.open())!;
+  const header = f.executor.rows.get(id)!;
+  f.executor.rows.set(id, { ...header, revision: header.revision + 1 });
+  const values = f.values(editor);
+  const notes = Object.keys(values).find((key) => key.endsWith('_notes'))!;
+  values[notes] = 'Retained stale input';
+  const stale = (await f.post(editor, 'save', values))!;
+  assert.equal(stale.statusCode, 409);
+  assert.match(stale.slots!.keyFacts!, /Retained stale input/);
+  editor = (await f.open())!;
+  const line = [...f.executor.rows.values()].find((row) =>
+    row.entityId.endsWith(':entity.sales_order_line'),
+  )!;
+  editor = (await f.post(editor, `remove:${line.recordId}`, f.values(editor)))!;
+  const before = f.executor.calls.length;
+  const review = (await f.post(editor, 'save', f.values(editor)))!;
+  assert.equal(f.executor.calls.length, before);
+  assert.match(review.slots!.commandBar!, /Confirm removal and save/);
+  await f.post(review, 'confirm', {
+    [`draft:${line.recordId}:${f.ns}:field.sales_order_line_ordered_quantity`]:
+      '999',
+  });
+  assert.equal(f.executor.rows.get(line.recordId)!.archived, true);
+  const updated = f.executor.rows.get(id)!;
+  f.executor.rows.set(id, {
+    ...updated,
+    values: {
+      ...updated.values,
+      [`${f.ns}:derived_state_field.machine.sales_order_lifecycle`]: `${f.ns}:state.sales_order_released`,
+    },
+  });
+  const locked = await f.open();
+  assert.equal(locked!.statusCode, 422);
+  assert.match(locked!.html, /DRAFT_EDITOR_LOCKED/);
+  const g = await orderEntryWitness();
+  const open = (await g.open())!;
+  g.executor.withheld = true;
+  const committed = (await g.post(open, 'save', g.values(open)))!;
+  assert.match(
+    committed.slots!.keyFacts!,
+    /OPERATION_COMMITTED_READBACK_WITHHELD/,
+  );
+  assert.doesNotMatch(committed.slots!.commandBar!, /Retry save/);
+  await g.post(committed, 'retry');
+  assert.equal(g.executor.calls.length, 1);
+});
 
 test('native Task policy reuses non-Sales forms, fresh Record context and exact prepared identity', async () => {
   const fixture = await correctionTaskFixture(true);

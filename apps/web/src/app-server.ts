@@ -152,6 +152,7 @@ function writeHtml(
   result: SurfaceRuntimeResponse,
 ): void {
   response.statusCode = result.statusCode;
+  if (result.location) response.setHeader('location', result.location);
   response.setHeader('content-type', 'text/html; charset=utf-8');
   response.end(result.html);
 }

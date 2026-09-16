@@ -9,6 +9,8 @@ import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
+import { orderEntrySurfaces } from './order-entry.js';
+import { purchasingWorkspace } from '../purchasing/workspace.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -150,41 +152,51 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     schemaVersion: version,
     stateMachines: merged(definitions, 'stateMachines'),
     storageMappings: merged(definitions, 'storageMappings'),
-    surfaces: merged(definitions, 'surfaces').map((surface) => {
-      if (!isRecord(surface)) throw new TypeError('surface must be an object');
-      if (
-        surface.surfaceId !==
-          `${APPLICATION_NAMESPACE}:surface.sales_order_detail` &&
-        surface.surfaceId !== `${APPLICATION_NAMESPACE}:surface.shipment_detail`
-      )
-        return surface;
-      return {
-        ...surface,
-        composition:
-          surface.surfaceId ===
-          `${APPLICATION_NAMESPACE}:surface.sales_order_detail`
-            ? salesWorkspace(APPLICATION_NAMESPACE)
-            : packingWorkspace(APPLICATION_NAMESPACE),
-        slots: [
-          ...(surface.slots as Record<string, unknown>[]).map((slot) => ({
-            ...slot,
-            ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
-          })),
-          {
-            kind: 'surfaceSlot',
-            schemaVersion: version,
-            slot: 'childTables',
-            slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_children`,
-            orderKey: 60,
-            content: {
-              kind: 'opaqueSurfaceContentReference',
+    surfaces: orderEntrySurfaces(
+      APPLICATION_NAMESPACE,
+      merged(definitions, 'surfaces').map((surface) => {
+        if (!isRecord(surface))
+          throw new TypeError('surface must be an object');
+        if (
+          surface.surfaceId !==
+            `${APPLICATION_NAMESPACE}:surface.sales_order_detail` &&
+          surface.surfaceId !==
+            `${APPLICATION_NAMESPACE}:surface.purchase_order_detail` &&
+          surface.surfaceId !==
+            `${APPLICATION_NAMESPACE}:surface.shipment_detail`
+        )
+          return surface;
+        return {
+          ...surface,
+          composition:
+            surface.surfaceId ===
+            `${APPLICATION_NAMESPACE}:surface.sales_order_detail`
+              ? salesWorkspace(APPLICATION_NAMESPACE)
+              : surface.surfaceId ===
+                  `${APPLICATION_NAMESPACE}:surface.purchase_order_detail`
+                ? purchasingWorkspace(APPLICATION_NAMESPACE)
+                : packingWorkspace(APPLICATION_NAMESPACE),
+          slots: [
+            ...(surface.slots as Record<string, unknown>[]).map((slot) => ({
+              ...slot,
+              ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
+            })),
+            {
+              kind: 'surfaceSlot',
               schemaVersion: version,
-              targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
+              slot: 'childTables',
+              slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_children`,
+              orderKey: 60,
+              content: {
+                kind: 'opaqueSurfaceContentReference',
+                schemaVersion: version,
+                targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
+              },
             },
-          },
-        ],
-      };
-    }),
+          ],
+        };
+      }),
+    ),
   };
 }
 

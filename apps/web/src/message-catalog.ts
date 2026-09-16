@@ -90,6 +90,24 @@ export interface SurfaceMessage {
 }
 
 export const SURFACE_MESSAGE_CATALOG = Object.freeze({
+  DRAFT_EDITOR_CONFLICT: {
+    sentence: 'Draft changed',
+    detail:
+      'This draft or document changed after the editor was opened. Your inputs remain in this session.',
+    nextAction:
+      'Reopen the document to review its current values before editing.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  DRAFT_EDITOR_LOCKED: {
+    sentence: 'Draft editing unavailable',
+    detail: 'This document is outside its declared editable states.',
+    nextAction: 'Use the document’s available lifecycle or correction actions.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
   COMPOSITION_CHILD_FAILED: {
     sentence: 'Section unavailable',
     detail:
@@ -357,6 +375,16 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Legal entity required',
     subject: null,
   },
+  WORKSPACE_COMPANY_UNAVAILABLE: {
+    consequence: 'blocking',
+    detail:
+      'The requested company is unavailable, inactive, or not currently authorized for this workspace.',
+    nextAction:
+      'Open the workspace and choose an authorized active company, or ask an administrator for access and setup.',
+    placements: ['slot', 'page'],
+    sentence: 'Company access required',
+    subject: null,
+  },
   QUERY_NOT_FOUND: {
     consequence: 'blocking',
     detail: 'No visible record matched this request in the pinned release.',
@@ -490,6 +518,7 @@ export const SURFACE_MESSAGE_CODES: readonly SurfaceMessageCode[] =
  * the contract test asserts rather than trusting this comment.
  */
 export const QUERY_DIAGNOSTIC_CODES = Object.freeze([
+  'WORKSPACE_COMPANY_UNAVAILABLE',
   'QUERY_AMBIGUOUS',
   'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED',
   'QUERY_NOT_FOUND',

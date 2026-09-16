@@ -25,11 +25,7 @@
 The 2026-09-01 QUEUE FREEZE and the previous operating model are in the archive; their
 substance survives in the rules above.
 
-**Selected 2026-09-14: RAIN-META-SALES** — sole local BUILD on
-`packet/RAIN-META-SALES`; P1/P2 closed at `f10c502`; owner-requested Task context/mobile/navigation correction at `d05651c8`; serving source `b7ffe632` on 38637; matched reference/Rain and JS-off evidence ready; stop for owner visual acceptance
-in [the corrected visual checkpoint](packets/RAIN-META-SALES-task-context-visual.md). Accepted fulfillment stays the base;
-live customization and actual AI execution follow this workspace before broader expansion.
-Publication stops at one draft PR; review online only, no local integration or deployment.
+**Selected 2026-09-15: RAIN-ORDER-ENTRY** — sole local BUILD on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 at `3830f95`; normal shared Sales/Purchase draft workspace, explicit compiled navigation and authorized company entry; [charter](packets/RAIN-ORDER-ENTRY.md). Continue after the first actual browser checkpoint; stop at completed draft PR handoff for online review, no integration or deployment. PR #5 and its closed P1/P2 and retained demos remain the dependency.
 
 ## Where we are — 2026-09-04
 

@@ -124,16 +124,15 @@ Rules that follow:
 
   It is **shell furniture, not a fourth part** — same class as the command
   palette and the New button. It is platform-owned, never an archetype slot and
-  never tenant-customizable. It **holds no state**: every selection is written to
-  the URL and read back from it, per ADR-0015:38's ban on ambient session state.
-  It **never selects for the user**. *Narrowed 2026-08-08.* For **legal entity**
-  that is absolute, including when exactly one option exists, because ADR-0031 §3
-  makes omission a typed refusal rather than a narrower scope — the reason is a
-  property of that dimension, not of the bar. The form that carries to a future
-  dimension is weaker and still binding: **no implicit default.** A default may
-  arrive only through the declared-default mechanism ADR-0015:38 admits and
-  ADR-0037 §4 records as absent; whether omission is *also* a refusal is answered
-  by each new dimension's own justification.
+  never tenant-customizable. **Amended by the owner 2026-09-15:** declared browser
+  entry resolves current authorized active companies. One enters automatically;
+  several reuse a currently authorized advisory preference scoped to the trusted
+  principal/tenant/environment, or ask once; none show access/setup guidance.
+  Entry writes explicit scope into the URL. Preference never grants permission or
+  supplies an operation operand. Invalid explicit scope refuses, and open documents,
+  draft buffers and prepared tasks retain their original scope across tabs/switches.
+  Raw APIs/background callers retain explicit pinned context. Without a declaration,
+  no implicit default is available. See amended ADR-0037 and ADR-0015.
 
   **A workspace scope is not a field pre-fill.** The bar selects the slice of the
   business being looked at; a form pre-filling a legal-entity field from a

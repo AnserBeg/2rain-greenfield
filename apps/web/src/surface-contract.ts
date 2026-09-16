@@ -2,6 +2,12 @@ import {
   SurfaceCompositionSchema,
   type SurfaceComposition,
 } from '../../../packages/canonical-model/src/index.js';
+import {
+  SurfaceWorkspaceSchema,
+  SurfaceDocumentEditorSchema,
+  type SurfaceWorkspace,
+  type SurfaceDocumentEditor,
+} from '../../../packages/canonical-model/src/schemas.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import {
@@ -264,6 +270,8 @@ export interface CompiledSurfaceSlot {
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly workspace?: SurfaceWorkspace;
+  readonly documentEditor?: SurfaceDocumentEditor;
   readonly composition?: SurfaceComposition;
   readonly archetype: CompiledSurfaceArchetype;
   readonly dataSourceQueryId: string;
@@ -326,6 +334,7 @@ export interface CompiledSurfaceOperationBinding {
 }
 
 export interface CompiledSurfaceInputField {
+  readonly temporal?: RegisteredOperationInputContract['fields'][number]['temporal'];
   readonly fieldId: string;
   readonly kind: RegisteredOperationInputContract['fields'][number]['fieldKind'];
   readonly required: boolean;
@@ -818,13 +827,13 @@ function navigationSurfaceIds(entry: CompiledNavigationEntry): string[] {
 }
 
 function isNavigationSurface(surface: CompiledSurfaceDefinition): boolean {
-  return (
-    surface.surfaceRole === 'list' ||
-    (surface.surfaceRole === null &&
-      (surface.archetype === 'list' ||
-        surface.archetype === 'home' ||
-        surface.archetype === 'task'))
-  );
+  return surface.workspace
+    ? surface.workspace.membership !== 'contextual'
+    : surface.surfaceRole === 'list' ||
+        (surface.surfaceRole === null &&
+          (surface.archetype === 'list' ||
+            surface.archetype === 'home' ||
+            surface.archetype === 'task'));
 }
 
 function invalidNavigation(message: string): SurfaceProjectionError {
@@ -880,6 +889,16 @@ function parseSurface(
     ...(value.composition === undefined
       ? {}
       : { composition: SurfaceCompositionSchema.parse(value.composition) }),
+    ...(value.workspace === undefined
+      ? {}
+      : { workspace: SurfaceWorkspaceSchema.parse(value.workspace) }),
+    ...(value.documentEditor === undefined
+      ? {}
+      : {
+          documentEditor: SurfaceDocumentEditorSchema.parse(
+            value.documentEditor,
+          ),
+        }),
     archetype,
     dataSourceQueryId: value.dataSourceQueryId,
     fieldIds: Object.freeze([...value.fieldIds]),
@@ -1124,6 +1143,7 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
                 Object.freeze({
                   fieldId: field.fieldId,
                   kind: field.fieldKind,
+                  temporal: field.temporal,
                   required: field.required,
                 }),
               ),
