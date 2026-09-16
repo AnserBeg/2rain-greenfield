@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; consolidated CI integration correction complete at `32b219280225d9c50221695d87f5edc110fdbc80`; sole LOCAL author; stacked draft PR handoff. Fresh CI/owner acceptance pending; no merge/deployment.
+Status: evidence_ready; consolidated F1/F2/F3 recovery correction complete at `d6ed9ce3017c9f944be4a36670dfafec11de6968`; sole LOCAL author; stacked draft PR handoff. Fresh CI/ONLINE/owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -28,6 +28,8 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 - Inventory re-derived without instrument changes: 2,299 → 2,351 obligations, 554 → 601 observations; new decision identities, unchanged two unhonored join-eligibility entries, no per-obligation execution claim.
 - Program review not due: unintegrated vertical, no stage boundary/new posting domain/imminent module fan-out; no autonomous review launched.
 - New caller seam delegates pinned Task/draft continuations to their own checks; buffered persisted lines reauthorize before display/writes. Committed redacted replays retain HTTP 200, with no cached fields or retry controls. P1/P2 kernels unchanged.
+- Draft recovery now records acknowledged gateway receipts separately from an immutable pending plan. A pending exact retry reaches receipt lookup with its original key/input/revision; fresh edits still compare current revision. Correctable replanning removes only acknowledged archives and keeps unexecuted removals governed by confirmation.
+- A post-execution read/authorization failure with an acknowledged step returns the catalogued redacted partial-commit outcome at HTTP 200, claims no complete save, exposes no editor controls and dispatches no repeat mutation. A pre-write read failure remains HTTP 422.
 
 ## Slices and actual reference
 
@@ -46,11 +48,13 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 - Correction gates: complete message catalog 17/17 with 18/46 real path drivers; all seven affected PostgreSQL files 95/95, with Inventory posting independently 19/19; retained browser order-entry/meta-sales 3/3, Sales order 1/1, fulfillment 1/1 and receiving 1/1. Full lint, Prettier, both TypeScript checks, authored/release freshness and boundaries (204 files) pass. The final copy correction also passes workspace contracts 4/4 and the two affected architecture files 50/50 through the shared lock.
 - CI run `35060214443` passed PostgreSQL, locale, catalog and the order-entry/meta-sales/Sales/fulfillment/receiving journeys, then exposed one ordinary-form script assertion, five obsolete composed-browser expectations and skipped quality-tail checks. The consolidated correction emits the CSP-pinned client enhancement only for a rendered eligible native Task dialog; ordinary native-picker pages are script-free. Browser expectations now prove owner navigation, contextual deep links, explicit company scope/continuity and the actual rail/raised-overlay focus grounds. Workspace-aware conformance preserves required owner/setup reachability while contextual surfaces remain reachable through their owner or deep links; the generic editor remains a typed SurfaceRuntime delegate and its value-import red control fails closed.
 - Complete correction evidence: `surface-data-binding.test.ts` 58/58; integration 174/174; browser 104/104 through the unfiltered supported wrapper with every project/dependency; architecture 194/194; agent 3/3; surface contracts 30/30; expected-red 139/139 plus 38 self-controls; format, lint, typecheck, build, demo/app release freshness and language coverage pass. The prior CI PostgreSQL/locale pass was retained. The CPU-idle performance result was not retried and no budget, threshold, timeout or compiler code changed, as directed.
+- F1/F2/F3 were reproduced on reviewed candidate `69383b75d179c244c4d2334dc4ff1a1b23fb51d3`: receipt-persisted retry returned 409 instead of 303; corrected archive replanning returned a second confirmation page (200) instead of completing (303); authorization, provider-read and correctable-clear post-commit variants each returned 422 instead of the required redacted 200.
+- Recovery evidence at executable `d6ed9ce3017c9f944be4a36670dfafec11de6968`: discriminating F1/F2/F3 controls 6/6; complete `surface-data-binding.test.ts` 64/64; integration 180/180; surface contracts 30/30; browser 20/20 (catalog census, complete order-entry, Task JS on/off); architecture 194/194; format, lint, typecheck, build and boundaries (204 files) pass. Receipt-after-mutation loss, duplicate-archive refusal and post-execution read faults are deterministic controlled-executor evidence through the real semantic gateways and SurfaceRuntime. No new PostgreSQL execution is claimed; the earlier hosted PostgreSQL pass remains separate evidence.
 - Fresh candidate CI starts through the same stacked draft PR after push. No full local matrix, inherited audit, dependency installation or CI polling; CI/ONLINE verdict required and not claimed green.
 
 ## Test it yourself
 
-Retained demo: `http://127.0.0.1:33809/?surface=northstar.app%3Asurface.sales_order_list`; PID 69493; serves executable SHA `20e5c1d4f389b1bcb887c6e71cf51d9e056cb731`, clean at startup. Masters/development identity/opening stock only; target orders start absent. Release `b052c152-19a2-4c4b-9c4d-ae7573549bf2`, root `b97f2bf398f0a6cb08ec6d975720f0dff6e200788033ff68531076ca512ec51e`, fence 13. The correction preserves this process, data and locks; it does not restart or retarget the retained demo.
+The prior retained demo at port 33809 was not running when this correction began. Its persisted data was left untouched; the correction did not restart or retarget it, and every test used the supported lock wrapper without bypass or manual deletion.
 In Ubuntu worktree: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/order-entry-fixture.ts --serve`.
 Open printed URL. Sales/Purchasing open their order tables; New opens the same declared editor with company already explicit. Select Alpine Office Supply, enter number/date/currency, add products by name/SKU/base unit; Sales unit explicit. Edit/remove, Save draft, leave/reopen and Edit again. Save is sequential and does not release.
 Release Sales Notebook 10 EA → select line → Reserve 8 Calgary → Review/Confirm; select reservation → Ship 5 → Review/Confirm; Release remainder → Review/Confirm; Open packing: 5 EA.
@@ -62,6 +66,7 @@ At 390×844 controls become one column and existing child tables become priority
 - Production sign-in integration absent from loopback demo: trusted entry/current policy exist, while `composition-root.ts` explicitly selects `localDemoIdentity: true`. No fake login or production-authentication claim.
 - Process loss/expiry loses unsaved buffers/preferences; reopen persisted records before retrying work. Neither durable drafts nor an atomic batch-save capability is added.
 - PaneFlow commercial taxes/payment/FX, Purchase approval/supplier-invoice states and promised-date availability are outside existing Rain capabilities and this change.
+- PR #5 alone remains unqualified for the selective Task client contract; the corrected PR #5 + PR #6 stack is the intended integration candidate, subject to fresh CI, ONLINE review and owner approval.
 
 ## Bounded ONLINE handoff
 
@@ -82,7 +87,7 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-84
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "32b219280225d9c50221695d87f5edc110fdbc80",
+  "head": "d6ed9ce3017c9f944be4a36670dfafec11de6968",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/web/release/app.authored.json",
