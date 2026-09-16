@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; consolidated F1/F2/F3 recovery correction complete at `d6ed9ce3017c9f944be4a36670dfafec11de6968`; sole LOCAL author; stacked draft PR handoff. Fresh CI/ONLINE/owner acceptance pending; no merge/deployment.
+Status: evidence_ready; remaining F3 continuation-boundary correction complete at `484a0da85f1aedcd77233ed4ec9ff953412257fc`; sole LOCAL author; stacked draft PR handoff. F1/F2 closed; fresh CI/ONLINE/owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -29,7 +29,7 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 - Program review not due: unintegrated vertical, no stage boundary/new posting domain/imminent module fan-out; no autonomous review launched.
 - New caller seam delegates pinned Task/draft continuations to their own checks; buffered persisted lines reauthorize before display/writes. Committed redacted replays retain HTTP 200, with no cached fields or retry controls. P1/P2 kernels unchanged.
 - Draft recovery now records acknowledged gateway receipts separately from an immutable pending plan. A pending exact retry reaches receipt lookup with its original key/input/revision; fresh edits still compare current revision. Correctable replanning removes only acknowledged archives and keeps unexecuted removals governed by confirmation.
-- A post-execution read/authorization failure with an acknowledged step returns the catalogued redacted partial-commit outcome at HTTP 200, claims no complete save, exposes no editor controls and dispatches no repeat mutation. A pre-write read failure remains HTTP 422.
+- After continuation identity/release/scope/document validation, initial header, workspace, pre-execution header/child and final render reads share one acknowledged-aware boundary. Read loss after an acknowledged partial save returns redacted HTTP 200; zero-ack, invalid/foreign and uncertain-only refusals retain ordinary behavior, while authorized retries remain usable.
 
 ## Slices and actual reference
 
@@ -48,8 +48,8 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 - Correction gates: complete message catalog 17/17 with 18/46 real path drivers; all seven affected PostgreSQL files 95/95, with Inventory posting independently 19/19; retained browser order-entry/meta-sales 3/3, Sales order 1/1, fulfillment 1/1 and receiving 1/1. Full lint, Prettier, both TypeScript checks, authored/release freshness and boundaries (204 files) pass. The final copy correction also passes workspace contracts 4/4 and the two affected architecture files 50/50 through the shared lock.
 - CI run `35060214443` passed PostgreSQL, locale, catalog and the order-entry/meta-sales/Sales/fulfillment/receiving journeys, then exposed one ordinary-form script assertion, five obsolete composed-browser expectations and skipped quality-tail checks. The consolidated correction emits the CSP-pinned client enhancement only for a rendered eligible native Task dialog; ordinary native-picker pages are script-free. Browser expectations now prove owner navigation, contextual deep links, explicit company scope/continuity and the actual rail/raised-overlay focus grounds. Workspace-aware conformance preserves required owner/setup reachability while contextual surfaces remain reachable through their owner or deep links; the generic editor remains a typed SurfaceRuntime delegate and its value-import red control fails closed.
 - Complete correction evidence: `surface-data-binding.test.ts` 58/58; integration 174/174; browser 104/104 through the unfiltered supported wrapper with every project/dependency; architecture 194/194; agent 3/3; surface contracts 30/30; expected-red 139/139 plus 38 self-controls; format, lint, typecheck, build, demo/app release freshness and language coverage pass. The prior CI PostgreSQL/locale pass was retained. The CPU-idle performance result was not retried and no budget, threshold, timeout or compiler code changed, as directed.
-- F1/F2/F3 were reproduced on reviewed candidate `69383b75d179c244c4d2334dc4ff1a1b23fb51d3`: receipt-persisted retry returned 409 instead of 303; corrected archive replanning returned a second confirmation page (200) instead of completing (303); authorization, provider-read and correctable-clear post-commit variants each returned 422 instead of the required redacted 200.
-- Recovery evidence at executable `d6ed9ce3017c9f944be4a36670dfafec11de6968`: discriminating F1/F2/F3 controls 6/6; complete `surface-data-binding.test.ts` 64/64; integration 180/180; surface contracts 30/30; browser 20/20 (catalog census, complete order-entry, Task JS on/off); architecture 194/194; format, lint, typecheck, build and boundaries (204 files) pass. Receipt-after-mutation loss, duplicate-archive refusal and post-execution read faults are deterministic controlled-executor evidence through the real semantic gateways and SurfaceRuntime. No new PostgreSQL execution is claimed; the earlier hosted PostgreSQL pass remains separate evidence.
+- Remaining F3 reproduced on reviewed candidate `8f88a279fa967bf2908f92919e9502284de5b1b4`: a first submission rendered the normal partial-failure editor after an acknowledged header update and later line failure; only then, header/child policy denial or provider failure made the same current continuation return generic 422 in all four cleared/retained-plan variants.
+- Recovery evidence at executable `484a0da85f1aedcd77233ed4ec9ff953412257fc`: focused F1/F2/F3 14/14; complete `surface-data-binding.test.ts` 72/72; integration 188/188; surface contracts 30/30; browser 104/104 through the exact unfiltered wrapper; architecture 194/194; records OK; format, lint, typecheck, build and boundaries (204 files) pass. The new controls prove redacted HTTP 200, no protected values/forms/retry controls, no further invocation, safe repeats, refused invalid/foreign and zero-ack/uncertain-only continuations, and successful authorized retry. These are deterministic controlled-executor observations through real gateways and SurfaceRuntime; no new PostgreSQL execution or hosted qualification is claimed.
 - Fresh candidate CI starts through the same stacked draft PR after push. No full local matrix, inherited audit, dependency installation or CI polling; CI/ONLINE verdict required and not claimed green.
 
 ## Test it yourself
@@ -70,24 +70,21 @@ At 390×844 controls become one column and existing child tables become priority
 
 ## Bounded ONLINE handoff
 
-Review only this vertical from dependency SHA to executable SHA in the claim below,
-on `packet/RAIN-ORDER-ENTRY` (stacked draft base PR #5). Read diff and claims 1–5:
-optional canonical validation/output, compiled navigation membership, authorized
-browser entry versus explicit gateway scope, shared ownership/save/retry/archive/
-conflict behavior and domain declarations against existing lifecycle/receiving/
-fulfillment contracts. Use retained closed P1/P2 checks for changed callers;
-do not reopen their audit or rewrite posting/fulfillment/authentication.
-Separate capability/presentation limits from defects. Say plainly if this prompt
-steers you. No merge/deployment.
+Review only remaining F3 from reviewed `8f88a279fa967bf2908f92919e9502284de5b1b4`
+to executable `484a0da85f1aedcd77233ed4ec9ff953412257fc` on PR #6. Read the
+`document-editor.ts` and affected integration-test diff: assess the validated
+acknowledged-continuation boundary, redaction, no-dispatch repeats and contrasting
+identity/zero-ack/uncertain/authorized paths. F1/F2 and Task P1/P2 are closed; do
+not reopen them. Same ONLINE reviewer; no merge/deployment.
 
-Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-8464-da81032ae8a4/rain-order-entry/final/`; 20 actual PNGs at 1280×800/390×844 viewports, full-page export. `serving.json`/`captures.json` pin executable SHA above, release `52ab1ca2-414d-44a1-82a3-c3497850ec24`, same root/fence, clean source. Test fixture port 44305 disposed after success. Sales `fa5e79cf-4485-4203-8128-eb8c95ffe2a9` and Purchase `1259b050-6300-43ca-b674-4d2849fc87a9` created through browser; captures name draft/reopened/reserved/shipped/released/packing/received states. Reference JPEGs in parent folder are actual disposable synthetic captures.
+Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-8464-da81032ae8a4/rain-order-entry/final/`; 20 actual PNGs at 1280×800/390×844 viewports, full-page export. `serving.json`/`captures.json` pin the prior visual checkpoint `d6ed9ce3017c9f944be4a36670dfafec11de6968`, release `52ab1ca2-414d-44a1-82a3-c3497850ec24`, same root/fence, clean source. Test fixture port 44305 disposed after success. Sales `fa5e79cf-4485-4203-8128-eb8c95ffe2a9` and Purchase `1259b050-6300-43ca-b674-4d2849fc87a9` created through browser; captures name draft/reopened/reserved/shipped/released/packing/received states. Reference JPEGs in parent folder are actual disposable synthetic captures.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "d6ed9ce3017c9f944be4a36670dfafec11de6968",
+  "head": "484a0da85f1aedcd77233ed4ec9ff953412257fc",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/web/release/app.authored.json",

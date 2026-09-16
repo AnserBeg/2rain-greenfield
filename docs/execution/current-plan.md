@@ -25,7 +25,7 @@
 The 2026-09-01 QUEUE FREEZE and the previous operating model are in the archive; their
 substance survives in the rules above.
 
-**Selected 2026-09-15: RAIN-ORDER-ENTRY** — consolidated CI integration correction complete at executable `32b21928` on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 at `3830f95`; normal shared Sales/Purchase draft workspace, explicit compiled navigation and authorized company entry; [draft handoff and test-it-yourself](packets/RAIN-ORDER-ENTRY.md). Fresh CI / owner acceptance pending; BUILD stops at draft PR, no integration or deployment. PR #5 and its closed P1/P2 and retained demos remain the dependency.
+**Selected 2026-09-15: RAIN-ORDER-ENTRY** — remaining F3 continuation-boundary correction complete at executable `484a0da85f1aedcd77233ed4ec9ff953412257fc` on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 at `3830f95`; normal shared Sales/Purchase draft workspace, explicit compiled navigation and authorized company entry; [draft handoff and test-it-yourself](packets/RAIN-ORDER-ENTRY.md). F1/F2 remain closed; fresh CI / same ONLINE reviewer / owner acceptance pending. BUILD stops at draft PR, no integration or deployment. PR #5 and its closed P1/P2 and retained demos remain the dependency.
 
 ## Where we are — 2026-09-04
 
