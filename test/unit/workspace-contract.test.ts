@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { platformContract } from '../../packages/canonical-model/src/index.js';
+import {
+  CanonicalModelError,
+  platformContract,
+} from '../../packages/canonical-model/src/index.js';
 import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
 import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 import {
@@ -110,4 +113,104 @@ test('canonical workspace/editor declarations refuse wrong ownership, undeclared
     (surface.workspace as Record<string, unknown>).ownerSurfaceId =
       'northstar.app:surface.sales_order_line_list';
   });
+});
+
+test('editor controls are closed, typed declarations checked against the entity model', () => {
+  const source = composedApplicationDefinition();
+  type Field = Record<string, unknown> & {
+    fieldId: string;
+    presentation?: Record<string, unknown>;
+    reference?: Record<string, unknown> & {
+      create?: Record<string, unknown> & {
+        steps: (Record<string, unknown> & {
+          fixed?: Record<string, unknown>[];
+        })[];
+        fields: Record<string, unknown>[];
+      };
+    };
+  };
+  const refuse = (
+    change: (editor: { headerFields: Field[]; lineFields: Field[] }) => void,
+    expected: RegExp,
+  ) => {
+    const candidate = structuredClone(source);
+    const surface = (candidate.surfaces as Record<string, unknown>[]).find(
+      (value) => String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!;
+    change(
+      surface.documentEditor as { headerFields: Field[]; lineFields: Field[] },
+    );
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  const header = (editor: { headerFields: Field[] }, suffix: string) =>
+    editor.headerFields.find((field) => field.fieldId.endsWith(suffix))!;
+  const line = (editor: { lineFields: Field[] }, suffix: string) =>
+    editor.lineFields.find((field) => field.fieldId.endsWith(suffix))!;
+
+  // The shipped declarations are admitted.
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // Closed schema: an undeclared control property is refused, not ignored.
+  refuse((editor) => {
+    header(editor, '_currency').presentation!.placeholder = 'Pick one';
+  }, /CANON_SCHEMA_INVALID.*headerFields\[\d+\]\.presentation"/);
+  // A choice default must be one of its offered values.
+  refuse((editor) => {
+    header(editor, '_currency').presentation!.defaultValue = 'JPY';
+  }, /choice presentation requires/);
+  // A choice cannot be declared over a non-text field.
+  refuse((editor) => {
+    header(editor, '_order_date').presentation = {
+      kind: 'choice',
+      options: [{ value: 'today', label: 'Today' }],
+    };
+  }, /choice presentation requires/);
+  // A derived value must name a sibling reference whose get reads the source.
+  refuse((editor) => {
+    line(editor, '_unit_id').presentation!.sourceFieldId =
+      'northstar.app:field.item_description_missing';
+  }, /derived presentation requires/);
+  // A picker with create needs an exact get of the same entity.
+  refuse((editor) => {
+    delete header(editor, '_customer_party_id').reference!.getQueryId;
+  }, /searchable picker requires an exact get/);
+  refuse((editor) => {
+    header(editor, '_customer_party_id').reference!.getQueryId =
+      'northstar.app:query.item_get';
+  }, /searchable picker requires an exact get/);
+  // Create steps must be governed creates, select the picker's entity, and
+  // carry only admissible fixed values and earlier-step relations.
+  refuse((editor) => {
+    header(
+      editor,
+      '_customer_party_id',
+    ).reference!.create!.steps[0]!.operationId =
+      'northstar.app:operation.party_update';
+  }, /create flow steps must be governed create operations/);
+  refuse((editor) => {
+    header(editor, '_customer_party_id').reference!.create!.selectStep = 1;
+  }, /create flow must select a record of the picker entity/);
+  refuse((editor) => {
+    header(
+      editor,
+      '_customer_party_id',
+    ).reference!.create!.steps[1]!.fixed![0]!.value =
+      'northstar.app:option.not_a_role';
+  }, /fixed create values must be admissible/);
+  refuse((editor) => {
+    header(editor, '_customer_party_id').reference!.create!.fields.push({
+      fieldId: 'northstar.app:field.item_sku',
+      label: 'SKU',
+    });
+  }, /each collected create field must belong to exactly one step/);
+  // A reference is presented by its picker, never by a presentation too.
+  refuse((editor) => {
+    header(editor, '_customer_party_id').presentation = { kind: 'multiline' };
+  }, /a reference field is presented by its picker/);
 });

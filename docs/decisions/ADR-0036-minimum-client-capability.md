@@ -36,7 +36,7 @@ with no third-party dependency. It is inlined into the served document and
 Pinning matters: the CSP currently blocks everything, and admitting script must be a
 deliberate, hash-bound exception rather than a relaxation that later admits anything.
 
-### 2. Exactly five behaviours — a closed set (amended 2026-09-15)
+### 2. Exactly six behaviours — a closed set (amended 2026-09-15, 2026-09-25)
 
 1. Pending-state toggling.
 2. Polling **one** operation-status resource to drive server-rendered determinate progress.
@@ -49,6 +49,15 @@ deliberate, hash-bound exception rather than a relaxation that later admits anyt
    Forms, preparation, confirmation, execution, outcomes and fresh Record reads
    remain server-owned. Closing dispatches nothing and never implies rollback.
    No fetching, replay, retry, routing, business rendering or client task state.
+6. Reference-control keyboard presentation in the draft document editor: Enter
+   in a picker's search box activates that field's own server-rendered Search
+   submit instead of the form's default action; arrow keys and Escape move focus
+   between the search box and the server-rendered result buttons; a pending
+   control is marked busy. The editor's in-context create uses behaviour 5's
+   native dialog, where Escape activates the create form's own server-rendered
+   Cancel submit and Hide dispatches nothing. Every search, page, selection,
+   create and cancel remains a server-rendered submit; the script fetches
+   nothing, creates no element, holds no selection and decides nothing.
 
 The owner approved this bounded amendment for RAIN-META-SALES on 2026-09-15:
 document context is essential while reserving and partially shipping. Native HTML
@@ -57,6 +66,18 @@ contained modal focus and in-context dismissal of a native `showModal()` dialog.
 The same Task/action flow remains one Task archetype; there is no sixth archetype.
 This is **Task presentation**, not `modal` MESSAGE placement: ADR-0048's named
 refusal remains in force. No notification, access-request or toast system enters.
+
+The owner authorized the sixth behaviour for the RAIN-ORDER-ENTRY form-usability
+correction on 2026-09-25, under §2a's test. It is this script's domain. Native HTML
+cannot deliver it: Enter in a text box submits the enclosing form's default
+button, so without script Enter refreshes the whole draft rather than searching
+the focused field, and focus cannot move through a result list by arrow key. The
+capability it depends on exists: server-side search, paging, selection and
+governed create, each already a complete no-JavaScript path. It ships with the gate
+that observes it: the order-entry browser proof drives keyboard search and
+selection with script and the same search, select and create-and-return with
+JavaScript disabled. Type-ahead fetching, a client result cache and client
+filtering stay refused under §7.
 
 Closed, not illustrative. This programme governs by closed vocabularies and exact
 partitions everywhere else; an open licence to "progressively enhance" is how one script

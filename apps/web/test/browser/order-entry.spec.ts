@@ -66,19 +66,20 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       page.getByText('Select legal entity', { exact: true }),
     ).toHaveCount(0);
     await page.getByRole('link', { name: 'New', exact: true }).click();
-    await header(page, 'SO-ENTRY-BROWSER', 'Customer');
+    await header(page, 'SO-ENTRY-BROWSER', 'customer');
     await line(page, 1, 'Field notebook · OFF-100', '10', true);
-    await page.getByRole('button', { name: 'Add line', exact: true }).click();
+    await submit(page, () =>
+      page.getByRole('button', { name: 'Add line', exact: true }).click(),
+    );
     await line(page, 2, 'Fine-point pen set · OFF-120', '2', true);
-    await page.getByRole('button', { name: 'Add line', exact: true }).click();
+    await submit(page, () =>
+      page.getByRole('button', { name: 'Add line', exact: true }).click(),
+    );
     await line(page, 3, 'Task lamp · OFF-210', '4', true);
-    await page
-      .getByRole('group', { name: 'Line 2', exact: true })
-      .getByLabel('Quantity *')
-      .fill('3');
-    await page
-      .getByRole('button', { name: 'Remove line 3', exact: true })
-      .click();
+    await page.getByLabel('Line 2 quantity', { exact: true }).fill('3');
+    await submit(page, () =>
+      page.getByRole('button', { name: 'Remove line 3', exact: true }).click(),
+    );
     await expect(page.locator('[data-draft-line]')).toHaveCount(2);
     await capture('sales-draft-editor');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
@@ -100,26 +101,25 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
     await expect(
-      page
-        .getByRole('group', { name: 'Line 2', exact: true })
-        .getByLabel('Quantity *'),
-    ).toHaveValue(/^3(?:\.0+)?$/);
+      page.getByLabel('Line 2 quantity', { exact: true }),
+    ).toHaveValue('3');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
     await page.getByRole('link', { name: 'New', exact: true }).click();
-    await header(page, 'PO-ENTRY-BROWSER', 'Vendor');
+    await header(page, 'PO-ENTRY-BROWSER', 'vendor');
     await line(page, 1, 'Field notebook · OFF-100', '10', false);
-    await page.getByRole('button', { name: 'Add line', exact: true }).click();
+    await submit(page, () =>
+      page.getByRole('button', { name: 'Add line', exact: true }).click(),
+    );
     await line(page, 2, 'Fine-point pen set · OFF-120', '2', false);
-    await page.getByRole('button', { name: 'Add line', exact: true }).click();
+    await submit(page, () =>
+      page.getByRole('button', { name: 'Add line', exact: true }).click(),
+    );
     await line(page, 3, 'Task lamp · OFF-210', '4', false);
-    await page
-      .getByRole('group', { name: 'Line 2', exact: true })
-      .getByLabel('Quantity *')
-      .fill('3');
-    await page
-      .getByRole('button', { name: 'Remove line 3', exact: true })
-      .click();
+    await page.getByLabel('Line 2 quantity', { exact: true }).fill('3');
+    await submit(page, () =>
+      page.getByRole('button', { name: 'Remove line 3', exact: true }).click(),
+    );
     await capture('purchase-draft-editor');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/purchase_order_detail/);
@@ -132,10 +132,8 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
     await expect(
-      page
-        .getByRole('group', { name: 'Line 2', exact: true })
-        .getByLabel('Quantity *'),
-    ).toHaveValue(/^3(?:\.0+)?$/);
+      page.getByLabel('Line 2 quantity', { exact: true }),
+    ).toHaveValue('3');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await measure('drafts', orderId!, purchaseId!);
     const navigation = page.getByRole('navigation', {
@@ -333,13 +331,375 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     );
   }, testInfo.outputPath('serving.json'));
 });
+test('order editor pickers search past the first page and create missing masters in context without duplicates', async ({
+  page,
+  browser,
+}, testInfo) => {
+  test.setTimeout(480_000);
+  page.setDefaultTimeout(30_000);
+  await fixture(async (url, measure) => {
+    const shot = (name: string) =>
+      page.screenshot({
+        path: testInfo.outputPath(`${name}.png`),
+        fullPage: true,
+      });
+    const dialog = page.locator('dialog.editor-create');
+    const customer = () => picker(page, 'Search customer');
+    const selectedCustomer = page.locator(
+      '.draft-header [data-reference-selected] strong',
+    );
+    const createForm = () =>
+      dialog.locator('form').evaluate((form: HTMLFormElement) => ({
+        action: form.action,
+        fields: Object.fromEntries(
+          [...new FormData(form).entries()].map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      }));
+    await page.goto(url);
+    await page.getByRole('link', { name: 'New', exact: true }).click();
+    await page.getByLabel('Order number *').fill('SO-PICKER');
+    await page.getByLabel('Currency *').selectOption('USD');
+    await page.getByLabel('Notes').fill('Dock 4\nCall ahead');
+
+    // The first page does not hold every customer; the server searches the rest.
+    await search(page, 'Search customer', '');
+    await expect(customer().locator('.reference-option')).toHaveCount(20);
+    await expect(
+      customer().locator('.reference-option', {
+        hasText: 'Whitecourt Forestry',
+      }),
+    ).toHaveCount(0);
+    await submit(page, () =>
+      customer().getByRole('button', { name: 'More results' }).click(),
+    );
+    expect(
+      await customer().locator('.reference-option').count(),
+    ).toBeGreaterThan(20);
+    await search(page, 'Search customer', 'Whitecourt');
+    await expect(customer().locator('.reference-option strong')).toHaveText([
+      'Whitecourt Forestry',
+    ]);
+    await shot('picker-server-search');
+
+    // Keyboard: Enter searches this field and never saves the order.
+    const box = page.getByLabel('Search customer', { exact: true });
+    await box.fill('Alpine');
+    await submit(page, () => box.press('Enter'));
+    expect(new URL(page.url()).searchParams.get('record')).toBeNull();
+    await expect(customer().locator('.reference-option').first()).toBeFocused();
+    await submit(page, () => page.keyboard.press('Enter'));
+    await expect(selectedCustomer).toHaveText('Alpine Office Supply');
+    await expect(
+      page.getByRole('button', { name: 'Change customer', exact: true }),
+    ).toBeFocused();
+    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
+    await expect(page.getByLabel('Currency *')).toHaveValue('USD');
+    await expect(page.getByLabel('Notes')).toHaveValue('Dock 4\nCall ahead');
+
+    // Cancel: nothing is written, nothing entered is lost, focus returns.
+    await submit(page, () =>
+      page
+        .getByRole('button', { name: 'Change customer', exact: true })
+        .click(),
+    );
+    await box.fill('Ghost Glazing');
+    await submit(page, () =>
+      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
+    );
+    expect(await dialog.evaluate((element) => element.matches(':modal'))).toBe(
+      true,
+    );
+    await expect(dialog.getByLabel('Name *')).toHaveValue('Ghost Glazing');
+    await submit(page, () => page.keyboard.press('Escape'));
+    await expect(dialog).toHaveCount(0);
+    await expect(box).toBeFocused();
+    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
+    expect(
+      (await measure('masters', undefined, undefined, 'Ghost Glazing')).parties,
+    ).toBe(0);
+
+    // Denied create: refused without a write; the picker still selects.
+    await measure('deny', undefined, undefined, 'party_create');
+    await box.fill('Denied Glazing');
+    await submit(page, () =>
+      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
+    );
+    await dialog.getByLabel('Customer number *').fill('C-DENIED');
+    expect(
+      await submit(page, () =>
+        dialog
+          .getByRole('button', { name: 'Create and use', exact: true })
+          .click(),
+      ),
+    ).toBe(422);
+    await expect(
+      dialog.locator('[data-diagnostic-code="OPERATION_PERMISSION_DENIED"]'),
+    ).toHaveCount(1);
+    await shot('create-denied');
+    expect(
+      (await measure('masters', undefined, undefined, 'Denied Glazing'))
+        .parties,
+    ).toBe(0);
+    await submit(page, () =>
+      dialog.getByRole('button', { name: 'Cancel', exact: true }).click(),
+    );
+    await choose(page, 'Search customer', 'Alpine', 'Alpine Office Supply');
+    await expect(selectedCustomer).toHaveText('Alpine Office Supply');
+    await measure('allow', undefined, undefined, 'party_create');
+
+    // Partial create: the second governed step is refused; the party is kept,
+    // not selected, and Retry finishes it with the same request.
+    await submit(page, () =>
+      page
+        .getByRole('button', { name: 'Change customer', exact: true })
+        .click(),
+    );
+    await measure('deny', undefined, undefined, 'party_role_create');
+    await box.fill('Partial Glazing');
+    await submit(page, () =>
+      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
+    );
+    await dialog.getByLabel('Customer number *').fill('C-PARTIAL');
+    await dialog.getByLabel('Contact').fill('Pat Lee\n403-555-0199');
+    await submit(page, () =>
+      dialog
+        .getByRole('button', { name: 'Create and use', exact: true })
+        .click(),
+    );
+    await expect(dialog).toContainText('1 of 2 create steps committed');
+    await expect(dialog.getByLabel('Name *')).toBeDisabled();
+    await shot('create-partial');
+    expect(
+      await measure('masters', undefined, undefined, 'Partial Glazing'),
+    ).toMatchObject({
+      parties: 1,
+      roles: [],
+    });
+    await measure('allow', undefined, undefined, 'party_role_create');
+    const retry = await createForm();
+    await submit(page, () =>
+      dialog.getByRole('button', { name: 'Retry', exact: true }).click(),
+    );
+    await expect(dialog).toHaveCount(0);
+    await expect(selectedCustomer).toHaveText('Partial Glazing');
+    await expect(page.locator('[data-editor-create-selected]')).toBeVisible();
+    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
+    await shot('create-retried-selected');
+    // A duplicate submission of the same create form writes nothing.
+    const duplicate = await page.request.post(retry.action, {
+      form: { ...retry.fields, draftCreate: 'submit' },
+    });
+    expect(duplicate.status()).toBe(409);
+    expect(
+      await measure('masters', undefined, undefined, 'Partial Glazing'),
+    ).toMatchObject({
+      parties: 1,
+      roles: ['northstar.app:option.customer'],
+    });
+
+    // A product created from a line returns to that exact line.
+    await page.getByLabel('Line 1 quantity', { exact: true }).fill('2.50');
+    await picker(page, 'Search line 1 product')
+      .getByLabel('Search line 1 product', { exact: true })
+      .fill('Thermal Roll');
+    await submit(page, () =>
+      page.getByRole('button', { name: '+ New product', exact: true }).click(),
+    );
+    await dialog.getByLabel('SKU *').fill('TR-80');
+    await dialog.getByLabel('Base unit *').fill('ROLL');
+    await shot('create-product');
+    await submit(page, () =>
+      dialog
+        .getByRole('button', { name: 'Create and use', exact: true })
+        .click(),
+    );
+    await expect(
+      page.getByRole('button', { name: 'Change line 1 product', exact: true }),
+    ).toBeFocused();
+    await expect(page.locator('tr.draft-line').first()).toContainText(
+      'Thermal Roll',
+    );
+    await expect(page.locator('output.derived-value').first()).toHaveText(
+      'ROLL',
+    );
+    await expect(
+      page.getByLabel('Line 1 quantity', { exact: true }),
+    ).toHaveValue('2.5');
+    expect(
+      (await measure('masters', undefined, undefined, 'Thermal Roll')).items,
+    ).toBe(1);
+    await shot('line-product-created');
+
+    // Read-back withheld: the create commits but is not selected.
+    await submit(page, () =>
+      page
+        .getByRole('button', { name: 'Change customer', exact: true })
+        .click(),
+    );
+    await box.fill('Withheld Glazing');
+    await submit(page, () =>
+      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
+    );
+    await dialog.getByLabel('Customer number *').fill('C-WITHHELD');
+    await measure('deny', undefined, undefined, 'party_read');
+    await submit(page, () =>
+      dialog
+        .getByRole('button', { name: 'Create and use', exact: true })
+        .click(),
+    );
+    await measure('allow', undefined, undefined, 'party_read');
+    const withheld = await measure(
+      'masters',
+      undefined,
+      undefined,
+      'Withheld Glazing',
+    );
+    await shot('create-withheld');
+    await expect(page.locator('[data-editor-create-withheld]')).toHaveCount(1);
+    await expect(selectedCustomer).toHaveCount(0);
+    // Both governed steps committed; only the read-back was refused.
+    expect(withheld).toMatchObject({
+      parties: 1,
+      roles: ['northstar.app:option.customer'],
+    });
+
+    // A stale create return -- a closed task at the current version -- is refused.
+    if (await dialog.count())
+      await submit(page, () =>
+        dialog.getByRole('button', { name: 'Cancel', exact: true }).click(),
+      );
+    await page
+      .getByLabel('Search customer', { exact: true })
+      .fill('Stale Glazing');
+    await submit(page, () =>
+      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
+    );
+    await dialog.getByLabel('Customer number *').fill('C-STALE');
+    const stale = await createForm();
+    await submit(page, () =>
+      dialog.getByRole('button', { name: 'Cancel', exact: true }).click(),
+    );
+    const refused = await page.request.post(stale.action, {
+      form: {
+        ...stale.fields,
+        draftCreate: 'submit',
+        draftVersion: await page
+          .locator('#draft-editor-form input[name="draftVersion"]')
+          .inputValue(),
+      },
+    });
+    expect(refused.status()).toBe(422);
+    expect(
+      (await measure('masters', undefined, undefined, 'Stale Glazing')).parties,
+    ).toBe(0);
+
+    // Without JavaScript the same controls are plain submits: search, select
+    // and create-and-return all work, and the create form sits in the page.
+    const plain = await browser.newContext({ javaScriptEnabled: false });
+    const noScript = await plain.newPage();
+    noScript.setDefaultTimeout(30_000);
+    await noScript.goto(url);
+    await noScript.getByRole('link', { name: 'New', exact: true }).click();
+    await noScript.getByLabel('Order number *').fill('SO-NOSCRIPT');
+    await search(noScript, 'Search customer', 'Alpine');
+    await submit(noScript, () =>
+      picker(noScript, 'Search customer')
+        .locator('.reference-option', { hasText: 'Alpine Office Supply' })
+        .click(),
+    );
+    await expect(
+      noScript.locator('.draft-header [data-reference-selected] strong'),
+    ).toHaveText('Alpine Office Supply');
+    await submit(noScript, () =>
+      noScript
+        .getByRole('button', { name: 'Change customer', exact: true })
+        .click(),
+    );
+    await noScript
+      .getByLabel('Search customer', { exact: true })
+      .fill('NoScript Glazing');
+    await submit(noScript, () =>
+      noScript
+        .getByRole('button', { name: '+ New customer', exact: true })
+        .click(),
+    );
+    const inline = noScript.locator('dialog.editor-create');
+    expect(await inline.evaluate((element) => element.matches(':modal'))).toBe(
+      false,
+    );
+    await inline.getByLabel('Customer number *').fill('C-NOSCRIPT');
+    await noScript.screenshot({
+      path: testInfo.outputPath('no-script-create.png'),
+      fullPage: true,
+    });
+    await submit(noScript, () =>
+      inline
+        .getByRole('button', { name: 'Create and use', exact: true })
+        .click(),
+    );
+    await expect(
+      noScript.locator('.draft-header [data-reference-selected] strong'),
+    ).toHaveText('NoScript Glazing');
+    await expect(noScript.getByLabel('Order number *')).toHaveValue(
+      'SO-NOSCRIPT',
+    );
+    expect(
+      await measure('masters', undefined, undefined, 'NoScript Glazing'),
+    ).toMatchObject({
+      parties: 1,
+      roles: ['northstar.app:option.customer'],
+    });
+    await plain.close();
+  }, testInfo.outputPath('serving.json'));
+});
+
+/** Waits for the server-rendered response to a submit and the page it loads. */
+async function submit(page: Page, act: () => Promise<unknown>) {
+  const loaded = page.waitForEvent('load');
+  const responded = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      response.request().resourceType() === 'document',
+  );
+  await act();
+  const response = await responded;
+  await loaded;
+  return response.status();
+}
+function picker(page: Page, label: string) {
+  return page
+    .locator('[data-reference-control]')
+    .filter({ has: page.getByLabel(label, { exact: true }) });
+}
+async function search(page: Page, label: string, term: string) {
+  const control = picker(page, label);
+  await control.getByLabel(label, { exact: true }).fill(term);
+  return submit(page, () =>
+    control.getByRole('button', { name: 'Search', exact: true }).click(),
+  );
+}
+async function choose(page: Page, label: string, term: string, option: string) {
+  await search(page, label, term);
+  await submit(page, () =>
+    picker(page, label)
+      .locator('.reference-option', { hasText: option })
+      .first()
+      .click(),
+  );
+}
 async function header(page: Page, number: string, party: string) {
   await page.getByLabel('Order number *').fill(number);
-  await page
-    .getByLabel(`${party} *`)
-    .selectOption({ label: 'Alpine Office Supply' });
+  await choose(page, `Search ${party}`, 'Alpine', 'Alpine Office Supply');
+  await expect(
+    page.getByRole('button', { name: `Change ${party}`, exact: true }),
+  ).toBeFocused();
+  await expect(page.getByLabel('Order number *')).toHaveValue(number);
   await page.getByLabel('Order date (UTC) *').fill('2026-09-15T12:00');
-  await page.getByLabel('Currency *').fill('CAD');
+  // The declared default; no other currency is typed.
+  await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
 }
 async function line(
   page: Page,
@@ -348,16 +708,30 @@ async function line(
   quantity: string,
   sales: boolean,
 ) {
-  const group = page.getByRole('group', { name: `Line ${index}`, exact: true });
-  await group.getByLabel('Product *').selectOption({
-    label: item + (item.includes('OFF-120') ? ' · BOX' : ' · EA'),
-  });
-  await group.getByLabel('Quantity *').fill(quantity);
+  const [name, sku] = item.split(' · ') as [string, string];
+  await choose(page, `Search line ${index} product`, sku, name);
+  await page
+    .getByLabel(`Line ${index} quantity`, { exact: true })
+    .fill(quantity);
   if (sales)
-    await group
-      .getByLabel('Unit *')
-      .fill(item.includes('OFF-120') ? 'BOX' : 'EA');
-  await group.getByLabel('Unit price').fill('12.5');
+    await expect(
+      page
+        .locator('tr.draft-line')
+        .nth(index - 1)
+        .locator('output.derived-value'),
+    ).toHaveText(sku === 'OFF-120' ? 'BOX' : 'EA');
+  await page
+    .getByLabel(`Line ${index} ${sales ? 'unit price' : 'unit cost'}`, {
+      exact: true,
+    })
+    .fill('12.5');
+}
+/** What the fixture reports back: a company it made, or stored master counts. */
+interface Measured {
+  readonly companyId?: string;
+  readonly parties?: number;
+  readonly roles?: readonly string[];
+  readonly items?: number;
 }
 async function fixture(
   run: (
@@ -366,7 +740,8 @@ async function fixture(
       phase: string,
       orderId?: string,
       purchaseId?: string,
-    ) => Promise<{ companyId?: string }>,
+      subject?: string,
+    ) => Promise<Measured>,
   ) => Promise<void>,
   servingPath: string,
 ) {
@@ -378,6 +753,7 @@ async function fixture(
       'test/helpers/order-entry-fixture.ts',
       '--serve',
       '--verify',
+      '--distributor',
     ],
     {
       cwd: fileURLToPath(new URL('../../../../', import.meta.url)),
@@ -392,8 +768,7 @@ async function fixture(
     rejectReady = reject;
   });
   const exited = once(child, 'exit');
-  let resolveMeasurement: ((value: { companyId?: string }) => void) | null =
-    null;
+  let resolveMeasurement: ((value: Measured) => void) | null = null;
   let rejectMeasurement: ((error: Error) => void) | null = null;
   let consumed = '';
   const measurements: unknown[] = [];
@@ -418,11 +793,18 @@ async function fixture(
   child.once('error', (error) => rejectReady(error));
   child.once('exit', () => rejectReady(new Error(output)));
   child.once('exit', () => rejectMeasurement?.(new Error(output)));
-  const measure = (phase: string, orderId?: string, purchaseId?: string) =>
-    new Promise<{ companyId?: string }>((resolve, reject) => {
+  const measure = (
+    phase: string,
+    orderId?: string,
+    purchaseId?: string,
+    subject?: string,
+  ) =>
+    new Promise<Measured>((resolve, reject) => {
       resolveMeasurement = resolve;
       rejectMeasurement = reject;
-      child.stdin.write(JSON.stringify({ phase, orderId, purchaseId }) + '\n');
+      child.stdin.write(
+        JSON.stringify({ phase, orderId, purchaseId, subject }) + '\n',
+      );
     });
   try {
     const url = await ready;

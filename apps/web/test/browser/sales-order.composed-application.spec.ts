@@ -109,6 +109,12 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     );
     const tag = await control.evaluate((element) => element.tagName);
     if (tag === 'SELECT') await control.selectOption(value);
+    // A draft-editor reference carries its record id in a hidden input; the
+    // server accepts a changed id only after an authorized exact read.
+    else if ((await control.getAttribute('type')) === 'hidden')
+      await control.evaluate((element, id) => {
+        (element as HTMLInputElement).value = id;
+      }, value);
     else
       await control.fill(
         (await control.getAttribute('type')) === 'datetime-local'
@@ -168,8 +174,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await field('sales_order', 'requested_date', new Date().toISOString());
   await field('sales_order', 'currency', 'CAD');
   await field('sales_order', 'notes', 'Initial sales order');
+  // The unit is derived from the selected product's base unit, not entered.
   await field('sales_order_line', 'item_id', itemId);
-  await field('sales_order_line', 'unit_id', 'EA');
   await field('sales_order_line', 'ordered_quantity', '10');
   await field('sales_order_line', 'unit_price', '12.5');
   const orderId = await save();

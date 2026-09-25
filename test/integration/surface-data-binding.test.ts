@@ -4790,6 +4790,8 @@ async function orderEntryWitness(variant = false) {
   return {
     executor,
     ns,
+    party,
+    item,
     scopes,
     allowed,
     deniedReads,
@@ -5319,6 +5321,415 @@ test('order entry F3: read loss between partial-save submissions redacts acknowl
       assert.equal(refused.statusCode, 422);
       assert.doesNotMatch(refused.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
       assert.equal(f.executor.calls.length, calls);
+    },
+  );
+});
+
+test('order entry picker and quick create: offered-only selection, verified carrier, governed create with stable keys', async (t) => {
+  type Rendered = NonNullable<Awaited<ReturnType<OrderEntryWitness['open']>>>;
+  const html = (rendered: Rendered) => Object.values(rendered.slots!).join('');
+  const headerOf = (rendered: Rendered) =>
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+      rendered.slots!.keyFacts!,
+    )![1]!;
+  const carrier = (rendered: Rendered, rowId: string, fieldId: string) =>
+    new RegExp(`name="draft:${rowId}:${fieldId}" value="([^"]*)"`).exec(
+      html(rendered),
+    )![1]!;
+  const creates = (f: OrderEntryWitness, local: string) =>
+    f.executor.calls.filter(
+      (call) =>
+        call.definition.operationId === `${f.ns}:operation.${local}_create`,
+    );
+  const submitCreate = (
+    f: OrderEntryWitness,
+    rendered: Rendered,
+    values: Record<string, string>,
+    verb = 'submit',
+    task = hiddenValue(rendered.slots!.keyFacts!, 'draftCreateTask'),
+  ) =>
+    documentEditor(
+      f.view,
+      f.form,
+      f.surfaces,
+      f.url,
+      f.scopes[0]!,
+      f.gateways,
+      {
+        draftSession: hiddenValue(rendered.slots!.keyFacts!, 'draftSession'),
+        draftVersion: hiddenValue(rendered.slots!.keyFacts!, 'draftVersion'),
+        draftCreateTask: task,
+        draftCreate: verb,
+        ...values,
+      },
+    ) as Promise<Rendered>;
+  const openCreate = async (f: OrderEntryWitness, term: string) => {
+    const editor = (await f.open())!;
+    const header = headerOf(editor);
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    const opened = (await f.post(editor, `create:${header}:${customer}`, {
+      [`draft:${header}:${f.ns}:field.sales_order_number`]: 'SO-KEPT',
+      [`draftSearch:${header}:${customer}`]: term,
+    }))!;
+    return { header, customer, opened };
+  };
+
+  await t.test(
+    'selection comes only from offered results and is re-read',
+    async () => {
+      const f = await orderEntryWitness();
+      let editor = (await f.open())!;
+      const header = headerOf(editor);
+      const customer = `${f.ns}:field.sales_order_customer_party_id`;
+      const forged = (await f.post(
+        editor,
+        `select:${header}:${customer}:${f.party}`,
+      ))!;
+      assert.equal(forged.statusCode, 422);
+      assert.equal(carrier(forged, header, customer), '');
+      editor = (await f.post(forged, `search:${header}:${customer}`, {
+        [`draftSearch:${header}:${customer}`]: 'Readable',
+      }))!;
+      assert.match(
+        editor.slots!.keyFacts!,
+        /class="reference-option"[^>]*><strong>Readable customer<\/strong>/,
+      );
+      const selected = (await f.post(
+        editor,
+        `select:${header}:${customer}:${f.party}`,
+      ))!;
+      assert.equal(selected.statusCode, 200);
+      assert.equal(carrier(selected, header, customer), f.party);
+      assert.match(selected.slots!.keyFacts!, /data-reference-selected/);
+      assert.equal(f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'a form-changed carrier needs an authorized exact read',
+    async () => {
+      const f = await orderEntryWitness();
+      const editor = (await f.open())!;
+      const header = headerOf(editor);
+      const customer = `${f.ns}:field.sales_order_customer_party_id`;
+      const unknown = (await f.post(editor, 'refresh', {
+        [`draft:${header}:${customer}`]: randomUUID(),
+      }))!;
+      assert.equal(unknown.statusCode, 422);
+      assert.match(unknown.slots!.keyFacts!, /data-editor-reference-refused/);
+      assert.equal(carrier(unknown, header, customer), '');
+      const other = f.executor.seed('party', {
+        [`${f.ns}:field.party_name`]: 'Unreadable customer',
+      });
+      f.deniedReads.add(`${f.ns}:permission.party_read`);
+      const denied = (await f.post(unknown, 'refresh', {
+        [`draft:${header}:${customer}`]: other,
+      }))!;
+      assert.equal(denied.statusCode, 422);
+      assert.equal(carrier(denied, header, customer), '');
+      f.deniedReads.delete(`${f.ns}:permission.party_read`);
+      const readable = (await f.post(denied, 'refresh', {
+        [`draft:${header}:${customer}`]: other,
+      }))!;
+      assert.equal(readable.statusCode, 200);
+      assert.equal(carrier(readable, header, customer), other);
+      // The derived unit is never taken from the form.
+      const line = /data-draft-line="([^"]+)"/.exec(
+        readable.slots!.sections!,
+      )![1]!;
+      const item = `${f.ns}:field.sales_order_line_item_id`;
+      const derived = (await f.post(readable, 'refresh', {
+        [`draft:${line}:${item}`]: f.item,
+        [`draft:${line}:${f.ns}:field.sales_order_line_unit_id`]: 'FORGED',
+      }))!;
+      assert.match(derived.slots!.sections!, /class="derived-value"[^>]*>EA</);
+      assert.doesNotMatch(derived.slots!.sections!, /FORGED/);
+    },
+  );
+
+  await t.test(
+    'create uses governed steps with stable keys, then selects',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(
+        f,
+        'Zenith Glazing',
+      );
+      assert.match(
+        opened.slots!.keyFacts!,
+        /<dialog class="editor-create" open/,
+      );
+      assert.match(
+        opened.slots!.keyFacts!,
+        /name="create:northstar\.app:field\.party_name" value="Zenith Glazing"/,
+      );
+      const paused = (await f.post(opened, 'add'))!;
+      assert.equal(paused.statusCode, 409);
+      assert.match(paused.slots!.keyFacts!, /data-editor-paused/);
+      assert.equal(
+        paused.slots!.sections!.match(/data-draft-line=/g)!.length,
+        1,
+      );
+      const created = await submitCreate(f, paused, {
+        [`create:${f.ns}:field.party_number`]: 'C-100',
+        [`create:${f.ns}:field.party_name`]: 'Zenith Glazing',
+      });
+      assert.equal(created.statusCode, 200);
+      assert.match(created.slots!.keyFacts!, /data-editor-create-selected/);
+      assert.doesNotMatch(created.slots!.keyFacts!, /<dialog/);
+      assert.match(created.slots!.keyFacts!, /value="SO-KEPT"/);
+      const [party] = creates(f, 'party');
+      const [role] = creates(f, 'party_role');
+      assert.equal(creates(f, 'party').length, 1);
+      assert.equal(creates(f, 'party_role').length, 1);
+      const partyId = String(asRecord(party!.input).recordId);
+      assert.equal(carrier(created, header, customer), partyId);
+      assert.deepEqual(asRecord(asRecord(role!.input).values), {
+        [`${f.ns}:field.party_role_kind`]: `${f.ns}:option.customer`,
+        [`${f.ns}:field.party_role_status`]: `${f.ns}:option.active`,
+      });
+      assert.deepEqual(asRecord(asRecord(role!.input).relations), {
+        [`${f.ns}:relation.party_role_party`]: partyId,
+      });
+      // A replay of the same create form is a stale version; nothing is written.
+      const replay = await submitCreate(f, paused, {
+        [`create:${f.ns}:field.party_number`]: 'C-100',
+        [`create:${f.ns}:field.party_name`]: 'Zenith Glazing',
+      });
+      assert.equal(replay.statusCode, 409);
+      // A current version carrying a closed task is refused, not re-run.
+      const stale = await submitCreate(
+        f,
+        created,
+        { [`create:${f.ns}:field.party_name`]: 'Zenith Glazing' },
+        'submit',
+        hiddenValue(paused.slots!.keyFacts!, 'draftCreateTask'),
+      );
+      assert.equal(stale.statusCode, 422);
+      assert.equal(creates(f, 'party').length, 1);
+      assert.equal(creates(f, 'party_role').length, 1);
+    },
+  );
+
+  await t.test(
+    'cancel writes nothing and returns to the kept draft',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(f, 'Ghost Supply');
+      const cancelled = await submitCreate(f, opened, {}, 'cancel');
+      assert.equal(cancelled.statusCode, 200);
+      assert.equal(f.executor.calls.length, 0);
+      assert.doesNotMatch(cancelled.slots!.keyFacts!, /<dialog/);
+      assert.match(cancelled.slots!.keyFacts!, /value="SO-KEPT"/);
+      assert.equal(carrier(cancelled, header, customer), '');
+      assert.match(
+        cancelled.slots!.keyFacts!,
+        /aria-label="Search customer"[^>]*autofocus/,
+      );
+    },
+  );
+
+  await t.test(
+    'a denied create is reported without a write or a selection',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(f, 'Denied Party');
+      f.deniedReads.add(`${f.ns}:permission.party_create`);
+      const denied = await submitCreate(f, opened, {
+        [`create:${f.ns}:field.party_number`]: 'C-DENIED',
+        [`create:${f.ns}:field.party_name`]: 'Denied Party',
+      });
+      assert.equal(denied.statusCode, 422);
+      assert.match(
+        denied.slots!.keyFacts!,
+        /data-diagnostic-code="OPERATION_PERMISSION_DENIED"/,
+      );
+      assert.match(
+        denied.slots!.keyFacts!,
+        /<dialog class="editor-create" open/,
+      );
+      assert.equal(f.executor.calls.length, 0);
+      assert.equal(carrier(denied, header, customer), '');
+    },
+  );
+
+  await t.test(
+    'a partial create is named, never selected, and retry reuses its keys',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(f, 'Partial Party');
+      f.executor.failAt = f.executor.calls.length + 2;
+      const partial = await submitCreate(f, opened, {
+        [`create:${f.ns}:field.party_number`]: 'C-PART',
+        [`create:${f.ns}:field.party_name`]: 'Partial Party',
+      });
+      assert.equal(partial.statusCode, 422);
+      assert.match(partial.slots!.keyFacts!, /1 of 2 create steps committed/);
+      assert.match(partial.slots!.keyFacts!, />Retry<\/button>/);
+      assert.equal(carrier(partial, header, customer), '');
+      f.executor.failAt = 0;
+      const retried = await submitCreate(f, partial, {
+        [`create:${f.ns}:field.party_name`]: 'forged',
+      });
+      assert.equal(retried.statusCode, 200);
+      assert.match(retried.slots!.keyFacts!, /data-editor-create-selected/);
+      const parties = creates(f, 'party');
+      const roles = creates(f, 'party_role');
+      assert.equal(parties.length, 1);
+      assert.equal(roles.length, 2);
+      assert.equal(roles[0]!.idempotencyKey, roles[1]!.idempotencyKey);
+      assert.deepEqual(roles[0]!.input, roles[1]!.input);
+      const party = f.executor.rows.get(
+        String(asRecord(parties[0]!.input).recordId),
+      )!;
+      assert.equal(party.values[`${f.ns}:field.party_name`], 'Partial Party');
+      assert.equal(carrier(retried, header, customer), party.recordId);
+    },
+  );
+
+  await t.test(
+    'a created record that cannot be read back is not selected',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(
+        f,
+        'Withheld Party',
+      );
+      f.deniedReads.add(`${f.ns}:permission.party_read`);
+      const withheld = await submitCreate(f, opened, {
+        [`create:${f.ns}:field.party_number`]: 'C-HELD',
+        [`create:${f.ns}:field.party_name`]: 'Withheld Party',
+      });
+      assert.match(withheld.slots!.keyFacts!, /data-editor-create-withheld/);
+      assert.equal(carrier(withheld, header, customer), '');
+      assert.equal(creates(f, 'party').length, 1);
+    },
+  );
+});
+
+test('order entry values: exact decimals, bounded before any write, choice set and stored values kept', async (t) => {
+  await t.test(
+    'decimals are canonical, compared by value and bounded before any write',
+    async () => {
+      const f = await orderEntryWitness();
+      const key = (rendered: Record<string, string>, suffix: string) =>
+        Object.keys(rendered).find((candidate) => candidate.endsWith(suffix))!;
+      let editor = (await f.open())!;
+      for (const [entry, message] of [
+        [
+          '1.1234567890123456789012',
+          /Use at most 18 digits after the decimal point/,
+        ],
+        ['1e3', /Enter a plain number, such as 12\.5\./],
+      ] as const) {
+        const values = f.values(editor);
+        editor = (await f.post(editor, 'save', {
+          ...values,
+          [key(values, '_ordered_quantity')]: entry,
+        }))!;
+        assert.equal(editor.statusCode, 422);
+        assert.match(editor.slots!.keyFacts!, /data-editor-problems/);
+        assert.match(editor.slots!.sections!, message);
+        // The refused entry is kept exactly as typed.
+        assert.ok(editor.slots!.sections!.includes(`value="${entry}"`));
+        assert.equal(f.executor.calls.length, 0);
+      }
+      const values = f.values(editor);
+      const saved = (await f.post(editor, 'save', {
+        ...values,
+        [key(values, '_ordered_quantity')]: '010.500',
+        [key(values, '_unit_price')]: '12.50',
+      }))!;
+      assert.equal(saved.statusCode, 303);
+      const lineCall = f.executor.calls.find((call) =>
+        call.definition.operationId.endsWith('.sales_order_line_create'),
+      )!;
+      const lineValues = asRecord(asRecord(lineCall.input).values);
+      assert.equal(
+        lineValues[`${f.ns}:field.sales_order_line_ordered_quantity`],
+        '10.5',
+      );
+      assert.equal(
+        lineValues[`${f.ns}:field.sales_order_line_unit_price`],
+        '12.5',
+      );
+      // A stored spelling with trailing zeros is the same exact value:
+      // reopening shows it canonically and an unchanged save plans no update.
+      const line = f.executor.rows.get(
+        String(asRecord(lineCall.input).recordId),
+      )!;
+      f.executor.rows.set(line.recordId, {
+        ...line,
+        values: {
+          ...line.values,
+          [`${f.ns}:field.sales_order_line_ordered_quantity`]:
+            '10.500000000000000000',
+        },
+      });
+      f.url.searchParams.set(
+        'record',
+        new URL(saved.location!, 'http://fixture.local').searchParams.get(
+          'record',
+        )!,
+      );
+      const reopened = (await f.open())!;
+      assert.match(reopened.slots!.sections!, /value="10\.5"/);
+      const calls = f.executor.calls.length;
+      const unchanged = (await f.post(reopened, 'save'))!;
+      assert.equal(unchanged.statusCode, 303);
+      assert.equal(f.executor.calls.length, calls);
+    },
+  );
+
+  await t.test(
+    'a choice admits only its offered set; a stored value outside it is kept',
+    async () => {
+      const f = await orderEntryWitness();
+      const editor = (await f.open())!;
+      assert.match(
+        editor.slots!.keyFacts!,
+        /<option value="CAD" selected>CAD · Canadian dollar<\/option>/,
+      );
+      const values = f.values(editor);
+      const currency = Object.keys(values).find((key) =>
+        key.endsWith('_currency'),
+      )!;
+      const refused = (await f.post(editor, 'save', {
+        ...values,
+        [currency]: 'XYZ',
+      }))!;
+      assert.equal(refused.statusCode, 422);
+      assert.match(
+        refused.slots!.keyFacts!,
+        /Currency: choose one of the offered values/,
+      );
+      assert.equal(f.executor.calls.length, 0);
+      const { recordId } = await persistedDraft(f);
+      const header = f.executor.rows.get(recordId)!;
+      f.executor.rows.set(recordId, {
+        ...header,
+        values: {
+          ...header.values,
+          [`${f.ns}:field.sales_order_currency`]: 'GBP',
+        },
+      });
+      const reopened = (await f.open())!;
+      assert.match(
+        reopened.slots!.keyFacts!,
+        /<option value="GBP" selected>GBP \(current value\)<\/option>/,
+      );
+      const kept = f.values(reopened);
+      kept[draftField(kept, recordId, '_currency')] = 'GBP';
+      kept[draftField(kept, recordId, '_notes')] = 'unrelated edit';
+      const saved = (await f.post(reopened, 'save', kept))!;
+      assert.equal(saved.statusCode, 303);
+      const update = f.executor.calls.at(-1)!;
+      assert.equal(
+        asRecord(asRecord(update.input).patch)[
+          `${f.ns}:field.sales_order_currency`
+        ],
+        'GBP',
+      );
     },
   );
 });

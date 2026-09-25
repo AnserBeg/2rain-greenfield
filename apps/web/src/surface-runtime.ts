@@ -1871,7 +1871,8 @@ table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:
 .draft-lines [aria-invalid="true"],.draft-header [aria-invalid="true"]{border-color:var(--status-blocked-ink)}
 .draft-note{margin:0 0 var(--space-3);padding:var(--space-2) var(--space-3);border-left:3px solid var(--status-attention-ink);border-radius:var(--radius-control);background:var(--status-attention-ground);color:var(--status-attention-ink)}.draft-note p{margin:0}
 .draft-note--done{border-left-color:var(--status-success-ink);background:var(--status-success-ground);color:var(--status-success-ink)}.draft-note--problem{border-left-color:var(--status-blocked-ink);background:var(--status-blocked-ground);color:var(--status-blocked-ink)}
-.draft-create-resume{margin:0 0 var(--space-3)}.draft-create-resume[hidden]{display:none}
+.editor-create__fields input:disabled,.editor-create__fields textarea:disabled,.draft-header input:disabled,.draft-header select:disabled,.draft-header textarea:disabled,.draft-lines input:disabled{background:var(--surface-sunken);color:var(--ink-muted);cursor:not-allowed}
+.draft-create-resume{grid-column:1/-1;margin:0 0 var(--space-3)}.draft-create-resume[hidden]{display:none}
 .draft-paused{margin:0 0 var(--space-3);padding:var(--space-2) var(--space-3);border-left:3px solid var(--accent-ground);background:var(--surface-sunken)}
 .editor-create{width:calc(100% - 2 * var(--space-4));max-width:42rem;margin:var(--space-4) auto;padding:var(--space-5);border:1px solid var(--line-strong);border-radius:var(--radius-container);background:var(--surface-panel);color:var(--ink)}
 .editor-create::backdrop{background:rgb(0 0 0 / 35%)}.editor-create__header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)}.editor-create__header h2{margin:0}
@@ -1879,9 +1880,9 @@ table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:
 /* The house .form-fields span rule styles labels as micro caps. Editor labels stay readable sentence case, and record data inside the editor is never transformed. */
 .draft-header .form-field__label,.draft-lines th{font-size:var(--text-body);font-weight:600;letter-spacing:normal;text-transform:none;color:var(--ink)}
 .draft-lines .derived-empty,.draft-lines .derived-value,.reference-control span,.reference-selected span{font-size:inherit;letter-spacing:normal;text-transform:none}
-.draft-header textarea,.editor-create__fields textarea{font:inherit;font-weight:400}
+.draft-header textarea,.editor-create__fields textarea{padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit;font-weight:400}
 /* Without JavaScript the create form stays in the page flow rather than overlapping it. */
-.editor-create[open]:not(:modal){position:static;inset:auto;width:auto;max-width:none;margin:0 0 var(--space-4)}.editor-create__footer{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-4)}
+.editor-create[open]:not(:modal){position:static;inset:auto;grid-column:1/-1;box-sizing:border-box;width:100%;max-width:none;margin:0 0 var(--space-4)}.editor-create__footer{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-4)}
 .form-field{display:grid;align-content:start;gap:var(--space-2)}
 .form-fields label{display:grid;gap:var(--space-1)}
 [data-document-editor] fieldset,[data-draft-line]{min-width:0;margin:var(--space-4) 0;padding:var(--space-4);border:1px solid var(--line);border-radius:var(--radius-control)}

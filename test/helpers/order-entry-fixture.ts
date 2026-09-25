@@ -172,7 +172,54 @@ async function seed(
     phase: string,
     orderId?: string,
     purchaseId?: string,
+    subject?: string,
   ) => {
+    if (phase === 'deny' || phase === 'allow') {
+      // One named permission, revoked or restored for the development role, so
+      // a browser proof can observe a refusal and then the same flow succeeding.
+      assert.match(subject ?? '', /^[a-z_]+$/);
+      const changed = await pool.query(
+        `UPDATE platform.current_policy_permission_grants
+            SET revoked_at=${phase === 'deny' ? 'transaction_timestamp()' : 'NULL'}
+          WHERE tenant_id=$1 AND environment_id=$2 AND permission_id=$3
+            AND revoked_at IS ${phase === 'deny' ? 'NULL' : 'NOT NULL'}
+          RETURNING permission_id`,
+        [
+          app.runtime.identity.tenantId,
+          app.runtime.identity.environmentId,
+          `${ns}:permission.${subject!}`,
+        ],
+      );
+      assert.ok(changed.rows.length > 0);
+      return { phase, subject, changed: changed.rows.length, observed: true };
+    }
+    if (phase === 'masters') {
+      // Stored masters named exactly `subject`, with the roles attached to them.
+      const named = async (local: string, field: string) =>
+        (await stored(local)).filter(
+          (row) => row[fulfillmentColumn(entity(local), field)] === subject,
+        );
+      const parties = await named('party', 'party_name');
+      const relation = target.relations.find(
+        (value) => value.relationId === `${ns}:relation.party_role_party`,
+      )!.relationColumn.physicalName;
+      const ids = new Set(parties.map((row) => row.record_id));
+      const roles = (await stored('party_role')).filter((row) =>
+        ids.has(row[relation]),
+      );
+      return {
+        phase,
+        subject,
+        parties: parties.length,
+        roles: roles.map((row) =>
+          String(
+            row[fulfillmentColumn(entity('party_role'), 'party_role_kind')],
+          ),
+        ),
+        items: (await named('item', 'item_name')).length,
+        observed: true,
+      };
+    }
     if (phase === 'catalog_setup') {
       const now = new Date().toISOString();
       const order = (number: string) =>
@@ -449,11 +496,13 @@ if (process.argv.includes('--serve')) {
                 phase: string;
                 orderId?: string;
                 purchaseId?: string;
+                subject?: string;
               };
               const observed = await fixture.measure(
                 request.phase,
                 request.orderId,
                 request.purchaseId,
+                request.subject,
               );
               console.log(`ORDER_ENTRY_MEASURED=${JSON.stringify(observed)}`);
             })().catch((error) => {

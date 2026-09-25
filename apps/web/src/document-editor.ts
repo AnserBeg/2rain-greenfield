@@ -107,8 +107,9 @@ type Buffer = {
 };
 const buffers = new Map<string, Buffer>();
 const expiry = 60 * 60 * 1000;
-const warning = (ref: SurfaceMessageRef) =>
-  `<div role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Save', 'h2')}</div>`;
+/** A catalog message; the eyebrow names the action it answers, Save by default. */
+const warning = (ref: SurfaceMessageRef, action = 'Save') =>
+  `<div role="alert" ${messageAttributes(ref)}>${messageBody(ref, action, 'h2')}</div>`;
 const editable = (
   definition: SurfaceDocumentEditor,
   record: SemanticRecordDto,
@@ -557,7 +558,7 @@ export async function documentEditor(
           nextCursor: page.nextCursor,
         });
       } catch (error) {
-        buffer.notice = warning(operationMessageRef(error));
+        buffer.notice = warning(operationMessageRef(error), field.label);
         statusCode = 422;
       }
       buffer.focus = `${controlId(rowId, field.fieldId)}-results`;
@@ -586,7 +587,10 @@ export async function documentEditor(
             )
           : null;
         if (!record) {
-          buffer.notice = warning({ code: 'OPERATION_INPUT_INVALID' });
+          buffer.notice = warning(
+            { code: 'OPERATION_INPUT_INVALID' },
+            field.label,
+          );
           statusCode = 422;
           return true;
         }
@@ -595,7 +599,7 @@ export async function documentEditor(
         await derive(rowId, field.fieldId);
         buffer.focus = controlId(rowId, field.fieldId);
       } catch (error) {
-        buffer.notice = warning(operationMessageRef(error));
+        buffer.notice = warning(operationMessageRef(error), field.label);
         statusCode = 422;
       }
       return true;
@@ -690,7 +694,10 @@ export async function documentEditor(
       const declared = create.steps[index]!;
       const operation = operationById(view, surfaces, step.operationId);
       if (!operation) {
-        task.notice = warning({ code: 'OPERATION_INPUT_INVALID' });
+        task.notice = warning(
+          { code: 'OPERATION_INPUT_INVALID' },
+          create.label,
+        );
         statusCode = 422;
         return;
       }
@@ -736,7 +743,7 @@ export async function documentEditor(
         step.done = true;
       } catch (error) {
         const done = task.steps.filter((value) => value.done).length;
-        task.notice = `${warning(operationMessageRef(error))}${
+        task.notice = `${warning(operationMessageRef(error), create.label)}${
           done
             ? `<p data-editor-create-partial>${done} of ${task.steps.length} create steps committed. The record is not ready and was not selected. Retry finishes it with the same request.</p>`
             : ''
