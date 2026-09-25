@@ -683,11 +683,14 @@ function renderSelectedSurface(
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
       ${renderedSlots.map((result) => result.html).join('')}
     </div>`;
+  // The one hash-pinned script also enhances draft-editor reference controls and
+  // their create dialog. It is inert where none of its elements are present.
   const enhanceTaskDialog =
-    data.status === 'READY' &&
-    selected.composition?.presentation?.task?.mode === 'nativeDialog' &&
-    data.compositionTask?.includes('<dialog ') === true &&
-    data.compositionTask.includes('data-composition-task');
+    selected.documentEditor !== undefined ||
+    (data.status === 'READY' &&
+      selected.composition?.presentation?.task?.mode === 'nativeDialog' &&
+      data.compositionTask?.includes('<dialog ') === true &&
+      data.compositionTask.includes('data-composition-task'));
 
   return Object.freeze({
     html: shellDocument(
@@ -1845,6 +1848,40 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .key-facts-panel{grid-column:span 12}
 .record-fields dd{margin:var(--space-1) 0 0}
 .form-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4);margin:var(--space-4) 0}
+/* Draft document editor. The line table and create form sit inside .form-fields so their controls use the already-measured focus rings; this block declares no new focus-ring selectors. */
+table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:separate;border-spacing:0 var(--space-2);table-layout:fixed}
+.draft-lines th{padding:0 var(--space-2) var(--space-1);text-align:left;font-size:var(--text-body);font-weight:600;color:var(--ink-muted)}
+.draft-lines__heading--reference{width:46%}.draft-lines__heading--value{width:17%}.draft-lines__heading--derived{width:10%}.draft-lines__heading--remove{width:6.5rem}
+.draft-line__cell{padding:var(--space-2);vertical-align:top;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface-panel)}
+.draft-line__cell:first-child{border-left:1px solid var(--line);border-radius:var(--radius-control) 0 0 var(--radius-control)}
+.draft-line__cell:last-child{border-right:1px solid var(--line);border-radius:0 var(--radius-control) var(--radius-control) 0;text-align:right}
+.draft-line__cell input,.draft-line__cell select{width:100%;min-width:0}
+.draft-line--removed td{padding:var(--space-2);color:var(--ink-muted)}
+.derived-value{display:inline-flex;align-items:center;min-height:44px;font-weight:600;color:var(--ink-strong)}.derived-empty{font-weight:400;color:var(--ink-muted)}
+.reference-control{display:grid;gap:var(--space-2)}.reference-search{display:flex;gap:var(--space-2)}.reference-search input{flex:1 1 auto;min-width:0}
+.reference-results{display:grid;gap:2px;max-height:16rem;margin:0;padding:var(--space-1);overflow:auto;list-style:none;border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel)}
+.reference-option{display:grid;gap:2px;width:100%;min-height:44px;padding:var(--space-2);text-align:left;border:0;border-radius:var(--radius-control);background:transparent;color:var(--ink);cursor:pointer}
+.reference-option:hover{background:var(--surface-sunken)}.reference-option small,.reference-selected small{color:var(--ink-muted)}
+.reference-empty{padding:var(--space-2);color:var(--ink-muted)}
+.reference-create{justify-self:start;min-height:44px;padding:var(--space-1) 0;border:0;background:transparent;color:var(--accent-ink);font-weight:600;cursor:pointer}
+.reference-selected{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-height:44px;padding:var(--space-1) var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken)}.reference-selected__text{display:grid}
+.link-action{min-height:44px;padding:var(--space-1);border:0;background:transparent;color:var(--accent-ink);text-decoration:underline;cursor:pointer}
+.form-field--wide{grid-column:1/-1}.draft-header textarea,.editor-create__fields textarea{width:100%;resize:vertical}
+.field-error{display:block;margin-top:var(--space-1);color:var(--status-blocked-ink);font-size:var(--text-body);font-weight:600;letter-spacing:normal;text-transform:none}
+.draft-lines [aria-invalid="true"],.draft-header [aria-invalid="true"]{border-color:var(--status-blocked-ink)}
+.draft-note{margin:0 0 var(--space-3);padding:var(--space-2) var(--space-3);border-left:3px solid var(--status-attention-ink);border-radius:var(--radius-control);background:var(--status-attention-ground);color:var(--status-attention-ink)}.draft-note p{margin:0}
+.draft-note--done{border-left-color:var(--status-success-ink);background:var(--status-success-ground);color:var(--status-success-ink)}.draft-note--problem{border-left-color:var(--status-blocked-ink);background:var(--status-blocked-ground);color:var(--status-blocked-ink)}
+.draft-create-resume{margin:0 0 var(--space-3)}.draft-create-resume[hidden]{display:none}
+.draft-paused{margin:0 0 var(--space-3);padding:var(--space-2) var(--space-3);border-left:3px solid var(--accent-ground);background:var(--surface-sunken)}
+.editor-create{width:calc(100% - 2 * var(--space-4));max-width:42rem;margin:var(--space-4) auto;padding:var(--space-5);border:1px solid var(--line-strong);border-radius:var(--radius-container);background:var(--surface-panel);color:var(--ink)}
+.editor-create::backdrop{background:rgb(0 0 0 / 35%)}.editor-create__header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)}.editor-create__header h2{margin:0}
+.editor-create__explanation{color:var(--ink-muted)}
+/* The house .form-fields span rule styles labels as micro caps. Editor labels stay readable sentence case, and record data inside the editor is never transformed. */
+.draft-header .form-field__label,.draft-lines th{font-size:var(--text-body);font-weight:600;letter-spacing:normal;text-transform:none;color:var(--ink)}
+.draft-lines .derived-empty,.draft-lines .derived-value,.reference-control span,.reference-selected span{font-size:inherit;letter-spacing:normal;text-transform:none}
+.draft-header textarea,.editor-create__fields textarea{font:inherit;font-weight:400}
+/* Without JavaScript the create form stays in the page flow rather than overlapping it. */
+.editor-create[open]:not(:modal){position:static;inset:auto;width:auto;max-width:none;margin:0 0 var(--space-4)}.editor-create__footer{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-4)}
 .form-field{display:grid;align-content:start;gap:var(--space-2)}
 .form-fields label{display:grid;gap:var(--space-1)}
 [data-document-editor] fieldset,[data-draft-line]{min-width:0;margin:var(--space-4) 0;padding:var(--space-4);border:1px solid var(--line);border-radius:var(--radius-control)}
@@ -1877,7 +1914,7 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 @media (prefers-reduced-motion:reduce){.skeleton::after{animation:none;display:none}}
 @media (prefers-reduced-motion:no-preference){.sidebar a,.navigation-group>summary,.primary-action,.secondary-action,.list-page-link,.record-link,.data-table-wrap tbody tr,button{transition:background-color var(--motion-duration) var(--motion-easing),border-color var(--motion-duration) var(--motion-easing),color var(--motion-duration) var(--motion-easing),opacity var(--motion-duration) var(--motion-easing)}}
 @media print{body *{visibility:hidden}.packing-document,.packing-document *{visibility:visible}.packing-document{position:absolute;inset:0;width:100%;border:0;box-shadow:none}.print-guidance{display:none}}
-@media(max-width:800px){
+@media(max-width:800px){table.draft-lines.form-fields,.draft-lines tbody,.draft-lines tr,.draft-lines td{display:block;width:auto}.draft-lines thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.draft-line{margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}.draft-line__cell,.draft-line__cell:first-child,.draft-line__cell:last-child{padding:var(--space-1) 0;border:0;border-radius:0;background:transparent;text-align:left}.draft-line__cell::before{content:attr(data-label);display:block;margin-bottom:var(--space-1);font-weight:600;color:var(--ink-muted)}.draft-line__cell--remove::before{content:none}.editor-create__fields{grid-template-columns:minmax(0,1fr)}
 body{padding-bottom:72px}
 .app-shell{display:block}
 .sidebar{position:fixed;z-index:4;top:auto;right:0;bottom:0;left:0;width:100%;height:auto;padding:var(--space-1);border-top:1px solid var(--line-on-rail);background:var(--surface-rail)}

@@ -158,3 +158,84 @@ export async function resolveWorkspaceEntry(
     redirect: selected ? url.pathname + url.search : null,
   };
 }
+
+/**
+ * One authorized page of a declared list, searched on the server. A picker uses
+ * this instead of `workspaceList`, so it never pulls a whole master table into
+ * every line, and it reports `hasMore` so "not on this page" is never read as
+ * "does not exist".
+ */
+export async function workspaceSearch(
+  view: RequestRuntimeView,
+  gateway: SemanticQueryGateway,
+  queryId: string,
+  scope: string | null,
+  search: string,
+  cursor: string | null,
+): Promise<{
+  records: readonly SemanticRecordDto[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}> {
+  const definition = registeredSemanticQueryFromPinnedView(view, queryId);
+  if (!definition || definition.queryType !== 'list')
+    throw new Error('Declared list unavailable');
+  const result = requireSharedListResult<SemanticRecordDto>(
+    await gateway.invoke(view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId,
+      arguments: {
+        includeArchived: false,
+        ...(definition.legalEntityScope
+          ? { [definition.legalEntityScope.operand.parameterId]: scope }
+          : {}),
+        list: {
+          schemaVersion: SHARED_LIST_QUERY_VERSION,
+          cursor,
+          pageSize: Math.min(definition.maximumResultCount, 20),
+          search,
+          matchMode: 'substring',
+          sort: [],
+          relationLabels: [],
+        },
+      },
+    }),
+  );
+  return {
+    records: result.records,
+    hasMore: result.listCoverage.hasMore,
+    nextCursor: result.listCoverage.nextCursor,
+  };
+}
+
+/**
+ * The exact authorized read of one selected record. `null` means the record is
+ * genuinely absent; a denied or failed read throws, so a caller can never
+ * mistake withheld authority for a missing record.
+ */
+export async function workspaceGet(
+  view: RequestRuntimeView,
+  gateway: SemanticQueryGateway,
+  getQueryId: string,
+  scope: string | null,
+  recordId: string,
+): Promise<SemanticRecordDto | null> {
+  const definition = registeredSemanticQueryFromPinnedView(view, getQueryId);
+  if (!definition || definition.queryType !== 'get')
+    throw new Error('Declared get unavailable');
+  const result = await gateway.invoke(view, {
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    queryId: getQueryId,
+    arguments: {
+      recordId,
+      includeArchived: false,
+      ...(definition.legalEntityScope
+        ? { [definition.legalEntityScope.operand.parameterId]: scope }
+        : {}),
+    },
+  });
+  if (result.outcome === 'not-found') return null;
+  if (result.outcome !== 'exact' || result.records.length !== 1)
+    throw new Error('Selected record unavailable');
+  return result.records[0]!;
+}

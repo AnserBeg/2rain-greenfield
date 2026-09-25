@@ -13,10 +13,15 @@ import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   type SemanticOperationResultEnvelope,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
-import type { SurfaceDocumentEditor } from '../../../packages/canonical-model/src/schemas.js';
+import type {
+  SurfaceDocumentEditor,
+  SurfaceEditorCreate as CreateFlow,
+} from '../../../packages/canonical-model/src/schemas.js';
 import {
   readCompiledSurfaceDataBinding,
   type CompiledSurfaceDefinition,
+  type CompiledSurfaceField,
+  type CompiledSurfaceInputField,
   type CompiledSurfaceOperationBinding,
 } from './surface-contract.js';
 import type {
@@ -25,9 +30,26 @@ import type {
 } from './surface-runtime.js';
 import {
   resolveWorkspaceEntry,
+  workspaceGet,
   workspaceList,
   workspacePrincipalKey,
+  workspaceSearch,
 } from './workspace-entry.js';
+import {
+  DECIMAL_KINDS,
+  canonicalDecimal,
+  choiceAdmits,
+  controlId,
+  decimalProblem,
+  declaredDefault,
+  referenceKey,
+  renderCreatePanel,
+  renderReferenceControl,
+  renderValueControl,
+  sameValue,
+  type CreateTask,
+  type ReferenceLookup,
+} from './editor-controls.js';
 import { escapeHtml as h } from './html.js';
 import { operationMessageRef } from './gateway-error-codes.js';
 import {
@@ -74,6 +96,14 @@ type Buffer = {
   touched: number;
   notice: string;
   withheld: 'none' | 'operation' | 'partial';
+  /** Search results per row and field, bound to this buffer's principal and scope. */
+  lookups: Map<string, ReferenceLookup>;
+  /** At most one in-context create; the draft pauses while it is open. */
+  create: CreateTask | null;
+  /** The control to focus after the next render, such as a field a create returned to. */
+  focus: string | null;
+  /** Save-time problems by control id, shown beside each control until the next action. */
+  errors: Map<string, string>;
 };
 const buffers = new Map<string, Buffer>();
 const expiry = 60 * 60 * 1000;
@@ -87,8 +117,6 @@ const editable = (
     (value) => value === record.values[definition.stateFieldId],
   );
 const inputName = (row: DraftRow, field: string) => `draft:${row.id}:${field}`;
-const string = (value: ImmutableJsonValue | undefined) =>
-  value == null ? '' : String(value);
 
 async function getRecord(
   view: RequestRuntimeView,
@@ -137,6 +165,23 @@ function operationFor(
     throw new Error('Declared editor operation unavailable');
   return operations[0]!;
 }
+/**
+ * A never-saved row takes each field's DECLARED default. A persisted row keeps
+ * whatever it stores, including a value outside a choice set, so a default can
+ * never overwrite existing data during an unrelated edit.
+ */
+const withDefaults = (
+  draft: DraftRow,
+  fields: SurfaceDocumentEditor['headerFields'],
+): DraftRow => {
+  if (draft.record) return draft;
+  for (const field of fields) {
+    const fallback = declaredDefault(field);
+    if (fallback !== undefined && draft.values[field.fieldId] === undefined)
+      draft.values[field.fieldId] = fallback;
+  }
+  return draft;
+};
 const row = (record: SemanticRecordDto | null = null): DraftRow => ({
   id: record?.recordId ?? randomUUID(),
   record,
@@ -277,7 +322,7 @@ export async function documentEditor(
       recordId,
       openedRecordId: recordId,
       completedLocation: null,
-      header: row(current),
+      header: withDefaults(row(current), definition.headerFields),
       lines: [],
       pending: null,
       acknowledged: [],
@@ -286,6 +331,10 @@ export async function documentEditor(
       touched: performance.now(),
       notice: '',
       withheld: 'none',
+      lookups: new Map(),
+      create: null,
+      focus: null,
+      errors: new Map(),
     };
     if (current)
       buffer.lines = (
@@ -301,9 +350,431 @@ export async function documentEditor(
           [{ fieldId: definition.lineNumberFieldId, direction: 'ascending' }],
         )
       ).map((value) => row(value));
-    else buffer.lines.push(row());
+    else buffer.lines.push(withDefaults(row(), definition.lineFields));
     buffers.set(buffer.id, buffer);
   }
+  const rowsOf = (fieldId: string) =>
+    definition.headerFields.some((value) => value.fieldId === fieldId)
+      ? { rows: [buffer.header], fields: definition.headerFields }
+      : { rows: buffer.lines, fields: definition.lineFields };
+  const findRow = (rowId: string) =>
+    buffer.header.id === rowId
+      ? buffer.header
+      : buffer.lines.find((value) => value.id === rowId && !value.removed);
+  /**
+   * Re-reads the record a reference now selects and updates every field derived
+   * from it. The read is the declared exact get; if it is refused the dependent
+   * is cleared rather than left describing the previous record.
+   */
+  const derive = async (rowId: string, referenceFieldId: string) => {
+    const { fields } = rowsOf(referenceFieldId);
+    const draft = findRow(rowId);
+    const source = fields.find((value) => value.fieldId === referenceFieldId);
+    const dependents = fields.filter(
+      (value) =>
+        value.presentation?.kind === 'derived' &&
+        value.presentation.referenceFieldId === referenceFieldId,
+    );
+    if (!draft || !dependents.length || !source?.reference?.getQueryId) return;
+    const selected = draft.values[referenceFieldId];
+    let record: SemanticRecordDto | null = null;
+    if (typeof selected === 'string' && selected)
+      try {
+        record = await workspaceGet(
+          view,
+          gateways.queryGateway,
+          source.reference.getQueryId,
+          scope,
+          selected,
+        );
+      } catch {
+        record = null;
+      }
+    for (const dependent of dependents) {
+      if (dependent.presentation?.kind !== 'derived') continue;
+      const value = record?.values[dependent.presentation.sourceFieldId];
+      draft.values[dependent.fieldId] =
+        typeof value === 'string' && value ? value : null;
+    }
+  };
+  /**
+   * A create flow is offered when every step is a bound create in the pinned
+   * release and none needs a human confirmation grant. This is availability,
+   * not authority: the operation gateway still decides each step at invoke time
+   * against the submitted values, and a refusal is reported without a write.
+   */
+  const createOffered = (create: CreateFlow) =>
+    create.steps.every((step) => {
+      const operation = operationById(view, surfaces, step.operationId);
+      return (
+        operation?.intent === 'create' &&
+        operation.confirmation !== 'humanRequired'
+      );
+    });
+  const referenceFields = [
+    ...definition.headerFields,
+    ...definition.lineFields,
+  ].filter((field) => field.reference);
+  const parseReferenceAction = (value: string | undefined) => {
+    const match =
+      /^(search|more|select|clear|create):([0-9a-f-]{36}):(.+)$/u.exec(
+        value ?? '',
+      );
+    if (!match) return null;
+    const [, verb, rowId, rest] = match as unknown as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    for (const field of referenceFields) {
+      if (rest === field.fieldId)
+        return { verb, rowId, field, recordId: null as string | null };
+      if (verb === 'select' && rest.startsWith(`${field.fieldId}:`))
+        return {
+          verb,
+          rowId,
+          field,
+          recordId: rest.slice(field.fieldId.length + 1),
+        };
+    }
+    return null;
+  };
+  /** The create operation's declared inputs for one of the editor's surfaces. */
+  const inputsOf = (surfaceId: string) =>
+    new Map(
+      (
+        operationFor(view, surfaceFor(surfaces, surfaceId), 'create')
+          .inputFields ?? []
+      ).map((value) => [value.fieldId, value]),
+    );
+  /**
+   * Required values still empty and decimals the contract cannot hold, named
+   * the way the editor labels them. Save reports these together, beside each
+   * control, before any step commits -- rather than committing the header and
+   * then having the provider refuse a line.
+   */
+  const problems = () => {
+    const found: { label: string; control: string; message: string }[] = [];
+    const check = (
+      draft: DraftRow,
+      fields: SurfaceDocumentEditor['headerFields'],
+      surfaceId: string,
+      prefix: string,
+    ) => {
+      const inputs = inputsOf(surfaceId);
+      for (const field of fields) {
+        const input = inputs.get(field.fieldId);
+        const value = draft.values[field.fieldId];
+        const label = prefix
+          ? `${prefix} ${field.label.toLowerCase()}`
+          : field.label;
+        const control = controlId(draft.id, field.fieldId);
+        if ((value ?? '') === '') {
+          if (!input?.required) continue;
+          // A derived value follows its reference; the empty reference is named.
+          if (
+            field.presentation?.kind === 'derived' &&
+            (draft.values[field.presentation.referenceFieldId] ?? '') === ''
+          )
+            continue;
+          found.push({
+            label,
+            control,
+            message: field.reference
+              ? `Select a ${field.label.toLowerCase()}.`
+              : 'Required.',
+          });
+        } else if (
+          input &&
+          DECIMAL_KINDS.includes(input.kind) &&
+          typeof value === 'string'
+        ) {
+          const message = decimalProblem(value, input);
+          if (message) found.push({ label, control, message });
+        }
+      }
+    };
+    check(
+      buffer.header,
+      definition.headerFields,
+      definition.headerFormSurfaceId,
+      '',
+    );
+    for (const [index, line] of buffer.lines.entries())
+      if (!line.removed)
+        check(
+          line,
+          definition.lineFields,
+          definition.lineFormSurfaceId,
+          `Line ${index + 1}`,
+        );
+    return found;
+  };
+  const invalidTarget = () => {
+    buffer.notice = warning({ code: 'OPERATION_INPUT_INVALID' });
+    statusCode = 422;
+  };
+  /** Search, page, select, clear or open create for one row's reference field. */
+  const referenceAction = async (value: string | undefined) => {
+    const parsed = parseReferenceAction(value);
+    if (!parsed) return false;
+    const { verb, rowId, field, recordId } = parsed;
+    const draft = findRow(rowId);
+    const { rows, fields } = rowsOf(field.fieldId);
+    // The row and field must belong together; a header field cannot be aimed at
+    // a line, and a removed or foreign row is refused rather than re-targeted.
+    if (!draft || !rows.includes(draft) || !fields.includes(field)) {
+      invalidTarget();
+      return true;
+    }
+    const reference = field.reference!;
+    const key = referenceKey(rowId, field.fieldId);
+    if (verb === 'search' || verb === 'more') {
+      const previous = buffer.lookups.get(key);
+      const term =
+        verb === 'more'
+          ? (previous?.term ?? '')
+          : (submission?.[`draftSearch:${rowId}:${field.fieldId}`] ?? '')
+              .trim()
+              .slice(0, 240);
+      try {
+        const page = await workspaceSearch(
+          view,
+          gateways.queryGateway,
+          reference.queryId,
+          scope,
+          term,
+          verb === 'more' ? (previous?.nextCursor ?? null) : null,
+        );
+        buffer.lookups.set(key, {
+          term,
+          records: [
+            ...(verb === 'more' ? (previous?.records ?? []) : []),
+            ...page.records,
+          ],
+          hasMore: page.hasMore,
+          nextCursor: page.nextCursor,
+        });
+      } catch (error) {
+        buffer.notice = warning(operationMessageRef(error));
+        statusCode = 422;
+      }
+      buffer.focus = `${controlId(rowId, field.fieldId)}-results`;
+      return true;
+    }
+    if (verb === 'select') {
+      // Only a record this field's own search offered, re-read through the exact
+      // get so the selection is one the principal can currently read.
+      if (
+        !recordId ||
+        !buffer.lookups
+          .get(key)
+          ?.records.some((record) => record.recordId === recordId)
+      ) {
+        invalidTarget();
+        return true;
+      }
+      try {
+        const record = reference.getQueryId
+          ? await workspaceGet(
+              view,
+              gateways.queryGateway,
+              reference.getQueryId,
+              scope,
+              recordId,
+            )
+          : null;
+        if (!record) {
+          buffer.notice = warning({ code: 'OPERATION_INPUT_INVALID' });
+          statusCode = 422;
+          return true;
+        }
+        draft.values[field.fieldId] = record.recordId;
+        buffer.lookups.delete(key);
+        await derive(rowId, field.fieldId);
+        buffer.focus = controlId(rowId, field.fieldId);
+      } catch (error) {
+        buffer.notice = warning(operationMessageRef(error));
+        statusCode = 422;
+      }
+      return true;
+    }
+    if (verb === 'clear') {
+      draft.values[field.fieldId] = null;
+      buffer.lookups.delete(key);
+      await derive(rowId, field.fieldId);
+      buffer.focus = controlId(rowId, field.fieldId);
+      return true;
+    }
+    const create = reference.create;
+    if (!create || !createOffered(create)) {
+      invalidTarget();
+      return true;
+    }
+    // A name typed into the search box carries into the create form's label
+    // field, so an operator does not retype what they were looking for.
+    const typed = (
+      submission?.[`draftSearch:${rowId}:${field.fieldId}`] ??
+      buffer.lookups.get(key)?.term ??
+      ''
+    ).trim();
+    const values: Values = {};
+    const labelField = create.fields.find((collected) =>
+      reference.labelFieldIds.includes(collected.fieldId),
+    );
+    if (labelField && typed) values[labelField.fieldId] = typed;
+    buffer.create = {
+      id: randomUUID(),
+      rowId,
+      fieldId: field.fieldId,
+      openedValue: draft.values[field.fieldId] ?? null,
+      values,
+      steps: create.steps.map((step) => ({
+        operationId: step.operationId,
+        key: randomUUID(),
+        recordId: randomUUID(),
+        done: false,
+      })),
+      attempted: false,
+      notice: '',
+    };
+    return true;
+  };
+  /**
+   * Completes, retries or cancels the open create. Each step reuses the key and
+   * record id minted when the flow opened, so a lost response replays instead of
+   * creating a second master. Outcomes are reported as they are: a refusal
+   * writes nothing further, a partial create is named as partial and not
+   * selected, and a record that cannot be read back is not selected either.
+   */
+  const runCreate = async () => {
+    const task = buffer.create;
+    if (!task || task.id !== submission?.draftCreateTask) {
+      invalidTarget();
+      return;
+    }
+    const field = referenceFields.find(
+      (value) => value.fieldId === task.fieldId,
+    );
+    const create = field?.reference?.create;
+    const draft = findRow(task.rowId);
+    if (!field?.reference || !create || !draft) {
+      buffer.create = null;
+      invalidTarget();
+      return;
+    }
+    if (submission.draftCreate === 'cancel') {
+      const committed = task.steps.some((step) => step.done);
+      buffer.notice = committed
+        ? `<div role="status" class="draft-note" data-editor-create-kept><p>${h(create.label)}: what was already created is kept and was not selected. Cancelling does not undo it.</p></div>`
+        : '';
+      buffer.create = null;
+      buffer.focus = controlId(task.rowId, task.fieldId);
+      return;
+    }
+    if (submission.draftCreate !== 'submit') {
+      invalidTarget();
+      return;
+    }
+    if (!task.attempted)
+      for (const collected of create.fields) {
+        const value = submission[`create:${collected.fieldId}`];
+        if (value !== undefined)
+          task.values[collected.fieldId] = value.trim() === '' ? null : value;
+      }
+    task.attempted = true;
+    task.notice = '';
+    for (const [index, step] of task.steps.entries()) {
+      if (step.done) continue;
+      const declared = create.steps[index]!;
+      const operation = operationById(view, surfaces, step.operationId);
+      if (!operation) {
+        task.notice = warning({ code: 'OPERATION_INPUT_INVALID' });
+        statusCode = 422;
+        return;
+      }
+      const accepted = new Set(
+        (operation.inputFields ?? []).map((value) => value.fieldId),
+      );
+      const values: Values = {};
+      for (const collected of create.fields) {
+        const value = task.values[collected.fieldId];
+        if (
+          accepted.has(collected.fieldId) &&
+          value !== null &&
+          value !== undefined
+        )
+          values[collected.fieldId] = value;
+      }
+      for (const fixed of declared.fixed ?? [])
+        values[fixed.fieldId] = fixed.value;
+      const relations: Values = {};
+      for (const bound of declared.relations ?? [])
+        relations[bound.relationId] = task.steps[bound.step]!.recordId;
+      try {
+        const result = await gateways.operationGateway.invoke(
+          view,
+          {
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+            operationId: step.operationId,
+            input: {
+              recordId: step.recordId,
+              values,
+              ...(operation.systemInputArgumentKey
+                ? { [operation.systemInputArgumentKey]: buffer.scope }
+                : {}),
+              ...(Object.keys(relations).length ? { relations } : {}),
+            },
+            idempotencyKey: step.key,
+            confirmationGrant: null,
+          },
+          gateways.operationMediation.issueInvocation(view, 'UI'),
+        );
+        if (result.outcome !== 'succeeded')
+          throw new Error('Create step returned non-success');
+        step.done = true;
+      } catch (error) {
+        const done = task.steps.filter((value) => value.done).length;
+        task.notice = `${warning(operationMessageRef(error))}${
+          done
+            ? `<p data-editor-create-partial>${done} of ${task.steps.length} create steps committed. The record is not ready and was not selected. Retry finishes it with the same request.</p>`
+            : ''
+        }`;
+        statusCode = 422;
+        return;
+      }
+    }
+    const created = task.steps[create.selectStep]!.recordId;
+    let record: SemanticRecordDto | null = null;
+    try {
+      record = field.reference.getQueryId
+        ? await workspaceGet(
+            view,
+            gateways.queryGateway,
+            field.reference.getQueryId,
+            scope,
+            created,
+          )
+        : null;
+    } catch {
+      record = null;
+    }
+    buffer.create = null;
+    buffer.focus = controlId(task.rowId, task.fieldId);
+    if (!record) {
+      buffer.notice = `<div role="status" class="draft-note" data-editor-create-withheld><p>${h(create.label)} was created but cannot be read with your current access, so it was not selected.</p></div>`;
+      return;
+    }
+    if ((draft.values[task.fieldId] ?? null) !== task.openedValue) {
+      buffer.notice = `<div role="status" class="draft-note" data-editor-create-stale><p>${h(create.label)} was created, but this field changed meanwhile, so it was not selected.</p></div>`;
+      return;
+    }
+    draft.values[task.fieldId] = record.recordId;
+    buffer.lookups.delete(referenceKey(task.rowId, task.fieldId));
+    await derive(task.rowId, task.fieldId);
+    buffer.notice = `<div role="status" class="draft-note draft-note--done" data-editor-create-selected><p>${h(create.label)} created and selected. It is its own record; saving or discarding this order does not undo it.</p></div>`;
+  };
   const workspaceEntry = await requiredRead(buffer, () =>
     resolveWorkspaceEntry(view, surface, url, gateways.queryGateway),
   );
@@ -354,11 +825,75 @@ export async function documentEditor(
       statusCode = 409;
     } else {
       buffer.busy = true;
+      // A notice describes the action that produced it and is shown once; state
+      // that must persist (save progress, withheld outcomes, the open create) is
+      // rendered from the buffer itself on every request.
+      buffer.notice = '';
+      buffer.errors.clear();
+      // A refused choice keeps the draft's previous value, so this action may
+      // not go on to save a value other than the one the operator submitted.
+      let refused = false;
       try {
-        if (!buffer.pending && buffer.withheld === 'none') {
-          capture(buffer.header, definition.headerFields, submission);
+        if (!buffer.pending && buffer.withheld === 'none' && !buffer.create) {
+          const sources = referenceSources(definition);
+          const before = snapshot(buffer, sources);
+          const headerInputs = inputsOf(definition.headerFormSurfaceId);
+          const lineInputs = inputsOf(definition.lineFormSurfaceId);
+          const refusedLabels = [
+            ...capture(
+              buffer.header,
+              definition.headerFields,
+              headerInputs,
+              submission,
+            ),
+          ];
           for (const line of buffer.lines)
-            if (!line.removed) capture(line, definition.lineFields, submission);
+            if (!line.removed)
+              refusedLabels.push(
+                ...capture(line, definition.lineFields, lineInputs, submission),
+              );
+          if (refusedLabels.length) {
+            refused = true;
+            buffer.notice = `<div role="alert" class="draft-note draft-note--problem" data-editor-refused><p>${h(
+              [...new Set(refusedLabels)].join(', '),
+            )}: choose one of the offered values.</p></div>`;
+            statusCode = 422;
+          }
+          // A reference changed by the form itself -- not by select or create
+          // -- is accepted only if the principal can read that exact record
+          // now. The hidden input is a carrier, never an authority.
+          for (const [key, value] of snapshot(buffer, sources)) {
+            if (before.get(key) === value) continue;
+            const [rowId, fieldId] = key.split('|') as [string, string];
+            const draft = findRow(rowId)!;
+            const field = rowsOf(fieldId).fields.find(
+              (candidate) => candidate.fieldId === fieldId,
+            )!;
+            const getQueryId = field.reference?.getQueryId;
+            if (getQueryId && typeof value === 'string' && value) {
+              let readable = false;
+              try {
+                readable =
+                  (await workspaceGet(
+                    view,
+                    gateways.queryGateway,
+                    getQueryId,
+                    scope,
+                    value,
+                  )) !== null;
+              } catch {
+                readable = false;
+              }
+              if (!readable) {
+                draft.values[fieldId] = before.get(key) ?? null;
+                refused = true;
+                buffer.notice += `<div role="alert" class="draft-note draft-note--problem" data-editor-reference-refused><p>${h(field.label)}: choose a record from the search results.</p></div>`;
+                statusCode = 422;
+                continue;
+              }
+            }
+            await derive(rowId, fieldId);
+          }
         }
         if (
           !buffer.pending &&
@@ -368,18 +903,45 @@ export async function documentEditor(
           buffer.notice = warning({ code: 'DRAFT_EDITOR_CONFLICT' });
           statusCode = 409;
         } else if (buffer.withheld === 'none') {
-          if (!buffer.pending) {
-            if (submission.draftAction === 'add' && buffer.lines.length < 40)
-              buffer.lines.push(row());
-            else if (submission.draftAction?.startsWith('remove:')) {
+          if (submission.draftCreateTask !== undefined) {
+            await runCreate();
+          } else if (buffer.create) {
+            // The order is paused while a create is open, so nothing reaching
+            // it by another route -- another tab, a replayed form -- may change it.
+            buffer.notice =
+              '<div role="alert" class="draft-note draft-note--problem" data-editor-paused><p>Finish or cancel the new record first. The order is kept as it was.</p></div>';
+            statusCode = 409;
+          } else if (!buffer.pending) {
+            if (await referenceAction(submission.draftAction)) {
+              // A reference action has already captured the whole draft and
+              // changed only its own field.
+            } else if (
+              submission.draftAction === 'add' &&
+              buffer.lines.length < 40
+            ) {
+              const added = withDefaults(row(), definition.lineFields);
+              buffer.lines.push(added);
+              const first = definition.lineFields[0];
+              if (first) buffer.focus = controlId(added.id, first.fieldId);
+            } else if (submission.draftAction?.startsWith('remove:')) {
               const line = buffer.lines.find(
                 (value) => value.id === submission.draftAction!.slice(7),
               );
               if (line?.record) line.removed = true;
               else if (line)
                 buffer.lines = buffer.lines.filter((value) => value !== line);
-            } else if (submission.draftAction === 'save')
-              buffer.pending = plan(view, surfaces, buffer);
+            } else if (submission.draftAction === 'save' && !refused) {
+              const found = problems();
+              if (found.length) {
+                for (const problem of found)
+                  buffer.errors.set(problem.control, problem.message);
+                buffer.notice = `<div role="alert" class="draft-note draft-note--problem" data-editor-problems><p>Nothing was saved. Correct ${found.length === 1 ? 'this field' : `these ${found.length} fields`} first: ${h(
+                  found.map((value) => value.label).join(', '),
+                )}.</p></div>`;
+                buffer.focus = found[0]!.control;
+                statusCode = 422;
+              } else buffer.pending = plan(view, surfaces, buffer);
+            }
           }
           if (buffer.pending) {
             const removal = buffer.pending.some(
@@ -514,27 +1076,219 @@ export async function documentEditor(
     const scopeQuery = readCompiledSurfaceDataBinding(view, surface).query
       .legalEntityScope!;
     action.searchParams.set(scopeQuery.operand.parameterId, scope);
-    const frozen = buffer.pending !== null || buffer.withheld !== 'none';
-    const header = await fieldsHtml(
-      view,
-      gateways,
-      surfaces,
-      definition.headerFormSurfaceId,
-      buffer.header,
-      definition.headerFields,
-      scope,
-      frozen,
+    // While a create is open the order is paused: shown, but not editable, so
+    // nothing entered before leaving it can change until the create returns.
+    const paused = buffer.create !== null;
+    const frozen =
+      buffer.pending !== null || buffer.withheld !== 'none' || paused;
+    const focus = buffer.focus;
+    buffer.focus = null;
+    const shapes = new Map<
+      string,
+      {
+        compiled: Map<string, CompiledSurfaceField>;
+        inputs: Map<string, CompiledSurfaceInputField>;
+      }
+    >();
+    const shape = (surfaceId: string) => {
+      let known = shapes.get(surfaceId);
+      if (!known) {
+        const target = surfaceFor(surfaces, surfaceId);
+        const operation = operationFor(view, target, 'create');
+        known = {
+          compiled: new Map(
+            (target.fields ?? []).map((value) => [value.fieldId, value]),
+          ),
+          inputs: new Map(
+            (operation.inputFields ?? []).map((value) => [
+              value.fieldId,
+              value,
+            ]),
+          ),
+        };
+        shapes.set(surfaceId, known);
+      }
+      return known;
+    };
+    // One exact read per selected record per render, however many lines share it.
+    const reads = new Map<string, Promise<SemanticRecordDto | null>>();
+    const selectedFor = (
+      field: SurfaceDocumentEditor['headerFields'][number],
+      draft: DraftRow,
+    ) => {
+      const value = draft.values[field.fieldId];
+      const getQueryId = field.reference?.getQueryId;
+      if (typeof value !== 'string' || !value || !getQueryId)
+        return Promise.resolve(null);
+      const key = `${getQueryId}|${value}`;
+      let read = reads.get(key);
+      if (!read) {
+        read = workspaceGet(
+          view,
+          gateways.queryGateway,
+          getQueryId,
+          scope,
+          value,
+        ).catch(() => null);
+        reads.set(key, read);
+      }
+      return read;
+    };
+    const control = async (
+      surfaceId: string,
+      draft: DraftRow,
+      field: SurfaceDocumentEditor['headerFields'][number],
+      index: number,
+      locked: boolean,
+      accessibleName: string | null,
+    ) => {
+      const { compiled, inputs } = shape(surfaceId);
+      const input = inputs.get(field.fieldId);
+      if (!input) throw new Error('Editor field unavailable');
+      const base = {
+        row: draft,
+        field,
+        compiled: compiled.get(field.fieldId),
+        input,
+        frozen: locked,
+        index,
+        accessibleName,
+        focus,
+        error: buffer.errors.get(controlId(draft.id, field.fieldId)) ?? null,
+      };
+      if (field.reference?.getQueryId)
+        return renderReferenceControl({
+          ...base,
+          selected: await selectedFor(field, draft),
+          lookup:
+            buffer.lookups.get(referenceKey(draft.id, field.fieldId)) ?? null,
+          createOffered:
+            !!field.reference.create && createOffered(field.reference.create),
+          noun: field.label,
+        });
+      if (field.reference) return legacyReference(draft, field, locked);
+      return renderValueControl(base);
+    };
+    /**
+     * An older release in the lineage may declare a reference without an exact
+     * get. It keeps the behaviour it was released with rather than failing, so
+     * a rollback still renders; every current declaration uses the picker.
+     */
+    const legacyReference = async (
+      draft: DraftRow,
+      field: SurfaceDocumentEditor['headerFields'][number],
+      locked: boolean,
+    ) => {
+      const value = draft.values[field.fieldId];
+      const records = await workspaceList(
+        view,
+        gateways.queryGateway,
+        field.reference!.queryId,
+        scope,
+      );
+      return `<select form="draft-editor-form" name="${h(inputName(draft, field.fieldId))}"${locked ? ' disabled' : ''}><option value="">Select ${h(field.label.toLowerCase())}</option>${records
+        .map((record) => {
+          const label = field
+            .reference!.labelFieldIds.map((id) => record.values[id])
+            .filter((part) => typeof part === 'string' && part.trim())
+            .join(' · ');
+          return label
+            ? `<option value="${h(record.recordId)}"${value === record.recordId ? ' selected' : ''}>${h(label)}</option>`
+            : '';
+        })
+        .join('')}</select>`;
+    };
+    const required = (surfaceId: string, fieldId: string) =>
+      shape(surfaceId).inputs.get(fieldId)?.required ? ' *' : '';
+    const header = (
+      await Promise.all(
+        definition.headerFields.map(async (field, index) => {
+          const html = await control(
+            definition.headerFormSurfaceId,
+            buffer.header,
+            field,
+            index,
+            frozen,
+            null,
+          );
+          const label = `${h(field.label)}${
+            field.presentation?.kind !== 'derived' &&
+            shape(definition.headerFormSurfaceId).inputs.get(field.fieldId)
+              ?.temporal?.timezoneSemantics === 'utcInstant'
+              ? ' (UTC)'
+              : ''
+          }${required(definition.headerFormSurfaceId, field.fieldId)}`;
+          const wide =
+            field.presentation?.kind === 'multiline' ? ' form-field--wide' : '';
+          return field.reference
+            ? `<div class="form-field form-field--reference${wide}" role="group" aria-labelledby="${h(controlId(buffer.header.id, field.fieldId))}-label"><span class="form-field__label" id="${h(controlId(buffer.header.id, field.fieldId))}-label">${label}</span>${html}</div>`
+            : `<label class="form-field${wide}" for="${h(controlId(buffer.header.id, field.fieldId))}"><span class="form-field__label">${label}</span>${html}</label>`;
+        }),
+      )
+    ).join('');
+    // One aligned row per line under shared column headings. Each control keeps
+    // an accessible name of its own ("Line 2 quantity"), so the headings are a
+    // visual aid, never the only label.
+    const lineRows = await Promise.all(
+      buffer.lines.map(async (line, index) => {
+        const number = index + 1;
+        if (line.removed)
+          return `<tr data-draft-line="${h(line.id)}" class="draft-line draft-line--removed"><td colspan="${definition.lineFields.length + 1}">Line ${number} · removed · pending governed archive</td></tr>`;
+        const cells = await Promise.all(
+          definition.lineFields.map(async (field, position) => {
+            const html = await control(
+              definition.lineFormSurfaceId,
+              line,
+              field,
+              index * 100 + position,
+              frozen,
+              `Line ${number} ${field.label.toLowerCase()}`,
+            );
+            return `<td data-label="${h(field.label)}" class="draft-line__cell draft-line__cell--${field.reference ? 'reference' : field.presentation?.kind === 'derived' ? 'derived' : 'value'}">${html}</td>`;
+          }),
+        );
+        const remove = frozen
+          ? ''
+          : `<button form="draft-editor-form" class="link-action draft-line__remove" name="draftAction" value="remove:${h(line.id)}" formnovalidate aria-label="Remove line ${number}">Remove</button>`;
+        return `<tr data-draft-line="${h(line.id)}" class="draft-line">${cells.join('')}<td class="draft-line__cell draft-line__cell--remove">${remove}</td></tr>`;
+      }),
     );
-    const lines = await Promise.all(
-      buffer.lines.map(
-        async (
-          line,
-          index,
-        ) => `<fieldset data-draft-line="${h(line.id)}"><legend>Line ${index + 1}${line.removed ? ' · removed' : ''}</legend>
-    ${line.removed ? '<p>Pending governed archive</p>' : ''}<div class="form-fields">${await fieldsHtml(view, gateways, surfaces, definition.lineFormSurfaceId, line.removed && line.record ? { ...line, values: { ...line.record.values } } : line, definition.lineFields, scope, frozen || line.removed)}</div>
-    ${!frozen && !line.removed ? `<button form="draft-editor-form" class="secondary-action" name="draftAction" value="remove:${h(line.id)}" formnovalidate>Remove line ${index + 1}</button>` : ''}</fieldset>`,
-      ),
-    );
+    const lines = [
+      `<table class="draft-lines form-fields"><thead><tr>${definition.lineFields
+        .map(
+          (field) =>
+            `<th scope="col" class="draft-lines__heading draft-lines__heading--${field.reference ? 'reference' : field.presentation?.kind === 'derived' ? 'derived' : 'value'}">${h(field.label)}${field.presentation?.kind === 'derived' ? '' : required(definition.lineFormSurfaceId, field.fieldId)}</th>`,
+        )
+        .join(
+          '',
+        )}<th scope="col" class="draft-lines__heading--remove"><span class="sr-only">Remove</span></th></tr></thead><tbody>${lineRows.join('')}</tbody></table>`,
+    ];
+    const openCreate = buffer.create;
+    const createField = openCreate
+      ? [...definition.headerFields, ...definition.lineFields].find(
+          (value) => value.fieldId === openCreate.fieldId,
+        )
+      : undefined;
+    const createFlow = createField?.reference?.create;
+    const createPanel =
+      openCreate && createFlow
+        ? renderCreatePanel({
+            task: openCreate,
+            create: createFlow,
+            session: buffer.id,
+            version: buffer.version,
+            action: action.pathname + action.search,
+            fieldInputs: new Map(
+              createFlow.steps.flatMap((step) =>
+                (
+                  operationById(view, surfaces, step.operationId)
+                    ?.inputFields ?? []
+                ).map((value) => [value.fieldId, value] as const),
+              ),
+            ),
+            compiledFields: new Map(),
+          })
+        : '';
     const steps = buffer.pending
       ? `<ol data-save-progress>${buffer.pending.map((step) => `<li>${h(step.label)} · ${step.done ? 'committed' : 'pending'}</li>`).join('')}</ol>`
       : '';
@@ -547,10 +1301,15 @@ export async function documentEditor(
       ...(current ? { record: current } : {}),
       slots: {
         titleStatus: `<header class="surface-heading surface-heading--slot"><h1>${current ? 'Edit' : 'New'} ${h(recordSurface.label.replace(/ detail$/i, ''))}</h1><span class="status-pill" data-status-role="inProgress">Draft</span></header>`,
-        keyFacts: `<section class="panel">${buffer.notice}${steps}<form id="draft-editor-form" method="post" action="${h(action.pathname + action.search)}" data-document-editor>
+        keyFacts: `${createPanel}<section class="panel">${buffer.notice}${
+          paused
+            ? '<p class="draft-paused" role="status">This order is paused while you create a record. Nothing you entered has changed.</p>'
+            : ''
+        }${steps}<form id="draft-editor-form" method="post" action="${h(action.pathname + action.search)}" data-document-editor>
+      <button class="sr-only" name="draftAction" value="refresh" tabindex="-1" data-draft-default>Update draft</button>
       <input type="hidden" name="draftSession" value="${h(buffer.id)}"><input type="hidden" name="draftVersion" value="${buffer.version}">
-      <fieldset><legend>${h(definition.headerLabel ?? 'Document details')}</legend><div class="form-fields">${header}</div></fieldset></form></section>`,
-        sections: `<section class="panel" aria-label="${h(definition.linesLabel ?? 'Lines')}"><div class="panel__heading"><h2>${h(definition.linesLabel ?? 'Lines')}</h2>${!frozen ? '<button form="draft-editor-form" class="secondary-action" name="draftAction" value="add" formnovalidate>Add line</button>' : ''}</div>${lines.join('')}</section>`,
+      <fieldset><legend>${h(definition.headerLabel ?? 'Document details')}</legend><div class="form-fields draft-header">${header}</div></fieldset></form></section>`,
+        sections: `<section class="panel draft-lines-panel" aria-label="${h(definition.linesLabel ?? 'Lines')}"><div class="panel__heading"><h2>${h(definition.linesLabel ?? 'Lines')}</h2>${!frozen ? '<button form="draft-editor-form" class="secondary-action" name="draftAction" value="add" formnovalidate>Add line</button>' : ''}</div>${lines.join('')}</section>`,
         commandBar: `<section class="panel"><div class="command-bar"><p data-save-boundary>${h(definition.saveDescription ?? 'Save commits this document and each line in sequence.')}</p>${commands}</div></section>`,
       },
     };
@@ -585,16 +1344,88 @@ function reconcileCompletedRemovals(
   if (archived.size > 0)
     buffer.lines = buffer.lines.filter((line) => !archived.has(line.id));
 }
+/**
+ * Copies submitted values into the draft. A derived field is never read from the
+ * form -- the server sets it from the selected record -- and a choice outside
+ * the offered set (and not already stored) is refused rather than accepted, so
+ * a stale or altered form cannot introduce a value the editor never offered.
+ * Returns the labels of refused fields.
+ */
 function capture(
   row: DraftRow,
   fields: SurfaceDocumentEditor['headerFields'],
+  inputs: ReadonlyMap<string, CompiledSurfaceInputField>,
   submission: SurfaceRuntimeSubmission,
-) {
+): string[] {
+  const refused: string[] = [];
   for (const field of fields) {
+    if (field.presentation?.kind === 'derived') continue;
     const value = submission[inputName(row, field.fieldId)];
-    if (value !== undefined)
-      row.values[field.fieldId] = value === '' ? null : value;
+    if (value === undefined) continue;
+    if (!choiceAdmits(field, row, value)) {
+      refused.push(field.label);
+      continue;
+    }
+    // A decimal is kept in canonical spelling when it is one; anything else is
+    // kept exactly as typed so the operator sees it, and save refuses it.
+    const kind = inputs.get(field.fieldId)?.kind ?? '';
+    const decimal = DECIMAL_KINDS.includes(kind)
+      ? canonicalDecimal(value)
+      : null;
+    row.values[field.fieldId] = value === '' ? null : (decimal ?? value);
   }
+  return refused;
+}
+/**
+ * The pinned binding of an operation, wherever a surface binds it. A create flow
+ * names governed operations by id; this is how the editor finds each one's
+ * declared input fields, system scope argument and confirmation policy.
+ */
+function operationById(
+  view: RequestRuntimeView,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  operationId: string,
+): CompiledSurfaceOperationBinding | null {
+  for (const candidate of surfaces) {
+    let binding;
+    try {
+      binding = readCompiledSurfaceDataBinding(view, candidate);
+    } catch {
+      continue;
+    }
+    const operation = binding.operations.find(
+      (value) => value.operationId === operationId,
+    );
+    if (operation) return operation;
+  }
+  return null;
+}
+/** Every reference field, per row list: each is verified and derived from. */
+function referenceSources(definition: SurfaceDocumentEditor) {
+  const sources = (fields: SurfaceDocumentEditor['headerFields']) =>
+    new Set(
+      fields.flatMap((field) => (field.reference ? [field.fieldId] : [])),
+    );
+  return {
+    header: sources(definition.headerFields),
+    lines: sources(definition.lineFields),
+  };
+}
+function snapshot(
+  buffer: Buffer,
+  sources: ReturnType<typeof referenceSources>,
+): Map<string, ImmutableJsonValue | undefined> {
+  const values = new Map<string, ImmutableJsonValue | undefined>();
+  for (const fieldId of sources.header)
+    values.set(
+      referenceKey(buffer.header.id, fieldId),
+      buffer.header.values[fieldId],
+    );
+  for (const line of buffer.lines)
+    if (!line.removed)
+      for (const fieldId of sources.lines)
+        values.set(referenceKey(line.id, fieldId), line.values[fieldId]);
+  return values;
 }
 function plan(
   view: RequestRuntimeView,
@@ -624,6 +1455,11 @@ function plan(
       let value = row.values[field.fieldId] ?? null;
       if (allowed.get(field.fieldId)!.required && value === null)
         throw new Error('Required editor field absent');
+      if (
+        typeof value === 'string' &&
+        DECIMAL_KINDS.includes(allowed.get(field.fieldId)!.kind)
+      )
+        value = canonicalDecimal(value) ?? value;
       const temporal = allowed.get(field.fieldId)!.temporal;
       if (
         typeof value === 'string' &&
@@ -654,8 +1490,12 @@ function plan(
     if (
       row.record &&
       !row.removed &&
-      fields.every(
-        (field) => row.record!.values[field.fieldId] === values[field.fieldId],
+      fields.every((field) =>
+        sameValue(
+          allowed.get(field.fieldId)!.kind,
+          row.record!.values[field.fieldId],
+          values[field.fieldId],
+        ),
       )
     )
       return;
@@ -696,57 +1536,4 @@ function plan(
     );
   }
   return steps;
-}
-async function fieldsHtml(
-  view: RequestRuntimeView,
-  gateways: SurfaceRuntimeGateways,
-  surfaces: readonly CompiledSurfaceDefinition[],
-  surfaceId: string,
-  row: DraftRow,
-  fields: SurfaceDocumentEditor['headerFields'],
-  scope: string,
-  frozen: boolean,
-) {
-  const operation = operationFor(
-    view,
-    surfaceFor(surfaces, surfaceId),
-    'create',
-  );
-  return (
-    await Promise.all(
-      fields.map(async (field) => {
-        const input = operation.inputFields?.find(
-          (value) => value.fieldId === field.fieldId,
-        );
-        if (!input) throw new Error('Editor field unavailable');
-        let value = string(row.values[field.fieldId]);
-        const attrs = `form="draft-editor-form" name="${h(inputName(row, field.fieldId))}" ${input.required ? 'required' : ''} ${frozen ? 'disabled' : ''}`;
-        let control: string;
-        if (field.reference) {
-          const records = await workspaceList(
-            view,
-            gateways.queryGateway,
-            field.reference.queryId,
-            scope,
-          );
-          control = `<select ${attrs}><option value="">Select ${h(field.label.toLowerCase())}</option>${records
-            .map((record) => {
-              const labels = field
-                .reference!.labelFieldIds.map((id) => record.values[id])
-                .filter((label) => typeof label === 'string' && label.trim());
-              if (!labels.length) return '';
-              return `<option value="${h(record.recordId)}"${value === record.recordId ? ' selected' : ''}>${h(labels.join(' · '))}</option>`;
-            })
-            .join('')}</select>`;
-        } else {
-          const dateTime =
-            input.kind === 'dateTimeFieldType' &&
-            input.temporal?.timezoneSemantics === 'utcInstant';
-          if (dateTime && value.endsWith('Z')) value = value.slice(0, 19);
-          control = `<input type="${dateTime ? 'datetime-local' : input.kind === 'dateFieldType' ? 'date' : 'text'}" ${attrs} value="${h(value)}" ${dateTime ? 'step="1"' : ''} ${['quantityFieldType', 'exactDecimalFieldType'].includes(input.kind) ? 'inputmode="decimal"' : ''}>`;
-        }
-        return `<label>${h(field.label)}${input.temporal?.timezoneSemantics === 'utcInstant' ? ' (UTC)' : ''}${input.required ? ' *' : ''}${control}</label>`;
-      }),
-    )
-  ).join('');
 }

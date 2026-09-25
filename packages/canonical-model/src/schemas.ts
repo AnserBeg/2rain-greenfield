@@ -900,13 +900,101 @@ export const SurfaceWorkspaceSchema = z.strictObject({
     .optional(),
 });
 export type SurfaceWorkspace = z.infer<typeof SurfaceWorkspaceSchema>;
+/**
+ * How the draft editor presents one declared field. Every variant is an EDITOR
+ * policy, never a domain rule: the field keeps its own type and server-side
+ * admission, so UI, API and agent writes stay subject to the same validation.
+ * `choice` in particular offers a fixed set; it does not narrow what the domain
+ * admits, and a stored value outside the set is preserved rather than replaced.
+ */
+const editorPresentation = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('multiline') }),
+  z.strictObject({
+    kind: z.literal('choice'),
+    options: z
+      .array(
+        z.strictObject({
+          value: z.string().min(1).max(64),
+          label: LabelSchema,
+        }),
+      )
+      .min(1)
+      .max(20),
+    defaultValue: z.string().min(1).max(64).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal('derived'),
+    /** A sibling reference field in the same row whose record supplies the value. */
+    referenceFieldId: CanonicalIdSchema,
+    /** A field selected by that reference's list query. */
+    sourceFieldId: CanonicalIdSchema,
+  }),
+]);
+/**
+ * An in-context create flow for a reference: an ordered set of existing
+ * governed create operations. Collected fields route to the step whose entity
+ * owns them; `fixed` values and `relations` bind the steps together. The record
+ * created by `selectStep` becomes the selected value of the originating field.
+ */
+const editorCreate = z.strictObject({
+  label: LabelSchema,
+  explanation: z.string().min(1).max(500),
+  fields: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        label: LabelSchema,
+        presentation: editorPresentation.optional(),
+      }),
+    )
+    .min(1)
+    .max(8),
+  steps: z
+    .array(
+      z.strictObject({
+        operationId: CanonicalIdSchema,
+        fixed: z
+          .array(
+            z.strictObject({
+              fieldId: CanonicalIdSchema,
+              value: z.string().min(1).max(200),
+            }),
+          )
+          .max(8)
+          .optional(),
+        relations: z
+          .array(
+            z.strictObject({
+              relationId: CanonicalIdSchema,
+              step: z.number().int().min(0).max(3),
+            }),
+          )
+          .max(4)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+  selectStep: z.number().int().min(0).max(3),
+});
 const editorField = z.strictObject({
   fieldId: CanonicalIdSchema,
   label: LabelSchema,
+  presentation: editorPresentation.optional(),
   reference: z
     .strictObject({
       queryId: CanonicalIdSchema,
+      /**
+       * The exact read for one selected record, so the picker can label and
+       * derive from a selection without scanning the list. Optional only so
+       * older releases in the lineage still parse; the validator requires it
+       * wherever search, detail, create or derivation is declared.
+       */
+      getQueryId: CanonicalIdSchema.optional(),
       labelFieldIds: z.array(CanonicalIdSchema).min(1).max(3),
+      /** Secondary text shown under each result, such as SKU and base unit. */
+      detailFieldIds: z.array(CanonicalIdSchema).min(1).max(3).optional(),
+      create: editorCreate.optional(),
     })
     .optional(),
 });
@@ -928,6 +1016,14 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
   saveMode: z.literal('sequential'),
 });
 export type SurfaceDocumentEditor = z.infer<typeof SurfaceDocumentEditorSchema>;
+export type SurfaceEditorField = SurfaceDocumentEditor['headerFields'][number];
+export type SurfaceEditorPresentation = NonNullable<
+  SurfaceEditorField['presentation']
+>;
+export type SurfaceEditorReference = NonNullable<
+  SurfaceEditorField['reference']
+>;
+export type SurfaceEditorCreate = NonNullable<SurfaceEditorReference['create']>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),

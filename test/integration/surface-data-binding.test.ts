@@ -4507,6 +4507,16 @@ type TaskSummary = {
 };
 
 /** Bounded order-entry witnesses: real canonical contracts/gateways, synthetic storage. */
+/**
+ * A well-formed quantity the stub provider refuses as MODULE_FIELD_VALUE_INVALID.
+ * The editor admits it -- it is a plain decimal inside the declared bounds -- so
+ * it stands for a provider rule the editor cannot know, and the refusal arrives
+ * after earlier save steps have committed, which is what F2/F3 exercise.
+ */
+const PROVIDER_REFUSED_QUANTITY = '404';
+/** A line's own value that is visible before read loss and redacted after it. */
+const CHILD_SENTINEL = '424242.4242';
+
 class OrderEntryExecutor
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
@@ -4609,7 +4619,8 @@ class OrderEntryExecutor
     if (
       Object.entries(asRecord(input.values ?? input.patch ?? {})).some(
         ([fieldId, value]) =>
-          fieldId.endsWith('_ordered_quantity') && value === 'invalid',
+          fieldId.endsWith('_ordered_quantity') &&
+          value === PROVIDER_REFUSED_QUANTITY,
       )
     ) {
       this.onControlledFailure?.();
@@ -4701,6 +4712,7 @@ async function orderEntryWitness(variant = false) {
   const item = executor.seed('item', {
     [`${ns}:field.item_name`]: 'Readable product',
     [`${ns}:field.item_sku`]: 'SKU-WITNESS',
+    [`${ns}:field.item_base_unit`]: 'EA',
   });
   const principal = randomUUID();
   const entry = runtimeEntry(compiled, policy, {
@@ -4830,15 +4842,25 @@ const assertDraftOutcomeRedacted = (response: {
   assert.match(response.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
   assert.doesNotMatch(
     response.html,
-    /PROTECTED_(?:ROOT|CHILD)_SENTINEL|<form\b|<button\b|data-draft-line/,
+    /PROTECTED_(?:ROOT|CHILD)_SENTINEL|424242\.4242|<form\b|<button\b|data-draft-line/,
   );
 };
 
 test('order entry: unrelated metadata renders the shared editor; partial save freezes exact retry and duplicate replay', async () => {
   const f = await orderEntryWitness(true);
   let form = (await f.open())!;
-  assert.match(form.slots!.sections!, /Readable product · SKU-WITNESS/);
+  // The product picker searches the declared list query; nothing is preloaded.
+  assert.doesNotMatch(form.slots!.sections!, /Readable product/);
   assert.match(form.slots!.sections!, /Requested units/);
+  const lineId = /data-draft-line="([^"]+)"/.exec(form.slots!.sections!)![1]!;
+  const productField = `${f.ns}:field.purchase_order_line_item_id`;
+  form = (await f.post(form, `search:${lineId}:${productField}`, {
+    [`draftSearch:${lineId}:${productField}`]: 'Readable',
+  }))!;
+  assert.match(
+    form.slots!.sections!,
+    /<strong>Readable product<\/strong><small>SKU-WITNESS · EA<\/small>/,
+  );
   form = (await f.post(form, 'add', f.values(form)))!;
   const values = f.values(form);
   f.executor.failAt = 3;
@@ -4952,7 +4974,7 @@ test('order entry F2: a completed archive is reconciled after correctable line i
   const [removed, corrected] = lines;
   const invalid = f.values(editor);
   invalid[draftField(invalid, corrected!.recordId, '_ordered_quantity')] =
-    'invalid';
+    PROVIDER_REFUSED_QUANTITY;
   editor = (await f.post(editor, `remove:${removed!.recordId}`, invalid))!;
   const review = (await f.post(editor, 'save', invalid))!;
   assert.match(review.slots!.commandBar!, /Confirm removal and save/);
@@ -4986,7 +5008,7 @@ test('order entry F2: a completed archive is reconciled after correctable line i
   const pendingValues = pending.values(editor);
   pendingValues[
     draftField(pendingValues, invalidLine!.recordId, '_ordered_quantity')
-  ] = 'invalid';
+  ] = PROVIDER_REFUSED_QUANTITY;
   editor = (await pending.post(
     editor,
     `remove:${stillRemoved!.recordId}`,
@@ -5067,7 +5089,7 @@ test('order entry F3: post-execution read refusal returns a redacted partial-com
       const [removed, invalidLine] = lines;
       const invalid = f.values(editor);
       invalid[draftField(invalid, invalidLine!.recordId, '_ordered_quantity')] =
-        'invalid';
+        PROVIDER_REFUSED_QUANTITY;
       editor = (await f.post(editor, `remove:${removed!.recordId}`, invalid))!;
       const review = (await f.post(editor, 'save', invalid))!;
       f.executor.onControlledFailure = () => {
@@ -5135,10 +5157,10 @@ test('order entry F3: read loss between partial-save submissions redacts acknowl
     const changed = f.values(editor);
     changed[draftField(changed, recordId, '_notes')] =
       'PROTECTED_ROOT_SENTINEL';
-    changed[draftField(changed, line.recordId, '_unit_id')] =
-      'PROTECTED_CHILD_SENTINEL';
+    changed[draftField(changed, line.recordId, '_unit_price')] = CHILD_SENTINEL;
     const quantity = draftField(changed, line.recordId, '_ordered_quantity');
-    changed[quantity] = pending === 'cleared' ? 'invalid' : '13';
+    changed[quantity] =
+      pending === 'cleared' ? PROVIDER_REFUSED_QUANTITY : '13';
     if (pending === 'retained') f.executor.failAt = f.executor.calls.length + 2;
 
     const first = await submitSurfaceRuntimeIntent(
@@ -5154,7 +5176,7 @@ test('order entry F3: read loss between partial-save submissions redacts acknowl
     );
     assert.equal(first.statusCode, 422);
     assert.match(first.html, /PROTECTED_ROOT_SENTINEL/);
-    assert.match(first.html, /PROTECTED_CHILD_SENTINEL/);
+    assert.match(first.html, new RegExp(CHILD_SENTINEL.replace('.', '\\.')));
     assert.match(first.html, /<form\b[^>]*data-document-editor/);
     assert.doesNotMatch(first.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
     if (pending === 'cleared') {

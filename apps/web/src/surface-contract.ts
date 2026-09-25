@@ -335,6 +335,11 @@ export interface CompiledSurfaceOperationBinding {
 
 export interface CompiledSurfaceInputField {
   readonly temporal?: RegisteredOperationInputContract['fields'][number]['temporal'];
+  /**
+   * The pinned contract's value bounds, so an editor can refuse an out-of-range
+   * decimal before any step commits. The provider still enforces them.
+   */
+  readonly bounds?: RegisteredOperationInputContract['fields'][number]['bounds'];
   readonly fieldId: string;
   readonly kind: RegisteredOperationInputContract['fields'][number]['fieldKind'];
   readonly required: boolean;
@@ -1144,6 +1149,7 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
                   fieldId: field.fieldId,
                   kind: field.fieldKind,
                   temporal: field.temporal,
+                  bounds: field.bounds,
                   required: field.required,
                 }),
               ),

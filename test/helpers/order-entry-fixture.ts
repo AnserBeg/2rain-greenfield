@@ -7,6 +7,7 @@ import {
   startComposedApplication,
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
 } from '../../apps/api/src/composition-root.js';
+import type { ComposedApplicationSeedProfile } from '../../packages/domain/src/app/seed.js';
 import { withEphemeralPostgres } from './postgres.js';
 import {
   parsePinnedOperationCatalog,
@@ -20,14 +21,20 @@ import {
   quoteFulfillmentIdentifier as q,
 } from '../../packages/postgres-provider/src/fulfillment.js';
 
-/** Masters, authorized development identity and opening stock only. Orders are browser-created. */
+/**
+ * Masters, authorized development identity and opening stock only. Orders are
+ * browser-created. `distributor` adds master volume only -- enough parties and
+ * products that a picker's first page cannot show them all.
+ */
 export async function withOrderEntryFixture(
   run: (fixture: Awaited<ReturnType<typeof seed>>) => Promise<void>,
+  seedProfile: ComposedApplicationSeedProfile = 'demo',
 ) {
   await withEphemeralPostgres('order-entry', async ({ connection, pool }) => {
     const app = await startComposedApplication({
       databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
       port: 0,
+      seedProfile,
       tenantSlug: 'order-entry',
     });
     try {
@@ -414,55 +421,58 @@ if (process.argv.includes('--serve')) {
     execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], {
       encoding: 'utf8',
     }).trim().length > 0;
-  void withOrderEntryFixture(async (fixture) => {
-    const served = await fixture.app.runtime.entry.run(
-      { headers: {} },
-      (view) => ({
-        releaseId: view.release.releaseId,
-        releaseRoot: view.release.contentHash,
-        fence: view.pointer.fence,
-      }),
-    );
-    console.log(
-      `ORDER_ENTRY_SERVING=${JSON.stringify({ sourceRevision, sourceHasTrackedChanges, pid: process.pid, worktree: process.cwd(), ...served })}`,
-    );
-    console.log(
-      `ORDER_ENTRY_URL=${fixture.app.baseUrl}/?surface=northstar.app%3Asurface.sales_order_list`,
-    );
-    const input = process.argv.includes('--verify')
-      ? createInterface({ input: process.stdin })
-      : null;
-    if (input) {
-      input.on(
-        'line',
-        (line) =>
-          void (async () => {
-            const request = JSON.parse(line) as {
-              phase: string;
-              orderId?: string;
-              purchaseId?: string;
-            };
-            const observed = await fixture.measure(
-              request.phase,
-              request.orderId,
-              request.purchaseId,
-            );
-            console.log(`ORDER_ENTRY_MEASURED=${JSON.stringify(observed)}`);
-          })().catch((error) => {
-            console.error(error);
-            process.exitCode = 1;
-            process.kill(process.pid, 'SIGTERM');
-          }),
+  void withOrderEntryFixture(
+    async (fixture) => {
+      const served = await fixture.app.runtime.entry.run(
+        { headers: {} },
+        (view) => ({
+          releaseId: view.release.releaseId,
+          releaseRoot: view.release.contentHash,
+          fence: view.pointer.fence,
+        }),
       );
-    }
-    await new Promise<void>((resolve) => {
-      const stop = () => {
-        input?.close();
-        process.stdin.destroy();
-        resolve();
-      };
-      process.once('SIGTERM', stop);
-      process.once('SIGINT', stop);
-    });
-  });
+      console.log(
+        `ORDER_ENTRY_SERVING=${JSON.stringify({ sourceRevision, sourceHasTrackedChanges, pid: process.pid, worktree: process.cwd(), ...served })}`,
+      );
+      console.log(
+        `ORDER_ENTRY_URL=${fixture.app.baseUrl}/?surface=northstar.app%3Asurface.sales_order_list`,
+      );
+      const input = process.argv.includes('--verify')
+        ? createInterface({ input: process.stdin })
+        : null;
+      if (input) {
+        input.on(
+          'line',
+          (line) =>
+            void (async () => {
+              const request = JSON.parse(line) as {
+                phase: string;
+                orderId?: string;
+                purchaseId?: string;
+              };
+              const observed = await fixture.measure(
+                request.phase,
+                request.orderId,
+                request.purchaseId,
+              );
+              console.log(`ORDER_ENTRY_MEASURED=${JSON.stringify(observed)}`);
+            })().catch((error) => {
+              console.error(error);
+              process.exitCode = 1;
+              process.kill(process.pid, 'SIGTERM');
+            }),
+        );
+      }
+      await new Promise<void>((resolve) => {
+        const stop = () => {
+          input?.close();
+          process.stdin.destroy();
+          resolve();
+        };
+        process.once('SIGTERM', stop);
+        process.once('SIGINT', stop);
+      });
+    },
+    process.argv.includes('--distributor') ? 'distributor' : 'demo',
+  );
 }

@@ -1724,20 +1724,31 @@ function renderEmptyIntentControl(
   return select(options);
 }
 
-interface RenderedFormControl {
+export interface RenderedFormControl {
   readonly html: string;
   /** The browser will sanitize or de-select this stored value to blank. */
   readonly storedValueUnavailable: boolean;
 }
 
-function renderFormControl(
+/**
+ * The typed control for one field. `control.name` and `control.attributes` let a
+ * caller with its own submission naming -- the draft document editor -- reuse
+ * the same typed rendering and stored-value preservation instead of keeping a
+ * separate text-only renderer. Both default to the record form's own shape.
+ */
+export function renderFormControl(
   field: CompiledSurfaceField | undefined,
   inputField: CompiledSurfaceInputField | undefined,
   fieldId: string,
   index: number,
   value: unknown,
+  control: { readonly name?: string; readonly attributes?: string } = {},
 ): RenderedFormControl {
-  const name = `value:${escapeHtml(fieldId)}`;
+  const name =
+    control.name === undefined
+      ? `value:${escapeHtml(fieldId)}`
+      : escapeHtml(control.name);
+  const extra = control.attributes ?? '';
   const storedValueUnavailable =
     value !== null &&
     value !== undefined &&
@@ -1754,12 +1765,12 @@ function renderFormControl(
     : '';
   if (!field) {
     return {
-      html: `<input${describedBy} name="${name}" value="${renderInputValue(renderedValue)}" autocomplete="off">`,
+      html: `<input${describedBy}${extra} name="${name}" value="${renderInputValue(renderedValue)}" autocomplete="off">`,
       storedValueUnavailable,
     };
   }
   const current = renderInputValue(renderedValue);
-  const kind = ` data-field-kind="${field.kind}"${describedBy}`;
+  const kind = ` data-field-kind="${field.kind}"${describedBy}${extra}`;
   const html = (() => {
     switch (field.kind) {
       case 'enumFieldType':

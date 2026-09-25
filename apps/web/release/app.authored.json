@@ -23010,7 +23010,51 @@
             "label": "Customer",
             "reference": {
               "queryId": "northstar.app:query.party_list",
-              "labelFieldIds": ["northstar.app:field.party_name"]
+              "getQueryId": "northstar.app:query.party_get",
+              "labelFieldIds": ["northstar.app:field.party_name"],
+              "detailFieldIds": ["northstar.app:field.party_number"],
+              "create": {
+                "label": "New customer",
+                "explanation": "Creates the customer now as its own record. Saving or discarding this order does not undo it.",
+                "fields": [
+                  {
+                    "fieldId": "northstar.app:field.party_number",
+                    "label": "Customer number"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_name",
+                    "label": "Name"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_contact_summary",
+                    "label": "Contact",
+                    "presentation": { "kind": "multiline" }
+                  }
+                ],
+                "steps": [
+                  { "operationId": "northstar.app:operation.party_create" },
+                  {
+                    "operationId": "northstar.app:operation.party_role_create",
+                    "fixed": [
+                      {
+                        "fieldId": "northstar.app:field.party_role_kind",
+                        "value": "northstar.app:option.customer"
+                      },
+                      {
+                        "fieldId": "northstar.app:field.party_role_status",
+                        "value": "northstar.app:option.active"
+                      }
+                    ],
+                    "relations": [
+                      {
+                        "relationId": "northstar.app:relation.party_role_party",
+                        "step": 0
+                      }
+                    ]
+                  }
+                ],
+                "selectStep": 0
+              }
             }
           },
           {
@@ -23023,11 +23067,21 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_currency",
-            "label": "Currency"
+            "label": "Currency",
+            "presentation": {
+              "kind": "choice",
+              "options": [
+                { "value": "CAD", "label": "CAD · Canadian dollar" },
+                { "value": "USD", "label": "USD · US dollar" },
+                { "value": "EUR", "label": "EUR · Euro" }
+              ],
+              "defaultValue": "CAD"
+            }
           },
           {
             "fieldId": "northstar.app:field.sales_order_notes",
-            "label": "Notes"
+            "label": "Notes",
+            "presentation": { "kind": "multiline" }
           }
         ],
         "lineFields": [
@@ -23036,11 +23090,36 @@
             "label": "Product",
             "reference": {
               "queryId": "northstar.app:query.item_list",
-              "labelFieldIds": [
-                "northstar.app:field.item_name",
+              "getQueryId": "northstar.app:query.item_get",
+              "labelFieldIds": ["northstar.app:field.item_name"],
+              "detailFieldIds": [
                 "northstar.app:field.item_sku",
                 "northstar.app:field.item_base_unit"
-              ]
+              ],
+              "create": {
+                "label": "New product",
+                "explanation": "Creates the product now as its own record. Saving or discarding this order does not undo it.",
+                "fields": [
+                  { "fieldId": "northstar.app:field.item_sku", "label": "SKU" },
+                  {
+                    "fieldId": "northstar.app:field.item_name",
+                    "label": "Name"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.item_base_unit",
+                    "label": "Base unit"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.item_description",
+                    "label": "Description",
+                    "presentation": { "kind": "multiline" }
+                  }
+                ],
+                "steps": [
+                  { "operationId": "northstar.app:operation.item_create" }
+                ],
+                "selectStep": 0
+              }
             }
           },
           {
@@ -23049,7 +23128,12 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_line_unit_id",
-            "label": "Unit"
+            "label": "Unit",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_line_item_id",
+              "sourceFieldId": "northstar.app:field.item_base_unit"
+            }
           },
           {
             "fieldId": "northstar.app:field.sales_order_line_unit_price",
@@ -23174,7 +23258,51 @@
             "label": "Customer",
             "reference": {
               "queryId": "northstar.app:query.party_list",
-              "labelFieldIds": ["northstar.app:field.party_name"]
+              "getQueryId": "northstar.app:query.party_get",
+              "labelFieldIds": ["northstar.app:field.party_name"],
+              "detailFieldIds": ["northstar.app:field.party_number"],
+              "create": {
+                "label": "New customer",
+                "explanation": "Creates the customer now as its own record. Saving or discarding this order does not undo it.",
+                "fields": [
+                  {
+                    "fieldId": "northstar.app:field.party_number",
+                    "label": "Customer number"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_name",
+                    "label": "Name"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_contact_summary",
+                    "label": "Contact",
+                    "presentation": { "kind": "multiline" }
+                  }
+                ],
+                "steps": [
+                  { "operationId": "northstar.app:operation.party_create" },
+                  {
+                    "operationId": "northstar.app:operation.party_role_create",
+                    "fixed": [
+                      {
+                        "fieldId": "northstar.app:field.party_role_kind",
+                        "value": "northstar.app:option.customer"
+                      },
+                      {
+                        "fieldId": "northstar.app:field.party_role_status",
+                        "value": "northstar.app:option.active"
+                      }
+                    ],
+                    "relations": [
+                      {
+                        "relationId": "northstar.app:relation.party_role_party",
+                        "step": 0
+                      }
+                    ]
+                  }
+                ],
+                "selectStep": 0
+              }
             }
           },
           {
@@ -23187,11 +23315,21 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_currency",
-            "label": "Currency"
+            "label": "Currency",
+            "presentation": {
+              "kind": "choice",
+              "options": [
+                { "value": "CAD", "label": "CAD · Canadian dollar" },
+                { "value": "USD", "label": "USD · US dollar" },
+                { "value": "EUR", "label": "EUR · Euro" }
+              ],
+              "defaultValue": "CAD"
+            }
           },
           {
             "fieldId": "northstar.app:field.sales_order_notes",
-            "label": "Notes"
+            "label": "Notes",
+            "presentation": { "kind": "multiline" }
           }
         ],
         "lineFields": [
@@ -23200,11 +23338,36 @@
             "label": "Product",
             "reference": {
               "queryId": "northstar.app:query.item_list",
-              "labelFieldIds": [
-                "northstar.app:field.item_name",
+              "getQueryId": "northstar.app:query.item_get",
+              "labelFieldIds": ["northstar.app:field.item_name"],
+              "detailFieldIds": [
                 "northstar.app:field.item_sku",
                 "northstar.app:field.item_base_unit"
-              ]
+              ],
+              "create": {
+                "label": "New product",
+                "explanation": "Creates the product now as its own record. Saving or discarding this order does not undo it.",
+                "fields": [
+                  { "fieldId": "northstar.app:field.item_sku", "label": "SKU" },
+                  {
+                    "fieldId": "northstar.app:field.item_name",
+                    "label": "Name"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.item_base_unit",
+                    "label": "Base unit"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.item_description",
+                    "label": "Description",
+                    "presentation": { "kind": "multiline" }
+                  }
+                ],
+                "steps": [
+                  { "operationId": "northstar.app:operation.item_create" }
+                ],
+                "selectStep": 0
+              }
             }
           },
           {
@@ -23213,7 +23376,12 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_line_unit_id",
-            "label": "Unit"
+            "label": "Unit",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_line_item_id",
+              "sourceFieldId": "northstar.app:field.item_base_unit"
+            }
           },
           {
             "fieldId": "northstar.app:field.sales_order_line_unit_price",
@@ -25668,7 +25836,51 @@
             "label": "Vendor",
             "reference": {
               "queryId": "northstar.app:query.party_list",
-              "labelFieldIds": ["northstar.app:field.party_name"]
+              "getQueryId": "northstar.app:query.party_get",
+              "labelFieldIds": ["northstar.app:field.party_name"],
+              "detailFieldIds": ["northstar.app:field.party_number"],
+              "create": {
+                "label": "New vendor",
+                "explanation": "Creates the vendor now as its own record. Saving or discarding this order does not undo it.",
+                "fields": [
+                  {
+                    "fieldId": "northstar.app:field.party_number",
+                    "label": "Vendor number"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_name",
+                    "label": "Name"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_contact_summary",
+                    "label": "Contact",
+                    "presentation": { "kind": "multiline" }
+                  }
+                ],
+                "steps": [
+                  { "operationId": "northstar.app:operation.party_create" },
+                  {
+                    "operationId": "northstar.app:operation.party_role_create",
+                    "fixed": [
+                      {
+                        "fieldId": "northstar.app:field.party_role_kind",
+                        "value": "northstar.app:option.supplier"
+                      },
+                      {
+                        "fieldId": "northstar.app:field.party_role_status",
+                        "value": "northstar.app:option.active"
+                      }
+                    ],
+                    "relations": [
+                      {
+                        "relationId": "northstar.app:relation.party_role_party",
+                        "step": 0
+                      }
+                    ]
+                  }
+                ],
+                "selectStep": 0
+              }
             }
           },
           {
@@ -25681,11 +25893,21 @@
           },
           {
             "fieldId": "northstar.app:field.purchase_order_currency",
-            "label": "Currency"
+            "label": "Currency",
+            "presentation": {
+              "kind": "choice",
+              "options": [
+                { "value": "CAD", "label": "CAD · Canadian dollar" },
+                { "value": "USD", "label": "USD · US dollar" },
+                { "value": "EUR", "label": "EUR · Euro" }
+              ],
+              "defaultValue": "CAD"
+            }
           },
           {
             "fieldId": "northstar.app:field.purchase_order_notes",
-            "label": "Notes"
+            "label": "Notes",
+            "presentation": { "kind": "multiline" }
           }
         ],
         "lineFields": [
@@ -25694,11 +25916,36 @@
             "label": "Product",
             "reference": {
               "queryId": "northstar.app:query.item_list",
-              "labelFieldIds": [
-                "northstar.app:field.item_name",
+              "getQueryId": "northstar.app:query.item_get",
+              "labelFieldIds": ["northstar.app:field.item_name"],
+              "detailFieldIds": [
                 "northstar.app:field.item_sku",
                 "northstar.app:field.item_base_unit"
-              ]
+              ],
+              "create": {
+                "label": "New product",
+                "explanation": "Creates the product now as its own record. Saving or discarding this order does not undo it.",
+                "fields": [
+                  { "fieldId": "northstar.app:field.item_sku", "label": "SKU" },
+                  {
+                    "fieldId": "northstar.app:field.item_name",
+                    "label": "Name"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.item_base_unit",
+                    "label": "Base unit"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.item_description",
+                    "label": "Description",
+                    "presentation": { "kind": "multiline" }
+                  }
+                ],
+                "steps": [
+                  { "operationId": "northstar.app:operation.item_create" }
+                ],
+                "selectStep": 0
+              }
             }
           },
           {
@@ -25707,7 +25954,7 @@
           },
           {
             "fieldId": "northstar.app:field.purchase_order_line_unit_price",
-            "label": "Unit price"
+            "label": "Unit cost"
           }
         ]
       },
@@ -25828,7 +26075,51 @@
             "label": "Vendor",
             "reference": {
               "queryId": "northstar.app:query.party_list",
-              "labelFieldIds": ["northstar.app:field.party_name"]
+              "getQueryId": "northstar.app:query.party_get",
+              "labelFieldIds": ["northstar.app:field.party_name"],
+              "detailFieldIds": ["northstar.app:field.party_number"],
+              "create": {
+                "label": "New vendor",
+                "explanation": "Creates the vendor now as its own record. Saving or discarding this order does not undo it.",
+                "fields": [
+                  {
+                    "fieldId": "northstar.app:field.party_number",
+                    "label": "Vendor number"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_name",
+                    "label": "Name"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_contact_summary",
+                    "label": "Contact",
+                    "presentation": { "kind": "multiline" }
+                  }
+                ],
+                "steps": [
+                  { "operationId": "northstar.app:operation.party_create" },
+                  {
+                    "operationId": "northstar.app:operation.party_role_create",
+                    "fixed": [
+                      {
+                        "fieldId": "northstar.app:field.party_role_kind",
+                        "value": "northstar.app:option.supplier"
+                      },
+                      {
+                        "fieldId": "northstar.app:field.party_role_status",
+                        "value": "northstar.app:option.active"
+                      }
+                    ],
+                    "relations": [
+                      {
+                        "relationId": "northstar.app:relation.party_role_party",
+                        "step": 0
+                      }
+                    ]
+                  }
+                ],
+                "selectStep": 0
+              }
             }
           },
           {
@@ -25841,11 +26132,21 @@
           },
           {
             "fieldId": "northstar.app:field.purchase_order_currency",
-            "label": "Currency"
+            "label": "Currency",
+            "presentation": {
+              "kind": "choice",
+              "options": [
+                { "value": "CAD", "label": "CAD · Canadian dollar" },
+                { "value": "USD", "label": "USD · US dollar" },
+                { "value": "EUR", "label": "EUR · Euro" }
+              ],
+              "defaultValue": "CAD"
+            }
           },
           {
             "fieldId": "northstar.app:field.purchase_order_notes",
-            "label": "Notes"
+            "label": "Notes",
+            "presentation": { "kind": "multiline" }
           }
         ],
         "lineFields": [
@@ -25854,11 +26155,36 @@
             "label": "Product",
             "reference": {
               "queryId": "northstar.app:query.item_list",
-              "labelFieldIds": [
-                "northstar.app:field.item_name",
+              "getQueryId": "northstar.app:query.item_get",
+              "labelFieldIds": ["northstar.app:field.item_name"],
+              "detailFieldIds": [
                 "northstar.app:field.item_sku",
                 "northstar.app:field.item_base_unit"
-              ]
+              ],
+              "create": {
+                "label": "New product",
+                "explanation": "Creates the product now as its own record. Saving or discarding this order does not undo it.",
+                "fields": [
+                  { "fieldId": "northstar.app:field.item_sku", "label": "SKU" },
+                  {
+                    "fieldId": "northstar.app:field.item_name",
+                    "label": "Name"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.item_base_unit",
+                    "label": "Base unit"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.item_description",
+                    "label": "Description",
+                    "presentation": { "kind": "multiline" }
+                  }
+                ],
+                "steps": [
+                  { "operationId": "northstar.app:operation.item_create" }
+                ],
+                "selectStep": 0
+              }
             }
           },
           {
@@ -25867,7 +26193,7 @@
           },
           {
             "fieldId": "northstar.app:field.purchase_order_line_unit_price",
-            "label": "Unit price"
+            "label": "Unit cost"
           }
         ]
       },
