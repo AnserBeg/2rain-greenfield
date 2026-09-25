@@ -596,6 +596,35 @@ test('order editor pickers search past the first page and create missing masters
       (await measure('masters', undefined, undefined, 'Stale Glazing')).parties,
     ).toBe(0);
 
+    // The same control on a Purchase order creates a vendor: a party with an
+    // active supplier role, selected on the order that asked for it.
+    await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
+    await page.getByRole('link', { name: 'New', exact: true }).click();
+    await page.getByLabel('Order number *').fill('PO-PICKER');
+    await page
+      .getByLabel('Search vendor', { exact: true })
+      .fill('Coastal Ink Supply');
+    await submit(page, () =>
+      page.getByRole('button', { name: '+ New vendor', exact: true }).click(),
+    );
+    await dialog.getByLabel('Vendor number *').fill('V-COASTAL');
+    await submit(page, () =>
+      dialog
+        .getByRole('button', { name: 'Create and use', exact: true })
+        .click(),
+    );
+    await expect(
+      page.locator('.draft-header [data-reference-selected] strong'),
+    ).toHaveText('Coastal Ink Supply');
+    await expect(page.getByLabel('Order number *')).toHaveValue('PO-PICKER');
+    await expect(
+      page.getByRole('columnheader', { name: 'Unit cost' }),
+    ).toBeVisible();
+    await shot('purchase-new-vendor');
+    expect(
+      await measure('masters', undefined, undefined, 'Coastal Ink Supply'),
+    ).toMatchObject({ parties: 1, roles: ['northstar.app:option.supplier'] });
+
     // Without JavaScript the same controls are plain submits: search, select
     // and create-and-return all work, and the create form sits in the page.
     const plain = await browser.newContext({ javaScriptEnabled: false });

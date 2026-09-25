@@ -35,6 +35,7 @@ const paths = Object.freeze({
   canonicalConstants: 'packages/canonical-model/src/constants.ts',
   componentRegistry: 'apps/web/src/component-registry.ts',
   documentEditor: 'apps/web/src/document-editor.ts',
+  editorControls: 'apps/web/src/editor-controls.ts',
   plan: 'docs/greenfield-north-star-erp-platform-plan.md',
   skill: '.agents/skills/ux-grammar/SKILL.md',
   surfaceContract: 'apps/web/src/surface-contract.ts',
@@ -618,6 +619,8 @@ function scanForBypass(
     paths.surfaceComposition,
     paths.componentRegistry,
     paths.documentEditor,
+    // The editor's own typed controls, consumed only by the generic editor.
+    paths.editorControls,
     paths.surfaceRuntime,
     // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
     // only by the closed registry; it is not an alternate surface authority.
@@ -627,6 +630,7 @@ function scanForBypass(
     paths.surfaceComposition,
     paths.componentRegistry,
     paths.documentEditor,
+    paths.editorControls,
     paths.surfaceRuntime,
     paths.workspaceEntry,
   ]);
@@ -661,6 +665,18 @@ function scanForBypass(
         repoPath,
         'SURF001_RUNTIME_BYPASS',
         'only SurfaceRuntime and its closed registry may delegate to the composition interpreter',
+      );
+    // The editor's controls are part of the generic editor delegate, not a
+    // second surface authority: nothing but that editor may render them.
+    if (
+      repoPath !== paths.documentEditor &&
+      /from ['"][^'"]*editor-controls\.js['"]/.test(source)
+    )
+      add(
+        violations,
+        repoPath,
+        'SURF001_RUNTIME_BYPASS',
+        'only the generic document editor may delegate to its controls',
       );
     if (!allowedMarkup.has(repoPath) && structuralMarkup.test(source)) {
       add(

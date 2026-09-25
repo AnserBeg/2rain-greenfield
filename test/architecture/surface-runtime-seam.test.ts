@@ -13,6 +13,7 @@ const seamPaths = [
   'apps/web/src/app-server.ts',
   'apps/web/src/component-registry.ts',
   'apps/web/src/document-editor.ts',
+  'apps/web/src/editor-controls.ts',
   'apps/web/src/surface-runtime.ts',
   'apps/web/src/workspace-entry.ts',
 ] as const;
@@ -160,6 +161,28 @@ test('the generic document editor may consume SurfaceRuntime types only', () => 
           violation.file === editorPath &&
           violation.ruleId === 'SURF001_RUNTIME_BYPASS' &&
           violation.message.includes('issued-view app server'),
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('editor controls are reachable only through the generic document editor', () => {
+  const files = seamFixture();
+  const appServerPath = 'apps/web/src/app-server.ts';
+  files[appServerPath] =
+    "import { renderReferenceControl } from './editor-controls.js';\n" +
+    files[appServerPath]!;
+  const root = createArchitectureFixture(files);
+
+  try {
+    assert.ok(
+      checkSurfaceRuntimeSeam(root).violations.some(
+        (violation) =>
+          violation.file === appServerPath &&
+          violation.ruleId === 'SURF001_RUNTIME_BYPASS' &&
+          violation.message.includes('generic document editor'),
       ),
     );
   } finally {

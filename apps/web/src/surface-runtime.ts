@@ -684,9 +684,10 @@ function renderSelectedSurface(
       ${renderedSlots.map((result) => result.html).join('')}
     </div>`;
   // The one hash-pinned script also enhances draft-editor reference controls and
-  // their create dialog. It is inert where none of its elements are present.
+  // their create dialog, and is emitted only when this response renders one.
+  // Matched inside a tag: escaped record text can never form `<... data-...`.
   const enhanceTaskDialog =
-    selected.documentEditor !== undefined ||
+    /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create)\b/u.test(body) ||
     (data.status === 'READY' &&
       selected.composition?.presentation?.task?.mode === 'nativeDialog' &&
       data.compositionTask?.includes('<dialog ') === true &&
