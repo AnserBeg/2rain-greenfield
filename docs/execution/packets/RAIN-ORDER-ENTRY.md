@@ -1,9 +1,70 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; remaining F3 continuation-boundary correction complete at `484a0da85f1aedcd77233ed4ec9ff953412257fc`; sole LOCAL author; stacked draft PR handoff. F1/F2 closed; fresh CI/ONLINE/owner acceptance pending; no merge/deployment.
+Status: evidence_ready; order-form usability correction complete at executable `@@HEAD@@` on the same PR #6 branch, from reviewed baseline `0566206d9ed41c2df301c2369d02446999f6063d`; sole LOCAL author; stacked draft PR handoff. F1/F2/F3 and Task P1/P2 closed and preserved; fresh CI / bounded ONLINE review of this delta / owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
+
+## Form-usability correction (2026-09-25)
+
+Owner rejected the reviewed forms: generic text inputs, inadequate reference
+pickers, no in-context creation of missing customers/vendors/products, and a
+stacked line layout. Reference: disposable PaneFlow copy at `d057daff`, driven
+in a real browser (customer combobox with "+ New customer", currency select,
+one-row lines).
+
+Claims of this delta:
+
+1. Canonical editor metadata declares each control: `choice` (offered set,
+   declared default) over a text field, `multiline`, `derived` (read from the
+   sibling reference's exact get), and reference pickers (list query, exact get,
+   label/detail fields, optional governed create flow). The compile-time
+   validator checks every binding against the entity model; the schema is closed.
+2. One reusable reference control serves Customer, Vendor and Product: server-side
+   search and paging, selection only from offered results re-read through the
+   declared get, keyboard search/selection, loading/no-results/error states, and
+   "+ New X" quick create returning to the same document, line and field with
+   focus. A form-changed carrier is accepted only after an authorized exact read.
+3. Quick create chains existing governed creates (Party then an active customer or
+   supplier PartyRole; Item), keeps every entered order value, works on an
+   invalid order, mints stable keys and record ids once, reports denied, partial
+   and read-back-withheld outcomes without selecting, and cancel writes nothing.
+4. Lines render as one aligned row under shared headings (Product | Quantity |
+   Unit | Unit price or Unit cost | Remove), stable line identity, compact cards
+   at phone width, no dead Tax/Discount/Route/Bin/FX columns.
+5. Exact decimals stay strings: canonical spelling, bounds from the pinned
+   operation contract checked before any step commits, comparison by value so
+   unchanged reopened lines plan no update. Save names each missing or invalid
+   field beside its control and writes nothing.
+
+Decisions of this delta:
+
+- Currency is an editor choice (CAD/USD/EUR, default CAD) over the domain's text
+  field. It is editor policy, not a domain rule: a stored value outside the set
+  is shown as "(current value)" and kept on unrelated edits; a submitted value
+  outside the set is refused.
+- The Sales unit is derived from the selected product's base unit and never read
+  from the form; Purchase has no unit field. No price, conversion or commercial
+  default is invented.
+- "+ New X" is offered when every step is a bound governed create without a
+  human confirmation grant. This is availability, not authority: the operation
+  gateway decides each step at invoke time and a refusal is reported without a
+  write. Per-principal pre-authorization of the button is not claimed.
+- ADR-0036 §2 gains a sixth behaviour (reference-control keyboard presentation)
+  under its §2a test; the create dialog reuses behaviour 5's native dialog, with
+  Escape activating the server-rendered Cancel. `ux-grammar` records the
+  reference-control rule. No framework, router, store, tenant script, client
+  fetch or client business rule.
+- `CompiledSurfaceInputField` gains the pinned contract's `bounds`, read from the
+  same admitted operation catalog; the provider still enforces them.
+- The order-entry fixture gains `--distributor` (master volume only) and two
+  verify-mode switches — revoke/restore one named permission, count stored
+  masters by name — so browser proofs observe refusals and duplicates in
+  PostgreSQL.
+- F2/F3 integration witnesses now drive their provider refusal with a well-formed
+  quantity the stub provider refuses (the editor refuses `'invalid'` before any
+  commit), and use a line's own unit price as the child sentinel (unit is
+  derived). Their subjects are unchanged.
 
 ## Claims
 
@@ -54,18 +115,25 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 
 ## Test it yourself
 
-The prior retained demo at port 33809 was not running when this correction began. Its persisted data was left untouched; the correction did not restart or retarget it, and every test used the supported lock wrapper without bypass or manual deletion.
-In Ubuntu worktree: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/order-entry-fixture.ts --serve`.
-Open printed URL. Sales/Purchasing open their order tables; New opens the same declared editor with company already explicit. Select Alpine Office Supply, enter number/date/currency, add products by name/SKU/base unit; Sales unit explicit. Edit/remove, Save draft, leave/reopen and Edit again. Save is sequential and does not release.
-Release Sales Notebook 10 EA → select line → Reserve 8 Calgary → Review/Confirm; select reservation → Ship 5 → Review/Confirm; Release remainder → Review/Confirm; Open packing: 5 EA.
-Release Purchase → select Notebook → Receive with actual cost → 2 EA, Calgary, 2.45 CAD → Review/Confirm. Receipts stay connected to order; no mandatory Receipt-line menu.
-At 390×844 controls become one column and existing child tables become priority cards. Setup remains reachable. Ctrl-C closes only this disposable fixture.
+In the Ubuntu worktree: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/order-entry-fixture.ts --serve --distributor`, then open the printed URL. Masters only: 45 parties, ~140 products, no orders.
+
+1. Sales → New. Currency is a select (CAD default, USD, EUR); Notes is multiline. Enter an order number and a note first.
+2. Customer: press Search with an empty box — 20 results and "More results"; Whitecourt Forestry is not among them. Type "Whitecourt" and Search (or press Enter): the server finds it. Arrow keys move through results; Enter selects; focus lands on "Change".
+3. Change, type a customer that does not exist, then "+ New customer". The name carries over; add a number and contact, "Create and use". The order number, currency and notes are still there, and the new customer is selected. Escape or Cancel instead writes nothing and returns to the search box.
+4. Line 1: search "notebook" and select — Unit shows EA. Add line; on the new line type a product that does not exist, "+ New product", give SKU and base unit: the line returns with that product and its unit. Quantities and prices accept exact decimals ("12.50" saves as 12.5).
+5. Remove a different line, Save draft, leave, reopen and Edit: values are exact; change a quantity, a price and the notes, remove a saved line (confirm), save and reopen again.
+6. Purchasing → New: the same editor with "+ New vendor" (creates a supplier role) and "Unit cost".
+7. Save with the customer empty, or a quantity with 19+ decimals: nothing is saved and each problem is named beside its field.
+8. At 390 px each line becomes a card. With JavaScript disabled the same search, select and create-and-return work as ordinary buttons.
+
+Release, reservation, shipment, packing and receiving are unchanged from the steps recorded before this correction. Ctrl-C closes only this disposable fixture.
 
 ## Filed limits
 
 - Production sign-in integration absent from loopback demo: trusted entry/current policy exist, while `composition-root.ts` explicitly selects `localDemoIdentity: true`. No fake login or production-authentication claim.
 - Process loss/expiry loses unsaved buffers/preferences; reopen persisted records before retrying work. Neither durable drafts nor an atomic batch-save capability is added.
 - PaneFlow commercial taxes/payment/FX, Purchase approval/supplier-invoice states and promised-date availability are outside existing Rain capabilities and this change.
+- Form-usability limits (2026-09-25): the customer and vendor pickers search all parties — `party_list` has no role predicate and order save does not enforce the role, so a supplier-only party is selectable as a customer; search runs on submit or Enter, with no type-ahead (ADR-0036 §7); "+ New X" reflects declared availability, not a per-principal pre-check; no likely-duplicate warning before a quick create; composition Task reference inputs (for example Stock location) still render a full select; the textarea focus ring is the browser default because the focus-ring gate's exact selector set was not widened; no line or order totals, tax, discount, price list, payment terms or FX, because Rain has none of them.
 - PR #5 alone remains unqualified for the selective Task client contract; the corrected PR #5 + PR #6 stack is the intended integration candidate, subject to fresh CI, ONLINE review and owner approval.
 
 ## Bounded ONLINE handoff
