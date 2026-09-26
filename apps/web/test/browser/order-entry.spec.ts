@@ -579,7 +579,9 @@ test('order editor pickers search past the first page and create missing masters
       .getByLabel('Search line 1 product', { exact: true })
       .fill('Thermal Roll');
     await submit(page, () =>
-      page.getByRole('button', { name: '+ New product', exact: true }).click(),
+      picker(page, 'Search line 1 product')
+        .getByRole('button', { name: '+ New product', exact: true })
+        .click(),
     );
     await dialog.getByLabel('SKU *').fill('TR-80');
     await dialog.getByLabel('Base unit *').fill('ROLL');
