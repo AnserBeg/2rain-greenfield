@@ -384,7 +384,8 @@ export function renderReferenceControl(
   const searchName = `draftSearch:${row.id}:${field.fieldId}`;
   // Three truthful endings: the query is exhausted (nothing more is shown), it
   // continues below the display limit (More), or it continues past the limit
-  // (a refine message that describes the search box; no More that cannot move).
+  // (a refine message under the search box it describes, not at the end of a
+  // scrolling list; no More that cannot move).
   const continues = lookup?.queryContinues === true;
   const limited = continues && lookup.displayLimitReached;
   const limitId = `${resultsId}-limit`;
@@ -412,18 +413,16 @@ export function renderReferenceControl(
               .join('')
           : `<li class="reference-empty" role="status">No ${h(noun.toLowerCase())} matches “${h(lookup.term)}”.</li>`
       }${
-        limited
-          ? `<li class="reference-empty reference-limit" id="${h(limitId)}" role="status">More matches exist. Refine your search.</li>`
-          : continues
-            ? `<li><button class="link-action" ${action('more')}>More results</button></li>`
-            : ''
+        continues && !limited
+          ? `<li><button class="link-action" ${action('more')}>More results</button></li>`
+          : ''
       }</ul>`
     : '';
   const create =
     context.createOffered && field.reference?.create
       ? `<button class="reference-create" ${action('create')}>+ ${h(field.reference.create.label)}</button>`
       : '';
-  return `${hidden}<div class="reference-control" id="${h(id)}" data-reference-control data-reference-results="${h(resultsId)}"><div class="reference-search"><input type="search" form="draft-editor-form" name="${h(searchName)}" value="${h(lookup?.term ?? '')}" placeholder="${h(`Search ${noun.toLowerCase()} by name or number`)}" aria-label="${h(`Search ${label.toLowerCase()}`)}" autocomplete="off" data-reference-search${searchFocus}${searchAttributes}><button class="secondary-action" ${action('search')} data-reference-submit>Search</button></div>${error.html}${results}${create}</div>`;
+  return `${hidden}<div class="reference-control" id="${h(id)}" data-reference-control data-reference-results="${h(resultsId)}"><div class="reference-search"><input type="search" form="draft-editor-form" name="${h(searchName)}" value="${h(lookup?.term ?? '')}" placeholder="${h(`Search ${noun.toLowerCase()} by name or number`)}" aria-label="${h(`Search ${label.toLowerCase()}`)}" autocomplete="off" data-reference-search${searchFocus}${searchAttributes}><button class="secondary-action" ${action('search')} data-reference-submit>Search</button></div>${error.html}${limited ? `<p class="reference-empty reference-limit" id="${h(limitId)}" role="status">More matches exist. Refine your search.</p>` : ''}${results}${create}</div>`;
 }
 
 /**

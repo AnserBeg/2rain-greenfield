@@ -1863,7 +1863,7 @@ table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:
 .reference-results{display:grid;gap:2px;max-height:16rem;margin:0;padding:var(--space-1);overflow:auto;list-style:none;border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel)}
 .reference-option{display:grid;gap:2px;width:100%;min-height:44px;padding:var(--space-2);text-align:left;border:0;border-radius:var(--radius-control);background:transparent;color:var(--ink);cursor:pointer}
 .reference-option:hover{background:var(--surface-sunken)}.reference-option small,.reference-selected small{color:var(--ink-muted)}
-.reference-empty{padding:var(--space-2);color:var(--ink-muted)}
+.reference-empty{padding:var(--space-2);color:var(--ink-muted)}.reference-limit{margin:0}
 .reference-create{justify-self:start;min-height:44px;padding:var(--space-1) 0;border:0;background:transparent;color:var(--accent-ink);font-weight:600;cursor:pointer}
 .reference-selected{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-height:44px;padding:var(--space-1) var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken)}.reference-selected__text{display:grid}
 .link-action{min-height:44px;padding:var(--space-1);border:0;background:transparent;color:var(--accent-ink);text-decoration:underline;cursor:pointer}
