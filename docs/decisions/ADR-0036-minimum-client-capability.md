@@ -36,7 +36,7 @@ with no third-party dependency. It is inlined into the served document and
 Pinning matters: the CSP currently blocks everything, and admitting script must be a
 deliberate, hash-bound exception rather than a relaxation that later admits anything.
 
-### 2. Exactly six behaviours — a closed set (amended 2026-09-15, 2026-09-25)
+### 2. Exactly seven behaviours — a closed set (amended 2026-09-15, 2026-09-25, 2026-09-26)
 
 1. Pending-state toggling.
 2. Polling **one** operation-status resource to drive server-rendered determinate progress.
@@ -58,6 +58,25 @@ deliberate, hash-bound exception rather than a relaxation that later admits anyt
    Cancel submit and Hide dispatches nothing. Every search, page, selection,
    create and cancel remains a server-rendered submit; the script fetches
    nothing, creates no element, holds no selection and decides nothing.
+   *Superseded for the draft editor's reference fields by behaviour 7 where the
+   script runs; unchanged as the no-JavaScript path.*
+7. In-place reference fields in the draft document editor (server-rendered
+   fragments). Focus, typing (debounced), More, selection, clear and the
+   governed create flow of one declared reference field send that field's own
+   server-rendered action as a same-origin `POST` to the page's own URL, marked
+   by the `x-rain-fragment` header, carrying the draft session, the field's
+   lookup request number and its selection generation. The server answers with
+   escaped server HTML naming the one element each part replaces — the field's
+   lookup region, the field, a declared dependent in the same row, or the create
+   slot — or asks for the ordinary submit instead (`x-rain-fragment-fallback`).
+   The script replaces only those elements, keeps focus and the highlighted
+   option, drops any answer older than the field's newest request, and holds
+   the order's own submit while a selection or create is in flight. Enter
+   chooses and never submits the order; Escape closes the popup first. It holds
+   no result cache, filters nothing, renders no business value and decides
+   nothing: every read is authorized per request on the server, every choice is
+   admitted there against the field's newest offered set and generation, and
+   search mutates no business data.
 
 The owner approved this bounded amendment for RAIN-META-SALES on 2026-09-15:
 document context is essential while reserving and partially shipping. Native HTML
@@ -78,6 +97,24 @@ that observes it: the order-entry browser proof drives keyboard search and
 selection with script and the same search, select and create-and-return with
 JavaScript disabled. Type-ahead fetching, a client result cache and client
 filtering stay refused under §7.
+
+The owner authorized the seventh behaviour for RAIN WORKSPACE INTERACTION
+COMPLETION on 2026-09-26, as the bounded server-rendered-fragment enhancement the
+product-parity assessment recommended, under §2a's test. It is this script's
+domain. Native HTML cannot deliver it: a submit re-renders the whole document,
+so options cannot open on focus or narrow while typing, and every search and
+selection reloads the page around fields the user is still completing. The
+capability it depends on exists: behaviour 6's server-side search, paging,
+selection and governed create, which remain the no-JavaScript path with the same
+authority and outcomes. It ships with the gates that observe it: controlled-
+executor tests of late, replayed, two-field and withdrawn-read answers and the
+HTTP transport guards, and the order-entry browser proof with scripted delays
+and JavaScript disabled. The CSP admits `connect-src 'self'` and nothing else
+changes: `script-src` stays one hash, no inline handler or `unsafe-inline`
+script is admitted, the server never redirects a fragment, and the fragment
+transport is the page's own submit, not a parallel write API. §8's audited
+hypermedia library is not adopted: the evidence is one bounded behaviour, not an
+accidental component framework.
 
 Closed, not illustrative. This programme governs by closed vocabularies and exact
 partitions everywhere else; an open licence to "progressively enhance" is how one script
@@ -154,8 +191,10 @@ existing rule applied to a fact one arm went and checked.
 
 Frameworks; hypermedia libraries as the default; hydration; client routing or stores;
 client rendering of business data; executable client validation; tenant-authored client
-code; component-emitting compiler output; script-created interactive elements; any second
-script; **client-side timing collection or beaconing** — added 2026-08-08, because
+code; component-emitting compiler output; script-created interactive elements (behaviour
+7 inserts elements the server rendered, never elements the script composes); any second
+script; client result caches or client filtering; fetching beyond behaviour 7's
+same-origin fragment POSTs; **client-side timing collection or beaconing** — added 2026-08-08, because
 measurement is not one of the five behaviours and
 [ADR-0032](ADR-0032-feedback-ladder-and-loading-states.md) §2c records the standing
 temptation to admit it as instrumentation rather than as capability. Wanting to observe

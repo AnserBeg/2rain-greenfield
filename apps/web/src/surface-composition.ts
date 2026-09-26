@@ -25,8 +25,16 @@ import {
   readCompiledSurfaceManifest,
   type CompiledSurfaceDefinition,
   type CompiledSurfaceField,
+  type CompiledSurfaceInputField,
 } from './surface-contract.js';
 import { escapeHtml as h } from './html.js';
+import {
+  DECIMAL_KINDS,
+  admitsChoice,
+  canonicalDecimal,
+  decimalProblem,
+  renderChoice,
+} from './control-semantics.js';
 import { operationMessageRef } from './gateway-error-codes.js';
 import { messageAttributes, messageBody } from './message-render.js';
 import type { SurfaceMessageCode } from './message-catalog.js';
@@ -538,7 +546,10 @@ export function renderCompositionFields(
     (column) => !assigned.includes(column.columnId),
   );
   if (!fields.length) return '';
-  return `<section class="panel"><h2>${h(surface.label)}</h2><dl class="record-fields">${ordered(
+  // Stored fields the header does not carry, read back as saved. Under a
+  // declared header the label is already the page's identity, so it is not
+  // repeated as this panel's heading.
+  return `<section class="panel" data-composition-fields><h2>${h(header ? 'Details' : surface.label)}</h2><dl class="record-fields">${ordered(
     fields,
   )
     .map(
@@ -672,6 +683,111 @@ export function renderCompositionActions(
     ? `<p><a href="${h(returnTo)}">Back to order</a></p>`
     : '';
   return `<div class="composition-actions">${back}${surface.composition!.actions.length ? `<section class="panel command-bar" aria-label="Selected record actions">${actions || compositionMessage('COMPOSITION_SELECTION_REQUIRED')}</section>` : ''}</div>`;
+}
+
+type TaskInput = Action['inputs'][number];
+
+/**
+ * The operation field a Task input is bound to by its steps, read from the
+ * pinned operation contract. A text input bound to a decimal field takes the
+ * shared exact-decimal semantics and that field's bounds; nothing is inferred
+ * from the input's label or id.
+ */
+function boundInputField(
+  view: RequestRuntimeView,
+  action: Action,
+  inputId: string,
+): CompiledSurfaceInputField | null {
+  const catalog = parsePinnedOperationCatalog(
+    view.projections.operation.payload,
+  );
+  for (const step of action.steps)
+    for (const binding of step.bindings) {
+      if (
+        binding.value.source !== 'input' ||
+        binding.value.inputId !== inputId ||
+        binding.path.length !== 2 ||
+        (binding.path[0] !== 'values' && binding.path[0] !== 'patch')
+      )
+        continue;
+      const field = catalog
+        .find((operation) => operation.operationId === step.operation.targetId)
+        ?.inputContract?.fields.find(
+          (candidate) => candidate.fieldId === binding.path[1],
+        );
+      if (field)
+        return {
+          fieldId: field.fieldId,
+          kind: field.fieldKind,
+          bounds: field.bounds,
+          required: field.required,
+          temporal: field.temporal,
+        } as unknown as CompiledSurfaceInputField;
+    }
+  return null;
+}
+
+/**
+ * A derived input's value, read on the server from the row the action
+ * selected: the declared column's field, through its declared exact get where
+ * the column names one. It is never taken from the submission, so an operator
+ * cannot type a unit that disagrees with the selected product.
+ */
+async function derivedInputValue(
+  view: RequestRuntimeView,
+  gateways: CompositionGateways,
+  data: CompositionData,
+  column: TaskColumn,
+): Promise<string | null> {
+  const declared = data.children
+    .find((child) => child.definition.datasetId === column.datasetId)
+    ?.definition.columns.find((value) => value.columnId === column.columnId);
+  const selected = data.selections[column.datasetId];
+  if (!declared || !selected) return null;
+  const value = recordValue(selected, declared.field);
+  if (declared.reference && typeof value === 'string' && value) {
+    const result = await query(
+      view,
+      gateways,
+      declared.reference.query.targetId,
+      data.scope,
+      { recordId: value, includeArchived: false },
+    );
+    if (result.outcome !== 'exact' || result.records.length !== 1) return null;
+    const derived = recordValue(
+      result.records[0]!,
+      declared.reference.labelField.targetId,
+    );
+    return typeof derived === 'string' && derived ? derived : null;
+  }
+  return typeof value === 'string' && value ? value : null;
+}
+
+/** How a reviewed input reads: a choice by its offered label, anything else as entered. */
+function shownInput(input: TaskInput, value: string): string {
+  return input.presentation?.kind === 'choice'
+    ? (input.presentation.options.find((option) => option.value === value)
+        ?.label ?? value)
+    : value;
+}
+
+/** A choice input's initial value: a stored record value it offers, else its declared default. */
+function choiceDefault(input: TaskInput, data: CompositionData | null): string {
+  const presentation = input.presentation;
+  if (presentation?.kind !== 'choice') return '';
+  if (presentation.defaultFrom && data) {
+    try {
+      const stored = recordValue(data.record, presentation.defaultFrom.field);
+      if (
+        typeof stored === 'string' &&
+        presentation.options.some((option) => option.value === stored)
+      )
+        return stored;
+    } catch {
+      /* An unavailable record value is simply no default. */
+    }
+  }
+  return presentation.defaultValue ?? '';
 }
 
 type TaskPresentation = NonNullable<
@@ -1008,7 +1124,7 @@ export async function submitCompositionAction(
           current.action.presentation.task,
           current.prepared.presentation,
         )
-      : `<dl class="composition-reviewed-inputs">${current.action.inputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(displayInputs[input.inputId] ?? '')}</dd></div>`).join('')}</dl>`;
+      : `<dl class="composition-reviewed-inputs">${current.action.inputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(shownInput(input, displayInputs[input.inputId] ?? ''))}</dd></div>`).join('')}</dl>`;
   const hidden = `<input type="hidden" name="taskToken" value="${h(token!)}"><input type="hidden" name="compositionAction" value="${h(current.action.actionId)}">`;
   if (current.busy)
     return taskDocument(
@@ -1020,34 +1136,53 @@ export async function submitCompositionAction(
         `${compositionMessage('COMPOSITION_COMMITTED_WITHHELD', 'status')}${back}`,
     );
   let error = '';
+  // Problems with the entered values, named beside each input.
+  const fieldErrors = new Map<string, string>();
   if (submission.taskStage === 'prepare' && !current.confirmed) {
     const generation = ++current.preparation;
     current.prepared = null;
-    const inputs = Object.freeze(
-      Object.fromEntries(
-        current.action.inputs.map((input) => [
-          input.inputId,
-          (submission[input.inputId] ?? '').trim(),
-        ]),
-      ),
-    );
+    const collected: Record<string, string> = {};
+    for (const input of current.action.inputs) {
+      const presentation = input.presentation;
+      let value = (submission[input.inputId] ?? '').trim();
+      if (presentation?.kind === 'derived') {
+        // Read on the server from the selected row; the submission is ignored.
+        value =
+          (await derivedInputValue(
+            view,
+            gateways,
+            current.data,
+            presentation.column,
+          ).catch(() => null)) ?? '';
+        if (!value)
+          fieldErrors.set(
+            input.inputId,
+            'Not available for the selected line.',
+          );
+      } else if (!admitsChoice(input, value)) {
+        fieldErrors.set(input.inputId, 'Choose one of the offered values.');
+        value = '';
+      } else if (value && input.type === 'text') {
+        const bound = boundInputField(view, current.action, input.inputId);
+        if (bound && DECIMAL_KINDS.includes(bound.kind)) {
+          const problem = decimalProblem(value, bound);
+          if (problem) fieldErrors.set(input.inputId, problem);
+          else value = canonicalDecimal(value) ?? value;
+        }
+      }
+      if (
+        input.type === 'quantity' &&
+        value &&
+        !/^(?:[1-9]\d*(?:\.\d+)?|0\.\d*[1-9]\d*)$/.test(value)
+      )
+        fieldErrors.set(input.inputId, 'Enter a positive exact quantity.');
+      if (input.required && !value && !fieldErrors.has(input.inputId))
+        fieldErrors.set(input.inputId, 'Required.');
+      collected[input.inputId] = value;
+    }
+    const inputs = Object.freeze(collected);
     const referenceLabels: Record<string, string> = { ...inputs };
-    if (
-      current.action.inputs.some(
-        (input) => input.required && !inputs[input.inputId],
-      )
-    )
-      error = 'Complete the required inputs.';
-    if (
-      current.action.inputs.some(
-        (input) =>
-          input.type === 'quantity' &&
-          !/^(?:[1-9]\d*(?:\.\d+)?|0\.\d*[1-9]\d*)$/.test(
-            inputs[input.inputId] ?? '',
-          ),
-      )
-    )
-      error = 'Enter a positive exact quantity.';
+    if (fieldErrors.size) error = 'Complete the required inputs.';
     try {
       for (const input of current.action.inputs.filter(
         (input) => input.type === 'reference',
@@ -1198,7 +1333,10 @@ export async function submitCompositionAction(
       }
       return taskDocument(
         () =>
-          `${compositionMessage('COMPOSITION_COMPLETE', 'status')}<p>Closing this task does not undo submitted work.</p>${current.receipt ? `<details><summary>Recovery receipt</summary><pre>${h(current.receipt)}</pre></details>` : ''}${back}`,
+          // Every step committed and was read back: the business result is
+          // what was reviewed and confirmed. The generic status and receipt stay
+          // below it, and a withheld or uncertain outcome never reaches here.
+          `<section class="composition-task-result" data-task-result role="status" aria-label="Result"><h3>${h(current.action.label)}: done</h3>${previewInputs()}</section><p>Closing this task does not undo submitted work.</p><details class="composition-task-support"><summary>Status and recovery receipt</summary>${compositionMessage('COMPOSITION_COMPLETE')}${current.receipt ? `<pre>${h(current.receipt)}</pre>` : ''}</details>${back}`,
       );
     } catch (failure) {
       const ref = operationMessageRef(failure);
@@ -1219,11 +1357,39 @@ export async function submitCompositionAction(
     );
   return taskDocument(() => {
     const controls = ordered(current.action.inputs).map((input) => {
-      const control =
-        input.type === 'reference' && input.query && input.labelField
-          ? `<select name="${h(input.inputId)}" ${input.required ? 'required' : ''}><option value="">Select…</option>${(displayChoices[input.inputId] ?? []).map((record) => `<option value="${h(record.recordId)}" ${current.inputs[input.inputId] === record.recordId ? 'selected' : ''}>${h(text(recordValue(record, input.labelField!.targetId)))}</option>`).join('')}</select>`
-          : `<input name="${h(input.inputId)}" value="${h(displayInputs[input.inputId] ?? '')}" ${input.required ? 'required' : ''} ${input.type === 'quantity' ? 'inputmode="decimal"' : ''}>`;
-      return `<label class="field">${h(input.label)}${control}</label>`;
+      const presentation = input.presentation;
+      const problem = fieldErrors.get(input.inputId);
+      const invalid = problem
+        ? ` aria-invalid="true" aria-describedby="${h(input.inputId)}-error"`
+        : '';
+      const required = input.required ? ' required' : '';
+      const value = current.inputs[input.inputId] ?? '';
+      let control: string;
+      if (input.type === 'reference' && input.query && input.labelField)
+        control = `<select name="${h(input.inputId)}"${required}${invalid}><option value="">Select…</option>${(displayChoices[input.inputId] ?? []).map((record) => `<option value="${h(record.recordId)}" ${value === record.recordId ? 'selected' : ''}>${h(text(recordValue(record, input.labelField!.targetId)))}</option>`).join('')}</select>`;
+      else if (presentation?.kind === 'derived')
+        // Read-only: taken from the selected row, never from the submission.
+        control = `<output class="derived-value" data-derived-input>${h(renderData ? taskColumnText(renderData, presentation.column) : '—')}</output>`;
+      else if (presentation?.kind === 'choice')
+        control = renderChoice(
+          presentation,
+          ` name="${h(input.inputId)}"${required}${invalid}`,
+          value || choiceDefault(input, renderData),
+          { required: input.required, keepCurrent: false, label: input.label },
+        );
+      else if (presentation?.kind === 'multiline')
+        control = `<textarea name="${h(input.inputId)}" rows="3"${required}${invalid}>${h(value)}</textarea>`;
+      else {
+        const bound =
+          input.type === 'text'
+            ? boundInputField(view, current.action, input.inputId)
+            : null;
+        const numeric =
+          input.type === 'quantity' ||
+          (bound !== null && DECIMAL_KINDS.includes(bound.kind));
+        control = `<input name="${h(input.inputId)}" value="${h(displayInputs[input.inputId] ?? '')}"${required}${numeric ? ' inputmode="decimal" autocomplete="off"' : ''}${invalid}>`;
+      }
+      return `<label class="field">${h(input.label)}${control}${problem ? `<small class="field-error" id="${h(input.inputId)}-error">${h(problem)}</small>` : ''}</label>`;
     });
     return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${controls.join('')}<p class="composition-task-consequence">${h(current.action.description)}</p><footer class="composition-task-footer"><button name="taskStage" value="prepare">${h(current.action.presentation?.task?.confirmation.reviewLabel ?? `Review ${current.action.label}`)}</button></footer></form>${back}`;
   });

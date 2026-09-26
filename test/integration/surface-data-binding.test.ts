@@ -4602,6 +4602,24 @@ class OrderEntryExecutor
   pageLists = false;
   /** List executions per query that reached this executor, for bounded-work checks. */
   readonly listReads = new Map<string, number>();
+  /**
+   * Reads of a query wait while it is held, so a test can deliver answers
+   * out of order. `hold` returns the release.
+   */
+  readonly holds = new Map<string, Promise<void>>();
+  hold(queryId: string) {
+    let release!: () => void;
+    this.holds.set(
+      queryId,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    return () => {
+      this.holds.delete(queryId);
+      release();
+    };
+  }
   seed(
     entity: string,
     values: Record<string, ImmutableJsonValue>,
@@ -4643,6 +4661,7 @@ class OrderEntryExecutor
     request: SemanticQueryExecutionRequest | SemanticOperationExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope | SemanticOperationResultEnvelope> {
     if ('arguments' in request) {
+      await this.holds.get(request.definition.queryId);
       if (this.failingQueries.has(request.definition.queryId))
         throw new Error('Isolated provider read failure');
       const args = asRecord(request.arguments);
@@ -4650,6 +4669,7 @@ class OrderEntryExecutor
         ? args[request.definition.legalEntityScope.operand.parameterId]
         : null;
       const parent = request.list?.query.parentScope;
+      const reference = request.list?.query.referenceScope;
       const fieldFilters = request.list?.query.fieldFilters;
       const related = request.list?.relatedFilter;
       // Like the PostgreSQL executor: exact filters and the related-record
@@ -4662,6 +4682,8 @@ class OrderEntryExecutor
           (!row.archived || args.includeArchived === true) &&
           (!args.recordId || row.recordId === args.recordId) &&
           (!parent || row.values[parent.relationId] === parent.recordId) &&
+          (!reference ||
+            row.values[reference.relationId] === reference.recordId) &&
           (fieldFilters ?? []).every(
             (filter) => row.values[filter.fieldId] === filter.value,
           ) &&
@@ -4677,6 +4699,7 @@ class OrderEntryExecutor
             )),
       );
       const echoed = {
+        ...(reference ? { referenceScope: reference } : {}),
         ...(fieldFilters ? { fieldFilters } : {}),
         ...(request.list?.query.relatedFilter
           ? { relatedFilter: request.list.query.relatedFilter }
@@ -6057,6 +6080,713 @@ test('Milestone A: role-eligible lookups and policy-aware quick create', async (
       assert.equal(f.executor.calls.length, 0, 'the preview never writes');
     },
   );
+});
+
+/**
+ * RAIN WORKSPACE INTERACTION COMPLETION, milestone B. A reference field is
+ * answered in place: a lookup answers only its own region, a selection only its
+ * field and that row's declared dependents. Every answer is bound to the draft
+ * session, the field's newest lookup request and its selection generation, so a
+ * late or duplicated answer can neither overwrite a newer edit nor select from
+ * superseded results, and two fields answering out of order never touch each
+ * other. Nothing here captures the form or advances the page's draft version.
+ */
+test('Milestone B: reference fields answer in place, bound to their own request and generation', async (t) => {
+  type Answer = NonNullable<Awaited<ReturnType<typeof documentEditor>>>;
+  const setup = async () => {
+    const f = await orderEntryWitness();
+    f.executor.pageLists = true;
+    const dual = f.executor.seedParty({
+      [`${f.ns}:field.party_name`]: 'Dual role co',
+    });
+    const editor = (await f.open())!;
+    const all = Object.values(editor.slots!).join('');
+    const header =
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+        all,
+      )![1]!;
+    const line =
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_line_item_id"/.exec(
+        all,
+      )![1]!;
+    const session = hiddenValue(editor.slots!.keyFacts!, 'draftSession');
+    const version = hiddenValue(editor.slots!.keyFacts!, 'draftVersion');
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    const product = `${f.ns}:field.sales_order_line_item_id`;
+    const fragment = (values: Record<string, string>, scope = f.scopes[0]!) =>
+      documentEditor(
+        f.view,
+        f.form,
+        f.surfaces,
+        f.url,
+        scope,
+        f.gateways,
+        { draftSession: session, draftVersion: version, ...values },
+        'fragment',
+      ) as Promise<Answer>;
+    const search = (
+      rowId: string,
+      fieldId: string,
+      term: string,
+      seq: number,
+    ) =>
+      fragment({
+        draftAction: `search:${rowId}:${fieldId}`,
+        draftLookupSeq: String(seq),
+        [`draftSearch:${rowId}:${fieldId}`]: term,
+      });
+    const select = (
+      rowId: string,
+      fieldId: string,
+      recordId: string,
+      seq: number,
+      generation: number,
+    ) =>
+      fragment({
+        draftAction: `select:${rowId}:${fieldId}:${recordId}`,
+        draftLookupSeq: String(seq),
+        draftFieldGeneration: String(generation),
+      });
+    const targets = (answer: Answer) =>
+      [...answer.html.matchAll(/data-fragment-target="([^"]+)"/g)].map(
+        (match) => match[1]!,
+      );
+    const id = (rowId: string, fieldId: string) =>
+      `editor-${rowId}-${fieldId.replace(/[^a-z0-9]/giu, '-')}`;
+    return {
+      f,
+      dual,
+      header,
+      line,
+      session,
+      customer,
+      product,
+      fragment,
+      search,
+      select,
+      targets,
+      id,
+      editor,
+    };
+  };
+
+  await t.test(
+    'a lookup answers only its own region and writes nothing',
+    async () => {
+      const s = await setup();
+      const answer = await s.search(s.header, s.customer, 'Readable', 1);
+      assert.equal(answer.fragment, true);
+      assert.equal(answer.statusCode, 200);
+      assert.deepEqual(s.targets(answer), [
+        `${s.id(s.header, s.customer)}-lookup`,
+      ]);
+      assert.match(answer.html, /<strong>Readable customer<\/strong>/);
+      // "+ New customer" is the popup's last row.
+      assert.match(answer.html, /\+ New customer<\/button><\/li><\/ul>/);
+      // No document: no form, fieldset or other field of the order.
+      assert.doesNotMatch(
+        answer.html,
+        /<form|<fieldset|data-document-editor|sales_order_number/,
+      );
+      assert.equal(s.f.executor.calls.length, 0);
+      // The page's draft version did not move: its next full submit applies.
+      const page = (await s.f.post(s.editor, 'refresh'))!;
+      assert.equal(page.statusCode, 200);
+    },
+  );
+
+  await t.test(
+    'an older lookup answer is superseded and cannot be selected from',
+    async () => {
+      const s = await setup();
+      assert.equal(
+        (await s.search(s.header, s.customer, 'Readable', 2)).statusCode,
+        200,
+      );
+      const older = await s.search(s.header, s.customer, 'Dual', 1);
+      assert.equal(older.statusCode, 409);
+      assert.equal(older.html, '');
+      const newer = await s.search(s.header, s.customer, 'Dual', 3);
+      assert.match(newer.html, /Dual role co/);
+      assert.doesNotMatch(newer.html, /Readable customer/);
+      // A record only the superseded request offered is not selectable any more.
+      const stale = await s.select(s.header, s.customer, s.f.party, 2, 0);
+      assert.equal(stale.statusCode, 409);
+      assert.match(stale.html, /Those results changed/);
+      const chosen = await s.select(s.header, s.customer, s.dual, 3, 0);
+      assert.equal(chosen.statusCode, 200);
+      assert.match(chosen.html, /data-selected-label="Dual role co"/);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'two fields answering out of order never touch each other',
+    async () => {
+      const s = await setup();
+      // The customer lookup is held; the product lookup and selection finish
+      // first; then the customer answer arrives and applies to its field only.
+      const release = s.f.executor.hold(`${s.f.ns}:query.party_list`);
+      const slowCustomer = s.search(s.header, s.customer, 'Readable', 1);
+      const productLookup = await s.search(s.line, s.product, 'Readable', 1);
+      assert.deepEqual(s.targets(productLookup), [
+        `${s.id(s.line, s.product)}-lookup`,
+      ]);
+      const productChosen = await s.select(s.line, s.product, s.f.item, 1, 0);
+      assert.equal(productChosen.statusCode, 200);
+      // The field and its declared dependent (Unit), and nothing else.
+      assert.deepEqual(s.targets(productChosen), [
+        `${s.id(s.line, s.product)}-field`,
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_id`),
+      ]);
+      assert.match(productChosen.html, />EA</);
+      release();
+      const customerLookup = await slowCustomer;
+      assert.equal(customerLookup.statusCode, 200);
+      assert.deepEqual(s.targets(customerLookup), [
+        `${s.id(s.header, s.customer)}-lookup`,
+      ]);
+      assert.doesNotMatch(customerLookup.html, /Readable product/);
+      const customerChosen = await s.select(
+        s.header,
+        s.customer,
+        s.f.party,
+        1,
+        0,
+      );
+      assert.equal(customerChosen.statusCode, 200);
+      // A full save then carries both in-place selections exactly.
+      const values = s.f.values(s.editor);
+      const saved = (await s.f.post(s.editor, 'save', values))!;
+      assert.equal(saved.statusCode, 303);
+      const stored = [...s.f.executor.rows.values()];
+      assert.ok(stored.some((row) => row.values[s.customer] === s.f.party));
+      assert.ok(stored.some((row) => row.values[s.product] === s.f.item));
+    },
+  );
+
+  await t.test(
+    'a late or replayed selection cannot overwrite a newer one',
+    async () => {
+      const s = await setup();
+      await s.search(s.header, s.customer, 'Readable', 1);
+      const winner = await s.select(s.header, s.customer, s.f.party, 1, 0);
+      assert.equal(winner.statusCode, 200);
+      await s.search(s.header, s.customer, 'Dual', 2);
+      // Replayed with the generation it was based on: refused, current value shown.
+      const replayed = await s.select(s.header, s.customer, s.dual, 2, 0);
+      assert.equal(replayed.statusCode, 409);
+      assert.match(replayed.html, /changed meanwhile/);
+      assert.match(replayed.html, /data-selected-label="Readable customer"/);
+      // Overtaken while its exact read was in flight: a clear lands first.
+      const hold = s.f.executor.hold(`${s.f.ns}:query.party_get`);
+      const overtaken = s.select(s.header, s.customer, s.dual, 2, 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      const cleared = await s.fragment({
+        draftAction: `clear:${s.header}:${s.customer}`,
+        draftFieldGeneration: '1',
+      });
+      assert.equal(cleared.statusCode, 200);
+      hold();
+      const late = await overtaken;
+      assert.equal(late.statusCode, 409);
+      assert.doesNotMatch(late.html, /data-selected-label="Dual role co"/);
+      assert.match(
+        late.html,
+        new RegExp(`name="draft:${s.header}:${s.customer}" value=""`),
+      );
+    },
+  );
+
+  await t.test(
+    'a withdrawn read drops the results and discloses nothing',
+    async () => {
+      const s = await setup();
+      assert.match(
+        (await s.search(s.header, s.customer, 'Readable', 1)).html,
+        /Readable customer/,
+      );
+      s.f.deniedReads.add(`${s.f.ns}:permission.party_read`);
+      const denied = await s.search(s.header, s.customer, 'Readable', 2);
+      assert.equal(denied.statusCode, 422);
+      assert.doesNotMatch(denied.html, /Readable customer/);
+      assert.match(denied.html, /data-message=/);
+      const selectDenied = await s.select(
+        s.header,
+        s.customer,
+        s.f.party,
+        2,
+        0,
+      );
+      assert.notEqual(selectDenied.statusCode, 200);
+      assert.doesNotMatch(selectDenied.html, /Readable customer/);
+    },
+  );
+
+  await t.test(
+    'a removed row, another company and an expired session are not answered in place',
+    async () => {
+      const s = await setup();
+      let editor = (await s.f.post(s.editor, 'add', s.f.values(s.editor)))!;
+      const extra = [
+        ...Object.values(editor.slots!)
+          .join('')
+          .matchAll(
+            /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_line_item_id"/g,
+          ),
+      ]
+        .map((match) => match[1]!)
+        .find((rowId) => rowId !== s.line)!;
+      editor = (await s.f.post(editor, `remove:${extra}`))!;
+      assert.equal(editor.statusCode, 200);
+      const removed = await s.search(extra, s.product, 'Readable', 1);
+      assert.equal(removed.statusCode, 422);
+      assert.equal(removed.fragment, true);
+      const foreign = await s.fragment(
+        {
+          draftAction: `search:${s.header}:${s.customer}`,
+          draftLookupSeq: '1',
+        },
+        s.f.scopes[1]!,
+      );
+      assert.equal(foreign.fallback, true);
+      const expired = await documentEditor(
+        s.f.view,
+        s.f.form,
+        s.f.surfaces,
+        s.f.url,
+        s.f.scopes[0]!,
+        s.f.gateways,
+        {
+          draftSession: randomUUID(),
+          draftAction: `search:${s.header}:${s.customer}`,
+          draftLookupSeq: '1',
+        },
+        'fragment',
+      );
+      assert.equal(expired?.fallback, true);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'create opens in place, returns to its field and is truthful when refused',
+    async () => {
+      const s = await setup();
+      const opened = await s.fragment({
+        draftAction: `create:${s.header}:${s.customer}`,
+        [`draftSearch:${s.header}:${s.customer}`]: 'Zenith Glazing',
+      });
+      assert.deepEqual(s.targets(opened), ['editor-create-slot']);
+      assert.match(opened.html, /data-editor-create-fragment/);
+      assert.match(
+        opened.html,
+        /name="create:[^"]+party_name" value="Zenith Glazing"/,
+      );
+      assert.doesNotMatch(opened.html, /data-task-close/);
+      const task = hiddenValue(opened.html, 'draftCreateTask');
+      // While it is open the order is paused, in place as well as in full.
+      const paused = await s.search(s.header, s.customer, 'x', 1);
+      assert.equal(paused.statusCode, 409);
+      const created = await s.fragment({
+        draftCreateTask: task,
+        draftCreate: 'submit',
+        [`create:${s.f.ns}:field.party_number`]: 'C-ZEN',
+        [`create:${s.f.ns}:field.party_name`]: 'Zenith Glazing',
+      });
+      assert.equal(created.statusCode, 200);
+      assert.deepEqual(s.targets(created), [
+        'editor-create-slot',
+        `${s.id(s.header, s.customer)}-field`,
+      ]);
+      assert.match(created.html, /data-selected-label="Zenith Glazing"/);
+      assert.match(created.html, /data-editor-create-selected/);
+      assert.equal(s.f.executor.calls.length, 2);
+
+      // Refused by current policy after the flow opened: Cancel only.
+      const again = await s.fragment({
+        draftAction: `create:${s.header}:${s.customer}`,
+        [`draftSearch:${s.header}:${s.customer}`]: 'Refused Co',
+      });
+      const refusedTask = hiddenValue(again.html, 'draftCreateTask');
+      s.f.deniedReads.add(`${s.f.ns}:permission.party_create`);
+      const refused = await s.fragment({
+        draftCreateTask: refusedTask,
+        draftCreate: 'submit',
+        [`create:${s.f.ns}:field.party_number`]: 'C-REF',
+        [`create:${s.f.ns}:field.party_name`]: 'Refused Co',
+      });
+      assert.equal(refused.statusCode, 422);
+      assert.match(refused.html, /data-editor-create-denied/);
+      assert.doesNotMatch(refused.html, /value="submit"/);
+      const cancelled = await s.fragment({
+        draftCreateTask: refusedTask,
+        draftCreate: 'cancel',
+      });
+      assert.deepEqual(s.targets(cancelled), [
+        'editor-create-slot',
+        `${s.id(s.header, s.customer)}-field`,
+      ]);
+      assert.match(cancelled.html, /data-selected-label="Zenith Glazing"/);
+      assert.equal(s.f.executor.calls.length, 2, 'nothing more was written');
+    },
+  );
+});
+
+/**
+ * The fragment transport over HTTP: only the owned script's same-origin POST,
+ * carrying the custom header, is answered in place. A cross-site request is
+ * refused, an ordinary POST stays a page, anything the page must answer asks
+ * for the fallback, and the page's CSP admits same-origin fetch and nothing
+ * more.
+ */
+test('Milestone B: the fragment transport is same-origin, header-bound and falls back to the page', async () => {
+  const f = await orderEntryWitness();
+  const server = createSurfaceRuntimeServer(f.entry, f.gateways);
+  const baseUrl = await listen(server);
+  const path = f.url.pathname + f.url.search;
+  try {
+    const page = await fetch(`${baseUrl}${path}`, {
+      headers: { authorization: 'a' },
+    });
+    const html = await page.text();
+    assert.equal(page.status, 200);
+    assert.match(
+      page.headers.get('content-security-policy')!,
+      /connect-src 'self';/,
+    );
+    assert.match(html, /<script>/);
+    const session = hiddenValue(html, 'draftSession');
+    const header =
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+        html,
+      )![1]!;
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    const body = new URLSearchParams({
+      draftSession: session,
+      draftVersion: '0',
+      draftAction: `search:${header}:${customer}`,
+      draftLookupSeq: '1',
+      [`draftSearch:${header}:${customer}`]: 'Readable',
+    });
+    const post = (headers: Record<string, string>, form = body) =>
+      fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          authorization: 'a',
+          'content-type': 'application/x-www-form-urlencoded',
+          ...headers,
+        },
+        body: form,
+        redirect: 'manual',
+      });
+    const inPlace = await post({
+      'x-rain-fragment': '1',
+      'sec-fetch-site': 'same-origin',
+    });
+    assert.equal(inPlace.status, 200);
+    assert.equal(inPlace.headers.get('x-rain-fragment'), 'fragment');
+    const answer = await inPlace.text();
+    assert.match(answer, /^<template data-fragment-target="[^"]+-lookup">/);
+    assert.match(answer, /Readable customer/);
+    const crossSite = await post({
+      'x-rain-fragment': '1',
+      'sec-fetch-site': 'cross-site',
+    });
+    assert.equal(crossSite.status, 403);
+    assert.equal(await crossSite.text(), '');
+    const ordinary = await post({});
+    assert.match(await ordinary.text(), /^<!doctype html>/);
+    const unknown = new URLSearchParams(body);
+    unknown.set('draftSession', randomUUID());
+    const expired = await post({ 'x-rain-fragment': '1' }, unknown);
+    assert.equal(expired.status, 409);
+    assert.equal(expired.headers.get('x-rain-fragment-fallback'), 'page');
+    assert.equal(f.executor.calls.length, 0);
+  } finally {
+    await close(server);
+  }
+});
+
+/**
+ * RAIN WORKSPACE INTERACTION COMPLETION, milestone C. A composed Task reuses
+ * the editor's control semantics. Receiving shows the selected line's product
+ * base unit read on the server (a forged unit is ignored), offers the declared
+ * currency codes starting from the order's own currency (a forged code is
+ * refused), and takes the bound field's exact-decimal bounds for the cost (a
+ * malformed cost is named beside its input). Nothing runs until every input is
+ * admitted; the committed line carries exactly the reviewed values.
+ */
+test('Milestone C: receiving inputs are derived, offered and exact, never free text', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const order = f.executor.seed(
+    'purchase_order',
+    {
+      [`${ns}:field.purchase_order_number`]: 'PO-RECEIVE',
+      [`${ns}:field.purchase_order_supplier_party_id`]: f.party,
+      [`${ns}:field.purchase_order_currency`]: 'USD',
+      [`${ns}:field.purchase_order_order_date`]: '2026-09-26T09:30:00Z',
+      // Selected but unset, as the provider returns them.
+      [`${ns}:field.purchase_order_expected_date`]: null,
+      [`${ns}:field.purchase_order_notes`]: null,
+      [`${ns}:derived_state_field.machine.purchase_order_lifecycle`]: `${ns}:state.purchase_order_released`,
+    },
+    scope,
+  );
+  const line = f.executor.seed(
+    'purchase_order_line',
+    {
+      [`${ns}:field.purchase_order_line_line_number`]: '1',
+      [`${ns}:field.purchase_order_line_item_id`]: f.item,
+      [`${ns}:field.purchase_order_line_ordered_quantity`]: '10',
+      [`${ns}:field.purchase_order_line_unit_price`]: '2.4',
+      [`${ns}:relation.purchase_order_line_order`]: order,
+    },
+    scope,
+  );
+  const location = f.executor.seed('location', {
+    [`${ns}:field.location_name`]: 'Calgary warehouse',
+  });
+  const lines = `${ns}:dataset.purchasing_lines`;
+  const params = new URLSearchParams({
+    surface: `${ns}:surface.purchase_order_detail`,
+    record: order,
+    [`${ns}:parameter.purchase_order_get_legal_entity_scope`]: scope,
+    dataset: lines,
+    selected: line,
+    [`select:${lines}`]: line,
+  });
+  const path = `/?${params}`;
+  const input = (name: string) => `${ns}:input.receive_${name}`;
+  const submit = (body: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      { compositionAction: `${ns}:action.receive_known`, ...body },
+      f.gateways,
+    );
+  const entry = await submit({});
+  assert.equal(entry.statusCode, 200);
+  const taskToken = hiddenValue(entry.html, 'taskToken');
+  // The unit is shown, not asked for; the currency is a choice starting from
+  // the order's USD; the cost is a decimal input.
+  assert.match(
+    entry.html,
+    /<output class="derived-value" data-derived-input>EA<\/output>/,
+  );
+  assert.doesNotMatch(entry.html, new RegExp(`name="${input('unit')}"`));
+  assert.match(
+    entry.html,
+    new RegExp(
+      `<select name="${input('currency')}"[^>]*>[\\s\\S]*?<option value="USD" selected>`,
+    ),
+  );
+  assert.match(
+    entry.html,
+    new RegExp(`<input name="${input('cost')}"[^>]*inputmode="decimal"`),
+  );
+  const forged = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    [input('quantity')]: '2',
+    [input('unit')]: 'BOX',
+    [input('location')]: location,
+    [input('cost')]: '2.4.5',
+    [input('currency')]: 'GBP',
+  });
+  assert.match(forged.html, /COMPOSITION_INPUT_INVALID/);
+  assert.match(forged.html, /Choose one of the offered values\./);
+  assert.match(forged.html, /Enter a plain number, such as 12\.5\./);
+  assert.equal(f.executor.calls.length, 0, 'nothing runs before admission');
+  const review = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    [input('quantity')]: '2',
+    [input('unit')]: 'BOX',
+    [input('location')]: location,
+    [input('cost')]: '2.450',
+    [input('currency')]: 'CAD',
+  });
+  assert.match(review.html, /<dt>Base unit<\/dt><dd>EA<\/dd>/);
+  assert.match(review.html, /<dd>2\.45<\/dd>/);
+  assert.match(review.html, /<dd>CAD · Canadian dollar<\/dd>/);
+  assert.equal(f.executor.calls.length, 0);
+  await submit({
+    taskToken,
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  const receiptLine = f.executor.calls.find((call) =>
+    call.definition.operationId.endsWith(
+      ':operation.goods_receipt_line_create',
+    ),
+  );
+  assert.ok(receiptLine, 'the receipt line create ran');
+  const values = asRecord(asRecord(receiptLine.input).values);
+  assert.equal(values[`${ns}:field.goods_receipt_line_unit_id`], 'EA');
+  assert.equal(values[`${ns}:field.goods_receipt_line_currency`], 'CAD');
+  assert.equal(values[`${ns}:field.goods_receipt_line_unit_cost`], '2.45');
+  assert.equal(values[`${ns}:field.goods_receipt_line_quantity`], '2');
+});
+
+/**
+ * The same shared semantics in an unrelated, renamed package: a declared
+ * choice on a workshop Task admits only its offered values, starting from its
+ * declared default, with no Sales or Purchasing identity anywhere in the path.
+ */
+test('Milestone C: a renamed non-Sales Task input uses the same declared choice semantics', async () => {
+  const definition = workshopComposition('Work title');
+  const authoredSurface = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).find((surface) => surface.composition)!;
+  const composition = authoredSurface.composition as unknown as {
+    actions: unknown[];
+    children: unknown[];
+  };
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  composition.children = [];
+  composition.actions = [
+    {
+      actionId: 'workshop.jobs:action.classify',
+      label: 'Classify work',
+      description: 'Choose the work class.',
+      orderKey: 10,
+      conditions: [],
+      inputs: [
+        {
+          inputId: 'workshop.jobs:input.class',
+          label: 'Work class',
+          orderKey: 10,
+          type: 'text',
+          required: true,
+          presentation: {
+            kind: 'choice',
+            options: [
+              { value: 'Routine', label: 'Routine work' },
+              { value: 'Urgent', label: 'Urgent work' },
+            ],
+            defaultValue: 'Routine',
+          },
+        },
+      ],
+      steps: [
+        {
+          stepId: 'workshop.jobs:step.classify',
+          operation: ref(
+            'operationReference',
+            'workshop.jobs:operation.job_update',
+          ),
+          bindings: [
+            {
+              path: ['recordId'],
+              value: { source: 'record', field: 'recordId' },
+            },
+            {
+              path: ['expectedRevision'],
+              value: { source: 'record', field: 'revision' },
+            },
+            {
+              path: ['patch', 'workshop.jobs:field.job_name'],
+              value: { source: 'input', inputId: 'workshop.jobs:input.class' },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+  const compiled = compileFixture(definition);
+  const policy = new RecordingPolicy('ALLOW');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const surface = readCompiledSurfaceManifest(view).surfaces.find(
+    (value) => value.surfaceId === 'workshop.jobs:surface.job_record',
+  )!;
+  const root: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.job',
+    recordId: randomUUID(),
+    revision: 3,
+    archived: false,
+    values: { 'workshop.jobs:field.job_name': 'Original' },
+  };
+  const calls: SemanticOperationExecutionRequest[] = [];
+  const mediation = new SemanticOperationMediationAuthority();
+  const gateways: SurfaceRuntimeGateways = {
+    queryGateway: fixedQueryGateway('exact', [root]),
+    operationMediation: mediation,
+    operationGateway: new SemanticOperationGateway(
+      policy,
+      {
+        async execute(request) {
+          calls.push(request);
+          return {
+            kind: 'semanticOperationResult',
+            schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+            operationId: request.definition.operationId,
+            outcome: 'succeeded',
+            readBack: { ...root, revision: 4 },
+            unsupportedReason: null,
+            trust: {
+              invocationId: randomUUID(),
+              changeDocumentId: randomUUID(),
+              domainEventId: randomUUID(),
+              outboxId: randomUUID(),
+            },
+          };
+        },
+        async recordNonAccepted() {},
+      },
+      mediation,
+    ),
+  };
+  const url = `/?surface=${encodeURIComponent(surface.surfaceId)}&record=${root.recordId}`;
+  const submit = (body: Record<string, string>) =>
+    submitCompositionAction(
+      view,
+      surface,
+      url,
+      { compositionAction: 'workshop.jobs:action.classify', ...body },
+      gateways,
+      (html) => ({ statusCode: 200, html }),
+    );
+  const initial = await submit({});
+  assert.match(
+    initial.html,
+    /<select name="workshop\.jobs:input\.class" required>[\s\S]*?<option value="Routine" selected>Routine work<\/option>/,
+  );
+  const taskToken = hiddenValue(initial.html, 'taskToken');
+  const forged = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    'workshop.jobs:input.class': 'Anything',
+  });
+  assert.match(forged.html, /Choose one of the offered values\./);
+  assert.equal(calls.length, 0);
+  const review = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    'workshop.jobs:input.class': 'Urgent',
+  });
+  assert.match(review.html, /<dd>Urgent work<\/dd>/);
+  const done = await submit({
+    taskToken,
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.match(done.html, /data-task-result/);
+  assert.match(done.html, /Classify work: done/);
+  assert.deepEqual(asRecord(calls[0]!.input).patch, {
+    'workshop.jobs:field.job_name': 'Urgent',
+  });
 });
 
 test('FORM-1: unselected lookup results are shown only under the current read authority of each response', async () => {

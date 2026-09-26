@@ -22085,7 +22085,11 @@
             "title": "northstar.app:column.order_number",
             "subtitle": ["northstar.app:column.customer"],
             "status": "northstar.app:column.order_state",
-            "facts": ["northstar.app:column.requested_date"]
+            "facts": [
+              "northstar.app:column.order_date",
+              "northstar.app:column.requested_date",
+              "northstar.app:column.currency"
+            ]
           },
           "context": {
             "label": "Fulfillment",
@@ -22127,10 +22131,28 @@
             }
           },
           {
+            "columnId": "northstar.app:column.order_date",
+            "label": "Order date",
+            "orderKey": 25,
+            "field": "northstar.app:field.sales_order_order_date"
+          },
+          {
             "columnId": "northstar.app:column.requested_date",
             "label": "Requested date",
             "orderKey": 30,
             "field": "northstar.app:field.sales_order_requested_date"
+          },
+          {
+            "columnId": "northstar.app:column.currency",
+            "label": "Currency",
+            "orderKey": 35,
+            "field": "northstar.app:field.sales_order_currency"
+          },
+          {
+            "columnId": "northstar.app:column.notes",
+            "label": "Notes",
+            "orderKey": 40,
+            "field": "northstar.app:field.sales_order_notes"
           }
         ],
         "children": [
@@ -22216,6 +22238,13 @@
                 "orderKey": 40,
                 "field": "northstar.app:field.sales_order_line_unit_id",
                 "presentation": { "role": "secondary", "priority": 40 }
+              },
+              {
+                "columnId": "northstar.app:column.unit_price",
+                "label": "Unit price",
+                "orderKey": 45,
+                "field": "northstar.app:field.sales_order_line_unit_price",
+                "presentation": { "role": "secondary", "priority": 45 }
               },
               {
                 "columnId": "northstar.app:column.coverage",
@@ -25068,7 +25097,11 @@
             "title": "northstar.app:column.purchasing_number",
             "subtitle": ["northstar.app:column.purchasing_vendor"],
             "status": "northstar.app:column.purchasing_state",
-            "facts": ["northstar.app:column.purchasing_expected"]
+            "facts": [
+              "northstar.app:column.purchasing_ordered",
+              "northstar.app:column.purchasing_expected",
+              "northstar.app:column.purchasing_currency"
+            ]
           },
           "context": {
             "label": "Receiving",
@@ -25110,10 +25143,28 @@
             "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
           },
           {
+            "columnId": "northstar.app:column.purchasing_ordered",
+            "label": "Order date",
+            "orderKey": 35,
+            "field": "northstar.app:field.purchase_order_order_date"
+          },
+          {
             "columnId": "northstar.app:column.purchasing_expected",
             "label": "Expected date",
             "orderKey": 40,
             "field": "northstar.app:field.purchase_order_expected_date"
+          },
+          {
+            "columnId": "northstar.app:column.purchasing_currency",
+            "label": "Currency",
+            "orderKey": 45,
+            "field": "northstar.app:field.purchase_order_currency"
+          },
+          {
+            "columnId": "northstar.app:column.purchasing_notes",
+            "label": "Notes",
+            "orderKey": 50,
+            "field": "northstar.app:field.purchase_order_notes"
           }
         ],
         "children": [
@@ -25212,6 +25263,13 @@
                   }
                 },
                 "presentation": { "role": "secondary", "priority": 40 }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_unit_cost",
+                "label": "Unit cost",
+                "orderKey": 50,
+                "field": "northstar.app:field.purchase_order_line_unit_price",
+                "presentation": { "role": "secondary", "priority": 50 }
               }
             ]
           },
@@ -25286,7 +25344,14 @@
                 "label": "Base unit",
                 "orderKey": 20,
                 "type": "text",
-                "required": true
+                "required": true,
+                "presentation": {
+                  "kind": "derived",
+                  "column": {
+                    "datasetId": "northstar.app:dataset.purchasing_lines",
+                    "columnId": "northstar.app:column.purchasing_base_unit"
+                  }
+                }
               },
               {
                 "inputId": "northstar.app:input.receive_location",
@@ -25317,7 +25382,19 @@
                 "label": "Actual cost currency",
                 "orderKey": 50,
                 "type": "text",
-                "required": true
+                "required": true,
+                "presentation": {
+                  "kind": "choice",
+                  "options": [
+                    { "value": "CAD", "label": "CAD · Canadian dollar" },
+                    { "value": "USD", "label": "USD · US dollar" },
+                    { "value": "EUR", "label": "EUR · Euro" }
+                  ],
+                  "defaultFrom": {
+                    "source": "record",
+                    "field": "northstar.app:field.purchase_order_currency"
+                  }
+                }
               }
             ],
             "steps": [
@@ -25575,7 +25652,14 @@
                 "label": "Base unit",
                 "orderKey": 20,
                 "type": "text",
-                "required": true
+                "required": true,
+                "presentation": {
+                  "kind": "derived",
+                  "column": {
+                    "datasetId": "northstar.app:dataset.purchasing_lines",
+                    "columnId": "northstar.app:column.purchasing_base_unit"
+                  }
+                }
               },
               {
                 "inputId": "northstar.app:input.receive_location",

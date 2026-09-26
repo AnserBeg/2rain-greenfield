@@ -97,14 +97,13 @@ Visible close, sensible initial focus, native focus containment, focus return
 to the Record's continuation control, and scrollable compact controls are required.
 `modal` MESSAGE placement remains refused under ADR-0048.
 
-**Reference controls, amended 2026-09-25 (ADR-0036 §2.6).** A draft-editor
-reference is one metadata-declared control: server-side search and paging over
-the declared list query, selection only from offered results re-read through the
-declared exact get, and an optional governed in-context create that returns to the
-same document, line and field. It is fully usable as ordinary submits with
-JavaScript disabled; the owned script adds only keyboard search and result
-navigation. Typed search text, focus and the rendered result list are never
-permission authority.
+**Reference controls, amended 2026-09-26 (ADR-0036 §2.7).** A draft-editor
+reference is one metadata-declared combobox: server-side search and paging over the
+declared list query and eligibility, selection only from the newest offered results
+re-read through the declared exact get, and "+ New" (only when it may start) as the
+popup's last row, returning to the same field. The owned script answers it in place
+with server-rendered fragments; ordinary submits remain the no-JavaScript path.
+Typed text, focus and the rendered popup are never permission authority.
 
 Rules that follow:
 
@@ -299,7 +298,7 @@ ever hidden; `progressive` and `onDemand` defer, and both remain discoverable.
 2026-08-08.** It is spelled here because the vocabulary is closed and an unspelled
 tier cannot be refused *by name*; it is not a working tier. Nothing honours it:
 native `<details>` expansion reveals content already in the document and cannot
-fetch, ADR-0036 §2's six behaviours contain no fetch-on-expand, and §7 forbids
+fetch, ADR-0036 §2's behaviours contain no fetch-on-expand, and §7 forbids
 client rendering of business data. Admitting it as workable would be precisely the
 accepted-and-ignored state this skill refuses `toast` and `modal` for
 (ADR-0041 §3, a refusal to ship a spelling ahead of its meaning). `U5b` — in

@@ -107,6 +107,15 @@ export function purchasingWorkspace(
           orderKey: 20,
           type: 'text',
           required: true,
+          // The selected line's product base unit, read on the server; the
+          // operator is never asked to type a unit the product already has.
+          presentation: {
+            kind: 'derived',
+            column: {
+              datasetId: lines,
+              columnId: id('column', 'purchasing_base_unit'),
+            },
+          },
         },
         {
           inputId: id('input', 'receive_location'),
@@ -132,6 +141,20 @@ export function purchasingWorkspace(
                 orderKey: 50,
                 type: 'text',
                 required: true,
+                // The offered codes, starting from the order's own currency;
+                // the actual cost itself is always entered explicitly.
+                presentation: {
+                  kind: 'choice',
+                  options: [
+                    { value: 'CAD', label: 'CAD · Canadian dollar' },
+                    { value: 'USD', label: 'USD · US dollar' },
+                    { value: 'EUR', label: 'EUR · Euro' },
+                  ],
+                  defaultFrom: {
+                    source: 'record',
+                    field: f('purchase_order_currency'),
+                  },
+                },
               },
             ]
           : []),
@@ -186,7 +209,11 @@ export function purchasingWorkspace(
         title: id('column', 'purchasing_number'),
         subtitle: [id('column', 'purchasing_vendor')],
         status: id('column', 'purchasing_state'),
-        facts: [id('column', 'purchasing_expected')],
+        facts: [
+          id('column', 'purchasing_ordered'),
+          id('column', 'purchasing_expected'),
+          id('column', 'purchasing_currency'),
+        ],
       },
       context: {
         label: 'Receiving',
@@ -209,12 +236,16 @@ export function purchasingWorkspace(
         30,
         id('derived_state_field', 'machine.purchase_order_lifecycle'),
       ),
+      column('ordered', 'Order date', 35, f('purchase_order_order_date')),
       column(
         'expected',
         'Expected date',
         40,
         f('purchase_order_expected_date'),
       ),
+      column('currency', 'Currency', 45, f('purchase_order_currency')),
+      // Read back as stored; shown in the document's sections.
+      column('notes', 'Notes', 50, f('purchase_order_notes')),
     ],
     children: [
       {
@@ -273,6 +304,14 @@ export function purchasingWorkspace(
             40,
             f('purchase_order_line_item_id'),
             ['item_get', 'item_base_unit'],
+            'secondary',
+          ),
+          column(
+            'unit_cost',
+            'Unit cost',
+            50,
+            f('purchase_order_line_unit_price'),
+            undefined,
             'secondary',
           ),
         ],

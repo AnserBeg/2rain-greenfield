@@ -34,6 +34,7 @@ const paths = Object.freeze({
   appServer: 'apps/web/src/app-server.ts',
   canonicalConstants: 'packages/canonical-model/src/constants.ts',
   componentRegistry: 'apps/web/src/component-registry.ts',
+  controlSemantics: 'apps/web/src/control-semantics.ts',
   documentEditor: 'apps/web/src/document-editor.ts',
   editorControls: 'apps/web/src/editor-controls.ts',
   plan: 'docs/greenfield-north-star-erp-platform-plan.md',
@@ -621,12 +622,16 @@ function scanForBypass(
     paths.documentEditor,
     // The editor's own typed controls, consumed only by the generic editor.
     paths.editorControls,
+    // Choice, default and decimal semantics shared by the editor's controls
+    // and the composition interpreter's Task inputs, so neither re-implements them.
+    paths.controlSemantics,
     paths.surfaceRuntime,
     // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
     // only by the closed registry; it is not an alternate surface authority.
     'apps/web/src/receiving-section.ts',
   ]);
   const allowedSurfaceConsumers = new Set<string>([
+    paths.controlSemantics,
     paths.surfaceComposition,
     paths.componentRegistry,
     paths.documentEditor,
@@ -677,6 +682,18 @@ function scanForBypass(
         repoPath,
         'SURF001_RUNTIME_BYPASS',
         'only the generic document editor may delegate to its controls',
+      );
+    if (
+      repoPath !== paths.editorControls &&
+      repoPath !== paths.documentEditor &&
+      repoPath !== paths.surfaceComposition &&
+      /from ['"][^'"]*control-semantics\.js['"]/.test(source)
+    )
+      add(
+        violations,
+        repoPath,
+        'SURF001_RUNTIME_BYPASS',
+        'only the generic editor and the composition interpreter share control semantics',
       );
     if (!allowedMarkup.has(repoPath) && structuralMarkup.test(source)) {
       add(

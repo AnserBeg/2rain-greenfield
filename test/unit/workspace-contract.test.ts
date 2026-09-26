@@ -319,3 +319,97 @@ test('FORM-4: every supplied exact get is validated, whether or not the picker c
     ),
   );
 });
+
+test('picker eligibility and Task input presentation are closed, typed declarations', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Eligibility = {
+    queryId: string;
+    filters: { fieldId: string; value: string }[];
+    [key: string]: unknown;
+  };
+  type Input = {
+    inputId: string;
+    presentation?: {
+      kind: string;
+      defaultValue?: string;
+      defaultFrom?: { field: string };
+      column?: { columnId: string };
+    };
+  };
+  const surface = (candidate: Loose, suffix: string) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(suffix),
+    )!;
+  const eligibility = (candidate: Loose) =>
+    (
+      surface(candidate, ':surface.sales_order_form').documentEditor as {
+        headerFields: {
+          fieldId: string;
+          reference: { eligibility: Eligibility };
+        }[];
+      }
+    ).headerFields.find((field) =>
+      field.fieldId.endsWith('_customer_party_id'),
+    )!.reference.eligibility;
+  const receiveInput = (candidate: Loose, name: string) =>
+    (
+      surface(candidate, ':surface.purchase_order_detail').composition as {
+        actions: { actionId: string; inputs: Input[] }[];
+      }
+    ).actions
+      .find((action) => action.actionId.endsWith(':action.receive_known'))!
+      .inputs.find((input) =>
+        input.inputId.endsWith(`:input.receive_${name}`),
+      )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // Eligibility: an unscoped list of an entity whose owned relation points at
+  // the picker's entity, filtered by its own selected fields and admissible values.
+  refuse((candidate) => {
+    eligibility(candidate).queryId = 'northstar.app:query.item_list';
+  }, /picker eligibility requires/);
+  refuse((candidate) => {
+    eligibility(candidate).queryId = 'northstar.app:query.sales_order_list';
+  }, /picker eligibility requires/);
+  refuse((candidate) => {
+    eligibility(candidate).filters[0]!.value =
+      'northstar.app:option.not_a_role';
+  }, /picker eligibility filters require/);
+  refuse((candidate) => {
+    eligibility(candidate).filters[0]!.fieldId =
+      'northstar.app:field.party_name';
+  }, /picker eligibility filters require/);
+  refuse((candidate) => {
+    eligibility(candidate).includeInactive = true;
+  }, /CANON_SCHEMA_INVALID/);
+  // Task inputs: presentation only on text inputs; a listed default; a
+  // record default the surface actually reads; a derived column of the
+  // selected dataset.
+  refuse((candidate) => {
+    receiveInput(candidate, 'quantity').presentation = { kind: 'multiline' };
+  }, /input presentation applies to text inputs/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'currency').presentation!.defaultValue = 'JPY';
+  }, /choice inputs require/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'currency').presentation!.defaultFrom!.field =
+      'northstar.app:field.item_name';
+  }, /choice inputs require/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'unit').presentation!.column!.columnId =
+      'northstar.app:column.purchasing_receipt';
+  }, /derived inputs require/);
+});

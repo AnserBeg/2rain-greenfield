@@ -2099,6 +2099,7 @@ body{padding-bottom:72px}
 .composition-task-context .record-fields dd{font-size:var(--text-body)}
 .composition-task-context section+section{margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--line)}
 .composition-task-consequence{margin:var(--space-3) 0;color:var(--ink-muted)}
+.composition-task-result{margin-bottom:var(--space-4);padding:var(--space-3);border-left:3px solid var(--status-success-ink);border-radius:var(--radius-control);background:var(--status-success-ground);color:var(--status-success-ink)}.composition-task-result h3{margin:0 0 var(--space-2);font-size:var(--text-section)}.composition-task-result dd,.composition-task-result dt{color:var(--status-success-ink)}
 .composition-task-summary,.composition-task-confirmation{margin-bottom:var(--space-4);padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken)}
 .composition-task-summary>strong{margin-right:var(--space-2)}
 .composition-task-summary p,.composition-task-confirmation p{margin:var(--space-2) 0 0}
@@ -2108,6 +2109,8 @@ body{padding-bottom:72px}
 .composition-task-support .record-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .composition-inputs{display:grid;gap:var(--space-4)}
 .composition-inputs .field{display:grid;gap:var(--space-2);font-weight:var(--weight-emphasis)}
+.composition-inputs .derived-value{min-height:auto}.composition-inputs .field-error{font-weight:600}
+.composition-inputs textarea{width:100%;box-sizing:border-box;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .composition-inputs input,.composition-inputs select{width:100%;box-sizing:border-box;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .composition-reviewed-inputs{display:flex;gap:var(--space-5);flex-wrap:wrap;margin:var(--space-4) 0}
 .composition-reviewed-inputs dt{color:var(--ink-muted);font-size:var(--text-micro)}
