@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; FORM-1..4 review correction complete at executable `4b081e08891b4d97264c4d3dda2053ac1323aa27` on the same PR #6 branch, over reviewed `736b512940d2e5a1cefc3c8366ae70cee87ffc4c` and handoff `c8c64bbcd3d98387f4d4f91f132bdb8a6804c3b0`; sole LOCAL author; stacked draft PR handoff. Editor F1/F2/F3 and Task P1/P2 closed and preserved; fresh CI / same ONLINE reviewer on FORM-1..4 / owner acceptance pending; no merge/deployment.
+Status: evidence_ready; FORM-PAGING correction complete at executable `2d62597523b1e2b39746669c45b59166857a1307` on the same PR #6 branch, over reviewed `4b081e08891b4d97264c4d3dda2053ac1323aa27` and records `4761b770072781aec6d79a752f44d6f99d945ec3`; FORM-1..4 addressed by the ONLINE reviewer and preserved; sole LOCAL author; stacked draft PR handoff. Editor F1/F2/F3 and Task P1/P2 closed and preserved; fresh CI / same ONLINE reviewer on FORM-PAGING / owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -54,6 +54,7 @@ normalization. No hosted evidence is claimed.
 | FORM-1 unselected lookup results under current authority | Controlled executor through SurfaceRuntime: after a customer search showed name/number sentinels, `party_read` was withdrawn between requests; the Add line, failed repeat-search and failed More responses all still contained the sentinels. | The buffer keeps only term, pages requested and ids last offered. Every response re-reads displayed pages through the declared lookup under its own authority (request-local reuse only); any failed read drops the lookup. Offered-selection and exact-read checks kept. | Controlled executor: all three responses free of sentinels, no operation calls, then authorized search/More/select work. Browser/PostgreSQL: after 20+ results and More, withdrawn read plus Add line discloses none of the shown names. |
 | FORM-2 Enter must not cancel quick create | Real browser on the fixture, JS on and off: Enter in New customer Name submitted `draftCreate=cancel`; the dialog closed and nothing was created. | Primary submit is the form's first submit button (visual order matches); Cancel stays explicit with `formnovalidate`. No script change. | Browser/PostgreSQL, JS on: Enter with number missing sends no request (native `valueMissing`), explicit Cancel creates nothing and keeps the order, Enter in Name creates and selects exactly one party with a customer role, Enter in product Base unit creates it. JS off: missing-value Enter sends nothing, Cancel keeps the order with zero parties, Enter in Name creates one party with a customer role. |
 | FORM-3 choice metadata inside quick create | Controlled executor, compiled variant with `item_base_unit` choice EA/BOX default EA: plain text input, no default, forged `PALLET` returned 200 and `item_create` ran with `PALLET`. | Create fields use the editor's shared choice render/admission/default helpers: native select, default applied once when a flow opens, every collected value (choice and required) admitted before any step, values frozen only once admitted, a refused value cleared rather than defaulted. | Controlled executor: Sales variant renders EA selected, `PALLET` gives 422 with zero operation calls, `BOX` creates and derives the unit. Non-Sales variant (Purchase, renamed, two-step inventory transaction then line with the choice on step 2): `PALLET` gives 422 with zero calls — the earlier step did not run — and `BOX` runs both steps with the relation bound. |
+| FORM-PAGING silent lookup truncation | Controlled executor with deterministic paged data (201 matches, twenty per page): after Search and nine More, 200 shown, no More, no message and no "no matches" text although match 201 existed; a direct More at the cap returned 200 with the same silent state. | Query continuation (this request's read) and the display limit (ten pages) are separate facts. Exhausted: nothing more. Continues below the limit: More. Continues past it: "More matches exist. Refine your search." directly under the search box, which it describes and which takes focus; no More that cannot advance. A More at the cap re-reads the same bounded pages. A new search starts at page one and replaces the offered ids. Only a current authorized read may state that more exist. | Controlled executor: 201 states the limit, More below the cap works, a More at the cap is bounded (at most ten list reads) with no mutation, narrowing finds and selects match 201 with the order kept and the old offered id refused; exactly 200 is exhaustion with no message; read withdrawn at the limit shows no labels and no claim. Browser/PostgreSQL with 201 masters, JavaScript on and off: message and no More after nine presses, focus on the search box, keyboard refinement to match 201 and keyboard selection, order values kept. |
 | FORM-4 validate every supplied exact get | Normalization: a plain customer picker (no create, no details) naming `item_get` was admitted. | Any supplied get must be a get of the picker entity selecting its labels and details; absent-get legacy pickers keep their behaviour. | Normalization with literal diagnostics: valid plain list/get passes; `item_get`, a list as get, a missing query and a same-entity get lacking the label are refused; legacy absent get passes. |
 
 Decisions of this delta:
@@ -119,6 +120,14 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 
 ## Gates
 
+FORM-PAGING correction, executable `2d62597523b1e2b39746669c45b59166857a1307`:
+
+- Pre-fix reproduction at `4b081e08` (controlled executor with the stub's opt-in shared-list paging, 201 matches): after Search and nine More, 200 shown with no More, no message and no exhaustion text; a direct More at the cap returned 200 with the same silent state.
+- Affected set against frozen `2d62597523b1e2b39746669c45b59166857a1307` (tree equal to HEAD at start and end): format, lint, typecheck, build, app-release freshness, boundaries (205 files), unit 167/167, integration 207/207 (including FORM-PAGING's three subtests with the FORM-1 and FORM-3 regressions and the F1/F2/F3 witnesses), surface contracts 30/30 (the message is control text, as the existing "No … matches" state is, so no catalog entry was added), architecture 195/195, and the complete supported browser wrapper 105/105.
+- Browser/PostgreSQL inspection with 201 masters (`--lookup-volume=201`), JavaScript on and off: 200 shown after nine More presses, the message directly under the search box, no More button, focus on the search box (`aria-describedby` the message); keyboard refinement to "Paging match 201" (Enter with JavaScript; Tab to Search without it), keyboard selection, order number and notes kept. The first inspection at `6fddb886` showed the message only at the end of the 200-item scrolling list; `2d625975` moves it under the search row.
+- Compiler, agent and language coverage were not repeated: no canonical, schema or agent path changed. No hosted result, CI polling or mutation population.
+
+
 FORM-1..4 correction, executable `4b081e08891b4d97264c4d3dda2053ac1323aa27`:
 
 - Full affected set against frozen `78ef50328064c51822aad9c41ec107c3f8cc5b15` (tree equal to HEAD at start and end): format, lint, typecheck, build, schema, both release-freshness checks, boundaries (205 files), unit 167/167, compiler 175/175, integration 203/203, surface contracts 30/30, agent 3/3, architecture 195/195, language coverage (unchanged 2,399 obligations). Browser: the picker journey's product step became ambiguous once the new FORM-1 step added a second line (test code only); scoped to line 1 in `4b081e08`, the complete supported browser wrapper then passed 105/105 at `4b081e08891b4d97264c4d3dda2053ac1323aa27` with the tree clean at start and end.
@@ -175,22 +184,24 @@ Release, reservation, shipment, packing and receiving are unchanged from the ste
 
 ## Bounded ONLINE handoff
 
-Same ONLINE reviewer: assess only the FORM-1..4 closures and directly affected
-behaviour, from reviewed `736b512940d2e5a1cefc3c8366ae70cee87ffc4c` to
-executable `4b081e08891b4d97264c4d3dda2053ac1323aa27`. Read the diff of `apps/web/src/{document-editor,editor-controls,surface-runtime}.ts`,
-`packages/canonical-model/src/surface-workspace.ts` and the four regressions in
-`test/integration/surface-data-binding.test.ts`, `test/unit/workspace-contract.test.ts`
-and `apps/web/test/browser/order-entry.spec.ts`. Editor F1/F2/F3 and Task P1/P2
-are closed; do not reopen them. No merge/deployment.
+Same ONLINE reviewer: assess only FORM-PAGING and the directly affected
+authorization and rendering paths, from reviewed
+`4b081e08891b4d97264c4d3dda2053ac1323aa27` to executable `2d62597523b1e2b39746669c45b59166857a1307`. Read the
+diff of `apps/web/src/{document-editor,editor-controls,surface-runtime}.ts`, the
+"FORM-PAGING" test in `test/integration/surface-data-binding.test.ts` (with the
+stub's opt-in paging) and the `--lookup-volume` fixture flag. FORM-1..4, editor
+F1/F2/F3 and Task P1/P2 are closed; do not reopen them. The lookup remains
+bounded; no claim is made of browsing an arbitrarily large result set. No
+merge/deployment.
 
-Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usability/` (reference, before, after, proof).
+Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usability/` — `rain-after/form-paging-limit-and-narrowed-selection.png` shows the limit message and the narrowed selection.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "4b081e08891b4d97264c4d3dda2053ac1323aa27",
+  "head": "2d62597523b1e2b39746669c45b59166857a1307",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/web/release/app.authored.json",
