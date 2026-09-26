@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; order-form usability correction complete at executable `@@HEAD@@` on the same PR #6 branch, from reviewed baseline `0566206d9ed41c2df301c2369d02446999f6063d`; sole LOCAL author; stacked draft PR handoff. F1/F2/F3 and Task P1/P2 closed and preserved; fresh CI / bounded ONLINE review of this delta / owner acceptance pending; no merge/deployment.
+Status: evidence_ready; order-form usability correction complete at executable `736b512940d2e5a1cefc3c8366ae70cee87ffc4c` on the same PR #6 branch, from reviewed baseline `0566206d9ed41c2df301c2369d02446999f6063d`; sole LOCAL author; stacked draft PR handoff. F1/F2/F3 and Task P1/P2 closed and preserved; fresh CI / bounded ONLINE review of this delta / owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -100,6 +100,16 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 
 ## Gates
 
+Form-usability correction (2026-09-25), executable `736b512940d2e5a1cefc3c8366ae70cee87ffc4c`:
+
+- Full affected set against frozen `f2e818a3091513bc489681b577bf5edaf3618281` (tree equal to HEAD at start and end): format, lint, typecheck, build, schema, both release-freshness checks, boundaries (205 files), unit 166/166, compiler 175/175, integration 199/199, surface contracts 30/30, agent 3/3, architecture 195/195 including the new seam red control, language coverage (2,351 → 2,399 obligations, 601 → 631 observations, unhonored set unchanged). Browser 103/105 through the supported wrapper: the two failures were the receiving and SALE-FULFILLMENT journeys still choosing a counterparty from the retired full select. Their only change moves them onto the picker (test files only); both then pass at `736b512940d2e5a1cefc3c8366ae70cee87ffc4c`.
+- The first full run, at `95fb6707`, found three real defects that the fix commit corrects: the client script was emitted on record pages that declare an editor without rendering one (meta-sales asserts script-free record pages); the new controls module was not registered in the SurfaceRuntime seam; the coverage decisions were stale for the new declarations.
+- Order-entry browser 2/2 against PostgreSQL with the distributor master set: the lifecycle journey on pickers (drafts, reserve 8, ship 5, release remainder, packing 5 EA, receive 2 EA at 2.45 CAD, redaction after revocation); and the picker journey — 20 results plus More on the first page, server search finds a customer off that page, keyboard Enter searches and never saves, Escape cancel writes nothing, denied create writes nothing while selection still works, partial create stores one party and no role, then Retry completes it with one party and one customer role, duplicate create replay 409 with no second master, stale create return 422 with nothing written, read-back withheld is created but not selected, product created from line 1 returns to line 1 with its unit, Purchase "+ New vendor" stores a supplier role, and the no-JavaScript search/select/create-and-return stores one party with a customer role.
+- A manual real-browser walk-through on the demo fixture also covered save with nothing selected (no write, problems named beside Customer and Line 1 product), a tampered currency refused, a 22-digit decimal refused before any write and kept exactly, four lines with a different line removed, save/leave/reopen, then an edit of quantity, price and notes plus a governed removal of a saved line, and an unchanged re-save that planned nothing.
+- No CI polling, full local matrix, expected-red run, inherited audit or dependency installation. Fresh CI and the bounded ONLINE review are required and not claimed.
+
+Earlier gates:
+
 - Pass: typecheck, build, affected ESLint/Prettier, both artifact freshness checks, boundaries (204 files), language inventory (2,351 decision-covered obligations, zero execution receipts).
 - Pass: affected canonical/compiler scope/adoption/normalization/determinism 27/27; workspace/catalog contracts 34/34; order-entry plus retained P1/P2 integration witnesses 12/12.
 - Pass: composed Sales policy/lifecycle browser 1/1: denied update, stale draft, foreign scope, released-line refusal, unchanged stock; initial caller mismatches corrected with exact assertions.
@@ -138,21 +148,26 @@ Release, reservation, shipment, packing and receiving are unchanged from the ste
 
 ## Bounded ONLINE handoff
 
-Review only remaining F3 from reviewed `8f88a279fa967bf2908f92919e9502284de5b1b4`
-to executable `484a0da85f1aedcd77233ed4ec9ff953412257fc` on PR #6. Read the
-`document-editor.ts` and affected integration-test diff: assess the validated
-acknowledged-continuation boundary, redaction, no-dispatch repeats and contrasting
-identity/zero-ack/uncertain/authorized paths. F1/F2 and Task P1/P2 are closed; do
-not reopen them. Same ONLINE reviewer; no merge/deployment.
+Review only the order-form usability correction on PR #6: from reviewed
+`0566206d9ed41c2df301c2369d02446999f6063d` to executable `736b512940d2e5a1cefc3c8366ae70cee87ffc4c`. Read the
+diff of `packages/canonical-model/src/{schemas,surface-workspace}.ts`,
+`packages/domain/src/app/order-entry.ts`, `apps/web/src/{editor-controls,document-editor,surface-contract,workspace-entry,surface-client,surface-runtime}.ts`,
+`packages/dev-tooling/src/surface-runtime-seam.ts`, ADR-0036 §2 and the affected
+tests. Assess server authority over selection and quick create (offered-only
+selection, verified carriers, stable keys, frozen retries, denied/partial/withheld/
+stale outcomes, cancel), exact decimals, choice-as-editor-policy, the ADR-0036
+boundary of the script, and whether the F2/F3 witness changes keep their subjects.
+F1/F2/F3 and Task P1/P2 are closed; do not reopen them. Same ONLINE reviewer; no
+merge/deployment.
 
-Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-8464-da81032ae8a4/rain-order-entry/final/`; 20 actual PNGs at 1280×800/390×844 viewports, full-page export. `serving.json`/`captures.json` pin the prior visual checkpoint `d6ed9ce3017c9f944be4a36670dfafec11de6968`, release `52ab1ca2-414d-44a1-82a3-c3497850ec24`, same root/fence, clean source. Test fixture port 44305 disposed after success. Sales `fa5e79cf-4485-4203-8128-eb8c95ffe2a9` and Purchase `1259b050-6300-43ca-b674-4d2849fc87a9` created through browser; captures name draft/reopened/reserved/shipped/released/packing/received states. Reference JPEGs in parent folder are actual disposable synthetic captures.
+Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usability/` — `reference-paneflow/` (actual disposable PaneFlow `d057daff` composer, customer search, "+ New customer" dialog, one-row lines, compact), `rain-before/` (reviewed baseline editor), `rain-after/` (this correction at desktop and phone width, including the create dialogs, field problems and reopened editing) and `rain-proof/` (the picker browser proof's own captures).
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "484a0da85f1aedcd77233ed4ec9ff953412257fc",
+  "head": "736b512940d2e5a1cefc3c8366ae70cee87ffc4c",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/web/release/app.authored.json",
@@ -160,7 +175,9 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-84
     "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts",
     "apps/web/src/document-editor.ts",
+    "apps/web/src/editor-controls.ts",
     "apps/web/src/message-catalog.ts",
+    "apps/web/src/surface-client.ts",
     "apps/web/src/surface-contract.ts",
     "apps/web/src/surface-runtime.ts",
     "apps/web/src/workspace-entry.ts",
@@ -174,6 +191,7 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-84
     "apps/web/test/surface-runtime-contract.test.ts",
     "docs/decisions/ADR-0015-legal-entity-business-dimension.md",
     "docs/decisions/ADR-0030-compiled-navigation-grouping.md",
+    "docs/decisions/ADR-0036-minimum-client-capability.md",
     "docs/decisions/ADR-0037-workspace-context-bar.md",
     "docs/execution/current-plan.md",
     "docs/execution/lanes.md",
@@ -210,8 +228,26 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/14/01a0a194-4517-7fb2-84
     "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
-    { "path": "apps/web/src/document-editor.ts", "name": "documentEditor" },
-    { "path": "packages/canonical-model/src/surface-workspace.ts", "name": "validateSurfaceWorkspaces" }
+    {
+      "path": "apps/web/src/document-editor.ts",
+      "name": "documentEditor"
+    },
+    {
+      "path": "packages/canonical-model/src/surface-workspace.ts",
+      "name": "validateSurfaceWorkspaces"
+    },
+    {
+      "path": "apps/web/src/editor-controls.ts",
+      "name": "renderReferenceControl"
+    },
+    {
+      "path": "apps/web/src/editor-controls.ts",
+      "name": "canonicalDecimal"
+    },
+    {
+      "path": "apps/web/src/surface-client.ts",
+      "name": "SURFACE_CLIENT_SCRIPT"
+    }
   ]
 }
 ```
