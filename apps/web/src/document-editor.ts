@@ -436,7 +436,9 @@ export async function documentEditor(
     if (!state || !field.reference) return null;
     const records: SemanticRecordDto[] = [];
     let cursor: string | null = null;
-    let hasMore = false;
+    // Query continuation and the display limit are separate facts: only this
+    // request's authorized read says whether the query continues.
+    let queryContinues = false;
     for (let page = 0; page < state.pages; page++) {
       const result = await workspaceSearch(
         view,
@@ -448,8 +450,8 @@ export async function documentEditor(
       );
       records.push(...result.records);
       cursor = result.nextCursor;
-      hasMore = result.hasMore && cursor !== null;
-      if (!hasMore) {
+      queryContinues = result.hasMore && cursor !== null;
+      if (!queryContinues) {
         state.pages = page + 1;
         break;
       }
@@ -457,7 +459,8 @@ export async function documentEditor(
     const lookup = {
       term: state.term,
       records,
-      hasMore: hasMore && state.pages < maximumLookupPages,
+      queryContinues,
+      displayLimitReached: state.pages >= maximumLookupPages,
       nextCursor: cursor,
     };
     state.offered = new Set(records.map((record) => record.recordId));
@@ -602,15 +605,21 @@ export async function documentEditor(
         state.pages = Math.min(state.pages + 1, maximumLookupPages);
       }
       lookupReads.delete(key);
+      let lookup: ReferenceLookup | null = null;
       try {
-        await readLookup(field, key);
+        lookup = await readLookup(field, key);
       } catch (error) {
         // A failed search shows no earlier results beside its notice.
         dropLookup(key);
         buffer.notice = warning(operationMessageRef(error), field.label);
         statusCode = 422;
       }
-      buffer.focus = `${controlId(rowId, field.fieldId)}-results`;
+      // At the display limit the next useful step is a narrower search, so the
+      // search box takes focus; otherwise focus lands on the results.
+      buffer.focus =
+        lookup?.queryContinues && lookup.displayLimitReached
+          ? controlId(rowId, field.fieldId)
+          : `${controlId(rowId, field.fieldId)}-results`;
       return true;
     }
     if (verb === 'select') {

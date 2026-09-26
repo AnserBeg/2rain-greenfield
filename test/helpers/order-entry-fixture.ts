@@ -29,6 +29,12 @@ import {
 export async function withOrderEntryFixture(
   run: (fixture: Awaited<ReturnType<typeof seed>>) => Promise<void>,
   seedProfile: ComposedApplicationSeedProfile = 'demo',
+  /**
+   * Extra parties named "Paging match NNN", created through the governed
+   * create, so a picker's bounded lookup can be judged against more matches
+   * than it displays. Masters only; zero by default.
+   */
+  lookupVolume = 0,
 ) {
   await withEphemeralPostgres('order-entry', async ({ connection, pool }) => {
     const app = await startComposedApplication({
@@ -38,7 +44,7 @@ export async function withOrderEntryFixture(
       tenantSlug: 'order-entry',
     });
     try {
-      await run(await seed(app, pool));
+      await run(await seed(app, pool, lookupVolume));
     } finally {
       await app.close();
     }
@@ -47,6 +53,7 @@ export async function withOrderEntryFixture(
 async function seed(
   app: Awaited<ReturnType<typeof startComposedApplication>>,
   pool: Pool,
+  lookupVolume = 0,
 ) {
   const ns = 'northstar.app';
   const scope = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
@@ -112,6 +119,16 @@ async function seed(
       'party_role',
       { kind: `${ns}:option.${kind}`, status: `${ns}:option.active` },
       { party: customer },
+      false,
+    );
+  for (let index = 1; index <= lookupVolume; index++)
+    await create(
+      'party',
+      {
+        number: `PM-${String(index).padStart(3, '0')}`,
+        name: `Paging match ${String(index).padStart(3, '0')}`,
+      },
+      {},
       false,
     );
   const now = new Date().toISOString();
@@ -523,5 +540,10 @@ if (process.argv.includes('--serve')) {
       });
     },
     process.argv.includes('--distributor') ? 'distributor' : 'demo',
+    Number(
+      process.argv
+        .find((value) => value.startsWith('--lookup-volume='))
+        ?.slice('--lookup-volume='.length) ?? 0,
+    ),
   );
 }

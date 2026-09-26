@@ -34,6 +34,7 @@ import {
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { encodeSharedListCursor } from '../../packages/runtime/src/list-behavior/index.js';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
@@ -4530,6 +4531,15 @@ class OrderEntryExecutor
   onControlledFailure: (() => void) | null = null;
   withheld = false;
   namespace = 'northstar.app';
+  /**
+   * Opt-in shared-list paging like the PostgreSQL executor: substring search
+   * over the selected fields, pages of the effective size in insertion order,
+   * and cursors minted for the exact query shape. Off, every list returns all
+   * rows, as the existing witnesses expect.
+   */
+  pageLists = false;
+  /** List executions per query that reached this executor, for bounded-work checks. */
+  readonly listReads = new Map<string, number>();
   seed(
     entity: string,
     values: Record<string, ImmutableJsonValue>,
@@ -4573,6 +4583,50 @@ class OrderEntryExecutor
           (!args.recordId || row.recordId === args.recordId) &&
           (!parent || row.values[parent.relationId] === parent.recordId),
       );
+      if (request.list)
+        this.listReads.set(
+          request.definition.queryId,
+          (this.listReads.get(request.definition.queryId) ?? 0) + 1,
+        );
+      if (request.list && this.pageLists) {
+        const query = request.list.query;
+        const term = query.search.trim().toLowerCase();
+        const matching = term
+          ? selected.filter((row) =>
+              request.definition.selections.some(({ fieldId }) =>
+                String(row.values[fieldId] ?? '')
+                  .toLowerCase()
+                  .includes(term),
+              ),
+            )
+          : selected;
+        const page = matching.slice(
+          query.pageOffset,
+          query.pageOffset + query.effectivePageSize,
+        );
+        const hasMore = query.pageOffset + page.length < matching.length;
+        return {
+          kind: 'semanticQueryResult',
+          schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+          queryId: request.definition.queryId,
+          outcome: 'exact',
+          records: page.map((row) => projectedListRecord(request, row)),
+          unsupportedReason: null,
+          listCoverage: {
+            ...listCoverage(request, page.length),
+            hasMore,
+            nextCursor: hasMore
+              ? encodeSharedListCursor(
+                  request.definition.queryId,
+                  query,
+                  query.pageOffset + page.length,
+                )
+              : null,
+            parentScope: parent ?? null,
+            totalCount: matching.length,
+          },
+        };
+      }
       const records = request.list
         ? selected.map((row) => projectedListRecord(request, row))
         : selected;
@@ -5805,6 +5859,153 @@ test('FORM-1: unselected lookup results are shown only under the current read au
   );
   assert.match(page.html, /data-reference-selected/);
   assert.equal(f.executor.calls.length, calls);
+});
+
+test('FORM-PAGING: a bounded lookup says when more matches exist beyond its display limit', async (t) => {
+  const limitMessage = 'More matches exist. Refine your search.';
+  const paged = async (count: number) => {
+    const f = await orderEntryWitness();
+    f.executor.pageLists = true;
+    const ids = Array.from({ length: count }, (_, index) =>
+      f.executor.seed('party', {
+        [`${f.ns}:field.party_name`]: `Paging match ${String(index + 1).padStart(3, '0')}`,
+        [`${f.ns}:field.party_number`]: `PM-${index + 1}`,
+      }),
+    );
+    const path = f.url.pathname + f.url.search;
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    // Every request goes through SurfaceRuntime and the real gateways.
+    let page = await renderSurfaceRuntimeWithData(f.view, path, f.gateways);
+    const header =
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+        page.html,
+      )![1]!;
+    const submit = async (
+      action: string,
+      extra: Record<string, string> = {},
+    ) => {
+      page = await submitSurfaceRuntimeIntent(
+        f.view,
+        path,
+        {
+          draftSession: hiddenValue(page.html, 'draftSession'),
+          draftVersion: hiddenValue(page.html, 'draftVersion'),
+          draftAction: action,
+          [`draft:${header}:${f.ns}:field.sales_order_number`]: 'SO-PAGING',
+          ...extra,
+        },
+        f.gateways,
+      );
+      return page;
+    };
+    const search = (term: string) =>
+      submit(`search:${header}:${customer}`, {
+        [`draftSearch:${header}:${customer}`]: term,
+      });
+    const more = () => submit(`more:${header}:${customer}`);
+    const shown = () =>
+      page.html.match(/class="reference-option"/g)?.length ?? 0;
+    const moreOffered = () =>
+      page.html.includes(`value="more:${header}:${customer}"`);
+    return {
+      f,
+      ids,
+      header,
+      customer,
+      submit,
+      search,
+      more,
+      shown,
+      moreOffered,
+      html: () => page.html,
+    };
+  };
+
+  await t.test(
+    '201 matches: the limit is stated, never presented as exhaustion; narrowing finds match 201',
+    async () => {
+      const p = await paged(201);
+      await p.search('Paging match');
+      assert.equal(p.shown(), 20);
+      assert.ok(p.moreOffered());
+      assert.ok(!p.html().includes(limitMessage));
+      // Below the cap with more pages, More works normally.
+      await p.more();
+      assert.equal(p.shown(), 40);
+      assert.ok(p.moreOffered());
+      for (let page = 3; page <= 10; page++) await p.more();
+      assert.equal(p.shown(), 200);
+      assert.ok(p.html().includes(limitMessage));
+      assert.ok(!p.moreOffered(), 'no More button that cannot advance');
+      assert.doesNotMatch(p.html(), /No customer matches/);
+      // The refinement field is described by the message and receives focus.
+      const searchBox = /<input type="search"[^>]*>/.exec(p.html())![0];
+      assert.match(searchBox, /aria-describedby="[^"]*-limit"/);
+      assert.match(searchBox, /\sautofocus[\s>]/);
+      // A directly submitted More at the cap: bounded work, the same truthful state.
+      const partyReads = () =>
+        p.f.executor.listReads.get(`${p.f.ns}:query.party_list`) ?? 0;
+      const reads = partyReads();
+      const capped = await p.more();
+      assert.equal(capped.statusCode, 200);
+      // At most the ten displayed pages, re-read once under this request's authority.
+      assert.ok(partyReads() - reads <= 10);
+      assert.equal(p.shown(), 200);
+      assert.ok(p.html().includes(limitMessage));
+      assert.ok(!p.moreOffered());
+      // A narrower search starts again at page one and replaces the offered set.
+      await p.search('Paging match 201');
+      assert.equal(p.shown(), 1);
+      assert.match(p.html(), /<strong>Paging match 201<\/strong>/);
+      assert.ok(!p.html().includes(limitMessage));
+      const earlier = await p.submit(
+        `select:${p.header}:${p.customer}:${p.ids[4]}`,
+      );
+      assert.equal(earlier.statusCode, 422);
+      assert.ok(
+        p.html().includes(`name="draft:${p.header}:${p.customer}" value=""`),
+      );
+      await p.submit(`select:${p.header}:${p.customer}:${p.ids[200]}`);
+      assert.ok(
+        p
+          .html()
+          .includes(
+            `name="draft:${p.header}:${p.customer}" value="${p.ids[200]}"`,
+          ),
+      );
+      assert.match(p.html(), /data-reference-selected[\s\S]*Paging match 201/);
+      assert.match(p.html(), /value="SO-PAGING"/);
+      assert.equal(p.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'exactly 200 matches: genuine exhaustion is not called truncation',
+    async () => {
+      const p = await paged(200);
+      await p.search('Paging match');
+      for (let page = 2; page <= 10; page++) await p.more();
+      assert.equal(p.shown(), 200);
+      assert.ok(!p.html().includes(limitMessage));
+      assert.ok(!p.moreOffered());
+    },
+  );
+
+  await t.test(
+    'read withdrawn at the limit: no earlier labels and no availability claim',
+    async () => {
+      const p = await paged(201);
+      await p.search('Paging match');
+      for (let page = 2; page <= 10; page++) await p.more();
+      assert.ok(p.html().includes(limitMessage));
+      p.f.deniedReads.add(`${p.f.ns}:permission.party_read`);
+      for (const response of [await p.submit('add'), await p.more()]) {
+        assert.doesNotMatch(response.html, /Paging match|PM-\d/);
+        assert.ok(!response.html.includes(limitMessage));
+      }
+      assert.equal(p.f.executor.calls.length, 0);
+    },
+  );
 });
 
 test('FORM-3: a declared choice inside quick create is rendered, defaulted and admitted before any create step', async (t) => {

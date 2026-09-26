@@ -47,7 +47,10 @@ export interface LookupState {
 export interface ReferenceLookup {
   readonly term: string;
   readonly records: readonly SemanticRecordDto[];
-  readonly hasMore: boolean;
+  /** This request's authorized read found further matches after its pages. */
+  readonly queryContinues: boolean;
+  /** The pages read reached the editor's display limit. */
+  readonly displayLimitReached: boolean;
   readonly nextCursor: string | null;
 }
 
@@ -379,6 +382,17 @@ export function renderReferenceControl(
   }
   const error = errorFor(id, context.error);
   const searchName = `draftSearch:${row.id}:${field.fieldId}`;
+  // Three truthful endings: the query is exhausted (nothing more is shown), it
+  // continues below the display limit (More), or it continues past the limit
+  // (a refine message that describes the search box; no More that cannot move).
+  const continues = lookup?.queryContinues === true;
+  const limited = continues && lookup.displayLimitReached;
+  const limitId = `${resultsId}-limit`;
+  const describedBy = [
+    ...(context.error ? [`${id}-error`] : []),
+    ...(limited ? [limitId] : []),
+  ];
+  const searchAttributes = `${context.error ? ' aria-invalid="true"' : ''}${describedBy.length ? ` aria-describedby="${h(describedBy.join(' '))}"` : ''}`;
   // After a search, focus lands on the first result; with none, back on the box.
   const toResults =
     context.focus === resultsId && (lookup?.records.length ?? 0) > 0;
@@ -397,13 +411,19 @@ export function renderReferenceControl(
               })
               .join('')
           : `<li class="reference-empty" role="status">No ${h(noun.toLowerCase())} matches “${h(lookup.term)}”.</li>`
-      }${lookup.hasMore ? `<li><button class="link-action" ${action('more')}>More results</button></li>` : ''}</ul>`
+      }${
+        limited
+          ? `<li class="reference-empty reference-limit" id="${h(limitId)}" role="status">More matches exist. Refine your search.</li>`
+          : continues
+            ? `<li><button class="link-action" ${action('more')}>More results</button></li>`
+            : ''
+      }</ul>`
     : '';
   const create =
     context.createOffered && field.reference?.create
       ? `<button class="reference-create" ${action('create')}>+ ${h(field.reference.create.label)}</button>`
       : '';
-  return `${hidden}<div class="reference-control" id="${h(id)}" data-reference-control data-reference-results="${h(resultsId)}"><div class="reference-search"><input type="search" form="draft-editor-form" name="${h(searchName)}" value="${h(lookup?.term ?? '')}" placeholder="${h(`Search ${noun.toLowerCase()} by name or number`)}" aria-label="${h(`Search ${label.toLowerCase()}`)}" autocomplete="off" data-reference-search${searchFocus}${error.attributes}><button class="secondary-action" ${action('search')} data-reference-submit>Search</button></div>${error.html}${results}${create}</div>`;
+  return `${hidden}<div class="reference-control" id="${h(id)}" data-reference-control data-reference-results="${h(resultsId)}"><div class="reference-search"><input type="search" form="draft-editor-form" name="${h(searchName)}" value="${h(lookup?.term ?? '')}" placeholder="${h(`Search ${noun.toLowerCase()} by name or number`)}" aria-label="${h(`Search ${label.toLowerCase()}`)}" autocomplete="off" data-reference-search${searchFocus}${searchAttributes}><button class="secondary-action" ${action('search')} data-reference-submit>Search</button></div>${error.html}${results}${create}</div>`;
 }
 
 /**
