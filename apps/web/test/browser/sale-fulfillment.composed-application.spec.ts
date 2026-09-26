@@ -133,23 +133,37 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.goto(url('inventory_transaction', 'detail', transactionId));
   await command('Post');
 
+  // Draft-editor pickers: search the declared list, select an offered result,
+  // and wait for the returned page's Change control before the next step.
+  const pick = async (search: string, term: string, option: string) => {
+    const control = page
+      .locator('[data-reference-control]')
+      .filter({ has: page.getByLabel(search, { exact: true }) });
+    await control.getByLabel(search, { exact: true }).fill(term);
+    await control.getByRole('button', { name: 'Search', exact: true }).click();
+    await page
+      .locator('.reference-option', { hasText: option })
+      .first()
+      .click();
+    await expect(
+      page.getByRole('button', {
+        name: `Change ${search.replace(/^Search /u, '')}`,
+        exact: true,
+      }),
+    ).toBeVisible();
+  };
   await page.goto(url('sales_order', 'form'));
   await page.getByLabel('Order number *').fill(`SO-FUL-${suffix}`);
-  await page
-    .getByLabel('Customer *')
-    .selectOption({ label: 'Alpine Office Supply' });
   await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
   await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
-  await page.getByLabel('Currency *').fill('CAD');
   await page.getByLabel('Notes').fill('Partial shipment and correction');
-  const draftLine = page.getByRole('group', {
-    name: 'Line 1',
-    exact: true,
-  });
-  await draftLine.getByLabel('Product *').selectOption(itemId);
-  await draftLine.getByLabel('Quantity *').fill('10');
-  await draftLine.getByLabel('Unit *').fill('EA');
-  await draftLine.getByLabel('Unit price').fill('12.5');
+  await pick('Search customer', 'Alpine', 'Alpine Office Supply');
+  // The declared currency default; the unit follows the product's base unit.
+  await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
+  await pick('Search line 1 product', 'OFF-100', 'Field notebook');
+  await expect(page.locator('output.derived-value').first()).toHaveText('EA');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
+  await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/sales_order_detail/u);
   const orderId = new URL(page.url()).searchParams.get('record')!;
@@ -323,20 +337,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   // of the cancelled-and-reversed order above.
   await page.goto(url('sales_order', 'form'));
   await page.getByLabel('Order number *').fill(`SO-CLOSE-${suffix}`);
-  await page
-    .getByLabel('Customer *')
-    .selectOption({ label: 'Alpine Office Supply' });
   await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
   await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
-  await page.getByLabel('Currency *').fill('CAD');
-  const closureDraftLine = page.getByRole('group', {
-    name: 'Line 1',
-    exact: true,
-  });
-  await closureDraftLine.getByLabel('Product *').selectOption(itemId);
-  await closureDraftLine.getByLabel('Quantity *').fill('2');
-  await closureDraftLine.getByLabel('Unit *').fill('EA');
-  await closureDraftLine.getByLabel('Unit price').fill('12.5');
+  await pick('Search customer', 'Alpine', 'Alpine Office Supply');
+  await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
+  await pick('Search line 1 product', 'OFF-100', 'Field notebook');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
+  await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/sales_order_detail/u);
   const closureOrderId = new URL(page.url()).searchParams.get('record')!;
