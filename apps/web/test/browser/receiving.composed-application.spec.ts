@@ -134,6 +134,18 @@ async function journey(
     await expect(page.getByRole('status')).toContainText('Create complete');
     return id;
   }
+  // The vendor picker offers only parties with an active supplier role.
+  await page.goto(
+    `${baseUrl}/?${new URLSearchParams({ surface: 'northstar.app:surface.party_role_form' })}`,
+  );
+  await page
+    .locator('select[name="value:northstar.app:field.party_role_kind"]')
+    .selectOption('northstar.app:option.supplier');
+  await page
+    .locator('select[name="value:northstar.app:field.party_role_status"]')
+    .selectOption('northstar.app:option.active');
+  await relation('party_role_party', '71000000-0000-4000-8000-000000000001');
+  await save();
   const suffix = randomUUID().slice(0, 8);
   await page.goto(url('purchase_order', 'form'));
   await expect(
@@ -141,32 +153,34 @@ async function journey(
       '[name="value:northstar.app:derived_state_field.machine.purchase_order_lifecycle"]',
     ),
   ).toHaveCount(0);
-  // Draft-editor pickers: search the declared list, select an offered result,
-  // and wait for the returned page's Change control before the next step.
-  const pick = async (search: string, term: string, option: string) => {
-    const control = page
-      .locator('[data-reference-control]')
-      .filter({ has: page.getByLabel(search, { exact: true }) });
-    await control.getByLabel(search, { exact: true }).fill(term);
-    await control.getByRole('button', { name: 'Search', exact: true }).click();
+  // Draft-editor pickers: type into the field's combobox and choose an offered
+  // result -- in place with the owned script, as ordinary submits without it --
+  // then wait for the field to show the selection before the next step.
+  const pick = async (name: string, term: string, option: string) => {
+    const box = page.getByRole('combobox', { name, exact: true });
+    await box.fill(term);
+    if (!(await page.locator('body[data-reference-enhanced]').count()))
+      await page
+        .locator('[data-reference-control]')
+        .filter({ has: box })
+        .getByRole('button', { name: 'Search', exact: true })
+        .click();
     await page
-      .locator('.reference-option', { hasText: option })
+      .getByRole('option')
+      .filter({ has: page.locator('strong', { hasText: option }) })
       .first()
       .click();
     await expect(
-      page.getByRole('button', {
-        name: `Change ${search.replace(/^Search /u, '')}`,
-        exact: true,
-      }),
-    ).toBeVisible();
+      page.getByRole('combobox', { name, exact: true }),
+    ).toHaveAttribute('data-selected-label', option);
   };
   await page.getByLabel('Order number *').fill(`RECEIPT-PO-${suffix}`);
   await page
     .getByLabel('Order date (UTC) *')
     .fill(new Date().toISOString().slice(0, 16));
-  await pick('Search vendor', 'Alpine', 'Alpine Office Supply');
+  await pick('Vendor', 'Alpine', 'Alpine Office Supply');
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
-  await pick('Search line 1 product', 'OFF-100', 'Field notebook');
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('5');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/purchase_order_detail/u);

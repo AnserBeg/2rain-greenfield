@@ -133,34 +133,44 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.goto(url('inventory_transaction', 'detail', transactionId));
   await command('Post');
 
-  // Draft-editor pickers: search the declared list, select an offered result,
-  // and wait for the returned page's Change control before the next step.
-  const pick = async (search: string, term: string, option: string) => {
-    const control = page
-      .locator('[data-reference-control]')
-      .filter({ has: page.getByLabel(search, { exact: true }) });
-    await control.getByLabel(search, { exact: true }).fill(term);
-    await control.getByRole('button', { name: 'Search', exact: true }).click();
+  // Draft-editor pickers: type into the field's combobox and choose an offered
+  // result -- in place with the owned script, as ordinary submits without it --
+  // then wait for the field to show the selection before the next step.
+  const pick = async (name: string, term: string, option: string) => {
+    const box = page.getByRole('combobox', { name, exact: true });
+    await box.fill(term);
+    if (!(await page.locator('body[data-reference-enhanced]').count()))
+      await page
+        .locator('[data-reference-control]')
+        .filter({ has: box })
+        .getByRole('button', { name: 'Search', exact: true })
+        .click();
     await page
-      .locator('.reference-option', { hasText: option })
+      .getByRole('option')
+      .filter({ has: page.locator('strong', { hasText: option }) })
       .first()
       .click();
     await expect(
-      page.getByRole('button', {
-        name: `Change ${search.replace(/^Search /u, '')}`,
-        exact: true,
-      }),
-    ).toBeVisible();
+      page.getByRole('combobox', { name, exact: true }),
+    ).toHaveAttribute('data-selected-label', option);
   };
+  // The customer picker offers only parties with an active customer role, so
+  // the role exists before the order. Reservation activation still checks the
+  // current persisted party-role facts on the server.
+  await page.goto(url('party_role', 'form'));
+  await choose('party_role', 'kind', 'Customer');
+  await choose('party_role', 'status', 'Active');
+  await relate('party_role_party', customerPartyId);
+  await save();
   await page.goto(url('sales_order', 'form'));
   await page.getByLabel('Order number *').fill(`SO-FUL-${suffix}`);
   await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
   await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
   await page.getByLabel('Notes').fill('Partial shipment and correction');
-  await pick('Search customer', 'Alpine', 'Alpine Office Supply');
+  await pick('Customer', 'Alpine', 'Alpine Office Supply');
   // The declared currency default; the unit follows the product's base unit.
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
-  await pick('Search line 1 product', 'OFF-100', 'Field notebook');
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await expect(page.locator('output.derived-value').first()).toHaveText('EA');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
   await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
@@ -173,15 +183,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     .getAttribute('data-record-id'))!;
   expect(orderLineId).toBeTruthy();
   await command('Release', false);
-
-  // Eligibility is checked from current persisted party-role facts when the
-  // reservation is activated. The released order deliberately predates this
-  // role so historical orders cannot bypass the same server-side check.
-  await page.goto(url('party_role', 'form'));
-  await choose('party_role', 'kind', 'Customer');
-  await choose('party_role', 'status', 'Active');
-  await relate('party_role_party', customerPartyId);
-  await save();
 
   await page.goto(url('reservation', 'form'));
   await fill('reservation', 'number', `RSV-${suffix}`);
@@ -339,9 +340,9 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.getByLabel('Order number *').fill(`SO-CLOSE-${suffix}`);
   await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
   await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
-  await pick('Search customer', 'Alpine', 'Alpine Office Supply');
+  await pick('Customer', 'Alpine', 'Alpine Office Supply');
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
-  await pick('Search line 1 product', 'OFF-100', 'Field notebook');
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
   await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();

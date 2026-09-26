@@ -72,7 +72,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   const state = (field) => {
     let known = states.get(field.id);
     if (!known) {
-      known = { seq: Number(lookupOf(field)?.getAttribute('data-reference-seq') || 0), timer: 0, controller: null, active: -1, term: null, quiet: false, pending: false, enter: 0 };
+      known = { seq: Number(lookupOf(field)?.getAttribute('data-reference-seq') || 0), timer: 0, controller: null, active: -1, term: null, quiet: false, pending: false, enter: 0, deferred: '' };
       states.set(field.id, known);
     }
     return known;
@@ -141,6 +141,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     if (!input || !button) return;
     const known = state(field);
     clearTimeout(known.timer);
+    known.timer = 0;
     known.controller?.abort();
     known.controller = new AbortController();
     const seq = ++known.seq;
@@ -152,6 +153,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       .then(({ html }) => {
         // A newer request owns the field; an older answer is dropped unseen.
         if (seq !== known.seq || !html) return;
+        known.pending = false;
         apply(html, row);
         known.term = term;
         prepare(field);
@@ -161,9 +163,13 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
           // initial options on focus wait for an arrow key.
           const first = optionsOf(field)[0];
           highlight(field, verb === 'more' ? known.active : term && first && !first.hasAttribute('data-reference-create') && !first.hasAttribute('data-reference-more') ? 0 : -1);
-          // Enter pressed before this answer arrived takes its best match.
+          // Enter pressed before this answer arrived takes its best match; a
+          // result chosen from an older answer is taken only if still offered.
           const option = optionsOf(field)[known.active];
-          if (known.enter === seq && option && !option.hasAttribute('data-reference-create') && !option.hasAttribute('data-reference-more')) choose(field, option);
+          const deferred = known.deferred && optionsOf(field).find((candidate) => candidate.value === known.deferred);
+          known.deferred = '';
+          if (deferred) choose(field, deferred);
+          else if (known.enter === seq && option && !option.hasAttribute('data-reference-create') && !option.hasAttribute('data-reference-more')) choose(field, option);
         }
       })
       .catch((error) => {
@@ -189,6 +195,16 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     if (option.hasAttribute('data-reference-create')) return openCreate(field, option);
     const id = field.id;
     const known = state(field);
+    // A newer search is still answering: choose once it has, from what it offers.
+    if (known.pending || known.timer) {
+      known.deferred = option.value;
+      if (known.timer) {
+        clearTimeout(known.timer);
+        known.timer = 0;
+        lookup(field, 'search');
+      }
+      return;
+    }
     known.seq++;
     known.controller?.abort();
     known.pending = false;

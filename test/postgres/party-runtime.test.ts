@@ -25,6 +25,7 @@ import {
   withRealPartyRuntime,
 } from '../fixtures/g2/party/runtime-harness.js';
 import { resolvePartyName } from '../fixtures/g2/party/resolver-harness.js';
+import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 
 test('Party executes the compiled declared-semantics contract on real PostgreSQL', async () => {
   await withRealPartyRuntime('party-walking-slice', async (runtime) => {
@@ -1128,3 +1129,116 @@ async function rejectedTypedError(
   }
   assert.fail(`expected ${code}`);
 }
+
+/**
+ * RAIN WORKSPACE INTERACTION COMPLETION, milestone A. A related-record filter
+ * (parties with an active customer role) narrows the list in SQL before the
+ * count and the page window, so a page is a page of the eligible set; search
+ * stays inside it, the cursor is bound to it, and tenant scope still applies.
+ */
+test('a related-record filter narrows the Party list before its count and page window', async () => {
+  await withRealPartyRuntime('party-related-filter', async (runtime) => {
+    const ns = PARTY_IDS.namespace;
+    const party = async (number: string, name: string) => {
+      const recordId = randomUUID();
+      await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+        recordId,
+        values: partyValues(number, name, ''),
+      });
+      return recordId;
+    };
+    const role = (partyId: string, kind: string, status = 'active') =>
+      invokePartyOperation(runtime, runtime.views.a, 'party_role_create', {
+        recordId: randomUUID(),
+        relations: { [PARTY_IDS.relationIds.roleParty]: partyId },
+        values: {
+          [PARTY_IDS.fieldIds.roleKind]: `${ns}:option.${kind}`,
+          [PARTY_IDS.fieldIds.roleStatus]: `${ns}:option.${status}`,
+        },
+      });
+    const customers: string[] = [];
+    for (let index = 1; index <= 25; index++) {
+      const id = await party(`C-${index}`, `Customer ${index}`);
+      await role(id, 'customer');
+      customers.push(id);
+    }
+    // A dual-role party is a legitimate customer.
+    await role(customers[0]!, 'supplier');
+    for (let index = 1; index <= 5; index++)
+      await role(await party(`S-${index}`, `Supplier ${index}`), 'supplier');
+    for (let index = 1; index <= 3; index++)
+      await role(
+        await party(`I-${index}`, `Inactive ${index}`),
+        'customer',
+        'inactive',
+      );
+    for (let index = 1; index <= 4; index++)
+      await party(`N-${index}`, `No role ${index}`);
+    const eligibility = (kind: string) => ({
+      queryId: `${ns}:query.party_role_list`,
+      relationId: PARTY_IDS.relationIds.roleParty,
+      fieldFilters: [
+        { fieldId: PARTY_IDS.fieldIds.roleKind, value: `${ns}:option.${kind}` },
+        {
+          fieldId: PARTY_IDS.fieldIds.roleStatus,
+          value: `${ns}:option.active`,
+        },
+      ],
+    });
+    const list = (
+      view: typeof runtime.views.a,
+      cursor: string | null,
+      search = '',
+      kind = 'customer',
+    ) =>
+      invokePartyQuery(runtime, view, 'party_list', {
+        includeArchived: false,
+        list: {
+          schemaVersion: SHARED_LIST_QUERY_VERSION,
+          cursor,
+          pageSize: 20,
+          search,
+          matchMode: 'substring',
+          sort: [],
+          relationLabels: [],
+          relatedFilter: eligibility(kind),
+        },
+      });
+    const first = await list(runtime.views.a, null);
+    assert.equal(first.listCoverage?.totalCount, 25);
+    assert.equal(first.records.length, 20);
+    assert.equal(first.listCoverage?.hasMore, true);
+    assert.deepEqual(
+      first.listCoverage?.relatedFilter,
+      eligibility('customer'),
+    );
+    const second = await list(runtime.views.a, first.listCoverage!.nextCursor);
+    assert.equal(second.records.length, 5);
+    assert.equal(second.listCoverage?.hasMore, false);
+    assert.deepEqual(
+      [...first.records, ...second.records]
+        .map((record) => record.recordId)
+        .sort(),
+      [...customers].sort(),
+    );
+    // Search runs inside the eligible set only.
+    const searched = await list(runtime.views.a, null, 'Customer 1');
+    assert.equal(searched.listCoverage?.totalCount, 11);
+    // The other kind: five suppliers plus the dual-role customer.
+    assert.equal(
+      (await list(runtime.views.a, null, '', 'supplier')).listCoverage
+        ?.totalCount,
+      6,
+    );
+    // A cursor minted for customers is not a window over suppliers.
+    await assert.rejects(
+      list(runtime.views.a, first.listCoverage!.nextCursor, '', 'supplier'),
+      /cursor/u,
+    );
+    // Another tenant sees none of these parties.
+    assert.equal(
+      (await list(runtime.views.b, null)).listCoverage?.totalCount,
+      0,
+    );
+  });
+});

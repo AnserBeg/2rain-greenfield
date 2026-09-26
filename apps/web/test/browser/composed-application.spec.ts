@@ -934,11 +934,9 @@ async function inventoryNavigationJourney(
     'Purchasing',
     'Inventory movement',
     'Inventory period lock',
-    'Inventory transaction line',
     'Inventory transaction',
     'Legal entity',
     'Posted stock',
-    'Stock count line',
     'Stock count',
     'Party',
     'Party role',
@@ -1010,14 +1008,39 @@ async function inventoryNavigationJourney(
     [
       'Inventory movement',
       'Inventory period lock',
-      'Inventory transaction line',
       'Inventory transaction',
       'Legal entity',
       'Posted stock',
-      'Stock count line',
       'Stock count',
     ],
   );
+  // Every Inventory destination opens with the authorized company and readable
+  // content: no legal-entity hurdle and no unreadable binding. Line tables are
+  // shown inside their documents rather than as destinations of their own.
+  for (const destination of [
+    'Inventory movement',
+    'Inventory period lock',
+    'Inventory transaction',
+    'Stock count',
+  ]) {
+    await inventoryNavigation
+      .getByRole('link', { name: destination, exact: true })
+      .click();
+    await expect(
+      page.getByRole('heading', { level: 1, name: destination }),
+    ).toBeVisible();
+    await expect(
+      page.locator(
+        '[data-message="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"], [data-message="INVALID_SURFACE_BINDING"]',
+      ),
+    ).toHaveCount(0);
+    await inventoryNavigation.getByText('Inventory', { exact: true }).click();
+  }
+  await page.goto(surfaceUrl(baseUrl, 'inventory_transaction_list'));
+  await expect(page).toHaveURL(
+    /inventory_transaction_list_legal_entity_scope=/u,
+  );
+  await page.goto(surfaceUrl(baseUrl, 'party_list'));
   await inventoryNavigation.getByText('Inventory', { exact: true }).click();
   await expect(moreNavigation).toBeVisible();
   await expect(

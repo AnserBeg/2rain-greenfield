@@ -66,7 +66,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       page.getByText('Select legal entity', { exact: true }),
     ).toHaveCount(0);
     await page.getByRole('link', { name: 'New', exact: true }).click();
-    await header(page, 'SO-ENTRY-BROWSER', 'customer');
+    await header(page, 'SO-ENTRY-BROWSER', 'Customer');
     await line(page, 1, 'Field notebook · OFF-100', '10', true);
     await submit(page, () =>
       page.getByRole('button', { name: 'Add line', exact: true }).click(),
@@ -106,7 +106,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
     await page.getByRole('link', { name: 'New', exact: true }).click();
-    await header(page, 'PO-ENTRY-BROWSER', 'vendor');
+    await header(page, 'PO-ENTRY-BROWSER', 'Vendor');
     await line(page, 1, 'Field notebook · OFF-100', '10', false);
     await submit(page, () =>
       page.getByRole('button', { name: 'Add line', exact: true }).click(),
@@ -286,14 +286,18 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       .getByRole('button', { name: 'Receive with actual cost', exact: true })
       .click();
     await page.getByLabel('Quantity to receive', { exact: true }).fill('2');
-    await page.getByLabel('Base unit', { exact: true }).fill('EA');
+    // The unit is the selected line's product base unit, shown, not typed; the
+    // currency is offered, starting from the order's own.
+    await expect(task().locator('output[data-derived-input]')).toHaveText('EA');
     await page
       .getByRole('combobox', { name: 'Receiving location', exact: true })
       .selectOption({ label: 'Calgary warehouse' });
     await page
       .getByLabel('Actual received unit cost', { exact: true })
       .fill('2.45');
-    await page.getByLabel('Actual cost currency', { exact: true }).fill('CAD');
+    await expect(
+      page.getByRole('combobox', { name: 'Actual cost currency', exact: true }),
+    ).toHaveValue('CAD');
     await page
       .getByRole('button', {
         name: 'Review Receive with actual cost',
@@ -308,6 +312,9 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       })
       .click();
     await expect(task()).toContainText('complete');
+    await expect(task().locator('[data-task-result]')).toContainText(
+      'Receive with actual cost: done',
+    );
     await page
       .getByRole('link', { name: 'Back to order', exact: true })
       .click();
@@ -331,7 +338,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     );
   }, testInfo.outputPath('serving.json'));
 });
-test('order editor pickers search past the first page and create missing masters in context without duplicates', async ({
+test('order editor pickers answer in place: focus, type, choose, create and return without reloading the order', async ({
   page,
   browser,
 }, testInfo) => {
@@ -344,10 +351,15 @@ test('order editor pickers search past the first page and create missing masters
         fullPage: true,
       });
     const dialog = page.locator('dialog.editor-create');
-    const customer = () => picker(page, 'Search customer');
-    const selectedCustomer = page.locator(
-      '.draft-header [data-reference-selected] strong',
-    );
+    const customer = page.getByRole('combobox', {
+      name: 'Customer',
+      exact: true,
+    });
+    const product = page.getByRole('combobox', {
+      name: 'Line 1 product',
+      exact: true,
+    });
+    const status = () => field(page, 'Customer').locator('.reference-status');
     const createForm = () =>
       dialog.locator('form').evaluate((form: HTMLFormElement) => ({
         action: form.action,
@@ -358,34 +370,54 @@ test('order editor pickers search past the first page and create missing masters
           ]),
         ),
       }));
+    // What left the page: document loads (navigations and ordinary submits)
+    // and in-place answers.
+    let documents = 0;
+    let fragments = 0;
+    page.on('request', (request) => {
+      if (request.resourceType() === 'document') documents += 1;
+      if (request.headers()['x-rain-fragment'] === '1') fragments += 1;
+    });
     await page.goto(url);
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await page.getByLabel('Order number *').fill('SO-PICKER');
     await page.getByLabel('Currency *').selectOption('USD');
     await page.getByLabel('Notes').fill('Dock 4\nCall ahead');
+    const kept = async () => {
+      await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
+      await expect(page.getByLabel('Currency *')).toHaveValue('USD');
+      await expect(page.getByLabel('Notes')).toHaveValue('Dock 4\nCall ahead');
+    };
+    const loaded = documents;
 
-    // The first page does not hold every customer; the server searches the rest.
-    await search(page, 'Search customer', '');
-    await expect(customer().locator('.reference-option')).toHaveCount(20);
-    await expect(
-      customer().locator('.reference-option', {
-        hasText: 'Whitecourt Forestry',
-      }),
-    ).toHaveCount(0);
-    await submit(page, () =>
-      customer().getByRole('button', { name: 'More results' }).click(),
+    // Focus opens the first page of ELIGIBLE customers; "+ New customer" is
+    // the popup's last row; More continues in place.
+    await customer.focus();
+    await expect(records(page, 'Customer')).toHaveCount(20);
+    await expect(field(page, 'Customer').getByRole('option').last()).toHaveText(
+      '+ New customer',
     );
-    expect(
-      await customer().locator('.reference-option').count(),
-    ).toBeGreaterThan(20);
-
-    // FORM-1: results already shown are never replayed once read access is
-    // withdrawn; an unrelated action's response re-reads them under its own
-    // authority and discloses none of them.
-    const shownNames = await customer()
-      .locator('.reference-option strong')
+    await expect(
+      records(page, 'Customer').filter({ hasText: 'Whitecourt Forestry' }),
+    ).toHaveCount(0);
+    await field(page, 'Customer')
+      .getByRole('option', { name: 'More results' })
+      .click();
+    await expect
+      .poll(() => records(page, 'Customer').count())
+      .toBeGreaterThan(20);
+    await shot('picker-focus-more');
+    expect(documents, 'focus and More load no page').toBe(loaded);
+    const shownNames = await records(page, 'Customer')
+      .locator('strong')
       .allInnerTexts();
+
+    // FORM-1: once read access is withdrawn, nothing shown before is shown
+    // again -- not by a fresh lookup and not by a full page answer.
     await measure('deny', undefined, undefined, 'party_read');
+    await customer.fill('Grande');
+    await expect(status().locator('[data-message]')).toBeVisible();
+    await expect(records(page, 'Customer')).toHaveCount(0);
     await submit(page, () =>
       page.getByRole('button', { name: 'Add line', exact: true }).click(),
     );
@@ -400,294 +432,320 @@ test('order editor pickers search past the first page and create missing masters
         (name) => withdrawn.includes(name) || withdrawn.includes(escaped(name)),
       ),
     ).toEqual([]);
-    await expect(page.locator('.reference-option')).toHaveCount(0);
     await expect(page.locator('tr.draft-line')).toHaveCount(2);
     await measure('allow', undefined, undefined, 'party_read');
-    await search(page, 'Search customer', 'Whitecourt');
-    await expect(customer().locator('.reference-option strong')).toHaveText([
+    await kept();
+    const afterAddLine = documents;
+
+    // Eligibility: a supplier-only party is not offered as a customer.
+    await customer.fill('Cascade Fastener');
+    await expect(status()).toContainText('No customer matches');
+    // Typing narrows on the server, and a late answer to an older term never
+    // replaces the newer one: the first 'Whit' request is held.
+    const releaseOld = await holdFirst(page, (body) =>
+      decodeURIComponent(body).includes('sales_order_customer_party_id'),
+    );
+    await customer.fill('Whit');
+    await customer.fill('Whitecourt');
+    await expect(records(page, 'Customer')).toHaveCount(1);
+    await releaseOld();
+    await page.waitForTimeout(300);
+    await expect(records(page, 'Customer')).toHaveCount(1);
+    await expect(records(page, 'Customer').first()).toContainText(
       'Whitecourt Forestry',
-    ]);
-    await shot('picker-server-search');
-
-    // Keyboard: Enter searches this field and never saves the order.
-    const box = page.getByLabel('Search customer', { exact: true });
-    await box.fill('Alpine');
-    await submit(page, () => box.press('Enter'));
+    );
+    await shot('picker-typed');
+    // Enter takes the highlighted match; it never saves the order.
+    await customer.press('Enter');
+    await expect(customer).toHaveAttribute(
+      'data-selected-label',
+      'Whitecourt Forestry',
+    );
+    await expect(customer).toBeFocused();
     expect(new URL(page.url()).searchParams.get('record')).toBeNull();
-    await expect(customer().locator('.reference-option').first()).toBeFocused();
-    await submit(page, () => page.keyboard.press('Enter'));
-    await expect(selectedCustomer).toHaveText('Alpine Office Supply');
+    await kept();
+    // Escape closes the popup first and leaves the selection as it was.
+    await customer.fill('Alp');
+    await expect(records(page, 'Customer').first()).toBeVisible();
+    await customer.press('Escape');
     await expect(
-      page.getByRole('button', { name: 'Change customer', exact: true }),
-    ).toBeFocused();
-    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
-    await expect(page.getByLabel('Currency *')).toHaveValue('USD');
-    await expect(page.getByLabel('Notes')).toHaveValue('Dock 4\nCall ahead');
+      field(page, 'Customer').locator('.reference-lookup'),
+    ).toBeHidden();
+    await expect(customer).toHaveValue('Whitecourt Forestry');
 
-    // Cancel: nothing is written, nothing entered is lost, focus returns.
-    await submit(page, () =>
-      page
-        .getByRole('button', { name: 'Change customer', exact: true })
-        .click(),
+    // Two fields answering out of order: the customer lookup is held while the
+    // line's product is found and chosen; each answer lands on its own field.
+    const releaseCustomer = await holdFirst(page, (body) =>
+      decodeURIComponent(body).includes('sales_order_customer_party_id'),
     );
-    await box.fill('Ghost Glazing');
-    await submit(page, () =>
-      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
+    await customer.fill('Alpine');
+    await product.fill('notebook');
+    await records(page, 'Line 1 product')
+      .filter({ hasText: 'Field notebook' })
+      .first()
+      .click();
+    await expect(product).toHaveAttribute(
+      'data-selected-label',
+      'Field notebook',
     );
+    await expect(page.locator('output.derived-value').first()).toHaveText('EA');
+    await releaseCustomer();
+    await page.waitForTimeout(300);
+    await expect(product).toHaveAttribute(
+      'data-selected-label',
+      'Field notebook',
+    );
+    await expect(customer).toHaveAttribute(
+      'data-selected-label',
+      'Whitecourt Forestry',
+    );
+    expect(documents, 'no page load for focus, search, More or selection').toBe(
+      afterAddLine,
+    );
+    expect(fragments).toBeGreaterThan(8);
+
+    // Create: "+ New customer" opens over the order with the typed name and
+    // Escape cancels it on the server, writing nothing.
+    await customer.fill('Ghost Glazing');
+    await field(page, 'Customer')
+      .getByRole('option', { name: '+ New customer' })
+      .click();
+    await expect(dialog).toBeVisible();
     expect(await dialog.evaluate((element) => element.matches(':modal'))).toBe(
       true,
     );
     await expect(dialog.getByLabel('Name *')).toHaveValue('Ghost Glazing');
-    await submit(page, () => page.keyboard.press('Escape'));
+    await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
-    await expect(box).toBeFocused();
-    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
+    await expect(customer).toBeFocused();
+    await kept();
     expect(
       (await measure('masters', undefined, undefined, 'Ghost Glazing')).parties,
     ).toBe(0);
 
-    // Denied create: refused without a write; the picker still selects.
-    await measure('deny', undefined, undefined, 'party_create');
-    await box.fill('Denied Glazing');
-    await submit(page, () =>
-      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
-    );
-    await dialog.getByLabel('Customer number *').fill('C-DENIED');
-    expect(
-      await submit(page, () =>
-        dialog
-          .getByRole('button', { name: 'Create and use', exact: true })
-          .click(),
-      ),
-    ).toBe(422);
-    await expect(
-      dialog.locator('[data-diagnostic-code="OPERATION_PERMISSION_DENIED"]'),
-    ).toHaveCount(1);
-    await shot('create-denied');
-    expect(
-      (await measure('masters', undefined, undefined, 'Denied Glazing'))
-        .parties,
-    ).toBe(0);
-    await submit(page, () =>
-      dialog.getByRole('button', { name: 'Cancel', exact: true }).click(),
-    );
-    await choose(page, 'Search customer', 'Alpine', 'Alpine Office Supply');
-    await expect(selectedCustomer).toHaveText('Alpine Office Supply');
-    await measure('allow', undefined, undefined, 'party_create');
-
-    // Partial create: the second governed step is refused; the party is kept,
-    // not selected, and Retry finishes it with the same request.
-    await submit(page, () =>
-      page
-        .getByRole('button', { name: 'Change customer', exact: true })
-        .click(),
-    );
-    await measure('deny', undefined, undefined, 'party_role_create');
-    await box.fill('Partial Glazing');
-    await submit(page, () =>
-      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
-    );
-    await dialog.getByLabel('Customer number *').fill('C-PARTIAL');
-    await dialog.getByLabel('Contact').fill('Pat Lee\n403-555-0199');
-    await submit(page, () =>
-      dialog
-        .getByRole('button', { name: 'Create and use', exact: true })
-        .click(),
-    );
-    await expect(dialog).toContainText('1 of 2 create steps committed');
-    await expect(dialog.getByLabel('Name *')).toBeDisabled();
-    await shot('create-partial');
-    expect(
-      await measure('masters', undefined, undefined, 'Partial Glazing'),
-    ).toMatchObject({
-      parties: 1,
-      roles: [],
-    });
-    await measure('allow', undefined, undefined, 'party_role_create');
-    const retry = await createForm();
-    await submit(page, () =>
-      dialog.getByRole('button', { name: 'Retry', exact: true }).click(),
-    );
-    await expect(dialog).toHaveCount(0);
-    await expect(selectedCustomer).toHaveText('Partial Glazing');
-    await expect(page.locator('[data-editor-create-selected]')).toBeVisible();
-    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
-    await shot('create-retried-selected');
-    // A duplicate submission of the same create form writes nothing.
-    const duplicate = await page.request.post(retry.action, {
-      form: { ...retry.fields, draftCreate: 'submit' },
-    });
-    expect(duplicate.status()).toBe(409);
-    expect(
-      await measure('masters', undefined, undefined, 'Partial Glazing'),
-    ).toMatchObject({
-      parties: 1,
-      roles: ['northstar.app:option.customer'],
-    });
-
-    // FORM-2: Enter in a single-line create field submits the primary action,
-    // after the browser's own required-field validation; it never cancels.
-    let posts = 0;
-    page.on('request', (request) => {
-      if (request.method() === 'POST') posts += 1;
-    });
-    await submit(page, () =>
-      page
-        .getByRole('button', { name: 'Change customer', exact: true })
-        .click(),
-    );
-    await box.fill('Blank Glazing');
-    await submit(page, () =>
-      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
-    );
-    const beforeEnter = posts;
+    // FORM-2: Enter with a required value missing sends nothing.
+    await customer.fill('Blank Glazing');
+    await field(page, 'Customer')
+      .getByRole('option', { name: '+ New customer' })
+      .click();
+    const beforeEnter = fragments;
     await dialog.getByLabel('Name *').press('Enter');
     await page.waitForTimeout(500);
-    expect(posts).toBe(beforeEnter);
-    await expect(dialog).toBeVisible();
+    expect(fragments).toBe(beforeEnter);
     expect(
       await dialog
         .getByLabel('Customer number *')
         .evaluate((input: HTMLInputElement) => input.validity.valueMissing),
     ).toBe(true);
-    // Explicit Cancel before any attempt creates nothing and keeps the order.
-    await submit(page, () =>
-      dialog.getByRole('button', { name: 'Cancel', exact: true }).click(),
-    );
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
     expect(
       (await measure('masters', undefined, undefined, 'Blank Glazing')).parties,
     ).toBe(0);
-    await box.fill('Enter Glazing');
-    await submit(page, () =>
-      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
-    );
+
+    // Create and use: governed Party + active customer role, selected in place.
+    await customer.fill('Enter Glazing');
+    await field(page, 'Customer')
+      .getByRole('option', { name: '+ New customer' })
+      .click();
     await dialog.getByLabel('Customer number *').fill('C-ENTER');
-    await submit(page, () => dialog.getByLabel('Name *').press('Enter'));
+    const created = await createForm();
+    await dialog.getByLabel('Name *').press('Enter');
     await expect(dialog).toHaveCount(0);
-    await expect(selectedCustomer).toHaveText('Enter Glazing');
-    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
-    await expect(page.getByLabel('Currency *')).toHaveValue('USD');
+    await expect(customer).toHaveAttribute(
+      'data-selected-label',
+      'Enter Glazing',
+    );
+    await expect(customer).toBeFocused();
+    await expect(page.locator('[data-editor-create-selected]')).toBeVisible();
+    await expect(product).toHaveAttribute(
+      'data-selected-label',
+      'Field notebook',
+    );
+    await kept();
+    await shot('create-returned');
     expect(
       await measure('masters', undefined, undefined, 'Enter Glazing'),
     ).toMatchObject({ parties: 1, roles: ['northstar.app:option.customer'] });
+    // The same create replayed as an ordinary submit creates nothing more.
+    const replayed = await page.request.post(created.action, {
+      form: { ...created.fields, draftCreate: 'submit' },
+    });
+    expect(replayed.status()).toBeGreaterThanOrEqual(400);
+    expect(
+      (await measure('masters', undefined, undefined, 'Enter Glazing')).parties,
+    ).toBe(1);
 
-    // A product created from a line returns to that exact line.
-    await page.getByLabel('Line 1 quantity', { exact: true }).fill('2.50');
-    await picker(page, 'Search line 1 product')
-      .getByLabel('Search line 1 product', { exact: true })
-      .fill('Thermal Roll');
-    await submit(page, () =>
-      picker(page, 'Search line 1 product')
-        .getByRole('button', { name: '+ New product', exact: true })
-        .click(),
+    // Not permitted: "+ New customer" is not offered at all.
+    await measure('deny', undefined, undefined, 'party_create');
+    await customer.fill('Denied Glazing');
+    await expect(status()).toContainText('No customer matches');
+    await expect(
+      field(page, 'Customer').getByRole('option', { name: '+ New customer' }),
+    ).toHaveCount(0);
+    await shot('create-not-offered');
+    await measure('allow', undefined, undefined, 'party_create');
+
+    // Revoked after the flow opened: refused truthfully, Cancel only.
+    await customer.fill('Revoked Glazing');
+    await field(page, 'Customer')
+      .getByRole('option', { name: '+ New customer' })
+      .click();
+    await dialog.getByLabel('Customer number *').fill('C-REVOKED');
+    await measure('deny', undefined, undefined, 'party_create');
+    await dialog
+      .getByRole('button', { name: 'Create and use', exact: true })
+      .click();
+    await expect(dialog.locator('[data-editor-create-denied]')).toBeVisible();
+    await expect(
+      dialog.getByRole('button', { name: /Create and use|Retry/ }),
+    ).toHaveCount(0);
+    await shot('create-revoked');
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await measure('allow', undefined, undefined, 'party_create');
+    expect(
+      (await measure('masters', undefined, undefined, 'Revoked Glazing'))
+        .parties,
+    ).toBe(0);
+
+    // Partial: the role step is refused after the party committed. The party
+    // is kept and not selected; Cancel says so.
+    await customer.fill('Partial Glazing');
+    await field(page, 'Customer')
+      .getByRole('option', { name: '+ New customer' })
+      .click();
+    await dialog.getByLabel('Customer number *').fill('C-PARTIAL');
+    await measure('deny', undefined, undefined, 'party_role_create');
+    await dialog
+      .getByRole('button', { name: 'Create and use', exact: true })
+      .click();
+    await expect(dialog).toContainText('1 of 2 create steps committed');
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator('[data-editor-create-kept]')).toBeVisible();
+    await expect(customer).toHaveAttribute(
+      'data-selected-label',
+      'Enter Glazing',
     );
+    await measure('allow', undefined, undefined, 'party_role_create');
+    expect(
+      await measure('masters', undefined, undefined, 'Partial Glazing'),
+    ).toMatchObject({ parties: 1, roles: [] });
+
+    // Read-back withheld: both steps commit but the record is not selected.
+    await customer.fill('Withheld Glazing');
+    await field(page, 'Customer')
+      .getByRole('option', { name: '+ New customer' })
+      .click();
+    await dialog.getByLabel('Customer number *').fill('C-WITHHELD');
+    await measure('deny', undefined, undefined, 'party_read');
+    await dialog
+      .getByRole('button', { name: 'Create and use', exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    await measure('allow', undefined, undefined, 'party_read');
+    await expect(page.locator('[data-editor-create-withheld]')).toBeVisible();
+    await expect(customer).toHaveAttribute(
+      'data-selected-label',
+      'Enter Glazing',
+    );
+    expect(
+      await measure('masters', undefined, undefined, 'Withheld Glazing'),
+    ).toMatchObject({ parties: 1, roles: ['northstar.app:option.customer'] });
+
+    // A product created from a line returns to that exact line, in place.
+    await page.getByLabel('Line 1 quantity', { exact: true }).fill('2.50');
+    await product.fill('Thermal Roll');
+    await field(page, 'Line 1 product')
+      .getByRole('option', { name: '+ New product' })
+      .click();
     await dialog.getByLabel('SKU *').fill('TR-80');
     await dialog.getByLabel('Base unit *').fill('ROLL');
     await shot('create-product');
     // FORM-2: Enter in the product's single-line Base unit creates it too.
-    await submit(page, () => dialog.getByLabel('Base unit *').press('Enter'));
-    await expect(
-      page.getByRole('button', { name: 'Change line 1 product', exact: true }),
-    ).toBeFocused();
-    await expect(page.locator('tr.draft-line').first()).toContainText(
+    await dialog.getByLabel('Base unit *').press('Enter');
+    await expect(dialog).toHaveCount(0);
+    await expect(product).toHaveAttribute(
+      'data-selected-label',
       'Thermal Roll',
     );
+    await expect(product).toBeFocused();
     await expect(page.locator('output.derived-value').first()).toHaveText(
       'ROLL',
     );
     await expect(
       page.getByLabel('Line 1 quantity', { exact: true }),
-    ).toHaveValue('2.5');
+    ).toHaveValue('2.50');
     expect(
       (await measure('masters', undefined, undefined, 'Thermal Roll')).items,
     ).toBe(1);
+    await kept();
     await shot('line-product-created');
-
-    // Read-back withheld: the create commits but is not selected.
-    await submit(page, () =>
-      page
-        .getByRole('button', { name: 'Change customer', exact: true })
-        .click(),
-    );
-    await box.fill('Withheld Glazing');
-    await submit(page, () =>
-      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
-    );
-    await dialog.getByLabel('Customer number *').fill('C-WITHHELD');
-    await measure('deny', undefined, undefined, 'party_read');
-    await submit(page, () =>
-      dialog
-        .getByRole('button', { name: 'Create and use', exact: true })
-        .click(),
-    );
-    await measure('allow', undefined, undefined, 'party_read');
-    const withheld = await measure(
-      'masters',
-      undefined,
-      undefined,
-      'Withheld Glazing',
-    );
-    await shot('create-withheld');
-    await expect(page.locator('[data-editor-create-withheld]')).toHaveCount(1);
-    await expect(selectedCustomer).toHaveCount(0);
-    // Both governed steps committed; only the read-back was refused.
-    expect(withheld).toMatchObject({
-      parties: 1,
-      roles: ['northstar.app:option.customer'],
-    });
+    expect(documents, 'create and return reloaded nothing').toBe(afterAddLine);
 
     // A stale create return -- a closed task at the current version -- is refused.
-    if (await dialog.count())
-      await submit(page, () =>
-        dialog.getByRole('button', { name: 'Cancel', exact: true }).click(),
-      );
-    await page
-      .getByLabel('Search customer', { exact: true })
-      .fill('Stale Glazing');
-    await submit(page, () =>
-      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
-    );
+    await customer.fill('Stale Glazing');
+    await field(page, 'Customer')
+      .getByRole('option', { name: '+ New customer' })
+      .click();
     await dialog.getByLabel('Customer number *').fill('C-STALE');
     const stale = await createForm();
-    await submit(page, () =>
-      dialog.getByRole('button', { name: 'Cancel', exact: true }).click(),
-    );
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
     const refused = await page.request.post(stale.action, {
-      form: {
-        ...stale.fields,
-        draftCreate: 'submit',
-        draftVersion: await page
-          .locator('#draft-editor-form input[name="draftVersion"]')
-          .inputValue(),
-      },
+      form: { ...stale.fields, draftCreate: 'submit' },
     });
     expect(refused.status()).toBe(422);
     expect(
       (await measure('masters', undefined, undefined, 'Stale Glazing')).parties,
     ).toBe(0);
 
+    // Save once: the in-place selections and untouched typed values persist.
+    await page
+      .getByRole('button', { name: 'Remove line 2', exact: true })
+      .click();
+    await page.waitForLoadState('load');
+    await page.getByLabel('Order date (UTC) *').fill('2026-09-15T12:00');
+    await page.getByLabel('Line 1 unit price', { exact: true }).fill('3.25');
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await expect(page).toHaveURL(/sales_order_detail/);
+    await expect(page.locator('.composition-header')).toContainText(
+      'Enter Glazing',
+    );
+    await expect(page.locator('.composition-header')).toContainText('USD');
+    await expect(page.locator('[data-composition-fields]')).toContainText(
+      'Call ahead',
+    );
+    await expect(
+      page.locator('[data-composition-dataset$="dataset.fulfillment_lines"]'),
+    ).toContainText('Thermal Roll');
+    await shot('saved-in-place-order');
+
     // The same control on a Purchase order creates a vendor: a party with an
     // active supplier role, selected on the order that asked for it.
     await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await page.getByLabel('Order number *').fill('PO-PICKER');
-    await page
-      .getByLabel('Search vendor', { exact: true })
-      .fill('Coastal Ink Supply');
-    await submit(page, () =>
-      page.getByRole('button', { name: '+ New vendor', exact: true }).click(),
-    );
-    await dialog.getByLabel('Vendor number *').fill('V-COASTAL');
-    await submit(page, () =>
-      dialog
-        .getByRole('button', { name: 'Create and use', exact: true })
-        .click(),
-    );
+    const vendor = page.getByRole('combobox', { name: 'Vendor', exact: true });
+    await vendor.fill('Lethbridge Millwork');
+    // A customer-only party is not a vendor.
     await expect(
-      page.locator('.draft-header [data-reference-selected] strong'),
-    ).toHaveText('Coastal Ink Supply');
+      field(page, 'Vendor').locator('.reference-status'),
+    ).toContainText('No vendor matches');
+    await vendor.fill('Coastal Ink Supply');
+    await field(page, 'Vendor')
+      .getByRole('option', { name: '+ New vendor' })
+      .click();
+    await dialog.getByLabel('Vendor number *').fill('V-COASTAL');
+    await dialog
+      .getByRole('button', { name: 'Create and use', exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    await expect(vendor).toHaveAttribute(
+      'data-selected-label',
+      'Coastal Ink Supply',
+    );
     await expect(page.getByLabel('Order number *')).toHaveValue('PO-PICKER');
     await expect(
       page.getByRole('columnheader', { name: 'Unit cost' }),
@@ -705,26 +763,21 @@ test('order editor pickers search past the first page and create missing masters
     await noScript.goto(url);
     await noScript.getByRole('link', { name: 'New', exact: true }).click();
     await noScript.getByLabel('Order number *').fill('SO-NOSCRIPT');
-    await search(noScript, 'Search customer', 'Alpine');
-    await submit(noScript, () =>
-      picker(noScript, 'Search customer')
-        .locator('.reference-option', { hasText: 'Alpine Office Supply' })
-        .click(),
-    );
-    await expect(
-      noScript.locator('.draft-header [data-reference-selected] strong'),
-    ).toHaveText('Alpine Office Supply');
-    await submit(noScript, () =>
-      noScript
-        .getByRole('button', { name: 'Change customer', exact: true })
-        .click(),
+    await pick(noScript, 'Customer', 'Alpine', 'Alpine Office Supply');
+    await expect(noScript.getByLabel('Order number *')).toHaveValue(
+      'SO-NOSCRIPT',
     );
     await noScript
-      .getByLabel('Search customer', { exact: true })
+      .getByRole('combobox', { name: 'Customer', exact: true })
       .fill('NoScript Glazing');
     await submit(noScript, () =>
-      noScript
-        .getByRole('button', { name: '+ New customer', exact: true })
+      field(noScript, 'Customer')
+        .getByRole('button', { name: 'Search', exact: true })
+        .click(),
+    );
+    await submit(noScript, () =>
+      field(noScript, 'Customer')
+        .getByRole('option', { name: '+ New customer' })
         .click(),
     );
     const inline = noScript.locator('dialog.editor-create');
@@ -755,11 +808,16 @@ test('order editor pickers search past the first page and create missing masters
         .parties,
     ).toBe(0);
     await noScript
-      .getByLabel('Search customer', { exact: true })
+      .getByRole('combobox', { name: 'Customer', exact: true })
       .fill('NoScript Glazing');
     await submit(noScript, () =>
-      noScript
-        .getByRole('button', { name: '+ New customer', exact: true })
+      field(noScript, 'Customer')
+        .getByRole('button', { name: 'Search', exact: true })
+        .click(),
+    );
+    await submit(noScript, () =>
+      field(noScript, 'Customer')
+        .getByRole('option', { name: '+ New customer' })
         .click(),
     );
     await inline.getByLabel('Customer number *').fill('C-NOSCRIPT');
@@ -769,8 +827,8 @@ test('order editor pickers search past the first page and create missing masters
     });
     await submit(noScript, () => inline.getByLabel('Name *').press('Enter'));
     await expect(
-      noScript.locator('.draft-header [data-reference-selected] strong'),
-    ).toHaveText('NoScript Glazing');
+      noScript.getByRole('combobox', { name: 'Customer', exact: true }),
+    ).toHaveAttribute('data-selected-label', 'NoScript Glazing');
     await expect(noScript.getByLabel('Order number *')).toHaveValue(
       'SO-NOSCRIPT',
     );
@@ -797,32 +855,77 @@ async function submit(page: Page, act: () => Promise<unknown>) {
   await loaded;
   return response.status();
 }
-function picker(page: Page, label: string) {
+/** One field's in-place control, found by its combobox's accessible name. */
+function field(page: Page, name: string) {
   return page
-    .locator('[data-reference-control]')
-    .filter({ has: page.getByLabel(label, { exact: true }) });
+    .locator('[data-reference-field]')
+    .filter({ has: page.getByRole('combobox', { name, exact: true }) });
 }
-async function search(page: Page, label: string, term: string) {
-  const control = picker(page, label);
-  await control.getByLabel(label, { exact: true }).fill(term);
-  return submit(page, () =>
-    control.getByRole('button', { name: 'Search', exact: true }).click(),
-  );
+/** The field's offered records (not More or "+ New"). */
+function records(page: Page, name: string) {
+  return field(page, name)
+    .getByRole('option')
+    .filter({ has: page.locator('strong') });
 }
-async function choose(page: Page, label: string, term: string, option: string) {
-  await search(page, label, term);
-  await submit(page, () =>
-    picker(page, label)
-      .locator('.reference-option', { hasText: option })
-      .first()
-      .click(),
-  );
-}
-async function header(page: Page, number: string, party: string) {
-  await page.getByLabel('Order number *').fill(number);
-  await choose(page, `Search ${party}`, 'Alpine', 'Alpine Office Supply');
+/**
+ * Types into a picker and chooses an offered record. With the owned script the
+ * whole exchange is in place; without it, Search and the result are ordinary
+ * submits. Either way the field then shows the selected record.
+ */
+async function pick(page: Page, name: string, term: string, option: string) {
+  const box = page.getByRole('combobox', { name, exact: true });
+  await box.fill(term);
+  const enhanced =
+    (await page.locator('body[data-reference-enhanced]').count()) > 0;
+  if (!enhanced)
+    await submit(page, () =>
+      field(page, name)
+        .getByRole('button', { name: 'Search', exact: true })
+        .click(),
+    );
+  const choice = records(page, name).filter({ hasText: option }).first();
+  if (enhanced) await choice.click();
+  else await submit(page, () => choice.click());
   await expect(
-    page.getByRole('button', { name: `Change ${party}`, exact: true }),
+    page.getByRole('combobox', { name, exact: true }),
+  ).toHaveAttribute('data-selected-label', option);
+}
+/**
+ * Holds the first in-place request whose body matches, so a test can deliver
+ * answers out of order. The returned function releases it.
+ */
+async function holdFirst(page: Page, match: (body: string) => boolean) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let held = false;
+  await page.route('**/*', async (route) => {
+    const request = route.request();
+    if (
+      !held &&
+      request.headers()['x-rain-fragment'] === '1' &&
+      match(request.postData() ?? '')
+    ) {
+      held = true;
+      await gate;
+    }
+    await route.continue();
+  });
+  return async () => {
+    release();
+    await page.unrouteAll({ behavior: 'wait' });
+  };
+}
+async function header(
+  page: Page,
+  number: string,
+  party: 'Customer' | 'Vendor',
+) {
+  await page.getByLabel('Order number *').fill(number);
+  await pick(page, party, 'Alpine', 'Alpine Office Supply');
+  await expect(
+    page.getByRole('combobox', { name: party, exact: true }),
   ).toBeFocused();
   await expect(page.getByLabel('Order number *')).toHaveValue(number);
   await page.getByLabel('Order date (UTC) *').fill('2026-09-15T12:00');
@@ -837,7 +940,7 @@ async function line(
   sales: boolean,
 ) {
   const [name, sku] = item.split(' · ') as [string, string];
-  await choose(page, `Search line ${index} product`, sku, name);
+  await pick(page, `Line ${index} product`, sku, name);
   await page
     .getByLabel(`Line ${index} quantity`, { exact: true })
     .fill(quantity);
