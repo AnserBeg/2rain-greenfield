@@ -3,6 +3,7 @@ import type { SemanticRecordDto } from '../../../packages/runtime/src/semantic-q
 import type {
   SurfaceEditorCreate,
   SurfaceEditorField,
+  SurfaceEditorPresentation,
 } from '../../../packages/canonical-model/src/schemas.js';
 import type {
   CompiledSurfaceField,
@@ -30,7 +31,19 @@ export interface EditorRow {
   removed: boolean;
 }
 
-/** One authorized page of results for one field, bound to the row and field. */
+/**
+ * What one field's search asked for -- never what it returned. The buffer keeps
+ * the term, how many pages were requested, and which record ids were last
+ * offered (for the own-field selection check). Results are re-read under each
+ * response's own authority; nothing an earlier response disclosed is replayed.
+ */
+export interface LookupState {
+  readonly term: string;
+  pages: number;
+  offered: ReadonlySet<string>;
+}
+
+/** The results a field shows in this response, read in this request. */
 export interface ReferenceLookup {
   readonly term: string;
   readonly records: readonly SemanticRecordDto[];
@@ -60,6 +73,8 @@ export interface CreateTask {
   }[];
   attempted: boolean;
   notice: string;
+  /** Problems found before any step ran, by collected field id. */
+  errors: Map<string, string>;
 }
 
 export const referenceKey = (rowId: string, fieldId: string) =>
@@ -88,9 +103,21 @@ export function referenceText(
   };
 }
 
-/** The declared default for a field on a new, never-saved row. */
+type Presented = {
+  readonly presentation?: SurfaceEditorPresentation | undefined;
+};
+type ChoicePresentation = Extract<
+  SurfaceEditorPresentation,
+  { kind: 'choice' }
+>;
+
+/**
+ * The declared default for a value nobody has entered yet: a field on a new,
+ * never-saved row, or a field of a freshly opened create flow. Never applied
+ * over an entered, stored, frozen or retried value.
+ */
 export function declaredDefault(
-  field: SurfaceEditorField,
+  field: Presented,
 ): ImmutableJsonValue | undefined {
   return field.presentation?.kind === 'choice'
     ? field.presentation.defaultValue
@@ -98,21 +125,66 @@ export function declaredDefault(
 }
 
 /**
- * Whether a submitted choice may be accepted. The offered set plus the value
- * already persisted on the record: a stored value outside the set is kept, but
- * a tampered or stale form cannot introduce a value the editor never offered.
+ * Whether a submitted choice may be accepted: the offered set, plus a value the
+ * record already stores. A stored value outside the set is kept, but a tampered
+ * or stale form cannot introduce a value the editor never offered. Editor policy
+ * over a text field, not a domain enum.
  */
-export function choiceAdmits(
-  field: SurfaceEditorField,
-  row: EditorRow,
+export function admitsChoice(
+  field: Presented,
   submitted: string,
+  stored?: ImmutableJsonValue,
 ): boolean {
   if (field.presentation?.kind !== 'choice') return true;
   if (submitted === '') return true;
   return (
     field.presentation.options.some((option) => option.value === submitted) ||
-    row.record?.values[field.fieldId] === submitted
+    stored === submitted
   );
+}
+
+export function choiceAdmits(
+  field: SurfaceEditorField,
+  row: EditorRow,
+  submitted: string,
+): boolean {
+  return admitsChoice(field, submitted, row.record?.values[field.fieldId]);
+}
+
+/**
+ * A declared choice as a native select, shared by the document editor and its
+ * create forms. An optional choice offers "Not set"; a required one with no
+ * value shows an explicit prompt rather than silently preselecting an option;
+ * `keepCurrent` shows a stored value outside the set so it is not replaced.
+ */
+export function renderChoice(
+  presentation: ChoicePresentation,
+  attributes: string,
+  current: string,
+  context: {
+    readonly required: boolean;
+    readonly keepCurrent: boolean;
+    readonly label: string;
+  },
+): string {
+  const offered = presentation.options.some(
+    (option) => option.value === current,
+  );
+  const kept =
+    context.keepCurrent && current && !offered
+      ? `<option value="${h(current)}" selected>${h(current)} (current value)</option>`
+      : '';
+  const blank = !context.required
+    ? `<option value=""${current ? '' : ' selected'}>Not set</option>`
+    : current
+      ? ''
+      : `<option value="" selected>Choose ${h(context.label.toLowerCase())}</option>`;
+  return `<select${attributes}>${blank}${kept}${presentation.options
+    .map(
+      (option) =>
+        `<option value="${h(option.value)}"${option.value === current ? ' selected' : ''}>${h(option.label)}</option>`,
+    )
+    .join('')}</select>`;
 }
 
 export const DECIMAL_KINDS: readonly string[] = [
@@ -228,27 +300,10 @@ export function renderValueControl(context: RenderContext): string {
   const presentation = field.presentation;
   if (presentation?.kind === 'multiline')
     return `<textarea${shared} name="${h(name)}" rows="3">${h(text(value))}</textarea>${error.html}`;
-  if (presentation?.kind === 'choice') {
-    const current = text(value);
-    const offered = presentation.options.some(
-      (option) => option.value === current,
-    );
+  if (presentation?.kind === 'choice')
     // A stored value outside the offered set is shown and kept, never replaced
     // by the first option during an unrelated edit.
-    const kept =
-      current && !offered
-        ? `<option value="${h(current)}" selected>${h(current)} (current value)</option>`
-        : '';
-    const blank = input.required
-      ? ''
-      : `<option value=""${current ? '' : ' selected'}>Not set</option>`;
-    return `<select${shared} name="${h(name)}">${blank}${kept}${presentation.options
-      .map(
-        (option) =>
-          `<option value="${h(option.value)}"${option.value === current ? ' selected' : ''}>${h(option.label)}</option>`,
-      )
-      .join('')}</select>${error.html}`;
-  }
+    return `${renderChoice(presentation, `${shared} name="${h(name)}"`, text(value), { required: input.required, keepCurrent: true, label: field.label })}${error.html}`;
   if (presentation?.kind === 'derived') {
     // Read-only: the server sets this from the selected record and never takes
     // it from the submission, so it cannot drift from the product it describes.
@@ -355,6 +410,9 @@ export function renderReferenceControl(
  * The quick-create form. It is its own form, never nested in the draft form,
  * and it carries the draft session and version so it is bound to the same
  * principal, release, company and document buffer as the order it returns to.
+ * The primary submit is the form's first submit button, so the browser's own
+ * Enter submission creates (after required-field validation) and never cancels;
+ * Cancel is explicit and is the only control that skips validation.
  */
 export function renderCreatePanel(context: {
   readonly task: CreateTask;
@@ -375,16 +433,33 @@ export function renderCreatePanel(context: {
       const disabled = frozen ? ' disabled' : '';
       const value = text(task.values[collected.fieldId]);
       const autofocus = index === 0 ? ' data-task-initial-focus' : '';
+      const error = errorFor(
+        `editor-create-${index}`,
+        task.errors.get(collected.fieldId) ?? null,
+      );
+      const attributes = `${required}${disabled}${autofocus}${error.attributes}`;
+      const presentation = collected.presentation;
       const control =
-        collected.presentation?.kind === 'multiline'
-          ? `<textarea name="${h(name)}" rows="2"${required}${disabled}${autofocus}>${h(value)}</textarea>`
-          : `<input name="${h(name)}" value="${h(value)}" autocomplete="off"${required}${disabled}${autofocus}>`;
+        presentation?.kind === 'multiline'
+          ? `<textarea name="${h(name)}" rows="2"${attributes}>${h(value)}</textarea>`
+          : presentation?.kind === 'choice'
+            ? renderChoice(
+                presentation,
+                ` name="${h(name)}"${attributes}`,
+                value,
+                {
+                  required: input?.required ?? false,
+                  keepCurrent: false,
+                  label: collected.label,
+                },
+              )
+            : `<input name="${h(name)}" value="${h(value)}" autocomplete="off"${attributes}>`;
       // A frozen retry must resend exactly what was attempted, so the frozen
       // values ride along as hidden inputs rather than disappearing.
       const kept = frozen
         ? `<input type="hidden" name="${h(name)}" value="${h(value)}">`
         : '';
-      return `<label class="field">${h(collected.label)}${input?.required ? ' *' : ''}${control}</label>${kept}`;
+      return `<label class="field">${h(collected.label)}${input?.required ? ' *' : ''}${control}${error.html}</label>${kept}`;
     })
     .join('');
   const pending = task.steps.some((step) => !step.done);
@@ -394,6 +469,6 @@ export function renderCreatePanel(context: {
   <p class="editor-create__explanation">${h(create.explanation)}</p>
   ${task.notice}
   <div class="form-fields editor-create__fields">${fields}</div>
-  <footer class="editor-create__footer"><button type="submit" name="draftCreate" value="cancel" formnovalidate class="secondary-action">Cancel</button><button type="submit" name="draftCreate" value="submit">${frozen && pending ? 'Retry' : `Create and use`}</button></footer>
+  <footer class="editor-create__footer"><button type="submit" name="draftCreate" value="submit">${frozen && pending ? 'Retry' : `Create and use`}</button><button type="submit" name="draftCreate" value="cancel" formnovalidate class="secondary-action">Cancel</button></footer>
 </form></dialog><p class="draft-create-resume" data-task-resume data-task-resume-closed-only hidden><button type="button" class="secondary-action" data-task-open>Show ${h(create.label.toLowerCase())}</button></p>`;
 }

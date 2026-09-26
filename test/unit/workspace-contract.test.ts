@@ -183,7 +183,7 @@ test('editor controls are closed, typed declarations checked against the entity 
   refuse((editor) => {
     header(editor, '_customer_party_id').reference!.getQueryId =
       'northstar.app:query.item_get';
-  }, /searchable picker requires an exact get/);
+  }, /a supplied exact get must be a get of the picker entity/);
   // Create steps must be governed creates, select the picker's entity, and
   // carry only admissible fixed values and earlier-step relations.
   refuse((editor) => {
@@ -213,4 +213,109 @@ test('editor controls are closed, typed declarations checked against the entity 
   refuse((editor) => {
     header(editor, '_customer_party_id').presentation = { kind: 'multiline' };
   }, /a reference field is presented by its picker/);
+});
+
+test('FORM-4: every supplied exact get is validated, whether or not the picker creates or shows details', () => {
+  const source = composedApplicationDefinition();
+  type Reference = Record<string, unknown> & {
+    create?: unknown;
+    detailFieldIds?: unknown;
+    getQueryId?: string;
+    labelFieldIds: string[];
+  };
+  const variant = (change: (reference: Reference) => void) => {
+    const candidate = structuredClone(source);
+    const surface = (candidate.surfaces as Record<string, unknown>[]).find(
+      (value) => String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!;
+    const customer = (
+      surface.documentEditor as {
+        headerFields: { fieldId: string; reference?: Reference }[];
+      }
+    ).headerFields.find((field) =>
+      field.fieldId.endsWith('_customer_party_id'),
+    )!.reference!;
+    // A plain picker: a list and an exact get, no quick create, no details.
+    delete customer.create;
+    delete customer.detailFieldIds;
+    change(customer);
+    return candidate;
+  };
+  // Literal expectations, written here rather than read from the validator.
+  const suppliedGetRefused =
+    'a supplied exact get must be a get of the picker entity reading its labels and details';
+  const refusedWith = (candidate: unknown, rule: string) =>
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => value.rule === rule),
+    );
+
+  assert.doesNotThrow(() => normalizeApplicationPackage(variant(() => {})));
+  // Mismatched entity: an item get on a party picker.
+  refusedWith(
+    variant((reference) => {
+      reference.getQueryId = 'northstar.app:query.item_get';
+    }),
+    suppliedGetRefused,
+  );
+  // Wrong kind: the list itself named as the exact get.
+  refusedWith(
+    variant((reference) => {
+      reference.getQueryId = 'northstar.app:query.party_list';
+    }),
+    suppliedGetRefused,
+  );
+  // Missing binding.
+  refusedWith(
+    variant((reference) => {
+      reference.getQueryId = 'northstar.app:query.party_missing_get';
+    }),
+    suppliedGetRefused,
+  );
+  // A same-entity get that does not select the picker's label. It is a second
+  // get added only for this picker, so no other surface's reads change.
+  const addedGet = (candidate: Record<string, unknown>, label: boolean) => {
+    const queries = candidate.queries as {
+      queryId: string;
+      selections: { selectionId: string; field: { targetId: string } }[];
+    }[];
+    const partyGet = queries.find(
+      (query) => query.queryId === 'northstar.app:query.party_get',
+    )!;
+    queries.push({
+      ...structuredClone(partyGet),
+      queryId: 'northstar.app:query.party_number_get',
+      selections: structuredClone(partyGet.selections)
+        .filter(
+          (selection) =>
+            label || !selection.field.targetId.endsWith(':field.party_name'),
+        )
+        .map((selection) => ({
+          ...selection,
+          selectionId: selection.selectionId.replace(
+            'party_get',
+            'party_number_get',
+          ),
+        })),
+    });
+    return candidate;
+  };
+  const numberGet = (reference: Reference) => {
+    reference.getQueryId = 'northstar.app:query.party_number_get';
+  };
+  refusedWith(addedGet(variant(numberGet), false), suppliedGetRefused);
+  // The same added get reading the label is admitted: the refusal is the label.
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(addedGet(variant(numberGet), true)),
+  );
+  // A legacy picker with no exact get keeps its admitted behaviour.
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(
+      variant((reference) => {
+        delete reference.getQueryId;
+      }),
+    ),
+  );
 });

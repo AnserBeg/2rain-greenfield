@@ -37,6 +37,7 @@ import {
 } from './workspace-entry.js';
 import {
   DECIMAL_KINDS,
+  admitsChoice,
   canonicalDecimal,
   choiceAdmits,
   controlId,
@@ -48,6 +49,7 @@ import {
   renderValueControl,
   sameValue,
   type CreateTask,
+  type LookupState,
   type ReferenceLookup,
 } from './editor-controls.js';
 import { escapeHtml as h } from './html.js';
@@ -97,7 +99,7 @@ type Buffer = {
   notice: string;
   withheld: 'none' | 'operation' | 'partial';
   /** Search results per row and field, bound to this buffer's principal and scope. */
-  lookups: Map<string, ReferenceLookup>;
+  lookups: Map<string, LookupState>;
   /** At most one in-context create; the draft pauses while it is open. */
   create: CreateTask | null;
   /** The control to focus after the next render, such as a field a create returned to. */
@@ -107,6 +109,8 @@ type Buffer = {
 };
 const buffers = new Map<string, Buffer>();
 const expiry = 60 * 60 * 1000;
+/** Pages a field's search may accumulate; each is re-read on every response. */
+const maximumLookupPages = 10;
 /** A catalog message; the eyebrow names the action it answers, Save by default. */
 const warning = (ref: SurfaceMessageRef, action = 'Save') =>
   `<div role="alert" ${messageAttributes(ref)}>${messageBody(ref, action, 'h2')}</div>`;
@@ -416,6 +420,55 @@ export async function documentEditor(
     ...definition.headerFields,
     ...definition.lineFields,
   ].filter((field) => field.reference);
+  /**
+   * Lookup results read in THIS request. An action's read is reused by the
+   * render that follows it; a later request reads again under its own current
+   * authority, so a withdrawn read discloses nothing from earlier responses.
+   */
+  const lookupReads = new Map<string, ReferenceLookup>();
+  const readLookup = async (
+    field: SurfaceDocumentEditor['headerFields'][number],
+    key: string,
+  ): Promise<ReferenceLookup | null> => {
+    const known = lookupReads.get(key);
+    if (known) return known;
+    const state = buffer.lookups.get(key);
+    if (!state || !field.reference) return null;
+    const records: SemanticRecordDto[] = [];
+    let cursor: string | null = null;
+    let hasMore = false;
+    for (let page = 0; page < state.pages; page++) {
+      const result = await workspaceSearch(
+        view,
+        gateways.queryGateway,
+        field.reference.queryId,
+        scope,
+        state.term,
+        cursor,
+      );
+      records.push(...result.records);
+      cursor = result.nextCursor;
+      hasMore = result.hasMore && cursor !== null;
+      if (!hasMore) {
+        state.pages = page + 1;
+        break;
+      }
+    }
+    const lookup = {
+      term: state.term,
+      records,
+      hasMore: hasMore && state.pages < maximumLookupPages,
+      nextCursor: cursor,
+    };
+    state.offered = new Set(records.map((record) => record.recordId));
+    lookupReads.set(key, lookup);
+    return lookup;
+  };
+  /** A lookup that cannot be read now is dropped, never shown from before. */
+  const dropLookup = (key: string) => {
+    buffer.lookups.delete(key);
+    lookupReads.delete(key);
+  };
   const parseReferenceAction = (value: string | undefined) => {
     const match =
       /^(search|more|select|clear|create):([0-9a-f-]{36}):(.+)$/u.exec(
@@ -532,32 +585,28 @@ export async function documentEditor(
     const reference = field.reference!;
     const key = referenceKey(rowId, field.fieldId);
     if (verb === 'search' || verb === 'more') {
-      const previous = buffer.lookups.get(key);
-      const term =
-        verb === 'more'
-          ? (previous?.term ?? '')
-          : (submission?.[`draftSearch:${rowId}:${field.fieldId}`] ?? '')
-              .trim()
-              .slice(0, 240);
-      try {
-        const page = await workspaceSearch(
-          view,
-          gateways.queryGateway,
-          reference.queryId,
-          scope,
-          term,
-          verb === 'more' ? (previous?.nextCursor ?? null) : null,
-        );
+      if (verb === 'search')
         buffer.lookups.set(key, {
-          term,
-          records: [
-            ...(verb === 'more' ? (previous?.records ?? []) : []),
-            ...page.records,
-          ],
-          hasMore: page.hasMore,
-          nextCursor: page.nextCursor,
+          term: (submission?.[`draftSearch:${rowId}:${field.fieldId}`] ?? '')
+            .trim()
+            .slice(0, 240),
+          pages: 1,
+          offered: new Set(),
         });
+      else {
+        const state = buffer.lookups.get(key);
+        if (!state) {
+          invalidTarget();
+          return true;
+        }
+        state.pages = Math.min(state.pages + 1, maximumLookupPages);
+      }
+      lookupReads.delete(key);
+      try {
+        await readLookup(field, key);
       } catch (error) {
+        // A failed search shows no earlier results beside its notice.
+        dropLookup(key);
         buffer.notice = warning(operationMessageRef(error), field.label);
         statusCode = 422;
       }
@@ -567,12 +616,7 @@ export async function documentEditor(
     if (verb === 'select') {
       // Only a record this field's own search offered, re-read through the exact
       // get so the selection is one the principal can currently read.
-      if (
-        !recordId ||
-        !buffer.lookups
-          .get(key)
-          ?.records.some((record) => record.recordId === recordId)
-      ) {
+      if (!recordId || !buffer.lookups.get(key)?.offered.has(recordId)) {
         invalidTarget();
         return true;
       }
@@ -623,11 +667,18 @@ export async function documentEditor(
       buffer.lookups.get(key)?.term ??
       ''
     ).trim();
+    // A fresh flow takes each collected field's declared default, once. The
+    // typed search term fills the label field only where that field admits it.
     const values: Values = {};
+    for (const collected of create.fields) {
+      const fallback = declaredDefault(collected);
+      if (fallback !== undefined) values[collected.fieldId] = fallback;
+    }
     const labelField = create.fields.find((collected) =>
       reference.labelFieldIds.includes(collected.fieldId),
     );
-    if (labelField && typed) values[labelField.fieldId] = typed;
+    if (labelField && typed && admitsChoice(labelField, typed))
+      values[labelField.fieldId] = typed;
     buffer.create = {
       id: randomUUID(),
       rowId,
@@ -642,6 +693,7 @@ export async function documentEditor(
       })),
       attempted: false,
       notice: '',
+      errors: new Map(),
     };
     return true;
   };
@@ -681,12 +733,49 @@ export async function documentEditor(
       invalidTarget();
       return;
     }
-    if (!task.attempted)
+    if (!task.attempted) {
+      // Every collected value is admitted before the first step runs, so a
+      // refused or missing value commits nothing, not even an earlier step.
+      // Values freeze only once they are admitted and a step is attempted.
+      const inputs = new Map(
+        create.steps.flatMap((step) =>
+          (
+            operationById(view, surfaces, step.operationId)?.inputFields ?? []
+          ).map((value) => [value.fieldId, value] as const),
+        ),
+      );
+      task.errors = new Map();
       for (const collected of create.fields) {
-        const value = submission[`create:${collected.fieldId}`];
-        if (value !== undefined)
-          task.values[collected.fieldId] = value.trim() === '' ? null : value;
+        const submitted = submission[`create:${collected.fieldId}`];
+        if (submitted !== undefined)
+          task.values[collected.fieldId] =
+            submitted.trim() === '' ? null : submitted;
+        const value = task.values[collected.fieldId] ?? null;
+        if (!admitsChoice(collected, typeof value === 'string' ? value : '')) {
+          task.errors.set(
+            collected.fieldId,
+            'Choose one of the offered values.',
+          );
+          // The refused value is dropped, and the default is not reapplied:
+          // the operator chooses again from the offered set.
+          task.values[collected.fieldId] = null;
+        } else if (value === null && inputs.get(collected.fieldId)?.required)
+          task.errors.set(collected.fieldId, 'Required.');
       }
+      if (task.errors.size) {
+        const problems = create.fields.flatMap((collected) => {
+          const message = task.errors.get(collected.fieldId);
+          return message
+            ? [
+                `${collected.label}: ${message.charAt(0).toLowerCase()}${message.slice(1)}`,
+              ]
+            : [];
+        });
+        task.notice = `<div role="alert" class="draft-note draft-note--problem" data-editor-create-problems><p>${h(`Nothing was created. ${problems.join(' ')}`)}</p></div>`;
+        statusCode = 422;
+        return;
+      }
+    }
     task.attempted = true;
     task.notice = '';
     for (const [index, step] of task.steps.entries()) {
@@ -1163,16 +1252,26 @@ export async function documentEditor(
         focus,
         error: buffer.errors.get(controlId(draft.id, field.fieldId)) ?? null,
       };
-      if (field.reference?.getQueryId)
+      if (field.reference?.getQueryId) {
+        // Results are shown only as read in this request, under its authority.
+        const key = referenceKey(draft.id, field.fieldId);
+        let lookup: ReferenceLookup | null = null;
+        if (!locked && buffer.lookups.has(key))
+          try {
+            lookup = await readLookup(field, key);
+          } catch (error) {
+            dropLookup(key);
+            buffer.notice += warning(operationMessageRef(error), field.label);
+          }
         return renderReferenceControl({
           ...base,
           selected: await selectedFor(field, draft),
-          lookup:
-            buffer.lookups.get(referenceKey(draft.id, field.fieldId)) ?? null,
+          lookup,
           createOffered:
             !!field.reference.create && createOffered(field.reference.create),
           noun: field.label,
         });
+      }
       if (field.reference) return legacyReference(draft, field, locked);
       return renderValueControl(base);
     };

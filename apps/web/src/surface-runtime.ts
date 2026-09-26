@@ -1883,7 +1883,7 @@ table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:
 .draft-lines .derived-empty,.draft-lines .derived-value,.reference-control span,.reference-selected span{font-size:inherit;letter-spacing:normal;text-transform:none}
 .draft-header textarea,.editor-create__fields textarea{padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit;font-weight:400}
 /* Without JavaScript the create form stays in the page flow rather than overlapping it. */
-.editor-create[open]:not(:modal){position:static;inset:auto;grid-column:1/-1;box-sizing:border-box;width:100%;max-width:none;margin:0 0 var(--space-4)}.editor-create__footer{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-4)}
+.editor-create[open]:not(:modal){position:static;inset:auto;grid-column:1/-1;box-sizing:border-box;width:100%;max-width:none;margin:0 0 var(--space-4)}.editor-create__footer{display:flex;justify-content:flex-start;gap:var(--space-2);margin-top:var(--space-4)}
 .form-field{display:grid;align-content:start;gap:var(--space-2)}
 .form-fields label{display:grid;gap:var(--space-1)}
 [data-document-editor] fieldset,[data-draft-line]{min-width:0;margin:var(--space-4) 0;padding:var(--space-4);border:1px solid var(--line);border-radius:var(--radius-control)}

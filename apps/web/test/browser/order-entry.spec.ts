@@ -378,6 +378,31 @@ test('order editor pickers search past the first page and create missing masters
     expect(
       await customer().locator('.reference-option').count(),
     ).toBeGreaterThan(20);
+
+    // FORM-1: results already shown are never replayed once read access is
+    // withdrawn; an unrelated action's response re-reads them under its own
+    // authority and discloses none of them.
+    const shownNames = await customer()
+      .locator('.reference-option strong')
+      .allInnerTexts();
+    await measure('deny', undefined, undefined, 'party_read');
+    await submit(page, () =>
+      page.getByRole('button', { name: 'Add line', exact: true }).click(),
+    );
+    const withdrawn = await page.content();
+    const escaped = (value: string) =>
+      value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+    expect(
+      shownNames.filter(
+        (name) => withdrawn.includes(name) || withdrawn.includes(escaped(name)),
+      ),
+    ).toEqual([]);
+    await expect(page.locator('.reference-option')).toHaveCount(0);
+    await expect(page.locator('tr.draft-line')).toHaveCount(2);
+    await measure('allow', undefined, undefined, 'party_read');
     await search(page, 'Search customer', 'Whitecourt');
     await expect(customer().locator('.reference-option strong')).toHaveText([
       'Whitecourt Forestry',
@@ -500,6 +525,54 @@ test('order editor pickers search past the first page and create missing masters
       roles: ['northstar.app:option.customer'],
     });
 
+    // FORM-2: Enter in a single-line create field submits the primary action,
+    // after the browser's own required-field validation; it never cancels.
+    let posts = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST') posts += 1;
+    });
+    await submit(page, () =>
+      page
+        .getByRole('button', { name: 'Change customer', exact: true })
+        .click(),
+    );
+    await box.fill('Blank Glazing');
+    await submit(page, () =>
+      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
+    );
+    const beforeEnter = posts;
+    await dialog.getByLabel('Name *').press('Enter');
+    await page.waitForTimeout(500);
+    expect(posts).toBe(beforeEnter);
+    await expect(dialog).toBeVisible();
+    expect(
+      await dialog
+        .getByLabel('Customer number *')
+        .evaluate((input: HTMLInputElement) => input.validity.valueMissing),
+    ).toBe(true);
+    // Explicit Cancel before any attempt creates nothing and keeps the order.
+    await submit(page, () =>
+      dialog.getByRole('button', { name: 'Cancel', exact: true }).click(),
+    );
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
+    expect(
+      (await measure('masters', undefined, undefined, 'Blank Glazing')).parties,
+    ).toBe(0);
+    await box.fill('Enter Glazing');
+    await submit(page, () =>
+      page.getByRole('button', { name: '+ New customer', exact: true }).click(),
+    );
+    await dialog.getByLabel('Customer number *').fill('C-ENTER');
+    await submit(page, () => dialog.getByLabel('Name *').press('Enter'));
+    await expect(dialog).toHaveCount(0);
+    await expect(selectedCustomer).toHaveText('Enter Glazing');
+    await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
+    await expect(page.getByLabel('Currency *')).toHaveValue('USD');
+    expect(
+      await measure('masters', undefined, undefined, 'Enter Glazing'),
+    ).toMatchObject({ parties: 1, roles: ['northstar.app:option.customer'] });
+
     // A product created from a line returns to that exact line.
     await page.getByLabel('Line 1 quantity', { exact: true }).fill('2.50');
     await picker(page, 'Search line 1 product')
@@ -511,11 +584,8 @@ test('order editor pickers search past the first page and create missing masters
     await dialog.getByLabel('SKU *').fill('TR-80');
     await dialog.getByLabel('Base unit *').fill('ROLL');
     await shot('create-product');
-    await submit(page, () =>
-      dialog
-        .getByRole('button', { name: 'Create and use', exact: true })
-        .click(),
-    );
+    // FORM-2: Enter in the product's single-line Base unit creates it too.
+    await submit(page, () => dialog.getByLabel('Base unit *').press('Enter'));
     await expect(
       page.getByRole('button', { name: 'Change line 1 product', exact: true }),
     ).toBeFocused();
@@ -659,16 +729,43 @@ test('order editor pickers search past the first page and create missing masters
     expect(await inline.evaluate((element) => element.matches(':modal'))).toBe(
       false,
     );
+    // FORM-2 without JavaScript: the native default submission is the primary
+    // action, so Enter with a required value missing sends nothing, and
+    // explicit Cancel creates nothing and keeps the order.
+    let plainPosts = 0;
+    noScript.on('request', (request) => {
+      if (request.method() === 'POST') plainPosts += 1;
+    });
+    const beforePlainEnter = plainPosts;
+    await inline.getByLabel('Name *').press('Enter');
+    await noScript.waitForTimeout(500);
+    expect(plainPosts).toBe(beforePlainEnter);
+    await expect(inline).toBeVisible();
+    await submit(noScript, () =>
+      inline.getByRole('button', { name: 'Cancel', exact: true }).click(),
+    );
+    await expect(inline).toHaveCount(0);
+    await expect(noScript.getByLabel('Order number *')).toHaveValue(
+      'SO-NOSCRIPT',
+    );
+    expect(
+      (await measure('masters', undefined, undefined, 'NoScript Glazing'))
+        .parties,
+    ).toBe(0);
+    await noScript
+      .getByLabel('Search customer', { exact: true })
+      .fill('NoScript Glazing');
+    await submit(noScript, () =>
+      noScript
+        .getByRole('button', { name: '+ New customer', exact: true })
+        .click(),
+    );
     await inline.getByLabel('Customer number *').fill('C-NOSCRIPT');
     await noScript.screenshot({
       path: testInfo.outputPath('no-script-create.png'),
       fullPage: true,
     });
-    await submit(noScript, () =>
-      inline
-        .getByRole('button', { name: 'Create and use', exact: true })
-        .click(),
-    );
+    await submit(noScript, () => inline.getByLabel('Name *').press('Enter'));
     await expect(
       noScript.locator('.draft-header [data-reference-selected] strong'),
     ).toHaveText('NoScript Glazing');

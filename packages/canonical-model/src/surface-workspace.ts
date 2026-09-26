@@ -315,14 +315,21 @@ export function validateSurfaceWorkspaces(
             ...field.reference.labelFieldIds,
             ...(field.reference.detailFieldIds ?? []),
           ];
+          // Any exact get that is supplied is checked, whatever else the picker
+          // declares: a get is how a selection is labelled and re-read.
+          if (
+            field.reference.getQueryId !== undefined &&
+            !reads(field.reference.getQueryId, field.reference.queryId, shown)
+          )
+            fail(
+              surface.surfaceId,
+              'a supplied exact get must be a get of the picker entity reading its labels and details',
+            );
+          // Only a picker that creates or shows details needs one; an older
+          // declaration without a get keeps the behaviour it was released with.
           if (
             (field.reference.create || field.reference.detailFieldIds) &&
-            (!field.reference.getQueryId ||
-              !reads(
-                field.reference.getQueryId,
-                field.reference.queryId,
-                shown,
-              ))
+            field.reference.getQueryId === undefined
           )
             fail(
               surface.surfaceId,

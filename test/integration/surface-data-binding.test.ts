@@ -4666,8 +4666,15 @@ class OrderEntryExecutor
     return result;
   }
 }
-async function orderEntryWitness(variant = false) {
+async function orderEntryWitness(
+  variant = false,
+  /** A metadata variation applied to the authored package before it compiles. */
+  mutate: (
+    source: ReturnType<typeof composedApplicationDefinition>,
+  ) => void = () => {},
+) {
   const source = composedApplicationDefinition();
+  mutate(source);
   if (variant)
     for (const surface of source.surfaces as Array<Record<string, unknown>>) {
       if (String(surface.surfaceId).endsWith(':surface.purchase_order_detail'))
@@ -5729,6 +5736,311 @@ test('order entry values: exact decimals, bounded before any write, choice set a
           `${f.ns}:field.sales_order_currency`
         ],
         'GBP',
+      );
+    },
+  );
+});
+
+test('FORM-1: unselected lookup results are shown only under the current read authority of each response', async () => {
+  const f = await orderEntryWitness();
+  const sentinelId = f.executor.seed('party', {
+    [`${f.ns}:field.party_name`]: 'FORM1_NAME_SENTINEL',
+    [`${f.ns}:field.party_number`]: 'FORM1-NUMBER-SENTINEL',
+  });
+  const protectedResults = /FORM1_NAME_SENTINEL|FORM1-NUMBER-SENTINEL/;
+  const path = f.url.pathname + f.url.search;
+  const customer = `${f.ns}:field.sales_order_customer_party_id`;
+  // Every request below goes through SurfaceRuntime and the real gateways.
+  let page = await renderSurfaceRuntimeWithData(f.view, path, f.gateways);
+  const header =
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+      page.html,
+    )![1]!;
+  const submit = async (action: string, extra: Record<string, string> = {}) => {
+    page = await submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      {
+        draftSession: hiddenValue(page.html, 'draftSession'),
+        draftVersion: hiddenValue(page.html, 'draftVersion'),
+        draftAction: action,
+        [`draft:${header}:${f.ns}:field.sales_order_number`]: 'SO-FORM1',
+        ...extra,
+      },
+      f.gateways,
+    );
+    return page;
+  };
+  const search = { [`draftSearch:${header}:${customer}`]: 'FORM1' };
+
+  await submit(`search:${header}:${customer}`, search);
+  assert.match(page.html, /<strong>FORM1_NAME_SENTINEL<\/strong>/);
+  assert.match(page.html, /<small>FORM1-NUMBER-SENTINEL<\/small>/);
+  const calls = f.executor.calls.length;
+
+  // Read access is withdrawn between requests; company/order access remains.
+  f.deniedReads.add(`${f.ns}:permission.party_read`);
+  await submit('add');
+  assert.equal(page.html.match(/data-draft-line=/g)!.length, 2);
+  assert.doesNotMatch(page.html, protectedResults);
+  await submit(`search:${header}:${customer}`, search);
+  assert.doesNotMatch(page.html, protectedResults);
+  await submit(`more:${header}:${customer}`);
+  assert.doesNotMatch(page.html, protectedResults);
+  assert.match(page.html, /value="SO-FORM1"/);
+  // Read handling performed no business mutation.
+  assert.equal(f.executor.calls.length, calls);
+
+  // Authorized control: search, More and selection work again.
+  f.deniedReads.delete(`${f.ns}:permission.party_read`);
+  await submit(`search:${header}:${customer}`, search);
+  assert.match(page.html, /<strong>FORM1_NAME_SENTINEL<\/strong>/);
+  await submit(`more:${header}:${customer}`);
+  assert.match(page.html, /<strong>FORM1_NAME_SENTINEL<\/strong>/);
+  await submit(`select:${header}:${customer}:${sentinelId}`);
+  assert.ok(
+    page.html.includes(
+      `name="draft:${header}:${customer}" value="${sentinelId}"`,
+    ),
+  );
+  assert.match(page.html, /data-reference-selected/);
+  assert.equal(f.executor.calls.length, calls);
+});
+
+test('FORM-3: a declared choice inside quick create is rendered, defaulted and admitted before any create step', async (t) => {
+  type Rendered = NonNullable<Awaited<ReturnType<OrderEntryWitness['open']>>>;
+  const choice = {
+    kind: 'choice',
+    options: [
+      { value: 'EA', label: 'EA · Each' },
+      { value: 'BOX', label: 'BOX · Box' },
+    ],
+    defaultValue: 'EA',
+  };
+  const createSubmit = (
+    f: OrderEntryWitness,
+    rendered: Rendered,
+    values: Record<string, string>,
+  ) =>
+    documentEditor(
+      f.view,
+      f.form,
+      f.surfaces,
+      f.url,
+      f.scopes[0]!,
+      f.gateways,
+      {
+        draftSession: hiddenValue(rendered.slots!.keyFacts!, 'draftSession'),
+        draftVersion: hiddenValue(rendered.slots!.keyFacts!, 'draftVersion'),
+        draftCreateTask: hiddenValue(
+          rendered.slots!.keyFacts!,
+          'draftCreateTask',
+        ),
+        draftCreate: 'submit',
+        ...values,
+      },
+    ) as Promise<Rendered>;
+  const selectFor = (html: string, name: string) =>
+    new RegExp(`<select[^>]*name="${name}"[^>]*>(.*?)</select>`, 's').exec(
+      html,
+    )?.[1];
+
+  await t.test(
+    'Sales product create: base unit is a declared choice',
+    async () => {
+      const f = await orderEntryWitness(false, (source) => {
+        for (const surface of source.surfaces as Array<
+          Record<string, unknown>
+        >) {
+          const editor = surface.documentEditor as
+            | {
+                lineFields: Array<{
+                  fieldId: string;
+                  reference?: {
+                    create: {
+                      fields: Array<{
+                        fieldId: string;
+                        presentation?: unknown;
+                      }>;
+                    };
+                  };
+                }>;
+              }
+            | undefined;
+          if (!String(surface.surfaceId).endsWith(':surface.sales_order_form'))
+            continue;
+          const product = editor!.lineFields.find((field) =>
+            field.fieldId.endsWith('_line_item_id'),
+          )!;
+          for (const collected of product.reference!.create.fields)
+            if (String(collected.fieldId).endsWith(':field.item_base_unit'))
+              collected.presentation = choice;
+        }
+      });
+      const unit = `create:${f.ns}:field.item_base_unit`;
+      let editor = (await f.open())!;
+      const line = /data-draft-line="([^"]+)"/.exec(
+        editor.slots!.sections!,
+      )![1]!;
+      const productField = `${f.ns}:field.sales_order_line_item_id`;
+      editor = (await f.post(editor, `create:${line}:${productField}`, {
+        [`draftSearch:${line}:${productField}`]: 'Pallet jack',
+      }))!;
+      const options = selectFor(editor.slots!.keyFacts!, unit);
+      assert.ok(options, 'the declared choice renders as a select');
+      assert.match(options, /<option value="EA" selected>EA · Each<\/option>/);
+      assert.match(options, /<option value="BOX">BOX · Box<\/option>/);
+      const forged = await createSubmit(f, editor, {
+        [`create:${f.ns}:field.item_sku`]: 'PJ-1',
+        [`create:${f.ns}:field.item_name`]: 'Pallet jack',
+        [unit]: 'PALLET',
+      });
+      assert.equal(forged.statusCode, 422);
+      assert.match(
+        forged.slots!.keyFacts!,
+        /Base unit: choose one of the offered values/,
+      );
+      assert.equal(f.executor.calls.length, 0);
+      // The entered, refused value is not replaced by the default; the form stays open.
+      assert.doesNotMatch(
+        selectFor(forged.slots!.keyFacts!, unit) ?? '',
+        /value="EA" selected/,
+      );
+      const created = await createSubmit(f, forged, {
+        [`create:${f.ns}:field.item_sku`]: 'PJ-1',
+        [`create:${f.ns}:field.item_name`]: 'Pallet jack',
+        [unit]: 'BOX',
+      });
+      assert.equal(created.statusCode, 200);
+      assert.match(created.slots!.keyFacts!, /data-editor-create-selected/);
+      const [item] = f.executor.calls;
+      assert.equal(f.executor.calls.length, 1);
+      assert.equal(
+        asRecord(asRecord(item!.input).values)[`${f.ns}:field.item_base_unit`],
+        'BOX',
+      );
+      assert.match(created.slots!.sections!, /class="derived-value"[^>]*>BOX</);
+    },
+  );
+
+  await t.test(
+    'non-Sales two-step create: a refused later-step choice commits no step',
+    async () => {
+      const id = (kind: string, local: string) =>
+        `northstar.app:${kind}.${local}`;
+      const f = await orderEntryWitness(true, (source) => {
+        for (const surface of source.surfaces as Array<
+          Record<string, unknown>
+        >) {
+          if (
+            !String(surface.surfaceId).endsWith(':surface.purchase_order_form')
+          )
+            continue;
+          const editor = surface.documentEditor as {
+            headerFields: Array<Record<string, unknown>>;
+          };
+          const notes = editor.headerFields.find((field) =>
+            String(field.fieldId).endsWith('_notes'),
+          )!;
+          delete notes.presentation;
+          notes.label = 'Adjustment';
+          notes.reference = {
+            queryId: id('query', 'inventory_transaction_list'),
+            getQueryId: id('query', 'inventory_transaction_get'),
+            labelFieldIds: [id('field', 'inventory_transaction_number')],
+            create: {
+              label: 'New adjustment',
+              explanation: 'Creates the adjustment and its first line.',
+              fields: [
+                {
+                  fieldId: id('field', 'inventory_transaction_number'),
+                  label: 'Adjustment number',
+                },
+                {
+                  fieldId: id('field', 'inventory_transaction_line_unit_id'),
+                  label: 'Line unit',
+                  presentation: choice,
+                },
+              ],
+              steps: [
+                {
+                  operationId: id('operation', 'inventory_transaction_create'),
+                  fixed: [
+                    {
+                      fieldId: id('field', 'inventory_transaction_state'),
+                      value: id('option', 'inventory_transaction_state_draft'),
+                    },
+                    {
+                      fieldId: id('field', 'inventory_transaction_type'),
+                      value: id(
+                        'option',
+                        'inventory_transaction_type_adjustment',
+                      ),
+                    },
+                  ],
+                },
+                {
+                  operationId: id(
+                    'operation',
+                    'inventory_transaction_line_create',
+                  ),
+                  relations: [
+                    {
+                      relationId: id(
+                        'relation',
+                        'inventory_transaction_line_transaction',
+                      ),
+                      step: 0,
+                    },
+                  ],
+                },
+              ],
+              selectStep: 0,
+            },
+          };
+        }
+      });
+      const unit = `create:${f.ns}:field.inventory_transaction_line_unit_id`;
+      let editor = (await f.open())!;
+      const header =
+        /name="draft:([0-9a-f-]{36}):northstar\.app:field\.purchase_order_number"/.exec(
+          editor.slots!.keyFacts!,
+        )![1]!;
+      const notes = `${f.ns}:field.purchase_order_notes`;
+      editor = (await f.post(editor, `create:${header}:${notes}`))!;
+      assert.match(
+        selectFor(editor.slots!.keyFacts!, unit) ?? '',
+        /<option value="EA" selected>/,
+      );
+      const forged = await createSubmit(f, editor, {
+        [`create:${f.ns}:field.inventory_transaction_number`]: 'ADJ-FORM3',
+        [unit]: 'PALLET',
+      });
+      assert.equal(forged.statusCode, 422);
+      assert.match(
+        forged.slots!.keyFacts!,
+        /Line unit: choose one of the offered values/,
+      );
+      // Zero create-step effects: not even the earlier transaction step ran.
+      assert.equal(f.executor.calls.length, 0);
+      const created = await createSubmit(f, forged, {
+        [`create:${f.ns}:field.inventory_transaction_number`]: 'ADJ-FORM3',
+        [unit]: 'BOX',
+      });
+      assert.match(created.slots!.keyFacts!, /data-editor-create-selected/);
+      const [transaction, line] = f.executor.calls;
+      assert.equal(f.executor.calls.length, 2);
+      assert.equal(
+        asRecord(asRecord(line!.input).values)[
+          `${f.ns}:field.inventory_transaction_line_unit_id`
+        ],
+        'BOX',
+      );
+      assert.equal(
+        asRecord(asRecord(line!.input).relations)[
+          `${f.ns}:relation.inventory_transaction_line_transaction`
+        ],
+        asRecord(transaction!.input).recordId,
       );
     },
   );
