@@ -31,6 +31,7 @@ import type {
 import {
   resolveWorkspaceEntry,
   workspaceGet,
+  workspaceEligible,
   workspaceList,
   workspacePrincipalKey,
   workspaceSearch,
@@ -46,6 +47,7 @@ import {
   referenceKey,
   renderCreatePanel,
   renderReferenceControl,
+  renderReferenceLookup,
   renderValueControl,
   sameValue,
   type CreateTask,
@@ -100,6 +102,10 @@ type Buffer = {
   withheld: 'none' | 'operation' | 'partial';
   /** Search results per row and field, bound to this buffer's principal and scope. */
   lookups: Map<string, LookupState>;
+  /** Highest lookup request number seen per row|field; a lower one is stale. */
+  seqs: Map<string, number>;
+  /** Selection generation per row|field; every change of selection bumps it. */
+  generations: Map<string, number>;
   /** At most one in-context create; the draft pauses while it is open. */
   create: CreateTask | null;
   /** The control to focus after the next render, such as a field a create returned to. */
@@ -194,7 +200,25 @@ const row = (record: SemanticRecordDto | null = null): DraftRow => ({
   removed: false,
 });
 
-/** One typed draft editor in existing Record slots, using only semantic gateways. */
+type EditorResponse = {
+  html: string;
+  statusCode: number;
+  location?: string;
+  slots?: Record<string, string>;
+  record?: SemanticRecordDto;
+  /** An in-place answer for the owned script; absent on every page answer. */
+  fragment?: true;
+  /** The script must repeat the action as the ordinary full-page submit. */
+  fallback?: true;
+};
+
+/**
+ * One typed draft editor in existing Record slots, using only semantic
+ * gateways. `fragment` answers one reference field in place for the owned
+ * script (ADR-0036 behaviour 7): a lookup region, a field and its declared
+ * dependents, or the create flow -- never the document. It shares every
+ * binding, authority and continuation check with the page.
+ */
 export async function documentEditor(
   view: RequestRuntimeView,
   surface: CompiledSurfaceDefinition,
@@ -203,13 +227,37 @@ export async function documentEditor(
   scope: string,
   gateways: SurfaceRuntimeGateways,
   submission: SurfaceRuntimeSubmission | null = null,
-): Promise<{
-  html: string;
-  statusCode: number;
-  location?: string;
-  slots?: Record<string, string>;
-  record?: SemanticRecordDto;
-} | null> {
+  mode: 'page' | 'fragment' = 'page',
+): Promise<EditorResponse | null> {
+  const response = await editorResponse(
+    view,
+    surface,
+    surfaces,
+    url,
+    scope,
+    gateways,
+    submission,
+    mode,
+  );
+  // A fragment request is answered only by a fragment. Any other outcome -- an
+  // expired or foreign session, a withheld or completed save, a locked or
+  // unreadable document -- is repeated as the ordinary full-page submit,
+  // which reports it under the page's own rules.
+  if (mode === 'fragment' && (!response || !response.fragment))
+    return { html: '', statusCode: 409, fallback: true };
+  return response;
+}
+
+async function editorResponse(
+  view: RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  url: URL,
+  scope: string,
+  gateways: SurfaceRuntimeGateways,
+  submission: SurfaceRuntimeSubmission | null,
+  mode: 'page' | 'fragment',
+): Promise<EditorResponse | null> {
   const definition = surface.documentEditor!;
   const recordSurface = surfaceFor(surfaces, definition.recordSurfaceId);
   const recordId = url.searchParams.get('record');
@@ -337,6 +385,8 @@ export async function documentEditor(
       notice: '',
       withheld: 'none',
       lookups: new Map(),
+      seqs: new Map(),
+      generations: new Map(),
       create: null,
       focus: null,
       errors: new Map(),
@@ -371,16 +421,35 @@ export async function documentEditor(
    * from it. The read is the declared exact get; if it is refused the dependent
    * is cleared rather than left describing the previous record.
    */
-  const derive = async (rowId: string, referenceFieldId: string) => {
-    const { fields } = rowsOf(referenceFieldId);
-    const draft = findRow(rowId);
-    const source = fields.find((value) => value.fieldId === referenceFieldId);
-    const dependents = fields.filter(
+  const dependentsOf = (referenceFieldId: string) =>
+    rowsOf(referenceFieldId).fields.filter(
       (value) =>
         value.presentation?.kind === 'derived' &&
         value.presentation.referenceFieldId === referenceFieldId,
     );
-    if (!draft || !dependents.length || !source?.reference?.getQueryId) return;
+  /** Sets every field derived from a reference from the record it now selects. */
+  const applyDerived = (
+    draft: DraftRow,
+    referenceFieldId: string,
+    record: SemanticRecordDto | null,
+  ) => {
+    for (const dependent of dependentsOf(referenceFieldId)) {
+      if (dependent.presentation?.kind !== 'derived') continue;
+      const value = record?.values[dependent.presentation.sourceFieldId];
+      draft.values[dependent.fieldId] =
+        typeof value === 'string' && value ? value : null;
+    }
+  };
+  const derive = async (rowId: string, referenceFieldId: string) => {
+    const { fields } = rowsOf(referenceFieldId);
+    const draft = findRow(rowId);
+    const source = fields.find((value) => value.fieldId === referenceFieldId);
+    if (
+      !draft ||
+      !dependentsOf(referenceFieldId).length ||
+      !source?.reference?.getQueryId
+    )
+      return;
     const selected = draft.values[referenceFieldId];
     let record: SemanticRecordDto | null = null;
     if (typeof selected === 'string' && selected)
@@ -395,27 +464,50 @@ export async function documentEditor(
       } catch {
         record = null;
       }
-    for (const dependent of dependents) {
-      if (dependent.presentation?.kind !== 'derived') continue;
-      const value = record?.values[dependent.presentation.sourceFieldId];
-      draft.values[dependent.fieldId] =
-        typeof value === 'string' && value ? value : null;
-    }
+    applyDerived(draft, referenceFieldId, record);
   };
+  /** Every change of a field's selection moves its generation on. */
+  const nextGeneration = (key: string) =>
+    buffer.generations.set(key, (buffer.generations.get(key) ?? 0) + 1);
   /**
    * A create flow is offered when every step is a bound create in the pinned
-   * release and none needs a human confirmation grant. This is availability,
-   * not authority: the operation gateway still decides each step at invoke time
-   * against the submitted values, and a refusal is reported without a write.
+   * release, none needs a human confirmation grant, and current policy would
+   * let this principal start every step -- asked through the gateway's
+   * side-effect-free eligibility preview, never by trying a write. Eligibility
+   * is not authority: the operation gateway still decides each step at invoke
+   * time against the submitted values, and a refusal is reported without a
+   * write. A preview that cannot be answered withholds the offer. Answers are
+   * reused only within this request.
    */
-  const createOffered = (create: CreateFlow) =>
-    create.steps.every((step) => {
-      const operation = operationById(view, surfaces, step.operationId);
-      return (
-        operation?.intent === 'create' &&
-        operation.confirmation !== 'humanRequired'
+  const eligibility = new Map<CreateFlow, Promise<boolean>>();
+  const createOffered = (create: CreateFlow): Promise<boolean> => {
+    let known = eligibility.get(create);
+    if (!known) {
+      const operations = create.steps.map((step) =>
+        operationById(view, surfaces, step.operationId),
       );
-    });
+      known = operations.every(
+        (operation) =>
+          operation?.intent === 'create' &&
+          operation.confirmation !== 'humanRequired',
+      )
+        ? gateways.operationGateway
+            .previewEligibility(
+              view,
+              operations.map((operation) => operation!.operationId),
+              operations.some((operation) => operation!.systemInputArgumentKey)
+                ? scope
+                : null,
+            )
+            .then(
+              (answer) => answer === 'eligible',
+              () => false,
+            )
+        : Promise.resolve(false);
+      eligibility.set(create, known);
+    }
+    return known;
+  };
   const referenceFields = [
     ...definition.headerFields,
     ...definition.lineFields,
@@ -447,6 +539,7 @@ export async function documentEditor(
         scope,
         state.term,
         cursor,
+        field.reference.eligibility,
       );
       records.push(...result.records);
       cursor = result.nextCursor;
@@ -466,6 +559,38 @@ export async function documentEditor(
     state.offered = new Set(records.map((record) => record.recordId));
     lookupReads.set(key, lookup);
     return lookup;
+  };
+  /**
+   * The exact read of a record this field may select now: readable through
+   * the declared get AND, where the picker declares eligibility, still
+   * eligible (for example still an active customer). `null` for either
+   * failure; a denied or failed read throws.
+   */
+  const readSelectable = async (
+    field: SurfaceDocumentEditor['headerFields'][number],
+    recordId: string,
+  ): Promise<SemanticRecordDto | null> => {
+    const reference = field.reference!;
+    if (!reference.getQueryId) return null;
+    const record = await workspaceGet(
+      view,
+      gateways.queryGateway,
+      reference.getQueryId,
+      scope,
+      recordId,
+    );
+    if (!record) return null;
+    if (
+      reference.eligibility &&
+      !(await workspaceEligible(
+        view,
+        gateways.queryGateway,
+        reference.eligibility,
+        record.recordId,
+      ))
+    )
+      return null;
+    return record;
   };
   /** A lookup that cannot be read now is dropped, never shown from before. */
   const dropLookup = (key: string) => {
@@ -588,23 +713,10 @@ export async function documentEditor(
     const reference = field.reference!;
     const key = referenceKey(rowId, field.fieldId);
     if (verb === 'search' || verb === 'more') {
-      if (verb === 'search')
-        buffer.lookups.set(key, {
-          term: (submission?.[`draftSearch:${rowId}:${field.fieldId}`] ?? '')
-            .trim()
-            .slice(0, 240),
-          pages: 1,
-          offered: new Set(),
-        });
-      else {
-        const state = buffer.lookups.get(key);
-        if (!state) {
-          invalidTarget();
-          return true;
-        }
-        state.pages = Math.min(state.pages + 1, maximumLookupPages);
+      if (!claimLookup(key, verb, rowId, field, nextSeq(key))) {
+        invalidTarget();
+        return true;
       }
-      lookupReads.delete(key);
       let lookup: ReferenceLookup | null = null;
       try {
         lookup = await readLookup(field, key);
@@ -630,15 +742,7 @@ export async function documentEditor(
         return true;
       }
       try {
-        const record = reference.getQueryId
-          ? await workspaceGet(
-              view,
-              gateways.queryGateway,
-              reference.getQueryId,
-              scope,
-              recordId,
-            )
-          : null;
+        const record = await readSelectable(field, recordId);
         if (!record) {
           buffer.notice = warning(
             { code: 'OPERATION_INPUT_INVALID' },
@@ -649,7 +753,8 @@ export async function documentEditor(
         }
         draft.values[field.fieldId] = record.recordId;
         buffer.lookups.delete(key);
-        await derive(rowId, field.fieldId);
+        applyDerived(draft, field.fieldId, record);
+        nextGeneration(key);
         buffer.focus = controlId(rowId, field.fieldId);
       } catch (error) {
         buffer.notice = warning(operationMessageRef(error), field.label);
@@ -660,24 +765,36 @@ export async function documentEditor(
     if (verb === 'clear') {
       draft.values[field.fieldId] = null;
       buffer.lookups.delete(key);
-      await derive(rowId, field.fieldId);
+      applyDerived(draft, field.fieldId, null);
+      nextGeneration(key);
       buffer.focus = controlId(rowId, field.fieldId);
       return true;
     }
     const create = reference.create;
-    if (!create || !createOffered(create)) {
+    if (!create || !(await createOffered(create))) {
       invalidTarget();
       return true;
     }
-    // A name typed into the search box carries into the create form's label
-    // field, so an operator does not retype what they were looking for.
+    openCreateTask(draft, field, create);
+    return true;
+  };
+  /**
+   * Opens the field's governed create flow. A name typed into the search box
+   * carries into the create form's label field, so an operator does not retype
+   * what they were looking for; each collected field takes its declared
+   * default once. Keys and record ids are minted here and never again.
+   */
+  const openCreateTask = (
+    draft: DraftRow,
+    field: SurfaceDocumentEditor['headerFields'][number],
+    create: CreateFlow,
+  ) => {
+    const reference = field.reference!;
     const typed = (
-      submission?.[`draftSearch:${rowId}:${field.fieldId}`] ??
-      buffer.lookups.get(key)?.term ??
+      submission?.[`draftSearch:${draft.id}:${field.fieldId}`] ??
+      buffer.lookups.get(referenceKey(draft.id, field.fieldId))?.term ??
       ''
     ).trim();
-    // A fresh flow takes each collected field's declared default, once. The
-    // typed search term fills the label field only where that field admits it.
     const values: Values = {};
     for (const collected of create.fields) {
       const fallback = declaredDefault(collected);
@@ -686,11 +803,12 @@ export async function documentEditor(
     const labelField = create.fields.find((collected) =>
       reference.labelFieldIds.includes(collected.fieldId),
     );
+    // The typed term fills the label field only where that field admits it.
     if (labelField && typed && admitsChoice(labelField, typed))
       values[labelField.fieldId] = typed;
     buffer.create = {
       id: randomUUID(),
-      rowId,
+      rowId: draft.id,
       fieldId: field.fieldId,
       openedValue: draft.values[field.fieldId] ?? null,
       values,
@@ -703,7 +821,47 @@ export async function documentEditor(
       attempted: false,
       notice: '',
       errors: new Map(),
+      denied: false,
+      busy: false,
     };
+  };
+  /** The next lookup request number for a field whose request carries none. */
+  const nextSeq = (key: string) => (buffer.seqs.get(key) ?? 0) + 1;
+  /**
+   * Records a search or More as the field's newest request and resets what
+   * this request will read. The previous offered set stays until this read
+   * completes, so an answer to an older request can never be selected from
+   * after a newer one was asked. `false` for a More with nothing to continue.
+   */
+  const claimLookup = (
+    key: string,
+    verb: string,
+    rowId: string,
+    field: SurfaceDocumentEditor['headerFields'][number],
+    seq: number,
+  ) => {
+    const previous = buffer.lookups.get(key);
+    if (verb === 'more' && !previous) return false;
+    buffer.seqs.set(key, seq);
+    buffer.lookups.set(
+      key,
+      verb === 'search'
+        ? {
+            term: (submission?.[`draftSearch:${rowId}:${field.fieldId}`] ?? '')
+              .trim()
+              .slice(0, 240),
+            pages: 1,
+            offered: new Set(),
+            seq,
+          }
+        : {
+            term: previous!.term,
+            pages: Math.min(previous!.pages + 1, maximumLookupPages),
+            offered: previous!.offered,
+            seq,
+          },
+    );
+    lookupReads.delete(key);
     return true;
   };
   /**
@@ -841,9 +999,13 @@ export async function documentEditor(
         step.done = true;
       } catch (error) {
         const done = task.steps.filter((value) => value.done).length;
-        task.notice = `${warning(operationMessageRef(error), create.label)}${
+        const ref = operationMessageRef(error);
+        // Current policy refused this step: a retry of the same request cannot
+        // succeed, so the flow stops offering one.
+        task.denied = ref.code === 'OPERATION_PERMISSION_DENIED';
+        task.notice = `${warning(ref, create.label)}${
           done
-            ? `<p data-editor-create-partial>${done} of ${task.steps.length} create steps committed. The record is not ready and was not selected. Retry finishes it with the same request.</p>`
+            ? `<p data-editor-create-partial>${done} of ${task.steps.length} create steps committed. The record is not ready and was not selected.${task.denied ? '' : ' Retry finishes it with the same request.'}</p>`
             : ''
         }`;
         statusCode = 422;
@@ -853,22 +1015,14 @@ export async function documentEditor(
     const created = task.steps[create.selectStep]!.recordId;
     let record: SemanticRecordDto | null = null;
     try {
-      record = field.reference.getQueryId
-        ? await workspaceGet(
-            view,
-            gateways.queryGateway,
-            field.reference.getQueryId,
-            scope,
-            created,
-          )
-        : null;
+      record = await readSelectable(field, created);
     } catch {
       record = null;
     }
     buffer.create = null;
     buffer.focus = controlId(task.rowId, task.fieldId);
     if (!record) {
-      buffer.notice = `<div role="status" class="draft-note" data-editor-create-withheld><p>${h(create.label)} was created but cannot be read with your current access, so it was not selected.</p></div>`;
+      buffer.notice = `<div role="status" class="draft-note" data-editor-create-withheld><p>${h(create.label)} was created but cannot be selected with your current access, so it was not selected.</p></div>`;
       return;
     }
     if ((draft.values[task.fieldId] ?? null) !== task.openedValue) {
@@ -877,7 +1031,8 @@ export async function documentEditor(
     }
     draft.values[task.fieldId] = record.recordId;
     buffer.lookups.delete(referenceKey(task.rowId, task.fieldId));
-    await derive(task.rowId, task.fieldId);
+    applyDerived(draft, task.fieldId, record);
+    nextGeneration(referenceKey(task.rowId, task.fieldId));
     buffer.notice = `<div role="status" class="draft-note draft-note--done" data-editor-create-selected><p>${h(create.label)} created and selected. It is its own record; saving or discarding this order does not undo it.</p></div>`;
   };
   const workspaceEntry = await requiredRead(buffer, () =>
@@ -918,7 +1073,369 @@ export async function documentEditor(
   };
   const authorization = await authorizePersisted();
   if (authorization) return authorization;
+  /**
+   * After partial creation the URL owns the committed parent, so retries
+   * cannot silently retarget or recreate it. Every form and fragment of this
+   * buffer posts to that exact context.
+   */
+  const formAction = () => {
+    const action = new URL(url);
+    if (buffer.recordId) action.searchParams.set('record', buffer.recordId);
+    const scopeQuery = readCompiledSurfaceDataBinding(view, surface).query
+      .legalEntityScope!;
+    action.searchParams.set(scopeQuery.operand.parameterId, scope);
+    return action.pathname + action.search;
+  };
+  const shapes = new Map<
+    string,
+    {
+      compiled: Map<string, CompiledSurfaceField>;
+      inputs: Map<string, CompiledSurfaceInputField>;
+    }
+  >();
+  const shape = (surfaceId: string) => {
+    let known = shapes.get(surfaceId);
+    if (!known) {
+      const target = surfaceFor(surfaces, surfaceId);
+      const operation = operationFor(view, target, 'create');
+      known = {
+        compiled: new Map(
+          (target.fields ?? []).map((value) => [value.fieldId, value]),
+        ),
+        inputs: new Map(
+          (operation.inputFields ?? []).map((value) => [value.fieldId, value]),
+        ),
+      };
+      shapes.set(surfaceId, known);
+    }
+    return known;
+  };
+  // One exact read per selected record per response, however many lines share it.
+  const reads = new Map<string, Promise<SemanticRecordDto | null>>();
+  const selectedFor = (
+    field: SurfaceDocumentEditor['headerFields'][number],
+    draft: DraftRow,
+  ) => {
+    const value = draft.values[field.fieldId];
+    const getQueryId = field.reference?.getQueryId;
+    if (typeof value !== 'string' || !value || !getQueryId)
+      return Promise.resolve(null);
+    const key = `${getQueryId}|${value}`;
+    let read = reads.get(key);
+    if (!read) {
+      read = workspaceGet(
+        view,
+        gateways.queryGateway,
+        getQueryId,
+        scope,
+        value,
+      ).catch(() => null);
+      reads.set(key, read);
+    }
+    return read;
+  };
+  /** The declared control context of one field in one row. */
+  const valueContext = (
+    surfaceId: string,
+    draft: DraftRow,
+    field: SurfaceDocumentEditor['headerFields'][number],
+    index: number,
+    locked: boolean,
+    accessibleName: string | null,
+    focus: string | null,
+  ) => {
+    const { compiled, inputs } = shape(surfaceId);
+    const input = inputs.get(field.fieldId);
+    if (!input) throw new Error('Editor field unavailable');
+    return {
+      row: draft,
+      field,
+      compiled: compiled.get(field.fieldId),
+      input,
+      frozen: locked,
+      index,
+      accessibleName,
+      focus,
+      error: buffer.errors.get(controlId(draft.id, field.fieldId)) ?? null,
+    };
+  };
+  const referenceContext = async (
+    base: ReturnType<typeof valueContext>,
+    draft: DraftRow,
+    field: SurfaceDocumentEditor['headerFields'][number],
+    lookup: ReferenceLookup | null,
+  ) => {
+    const key = referenceKey(draft.id, field.fieldId);
+    return {
+      ...base,
+      selected: await selectedFor(field, draft),
+      lookup,
+      createOffered:
+        !!field.reference!.create &&
+        (await createOffered(field.reference!.create)),
+      noun: field.label,
+      generation: buffer.generations.get(key) ?? 0,
+      seq: buffer.seqs.get(key) ?? 0,
+    };
+  };
+  /** One field of one row as the page renders it, for an in-place answer. */
+  const fieldContext = (
+    draft: DraftRow,
+    field: SurfaceDocumentEditor['headerFields'][number],
+  ) =>
+    valueContext(
+      draft === buffer.header
+        ? definition.headerFormSurfaceId
+        : definition.lineFormSurfaceId,
+      draft,
+      field,
+      0,
+      false,
+      draft === buffer.header
+        ? null
+        : `Line ${buffer.lines.indexOf(draft) + 1} ${field.label.toLowerCase()}`,
+      null,
+    );
+  const createDialog = (fragment: boolean) => {
+    const task = buffer.create!;
+    const create = referenceFields.find(
+      (value) => value.fieldId === task.fieldId,
+    )!.reference!.create!;
+    return renderCreatePanel({
+      task,
+      create,
+      session: buffer.id,
+      version: buffer.version,
+      action: formAction(),
+      fieldInputs: new Map(
+        create.steps.flatMap((step) =>
+          (
+            operationById(view, surfaces, step.operationId)?.inputFields ?? []
+          ).map((value) => [value.fieldId, value] as const),
+        ),
+      ),
+      compiledFields: new Map(),
+      mode: fragment ? 'fragment' : 'page',
+    });
+  };
+  /**
+   * The in-place answer (ADR-0036 behaviour 7). Each part names the one element
+   * it replaces: this field's lookup region, this field, a declared dependent
+   * in the same row, or the create slot. Nothing else in the document -- in
+   * particular no neighbouring input the user is typing -- is touched. It never
+   * captures the whole form and never advances the page's draft version; a
+   * select is bound instead to the field's own generation and lookup request.
+   */
+  const fragmentResponse = async (): Promise<EditorResponse | null> => {
+    const answer = (
+      parts: readonly (readonly [string, string])[],
+      notice = '',
+      status = 200,
+    ): EditorResponse => ({
+      html: `${parts
+        .map(
+          ([target, html]) =>
+            `<template data-fragment-target="${h(target)}">${html}</template>`,
+        )
+        .join(
+          '',
+        )}${notice ? `<template data-fragment-live>${notice}</template>` : ''}`,
+      statusCode: status,
+      fragment: true,
+    });
+    const note = (text: string) =>
+      `<p class="draft-note draft-note--problem">${h(text)}</p>`;
+    if (!submission) return null;
+    if (buffer.busy || buffer.pending || buffer.withheld !== 'none')
+      return answer(
+        [],
+        note('The order is being saved. Try again in a moment.'),
+        409,
+      );
+    const field = (draft: DraftRow, fieldId: string) =>
+      rowsOf(fieldId).fields.find((value) => value.fieldId === fieldId)!;
+    const fieldParts = async (draft: DraftRow, fieldId: string) => {
+      const declared = field(draft, fieldId);
+      const base = fieldContext(draft, declared);
+      const parts: [string, string][] = [
+        [
+          `${controlId(draft.id, fieldId)}-field`,
+          renderReferenceControl(
+            await referenceContext(base, draft, declared, null),
+          ),
+        ],
+      ];
+      for (const dependent of dependentsOf(fieldId))
+        parts.push([
+          controlId(draft.id, dependent.fieldId),
+          renderValueControl(fieldContext(draft, dependent)),
+        ]);
+      return parts;
+    };
+    const slot = (html: string) =>
+      `<div id="editor-create-slot" data-editor-create-slot>${html}</div>`;
+    if (submission.draftCreateTask !== undefined) {
+      const task = buffer.create;
+      if (!task || task.id !== submission.draftCreateTask)
+        return answer(
+          [['editor-create-slot', slot('')]],
+          warning({ code: 'OPERATION_INPUT_INVALID' }, 'Create'),
+          422,
+        );
+      if (task.busy)
+        return answer([], note('Still creating. Wait for the result.'), 409);
+      task.busy = true;
+      try {
+        await runCreate();
+      } finally {
+        task.busy = false;
+      }
+      buffer.touched = performance.now();
+      if (buffer.create)
+        return answer(
+          [['editor-create-slot', slot(createDialog(true))]],
+          '',
+          statusCode,
+        );
+      const notice = buffer.notice;
+      buffer.notice = '';
+      buffer.focus = null;
+      const draft = findRow(task.rowId);
+      return answer(
+        [
+          ['editor-create-slot', slot('')],
+          ...(draft ? await fieldParts(draft, task.fieldId) : []),
+        ],
+        notice,
+        statusCode,
+      );
+    }
+    if (buffer.create)
+      return answer(
+        [],
+        note(
+          'Finish or cancel the new record first. The order is kept as it was.',
+        ),
+        409,
+      );
+    const parsed = parseReferenceAction(submission.draftAction);
+    if (!parsed) return null;
+    const { verb, rowId, recordId } = parsed;
+    const draft = findRow(rowId);
+    const { rows, fields } = rowsOf(parsed.field.fieldId);
+    if (!draft || !rows.includes(draft) || !fields.includes(parsed.field))
+      return answer([], warning({ code: 'OPERATION_INPUT_INVALID' }), 422);
+    const declared = parsed.field;
+    const key = referenceKey(rowId, declared.fieldId);
+    const id = controlId(rowId, declared.fieldId);
+    buffer.touched = performance.now();
+    if (verb === 'search' || verb === 'more') {
+      const seq = Number(submission.draftLookupSeq ?? '');
+      if (!Number.isSafeInteger(seq) || seq < 1)
+        return answer([], warning({ code: 'OPERATION_INPUT_INVALID' }), 422);
+      // An older request is answered with nothing: the newer one owns the field.
+      if (seq <= (buffer.seqs.get(key) ?? 0)) return answer([], '', 409);
+      if (!claimLookup(key, verb, rowId, declared, seq))
+        return answer([], warning({ code: 'OPERATION_INPUT_INVALID' }), 422);
+      let lookup: ReferenceLookup | null = null;
+      let failure = '';
+      try {
+        lookup = await readLookup(declared, key);
+      } catch (error) {
+        // A failed read drops the lookup; nothing read before is shown again.
+        if (buffer.seqs.get(key) === seq) dropLookup(key);
+        failure = warning(operationMessageRef(error), declared.label);
+      }
+      if (buffer.seqs.get(key) !== seq) return answer([], '', 409);
+      const context = await referenceContext(
+        fieldContext(draft, declared),
+        draft,
+        declared,
+        lookup,
+      );
+      return answer(
+        [
+          [
+            `${id}-lookup`,
+            renderReferenceLookup({ ...context, notice: failure }),
+          ],
+        ],
+        '',
+        failure ? 422 : 200,
+      );
+    }
+    if (verb === 'select' || verb === 'clear') {
+      const generation = buffer.generations.get(key) ?? 0;
+      const resync = async (status: number, message: string) =>
+        answer(await fieldParts(draft, declared.fieldId), message, status);
+      if (submission.draftFieldGeneration !== String(generation))
+        return resync(
+          409,
+          note('This field changed meanwhile. It shows its current value.'),
+        );
+      let record: SemanticRecordDto | null = null;
+      if (verb === 'select') {
+        const state = buffer.lookups.get(key);
+        // Only a record this field's newest search offered.
+        if (
+          !recordId ||
+          !state ||
+          String(state.seq) !== submission.draftLookupSeq ||
+          !state.offered.has(recordId)
+        )
+          return resync(409, note('Those results changed. Search again.'));
+        const version = buffer.version;
+        try {
+          record = await readSelectable(declared, recordId);
+        } catch (error) {
+          dropLookup(key);
+          return resync(
+            422,
+            warning(operationMessageRef(error), declared.label),
+          );
+        }
+        if (!record)
+          return resync(
+            422,
+            warning({ code: 'OPERATION_INPUT_INVALID' }, declared.label),
+          );
+        // Nothing may have moved while the record was read: not the field, not
+        // its row, not the draft, and no create may have opened.
+        if (
+          buffer.busy ||
+          buffer.version !== version ||
+          buffer.create ||
+          findRow(rowId) !== draft ||
+          (buffer.generations.get(key) ?? 0) !== generation
+        )
+          return resync(
+            409,
+            note('This field changed meanwhile. It shows its current value.'),
+          );
+        reads.set(
+          `${declared.reference!.getQueryId}|${record.recordId}`,
+          Promise.resolve(record),
+        );
+      }
+      draft.values[declared.fieldId] = record?.recordId ?? null;
+      applyDerived(draft, declared.fieldId, record);
+      buffer.lookups.delete(key);
+      nextGeneration(key);
+      return answer(await fieldParts(draft, declared.fieldId));
+    }
+    // verb === 'create'
+    const create = declared.reference?.create;
+    if (!create || !(await createOffered(create)))
+      return answer(
+        [],
+        note('You cannot create this record with your current access.'),
+        422,
+      );
+    openCreateTask(draft, declared, create);
+    return answer([['editor-create-slot', slot(createDialog(true))]]);
+  };
   let statusCode = 200;
+  if (mode === 'fragment') return fragmentResponse();
   if (submission) {
     if (buffer.busy)
       return {
@@ -978,14 +1495,7 @@ export async function documentEditor(
             if (getQueryId && typeof value === 'string' && value) {
               let readable = false;
               try {
-                readable =
-                  (await workspaceGet(
-                    view,
-                    gateways.queryGateway,
-                    getQueryId,
-                    scope,
-                    value,
-                  )) !== null;
+                readable = (await readSelectable(field, value)) !== null;
               } catch {
                 readable = false;
               }
@@ -997,6 +1507,7 @@ export async function documentEditor(
                 continue;
               }
             }
+            nextGeneration(key);
             await derive(rowId, fieldId);
           }
         }
@@ -1174,13 +1685,7 @@ export async function documentEditor(
   try {
     const authorization = await authorizePersisted();
     if (authorization) return authorization;
-    // After partial creation the URL owns the committed parent, so retries cannot
-    // silently retarget or recreate it. Form action uses that exact context.
-    const action = new URL(url);
-    if (buffer.recordId) action.searchParams.set('record', buffer.recordId);
-    const scopeQuery = readCompiledSurfaceDataBinding(view, surface).query
-      .legalEntityScope!;
-    action.searchParams.set(scopeQuery.operand.parameterId, scope);
+    const action = formAction();
     // While a create is open the order is paused: shown, but not editable, so
     // nothing entered before leaving it can change until the create returns.
     const paused = buffer.create !== null;
@@ -1188,57 +1693,6 @@ export async function documentEditor(
       buffer.pending !== null || buffer.withheld !== 'none' || paused;
     const focus = buffer.focus;
     buffer.focus = null;
-    const shapes = new Map<
-      string,
-      {
-        compiled: Map<string, CompiledSurfaceField>;
-        inputs: Map<string, CompiledSurfaceInputField>;
-      }
-    >();
-    const shape = (surfaceId: string) => {
-      let known = shapes.get(surfaceId);
-      if (!known) {
-        const target = surfaceFor(surfaces, surfaceId);
-        const operation = operationFor(view, target, 'create');
-        known = {
-          compiled: new Map(
-            (target.fields ?? []).map((value) => [value.fieldId, value]),
-          ),
-          inputs: new Map(
-            (operation.inputFields ?? []).map((value) => [
-              value.fieldId,
-              value,
-            ]),
-          ),
-        };
-        shapes.set(surfaceId, known);
-      }
-      return known;
-    };
-    // One exact read per selected record per render, however many lines share it.
-    const reads = new Map<string, Promise<SemanticRecordDto | null>>();
-    const selectedFor = (
-      field: SurfaceDocumentEditor['headerFields'][number],
-      draft: DraftRow,
-    ) => {
-      const value = draft.values[field.fieldId];
-      const getQueryId = field.reference?.getQueryId;
-      if (typeof value !== 'string' || !value || !getQueryId)
-        return Promise.resolve(null);
-      const key = `${getQueryId}|${value}`;
-      let read = reads.get(key);
-      if (!read) {
-        read = workspaceGet(
-          view,
-          gateways.queryGateway,
-          getQueryId,
-          scope,
-          value,
-        ).catch(() => null);
-        reads.set(key, read);
-      }
-      return read;
-    };
     const control = async (
       surfaceId: string,
       draft: DraftRow,
@@ -1247,20 +1701,15 @@ export async function documentEditor(
       locked: boolean,
       accessibleName: string | null,
     ) => {
-      const { compiled, inputs } = shape(surfaceId);
-      const input = inputs.get(field.fieldId);
-      if (!input) throw new Error('Editor field unavailable');
-      const base = {
-        row: draft,
+      const base = valueContext(
+        surfaceId,
+        draft,
         field,
-        compiled: compiled.get(field.fieldId),
-        input,
-        frozen: locked,
         index,
+        locked,
         accessibleName,
         focus,
-        error: buffer.errors.get(controlId(draft.id, field.fieldId)) ?? null,
-      };
+      );
       if (field.reference?.getQueryId) {
         // Results are shown only as read in this request, under its authority.
         const key = referenceKey(draft.id, field.fieldId);
@@ -1272,14 +1721,9 @@ export async function documentEditor(
             dropLookup(key);
             buffer.notice += warning(operationMessageRef(error), field.label);
           }
-        return renderReferenceControl({
-          ...base,
-          selected: await selectedFor(field, draft),
-          lookup,
-          createOffered:
-            !!field.reference.create && createOffered(field.reference.create),
-          noun: field.label,
-        });
+        return renderReferenceControl(
+          await referenceContext(base, draft, field, lookup),
+        );
       }
       if (field.reference) return legacyReference(draft, field, locked);
       return renderValueControl(base);
@@ -1378,32 +1822,9 @@ export async function documentEditor(
           '',
         )}<th scope="col" class="draft-lines__heading--remove"><span class="sr-only">Remove</span></th></tr></thead><tbody>${lineRows.join('')}</tbody></table>`,
     ];
-    const openCreate = buffer.create;
-    const createField = openCreate
-      ? [...definition.headerFields, ...definition.lineFields].find(
-          (value) => value.fieldId === openCreate.fieldId,
-        )
-      : undefined;
-    const createFlow = createField?.reference?.create;
-    const createPanel =
-      openCreate && createFlow
-        ? renderCreatePanel({
-            task: openCreate,
-            create: createFlow,
-            session: buffer.id,
-            version: buffer.version,
-            action: action.pathname + action.search,
-            fieldInputs: new Map(
-              createFlow.steps.flatMap((step) =>
-                (
-                  operationById(view, surfaces, step.operationId)
-                    ?.inputFields ?? []
-                ).map((value) => [value.fieldId, value] as const),
-              ),
-            ),
-            compiledFields: new Map(),
-          })
-        : '';
+    // A flow opened by a full-page submit renders in the page; one opened in
+    // place by the script arrives as a fragment into the empty slot below.
+    const createPanel = buffer.create ? createDialog(false) : '';
     const steps = buffer.pending
       ? `<ol data-save-progress>${buffer.pending.map((step) => `<li>${h(step.label)} · ${step.done ? 'committed' : 'pending'}</li>`).join('')}</ol>`
       : '';
@@ -1416,11 +1837,11 @@ export async function documentEditor(
       ...(current ? { record: current } : {}),
       slots: {
         titleStatus: `<header class="surface-heading surface-heading--slot"><h1>${current ? 'Edit' : 'New'} ${h(recordSurface.label.replace(/ detail$/i, ''))}</h1><span class="status-pill" data-status-role="inProgress">Draft</span></header>`,
-        keyFacts: `${createPanel}<section class="panel">${buffer.notice}${
+        keyFacts: `${createPanel}<div id="editor-create-slot" data-editor-create-slot></div><section class="panel"><div class="draft-live" id="draft-editor-live" role="status" aria-live="polite" data-editor-live>${buffer.notice}</div>${
           paused
             ? '<p class="draft-paused" role="status">This order is paused while you create a record. Nothing you entered has changed.</p>'
             : ''
-        }${steps}<form id="draft-editor-form" method="post" action="${h(action.pathname + action.search)}" data-document-editor>
+        }${steps}<form id="draft-editor-form" method="post" action="${h(action)}" data-document-editor>
       <button class="sr-only" name="draftAction" value="refresh" tabindex="-1" data-draft-default>Update draft</button>
       <input type="hidden" name="draftSession" value="${h(buffer.id)}"><input type="hidden" name="draftVersion" value="${buffer.version}">
       <fieldset><legend>${h(definition.headerLabel ?? 'Document details')}</legend><div class="form-fields draft-header">${header}</div></fieldset></form></section>`,

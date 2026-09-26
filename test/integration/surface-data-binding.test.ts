@@ -2957,6 +2957,68 @@ for (const intent of ['archive', 'create', 'restore', 'update'] as const) {
 }
 
 /**
+ * RAIN WORKSPACE INTERACTION COMPLETION, milestone A. The composed Inventory
+ * period lock declares two update operations (advance and reopen) and no form,
+ * so its read-only List and Record rendered INVALID_SURFACE_BINDING. A family
+ * with no form renders no update at all: the surplus is left unbound and the
+ * read surfaces bind. A surplus that could still render -- archive, on the
+ * Record -- is refused by name exactly as before, and the table above keeps a
+ * family WITH a form refusing its surplus update.
+ */
+test('a form-less family leaves a surplus update unbound and still reads', async () => {
+  const bindings = async (
+    source: Record<string, unknown>,
+    surfaceIds: readonly string[],
+  ) => {
+    const view = await issuedView(
+      runtimeEntry(compileFixture(source), new RecordingPolicy('ALLOW'), {
+        a: identity(tenantA, environmentA, principalA),
+      }),
+      'a',
+    );
+    const surfaces = readCompiledSurfaceManifest(view).surfaces;
+    return surfaceIds.map((surfaceId) => {
+      const surface = surfaces.find(
+        (candidate) => candidate.surfaceId === surfaceId,
+      );
+      assert.ok(surface, surfaceId);
+      return readCompiledSurfaceDataBinding(view, surface);
+    });
+  };
+  // The composed period lock: two update operations, no form.
+  for (const binding of await bindings(composedApplicationDefinition(), [
+    'northstar.app:surface.inventory_period_lock_list',
+    'northstar.app:surface.inventory_period_lock_detail',
+  ]))
+    assert.deepEqual(
+      binding.operations.map((operation) => operation.intent),
+      [],
+    );
+
+  // The same surplus beside a form still refuses by name.
+  const withForm = composedApplicationDefinition();
+  const operations = withForm.operations as Array<Record<string, unknown>>;
+  const update = operations.find(
+    (candidate) =>
+      candidate.operationId === 'northstar.app:operation.party_update',
+  );
+  assert.ok(update);
+  operations.push({
+    ...update,
+    operationId: 'northstar.app:operation.party_update_alternate',
+  });
+  await assert.rejects(
+    async () => bindings(withForm, ['northstar.app:surface.party_list']),
+    (error: unknown) => {
+      assert.ok(error instanceof SurfaceProjectionError);
+      assert.equal(error.code, 'INVALID_SURFACE_BINDING');
+      assert.match(error.message, /\bupdate\b/u);
+      return true;
+    },
+  );
+});
+
+/**
  * THE PACKET'S OWN PREMISE, executable for the first time on this tree.
  *
  * `PUR-1`'s shape is a document carrying a release AND a cancel. Both are
@@ -4556,6 +4618,20 @@ class OrderEntryExecutor
     if (scope) this.owners.set(recordId, scope);
     return recordId;
   }
+  /** A party with active roles, as the picker's declared eligibility reads them. */
+  seedParty(
+    values: Record<string, ImmutableJsonValue>,
+    roles: readonly ('customer' | 'supplier')[] = ['customer', 'supplier'],
+  ) {
+    const party = this.seed('party', values);
+    for (const role of roles)
+      this.seed('party_role', {
+        [`${this.namespace}:field.party_role_kind`]: `${this.namespace}:option.${role}`,
+        [`${this.namespace}:field.party_role_status`]: `${this.namespace}:option.active`,
+        [`${this.namespace}:relation.party_role_party`]: party,
+      });
+    return party;
+  }
   async recordNonAccepted() {}
   execute(
     request: SemanticQueryExecutionRequest,
@@ -4574,6 +4650,10 @@ class OrderEntryExecutor
         ? args[request.definition.legalEntityScope.operand.parameterId]
         : null;
       const parent = request.list?.query.parentScope;
+      const fieldFilters = request.list?.query.fieldFilters;
+      const related = request.list?.relatedFilter;
+      // Like the PostgreSQL executor: exact filters and the related-record
+      // existence check apply before paging, and both are echoed.
       const selected = [...this.rows.values()].filter(
         (row) =>
           row.entityId === request.definition.sourceEntityId &&
@@ -4581,8 +4661,27 @@ class OrderEntryExecutor
             this.owners.get(row.recordId) === scope) &&
           (!row.archived || args.includeArchived === true) &&
           (!args.recordId || row.recordId === args.recordId) &&
-          (!parent || row.values[parent.relationId] === parent.recordId),
+          (!parent || row.values[parent.relationId] === parent.recordId) &&
+          (fieldFilters ?? []).every(
+            (filter) => row.values[filter.fieldId] === filter.value,
+          ) &&
+          (!related ||
+            [...this.rows.values()].some(
+              (candidate) =>
+                candidate.entityId === related.relatedEntityId &&
+                !candidate.archived &&
+                candidate.values[related.relationId] === row.recordId &&
+                related.fieldFilters.every(
+                  (filter) => candidate.values[filter.fieldId] === filter.value,
+                ),
+            )),
       );
+      const echoed = {
+        ...(fieldFilters ? { fieldFilters } : {}),
+        ...(request.list?.query.relatedFilter
+          ? { relatedFilter: request.list.query.relatedFilter }
+          : {}),
+      };
       if (request.list)
         this.listReads.set(
           request.definition.queryId,
@@ -4624,6 +4723,7 @@ class OrderEntryExecutor
               : null,
             parentScope: parent ?? null,
             totalCount: matching.length,
+            ...echoed,
           },
         };
       }
@@ -4642,6 +4742,7 @@ class OrderEntryExecutor
               listCoverage: {
                 ...listCoverage(request, records.length),
                 parentScope: parent ?? null,
+                ...echoed,
               },
             }
           : {}),
@@ -4767,7 +4868,7 @@ async function orderEntryWitness(
         [`${ns}:field.legal_entity_status`]: `${ns}:option.legal_entity_status_active`,
       },
     });
-  const party = executor.seed('party', {
+  const party = executor.seedParty({
     [`${ns}:field.party_name`]: 'Readable customer',
   });
   const item = executor.seed('item', {
@@ -5461,7 +5562,10 @@ test('order entry picker and quick create: offered-only selection, verified carr
       ))!;
       assert.equal(selected.statusCode, 200);
       assert.equal(carrier(selected, header, customer), f.party);
-      assert.match(selected.slots!.keyFacts!, /data-reference-selected/);
+      assert.match(
+        selected.slots!.keyFacts!,
+        /data-selected-label="Readable customer"/,
+      );
       assert.equal(f.executor.calls.length, 0);
     },
   );
@@ -5479,7 +5583,7 @@ test('order entry picker and quick create: offered-only selection, verified carr
       assert.equal(unknown.statusCode, 422);
       assert.match(unknown.slots!.keyFacts!, /data-editor-reference-refused/);
       assert.equal(carrier(unknown, header, customer), '');
-      const other = f.executor.seed('party', {
+      const other = f.executor.seedParty({
         [`${f.ns}:field.party_name`]: 'Unreadable customer',
       });
       f.deniedReads.add(`${f.ns}:permission.party_read`);
@@ -5585,7 +5689,7 @@ test('order entry picker and quick create: offered-only selection, verified carr
       assert.equal(carrier(cancelled, header, customer), '');
       assert.match(
         cancelled.slots!.keyFacts!,
-        /aria-label="Search customer"[^>]*autofocus/,
+        /role="combobox"[^>]*aria-label="Customer"[^>]*autofocus/,
       );
     },
   );
@@ -5795,9 +5899,169 @@ test('order entry values: exact decimals, bounded before any write, choice set a
   );
 });
 
+/**
+ * RAIN WORKSPACE INTERACTION COMPLETION, milestone A. Customer and vendor
+ * pickers offer only parties with an active role of that kind, filtered by the
+ * list query itself, and every selection route re-checks it. A quick create is
+ * offered only when current policy would let the principal start every step,
+ * asked without executing anything; a revocation is observed on the next
+ * render and the create action is refused rather than opened.
+ */
+test('Milestone A: role-eligible lookups and policy-aware quick create', async (t) => {
+  type Rendered = NonNullable<Awaited<ReturnType<OrderEntryWitness['open']>>>;
+  const keyFacts = (rendered: Rendered) => rendered.slots!.keyFacts!;
+  const headerOf = (rendered: Rendered) =>
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.(?:sales|purchase)_order_number"/.exec(
+      keyFacts(rendered),
+    )![1]!;
+  const optionNames = (rendered: Rendered) =>
+    [
+      ...keyFacts(rendered).matchAll(
+        /class="reference-option"[^>]*><strong>([^<]+)<\/strong>/g,
+      ),
+    ].map((match) => match[1]);
+  const seeded = (f: OrderEntryWitness) => ({
+    // Server search over the selected fields, as the PostgreSQL executor does.
+    paged: (f.executor.pageLists = true),
+    supplierOnly: f.executor.seedParty(
+      {
+        [`${f.ns}:field.party_name`]: 'Supplier only co',
+      },
+      ['supplier'],
+    ),
+    customerOnly: f.executor.seedParty(
+      {
+        [`${f.ns}:field.party_name`]: 'Customer only co',
+      },
+      ['customer'],
+    ),
+    dual: f.executor.seedParty({
+      [`${f.ns}:field.party_name`]: 'Dual role co',
+    }),
+    inactive: (() => {
+      const party = f.executor.seed('party', {
+        [`${f.ns}:field.party_name`]: 'Inactive role co',
+      });
+      f.executor.seed('party_role', {
+        [`${f.ns}:field.party_role_kind`]: `${f.ns}:option.customer`,
+        [`${f.ns}:field.party_role_status`]: `${f.ns}:option.inactive`,
+        [`${f.ns}:relation.party_role_party`]: party,
+      });
+      return party;
+    })(),
+    none: f.executor.seed('party', {
+      [`${f.ns}:field.party_name`]: 'No role co',
+    }),
+  });
+
+  await t.test(
+    'lookups offer only active roles of the picker kind',
+    async () => {
+      for (const variant of [false, true]) {
+        const f = await orderEntryWitness(variant);
+        seeded(f);
+        const editor = (await f.open())!;
+        const header = headerOf(editor);
+        const field = `${f.ns}:field.${variant ? 'purchase_order_supplier' : 'sales_order_customer'}_party_id`;
+        const searched = (await f.post(editor, `search:${header}:${field}`, {
+          [`draftSearch:${header}:${field}`]: 'co',
+        }))!;
+        assert.deepEqual(
+          optionNames(searched).sort(),
+          variant
+            ? ['Dual role co', 'Supplier only co']
+            : ['Customer only co', 'Dual role co'],
+        );
+        assert.equal(f.executor.calls.length, 0, 'a lookup writes nothing');
+      }
+    },
+  );
+
+  await t.test('every selection route re-checks eligibility', async () => {
+    const f = await orderEntryWitness();
+    const parties = seeded(f);
+    const editor = (await f.open())!;
+    const header = headerOf(editor);
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    // A readable supplier-only party forged into the form carrier is refused.
+    const forged = (await f.post(editor, 'refresh', {
+      [`draft:${header}:${customer}`]: parties.supplierOnly,
+    }))!;
+    assert.equal(forged.statusCode, 422);
+    assert.match(keyFacts(forged), /data-editor-reference-refused/);
+    // An offered party that loses its role before selection is refused.
+    const searched = (await f.post(forged, `search:${header}:${customer}`, {
+      [`draftSearch:${header}:${customer}`]: 'Customer only',
+    }))!;
+    assert.deepEqual(optionNames(searched), ['Customer only co']);
+    for (const row of f.executor.rows.values())
+      if (
+        row.values[`${f.ns}:relation.party_role_party`] === parties.customerOnly
+      )
+        f.executor.rows.set(row.recordId, {
+          ...row,
+          values: {
+            ...row.values,
+            [`${f.ns}:field.party_role_status`]: `${f.ns}:option.inactive`,
+          },
+        });
+    const lost = (await f.post(
+      searched,
+      `select:${header}:${customer}:${parties.customerOnly}`,
+    ))!;
+    assert.equal(lost.statusCode, 422);
+    assert.doesNotMatch(
+      keyFacts(lost),
+      new RegExp(
+        `name="draft:${header}:${customer}" value="${parties.customerOnly}"`,
+      ),
+    );
+    // A dual-role party is a legitimate customer.
+    const dual = (await f.post(lost, `search:${header}:${customer}`, {
+      [`draftSearch:${header}:${customer}`]: 'Dual',
+    }))!;
+    const chosen = (await f.post(
+      dual,
+      `select:${header}:${customer}:${parties.dual}`,
+    ))!;
+    assert.equal(chosen.statusCode, 200);
+    assert.match(
+      keyFacts(chosen),
+      new RegExp(`name="draft:${header}:${customer}" value="${parties.dual}"`),
+    );
+  });
+
+  await t.test(
+    'quick create is offered only when every step may start',
+    async () => {
+      const f = await orderEntryWitness();
+      let editor = (await f.open())!;
+      assert.match(keyFacts(editor), /\+ New customer/);
+      for (const permission of ['party_create', 'party_role_create']) {
+        f.deniedReads.add(`${f.ns}:permission.${permission}`);
+        editor = (await f.post(editor, 'refresh'))!;
+        assert.doesNotMatch(keyFacts(editor), /\+ New customer/, permission);
+        const header = headerOf(editor);
+        const customer = `${f.ns}:field.sales_order_customer_party_id`;
+        const refused = (await f.post(editor, `create:${header}:${customer}`))!;
+        assert.equal(refused.statusCode, 422, permission);
+        assert.doesNotMatch(
+          keyFacts(refused),
+          /<form[^>]*data-editor-create[\s>]/,
+          permission,
+        );
+        f.deniedReads.delete(`${f.ns}:permission.${permission}`);
+        editor = (await f.post(refused, 'refresh'))!;
+        assert.match(keyFacts(editor), /\+ New customer/, permission);
+      }
+      assert.equal(f.executor.calls.length, 0, 'the preview never writes');
+    },
+  );
+});
+
 test('FORM-1: unselected lookup results are shown only under the current read authority of each response', async () => {
   const f = await orderEntryWitness();
-  const sentinelId = f.executor.seed('party', {
+  const sentinelId = f.executor.seedParty({
     [`${f.ns}:field.party_name`]: 'FORM1_NAME_SENTINEL',
     [`${f.ns}:field.party_number`]: 'FORM1-NUMBER-SENTINEL',
   });
@@ -5857,7 +6121,7 @@ test('FORM-1: unselected lookup results are shown only under the current read au
       `name="draft:${header}:${customer}" value="${sentinelId}"`,
     ),
   );
-  assert.match(page.html, /data-reference-selected/);
+  assert.match(page.html, /data-selected-label="FORM1_NAME_SENTINEL"/);
   assert.equal(f.executor.calls.length, calls);
 });
 
@@ -5867,7 +6131,7 @@ test('FORM-PAGING: a bounded lookup says when more matches exist beyond its disp
     const f = await orderEntryWitness();
     f.executor.pageLists = true;
     const ids = Array.from({ length: count }, (_, index) =>
-      f.executor.seed('party', {
+      f.executor.seedParty({
         [`${f.ns}:field.party_name`]: `Paging match ${String(index + 1).padStart(3, '0')}`,
         [`${f.ns}:field.party_number`]: `PM-${index + 1}`,
       }),
@@ -5939,8 +6203,18 @@ test('FORM-PAGING: a bounded lookup says when more matches exist beyond its disp
       assert.ok(!p.moreOffered(), 'no More button that cannot advance');
       assert.doesNotMatch(p.html(), /No customer matches/);
       // The refinement field is described by the message and receives focus.
-      const searchBox = /<input type="search"[^>]*>/.exec(p.html())![0];
-      assert.match(searchBox, /aria-describedby="[^"]*-limit"/);
+      const searchBox = /<input type="text" role="combobox"[^>]*>/.exec(
+        p.html(),
+      )![0];
+      const status = /aria-describedby="[^"]*?([^" ]*-status)"/.exec(
+        searchBox,
+      )![1]!;
+      assert.match(
+        p.html(),
+        new RegExp(
+          `id="${status}" role="status"><p class="reference-empty reference-limit"`,
+        ),
+      );
       assert.match(searchBox, /\sautofocus[\s>]/);
       // A directly submitted More at the cap: bounded work, the same truthful state.
       const partyReads = () =>
@@ -5973,7 +6247,7 @@ test('FORM-PAGING: a bounded lookup says when more matches exist beyond its disp
             `name="draft:${p.header}:${p.customer}" value="${p.ids[200]}"`,
           ),
       );
-      assert.match(p.html(), /data-reference-selected[\s\S]*Paging match 201/);
+      assert.match(p.html(), /data-selected-label="Paging match 201"/);
       assert.match(p.html(), /value="SO-PAGING"/);
       assert.equal(p.f.executor.calls.length, 0);
     },

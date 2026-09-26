@@ -95,6 +95,7 @@ export function sharedListBindingDigest(
     | 'parentScope'
     | 'referenceScope'
     | 'fieldFilters'
+    | 'relatedFilter'
     | 'relationLabels'
     | 'search'
     | 'sort'
@@ -109,6 +110,8 @@ export function sharedListBindingDigest(
     parentScope: query.parentScope,
     ...(query.referenceScope ? { referenceScope: query.referenceScope } : {}),
     ...(query.fieldFilters ? { fieldFilters: query.fieldFilters } : {}),
+    // Likewise a window over customers is not a window over suppliers.
+    ...(query.relatedFilter ? { relatedFilter: query.relatedFilter } : {}),
     queryId,
     relationLabels: query.relationLabels,
     search: query.search,

@@ -41,6 +41,12 @@ export interface LookupState {
   readonly term: string;
   pages: number;
   offered: ReadonlySet<string>;
+  /**
+   * Which request asked for this term. Every search for the field takes a
+   * higher number, so a slower answer to an older request can neither replace
+   * the offered set nor be selected from once a newer one has been asked.
+   */
+  readonly seq: number;
 }
 
 /** The results a field shows in this response, read in this request. */
@@ -78,6 +84,14 @@ export interface CreateTask {
   notice: string;
   /** Problems found before any step ran, by collected field id. */
   errors: Map<string, string>;
+  /**
+   * Current policy refused a step when it ran. Retrying the same request
+   * cannot succeed, so the flow offers only Cancel -- which reports anything
+   * already created -- instead of a futile Retry loop.
+   */
+  denied: boolean;
+  /** A step is running; a second submission of the same flow waits for it. */
+  busy: boolean;
 }
 
 export const referenceKey = (rowId: string, fieldId: string) =>
@@ -351,78 +365,113 @@ interface ReferenceRenderContext extends RenderContext {
   readonly lookup: ReferenceLookup | null;
   readonly createOffered: boolean;
   readonly noun: string;
+  /** Selection generation: a select or create based on another is stale. */
+  readonly generation: number;
+  /** The field's latest lookup request number, from which a client continues. */
+  readonly seq: number;
 }
 
 /**
- * The reusable reference control. Without JavaScript it is a complete search,
- * select and create path made of ordinary submit buttons, each of which first
- * captures the whole draft. The hidden input carries the selected record id, so
- * no text typed into the search box can ever replace a selection.
+ * The reusable reference control: a combobox over the declared list query.
+ *
+ * Without JavaScript it is a complete search, select and create path made of
+ * ordinary submit buttons, each of which first captures the whole draft. With
+ * the owned script it becomes an in-place popup: the same server renders only
+ * this field's lookup region or this field's control, never the document. The
+ * hidden carrier holds the selected record id, so text typed into the box can
+ * never replace a selection by itself; the box shows the selected label.
  */
 export function renderReferenceControl(
   context: ReferenceRenderContext,
 ): string {
-  const { row, field, frozen, selected, lookup, noun } = context;
+  const { row, field, frozen, selected } = context;
   const name = draftInputName(row.id, field.fieldId);
   const id = controlId(row.id, field.fieldId);
   const value = text(row.values[field.fieldId]);
-  const action = (verb: string, extra = '') =>
-    `form="draft-editor-form" name="draftAction" value="${h(`${verb}:${row.id}:${field.fieldId}${extra}`)}" formnovalidate`;
-  const hidden = `<input type="hidden" form="draft-editor-form" name="${h(name)}" value="${h(value)}">`;
+  const hidden = `<input type="hidden" form="draft-editor-form" name="${h(name)}" value="${h(value)}" data-reference-value>`;
   const label = context.accessibleName ?? field.label;
-  if (frozen) {
-    const shown = selected ? referenceText(field, selected) : null;
-    return `${hidden}<div class="reference-selected" id="${h(id)}">${shown ? `<strong>${h(shown.label)}</strong>${shown.detail ? `<small>${h(shown.detail)}</small>` : ''}` : '<span>Not selected</span>'}</div>`;
-  }
-  const resultsId = `${id}-results`;
-  const here = context.focus === id ? ' autofocus' : '';
-  if (value && selected) {
-    const shown = referenceText(field, selected);
-    return `${hidden}<div class="reference-selected" id="${h(id)}" data-reference-selected><div class="reference-selected__text"><strong>${h(shown.label)}</strong>${shown.detail ? `<small>${h(shown.detail)}</small>` : ''}</div><button class="link-action" ${action('clear')} aria-label="Change ${h(label.toLowerCase())}"${here}>Change</button></div>`;
-  }
+  const shown = value && selected ? referenceText(field, selected) : null;
+  if (frozen)
+    return `<div class="reference-field" id="${h(id)}-field">${hidden}<div class="reference-selected" id="${h(id)}">${shown ? `<strong>${h(shown.label)}</strong>${shown.detail ? `<small>${h(shown.detail)}</small>` : ''}` : '<span>Not selected</span>'}</div></div>`;
+  const action = referenceAction(row.id, field.fieldId);
   const error = errorFor(id, context.error);
   const searchName = `draftSearch:${row.id}:${field.fieldId}`;
-  // Three truthful endings: the query is exhausted (nothing more is shown), it
-  // continues below the display limit (More), or it continues past the limit
-  // (a refine message under the search box it describes, not at the end of a
-  // scrolling list; no More that cannot move).
-  const continues = lookup?.queryContinues === true;
-  const limited = continues && lookup.displayLimitReached;
-  const limitId = `${resultsId}-limit`;
-  const describedBy = [
-    ...(context.error ? [`${id}-error`] : []),
-    ...(limited ? [limitId] : []),
-  ];
-  const searchAttributes = `${context.error ? ' aria-invalid="true"' : ''}${describedBy.length ? ` aria-describedby="${h(describedBy.join(' '))}"` : ''}`;
   // After a search, focus lands on the first result; with none, back on the box.
+  const resultsId = `${id}-results`;
   const toResults =
-    context.focus === resultsId && (lookup?.records.length ?? 0) > 0;
+    context.focus === resultsId && (context.lookup?.records.length ?? 0) > 0;
   const searchFocus =
     context.focus === id || (context.focus === resultsId && !toResults)
       ? ' autofocus'
       : '';
-  const results = lookup
-    ? `<ul class="reference-results" id="${h(resultsId)}" role="list" aria-label="${h(`${noun} results`)}">${
-        lookup.records.length
-          ? lookup.records
-              .map((record, position) => {
-                const shown = referenceText(field, record);
-                const first = toResults && position === 0 ? ' autofocus' : '';
-                return `<li><button class="reference-option" ${action('select', `:${record.recordId}`)}${first}><strong>${h(shown.label)}</strong>${shown.detail ? `<small>${h(shown.detail)}</small>` : ''}</button></li>`;
-              })
-              .join('')
-          : `<li class="reference-empty" role="status">No ${h(noun.toLowerCase())} matches “${h(lookup.term)}”.</li>`
-      }${
-        continues && !limited
-          ? `<li><button class="link-action" ${action('more')}>More results</button></li>`
-          : ''
-      }</ul>`
+  const describedBy = [
+    ...(context.error ? [`${id}-error`] : []),
+    `${id}-status`,
+  ];
+  // The box shows what it searches for; with a selection and no open search,
+  // it shows the selected label so the field reads like a filled field.
+  const term = context.lookup?.term ?? shown?.label ?? '';
+  const clear = shown
+    ? `<button class="link-action reference-clear" ${action('clear')} data-reference-clear aria-label="${h(`Clear ${label.toLowerCase()}`)}">Clear</button>`
     : '';
+  return `<div class="reference-field" id="${h(id)}-field" data-reference-field data-reference-row="${h(row.id)}" data-reference-generation="${context.generation}">${hidden}<div class="reference-control" id="${h(id)}" data-reference-control data-reference-results="${h(resultsId)}"><div class="reference-search"><input type="text" role="combobox" id="${h(id)}-input" form="draft-editor-form" name="${h(searchName)}" value="${h(term)}" placeholder="${h(`Search ${context.noun.toLowerCase()} by name or number`)}" aria-label="${h(label)}" aria-autocomplete="list" aria-expanded="${context.lookup ? 'true' : 'false'}" aria-controls="${h(resultsId)}" autocomplete="off" enterkeyhint="search" data-reference-search${shown ? ` data-selected-label="${h(shown.label)}"` : ''}${searchFocus}${context.error ? ' aria-invalid="true"' : ''} aria-describedby="${h(describedBy.join(' '))}"><button class="secondary-action" ${action('search')} data-reference-submit>Search</button>${clear}${renderReferenceLookup({ ...context, focusResults: toResults })}</div>${shown?.detail ? `<small class="reference-selected-detail">${h(shown.detail)}</small>` : ''}${error.html}</div></div>`;
+}
+
+const referenceAction =
+  (rowId: string, fieldId: string) =>
+  (verb: string, extra = '') =>
+    `form="draft-editor-form" name="draftAction" value="${h(`${verb}:${rowId}:${fieldId}${extra}`)}" formnovalidate`;
+
+/**
+ * The part of a reference control that one lookup changes: its status line
+ * and its popup. The owned script replaces exactly this element when a search
+ * answers, so what the user is typing is never re-rendered under them.
+ *
+ * Three truthful endings: the query is exhausted (nothing more is shown), it
+ * continues below the display limit (More), or it continues past it (a refine
+ * message beside the box, and no More that cannot move). "+ New" is the last
+ * row of the popup, and exists only when the create may start.
+ */
+export function renderReferenceLookup(
+  context: ReferenceRenderContext & {
+    readonly focusResults?: boolean;
+    /** A refusal from this request's read, shown in place of any results. */
+    readonly notice?: string;
+  },
+): string {
+  const { row, field, lookup, noun } = context;
+  const id = controlId(row.id, field.fieldId);
+  const resultsId = `${id}-results`;
+  const action = referenceAction(row.id, field.fieldId);
+  const continues = lookup?.queryContinues === true;
+  const limited = continues && lookup.displayLimitReached;
+  const status = context.notice
+    ? context.notice
+    : limited
+      ? `<p class="reference-empty reference-limit" id="${h(resultsId)}-limit">More matches exist. Refine your search.</p>`
+      : lookup && lookup.records.length === 0
+        ? `<p class="reference-empty">No ${h(noun.toLowerCase())} matches “${h(lookup.term)}”.</p>`
+        : '';
+  const options = (lookup?.records ?? [])
+    .map((record, position) => {
+      const shown = referenceText(field, record);
+      const first = context.focusResults && position === 0 ? ' autofocus' : '';
+      return `<li role="presentation"><button class="reference-option" role="option" id="${h(id)}-option-${position}" aria-selected="false" ${action('select', `:${record.recordId}`)}${first}><strong>${h(shown.label)}</strong>${shown.detail ? `<small>${h(shown.detail)}</small>` : ''}</button></li>`;
+    })
+    .join('');
+  const more =
+    continues && !limited
+      ? `<li role="presentation"><button class="link-action reference-more" role="option" id="${h(id)}-option-more" aria-selected="false" ${action('more')} data-reference-more>More results</button></li>`
+      : '';
   const create =
     context.createOffered && field.reference?.create
-      ? `<button class="reference-create" ${action('create')}>+ ${h(field.reference.create.label)}</button>`
+      ? `<li role="presentation"><button class="reference-create" role="option" id="${h(id)}-option-create" aria-selected="false" ${action('create')} data-reference-create>+ ${h(field.reference.create.label)}</button></li>`
       : '';
-  return `${hidden}<div class="reference-control" id="${h(id)}" data-reference-control data-reference-results="${h(resultsId)}"><div class="reference-search"><input type="search" form="draft-editor-form" name="${h(searchName)}" value="${h(lookup?.term ?? '')}" placeholder="${h(`Search ${noun.toLowerCase()} by name or number`)}" aria-label="${h(`Search ${label.toLowerCase()}`)}" autocomplete="off" data-reference-search${searchFocus}${searchAttributes}><button class="secondary-action" ${action('search')} data-reference-submit>Search</button></div>${error.html}${limited ? `<p class="reference-empty reference-limit" id="${h(limitId)}" role="status">More matches exist. Refine your search.</p>` : ''}${results}${create}</div>`;
+  const popup =
+    options || more || create
+      ? `<div class="reference-popup" id="${h(id)}-popup" data-reference-popup><ul class="reference-results" id="${h(resultsId)}" role="listbox" aria-label="${h(`${noun} results`)}">${options}${more}${create}</ul></div>`
+      : '';
+  return `<div class="reference-lookup" id="${h(id)}-lookup" data-reference-lookup data-reference-seq="${context.seq}" data-reference-shown="${lookup ? 'true' : 'false'}"><div class="reference-status" id="${h(id)}-status" role="status">${status}</div>${popup}</div>`;
 }
 
 /**
@@ -441,8 +490,15 @@ export function renderCreatePanel(context: {
   readonly action: string;
   readonly fieldInputs: ReadonlyMap<string, CompiledSurfaceInputField>;
   readonly compiledFields: ReadonlyMap<string, CompiledSurfaceField>;
+  /**
+   * `fragment`: opened in place by the owned script as a modal over the live
+   * order. It has no Hide -- the order stays paused on the server until the
+   * flow is created or cancelled, so a hidden flow would only strand it.
+   */
+  readonly mode?: 'page' | 'fragment';
 }): string {
   const { task, create } = context;
+  const fragment = context.mode === 'fragment';
   const frozen = task.attempted;
   const fields = create.fields
     .map((collected, index) => {
@@ -482,12 +538,26 @@ export function renderCreatePanel(context: {
     })
     .join('');
   const pending = task.steps.some((step) => !step.done);
-  return `<dialog class="editor-create" open data-composition-task aria-labelledby="editor-create-heading"><form method="post" action="${h(context.action)}" class="editor-create__form" data-editor-create>
+  // A refusal by current policy cannot be retried into success: offer Cancel
+  // only, which reports anything already created, rather than a Retry loop.
+  const primary = task.denied
+    ? ''
+    : `<button type="submit" name="draftCreate" value="submit">${frozen && pending ? 'Retry' : `Create and use`}</button>`;
+  const denied = task.denied
+    ? `<p class="draft-note" data-editor-create-denied>You cannot create this record with your current access. Cancel returns to the order${pending && task.steps.some((step) => step.done) ? '; what was already created is kept' : ''}.</p>`
+    : '';
+  const hide = fragment
+    ? ''
+    : `<button type="button" class="link-action" data-task-close hidden aria-label="Hide ${h(create.label.toLowerCase())}">Hide</button>`;
+  const resume = fragment
+    ? ''
+    : `<p class="draft-create-resume" data-task-resume data-task-resume-closed-only hidden><button type="button" class="secondary-action" data-task-open>Show ${h(create.label.toLowerCase())}</button></p>`;
+  return `<dialog class="editor-create"${fragment ? ' data-editor-create-fragment' : ' open data-composition-task'} aria-labelledby="editor-create-heading"><form method="post" action="${h(context.action)}" class="editor-create__form" data-editor-create>
   <input type="hidden" name="draftSession" value="${h(context.session)}"><input type="hidden" name="draftVersion" value="${context.version}"><input type="hidden" name="draftCreateTask" value="${h(task.id)}">
-  <header class="editor-create__header"><h2 id="editor-create-heading" data-task-heading tabindex="-1">${h(create.label)}</h2><button type="button" class="link-action" data-task-close hidden aria-label="Hide ${h(create.label.toLowerCase())}">Hide</button></header>
+  <header class="editor-create__header"><h2 id="editor-create-heading" data-task-heading tabindex="-1">${h(create.label)}</h2>${hide}</header>
   <p class="editor-create__explanation">${h(create.explanation)}</p>
-  ${task.notice}
+  ${task.notice}${denied}
   <div class="form-fields editor-create__fields">${fields}</div>
-  <footer class="editor-create__footer"><button type="submit" name="draftCreate" value="submit">${frozen && pending ? 'Retry' : `Create and use`}</button><button type="submit" name="draftCreate" value="cancel" formnovalidate class="secondary-action">Cancel</button></footer>
-</form></dialog><p class="draft-create-resume" data-task-resume data-task-resume-closed-only hidden><button type="button" class="secondary-action" data-task-open>Show ${h(create.label.toLowerCase())}</button></p>`;
+  <footer class="editor-create__footer">${primary}<button type="submit" name="draftCreate" value="cancel" formnovalidate class="secondary-action">Cancel</button></footer>
+</form></dialog>${resume}`;
 }

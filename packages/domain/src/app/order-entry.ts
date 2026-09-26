@@ -2,6 +2,7 @@
 export function orderEntrySurfaces(
   namespace: string,
   surfaces: Record<string, unknown>[],
+  queries: readonly Record<string, unknown>[] = [],
 ) {
   const id = (type: string, local: string) => `${namespace}:${type}.${local}`;
   const company = {
@@ -31,6 +32,22 @@ export function orderEntrySurfaces(
         getQueryId: id('query', 'party_get'),
         labelFieldIds: [id('field', 'party_name')],
         detailFieldIds: [id('field', 'party_number')],
+        // Only parties with an active role of this kind. A party holding both
+        // roles is offered to both documents.
+        eligibility: {
+          queryId: id('query', 'party_role_list'),
+          relationId: id('relation', 'party_role_party'),
+          filters: [
+            {
+              fieldId: id('field', 'party_role_kind'),
+              value: id('option', role),
+            },
+            {
+              fieldId: id('field', 'party_role_status'),
+              value: id('option', 'active'),
+            },
+          ],
+        },
         create: {
           label: role === 'customer' ? 'New customer' : 'New vendor',
           explanation:
@@ -172,6 +189,23 @@ export function orderEntrySurfaces(
       document('purchase_order', 'supplier', 'expected_date', false),
     ],
   ]);
+  // A List whose declared query is scoped to exactly one company enters with
+  // the caller's authorized company, like the document workspaces do.
+  const companyScoped = new Set(
+    queries.flatMap((query) => {
+      const scope = query.legalEntityScope as
+        { cardinality?: string } | undefined;
+      return query.queryType === 'list' && scope?.cardinality === 'exactlyOne'
+        ? [String(query.queryId)]
+        : [];
+    }),
+  );
+  // Line tables belong inside the document that owns them; navigation lists
+  // the documents. Each remains a contextual, deep-linkable surface.
+  const lineOwners: Readonly<Record<string, string>> = {
+    inventory_transaction_line: 'inventory_transaction',
+    stock_count_line: 'stock_count',
+  };
   return surfaces.map((surface) => {
     const name = String(surface.surfaceId).split(':surface.')[1]!;
     const role = surface.surfaceRole;
@@ -188,7 +222,10 @@ export function orderEntrySurfaces(
               'shipment_line',
             ].includes(local)
           ? 'sales_order'
-          : null;
+          : (lineOwners[local] ?? null);
+    const listQueryId = String(
+      (surface.dataSource as { targetId?: unknown } | undefined)?.targetId,
+    );
     return {
       ...surface,
       ...(editor && role !== 'list' ? { documentEditor: editor } : {}),
@@ -210,7 +247,10 @@ export function orderEntrySurfaces(
                 : 'setup'
             : 'contextual',
         ...(owner ? { ownerSurfaceId: id('surface', `${owner}_list`) } : {}),
-        ...(editor || owner || local === 'posted_stock_balance'
+        ...(editor ||
+        owner ||
+        local === 'posted_stock_balance' ||
+        (role === 'list' && companyScoped.has(listQueryId))
           ? {
               entry: {
                 ...company,

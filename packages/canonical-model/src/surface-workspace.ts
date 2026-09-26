@@ -279,6 +279,57 @@ export function validateSurfaceWorkspaces(
         }
       });
     };
+    // Eligibility reads another entity's whole unscoped, unfiltered List: its
+    // owned relation must point from that entity to the picker's (so one
+    // record's eligibility is an exact parent-scoped read), and every filter
+    // must be a selected field of it with an admissible value.
+    const checkEligibility = (
+      eligibility: NonNullable<
+        NonNullable<
+          (typeof editor.headerFields)[number]['reference']
+        >['eligibility']
+      >,
+      pickerEntityId: string,
+    ) => {
+      const query = queries.get(eligibility.queryId);
+      const relation = model.relations.find(
+        (value) => value.relationId === eligibility.relationId,
+      );
+      if (
+        query?.queryType !== 'list' ||
+        ('legalEntityScope' in query && query.legalEntityScope) ||
+        ('filter' in query &&
+          query.filter &&
+          !(
+            query.filter.kind === 'booleanPredicate' &&
+            'value' in query.filter &&
+            query.filter.value === true
+          )) ||
+        relation?.sourceEntity.targetId !== query.sourceEntity.targetId ||
+        relation.targetEntity.targetId !== pickerEntityId ||
+        relation.ownership !== 'parentScopedChild' ||
+        new Set(eligibility.filters.map((filter) => filter.fieldId)).size !==
+          eligibility.filters.length
+      )
+        fail(
+          surface.surfaceId,
+          'picker eligibility requires an unscoped List of an entity related to the picker entity',
+        );
+      for (const filter of eligibility.filters) {
+        const type = fields.get(filter.fieldId)?.fieldType;
+        if (
+          !selects(eligibility.queryId, [filter.fieldId]) ||
+          (type?.kind === 'enumFieldType'
+            ? !type.options.some((option) => option.optionId === filter.value)
+            : type?.kind !== 'textFieldType' ||
+              filter.value.length > type.maximumLength)
+        )
+          fail(
+            surface.surfaceId,
+            'picker eligibility filters require selected fields and admissible values',
+          );
+      }
+    };
     const checkFields = (
       declared: typeof editor.headerFields,
       entityId: string,
@@ -334,6 +385,13 @@ export function validateSurfaceWorkspaces(
             fail(
               surface.surfaceId,
               'a searchable picker requires an exact get of the same entity reading its labels',
+            );
+          if (field.reference.eligibility)
+            checkEligibility(
+              field.reference.eligibility,
+              String(
+                queries.get(field.reference.queryId)!.sourceEntity.targetId,
+              ),
             );
           if (field.reference.create)
             checkCreate(

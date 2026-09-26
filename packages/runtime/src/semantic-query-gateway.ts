@@ -45,6 +45,7 @@ import {
   parseSharedListArguments,
   requireSharedListResult,
   SharedListContractError,
+  type AuthorizedSharedListRelatedFilter,
   type AuthorizedSharedListRequest,
   type SharedListCoverage,
 } from './list-behavior/index.js';
@@ -843,9 +844,69 @@ async function authorizeSharedListProjection(
       }),
     );
   }
+  let relatedFilter: AuthorizedSharedListRelatedFilter | undefined;
+  if (query.relatedFilter) {
+    const related = query.relatedFilter;
+    const relatedDefinition = registeredQueryFromPinnedView(
+      view,
+      related.queryId,
+    );
+    // The existence check reads the related entity as a whole, so its list
+    // must be one that shows the whole entity: an admitted Q0 predicate and no
+    // company scope. Anything narrower is refused rather than approximated.
+    if (
+      !relatedDefinition ||
+      relatedDefinition.lifecycle !== 'active' ||
+      relatedDefinition.tier !== 'q0' ||
+      relatedDefinition.queryType !== 'list' ||
+      relatedDefinition.legalEntityScope !== undefined ||
+      !related.fieldFilters.every((filter) =>
+        relatedDefinition.selections.some(
+          (selection) => selection.fieldId === filter.fieldId,
+        ),
+      )
+    ) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'related filter must use selected fields of an active, unfiltered, unscoped pinned list query',
+        related.queryId,
+      );
+    }
+    const decision = await authorizeCurrentPolicy(
+      currentPolicy,
+      view,
+      relatedDefinition.permissionId,
+      Object.freeze({
+        arguments: Object.freeze({
+          fieldIds: Object.freeze(
+            related.fieldFilters.map((filter) => filter.fieldId),
+          ),
+          relationId: related.relationId,
+        }),
+        kind: 'registeredSemanticListRelatedFilterPolicyInput',
+        queryId: relatedDefinition.queryId,
+        requestId: view.requestId,
+        schemaVersion: QUERY_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (decision.decision === 'DENY') {
+      await recordDenied(relatedDefinition.queryId, decision.policyVersion);
+      throw new SemanticQueryPolicyDeniedError(relatedDefinition.queryId, view);
+    }
+    const predicateReceipt = inspectPredicateForExecution(
+      relatedDefinition.filter,
+    );
+    observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+    if (predicateReceipt.outcome !== 'accepted') return null;
+    relatedFilter = Object.freeze({
+      ...related,
+      relatedEntityId: relatedDefinition.sourceEntityId,
+    });
+  }
   return Object.freeze({
     query,
     relationLabels: Object.freeze(relationLabels),
+    ...(relatedFilter ? { relatedFilter } : {}),
   });
 }
 

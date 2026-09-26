@@ -50,6 +50,23 @@ export interface SharedListParentScope {
   readonly relationId: string;
 }
 
+/**
+ * Keeps only records that at least one active record of another entity points
+ * at through a declared relation, where that record matches exact field
+ * values -- for example parties with an active customer role. Applied BEFORE
+ * the count and the page window, so a page is never a broader set filtered
+ * afterwards. The related list query names the entity and carries the read
+ * permission that must allow the check.
+ */
+export interface SharedListRelatedFilter {
+  readonly queryId: string;
+  readonly relationId: string;
+  readonly fieldFilters: readonly {
+    readonly fieldId: string;
+    readonly value: string;
+  }[];
+}
+
 export interface SharedListQueryRequest {
   readonly cursor: string | null;
   readonly effectivePageSize: number;
@@ -62,6 +79,7 @@ export interface SharedListQueryRequest {
     readonly fieldId: string;
     readonly value: string;
   }[];
+  readonly relatedFilter?: SharedListRelatedFilter;
   readonly relationLabels: readonly SharedListRelationLabelRequest[];
   readonly requestedPageSize: number;
   readonly schemaVersion: typeof SHARED_LIST_QUERY_VERSION;
@@ -74,9 +92,14 @@ export interface AuthorizedSharedListRelationLabel extends SharedListRelationLab
   readonly targetEntityId: string;
 }
 
+export interface AuthorizedSharedListRelatedFilter extends SharedListRelatedFilter {
+  readonly relatedEntityId: string;
+}
+
 export interface AuthorizedSharedListRequest {
   readonly query: SharedListQueryRequest;
   readonly relationLabels: readonly AuthorizedSharedListRelationLabel[];
+  readonly relatedFilter?: AuthorizedSharedListRelatedFilter;
 }
 
 export interface SharedListCoverage {
@@ -98,6 +121,8 @@ export interface SharedListCoverage {
     readonly fieldId: string;
     readonly value: string;
   }[];
+  /** Echoed like `parentScope`, so an executor that ignored it is observable. */
+  readonly relatedFilter?: SharedListRelatedFilter;
   readonly projectedSearchValueCount: number;
   readonly requestedPageSize: number;
   readonly returnedCount: number;
@@ -145,6 +170,7 @@ export function parseSharedListArguments(
     parentScope: parentScopeValue,
     fieldFilters: fieldFiltersValue,
     referenceScope: referenceScopeValue,
+    relatedFilter: relatedFilterValue,
     ...closedList
   } = list;
   assertExactKeys(closedList, [
@@ -161,25 +187,32 @@ export function parseSharedListArguments(
   const fieldFilters =
     fieldFiltersValue === undefined
       ? undefined
+      : parseExactFieldFilters(fieldFiltersValue);
+  const relatedFilter =
+    relatedFilterValue === undefined
+      ? undefined
       : (() => {
-          if (
-            !Array.isArray(fieldFiltersValue) ||
-            fieldFiltersValue.length === 0 ||
-            fieldFiltersValue.length > 4
-          )
-            throw malformed('one to four exact field filters required');
-          return fieldFiltersValue.map((value) => {
-            if (!isRecord(value))
-              throw malformed('field filter must be an object');
-            assertExactKeys(value, ['fieldId', 'value']);
-            if (
-              typeof value.fieldId !== 'string' ||
-              !canonicalIdPattern.test(value.fieldId) ||
-              typeof value.value !== 'string' ||
-              value.value.length > 240
-            )
-              throw malformed('invalid exact field filter');
-            return { fieldId: value.fieldId, value: value.value };
+          if (!isRecord(relatedFilterValue))
+            throw malformed('related filter must be an object');
+          assertExactKeys(relatedFilterValue, [
+            'fieldFilters',
+            'queryId',
+            'relationId',
+          ]);
+          assertCanonicalId(
+            relatedFilterValue.queryId,
+            'related filter queryId',
+          );
+          assertCanonicalId(
+            relatedFilterValue.relationId,
+            'related filter relationId',
+          );
+          return Object.freeze({
+            fieldFilters: parseExactFieldFilters(
+              relatedFilterValue.fieldFilters,
+            ),
+            queryId: relatedFilterValue.queryId,
+            relationId: relatedFilterValue.relationId,
           });
         })();
   if (parentScope && referenceScope)
@@ -218,6 +251,7 @@ export function parseSharedListArguments(
     parentScope,
     ...(referenceScope ? { referenceScope } : {}),
     ...(fieldFilters ? { fieldFilters } : {}),
+    ...(relatedFilter ? { relatedFilter } : {}),
     relationLabels,
     search: list.search,
     sort,
@@ -232,6 +266,7 @@ export function parseSharedListArguments(
     parentScope,
     ...(referenceScope ? { referenceScope } : {}),
     ...(fieldFilters ? { fieldFilters } : {}),
+    ...(relatedFilter ? { relatedFilter } : {}),
     relationLabels,
     requestedPageSize,
     schemaVersion: SHARED_LIST_QUERY_VERSION,
@@ -334,6 +369,27 @@ function parseSort(
     });
   });
   return Object.freeze(result);
+}
+
+function parseExactFieldFilters(
+  value: ImmutableJsonValue | undefined,
+): readonly { readonly fieldId: string; readonly value: string }[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 4)
+    throw malformed('one to four exact field filters required');
+  return Object.freeze(
+    value.map((entry) => {
+      if (!isRecord(entry)) throw malformed('field filter must be an object');
+      assertExactKeys(entry, ['fieldId', 'value']);
+      if (
+        typeof entry.fieldId !== 'string' ||
+        !canonicalIdPattern.test(entry.fieldId) ||
+        typeof entry.value !== 'string' ||
+        entry.value.length > 240
+      )
+        throw malformed('invalid exact field filter');
+      return Object.freeze({ fieldId: entry.fieldId, value: entry.value });
+    }),
+  );
 }
 
 function parseRelationLabels(

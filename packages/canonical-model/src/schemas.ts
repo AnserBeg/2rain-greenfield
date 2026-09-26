@@ -748,6 +748,37 @@ const compositionCondition = z.strictObject({
   operator: z.enum(['equals', 'notEquals', 'positive']),
   compare: z.union([z.string(), z.number(), z.boolean(), z.null()]),
 });
+const compositionTaskColumn = z.strictObject({
+  datasetId: CanonicalIdSchema,
+  columnId: CanonicalIdSchema,
+});
+/**
+ * How a Task presents one of its text inputs, reusing the draft editor's
+ * vocabulary. `choice` offers a fixed set (optionally defaulting to a stored
+ * record value that is itself offered); `derived` is read on the server from
+ * the selected row's declared column and never from the submission; both are
+ * presentation policy over the input, never a domain rule.
+ */
+const compositionInputPresentation = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('multiline') }),
+  z.strictObject({
+    kind: z.literal('choice'),
+    options: z
+      .array(
+        z.strictObject({
+          value: z.string().min(1).max(64),
+          label: LabelSchema,
+        }),
+      )
+      .min(1)
+      .max(20),
+    defaultValue: z.string().min(1).max(64).optional(),
+    defaultFrom: z
+      .strictObject({ source: z.literal('record'), field: z.string().min(1) })
+      .optional(),
+  }),
+  z.strictObject({ kind: z.literal('derived'), column: compositionTaskColumn }),
+]);
 const compositionInput = z.strictObject({
   inputId: CanonicalIdSchema,
   label: LabelSchema,
@@ -756,6 +787,7 @@ const compositionInput = z.strictObject({
   required: z.boolean(),
   query: compositionReference('queryReference').optional(),
   labelField: compositionReference('fieldReference').optional(),
+  presentation: compositionInputPresentation.optional(),
 });
 const compositionStep = z.strictObject({
   stepId: CanonicalIdSchema,
@@ -769,10 +801,6 @@ const compositionStep = z.strictObject({
     )
     .min(1)
     .max(60),
-});
-const compositionTaskColumn = z.strictObject({
-  datasetId: CanonicalIdSchema,
-  columnId: CanonicalIdSchema,
 });
 const compositionTaskValue = z.discriminatedUnion('source', [
   z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
@@ -994,6 +1022,27 @@ const editorField = z.strictObject({
       labelFieldIds: z.array(CanonicalIdSchema).min(1).max(3),
       /** Secondary text shown under each result, such as SKU and base unit. */
       detailFieldIds: z.array(CanonicalIdSchema).min(1).max(3).optional(),
+      /**
+       * Which records may be chosen: those an active record of another entity
+       * points at through a declared relation, matching exact values -- for
+       * example parties with an active customer role. Applied by the list
+       * query before paging, and to every selection route.
+       */
+      eligibility: z
+        .strictObject({
+          queryId: CanonicalIdSchema,
+          relationId: CanonicalIdSchema,
+          filters: z
+            .array(
+              z.strictObject({
+                fieldId: CanonicalIdSchema,
+                value: z.string().min(1).max(200),
+              }),
+            )
+            .min(1)
+            .max(4),
+        })
+        .optional(),
       create: editorCreate.optional(),
     })
     .optional(),

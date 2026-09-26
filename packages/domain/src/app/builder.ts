@@ -11,6 +11,7 @@ import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
 import { orderEntrySurfaces } from './order-entry.js';
 import { purchasingWorkspace } from '../purchasing/workspace.js';
+import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -56,6 +57,19 @@ const MODULE_REGISTRY = Object.freeze([
   Object.freeze({ create: catalogModuleDefinition, moduleName: 'catalog' }),
   Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),
 ] as const);
+
+/** Record surfaces presented as documents with their own lines and actions. */
+const RECORD_COMPOSITIONS: Readonly<
+  Record<string, (namespace: string) => Record<string, unknown>>
+> = Object.freeze({
+  sales_order_detail: salesWorkspace,
+  purchase_order_detail: purchasingWorkspace,
+  shipment_detail: packingWorkspace,
+  inventory_transaction_detail: (namespace: string) =>
+    inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
+  stock_count_detail: (namespace: string) =>
+    inventoryDocumentWorkspace(namespace, 'stock_count'),
+});
 
 /** The mounted module names, in composition order, for callers that assert on the set. */
 export const COMPOSED_MODULE_NAMES = Object.freeze(
@@ -157,45 +171,41 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       merged(definitions, 'surfaces').map((surface) => {
         if (!isRecord(surface))
           throw new TypeError('surface must be an object');
-        if (
-          surface.surfaceId !==
-            `${APPLICATION_NAMESPACE}:surface.sales_order_detail` &&
-          surface.surfaceId !==
-            `${APPLICATION_NAMESPACE}:surface.purchase_order_detail` &&
-          surface.surfaceId !==
-            `${APPLICATION_NAMESPACE}:surface.shipment_detail`
-        )
-          return surface;
+        const composition = RECORD_COMPOSITIONS[
+          String(surface.surfaceId).split(':surface.')[1] ?? ''
+        ]?.(APPLICATION_NAMESPACE);
+        if (!composition) return surface;
+        const slots = surface.slots as Record<string, unknown>[];
+        const slot = (name: string, suffix: string, orderKey: number) => ({
+          kind: 'surfaceSlot',
+          schemaVersion: version,
+          slot: name,
+          slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_${suffix}`,
+          orderKey,
+          content: {
+            kind: 'opaqueSurfaceContentReference',
+            schemaVersion: version,
+            targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
+          },
+        });
         return {
           ...surface,
-          composition:
-            surface.surfaceId ===
-            `${APPLICATION_NAMESPACE}:surface.sales_order_detail`
-              ? salesWorkspace(APPLICATION_NAMESPACE)
-              : surface.surfaceId ===
-                  `${APPLICATION_NAMESPACE}:surface.purchase_order_detail`
-                ? purchasingWorkspace(APPLICATION_NAMESPACE)
-                : packingWorkspace(APPLICATION_NAMESPACE),
+          composition,
           slots: [
-            ...(surface.slots as Record<string, unknown>[]).map((slot) => ({
+            ...slots.map((slot) => ({
               ...slot,
               ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
             })),
-            {
-              kind: 'surfaceSlot',
-              schemaVersion: version,
-              slot: 'childTables',
-              slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_children`,
-              orderKey: 60,
-              content: {
-                kind: 'opaqueSurfaceContentReference',
-                schemaVersion: version,
-                targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
-              },
-            },
+            // A composition renders its fields in `sections`; a read-only
+            // document that never declared one gains it here.
+            ...(slots.some((value) => value.slot === 'sections')
+              ? []
+              : [slot('sections', 'sections', 50)]),
+            slot('childTables', 'children', 60),
           ],
         };
       }),
+      merged(definitions, 'queries') as Record<string, unknown>[],
     ),
   };
 }
@@ -236,6 +246,19 @@ export const APPLICATION_IDS = Object.freeze({
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_form`,
     listQueryId: `${APPLICATION_NAMESPACE}:query.party_list`,
     listSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_list`,
+    role: Object.freeze({
+      createOperationId: `${APPLICATION_NAMESPACE}:operation.party_role_create`,
+      fieldIds: Object.freeze({
+        kind: `${APPLICATION_NAMESPACE}:field.party_role_kind`,
+        status: `${APPLICATION_NAMESPACE}:field.party_role_status`,
+      }),
+      optionIds: Object.freeze({
+        active: `${APPLICATION_NAMESPACE}:option.active`,
+        customer: `${APPLICATION_NAMESPACE}:option.customer`,
+        supplier: `${APPLICATION_NAMESPACE}:option.supplier`,
+      }),
+      partyRelationId: `${APPLICATION_NAMESPACE}:relation.party_role_party`,
+    }),
   }),
   purchasing: Object.freeze({
     cancelOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_cancel`,

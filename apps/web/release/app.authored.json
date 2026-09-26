@@ -23013,6 +23013,20 @@
               "getQueryId": "northstar.app:query.party_get",
               "labelFieldIds": ["northstar.app:field.party_name"],
               "detailFieldIds": ["northstar.app:field.party_number"],
+              "eligibility": {
+                "queryId": "northstar.app:query.party_role_list",
+                "relationId": "northstar.app:relation.party_role_party",
+                "filters": [
+                  {
+                    "fieldId": "northstar.app:field.party_role_kind",
+                    "value": "northstar.app:option.customer"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_role_status",
+                    "value": "northstar.app:option.active"
+                  }
+                ]
+              },
               "create": {
                 "label": "New customer",
                 "explanation": "Creates the customer now as its own record. Saving or discarding this order does not undo it.",
@@ -23261,6 +23275,20 @@
               "getQueryId": "northstar.app:query.party_get",
               "labelFieldIds": ["northstar.app:field.party_name"],
               "detailFieldIds": ["northstar.app:field.party_number"],
+              "eligibility": {
+                "queryId": "northstar.app:query.party_role_list",
+                "relationId": "northstar.app:relation.party_role_party",
+                "filters": [
+                  {
+                    "fieldId": "northstar.app:field.party_role_kind",
+                    "value": "northstar.app:option.customer"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_role_status",
+                    "value": "northstar.app:option.active"
+                  }
+                ]
+              },
               "create": {
                 "label": "New customer",
                 "explanation": "Creates the customer now as its own record. Saving or discarding this order does not undo it.",
@@ -25839,6 +25867,20 @@
               "getQueryId": "northstar.app:query.party_get",
               "labelFieldIds": ["northstar.app:field.party_name"],
               "detailFieldIds": ["northstar.app:field.party_number"],
+              "eligibility": {
+                "queryId": "northstar.app:query.party_role_list",
+                "relationId": "northstar.app:relation.party_role_party",
+                "filters": [
+                  {
+                    "fieldId": "northstar.app:field.party_role_kind",
+                    "value": "northstar.app:option.supplier"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_role_status",
+                    "value": "northstar.app:option.active"
+                  }
+                ]
+              },
               "create": {
                 "label": "New vendor",
                 "explanation": "Creates the vendor now as its own record. Saving or discarding this order does not undo it.",
@@ -26078,6 +26120,20 @@
               "getQueryId": "northstar.app:query.party_get",
               "labelFieldIds": ["northstar.app:field.party_name"],
               "detailFieldIds": ["northstar.app:field.party_number"],
+              "eligibility": {
+                "queryId": "northstar.app:query.party_role_list",
+                "relationId": "northstar.app:relation.party_role_party",
+                "filters": [
+                  {
+                    "fieldId": "northstar.app:field.party_role_kind",
+                    "value": "northstar.app:option.supplier"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_role_status",
+                    "value": "northstar.app:option.active"
+                  }
+                ]
+              },
               "create": {
                 "label": "New vendor",
                 "explanation": "Creates the vendor now as its own record. Saving or discarding this order does not undo it.",
@@ -27622,7 +27678,17 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_transaction_list",
       "surfaceRole": "list",
-      "workspace": { "membership": "setup" }
+      "workspace": {
+        "membership": "setup",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.inventory_transaction_list"
+        }
+      }
     },
     {
       "archetype": "record",
@@ -27683,15 +27749,213 @@
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
-          "orderKey": 40,
+          "orderKey": 90,
           "schemaVersion": "v6",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.inventory_transaction_detail_key_facts"
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.inventory_transaction_detail_sections",
+          "orderKey": 50,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "childTables",
+          "slotId": "northstar.app:slot.inventory_transaction_detail_children",
+          "orderKey": 60,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
         }
       ],
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_transaction_detail",
       "surfaceRole": "record",
+      "composition": {
+        "kind": "surfaceComposition",
+        "schemaVersion": "v6",
+        "fields": [],
+        "children": [
+          {
+            "datasetId": "northstar.app:dataset.inventory_transaction_inventory_transaction_line",
+            "label": "Lines",
+            "orderKey": 10,
+            "query": {
+              "kind": "queryReference",
+              "targetId": "northstar.app:query.inventory_transaction_line_list",
+              "schemaVersion": "v6"
+            },
+            "parent": {
+              "relationId": "northstar.app:relation.inventory_transaction_line_transaction",
+              "value": { "source": "record", "field": "recordId" },
+              "ownership": "parentScopedChild"
+            },
+            "sort": [
+              {
+                "fieldId": "northstar.app:field.inventory_transaction_line_line_number",
+                "direction": "ascending"
+              }
+            ],
+            "columns": [
+              {
+                "columnId": "northstar.app:column.line_line",
+                "label": "Line",
+                "orderKey": 10,
+                "field": "northstar.app:field.inventory_transaction_line_line_number"
+              },
+              {
+                "columnId": "northstar.app:column.line_item",
+                "label": "Product",
+                "orderKey": 20,
+                "field": "northstar.app:field.inventory_transaction_line_item_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "targetId": "northstar.app:query.item_get",
+                    "schemaVersion": "v6"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "targetId": "northstar.app:field.item_name",
+                    "schemaVersion": "v6"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.line_quantity",
+                "label": "Quantity",
+                "orderKey": 30,
+                "field": "northstar.app:field.inventory_transaction_line_quantity"
+              },
+              {
+                "columnId": "northstar.app:column.line_unit",
+                "label": "Unit",
+                "orderKey": 40,
+                "field": "northstar.app:field.inventory_transaction_line_unit_id"
+              },
+              {
+                "columnId": "northstar.app:column.line_from",
+                "label": "From location",
+                "orderKey": 50,
+                "field": "northstar.app:field.inventory_transaction_line_from_location_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "targetId": "northstar.app:query.location_get",
+                    "schemaVersion": "v6"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "targetId": "northstar.app:field.location_name",
+                    "schemaVersion": "v6"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.line_to",
+                "label": "To location",
+                "orderKey": 60,
+                "field": "northstar.app:field.inventory_transaction_line_to_location_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "targetId": "northstar.app:query.location_get",
+                    "schemaVersion": "v6"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "targetId": "northstar.app:field.location_name",
+                    "schemaVersion": "v6"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "datasetId": "northstar.app:dataset.inventory_transaction_inventory_movement",
+            "label": "Posted movements",
+            "orderKey": 20,
+            "query": {
+              "kind": "queryReference",
+              "targetId": "northstar.app:query.inventory_movement_list",
+              "schemaVersion": "v6"
+            },
+            "parent": {
+              "relationId": "northstar.app:relation.inventory_movement_transaction",
+              "value": { "source": "record", "field": "recordId" },
+              "ownership": "parentScopedChild"
+            },
+            "columns": [
+              {
+                "columnId": "northstar.app:column.movement_item",
+                "label": "Product",
+                "orderKey": 10,
+                "field": "northstar.app:field.inventory_movement_item_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "targetId": "northstar.app:query.item_get",
+                    "schemaVersion": "v6"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "targetId": "northstar.app:field.item_name",
+                    "schemaVersion": "v6"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.movement_location",
+                "label": "Location",
+                "orderKey": 20,
+                "field": "northstar.app:field.inventory_movement_location_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "targetId": "northstar.app:query.location_get",
+                    "schemaVersion": "v6"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "targetId": "northstar.app:field.location_name",
+                    "schemaVersion": "v6"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.movement_delta",
+                "label": "Quantity change",
+                "orderKey": 30,
+                "field": "northstar.app:field.inventory_movement_quantity_delta"
+              },
+              {
+                "columnId": "northstar.app:column.movement_unit",
+                "label": "Unit",
+                "orderKey": 40,
+                "field": "northstar.app:field.inventory_movement_unit_id"
+              },
+              {
+                "columnId": "northstar.app:column.movement_effective",
+                "label": "Effective",
+                "orderKey": 50,
+                "field": "northstar.app:field.inventory_movement_effective_at"
+              }
+            ]
+          }
+        ],
+        "actions": []
+      },
       "workspace": { "membership": "contextual" }
     },
     {
@@ -27820,7 +28084,18 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_transaction_line_list",
       "surfaceRole": "list",
-      "workspace": { "membership": "setup" }
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.inventory_transaction_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.inventory_transaction_list"
+        }
+      }
     },
     {
       "archetype": "record",
@@ -27878,7 +28153,18 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_transaction_line_detail",
       "surfaceRole": "record",
-      "workspace": { "membership": "contextual" }
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.inventory_transaction_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.inventory_transaction_list"
+        }
+      }
     },
     {
       "archetype": "record",
@@ -27960,7 +28246,18 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_transaction_line_form",
       "surfaceRole": "form",
-      "workspace": { "membership": "contextual" }
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.inventory_transaction_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.inventory_transaction_list"
+        }
+      }
     },
     {
       "archetype": "list",
@@ -28006,7 +28303,17 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_period_lock_list",
       "surfaceRole": "list",
-      "workspace": { "membership": "setup" }
+      "workspace": {
+        "membership": "setup",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.inventory_period_lock_list"
+        }
+      }
     },
     {
       "archetype": "record",
@@ -28110,7 +28417,17 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.stock_count_list",
       "surfaceRole": "list",
-      "workspace": { "membership": "setup" }
+      "workspace": {
+        "membership": "setup",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.stock_count_list"
+        }
+      }
     },
     {
       "archetype": "record",
@@ -28159,15 +28476,118 @@
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
-          "orderKey": 30,
+          "orderKey": 90,
           "schemaVersion": "v6",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.stock_count_detail_key_facts"
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.stock_count_detail_sections",
+          "orderKey": 50,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "childTables",
+          "slotId": "northstar.app:slot.stock_count_detail_children",
+          "orderKey": 60,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
         }
       ],
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.stock_count_detail",
       "surfaceRole": "record",
+      "composition": {
+        "kind": "surfaceComposition",
+        "schemaVersion": "v6",
+        "fields": [],
+        "children": [
+          {
+            "datasetId": "northstar.app:dataset.stock_count_stock_count_line",
+            "label": "Counted lines",
+            "orderKey": 10,
+            "query": {
+              "kind": "queryReference",
+              "targetId": "northstar.app:query.stock_count_line_list",
+              "schemaVersion": "v6"
+            },
+            "parent": {
+              "relationId": "northstar.app:relation.stock_count_line_session",
+              "value": { "source": "record", "field": "recordId" },
+              "ownership": "parentScopedChild"
+            },
+            "sort": [
+              {
+                "fieldId": "northstar.app:field.stock_count_line_line_number",
+                "direction": "ascending"
+              }
+            ],
+            "columns": [
+              {
+                "columnId": "northstar.app:column.count_line_line",
+                "label": "Line",
+                "orderKey": 10,
+                "field": "northstar.app:field.stock_count_line_line_number"
+              },
+              {
+                "columnId": "northstar.app:column.count_line_item",
+                "label": "Product",
+                "orderKey": 20,
+                "field": "northstar.app:field.stock_count_line_item_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "targetId": "northstar.app:query.item_get",
+                    "schemaVersion": "v6"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "targetId": "northstar.app:field.item_name",
+                    "schemaVersion": "v6"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.count_line_expected",
+                "label": "Expected",
+                "orderKey": 30,
+                "field": "northstar.app:field.stock_count_line_expected_quantity"
+              },
+              {
+                "columnId": "northstar.app:column.count_line_counted",
+                "label": "Counted",
+                "orderKey": 40,
+                "field": "northstar.app:field.stock_count_line_counted_quantity"
+              },
+              {
+                "columnId": "northstar.app:column.count_line_variance",
+                "label": "Variance",
+                "orderKey": 50,
+                "field": "northstar.app:field.stock_count_line_variance_quantity"
+              },
+              {
+                "columnId": "northstar.app:column.count_line_unit",
+                "label": "Unit",
+                "orderKey": 60,
+                "field": "northstar.app:field.stock_count_line_unit_id"
+              }
+            ]
+          }
+        ],
+        "actions": []
+      },
       "workspace": { "membership": "contextual" }
     },
     {
@@ -28296,7 +28716,18 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.stock_count_line_list",
       "surfaceRole": "list",
-      "workspace": { "membership": "setup" }
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.stock_count_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.stock_count_list"
+        }
+      }
     },
     {
       "archetype": "record",
@@ -28354,7 +28785,18 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.stock_count_line_detail",
       "surfaceRole": "record",
-      "workspace": { "membership": "contextual" }
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.stock_count_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.stock_count_list"
+        }
+      }
     },
     {
       "archetype": "record",
@@ -28436,7 +28878,18 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.stock_count_line_form",
       "surfaceRole": "form",
-      "workspace": { "membership": "contextual" }
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.stock_count_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.stock_count_list"
+        }
+      }
     },
     {
       "archetype": "list",
@@ -28482,7 +28935,17 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_movement_list",
       "surfaceRole": "list",
-      "workspace": { "membership": "setup" }
+      "workspace": {
+        "membership": "setup",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.inventory_movement_list"
+        }
+      }
     },
     {
       "archetype": "record",

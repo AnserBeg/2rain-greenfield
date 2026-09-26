@@ -179,7 +179,11 @@ async function seedComposedApplication(
           {
             confirmationGrant: null,
             idempotencyKey: seed.idempotencyKey,
-            input: { recordId: seed.recordId, values: seed.values },
+            input: {
+              recordId: seed.recordId,
+              values: seed.values,
+              ...(seed.relations ? { relations: seed.relations } : {}),
+            },
             operationId: seed.operationId,
             schemaVersion: 'northstar.semantic-operation-request/v1',
           },

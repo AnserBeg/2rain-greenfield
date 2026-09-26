@@ -172,6 +172,7 @@ export async function workspaceSearch(
   scope: string | null,
   search: string,
   cursor: string | null,
+  eligibility?: ReferenceEligibility,
 ): Promise<{
   records: readonly SemanticRecordDto[];
   hasMore: boolean;
@@ -180,6 +181,16 @@ export async function workspaceSearch(
   const definition = registeredSemanticQueryFromPinnedView(view, queryId);
   if (!definition || definition.queryType !== 'list')
     throw new Error('Declared list unavailable');
+  const relatedFilter = eligibility
+    ? {
+        queryId: eligibility.queryId,
+        relationId: eligibility.relationId,
+        fieldFilters: eligibility.filters.map((filter) => ({
+          fieldId: filter.fieldId,
+          value: filter.value,
+        })),
+      }
+    : undefined;
   const result = requireSharedListResult<SemanticRecordDto>(
     await gateway.invoke(view, {
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
@@ -197,16 +208,101 @@ export async function workspaceSearch(
           matchMode: 'substring',
           sort: [],
           relationLabels: [],
+          ...(relatedFilter ? { relatedFilter } : {}),
         },
       },
     }),
   );
+  // An executor that ignored the eligibility filter cannot echo it, so a
+  // broader list is refused rather than offered as eligible choices.
+  const applied = result.listCoverage.relatedFilter;
+  if (
+    relatedFilter &&
+    (applied?.queryId !== relatedFilter.queryId ||
+      applied.relationId !== relatedFilter.relationId ||
+      !sameFilters(applied.fieldFilters, relatedFilter.fieldFilters))
+  )
+    throw new Error('Eligibility filter not applied');
   return {
     records: result.records,
     hasMore: result.listCoverage.hasMore,
     nextCursor: result.listCoverage.nextCursor,
   };
 }
+
+/** A picker's declared eligibility: records another entity points at. */
+export interface ReferenceEligibility {
+  readonly queryId: string;
+  readonly relationId: string;
+  readonly filters: readonly {
+    readonly fieldId: string;
+    readonly value: string;
+  }[];
+}
+
+/**
+ * Whether one record is eligible now: at least one active related record of
+ * the declared kind points at it. Read through the related entity's own List,
+ * restricted to that record as parent, under current authority. A denied or
+ * failed read throws, so withheld authority is never read as "eligible".
+ */
+export async function workspaceEligible(
+  view: RequestRuntimeView,
+  gateway: SemanticQueryGateway,
+  eligibility: ReferenceEligibility,
+  recordId: string,
+): Promise<boolean> {
+  const definition = registeredSemanticQueryFromPinnedView(
+    view,
+    eligibility.queryId,
+  );
+  if (!definition || definition.queryType !== 'list')
+    throw new Error('Declared eligibility list unavailable');
+  const parentScope = { relationId: eligibility.relationId, recordId };
+  const fieldFilters = eligibility.filters.map((filter) => ({
+    fieldId: filter.fieldId,
+    value: filter.value,
+  }));
+  const result = requireSharedListResult<SemanticRecordDto>(
+    await gateway.invoke(view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: eligibility.queryId,
+      arguments: {
+        includeArchived: false,
+        list: {
+          schemaVersion: SHARED_LIST_QUERY_VERSION,
+          cursor: null,
+          pageSize: 1,
+          search: '',
+          matchMode: 'substring',
+          sort: [],
+          relationLabels: [],
+          parentScope,
+          fieldFilters,
+        },
+      },
+    }),
+  );
+  if (
+    result.listCoverage.parentScope?.recordId !== recordId ||
+    result.listCoverage.parentScope.relationId !== eligibility.relationId ||
+    !sameFilters(result.listCoverage.fieldFilters, fieldFilters)
+  )
+    throw new Error('Eligibility check not applied');
+  return result.records.length > 0;
+}
+
+const sameFilters = (
+  applied:
+    readonly { readonly fieldId: string; readonly value: string }[] | undefined,
+  requested: readonly { readonly fieldId: string; readonly value: string }[],
+) =>
+  applied?.length === requested.length &&
+  requested.every(
+    (filter, index) =>
+      applied[index]?.fieldId === filter.fieldId &&
+      applied[index]?.value === filter.value,
+  );
 
 /**
  * The exact authorized read of one selected record. `null` means the record is

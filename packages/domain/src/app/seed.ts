@@ -24,6 +24,8 @@ export interface ComposedApplicationSeedRecord {
   readonly operationId: string;
   readonly recordId: string;
   readonly values: Readonly<Record<string, string>>;
+  /** Relation inputs by relation id, for records that belong to another. */
+  readonly relations?: Readonly<Record<string, string>>;
 }
 
 export type ComposedApplicationSeedProfile = 'demo' | 'distributor';
@@ -428,8 +430,32 @@ export function composedApplicationSeed(
     ...distributorLocations.map(([code, name, locationType], index) =>
       locationRecord(3001 + index, code, name, locationType),
     ),
+    // Each trading partner holds the active role its description states, so
+    // customer and vendor pickers offer exactly the parties they should.
+    ...distributorParties.map(([, contactSummary], index) =>
+      partyRoleRecord(
+        5001 + index,
+        record(1001 + index, '', {}).recordId,
+        contactSummary.startsWith('Supplier') ? 'supplier' : 'customer',
+      ),
+    ),
   );
   return Object.freeze(records);
+}
+
+function partyRoleRecord(
+  ordinal: number,
+  partyRecordId: string,
+  kind: 'customer' | 'supplier',
+): ComposedApplicationSeedRecord {
+  const role = APPLICATION_IDS.party.role;
+  return Object.freeze({
+    ...record(ordinal, role.createOperationId, {
+      [role.fieldIds.kind]: role.optionIds[kind],
+      [role.fieldIds.status]: role.optionIds.active,
+    }),
+    relations: Object.freeze({ [role.partyRelationId]: partyRecordId }),
+  });
 }
 
 function distributorItems(): readonly ComposedApplicationSeedRecord[] {

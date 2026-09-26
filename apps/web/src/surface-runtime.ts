@@ -359,6 +359,69 @@ export async function renderSurfaceRuntimeWithData(
   );
 }
 
+/** Sent by the owned script only; a cross-site form cannot set a header. */
+export const FRAGMENT_REQUEST_HEADER = 'x-rain-fragment';
+
+export interface SurfaceRuntimeFragmentResponse extends SurfaceRuntimeResponse {
+  /** Repeat the action as the ordinary full-page submit instead. */
+  readonly fallback?: true;
+}
+
+/**
+ * ADR-0036 behaviour 7: one draft-editor reference field answered in place.
+ * The same selection, binding, company scope and continuation checks as the
+ * page decide it; the answer is escaped server HTML naming the one element it
+ * replaces. Anything that is not an in-place answer -- an unknown surface, no
+ * draft session, an expired buffer, a withheld save -- becomes `fallback`, and
+ * the script then performs the ordinary submit, which answers it as a page.
+ */
+export async function submitSurfaceRuntimeFragment(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  submission: SurfaceRuntimeSubmission,
+  gateways: SurfaceRuntimeGateways,
+): Promise<SurfaceRuntimeFragmentResponse> {
+  assertRequestRuntimeView(view);
+  const fallback = Object.freeze({
+    html: '',
+    statusCode: 409,
+    fallback: true as const,
+  });
+  const selection = selectSurface(view, requestUrl);
+  if (
+    'statusCode' in selection ||
+    !selection.selected.documentEditor ||
+    !submission.draftSession
+  )
+    return fallback;
+  let binding: CompiledSurfaceDataBinding;
+  try {
+    binding = readCompiledSurfaceDataBinding(view, selection.selected);
+  } catch {
+    return fallback;
+  }
+  const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const scope = legalEntitySelectionForSurface(binding, url);
+  if (scope.length !== 1) return fallback;
+  try {
+    const editor = await documentEditor(
+      view,
+      selection.selected,
+      selection.surfaces,
+      url,
+      scope[0]!,
+      gateways,
+      submission,
+      'fragment',
+    );
+    return editor?.fragment
+      ? Object.freeze({ html: editor.html, statusCode: editor.statusCode })
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /**
  * Resolves a submission to one pinned operation, SELECTED by the posted id and
  * AUTHORIZED only by the compiled binding.
@@ -1859,12 +1922,19 @@ table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:
 .draft-line__cell input,.draft-line__cell select{width:100%;min-width:0}
 .draft-line--removed td{padding:var(--space-2);color:var(--ink-muted)}
 .derived-value{display:inline-flex;align-items:center;min-height:44px;font-weight:600;color:var(--ink-strong)}.derived-empty{font-weight:400;color:var(--ink-muted)}
-.reference-control{display:grid;gap:var(--space-2)}.reference-search{display:flex;gap:var(--space-2)}.reference-search input{flex:1 1 auto;min-width:0}
+.reference-control{display:grid;gap:var(--space-2)}.reference-search{position:relative;display:flex;flex-wrap:wrap;gap:var(--space-2)}.reference-search input{flex:1 1 12rem;min-width:0}.reference-lookup{display:grid;flex-basis:100%;gap:var(--space-2)}.reference-status:empty{display:none}.reference-status p{margin:0}.reference-selected-detail{color:var(--ink-muted)}
+/* Enhanced (ADR-0036 behaviour 7): the lookup becomes a bounded popup under the box; Search is the no-script path. */
+body[data-reference-enhanced] [data-reference-submit]{display:none}
+body[data-reference-enhanced] .reference-lookup{display:none}
+body[data-reference-enhanced] [data-reference-open] .reference-lookup{display:grid;position:absolute;z-index:6;top:calc(100% + 2px);left:0;right:0;gap:0;padding:var(--space-1);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);box-shadow:var(--elevation-overlay)}
+body[data-reference-enhanced] [data-reference-open] .reference-results{max-height:18rem;padding:0;border:0}
+body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .reference-search input{cursor:progress}
+.reference-option[aria-selected="true"],.reference-create[aria-selected="true"],.reference-more[aria-selected="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent-ground)}
 .reference-results{display:grid;gap:2px;max-height:16rem;margin:0;padding:var(--space-1);overflow:auto;list-style:none;border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel)}
 .reference-option{display:grid;gap:2px;width:100%;min-height:44px;padding:var(--space-2);text-align:left;border:0;border-radius:var(--radius-control);background:transparent;color:var(--ink);cursor:pointer}
 .reference-option:hover{background:var(--surface-sunken)}.reference-option small,.reference-selected small{color:var(--ink-muted)}
 .reference-empty{padding:var(--space-2);color:var(--ink-muted)}.reference-limit{margin:0}
-.reference-create{justify-self:start;min-height:44px;padding:var(--space-1) 0;border:0;background:transparent;color:var(--accent-ink);font-weight:600;cursor:pointer}
+.reference-create{display:block;width:100%;min-height:44px;padding:var(--space-2);border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;color:var(--accent-ink);font-weight:600;text-align:left;cursor:pointer}.reference-create:hover{background:var(--surface-sunken)}.reference-more{width:100%;text-align:left}
 .reference-selected{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-height:44px;padding:var(--space-1) var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken)}.reference-selected__text{display:grid}
 .link-action{min-height:44px;padding:var(--space-1);border:0;background:transparent;color:var(--accent-ink);text-decoration:underline;cursor:pointer}
 .form-field--wide{grid-column:1/-1}.draft-header textarea,.editor-create__fields textarea{width:100%;resize:vertical}
