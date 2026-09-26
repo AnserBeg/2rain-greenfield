@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RAIN-ORDER-ENTRY` | order-form usability correction complete at `736b5129`; sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / bounded ONLINE review / owner acceptance; stopped without integration; retained demos preserved |
+| **BUILD** | `RAIN-ORDER-ENTRY` | FORM-1..4 review correction complete at `4b081e08`; sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / same ONLINE reviewer / owner acceptance; stopped without integration; retained demos preserved |
 | **SUPPORT** | — | idle |
 
 

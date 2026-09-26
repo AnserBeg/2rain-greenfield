@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; order-form usability correction complete at executable `736b512940d2e5a1cefc3c8366ae70cee87ffc4c` on the same PR #6 branch, from reviewed baseline `0566206d9ed41c2df301c2369d02446999f6063d`; sole LOCAL author; stacked draft PR handoff. F1/F2/F3 and Task P1/P2 closed and preserved; fresh CI / bounded ONLINE review of this delta / owner acceptance pending; no merge/deployment.
+Status: evidence_ready; FORM-1..4 review correction complete at executable `4b081e08891b4d97264c4d3dda2053ac1323aa27` on the same PR #6 branch, over reviewed `736b512940d2e5a1cefc3c8366ae70cee87ffc4c` and handoff `c8c64bbcd3d98387f4d4f91f132bdb8a6804c3b0`; sole LOCAL author; stacked draft PR handoff. Editor F1/F2/F3 and Task P1/P2 closed and preserved; fresh CI / same ONLINE reviewer on FORM-1..4 / owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -35,7 +35,26 @@ Claims of this delta:
 5. Exact decimals stay strings: canonical spelling, bounds from the pinned
    operation contract checked before any step commits, comparison by value so
    unchanged reopened lines plan no update. Save names each missing or invalid
-   field beside its control and writes nothing.
+   field beside its control and writes nothing. The one numeric conversion is
+   the shared typed control's finiteness probe (`Number.isFinite(Number(value))`)
+   deciding whether a native number input can display a stored value; it keeps
+   the original string, so nothing is rounded. An earlier handoff's "never
+   passes through Number" wording was wrong and is withdrawn.
+
+### FORM-1..4 review correction
+
+Source counterexamples came from the ONLINE reviewer; each was reproduced
+here before correction, through the harness named. Evidence kinds:
+controlled executor (real SurfaceRuntime, policy and semantic gateways over the
+integration stub executor), browser against isolated PostgreSQL, and
+normalization. No hosted evidence is claimed.
+
+| Finding | Pre-fix observation | Correction | Tested result |
+|---|---|---|---|
+| FORM-1 unselected lookup results under current authority | Controlled executor through SurfaceRuntime: after a customer search showed name/number sentinels, `party_read` was withdrawn between requests; the Add line, failed repeat-search and failed More responses all still contained the sentinels. | The buffer keeps only term, pages requested and ids last offered. Every response re-reads displayed pages through the declared lookup under its own authority (request-local reuse only); any failed read drops the lookup. Offered-selection and exact-read checks kept. | Controlled executor: all three responses free of sentinels, no operation calls, then authorized search/More/select work. Browser/PostgreSQL: after 20+ results and More, withdrawn read plus Add line discloses none of the shown names. |
+| FORM-2 Enter must not cancel quick create | Real browser on the fixture, JS on and off: Enter in New customer Name submitted `draftCreate=cancel`; the dialog closed and nothing was created. | Primary submit is the form's first submit button (visual order matches); Cancel stays explicit with `formnovalidate`. No script change. | Browser/PostgreSQL, JS on: Enter with number missing sends no request (native `valueMissing`), explicit Cancel creates nothing and keeps the order, Enter in Name creates and selects exactly one party with a customer role, Enter in product Base unit creates it. JS off: missing-value Enter sends nothing, Cancel keeps the order with zero parties, Enter in Name creates one party with a customer role. |
+| FORM-3 choice metadata inside quick create | Controlled executor, compiled variant with `item_base_unit` choice EA/BOX default EA: plain text input, no default, forged `PALLET` returned 200 and `item_create` ran with `PALLET`. | Create fields use the editor's shared choice render/admission/default helpers: native select, default applied once when a flow opens, every collected value (choice and required) admitted before any step, values frozen only once admitted, a refused value cleared rather than defaulted. | Controlled executor: Sales variant renders EA selected, `PALLET` gives 422 with zero operation calls, `BOX` creates and derives the unit. Non-Sales variant (Purchase, renamed, two-step inventory transaction then line with the choice on step 2): `PALLET` gives 422 with zero calls — the earlier step did not run — and `BOX` runs both steps with the relation bound. |
+| FORM-4 validate every supplied exact get | Normalization: a plain customer picker (no create, no details) naming `item_get` was admitted. | Any supplied get must be a get of the picker entity selecting its labels and details; absent-get legacy pickers keep their behaviour. | Normalization with literal diagnostics: valid plain list/get passes; `item_get`, a list as get, a missing query and a same-entity get lacking the label are refused; legacy absent get passes. |
 
 Decisions of this delta:
 
@@ -100,6 +119,14 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 
 ## Gates
 
+FORM-1..4 correction, executable `4b081e08891b4d97264c4d3dda2053ac1323aa27`:
+
+- Full affected set against frozen `78ef50328064c51822aad9c41ec107c3f8cc5b15` (tree equal to HEAD at start and end): format, lint, typecheck, build, schema, both release-freshness checks, boundaries (205 files), unit 167/167, compiler 175/175, integration 203/203, surface contracts 30/30, agent 3/3, architecture 195/195, language coverage (unchanged 2,399 obligations). Browser: the picker journey's product step became ambiguous once the new FORM-1 step added a second line (test code only); scoped to line 1 in `4b081e08`, the complete supported browser wrapper then passed 105/105 at `4b081e08891b4d97264c4d3dda2053ac1323aa27` with the tree clean at start and end.
+- Discriminating regressions: controlled executor `FORM-1` and `FORM-3` (Sales and non-Sales two-step subtests) in `surface-data-binding.test.ts`; normalization `FORM-4` in `workspace-contract.test.ts`; browser/PostgreSQL FORM-1 (withdrawn read) and FORM-2 (Enter, JavaScript on and off) in the order-entry picker journey. PostgreSQL masters measured by the journey: Blank Glazing 0 after blocked Enter and Cancel; Enter Glazing 1 with a customer role; NoScript Glazing 0 after Cancel, then 1 with a customer role; Thermal Roll exactly 1 item after Enter in Base unit.
+- Real-browser inspection on the corrected fixture: the same reproduction that submitted `draftCreate=cancel` now submits `draftCreate=submit` and selects the new customer with JavaScript on and off; Enter with the number missing leaves the dialog open with focus on it; footer order is Create and use, then Cancel.
+- Editor F1/F2/F3 and Task P1/P2 witnesses stayed green inside the integration run; their historical audit was not re-run. No hosted result is claimed: hosted jobs currently fail before runner execution. No CI polling, full mutation population or gate weakening.
+
+
 Form-usability correction (2026-09-25), executable `736b512940d2e5a1cefc3c8366ae70cee87ffc4c`:
 
 - Full affected set against frozen `f2e818a3091513bc489681b577bf5edaf3618281` (tree equal to HEAD at start and end): format, lint, typecheck, build, schema, both release-freshness checks, boundaries (205 files), unit 166/166, compiler 175/175, integration 199/199, surface contracts 30/30, agent 3/3, architecture 195/195 including the new seam red control, language coverage (2,351 → 2,399 obligations, 601 → 631 observations, unhonored set unchanged). Browser 103/105 through the supported wrapper: the two failures were the receiving and SALE-FULFILLMENT journeys still choosing a counterparty from the retired full select. Their only change moves them onto the picker (test files only); both then pass at `736b512940d2e5a1cefc3c8366ae70cee87ffc4c`.
@@ -148,26 +175,22 @@ Release, reservation, shipment, packing and receiving are unchanged from the ste
 
 ## Bounded ONLINE handoff
 
-Review only the order-form usability correction on PR #6: from reviewed
-`0566206d9ed41c2df301c2369d02446999f6063d` to executable `736b512940d2e5a1cefc3c8366ae70cee87ffc4c`. Read the
-diff of `packages/canonical-model/src/{schemas,surface-workspace}.ts`,
-`packages/domain/src/app/order-entry.ts`, `apps/web/src/{editor-controls,document-editor,surface-contract,workspace-entry,surface-client,surface-runtime}.ts`,
-`packages/dev-tooling/src/surface-runtime-seam.ts`, ADR-0036 §2 and the affected
-tests. Assess server authority over selection and quick create (offered-only
-selection, verified carriers, stable keys, frozen retries, denied/partial/withheld/
-stale outcomes, cancel), exact decimals, choice-as-editor-policy, the ADR-0036
-boundary of the script, and whether the F2/F3 witness changes keep their subjects.
-F1/F2/F3 and Task P1/P2 are closed; do not reopen them. Same ONLINE reviewer; no
-merge/deployment.
+Same ONLINE reviewer: assess only the FORM-1..4 closures and directly affected
+behaviour, from reviewed `736b512940d2e5a1cefc3c8366ae70cee87ffc4c` to
+executable `4b081e08891b4d97264c4d3dda2053ac1323aa27`. Read the diff of `apps/web/src/{document-editor,editor-controls,surface-runtime}.ts`,
+`packages/canonical-model/src/surface-workspace.ts` and the four regressions in
+`test/integration/surface-data-binding.test.ts`, `test/unit/workspace-contract.test.ts`
+and `apps/web/test/browser/order-entry.spec.ts`. Editor F1/F2/F3 and Task P1/P2
+are closed; do not reopen them. No merge/deployment.
 
-Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usability/` — `reference-paneflow/` (actual disposable PaneFlow `d057daff` composer, customer search, "+ New customer" dialog, one-row lines, compact), `rain-before/` (reviewed baseline editor), `rain-after/` (this correction at desktop and phone width, including the create dialogs, field problems and reopened editing) and `rain-proof/` (the picker browser proof's own captures).
+Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usability/` (reference, before, after, proof).
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "736b512940d2e5a1cefc3c8366ae70cee87ffc4c",
+  "head": "4b081e08891b4d97264c4d3dda2053ac1323aa27",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/web/release/app.authored.json",
@@ -247,6 +270,14 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usab
     {
       "path": "apps/web/src/surface-client.ts",
       "name": "SURFACE_CLIENT_SCRIPT"
+    },
+    {
+      "path": "apps/web/src/editor-controls.ts",
+      "name": "renderChoice"
+    },
+    {
+      "path": "apps/web/src/editor-controls.ts",
+      "name": "admitsChoice"
     }
   ]
 }

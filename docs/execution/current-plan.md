@@ -25,7 +25,7 @@
 The 2026-09-01 QUEUE FREEZE and the previous operating model are in the archive; their
 substance survives in the rules above.
 
-**Selected 2026-09-15: RAIN-ORDER-ENTRY** — order-form usability correction complete at executable `736b512940d2e5a1cefc3c8366ae70cee87ffc4c` on `packet/RAIN-ORDER-ENTRY` (PR #6), stacked on PR #5 at `3830f95`: declared editor controls, one reusable reference picker with in-context customer/vendor/product creation, and one aligned row per line; [draft handoff and test-it-yourself](packets/RAIN-ORDER-ENTRY.md). F1/F2/F3 and Task P1/P2 remain closed; fresh CI / bounded ONLINE review of the delta / owner acceptance pending. BUILD stops at draft PR, no integration or deployment. PR #5 and its closed P1/P2 and retained demos remain the dependency.
+**Selected 2026-09-15: RAIN-ORDER-ENTRY** — FORM-1..4 review correction complete at executable `4b081e08891b4d97264c4d3dda2053ac1323aa27` on `packet/RAIN-ORDER-ENTRY` (PR #6), stacked on PR #5 at `3830f95`: current authority for lookup results, Enter creates in quick create, declared choices inside quick create, every supplied exact get validated; [draft handoff and test-it-yourself](packets/RAIN-ORDER-ENTRY.md). Editor F1/F2/F3 and Task P1/P2 remain closed; fresh CI / same ONLINE reviewer / owner acceptance pending. BUILD stops at draft PR, no integration or deployment. PR #5 and its closed P1/P2 and retained demos remain the dependency.
 
 ## Where we are — 2026-09-04
 
