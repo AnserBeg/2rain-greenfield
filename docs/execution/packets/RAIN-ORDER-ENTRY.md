@@ -185,6 +185,14 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 
 ## Gates
 
+Review corrections, executable `d9eca60a1d4ddbac6d69aaf323e53fc423b5721a` (records `2a6f7bf96fc4c68b35f090a6042652da684c3b38`, tree equal to HEAD at start and end of every run):
+
+- Format, lint, typecheck, build, schema, app/demo release freshness, boundaries (207 files), records, unit 168/168, compiler 175/175, integration 228/228 (superseded offered set, late create-open, stale-generation create-open, first-problem quick-create focus, fetch-metadata/Origin), surface contracts 30/30, agent 3/3, architecture 195/195.
+- PostgreSQL 249/249 (bounded pair 199.0s and 269.3s) and language coverage PASS (2,413 obligations).
+- Browser 105/105: the supported wrapper 65 (the picker journey's second click while answering sends nothing, a refused quick create focuses the Name that is wrong, a selection lost in transport lands through one ordinary page answer with an unsent quantity kept), composed-application 23/23 and `message-catalog.spec.ts` 17/17. In the gate run's own composed pass the focus-ring control "a seventh selector on an unmeasured ground" failed once: its two readings differed by one ground (`tr #ffffff`). It was not reproduced in seven further runs of the same tree (five isolated, two full-project, instrumented to list plain-`tr` grounds: none measured) nor in the uninstrumented 23/23 rerun; the draft editor's only class-less row is its header, which holds no focusable control. Recorded as intermittent, cause not established. The wrapper's message-catalog `beforeAll` bound is as recorded below (the audited base misses it too).
+- Discrimination: with each correction removed, its integration test (D2, D3 ownership, D3 generation, D4, Origin) and browser step (D1, D4, D5) was observed red; restored from the commit each time.
+- The laptop was on mains power for PostgreSQL and on battery from language coverage onward; the browser results above include that.
+
 Gap fixes, executable `8bfe8fc092b50c20c7b6e9101f8cd8aa8d880a95` (records `8bdbba09729a4e45b72e6a7bedae80199117b4d1`, tree equal to HEAD at start and end of every run):
 
 - Format, lint, typecheck, build, schema, app/demo release freshness, boundaries (207 files), records, unit 168/168, compiler 175/175, integration 225/225 (header problem markup, Task first-invalid focus, duplicate warning offered/not offered/failed read/no match), surface contracts 30/30, agent 3/3, architecture 195/195.
