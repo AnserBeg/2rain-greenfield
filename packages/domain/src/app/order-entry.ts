@@ -105,7 +105,24 @@ export function orderEntrySurfaces(
           fields: [
             { fieldId: id('field', 'item_sku'), label: 'SKU' },
             { fieldId: id('field', 'item_name'), label: 'Name' },
-            { fieldId: id('field', 'item_base_unit'), label: 'Base unit' },
+            // The unit codes the catalog is configured with, offered rather than
+            // typed. A code list only: no unit master or conversion exists.
+            {
+              fieldId: id('field', 'item_base_unit'),
+              label: 'Base unit',
+              presentation: {
+                kind: 'choice',
+                options: [
+                  { value: 'EA', label: 'EA · Each' },
+                  { value: 'BOX', label: 'BOX · Box' },
+                  { value: 'CASE', label: 'CASE · Case' },
+                  { value: 'PACK', label: 'PACK · Pack' },
+                  { value: 'PAIR', label: 'PAIR · Pair' },
+                  { value: 'ROLL', label: 'ROLL · Roll' },
+                ],
+                defaultValue: 'EA',
+              },
+            },
             {
               fieldId: id('field', 'item_description'),
               label: 'Description',

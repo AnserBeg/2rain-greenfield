@@ -23150,7 +23150,19 @@
                   },
                   {
                     "fieldId": "northstar.app:field.item_base_unit",
-                    "label": "Base unit"
+                    "label": "Base unit",
+                    "presentation": {
+                      "kind": "choice",
+                      "options": [
+                        { "value": "EA", "label": "EA · Each" },
+                        { "value": "BOX", "label": "BOX · Box" },
+                        { "value": "CASE", "label": "CASE · Case" },
+                        { "value": "PACK", "label": "PACK · Pack" },
+                        { "value": "PAIR", "label": "PAIR · Pair" },
+                        { "value": "ROLL", "label": "ROLL · Roll" }
+                      ],
+                      "defaultValue": "EA"
+                    }
                   },
                   {
                     "fieldId": "northstar.app:field.item_description",
@@ -23412,7 +23424,19 @@
                   },
                   {
                     "fieldId": "northstar.app:field.item_base_unit",
-                    "label": "Base unit"
+                    "label": "Base unit",
+                    "presentation": {
+                      "kind": "choice",
+                      "options": [
+                        { "value": "EA", "label": "EA · Each" },
+                        { "value": "BOX", "label": "BOX · Box" },
+                        { "value": "CASE", "label": "CASE · Case" },
+                        { "value": "PACK", "label": "PACK · Pack" },
+                        { "value": "PAIR", "label": "PAIR · Pair" },
+                        { "value": "ROLL", "label": "ROLL · Roll" }
+                      ],
+                      "defaultValue": "EA"
+                    }
                   },
                   {
                     "fieldId": "northstar.app:field.item_description",
@@ -26059,7 +26083,19 @@
                   },
                   {
                     "fieldId": "northstar.app:field.item_base_unit",
-                    "label": "Base unit"
+                    "label": "Base unit",
+                    "presentation": {
+                      "kind": "choice",
+                      "options": [
+                        { "value": "EA", "label": "EA · Each" },
+                        { "value": "BOX", "label": "BOX · Box" },
+                        { "value": "CASE", "label": "CASE · Case" },
+                        { "value": "PACK", "label": "PACK · Pack" },
+                        { "value": "PAIR", "label": "PAIR · Pair" },
+                        { "value": "ROLL", "label": "ROLL · Roll" }
+                      ],
+                      "defaultValue": "EA"
+                    }
                   },
                   {
                     "fieldId": "northstar.app:field.item_description",
@@ -26312,7 +26348,19 @@
                   },
                   {
                     "fieldId": "northstar.app:field.item_base_unit",
-                    "label": "Base unit"
+                    "label": "Base unit",
+                    "presentation": {
+                      "kind": "choice",
+                      "options": [
+                        { "value": "EA", "label": "EA · Each" },
+                        { "value": "BOX", "label": "BOX · Box" },
+                        { "value": "CASE", "label": "CASE · Case" },
+                        { "value": "PACK", "label": "PACK · Pack" },
+                        { "value": "PAIR", "label": "PAIR · Pair" },
+                        { "value": "ROLL", "label": "ROLL · Roll" }
+                      ],
+                      "defaultValue": "EA"
+                    }
                   },
                   {
                     "fieldId": "northstar.app:field.item_description",

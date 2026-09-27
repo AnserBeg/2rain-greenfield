@@ -661,10 +661,12 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       .getByRole('option', { name: '+ New product' })
       .click();
     await dialog.getByLabel('SKU *').fill('TR-80');
-    await dialog.getByLabel('Base unit *').fill('ROLL');
+    // The base unit is offered from the configured codes, not typed.
+    await expect(dialog.getByLabel('Base unit *')).toHaveValue('EA');
+    await dialog.getByLabel('Base unit *').selectOption('ROLL');
     await shot('create-product');
-    // FORM-2: Enter in the product's single-line Base unit creates it too.
-    await dialog.getByLabel('Base unit *').press('Enter');
+    // FORM-2: Enter in the product's single-line SKU creates it too.
+    await dialog.getByLabel('SKU *').press('Enter');
     await expect(dialog).toHaveCount(0);
     await expect(product).toHaveAttribute(
       'data-selected-label',
