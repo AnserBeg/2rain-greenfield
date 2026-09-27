@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; RAIN WORKSPACE INTERACTION COMPLETION (owner-authorized charter after the product-parity audit) implemented at executable `4f13c15508f51568e4e124ad1fd2e3a431dc4dae` on the same PR #6 branch over audited candidate `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e`: working Inventory destinations, eligible pickers and policy-aware quick create (A), in-place reference fragments (B, ADR-0036 behaviour 7), shared control semantics through Tasks (C). FORM-1..4/PAGING, editor F1/F2/F3 and Task P1/P2 preserved; sole LOCAL author; fresh CI / ONLINE review of the changed boundaries / owner acceptance pending; no merge/deployment.
+Status: evidence_ready; RAIN WORKSPACE INTERACTION COMPLETION (owner-authorized charter after the product-parity audit) implemented at executable `174b4d355d9a2def4582b9a44e3fd421189475c3` on the same PR #6 branch over audited candidate `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e`: working Inventory destinations, eligible pickers and policy-aware quick create (A), in-place reference fragments (B, ADR-0036 behaviour 7), shared control semantics through Tasks (C). FORM-1..4/PAGING, editor F1/F2/F3 and Task P1/P2 preserved; sole LOCAL author; fresh CI / ONLINE review of the changed boundaries / owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -33,6 +33,13 @@ Decisions of this increment:
   eligibility on select, carrier change and create-and-return.
 - Currency and unit code lists are editor policy over text fields, not unit
   masters or conversions.
+- One application lineage entry for the increment. Development compiles had
+  appended four (14 -> 18); every fresh tenant replays each transition, and
+  the composed PostgreSQL suite slowed 10-30% until "advances an existing
+  deployment" passed its 300s bound. None of the four was pushed or served
+  beyond disposable fixtures, so the lineage is 35e3eaa1's fourteen entries
+  (byte-identical) plus one compiled from the unchanged authored source. The
+  bound is unchanged.
 
 ## Form-usability correction (2026-09-25)
 
@@ -214,14 +221,14 @@ Release, reservation, shipment and packing are unchanged. Ctrl-C closes only thi
 
 ## Bounded ONLINE handoff
 
-Same ONLINE reviewer, changed boundaries only, diff `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e..4f13c15508f51568e4e124ad1fd2e3a431dc4dae`: fragment transport and binding (`apps/web/src/{app-server,surface-runtime,document-editor,surface-client}.ts`), authority under fragments (FORM-1), picker eligibility (canonical schema/validator, `packages/runtime/src/list-behavior/*`, `semantic-query-gateway.ts`, the EXISTS in `module-runtime-interpreter.ts`), `previewEligibility` and denied creates, Task input semantics (`control-semantics.ts`, `surface-composition.ts`) and the form-less surplus in `surface-contract.ts`. Production defects separately from everything else. No merge/deployment or CI polling.
+Same ONLINE reviewer, changed boundaries only, diff `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e..174b4d355d9a2def4582b9a44e3fd421189475c3`: fragment transport and binding (`apps/web/src/{app-server,surface-runtime,document-editor,surface-client}.ts`), authority under fragments (FORM-1), picker eligibility (canonical schema/validator, `packages/runtime/src/list-behavior/*`, `semantic-query-gateway.ts`, the EXISTS in `module-runtime-interpreter.ts`), `previewEligibility` and denied creates, Task input semantics (`control-semantics.ts`, `surface-composition.ts`) and the form-less surplus in `surface-contract.ts`. Production defects separately from everything else. No merge/deployment or CI polling.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "4f13c15508f51568e4e124ad1fd2e3a431dc4dae",
+  "head": "174b4d355d9a2def4582b9a44e3fd421189475c3",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/api/src/composition-root.ts",
