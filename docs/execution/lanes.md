@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RAIN-ORDER-ENTRY` | FORM-PAGING correction complete at `2d625975`; sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / same ONLINE reviewer / owner acceptance; stopped without integration; retained demos preserved |
+| **BUILD** | `RAIN-ORDER-ENTRY` | workspace interaction completion at `4f13c155` (Inventory destinations, eligible pickers, in-place references, shared Task controls); sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / ONLINE review / owner acceptance; stopped without integration; retained databases preserved |
 | **SUPPORT** | — | idle |
 
 

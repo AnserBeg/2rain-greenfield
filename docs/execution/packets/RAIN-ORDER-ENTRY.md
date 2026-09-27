@@ -1,9 +1,38 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; FORM-PAGING correction complete at executable `2d62597523b1e2b39746669c45b59166857a1307` on the same PR #6 branch, over reviewed `4b081e08891b4d97264c4d3dda2053ac1323aa27` and records `4761b770072781aec6d79a752f44d6f99d945ec3`; FORM-1..4 addressed by the ONLINE reviewer and preserved; sole LOCAL author; stacked draft PR handoff. Editor F1/F2/F3 and Task P1/P2 closed and preserved; fresh CI / same ONLINE reviewer on FORM-PAGING / owner acceptance pending; no merge/deployment.
+Status: evidence_ready; RAIN WORKSPACE INTERACTION COMPLETION (owner-authorized charter after the product-parity audit) implemented at executable `4f13c15508f51568e4e124ad1fd2e3a431dc4dae` on the same PR #6 branch over audited candidate `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e`: working Inventory destinations, eligible pickers and policy-aware quick create (A), in-place reference fragments (B, ADR-0036 behaviour 7), shared control semantics through Tasks (C). FORM-1..4/PAGING, editor F1/F2/F3 and Task P1/P2 preserved; sole LOCAL author; fresh CI / ONLINE review of the changed boundaries / owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
+
+## Workspace interaction completion (2026-09-26)
+
+Owner-authorized charter after the product-parity audit and online
+assessment. Three milestones on the same PR #6 branch over audited candidate
+`35e3eaa1`; synthetic data only; reference `d057daff` used for interaction,
+not architecture.
+
+| Milestone | Reproduced cause | Change | Evidence |
+|---|---|---|---|
+| A · navigation/availability | Period lock: the composed release declares two update operations (advance, reopen) and no form, so the binder refused the whole family (INVALID_SURFACE_BINDING). Inventory lists: scoped queries without declared company entry. Line tables were operator destinations. `+ New` ignored authority; customer/vendor pickers listed every party. | A form-less family leaves its surplus create/update unbound; every exactly-one-scoped List declares company entry; line tables contextual, shown inside their documents; `SemanticOperationGateway.previewEligibility` (policy only, no write/evidence/grant) gates `+ New`, and a denial at invoke offers Cancel only; picker `eligibility` = related-record filter (EXISTS before count/page, echoed, cursor-bound) re-checked on every selection route; distributor seed gives partners their stated roles. | Integration: form-less binding, eligibility and create availability; PostgreSQL related filter (count/page/search/cursor/tenant); browser composed navigation. |
+| B · in-place references | Submit-to-search; every search/select a full document. | ADR-0036 behaviour 7: focus/type/More/select/clear/create answered by same-origin fragment POSTs (`x-rain-fragment`, `connect-src 'self'`), bound to session, per-field lookup sequence and selection generation; answers name the one element they replace; fallback to the ordinary submit. Combobox popup, `+ New` last row, Enter never saves, Escape closes the popup first. | Integration: superseded/late/replayed answers, two fields out of order, withdrawn read, removed row, company, expired session, create-in-place/denied/cancel, HTTP guards. Browser: document loads vs fragment requests, held late answer, JS off. |
+| C · shared controls | Receiving typed Base unit and currency; tasks had no choice/derived/decimal semantics; order views hid stored fields. | `control-semantics.ts` shared by editor, quick create and Task inputs; Task input `presentation` (derived from a selected-row column, choice with declared/record default, multiline); decimal bounds from the bound field; receiving unit derived, currency offered from the order; product quick-create base unit offered from configured codes; completion shows a business result; order views read back order date, currency, notes, unit price/cost. | Integration: receiving forged unit ignored, forged currency and malformed cost refused before any step, exact committed values; renamed non-Sales Task choice; validator refusals. Browser receive journey. |
+
+Decisions of this increment:
+
+- ADR-0036 §2 gains behaviour 7 under §2a; §7 names what stays refused (client
+  caches/filtering, fetch beyond the fragment POST, script-composed elements).
+  `ux-grammar`'s reference rule is amended in place (no new rule, one line
+  shorter). No framework, library, router, store or second script.
+- Surface manifest capability 9 when picker eligibility or typed Task inputs
+  are declared; the runtime supports 9. Historical floors unchanged.
+- The CSP adds `connect-src 'self'` only with gateways composed.
+- Eligibility-to-start is not authority: invoke still decides per input, so a
+  revocation after opening is refused and reported without a Retry loop.
+- Selection is re-read through the declared get AND re-checked for
+  eligibility on select, carrier change and create-and-return.
+- Currency and unit code lists are editor policy over text fields, not unit
+  masters or conversions.
 
 ## Form-usability correction (2026-09-25)
 
@@ -161,57 +190,51 @@ Earlier gates:
 
 ## Test it yourself
 
-In the Ubuntu worktree: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/order-entry-fixture.ts --serve --distributor`, then open the printed URL. Masters only: 45 parties, ~140 products, no orders.
+In the Ubuntu worktree: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/order-entry-fixture.ts --serve --distributor`, then open the printed URL. Masters only: 45 parties holding their stated customer or supplier role, ~140 products, no orders.
 
-1. Sales → New. Currency is a select (CAD default, USD, EUR); Notes is multiline. Enter an order number and a note first.
-2. Customer: press Search with an empty box — 20 results and "More results"; Whitecourt Forestry is not among them. Type "Whitecourt" and Search (or press Enter): the server finds it. Arrow keys move through results; Enter selects; focus lands on "Change".
-3. Change, type a customer that does not exist, then "+ New customer". The name carries over; add a number and contact, "Create and use". The order number, currency and notes are still there, and the new customer is selected. Escape or Cancel instead writes nothing and returns to the search box.
-4. Line 1: search "notebook" and select — Unit shows EA. Add line; on the new line type a product that does not exist, "+ New product", give SKU and base unit: the line returns with that product and its unit. Quantities and prices accept exact decimals ("12.50" saves as 12.5).
-5. Remove a different line, Save draft, leave, reopen and Edit: values are exact; change a quantity, a price and the notes, remove a saved line (confirm), save and reopen again.
-6. Purchasing → New: the same editor with "+ New vendor" (creates a supplier role) and "Unit cost".
-7. Save with the customer empty, or a quantity with 19+ decimals: nothing is saved and each problem is named beside its field.
-8. At 390 px each line becomes a card. With JavaScript disabled the same search, select and create-and-return work as ordinary buttons.
+1. Sales → New. Click Customer: the first 20 customers open at once, More continues, "+ New customer" is the last row. Suppliers (type "Cascade") are not offered.
+2. Type "White": the list narrows as you type; Enter or a click picks Whitecourt Forestry in place. Nothing reloads and focus stays on Customer; Escape closes the list and keeps the choice.
+3. Enter an order number, date, notes and two lines ("notebook", Enter; Add line; "lamp"). Type a customer that does not exist, "+ New customer": the name carries over; add a number, Create and use. You are back on Customer with it selected, everything else as you left it.
+4. On a line, "+ New product" offers the base unit (EA, BOX, CASE, PACK, PAIR, ROLL) and returns to that line with its unit.
+5. Save draft: the order shows order date, requested date, currency, notes and unit prices.
+6. Purchasing → New (vendors only), save, Release under Record actions, select the line, "Receive with actual cost": the base unit is shown, not typed; the currency is offered from the order's; the cost takes exact decimals. Review, Confirm: the result says what was received.
+7. Inventory → transaction, stock count, period lock and movement all open with the company; a transaction shows its lines and posted movements.
+8. With JavaScript disabled, Search and the result buttons do the same as ordinary submits.
 
-Release, reservation, shipment, packing and receiving are unchanged from the steps recorded before this correction. Ctrl-C closes only this disposable fixture.
+Release, reservation, shipment and packing are unchanged. Ctrl-C closes only this disposable fixture.
 
 ## Filed limits
 
 - Production sign-in integration absent from loopback demo: trusted entry/current policy exist, while `composition-root.ts` explicitly selects `localDemoIdentity: true`. No fake login or production-authentication claim.
 - Process loss/expiry loses unsaved buffers/preferences; reopen persisted records before retrying work. Neither durable drafts nor an atomic batch-save capability is added.
 - PaneFlow commercial taxes/payment/FX, Purchase approval/supplier-invoice states and promised-date availability are outside existing Rain capabilities and this change.
-- Form-usability limits (2026-09-25): the customer and vendor pickers search all parties — `party_list` has no role predicate and order save does not enforce the role, so a supplier-only party is selectable as a customer; search runs on submit or Enter, with no type-ahead (ADR-0036 §7); "+ New X" reflects declared availability, not a per-principal pre-check; no likely-duplicate warning before a quick create; composition Task reference inputs (for example Stock location) still render a full select; the textarea focus ring is the browser default because the focus-ring gate's exact selector set was not widened; no line or order totals, tax, discount, price list, payment terms or FX, because Rain has none of them.
+- Interaction limits (2026-09-26): fragment state (lookup requests, generations, an open create) is process-local like the draft buffer; a value typed into an ordinary field reaches the session only with the page's next ordinary submit, so when another request advances the draft first (another tab, a replayed form), the conflict answer shows the session's values and that value is entered again; composition Task reference inputs (stock and receiving location) remain bounded native selects; picker eligibility supports an owned relation from an unscoped, unfiltered related list only (anything else is refused); no likely-duplicate warning before a quick create; unit and currency choices are declared code lists, not a unit master, precision or conversion; the textarea focus ring is the browser default.
+- Business gaps kept out of this increment (assessment backlog): pricing and cost sources, payment terms, addresses, discounts, tax, charges, FX and totals; approvals and placement; multi-line receipts, carriers and tracking; unit conversions and granularity; returns, supply routes, warehouse workflows, valuation, invoicing and payments; documents, imports and integrations.
 - PR #5 alone remains unqualified for the selective Task client contract; the corrected PR #5 + PR #6 stack is the intended integration candidate, subject to fresh CI, ONLINE review and owner approval.
 
 ## Bounded ONLINE handoff
 
-Same ONLINE reviewer: assess only FORM-PAGING and the directly affected
-authorization and rendering paths, from reviewed
-`4b081e08891b4d97264c4d3dda2053ac1323aa27` to executable `2d62597523b1e2b39746669c45b59166857a1307`. Read the
-diff of `apps/web/src/{document-editor,editor-controls,surface-runtime}.ts`, the
-"FORM-PAGING" test in `test/integration/surface-data-binding.test.ts` (with the
-stub's opt-in paging) and the `--lookup-volume` fixture flag. FORM-1..4, editor
-F1/F2/F3 and Task P1/P2 are closed; do not reopen them. The lookup remains
-bounded; no claim is made of browsing an arbitrarily large result set. No
-merge/deployment.
-
-Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usability/` — `rain-after/form-paging-limit-and-narrowed-selection.png` shows the limit message and the narrowed selection.
+Same ONLINE reviewer, changed boundaries only, diff `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e..4f13c15508f51568e4e124ad1fd2e3a431dc4dae`: fragment transport and binding (`apps/web/src/{app-server,surface-runtime,document-editor,surface-client}.ts`), authority under fragments (FORM-1), picker eligibility (canonical schema/validator, `packages/runtime/src/list-behavior/*`, `semantic-query-gateway.ts`, the EXISTS in `module-runtime-interpreter.ts`), `previewEligibility` and denied creates, Task input semantics (`control-semantics.ts`, `surface-composition.ts`) and the form-less surplus in `surface-contract.ts`. Production defects separately from everything else. No merge/deployment or CI polling.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "2d62597523b1e2b39746669c45b59166857a1307",
+  "head": "4f13c15508f51568e4e124ad1fd2e3a431dc4dae",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
+    "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
     "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts",
+    "apps/web/src/control-semantics.ts",
     "apps/web/src/document-editor.ts",
     "apps/web/src/editor-controls.ts",
     "apps/web/src/message-catalog.ts",
     "apps/web/src/surface-client.ts",
+    "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts",
     "apps/web/src/surface-runtime.ts",
     "apps/web/src/workspace-entry.ts",
@@ -235,15 +258,23 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usab
     "packages/canonical-model/src/index.ts",
     "packages/canonical-model/src/normalize.ts",
     "packages/canonical-model/src/schemas.ts",
+    "packages/canonical-model/src/surface-composition.ts",
     "packages/canonical-model/src/surface-workspace.ts",
     "packages/compiler/src/projections.ts",
     "packages/dev-tooling/src/surface-grammar-conformance/index.ts",
     "packages/dev-tooling/src/surface-runtime-seam.ts",
     "packages/domain/src/app/builder.ts",
     "packages/domain/src/app/order-entry.ts",
+    "packages/domain/src/app/seed.ts",
+    "packages/domain/src/inventory/workspace.ts",
     "packages/domain/src/purchasing/workspace.ts",
     "packages/domain/src/sales/workspace.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/runtime/src/list-behavior/cursor.ts",
+    "packages/runtime/src/list-behavior/index.ts",
     "packages/runtime/src/request-runtime-view.ts",
+    "packages/runtime/src/semantic-operation-gateway.ts",
+    "packages/runtime/src/semantic-query-gateway.ts",
     "test/architecture/surface-grammar-conformance.baseline.ts",
     "test/architecture/surface-grammar-conformance.test.ts",
     "test/architecture/surface-runtime-seam.test.ts",
@@ -257,6 +288,7 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usab
     "test/postgres/inventory-terminal-state.test.ts",
     "test/postgres/module-runtime.test.ts",
     "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/party-runtime.test.ts",
     "test/postgres/request-runtime-view.test.ts",
     "test/postgres/stock-serializer.test.ts",
     "test/unit/workspace-contract.test.ts"
@@ -275,20 +307,40 @@ Captures: `C:/Users/rvham/.codex/visualizations/2026/09/25/rain-order-entry-usab
       "name": "renderReferenceControl"
     },
     {
-      "path": "apps/web/src/editor-controls.ts",
-      "name": "canonicalDecimal"
-    },
-    {
       "path": "apps/web/src/surface-client.ts",
       "name": "SURFACE_CLIENT_SCRIPT"
     },
     {
-      "path": "apps/web/src/editor-controls.ts",
+      "path": "apps/web/src/control-semantics.ts",
+      "name": "canonicalDecimal"
+    },
+    {
+      "path": "apps/web/src/control-semantics.ts",
+      "name": "decimalProblem"
+    },
+    {
+      "path": "apps/web/src/control-semantics.ts",
       "name": "renderChoice"
     },
     {
-      "path": "apps/web/src/editor-controls.ts",
+      "path": "apps/web/src/control-semantics.ts",
       "name": "admitsChoice"
+    },
+    {
+      "path": "apps/web/src/workspace-entry.ts",
+      "name": "workspaceEligible"
+    },
+    {
+      "path": "packages/runtime/src/list-behavior/index.ts",
+      "name": "SharedListRelatedFilter"
+    },
+    {
+      "path": "packages/runtime/src/semantic-operation-gateway.ts",
+      "name": "SemanticOperationGateway"
+    },
+    {
+      "path": "packages/domain/src/inventory/workspace.ts",
+      "name": "inventoryDocumentWorkspace"
     }
   ]
 }
