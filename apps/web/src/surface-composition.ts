@@ -1356,11 +1356,17 @@ export async function submitCompositionAction(
         `${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
     );
   return taskDocument(() => {
+    // Focus opens on the first input with a problem (autofocus without the
+    // script), so the operator lands where the correction is needed.
+    let focusTaken = false;
     const controls = ordered(current.action.inputs).map((input) => {
       const presentation = input.presentation;
       const problem = fieldErrors.get(input.inputId);
+      const takesFocus =
+        !!problem && presentation?.kind !== 'derived' && !focusTaken;
+      if (takesFocus) focusTaken = true;
       const invalid = problem
-        ? ` aria-invalid="true" aria-describedby="${h(input.inputId)}-error"`
+        ? ` aria-invalid="true" aria-describedby="${h(input.inputId)}-error"${takesFocus ? ' data-task-initial-focus autofocus' : ''}`
         : '';
       const required = input.required ? ' required' : '';
       const value = current.inputs[input.inputId] ?? '';

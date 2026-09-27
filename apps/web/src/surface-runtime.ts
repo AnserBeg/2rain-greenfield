@@ -1962,7 +1962,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .form-unavailable-value code{color:var(--ink);overflow-wrap:anywhere}
 .form-fields input,.form-fields select{width:100%;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .form-fields input[type="checkbox"]{width:24px;height:24px;min-height:24px;padding:0;justify-self:start;margin:10px 0}
-.form-fields input:focus-visible,.form-fields select:focus-visible,button:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
 button{min-height:44px;padding:var(--space-2) var(--space-4);border:0;border-radius:var(--radius-control);background:var(--accent-ground);color:var(--ink-on-accent);font:inherit;font-weight:var(--weight-emphasis);cursor:pointer}
 button:hover{background:var(--accent-ground-hover)}
 button:active{background:var(--accent-ground-pressed)}
@@ -2110,6 +2110,11 @@ body{padding-bottom:72px}
 .composition-inputs{display:grid;gap:var(--space-4)}
 .composition-inputs .field{display:grid;gap:var(--space-2);font-weight:var(--weight-emphasis)}
 .composition-inputs .composition-input{display:grid;gap:var(--space-1)}
+.composition-task-dialog:modal{scroll-padding-bottom:7rem}
+.composition-inputs input,.composition-inputs select,.composition-inputs textarea{scroll-margin-bottom:7rem}
+.draft-header>.form-field:not(.form-field--reference){gap:var(--space-1)}
+.editor-create__duplicates{margin:var(--space-3) 0;padding:var(--space-3);border-left:4px solid var(--status-attention-ink);border-radius:var(--radius-control);background:var(--status-attention-ground);color:var(--ink)}
+.editor-create__duplicates p{margin:0 0 var(--space-2)}.editor-create__duplicates ul{margin:0 0 var(--space-2);padding-left:var(--space-5)}
 .composition-inputs .derived-value{min-height:auto}.composition-inputs .field-error{font-weight:600}
 .composition-inputs textarea{width:100%;box-sizing:border-box;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .composition-inputs input,.composition-inputs select{width:100%;box-sizing:border-box;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}

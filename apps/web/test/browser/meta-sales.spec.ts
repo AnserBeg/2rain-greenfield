@@ -122,6 +122,10 @@ for (const javaScriptEnabled of [true, false]) {
           .getByRole('button', { name: 'Review reservation', exact: true })
           .click();
         await expect(task()).toContainText('Check the task inputs');
+        // Focus lands on the input that needs correcting.
+        await expect(
+          page.getByLabel(/^Quantity to (?:reserve|ship)$/),
+        ).toBeFocused();
         await expect(
           page.getByLabel(/^Quantity to (?:reserve|ship)$/),
         ).toHaveValue('-2');

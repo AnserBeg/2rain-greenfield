@@ -45,6 +45,7 @@ import {
   decimalProblem,
   declaredDefault,
   referenceKey,
+  referenceText,
   renderCreatePanel,
   renderReferenceControl,
   renderReferenceLookup,
@@ -52,6 +53,7 @@ import {
   sameValue,
   type CreateTask,
   type LookupState,
+  type PossibleDuplicates,
   type ReferenceLookup,
 } from './editor-controls.js';
 import { escapeHtml as h } from './html.js';
@@ -1196,7 +1198,70 @@ async function editorResponse(
         : `Line ${buffer.lines.indexOf(draft) + 1} ${field.label.toLowerCase()}`,
       null,
     );
-  const createDialog = (fragment: boolean) => {
+  /**
+   * Existing records that match the name a quick create would use, read by this
+   * request: the field's declared list without its eligibility (every match,
+   * offered here or not) and with it (which of those this field offers). Only
+   * before an attempt, never the flow's own minted records, and any failure
+   * omits the warning -- nothing read by an earlier request is shown again.
+   */
+  const possibleDuplicates = async (
+    task: CreateTask,
+  ): Promise<PossibleDuplicates | null> => {
+    if (task.attempted) return null;
+    const field = referenceFields.find(
+      (value) => value.fieldId === task.fieldId,
+    );
+    const reference = field?.reference;
+    const labelField = reference?.create?.fields.find((collected) =>
+      reference.labelFieldIds.includes(collected.fieldId),
+    );
+    const named = labelField ? task.values[labelField.fieldId] : null;
+    const term = typeof named === 'string' ? named.trim() : '';
+    if (!field || !reference || term.length < 2) return null;
+    try {
+      const [all, offered] = await Promise.all([
+        workspaceSearch(
+          view,
+          gateways.queryGateway,
+          reference.queryId,
+          scope,
+          term,
+          null,
+        ),
+        reference.eligibility
+          ? workspaceSearch(
+              view,
+              gateways.queryGateway,
+              reference.queryId,
+              scope,
+              term,
+              null,
+              reference.eligibility,
+            )
+          : null,
+      ]);
+      const minted = new Set(task.steps.map((step) => step.recordId));
+      const offeredIds = new Set(
+        (offered ?? all).records.map((record) => record.recordId),
+      );
+      const matches = all.records.filter(
+        (record) => !minted.has(record.recordId),
+      );
+      if (!matches.length) return null;
+      return {
+        term,
+        records: matches.slice(0, 5).map((record) => ({
+          ...referenceText(field, record),
+          offered: offeredIds.has(record.recordId),
+        })),
+        more: matches.length > 5 || all.hasMore,
+      };
+    } catch {
+      return null;
+    }
+  };
+  const createDialog = async (fragment: boolean) => {
     const task = buffer.create!;
     const create = referenceFields.find(
       (value) => value.fieldId === task.fieldId,
@@ -1216,6 +1281,7 @@ async function editorResponse(
       ),
       compiledFields: new Map(),
       mode: fragment ? 'fragment' : 'page',
+      duplicates: await possibleDuplicates(task),
     });
   };
   /**
@@ -1293,7 +1359,7 @@ async function editorResponse(
       buffer.touched = performance.now();
       if (buffer.create)
         return answer(
-          [['editor-create-slot', slot(createDialog(true))]],
+          [['editor-create-slot', slot(await createDialog(true))]],
           '',
           statusCode,
         );
@@ -1432,7 +1498,7 @@ async function editorResponse(
         422,
       );
     openCreateTask(draft, declared, create);
-    return answer([['editor-create-slot', slot(createDialog(true))]]);
+    return answer([['editor-create-slot', slot(await createDialog(true))]]);
   };
   let statusCode = 200;
   if (mode === 'fragment') return fragmentResponse();
@@ -1781,7 +1847,9 @@ async function editorResponse(
             field.presentation?.kind === 'multiline' ? ' form-field--wide' : '';
           return field.reference
             ? `<div class="form-field form-field--reference${wide}" role="group" aria-labelledby="${h(controlId(buffer.header.id, field.fieldId))}-label"><span class="form-field__label" id="${h(controlId(buffer.header.id, field.fieldId))}-label">${label}</span>${html}</div>`
-            : `<label class="form-field${wide}" for="${h(controlId(buffer.header.id, field.fieldId))}"><span class="form-field__label">${label}</span>${html}</label>`;
+            : // The label names only its control; a problem shown after the
+              // control describes it (aria-describedby) without renaming it.
+              `<div class="form-field${wide}"><label class="form-field__label" for="${h(controlId(buffer.header.id, field.fieldId))}">${label}</label>${html}</div>`;
         }),
       )
     ).join('');
@@ -1824,7 +1892,7 @@ async function editorResponse(
     ];
     // A flow opened by a full-page submit renders in the page; one opened in
     // place by the script arrives as a fragment into the empty slot below.
-    const createPanel = buffer.create ? createDialog(false) : '';
+    const createPanel = buffer.create ? await createDialog(false) : '';
     const steps = buffer.pending
       ? `<ol data-save-progress>${buffer.pending.map((step) => `<li>${h(step.label)} · ${step.done ? 'committed' : 'pending'}</li>`).join('')}</ol>`
       : '';

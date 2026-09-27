@@ -696,6 +696,26 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     await shot('line-product-created');
     expect(documents, 'create and return reloaded nothing').toBe(afterAddLine);
 
+    // A quick create names existing records with the same name first: a
+    // supplier-only party is not offered as a customer, so creating here would
+    // make a second, separate party. The warning is a read; Cancel writes nothing.
+    await customer.fill('Cascade Fastener');
+    await field(page, 'Customer')
+      .getByRole('option', { name: '+ New customer' })
+      .click();
+    const duplicates = dialog.locator('[data-editor-create-duplicates]');
+    await expect(duplicates).toContainText('Cascade Fastener Works');
+    await expect(duplicates).toContainText(
+      'exists, but is not offered in this field',
+    );
+    await shot('create-duplicate-warning');
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(
+      (await measure('masters', undefined, undefined, 'Cascade Fastener Works'))
+        .parties,
+    ).toBe(1);
+
     // A stale create return -- a closed task at the current version -- is refused.
     await customer.fill('Stale Glazing');
     await field(page, 'Customer')

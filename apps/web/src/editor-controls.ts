@@ -363,10 +363,21 @@ export function renderCreatePanel(context: {
    * flow is created or cancelled, so a hidden flow would only strand it.
    */
   readonly mode?: 'page' | 'fragment';
+  /**
+   * Existing records that already match the name being created, read by this
+   * request under its own authority (never carried from an earlier one). Null
+   * when there is nothing to warn about or the read failed.
+   */
+  readonly duplicates?: PossibleDuplicates | null;
 }): string {
   const { task, create } = context;
   const fragment = context.mode === 'fragment';
   const frozen = task.attempted;
+  // Focus starts on the first field with a problem, else on the first field.
+  const focusIndex = Math.max(
+    0,
+    create.fields.findIndex((collected) => task.errors.has(collected.fieldId)),
+  );
   const fields = create.fields
     .map((collected, index) => {
       const name = `create:${collected.fieldId}`;
@@ -374,7 +385,7 @@ export function renderCreatePanel(context: {
       const required = input?.required ? ' required' : '';
       const disabled = frozen ? ' disabled' : '';
       const value = text(task.values[collected.fieldId]);
-      const autofocus = index === 0 ? ' data-task-initial-focus' : '';
+      const autofocus = index === focusIndex ? ' data-task-initial-focus' : '';
       const error = errorFor(
         `editor-create-${index}`,
         task.errors.get(collected.fieldId) ?? null,
@@ -401,7 +412,9 @@ export function renderCreatePanel(context: {
       const kept = frozen
         ? `<input type="hidden" name="${h(name)}" value="${h(value)}">`
         : '';
-      return `<label class="field">${h(collected.label)}${input?.required ? ' *' : ''}${control}${error.html}</label>${kept}`;
+      // The problem describes the control (aria-describedby); it is not part of
+      // its accessible name, so it sits after the label.
+      return `<div class="form-field"><label class="field">${h(collected.label)}${input?.required ? ' *' : ''}${control}</label>${error.html}</div>${kept}`;
     })
     .join('');
   const pending = task.steps.some((step) => !step.done);
@@ -423,8 +436,41 @@ export function renderCreatePanel(context: {
   <input type="hidden" name="draftSession" value="${h(context.session)}"><input type="hidden" name="draftVersion" value="${context.version}"><input type="hidden" name="draftCreateTask" value="${h(task.id)}">
   <header class="editor-create__header"><h2 id="editor-create-heading" data-task-heading tabindex="-1">${h(create.label)}</h2>${hide}</header>
   <p class="editor-create__explanation">${h(create.explanation)}</p>
-  ${task.notice}${denied}
+  ${task.notice}${denied}${renderPossibleDuplicates(context.duplicates ?? null)}
   <div class="form-fields editor-create__fields">${fields}</div>
   <footer class="editor-create__footer">${primary}<button type="submit" name="draftCreate" value="cancel" formnovalidate class="secondary-action">Cancel</button></footer>
 </form></dialog>${resume}`;
+}
+
+export interface PossibleDuplicates {
+  /** The name being created, as the operator last entered it. */
+  readonly term: string;
+  readonly records: readonly {
+    readonly label: string;
+    readonly detail: string;
+    /** Offered by this field already, so it can be chosen instead. */
+    readonly offered: boolean;
+  }[];
+  /** More existing records match than are listed. */
+  readonly more: boolean;
+}
+
+/**
+ * A warning before a quick create, never a block: creating always makes a new,
+ * separate record, so matching records are named first. A record this field
+ * already offers can be chosen instead; one it does not offer (for example a
+ * party without the role this field requires) is named so a second copy is not
+ * made by accident.
+ */
+function renderPossibleDuplicates(
+  duplicates: PossibleDuplicates | null,
+): string {
+  if (!duplicates || !duplicates.records.length) return '';
+  const items = duplicates.records
+    .map(
+      (record) =>
+        `<li><strong>${h(record.label)}</strong>${record.detail ? ` <span class="muted">${h(record.detail)}</span>` : ''} — ${record.offered ? 'already offered in this field; cancel and choose it instead' : 'exists, but is not offered in this field'}</li>`,
+    )
+    .join('');
+  return `<section class="editor-create__duplicates" data-editor-create-duplicates aria-labelledby="editor-create-duplicates-heading"><p id="editor-create-duplicates-heading"><strong>Existing records match “${h(duplicates.term)}”</strong></p><ul>${items}</ul>${duplicates.more ? '<p class="muted">More records match; refine the name to see them.</p>' : ''}<p class="muted">Create and use makes a new, separate record.</p></section>`;
 }

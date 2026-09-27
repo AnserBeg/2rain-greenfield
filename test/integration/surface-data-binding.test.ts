@@ -5803,6 +5803,28 @@ test('order entry values: exact decimals, bounded before any write, choice set a
       const key = (rendered: Record<string, string>, suffix: string) =>
         Object.keys(rendered).find((candidate) => candidate.endsWith(suffix))!;
       let editor = (await f.open())!;
+      {
+        // A header problem: the label holds only the field's name, and the
+        // message after the control describes it (aria-describedby).
+        const values = f.values(editor);
+        const refused = (await f.post(editor, 'save', {
+          ...values,
+          [key(values, 'field.sales_order_number')]: '',
+        }))!;
+        assert.equal(refused.statusCode, 422);
+        const header = refused.slots!.keyFacts!;
+        assert.match(
+          header,
+          /<label class="form-field__label" for="([^"]+)">Order number \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
+        );
+        assert.match(header, /<small class="field-error" id="[^"]+-error">/);
+        assert.doesNotMatch(
+          header,
+          /<label\b(?:(?!<\/label>)[\s\S])*class="field-error"/,
+        );
+        assert.equal(f.executor.calls.length, 0);
+        editor = refused;
+      }
       for (const [entry, message] of [
         [
           '1.1234567890123456789012',
@@ -5818,6 +5840,11 @@ test('order entry values: exact decimals, bounded before any write, choice set a
         assert.equal(editor.statusCode, 422);
         assert.match(editor.slots!.keyFacts!, /data-editor-problems/);
         assert.match(editor.slots!.sections!, message);
+        // A problem describes its control; it never becomes part of a label.
+        assert.doesNotMatch(
+          editor.slots!.keyFacts! + editor.slots!.sections!,
+          /<label\b(?:(?!<\/label>)[\s\S])*class="field-error"/,
+        );
         // The refused entry is kept exactly as typed.
         assert.ok(editor.slots!.sections!.includes(`value="${entry}"`));
         assert.equal(f.executor.calls.length, 0);
@@ -6078,6 +6105,56 @@ test('Milestone A: role-eligible lookups and policy-aware quick create', async (
         assert.match(keyFacts(editor), /\+ New customer/, permission);
       }
       assert.equal(f.executor.calls.length, 0, 'the preview never writes');
+    },
+  );
+
+  await t.test(
+    'quick create names existing matches before a second record is made',
+    async () => {
+      const f = await orderEntryWitness();
+      seeded(f);
+      const editor = (await f.open())!;
+      const header = headerOf(editor);
+      const customer = `${f.ns}:field.sales_order_customer_party_id`;
+      const opened = (await f.post(editor, `create:${header}:${customer}`, {
+        [`draftSearch:${header}:${customer}`]: 'only co',
+      }))!;
+      const warning =
+        /<section class="editor-create__duplicates"[\s\S]*?<\/section>/.exec(
+          keyFacts(opened),
+        )?.[0] ?? '';
+      // Every match is named, read now; only one this field offers can be
+      // chosen instead of creating.
+      assert.match(
+        warning,
+        /Customer only co<\/strong>(?:(?!<li>)[\s\S])*already offered in this field/,
+      );
+      assert.match(
+        warning,
+        /Supplier only co<\/strong>(?:(?!<li>)[\s\S])*exists, but is not offered in this field/,
+      );
+      assert.match(keyFacts(opened), /<form[^>]*data-editor-create[\s>]/);
+      assert.equal(f.executor.calls.length, 0, 'the warning never writes');
+      // A failed read omits the warning; nothing read earlier is shown again.
+      f.executor.failingQueries.add(`${f.ns}:query.party_list`);
+      const failed = (await f.post(opened, 'refresh'))!;
+      assert.match(keyFacts(failed), /<form[^>]*data-editor-create[\s>]/);
+      assert.doesNotMatch(
+        keyFacts(failed),
+        /editor-create__duplicates|Supplier only co/,
+      );
+      f.executor.failingQueries.delete(`${f.ns}:query.party_list`);
+      // A name nothing matches warns about nothing.
+      const cancelled = (await f.post(failed, 'refresh', {
+        draftCreateTask: hiddenValue(keyFacts(failed), 'draftCreateTask'),
+        draftCreate: 'cancel',
+      }))!;
+      const fresh = (await f.post(cancelled, `create:${header}:${customer}`, {
+        [`draftSearch:${header}:${customer}`]: 'Unmatched Glazing',
+      }))!;
+      assert.match(keyFacts(fresh), /<form[^>]*data-editor-create[\s>]/);
+      assert.doesNotMatch(keyFacts(fresh), /editor-create__duplicates/);
+      assert.equal(f.executor.calls.length, 0);
     },
   );
 });
@@ -6623,6 +6700,19 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
   assert.match(forged.html, /COMPOSITION_INPUT_INVALID/);
   assert.match(forged.html, /Choose one of the offered values\./);
   assert.match(forged.html, /Enter a plain number, such as 12\.5\./);
+  // The first input with a problem takes focus (autofocus without the script);
+  // each message follows its label and describes the input.
+  assert.match(
+    forged.html,
+    new RegExp(
+      `<input name="${input('cost')}"[^>]*data-task-initial-focus autofocus`,
+    ),
+  );
+  assert.equal(forged.html.match(/\sdata-task-initial-focus[\s>]/g)?.length, 1);
+  assert.match(
+    forged.html,
+    /<\/label><small class="field-error" id="[^"]*receive_cost-error">Enter a plain number/,
+  );
   assert.equal(f.executor.calls.length, 0, 'nothing runs before admission');
   const review = await submit({
     taskToken,

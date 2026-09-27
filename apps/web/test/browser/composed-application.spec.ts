@@ -337,7 +337,9 @@ composedTest.describe('focus ring coverage', () => {
         //
         // `.form-fields select` left this set when ADR-0053's native empty-intent
         // select made the selector reachable without profile-v2 field metadata.
-        // Its light and dark measurements are now part of `measurementsRead`.
+        // The control ring now names `input`, `select` and `textarea` outright
+        // (order lines, task inputs and multiline fields had the browser
+        // default), and the draft-editor state gives `textarea` its subject.
         assert.deepEqual(observed.selectorsWithoutSubject, [
           '.list-page-link:focus-visible',
         ]);
@@ -626,6 +628,22 @@ async function readFocusRingCoverage(
         if (href) await page.goto(new URL(href, baseUrl).href);
       },
       label: 'record',
+    },
+    {
+      // The draft editor: its multiline notes, order-line inputs and reference
+      // comboboxes carry the shared control ring, so each is measured on the
+      // ground it actually sits on.
+      go: async () => {
+        await page.goto(
+          scopedSurfaceUrl(
+            baseUrl,
+            'sales_order_form',
+            await loadSurfaceScopeParameterId('sales_order_form'),
+            browserLegalEntityId,
+          ),
+        );
+      },
+      label: 'editor',
     },
   ];
 
