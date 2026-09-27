@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; RAIN WORKSPACE INTERACTION COMPLETION (owner-authorized charter after the product-parity audit) implemented at executable `8bfe8fc092b50c20c7b6e9101f8cd8aa8d880a95` on the same PR #6 branch over audited candidate `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e`: working Inventory destinations, eligible pickers and policy-aware quick create (A), in-place reference fragments (B, ADR-0036 behaviour 7), shared control semantics through Tasks (C). FORM-1..4/PAGING, editor F1/F2/F3 and Task P1/P2 preserved; sole LOCAL author; fresh CI / ONLINE review of the changed boundaries / owner acceptance pending; no merge/deployment.
+Status: evidence_ready; RAIN WORKSPACE INTERACTION COMPLETION (owner-authorized charter after the product-parity audit) implemented at executable `d9eca60a1d4ddbac6d69aaf323e53fc423b5721a` on the same PR #6 branch over audited candidate `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e`: working Inventory destinations, eligible pickers and policy-aware quick create (A), in-place reference fragments (B, ADR-0036 behaviour 7), shared control semantics through Tasks (C). FORM-1..4/PAGING, editor F1/F2/F3 and Task P1/P2 preserved; sole LOCAL author; fresh CI / ONLINE review of the changed boundaries / owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -52,7 +52,23 @@ Decisions of this increment:
   deployment" passed its 300s bound. None of the four was pushed or served
   beyond disposable fixtures, so the lineage is 35e3eaa1's fourteen entries
   (byte-identical) plus one compiled from the unchanged authored source. The
-  bound is unchanged.
+  bound is unchanged. Proof: the fourteen entries and the bootstrap hash
+  identically at `35e3eaa1` and at the head, and `git diff --numstat` reports
+  660 lines added and none deleted in one hunk. A database active on a dropped
+  intermediate entry refuses to start (the runtime requires its active release
+  in the lineage) -- fail-closed; only disposable fixtures ever activated one.
+- ONLINE review of `35e3eaa1..8bfe8fc0` (D1-D5), corrected: every request on
+  a reference field takes the field's next number and only the newest answer
+  is applied, and a field accepts no further change or lookup while one is
+  answering (D1); answers may replace only the requesting field, its lookup,
+  the dependents the server declared for it and the create slot; a selection
+  re-checks the newest offered set after its read, and every refused
+  selection drops its lookup (D2); create-open is bound to the field
+  generation and re-checks create ownership, save state, draft, row and field
+  immediately before opening (D3); quick create marks and natively autofocuses
+  the same field (D4); a current request's transport failure is repeated as
+  the ordinary submit, a cancelled lookup or a page being left is not (D5);
+  without fetch metadata a fragment must carry an Origin naming this server.
 
 ## Form-usability correction (2026-09-25)
 
@@ -242,20 +258,20 @@ Release, reservation, shipment and packing are unchanged. Ctrl-C closes only thi
 - Production sign-in integration absent from loopback demo: trusted entry/current policy exist, while `composition-root.ts` explicitly selects `localDemoIdentity: true`. No fake login or production-authentication claim.
 - Process loss/expiry loses unsaved buffers/preferences; reopen persisted records before retrying work. Neither durable drafts nor an atomic batch-save capability is added.
 - PaneFlow commercial taxes/payment/FX, Purchase approval/supplier-invoice states and promised-date availability are outside existing Rain capabilities and this change.
-- Interaction limits (2026-09-26): fragment state (lookup requests, generations, an open create) is process-local like the draft buffer; a value typed into an ordinary field reaches the session only with the page's next ordinary submit, so when another request advances the draft first (another tab, a replayed form), the conflict answer shows the session's values and that value is entered again; composition Task reference inputs (stock and receiving location) remain native selects over the full declared list -- the audit rated them matched, and past 1,000 records the Task refuses openly rather than truncating; picker eligibility supports an owned relation from an unscoped, unfiltered related list only (anything else is refused); unit and currency choices are declared code lists, not a unit master, precision or conversion.
+- Interaction limits (2026-09-26): fragment state (lookup requests, generations, an open create) is process-local like the draft buffer; a value typed into an ordinary field reaches the session only with the page's next ordinary submit, so when another request advances the draft first (another tab, a replayed form), the conflict answer shows the session's values and that value is entered again; composition Task reference inputs (stock and receiving location) remain native selects over the full declared list -- the audit rated them matched, and past 1,000 records the Task refuses openly rather than truncating; picker eligibility supports an owned relation from an unscoped, unfiltered related list only (anything else is refused); unit and currency choices are declared code lists, not a unit master, precision or conversion; the sale-fulfillment journey now creates the customer role before the order (the customer carrier requires it), so it no longer exercises an order that predates its role -- reservation still checks current role facts on the server; the loopback composition's ordinary POST path carries no origin check under `localDemoIdentity` (an existing composition boundary, not the fragment path).
 - Business gaps kept out of this increment (assessment backlog): pricing and cost sources, payment terms, addresses, discounts, tax, charges, FX and totals; approvals and placement; multi-line receipts, carriers and tracking; unit conversions and granularity; returns, supply routes, warehouse workflows, valuation, invoicing and payments; documents, imports and integrations.
 - PR #5 alone remains unqualified for the selective Task client contract; the corrected PR #5 + PR #6 stack is the intended integration candidate, subject to fresh CI, ONLINE review and owner approval.
 
 ## Bounded ONLINE handoff
 
-Same ONLINE reviewer, changed boundaries only, diff `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e..8bfe8fc092b50c20c7b6e9101f8cd8aa8d880a95`: fragment transport and binding (`apps/web/src/{app-server,surface-runtime,document-editor,surface-client}.ts`), authority under fragments (FORM-1), picker eligibility (canonical schema/validator, `packages/runtime/src/list-behavior/*`, `semantic-query-gateway.ts`, the EXISTS in `module-runtime-interpreter.ts`), `previewEligibility` and denied creates, Task input semantics (`control-semantics.ts`, `surface-composition.ts`) and the form-less surplus in `surface-contract.ts`. Production defects separately from everything else. No merge/deployment or CI polling.
+Same ONLINE reviewer, changed boundaries only, diff `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e..d9eca60a1d4ddbac6d69aaf323e53fc423b5721a`: fragment transport and binding (`apps/web/src/{app-server,surface-runtime,document-editor,surface-client}.ts`), authority under fragments (FORM-1), picker eligibility (canonical schema/validator, `packages/runtime/src/list-behavior/*`, `semantic-query-gateway.ts`, the EXISTS in `module-runtime-interpreter.ts`), `previewEligibility` and denied creates, Task input semantics (`control-semantics.ts`, `surface-composition.ts`) and the form-less surplus in `surface-contract.ts`. Production defects separately from everything else. No merge/deployment or CI polling.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "8bfe8fc092b50c20c7b6e9101f8cd8aa8d880a95",
+  "head": "d9eca60a1d4ddbac6d69aaf323e53fc423b5721a",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/api/src/composition-root.ts",
