@@ -1389,7 +1389,9 @@ export async function submitCompositionAction(
           (bound !== null && DECIMAL_KINDS.includes(bound.kind));
         control = `<input name="${h(input.inputId)}" value="${h(displayInputs[input.inputId] ?? '')}"${required}${numeric ? ' inputmode="decimal" autocomplete="off"' : ''}${invalid}>`;
       }
-      return `<label class="field">${h(input.label)}${control}${problem ? `<small class="field-error" id="${h(input.inputId)}-error">${h(problem)}</small>` : ''}</label>`;
+      // The problem describes the input (aria-describedby); it is not part of
+      // its accessible name, so it sits after the label.
+      return `<div class="composition-input"><label class="field">${h(input.label)}${control}</label>${problem ? `<small class="field-error" id="${h(input.inputId)}-error">${h(problem)}</small>` : ''}</div>`;
     });
     return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${controls.join('')}<p class="composition-task-consequence">${h(current.action.description)}</p><footer class="composition-task-footer"><button name="taskStage" value="prepare">${h(current.action.presentation?.task?.confirmation.reviewLabel ?? `Review ${current.action.label}`)}</button></footer></form>${back}`;
   });

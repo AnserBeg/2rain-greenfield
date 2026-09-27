@@ -6324,6 +6324,30 @@ test('Milestone B: reference fields answer in place, bound to their own request 
   );
 
   await t.test(
+    'a failed read answers with its refusal and no earlier results',
+    async () => {
+      const s = await setup();
+      assert.match(
+        (await s.search(s.header, s.customer, 'Readable', 1)).html,
+        /Readable customer/,
+      );
+      s.f.executor.failingQueries.add(`${s.f.ns}:query.party_list`);
+      const failed = await s.search(s.header, s.customer, 'Readable', 2);
+      assert.equal(failed.statusCode, 422);
+      assert.deepEqual(s.targets(failed), [
+        `${s.id(s.header, s.customer)}-lookup`,
+      ]);
+      assert.doesNotMatch(failed.html, /Readable customer/);
+      assert.match(failed.html, /data-message=/);
+      s.f.executor.failingQueries.delete(`${s.f.ns}:query.party_list`);
+      // The dropped lookup offers nothing to select from.
+      const orphan = await s.select(s.header, s.customer, s.f.party, 2, 0);
+      assert.equal(orphan.statusCode, 409);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
     'a removed row, another company and an expired session are not answered in place',
     async () => {
       const s = await setup();

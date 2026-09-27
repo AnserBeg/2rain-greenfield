@@ -398,7 +398,7 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       '+ New customer',
     );
     await expect(
-      records(page, 'Customer').filter({ hasText: 'Whitecourt Forestry' }),
+      records(page, 'Customer').filter({ hasText: 'Chestermere Dental Group' }),
     ).toHaveCount(0);
     await field(page, 'Customer')
       .getByRole('option', { name: 'More results' })
@@ -406,6 +406,9 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     await expect
       .poll(() => records(page, 'Customer').count())
       .toBeGreaterThan(20);
+    await expect(
+      records(page, 'Customer').filter({ hasText: 'Chestermere Dental Group' }),
+    ).toHaveCount(1);
     await shot('picker-focus-more');
     expect(documents, 'focus and More load no page').toBe(loaded);
     const shownNames = await records(page, 'Customer')
@@ -442,13 +445,14 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     await expect(status()).toContainText('No customer matches');
     // Typing narrows on the server, and a late answer to an older term never
     // replaces the newer one: the first 'Whit' request is held.
-    const releaseOld = await holdFirst(page, (body) =>
+    const older = await holdFirst(page, (body) =>
       decodeURIComponent(body).includes('sales_order_customer_party_id'),
     );
     await customer.fill('Whit');
+    await older.held;
     await customer.fill('Whitecourt');
     await expect(records(page, 'Customer')).toHaveCount(1);
-    await releaseOld();
+    await older.release();
     await page.waitForTimeout(300);
     await expect(records(page, 'Customer')).toHaveCount(1);
     await expect(records(page, 'Customer').first()).toContainText(
@@ -475,10 +479,11 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
 
     // Two fields answering out of order: the customer lookup is held while the
     // line's product is found and chosen; each answer lands on its own field.
-    const releaseCustomer = await holdFirst(page, (body) =>
+    const slowCustomer = await holdFirst(page, (body) =>
       decodeURIComponent(body).includes('sales_order_customer_party_id'),
     );
     await customer.fill('Alpine');
+    await slowCustomer.held;
     await product.fill('notebook');
     await records(page, 'Line 1 product')
       .filter({ hasText: 'Field notebook' })
@@ -489,7 +494,7 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       'Field notebook',
     );
     await expect(page.locator('output.derived-value').first()).toHaveText('EA');
-    await releaseCustomer();
+    await slowCustomer.release();
     await page.waitForTimeout(300);
     await expect(product).toHaveAttribute(
       'data-selected-label',
@@ -646,10 +651,15 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     await expect(dialog).toHaveCount(0);
     await measure('allow', undefined, undefined, 'party_read');
     await expect(page.locator('[data-editor-create-withheld]')).toBeVisible();
-    await expect(customer).toHaveAttribute(
+    // Under the withdrawn read the field withholds its label, but the earlier
+    // selection is kept: the carrier is unchanged and the saved order shows it.
+    await expect(customer).not.toHaveAttribute(
       'data-selected-label',
-      'Enter Glazing',
+      /Withheld/,
     );
+    await expect(
+      field(page, 'Customer').locator('input[data-reference-value]'),
+    ).not.toHaveValue('');
     expect(
       await measure('masters', undefined, undefined, 'Withheld Glazing'),
     ).toMatchObject({ parties: 1, roles: ['northstar.app:option.customer'] });
@@ -703,11 +713,36 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       (await measure('masters', undefined, undefined, 'Stale Glazing')).parties,
     ).toBe(0);
 
-    // Save once: the in-place selections and untouched typed values persist.
-    await page
-      .getByRole('button', { name: 'Remove line 2', exact: true })
-      .click();
-    await page.waitForLoadState('load');
+    // The replay came from outside this page and advanced the draft, so the
+    // page's next ordinary submit is refused as a conflict and shown again at
+    // the current version, with the session's values and in-place selections.
+    // A value typed since the page's last submit was never sent, so it is
+    // entered again.
+    expect(
+      await submit(page, () =>
+        page
+          .getByRole('button', { name: 'Remove line 2', exact: true })
+          .click(),
+      ),
+    ).toBe(409);
+    await expect(page.getByText('DRAFT_EDITOR_CONFLICT')).toBeVisible();
+    await kept();
+    await expect(product).toHaveAttribute(
+      'data-selected-label',
+      'Thermal Roll',
+    );
+    await expect(
+      page.getByRole('button', { name: 'Remove line 2', exact: true }),
+    ).toBeVisible();
+
+    // Save once: the in-place selections and typed values persist.
+    await submit(page, () =>
+      page.getByRole('button', { name: 'Remove line 2', exact: true }).click(),
+    );
+    await expect(
+      page.getByRole('button', { name: 'Remove line 2', exact: true }),
+    ).toHaveCount(0);
+    await page.getByLabel('Line 1 quantity', { exact: true }).fill('2.50');
     await page.getByLabel('Order date (UTC) *').fill('2026-09-15T12:00');
     await page.getByLabel('Line 1 unit price', { exact: true }).fill('3.25');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
@@ -901,22 +936,31 @@ async function holdFirst(page: Page, match: (body: string) => boolean) {
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  let held = false;
+  let intercepted!: () => void;
+  const held = new Promise<void>((resolve) => {
+    intercepted = resolve;
+  });
+  let holding = false;
   await page.route('**/*', async (route) => {
     const request = route.request();
     if (
-      !held &&
+      !holding &&
       request.headers()['x-rain-fragment'] === '1' &&
       match(request.postData() ?? '')
     ) {
-      held = true;
+      holding = true;
+      intercepted();
       await gate;
     }
     await route.continue();
   });
-  return async () => {
-    release();
-    await page.unrouteAll({ behavior: 'wait' });
+  return {
+    /** Resolves once the matching request is being held. */
+    held,
+    release: async () => {
+      release();
+      await page.unrouteAll({ behavior: 'wait' });
+    },
   };
 }
 async function header(

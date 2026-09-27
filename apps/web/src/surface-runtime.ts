@@ -2109,6 +2109,7 @@ body{padding-bottom:72px}
 .composition-task-support .record-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .composition-inputs{display:grid;gap:var(--space-4)}
 .composition-inputs .field{display:grid;gap:var(--space-2);font-weight:var(--weight-emphasis)}
+.composition-inputs .composition-input{display:grid;gap:var(--space-1)}
 .composition-inputs .derived-value{min-height:auto}.composition-inputs .field-error{font-weight:600}
 .composition-inputs textarea{width:100%;box-sizing:border-box;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .composition-inputs input,.composition-inputs select{width:100%;box-sizing:border-box;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}

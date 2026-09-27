@@ -1,5 +1,6 @@
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
+import { inspectPredicateForExecution } from './predicate-kernel.js';
 
 /** Typed declarations also prove their cross-entity and contextual references. */
 export function validateSurfaceWorkspaces(
@@ -300,11 +301,7 @@ export function validateSurfaceWorkspaces(
         ('legalEntityScope' in query && query.legalEntityScope) ||
         ('filter' in query &&
           query.filter &&
-          !(
-            query.filter.kind === 'booleanPredicate' &&
-            'value' in query.filter &&
-            query.filter.value === true
-          )) ||
+          inspectPredicateForExecution(query.filter).outcome !== 'accepted') ||
         relation?.sourceEntity.targetId !== query.sourceEntity.targetId ||
         relation.targetEntity.targetId !== pickerEntityId ||
         relation.ownership !== 'parentScopedChild' ||
