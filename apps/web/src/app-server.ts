@@ -71,8 +71,9 @@ async function handleRequest(
   }
 
   // A fragment is the owned script's same-origin POST: it must carry the custom
-  // header (which a cross-site form cannot set) and, where the browser reports
-  // it, same-origin fetch metadata. Anything else is an ordinary request.
+  // header (which a cross-site form cannot set) and prove its origin -- by
+  // same-origin fetch metadata where the browser sends it, otherwise by an
+  // Origin naming this server. Anything else is an ordinary request.
   const fragment =
     request.method === 'POST' &&
     gateways !== undefined &&
@@ -84,7 +85,16 @@ async function handleRequest(
       response.setHeader(`${FRAGMENT_REQUEST_HEADER}-fallback`, 'page');
       writeHtml(response, { html: '', statusCode: 409 });
     };
-    if (site !== undefined && site !== 'same-origin') {
+    const origin = request.headers.origin;
+    let sameOrigin = site === 'same-origin';
+    if (site === undefined && typeof origin === 'string') {
+      try {
+        sameOrigin = new URL(origin).host === request.headers.host;
+      } catch {
+        sameOrigin = false;
+      }
+    }
+    if (!sameOrigin) {
       writeHtml(response, { html: '', statusCode: 403 });
       return;
     }

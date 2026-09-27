@@ -236,6 +236,11 @@ interface ReferenceRenderContext extends RenderContext {
   readonly generation: number;
   /** The field's latest lookup request number, from which a client continues. */
   readonly seq: number;
+  /**
+   * Ids of the same-row controls declared to follow this field. An in-place
+   * answer for this field may replace only these, the field and its lookup.
+   */
+  readonly dependents?: readonly string[];
 }
 
 /**
@@ -281,7 +286,10 @@ export function renderReferenceControl(
   const clear = shown
     ? `<button class="link-action reference-clear" ${action('clear')} data-reference-clear aria-label="${h(`Clear ${label.toLowerCase()}`)}">Clear</button>`
     : '';
-  return `<div class="reference-field" id="${h(id)}-field" data-reference-field data-reference-row="${h(row.id)}" data-reference-generation="${context.generation}">${hidden}<div class="reference-control" id="${h(id)}" data-reference-control data-reference-results="${h(resultsId)}"><div class="reference-search"><input type="text" role="combobox" id="${h(id)}-input" form="draft-editor-form" name="${h(searchName)}" value="${h(term)}" placeholder="${h(`Search ${context.noun.toLowerCase()} by name or number`)}" aria-label="${h(label)}" aria-autocomplete="list" aria-expanded="${context.lookup ? 'true' : 'false'}" aria-controls="${h(resultsId)}" autocomplete="off" enterkeyhint="search" data-reference-search${shown ? ` data-selected-label="${h(shown.label)}"` : ''}${searchFocus}${context.error ? ' aria-invalid="true"' : ''} aria-describedby="${h(describedBy.join(' '))}"><button class="secondary-action" ${action('search')} data-reference-submit>Search</button>${clear}${renderReferenceLookup({ ...context, focusResults: toResults })}</div>${shown?.detail ? `<small class="reference-selected-detail">${h(shown.detail)}</small>` : ''}${error.html}</div></div>`;
+  const dependents = context.dependents?.length
+    ? ` data-reference-dependents="${h(context.dependents.join(' '))}"`
+    : '';
+  return `<div class="reference-field" id="${h(id)}-field" data-reference-field data-reference-row="${h(row.id)}" data-reference-generation="${context.generation}"${dependents}>${hidden}<div class="reference-control" id="${h(id)}" data-reference-control data-reference-results="${h(resultsId)}"><div class="reference-search"><input type="text" role="combobox" id="${h(id)}-input" form="draft-editor-form" name="${h(searchName)}" value="${h(term)}" placeholder="${h(`Search ${context.noun.toLowerCase()} by name or number`)}" aria-label="${h(label)}" aria-autocomplete="list" aria-expanded="${context.lookup ? 'true' : 'false'}" aria-controls="${h(resultsId)}" autocomplete="off" enterkeyhint="search" data-reference-search${shown ? ` data-selected-label="${h(shown.label)}"` : ''}${searchFocus}${context.error ? ' aria-invalid="true"' : ''} aria-describedby="${h(describedBy.join(' '))}"><button class="secondary-action" ${action('search')} data-reference-submit>Search</button>${clear}${renderReferenceLookup({ ...context, focusResults: toResults })}</div>${shown?.detail ? `<small class="reference-selected-detail">${h(shown.detail)}</small>` : ''}${error.html}</div></div>`;
 }
 
 const referenceAction =
@@ -385,7 +393,9 @@ export function renderCreatePanel(context: {
       const required = input?.required ? ' required' : '';
       const disabled = frozen ? ' disabled' : '';
       const value = text(task.values[collected.fieldId]);
-      const autofocus = index === focusIndex ? ' data-task-initial-focus' : '';
+      // The same field is marked for the script and autofocused natively.
+      const autofocus =
+        index === focusIndex ? ' data-task-initial-focus autofocus' : '';
       const error = errorFor(
         `editor-create-${index}`,
         task.errors.get(collected.fieldId) ?? null,

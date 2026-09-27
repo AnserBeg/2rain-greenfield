@@ -6476,6 +6476,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       const s = await setup();
       const opened = await s.fragment({
         draftAction: `create:${s.header}:${s.customer}`,
+        draftFieldGeneration: '0',
         [`draftSearch:${s.header}:${s.customer}`]: 'Zenith Glazing',
       });
       assert.deepEqual(s.targets(opened), ['editor-create-slot']);
@@ -6507,6 +6508,9 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       // Refused by current policy after the flow opened: Cancel only.
       const again = await s.fragment({
         draftAction: `create:${s.header}:${s.customer}`,
+        draftFieldGeneration: /data-reference-generation="(\d+)"/.exec(
+          created.html,
+        )![1]!,
         [`draftSearch:${s.header}:${s.customer}`]: 'Refused Co',
       });
       const refusedTask = hiddenValue(again.html, 'draftCreateTask');
@@ -6532,6 +6536,125 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       assert.equal(s.f.executor.calls.length, 2, 'nothing more was written');
     },
   );
+
+  await t.test(
+    'a selection from a superseded offered set is refused after its read',
+    async () => {
+      const s = await setup();
+      await s.search(s.header, s.customer, 'Dual', 1);
+      // The chosen record's exact read is held while a newer search replaces
+      // the offered set with one that does not contain it.
+      const hold = s.f.executor.hold(`${s.f.ns}:query.party_get`);
+      const older = s.select(s.header, s.customer, s.dual, 1, 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      const newer = await s.search(s.header, s.customer, 'Readable', 2);
+      assert.equal(newer.statusCode, 200);
+      assert.doesNotMatch(newer.html, /Dual role co/);
+      hold();
+      const late = await older;
+      assert.equal(late.statusCode, 409);
+      assert.doesNotMatch(late.html, /data-selected-label="Dual role co"/);
+      assert.match(
+        late.html,
+        new RegExp(`name="draft:${s.header}:${s.customer}" value=""`),
+      );
+      // The newer lookup survives, and its own result can be chosen.
+      const chosen = await s.select(s.header, s.customer, s.f.party, 2, 0);
+      assert.equal(chosen.statusCode, 200);
+      assert.match(chosen.html, /data-selected-label="Readable customer"/);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'a create-open that finishes late never replaces the open create',
+    async () => {
+      const s = await setup();
+      const open = (name: string, generation: string) =>
+        s.fragment({
+          draftAction: `create:${s.header}:${s.customer}`,
+          draftFieldGeneration: generation,
+          [`draftSearch:${s.header}:${s.customer}`]: name,
+        });
+      // The first availability check is held; a second create-open overtakes it.
+      const gateway = s.f.gateways.operationGateway;
+      const preview = gateway.previewEligibility.bind(gateway);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let first = true;
+      gateway.previewEligibility = (async (
+        ...args: Parameters<typeof preview>
+      ) => {
+        if (first) {
+          first = false;
+          await gate;
+        }
+        return preview(...args);
+      }) as typeof gateway.previewEligibility;
+      try {
+        const slow = open('Slow Glazing', '0');
+        await new Promise((resolve) => setImmediate(resolve));
+        const fast = await open('Fast Glazing', '0');
+        assert.deepEqual(s.targets(fast), ['editor-create-slot']);
+        const fastTask = hiddenValue(fast.html, 'draftCreateTask');
+        release();
+        const late = await slow;
+        assert.equal(late.statusCode, 409);
+        assert.doesNotMatch(late.html, /data-editor-create-fragment/);
+        // The create that opened first still owns the flow and its keys.
+        const cancelled = await s.fragment({
+          draftCreateTask: fastTask,
+          draftCreate: 'cancel',
+        });
+        assert.equal(cancelled.statusCode, 200);
+        assert.deepEqual(s.targets(cancelled), [
+          'editor-create-slot',
+          `${s.id(s.header, s.customer)}-field`,
+        ]);
+      } finally {
+        gateway.previewEligibility = preview;
+      }
+      // A create-open based on an older field generation opens nothing.
+      await s.search(s.header, s.customer, 'Readable', 1);
+      assert.equal(
+        (await s.select(s.header, s.customer, s.f.party, 1, 0)).statusCode,
+        200,
+      );
+      const stale = await open('Stale Glazing', '0');
+      assert.equal(stale.statusCode, 409);
+      assert.match(stale.html, /changed meanwhile/);
+      assert.doesNotMatch(stale.html, /data-editor-create-fragment/);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test('a refused quick create focuses its first problem', async () => {
+    const s = await setup();
+    const opened = await s.fragment({
+      draftAction: `create:${s.header}:${s.customer}`,
+      draftFieldGeneration: '0',
+      [`draftSearch:${s.header}:${s.customer}`]: 'Focus Glazing',
+    });
+    const refused = await s.fragment({
+      draftCreateTask: hiddenValue(opened.html, 'draftCreateTask'),
+      draftCreate: 'submit',
+      [`create:${s.f.ns}:field.party_number`]: 'C-FOCUS',
+      [`create:${s.f.ns}:field.party_name`]: '',
+    });
+    // The number is valid and comes first; the problem is the name, and it
+    // alone is marked for the script and autofocused natively.
+    assert.match(
+      refused.html,
+      /name="create:[^"]+party_name"[^>]*data-task-initial-focus autofocus/,
+    );
+    assert.equal(
+      refused.html.match(/\sdata-task-initial-focus[\s>]/g)?.length,
+      1,
+    );
+    assert.equal(s.f.executor.calls.length, 0);
+  });
 });
 
 /**
@@ -6596,11 +6719,30 @@ test('Milestone B: the fragment transport is same-origin, header-bound and falls
     });
     assert.equal(crossSite.status, 403);
     assert.equal(await crossSite.text(), '');
+    // Without fetch metadata the request must name this server as its origin.
+    const noMetadata = await post({ 'x-rain-fragment': '1' });
+    assert.equal(noMetadata.status, 403);
+    const foreignOrigin = await post({
+      'x-rain-fragment': '1',
+      origin: 'https://elsewhere.example',
+    });
+    assert.equal(foreignOrigin.status, 403);
+    const next = new URLSearchParams(body);
+    next.set('draftLookupSeq', '2');
+    const ownOrigin = await post(
+      { 'x-rain-fragment': '1', origin: new URL(baseUrl).origin },
+      next,
+    );
+    assert.equal(ownOrigin.status, 200);
+    assert.equal(ownOrigin.headers.get('x-rain-fragment'), 'fragment');
     const ordinary = await post({});
     assert.match(await ordinary.text(), /^<!doctype html>/);
     const unknown = new URLSearchParams(body);
     unknown.set('draftSession', randomUUID());
-    const expired = await post({ 'x-rain-fragment': '1' }, unknown);
+    const expired = await post(
+      { 'x-rain-fragment': '1', 'sec-fetch-site': 'same-origin' },
+      unknown,
+    );
     assert.equal(expired.status, 409);
     assert.equal(expired.headers.get('x-rain-fragment-fallback'), 'page');
     assert.equal(f.executor.calls.length, 0);

@@ -1178,6 +1178,9 @@ async function editorResponse(
       noun: field.label,
       generation: buffer.generations.get(key) ?? 0,
       seq: buffer.seqs.get(key) ?? 0,
+      dependents: dependentsOf(field.fieldId).map((dependent) =>
+        controlId(draft.id, dependent.fieldId),
+      ),
     };
   };
   /** One field of one row as the page renders it, for an in-place answer. */
@@ -1454,25 +1457,37 @@ async function editorResponse(
         try {
           record = await readSelectable(declared, recordId);
         } catch (error) {
-          dropLookup(key);
+          if (buffer.lookups.get(key) === state) dropLookup(key);
           return resync(
             422,
             warning(operationMessageRef(error), declared.label),
           );
         }
-        if (!record)
+        if (!record) {
+          // Refused like a failed read: the offered set is not reused.
+          if (buffer.lookups.get(key) === state) dropLookup(key);
           return resync(
             422,
             warning({ code: 'OPERATION_INPUT_INVALID' }, declared.label),
           );
+        }
         // Nothing may have moved while the record was read: not the field, not
-        // its row, not the draft, and no create may have opened.
+        // its row, not the draft, no create may have opened, and the result
+        // chosen must still belong to this field's newest offered set -- a
+        // newer search replaces the set, so a selection from the older one is
+        // refused rather than accepted after the fact.
+        const newest = buffer.lookups.get(key);
         if (
           buffer.busy ||
+          buffer.pending !== null ||
+          buffer.withheld !== 'none' ||
           buffer.version !== version ||
           buffer.create ||
           findRow(rowId) !== draft ||
-          (buffer.generations.get(key) ?? 0) !== generation
+          (buffer.generations.get(key) ?? 0) !== generation ||
+          newest !== state ||
+          buffer.seqs.get(key) !== state.seq ||
+          !newest.offered.has(recordId)
         )
           return resync(
             409,
@@ -1491,11 +1506,44 @@ async function editorResponse(
     }
     // verb === 'create'
     const create = declared.reference?.create;
+    const generation = buffer.generations.get(key) ?? 0;
+    if (submission.draftFieldGeneration !== String(generation))
+      return answer(
+        await fieldParts(draft, declared.fieldId),
+        note('This field changed meanwhile. It shows its current value.'),
+        409,
+      );
+    const version = buffer.version;
     if (!create || !(await createOffered(create)))
       return answer(
         [],
         note('You cannot create this record with your current access.'),
         422,
+      );
+    // The availability read awaited; another request may have opened a create,
+    // started a save, changed the field or removed the row meanwhile. Only an
+    // unchanged draft opens this one, so a task (and the keys it owns) is never
+    // replaced by a later-finishing request.
+    if (buffer.create)
+      return answer(
+        [],
+        note(
+          'Finish or cancel the new record first. The order is kept as it was.',
+        ),
+        409,
+      );
+    if (
+      buffer.busy ||
+      buffer.pending !== null ||
+      buffer.withheld !== 'none' ||
+      buffer.version !== version ||
+      findRow(rowId) !== draft ||
+      (buffer.generations.get(key) ?? 0) !== generation
+    )
+      return answer(
+        await fieldParts(draft, declared.fieldId),
+        note('This field changed meanwhile. It shows its current value.'),
+        409,
       );
     openCreateTask(draft, declared, create);
     return answer([['editor-create-slot', slot(await createDialog(true))]]);
@@ -1757,7 +1805,9 @@ async function editorResponse(
     const paused = buffer.create !== null;
     const frozen =
       buffer.pending !== null || buffer.withheld !== 'none' || paused;
-    const focus = buffer.focus;
+    // Paused behind an open create, nothing in the order claims focus: the
+    // create's own first field (or first problem) has it.
+    const focus = paused ? null : buffer.focus;
     buffer.focus = null;
     const control = async (
       surfaceId: string,

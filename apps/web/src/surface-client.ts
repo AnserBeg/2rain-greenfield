@@ -72,7 +72,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   const state = (field) => {
     let known = states.get(field.id);
     if (!known) {
-      known = { seq: Number(lookupOf(field)?.getAttribute('data-reference-seq') || 0), timer: 0, controller: null, active: -1, term: null, quiet: false, pending: false, enter: 0, deferred: '' };
+      known = { seq: Number(lookupOf(field)?.getAttribute('data-reference-seq') || 0), timer: 0, controller: null, active: -1, term: null, quiet: false, pending: false, enter: 0, deferred: '', mutating: false };
       states.set(field.id, known);
     }
     return known;
@@ -109,29 +109,53 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     const doc = new DOMParser().parseFromString('<template>' + html + '</template>', 'text/html');
     region.replaceChildren(document.importNode(doc.querySelector('template').content, true));
   };
-  const post = async (body, signal) => {
-    const response = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', redirect: 'error', signal, headers: { 'x-rain-fragment': '1', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
-    if (response.headers.get('x-rain-fragment-fallback') === 'page' || response.headers.get('x-rain-fragment') !== 'fragment') {
-      const error = new Error('fallback');
-      error.fallback = true;
-      throw error;
-    }
-    return { status: response.status, html: await response.text() };
+  // A request the script cancelled on purpose (a superseded lookup) is dropped;
+  // every other failure -- a page answer, a refused redirect, a lost or broken
+  // response -- is repeated as the ordinary submit by whoever still owns it.
+  const fallbackError = () => {
+    const error = new Error('fallback');
+    error.fallback = true;
+    return error;
   };
-  // Only bound targets: controls of the row the request named, or the create slot.
-  const apply = (html, row) => {
+  const post = async (body, signal) => {
+    try {
+      const response = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', redirect: 'error', signal, headers: { 'x-rain-fragment': '1', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
+      if (response.headers.get('x-rain-fragment-fallback') === 'page' || response.headers.get('x-rain-fragment') !== 'fragment') throw fallbackError();
+      return { status: response.status, html: await response.text() };
+    } catch (error) {
+      if (error && (error.fallback || error.name === 'AbortError')) throw error;
+      throw fallbackError();
+    }
+  };
+  // Only bound targets: the requesting field, its lookup region, the same-row
+  // dependents the server declared for it, and the create slot.
+  const allowedFor = (field) => {
+    const control = field.id.replace(/-field$/, '');
+    return new Set([field.id, control + '-lookup', 'editor-create-slot', ...(field.getAttribute('data-reference-dependents') || '').split(' ').filter(Boolean)]);
+  };
+  const apply = (html, allowed) => {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     for (const template of doc.querySelectorAll('template[data-fragment-target]')) {
       const id = template.getAttribute('data-fragment-target') || '';
       const next = template.content.firstElementChild;
       const target = document.getElementById(id);
-      if (!target || !next || next.id !== id || (id !== 'editor-create-slot' && !id.startsWith('editor-' + row + '-'))) continue;
+      if (!target || !next || next.id !== id || !allowed.has(id)) continue;
       target.replaceWith(document.importNode(next, true));
     }
     const live = doc.querySelector('template[data-fragment-live]');
     if (live) say(live.innerHTML);
   };
+  // Leaving the page cancels outstanding requests; that is not a failure to
+  // repeat as a submit.
+  let leaving = false;
+  window.addEventListener('beforeunload', () => {
+    leaving = true;
+  });
+  window.addEventListener('pageshow', () => {
+    leaving = false;
+  });
   const fallback = (control) => {
+    if (leaving || native) return;
     native = true;
     form.requestSubmit(control);
   };
@@ -140,13 +164,14 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     const button = field.querySelector(verb === 'more' ? '[data-reference-more]' : '[data-reference-submit]');
     if (!input || !button) return;
     const known = state(field);
+    if (known.mutating) return;
     clearTimeout(known.timer);
     known.timer = 0;
     known.controller?.abort();
     known.controller = new AbortController();
     const seq = ++known.seq;
     const term = input.value === input.getAttribute('data-selected-label') ? '' : input.value;
-    const row = field.getAttribute('data-reference-row');
+    const allowed = allowedFor(field);
     known.pending = true;
     field.setAttribute('aria-busy', 'true');
     post({ draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: button.value, draftLookupSeq: String(seq), [input.name]: term }, known.controller.signal)
@@ -154,7 +179,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
         // A newer request owns the field; an older answer is dropped unseen.
         if (seq !== known.seq || !html) return;
         known.pending = false;
-        apply(html, row);
+        apply(html, allowed);
         known.term = term;
         prepare(field);
         if (field.contains(document.activeElement)) {
@@ -173,7 +198,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
         }
       })
       .catch((error) => {
-        if (error.fallback) fallback(button);
+        if (error.fallback && seq === known.seq) fallback(button);
       })
       .finally(() => {
         if (seq === known.seq) {
@@ -190,11 +215,16 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     inputOf(field)?.focus();
     state(field).quiet = false;
   };
+  // A field changes one thing at a time: while a selection, clear or create is
+  // answering, further clicks and lookups on it wait. Each request takes the
+  // field's next number, and only the newest request's answer is applied, so a
+  // delayed answer can never replace a newer selection.
   const choose = (field, option) => {
+    const known = state(field);
+    if (known.mutating) return;
     if (option.hasAttribute('data-reference-more')) return lookup(field, 'more');
     if (option.hasAttribute('data-reference-create')) return openCreate(field, option);
     const id = field.id;
-    const known = state(field);
     // A newer search is still answering: choose once it has, from what it offers.
     if (known.pending || known.timer) {
       known.deferred = option.value;
@@ -205,68 +235,94 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       }
       return;
     }
-    known.seq++;
+    const mine = ++known.seq;
     known.controller?.abort();
     known.pending = false;
     known.enter = 0;
-    const row = field.getAttribute('data-reference-row');
+    known.mutating = true;
+    const allowed = allowedFor(field);
     const input = inputOf(field);
     if (input) input.readOnly = true;
     field.setAttribute('aria-busy', 'true');
     inflight++;
     post({ draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: option.value, draftLookupSeq: lookupOf(field)?.getAttribute('data-reference-seq') || '', draftFieldGeneration: field.getAttribute('data-reference-generation') || '' })
       .then(({ html }) => {
-        apply(html, row);
+        if (mine !== known.seq) return;
+        apply(html, allowed);
         known.term = null;
         refocus(id);
       })
       .catch((error) => {
-        if (error.fallback) fallback(option);
-        else {
-          if (input) input.readOnly = false;
-          field.removeAttribute('aria-busy');
-        }
+        if (error.fallback && mine === known.seq) fallback(option);
       })
-      .finally(() => inflight--);
+      .finally(() => {
+        known.mutating = false;
+        if (input) input.readOnly = false;
+        field.removeAttribute('aria-busy');
+        inflight--;
+      });
   };
   const clear = (field, button) => {
     const id = field.id;
-    const row = field.getAttribute('data-reference-row');
     const known = state(field);
-    known.seq++;
+    if (known.mutating) return;
+    const mine = ++known.seq;
     known.controller?.abort();
     known.pending = false;
+    known.mutating = true;
+    const allowed = allowedFor(field);
+    const input = inputOf(field);
+    if (input) input.readOnly = true;
+    field.setAttribute('aria-busy', 'true');
     inflight++;
     post({ draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: button.value, draftFieldGeneration: field.getAttribute('data-reference-generation') || '' })
       .then(({ html }) => {
-        apply(html, row);
+        if (mine !== known.seq) return;
+        apply(html, allowed);
         refocus(id);
       })
       .catch((error) => {
-        if (error.fallback) fallback(button);
+        if (error.fallback && mine === known.seq) fallback(button);
       })
-      .finally(() => inflight--);
+      .finally(() => {
+        known.mutating = false;
+        if (input) input.readOnly = false;
+        field.removeAttribute('aria-busy');
+        inflight--;
+      });
   };
   // The create flow opens as a modal over the live order and returns to the
   // same field. Cancel (and Escape) is a server submit that reports anything
   // already created; the order itself is never re-rendered.
   const openCreate = (field, option) => {
+    const known = state(field);
+    if (known.mutating) return;
     const input = inputOf(field);
-    const row = field.getAttribute('data-reference-row');
     const term = input && input.value !== input.getAttribute('data-selected-label') ? input.value : '';
+    const mine = ++known.seq;
+    known.controller?.abort();
+    known.pending = false;
+    known.mutating = true;
+    const allowed = allowedFor(field);
     setOpen(field, false);
+    field.setAttribute('aria-busy', 'true');
     inflight++;
-    post({ draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: option.value, [input?.name || '']: term })
+    post({ draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: option.value, draftFieldGeneration: field.getAttribute('data-reference-generation') || '', [input?.name || '']: term })
       .then(({ html }) => {
-        apply(html, row);
-        showCreate(field.id, row);
+        if (mine !== known.seq) return;
+        apply(html, allowed);
+        showCreate(field.id, allowed);
       })
       .catch((error) => {
-        if (error.fallback) fallback(option);
+        if (error.fallback && mine === known.seq) fallback(option);
       })
-      .finally(() => inflight--);
+      .finally(() => {
+        known.mutating = false;
+        field.removeAttribute('aria-busy');
+        inflight--;
+      });
   };
-  const showCreate = (fieldId, row) => {
+  const showCreate = (fieldId, allowed) => {
     const dialog = document.querySelector('#editor-create-slot dialog[data-editor-create-fragment]');
     if (!dialog || typeof dialog.showModal !== 'function') {
       refocus(fieldId);
@@ -274,20 +330,22 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     }
     dialog.removeAttribute('open');
     dialog.showModal();
-    dialog.querySelector('[data-task-initial-focus], input:not([type="hidden"]):not([disabled]), select, textarea, button')?.focus();
+    // The marked field (first problem, else first field) wins; only without one
+    // does focus fall to the first control.
+    (dialog.querySelector('[data-task-initial-focus]') || dialog.querySelector('input:not([type="hidden"]):not([disabled]), select, textarea, button'))?.focus();
     const createForm = dialog.querySelector('form');
     dialog.addEventListener('cancel', (event) => {
       event.preventDefault();
       const cancel = createForm?.querySelector('button[value="cancel"]');
-      if (cancel) submitCreate(createForm, cancel, fieldId, row);
+      if (cancel) submitCreate(createForm, cancel, fieldId, allowed);
     });
     createForm?.addEventListener('submit', (event) => {
       if (native) return;
       event.preventDefault();
-      submitCreate(createForm, event.submitter, fieldId, row);
+      submitCreate(createForm, event.submitter, fieldId, allowed);
     });
   };
-  const submitCreate = (createForm, submitter, fieldId, row) => {
+  const submitCreate = (createForm, submitter, fieldId, allowed) => {
     if (createForm.hasAttribute('aria-busy')) return;
     createForm.setAttribute('aria-busy', 'true');
     const body = new URLSearchParams(new FormData(createForm));
@@ -295,12 +353,12 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     inflight++;
     post(Object.fromEntries(body), undefined)
       .then(({ html }) => {
-        apply(html, row);
-        showCreate(fieldId, row);
+        apply(html, allowed);
+        showCreate(fieldId, allowed);
       })
       .catch((error) => {
         createForm.removeAttribute('aria-busy');
-        if (error.fallback) {
+        if (error.fallback && !leaving && !native) {
           native = true;
           createForm.requestSubmit(submitter);
         }
