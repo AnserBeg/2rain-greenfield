@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
@@ -509,6 +509,89 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     );
     expect(fragments).toBeGreaterThan(8);
 
+    // A field changes one thing at a time: while a selection is answering, a
+    // second click on the same field sends nothing, and the answer that lands
+    // is the one for the request still outstanding.
+    const isSelect = (body: string) =>
+      decodeURIComponent(body).includes('draftAction=select:') &&
+      decodeURIComponent(body).includes('sales_order_customer_party_id');
+    let selects = 0;
+    const countSelects = (request: Request) => {
+      if (
+        request.headers()['x-rain-fragment'] === '1' &&
+        isSelect(request.postData() ?? '')
+      )
+        selects += 1;
+    };
+    await customer.fill('Grande');
+    const grande = records(page, 'Customer')
+      .filter({ hasText: 'Grande Cache Mining Services' })
+      .first();
+    await expect(grande).toBeVisible();
+    const selecting = await holdFirst(page, isSelect);
+    page.on('request', countSelects);
+    await grande.click();
+    await selecting.held;
+    await grande.click();
+    await page.waitForTimeout(300);
+    expect(selects, 'a second click while answering sends nothing').toBe(1);
+    await selecting.release();
+    await expect(customer).toHaveAttribute(
+      'data-selected-label',
+      'Grande Cache Mining Services',
+    );
+    page.off('request', countSelects);
+
+    // A refused quick create opens on its problem: the number is valid and
+    // comes first, but the blank-once-trimmed name is what must be corrected.
+    await customer.fill('Space Glazing');
+    await field(page, 'Customer')
+      .getByRole('option', { name: '+ New customer' })
+      .click();
+    await dialog.getByLabel('Customer number *').fill('C-SPACE');
+    await dialog.getByLabel('Name *').fill('   ');
+    await dialog.getByRole('button', { name: 'Create and use' }).click();
+    await expect(dialog.getByLabel('Name *')).toBeFocused();
+    await expect(dialog.getByLabel('Name *')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+
+    // A current request lost in transport is repeated as the ordinary submit:
+    // the selection still lands, by a page answer, and nothing typed is lost.
+    await page.getByLabel('Line 1 quantity', { exact: true }).fill('3.75');
+    await customer.fill('Whitecourt');
+    const whitecourt = records(page, 'Customer')
+      .filter({ hasText: 'Whitecourt Forestry' })
+      .first();
+    await expect(whitecourt).toBeVisible();
+    await page.route('**/*', async (route) => {
+      const request = route.request();
+      if (
+        request.headers()['x-rain-fragment'] === '1' &&
+        isSelect(request.postData() ?? '')
+      )
+        return route.abort('failed');
+      return route.continue();
+    });
+    const beforeFallback = documents;
+    expect(await submit(page, () => whitecourt.click())).toBe(200);
+    await page.unrouteAll({ behavior: 'wait' });
+    expect(documents, 'the lost selection became one page answer').toBe(
+      beforeFallback + 1,
+    );
+    await expect(customer).toHaveAttribute(
+      'data-selected-label',
+      'Whitecourt Forestry',
+    );
+    await kept();
+    await expect(
+      page.getByLabel('Line 1 quantity', { exact: true }),
+    ).toHaveValue('3.75');
+    const afterFallback = documents;
+
     // Create: "+ New customer" opens over the order with the typed name and
     // Escape cancels it on the server, writing nothing.
     await customer.fill('Ghost Glazing');
@@ -694,7 +777,7 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     ).toBe(1);
     await kept();
     await shot('line-product-created');
-    expect(documents, 'create and return reloaded nothing').toBe(afterAddLine);
+    expect(documents, 'create and return reloaded nothing').toBe(afterFallback);
 
     // A quick create names existing records with the same name first: a
     // supplier-only party is not offered as a customer, so creating here would
