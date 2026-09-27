@@ -1,6 +1,6 @@
 # RAIN-ORDER-ENTRY — normal metadata-defined order workspace
 
-Status: evidence_ready; RAIN WORKSPACE INTERACTION COMPLETION (owner-authorized charter after the product-parity audit) implemented at executable `174b4d355d9a2def4582b9a44e3fd421189475c3` on the same PR #6 branch over audited candidate `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e`: working Inventory destinations, eligible pickers and policy-aware quick create (A), in-place reference fragments (B, ADR-0036 behaviour 7), shared control semantics through Tasks (C). FORM-1..4/PAGING, editor F1/F2/F3 and Task P1/P2 preserved; sole LOCAL author; fresh CI / ONLINE review of the changed boundaries / owner acceptance pending; no merge/deployment.
+Status: evidence_ready; RAIN WORKSPACE INTERACTION COMPLETION (owner-authorized charter after the product-parity audit) implemented at executable `8bfe8fc092b50c20c7b6e9101f8cd8aa8d880a95` on the same PR #6 branch over audited candidate `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e`: working Inventory destinations, eligible pickers and policy-aware quick create (A), in-place reference fragments (B, ADR-0036 behaviour 7), shared control semantics through Tasks (C). FORM-1..4/PAGING, editor F1/F2/F3 and Task P1/P2 preserved; sole LOCAL author; fresh CI / ONLINE review of the changed boundaries / owner acceptance pending; no merge/deployment.
 Tier: Behavioral. Actual AGENTS §4 Critical set untouched; no local arm.
 Dependency/base: `3830f95b6ff05c8e2b80113f812d59359a67f448`, open draft PR #5.
 Branch/worktree: `packet/RAIN-ORDER-ENTRY`, `/home/rvham/2rain-greenfield-rain-order-entry`; draft base `packet/RAIN-META-SALES`.
@@ -33,6 +33,19 @@ Decisions of this increment:
   eligibility on select, carrier change and create-and-return.
 - Currency and unit code lists are editor policy over text fields, not unit
   masters or conversions.
+- Field problems describe their control and never rename it: in the order
+  header, quick create and Task inputs the message follows the label
+  (aria-describedby), focus opens on the first input with a problem
+  (autofocus without the script), and a modal Task reserves its pinned
+  footer's height when scrolling to it.
+- Quick create names existing matches before a second record is made: the
+  field's declared list read by the same request without and with its
+  eligibility, at most five, never the flow's own minted records, only before
+  an attempt; any failure omits the warning. It warns and never blocks.
+- One focus ring for every input, select and textarea (order lines, Task
+  inputs and multiline fields had the browser default). The focus-ring gate
+  now also visits the Sales order draft editor, so `textarea` is measured on
+  its real ground rather than admitted by a list.
 - One application lineage entry for the increment. Development compiles had
   appended four (14 -> 18); every fresh tenant replays each transition, and
   the composed PostgreSQL suite slowed 10-30% until "advances an existing
@@ -223,20 +236,20 @@ Release, reservation, shipment and packing are unchanged. Ctrl-C closes only thi
 - Production sign-in integration absent from loopback demo: trusted entry/current policy exist, while `composition-root.ts` explicitly selects `localDemoIdentity: true`. No fake login or production-authentication claim.
 - Process loss/expiry loses unsaved buffers/preferences; reopen persisted records before retrying work. Neither durable drafts nor an atomic batch-save capability is added.
 - PaneFlow commercial taxes/payment/FX, Purchase approval/supplier-invoice states and promised-date availability are outside existing Rain capabilities and this change.
-- Interaction limits (2026-09-26): fragment state (lookup requests, generations, an open create) is process-local like the draft buffer; a value typed into an ordinary field reaches the session only with the page's next ordinary submit, so when another request advances the draft first (another tab, a replayed form), the conflict answer shows the session's values and that value is entered again; composition Task reference inputs (stock and receiving location) remain bounded native selects; picker eligibility supports an owned relation from an unscoped, unfiltered related list only (anything else is refused); no likely-duplicate warning before a quick create; unit and currency choices are declared code lists, not a unit master, precision or conversion; the textarea focus ring is the browser default.
+- Interaction limits (2026-09-26): fragment state (lookup requests, generations, an open create) is process-local like the draft buffer; a value typed into an ordinary field reaches the session only with the page's next ordinary submit, so when another request advances the draft first (another tab, a replayed form), the conflict answer shows the session's values and that value is entered again; composition Task reference inputs (stock and receiving location) remain native selects over the full declared list -- the audit rated them matched, and past 1,000 records the Task refuses openly rather than truncating; picker eligibility supports an owned relation from an unscoped, unfiltered related list only (anything else is refused); unit and currency choices are declared code lists, not a unit master, precision or conversion.
 - Business gaps kept out of this increment (assessment backlog): pricing and cost sources, payment terms, addresses, discounts, tax, charges, FX and totals; approvals and placement; multi-line receipts, carriers and tracking; unit conversions and granularity; returns, supply routes, warehouse workflows, valuation, invoicing and payments; documents, imports and integrations.
 - PR #5 alone remains unqualified for the selective Task client contract; the corrected PR #5 + PR #6 stack is the intended integration candidate, subject to fresh CI, ONLINE review and owner approval.
 
 ## Bounded ONLINE handoff
 
-Same ONLINE reviewer, changed boundaries only, diff `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e..174b4d355d9a2def4582b9a44e3fd421189475c3`: fragment transport and binding (`apps/web/src/{app-server,surface-runtime,document-editor,surface-client}.ts`), authority under fragments (FORM-1), picker eligibility (canonical schema/validator, `packages/runtime/src/list-behavior/*`, `semantic-query-gateway.ts`, the EXISTS in `module-runtime-interpreter.ts`), `previewEligibility` and denied creates, Task input semantics (`control-semantics.ts`, `surface-composition.ts`) and the form-less surplus in `surface-contract.ts`. Production defects separately from everything else. No merge/deployment or CI polling.
+Same ONLINE reviewer, changed boundaries only, diff `35e3eaa1ba6dd912067c7c0d58ac3128c6b2a71e..8bfe8fc092b50c20c7b6e9101f8cd8aa8d880a95`: fragment transport and binding (`apps/web/src/{app-server,surface-runtime,document-editor,surface-client}.ts`), authority under fragments (FORM-1), picker eligibility (canonical schema/validator, `packages/runtime/src/list-behavior/*`, `semantic-query-gateway.ts`, the EXISTS in `module-runtime-interpreter.ts`), `previewEligibility` and denied creates, Task input semantics (`control-semantics.ts`, `surface-composition.ts`) and the form-less surplus in `surface-contract.ts`. Production defects separately from everything else. No merge/deployment or CI polling.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RAIN-ORDER-ENTRY",
   "base": "3830f95b6ff05c8e2b80113f812d59359a67f448",
-  "head": "174b4d355d9a2def4582b9a44e3fd421189475c3",
+  "head": "8bfe8fc092b50c20c7b6e9101f8cd8aa8d880a95",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md",
     "apps/api/src/composition-root.ts",
@@ -356,6 +369,10 @@ Same ONLINE reviewer, changed boundaries only, diff `35e3eaa1ba6dd912067c7c0d58a
     {
       "path": "packages/domain/src/inventory/workspace.ts",
       "name": "inventoryDocumentWorkspace"
+    },
+    {
+      "path": "apps/web/src/editor-controls.ts",
+      "name": "PossibleDuplicates"
     }
   ]
 }
