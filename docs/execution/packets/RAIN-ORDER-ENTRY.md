@@ -169,6 +169,12 @@ Boundary: no pricing/tax/FX expansion, target-order seeding, bespoke Sales rende
 
 ## Gates
 
+Gap fixes, executable `8bfe8fc092b50c20c7b6e9101f8cd8aa8d880a95` (records `8bdbba09729a4e45b72e6a7bedae80199117b4d1`, tree equal to HEAD at start and end of every run):
+
+- Format, lint, typecheck, build, schema, app/demo release freshness, boundaries (207 files), records, unit 168/168, compiler 175/175, integration 225/225 (header problem markup, Task first-invalid focus, duplicate warning offered/not offered/failed read/no match), surface contracts 30/30, agent 3/3, architecture 195/195.
+- PostgreSQL 249/249 and language coverage PASS (2,413 obligations, 645 observations) on mains power: the 300s-bounded pair at 242.9s and 201.1s. Two earlier runs of the same tree are not counted as green: one on mains had a Docker published-port refusal in `saved-filter.test.ts` (passed in every other run), one on battery cancelled the bounded pair.
+- Browser 105/105 at `8bdbba09`: the supported wrapper 65 (order-entry journeys with the duplicate step, meta-sales JS on/off with focus on the corrected input), then composed-application 23/23 (focus-ring gate: 12 derived selectors including `textarea:focus-visible`, 198/198 rings painted, worst 4.03:1) and `message-catalog.spec.ts` 17/17 in separate runs. The wrapper's message-catalog `beforeAll` exceeds its 120s hook bound under four workers at the audited base too (paired, same host: base `35e3eaa1` fixture ready at 122.9s, head 124.0s); the bound is not raised.
+
 Workspace interaction completion, executable `174b4d355d9a2def4582b9a44e3fd421189475c3` (records `a324eb9c66103523aa0bda9a677f7d07aaac17d0`, tree equal to HEAD at start and end of every run):
 
 - Format, lint, typecheck, build, schema, app/demo release freshness, boundaries (207 files), records, unit 168/168, compiler 175/175, integration 224/224 (Milestone A/B/C subtests in `surface-data-binding.test.ts`), surface contracts 30/30, agent 3/3, architecture 195/195.
