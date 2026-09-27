@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
@@ -1014,33 +1015,6 @@ async function inventoryNavigationJourney(
       'Stock count',
     ],
   );
-  // Every Inventory destination opens with the authorized company and readable
-  // content: no legal-entity hurdle and no unreadable binding. Line tables are
-  // shown inside their documents rather than as destinations of their own.
-  for (const destination of [
-    'Inventory movement',
-    'Inventory period lock',
-    'Inventory transaction',
-    'Stock count',
-  ]) {
-    await inventoryNavigation
-      .getByRole('link', { name: destination, exact: true })
-      .click();
-    await expect(
-      page.getByRole('heading', { level: 1, name: destination }),
-    ).toBeVisible();
-    await expect(
-      page.locator(
-        '[data-message="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"], [data-message="INVALID_SURFACE_BINDING"]',
-      ),
-    ).toHaveCount(0);
-    await inventoryNavigation.getByText('Inventory', { exact: true }).click();
-  }
-  await page.goto(surfaceUrl(baseUrl, 'inventory_transaction_list'));
-  await expect(page).toHaveURL(
-    /inventory_transaction_list_legal_entity_scope=/u,
-  );
-  await page.goto(surfaceUrl(baseUrl, 'party_list'));
   await inventoryNavigation.getByText('Inventory', { exact: true }).click();
   await expect(moreNavigation).toBeVisible();
   await expect(
@@ -1105,6 +1079,33 @@ async function inventoryNavigationJourney(
     ),
   ).toBe(true);
   await page.setViewportSize({ height: 720, width: 1280 });
+  await inventoryNavigation.getByText('Inventory', { exact: true }).click();
+  // Every Inventory destination opens with the authorized company and readable
+  // content: no legal-entity hurdle and no unreadable binding. Line tables are
+  // shown inside their documents rather than as destinations of their own.
+  for (const destination of [
+    'Inventory movement',
+    'Inventory period lock',
+    'Inventory transaction',
+    'Stock count',
+  ]) {
+    await inventoryNavigation
+      .getByRole('link', { name: destination, exact: true })
+      .click();
+    await expect(
+      page.getByRole('heading', { level: 1, name: destination }),
+    ).toBeVisible();
+    await expect(
+      page.locator(
+        '[data-message="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"], [data-message="INVALID_SURFACE_BINDING"]',
+      ),
+    ).toHaveCount(0);
+    await inventoryNavigation.getByText('Inventory', { exact: true }).click();
+  }
+  await page.goto(surfaceUrl(baseUrl, 'inventory_transaction_list'));
+  await expect(page).toHaveURL(
+    /inventory_transaction_list_legal_entity_scope=/u,
+  );
 }
 
 async function inventoryRecordNavigationJourney(
@@ -1440,12 +1441,39 @@ async function scopedInventoryListJourney(
       'inventory_transaction_list',
     ),
   } as const;
+  // Every company-scoped List declares workspace entry, so a movement list is
+  // never read unscoped: a company outside the principal's active authorized
+  // ones is refused by name with no rows, and entry opens the principal's
+  // current company pinned in the URL.
+  const foreignMovementResponse = await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_movement_list',
+      inventoryScopeParameters.movementList,
+      randomUUID(),
+    ),
+  );
+  expect(foreignMovementResponse?.status()).toBe(422);
+  await expect(
+    page.locator('[data-diagnostic-code="WORKSPACE_COMPANY_UNAVAILABLE"]'),
+  ).toHaveCount(1);
+  await expect(
+    page.locator('tr', { hasText: 'browser-posted-adjustment' }),
+  ).toHaveCount(0);
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_movement_list',
+      inventoryScopeParameters.movementList,
+      browserLegalEntityId,
+    ),
+  );
   const unscopedMovementUrl = surfaceUrl(baseUrl, 'inventory_movement_list');
   const unscopedMovementResponse = await page.goto(unscopedMovementUrl);
-  expect(unscopedMovementResponse?.status()).toBe(422);
-  await expect(
-    page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
-  ).toBeVisible();
+  expect(unscopedMovementResponse?.status()).toBe(200);
+  expect(
+    new URL(page.url()).searchParams.get(inventoryScopeParameters.movementList),
+  ).toBe(browserLegalEntityId);
   const legalEntityPicker = page.getByRole('navigation', {
     name: 'Company',
   });
@@ -1454,9 +1482,9 @@ async function scopedInventoryListJourney(
     'data-scope-parameter-id',
     inventoryScopeParameters.movementList,
   );
-  await expect(legalEntityPicker.locator('[aria-current="true"]')).toHaveCount(
-    0,
-  );
+  await expect(
+    legalEntityPicker.locator('[aria-current="true"]'),
+  ).toHaveAttribute('data-legal-entity-id', browserLegalEntityId);
   const defaultLegalEntity = legalEntityPicker.getByRole('link', {
     name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityCode,
   });

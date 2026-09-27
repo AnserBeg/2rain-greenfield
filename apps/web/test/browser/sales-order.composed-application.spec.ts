@@ -166,6 +166,23 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     page.getByRole('heading', { name: 'Sales orders', level: 1, exact: true }),
   ).toBeVisible();
 
+  // The customer carrier is accepted only for a party with an active customer
+  // role (re-checked on every selection route), so the role exists first.
+  await page.goto(
+    `${baseUrl}/?${new URLSearchParams({ surface: 'northstar.app:surface.party_role_form' })}`,
+  );
+  await page
+    .locator('[name="value:northstar.app:field.party_role_kind"]')
+    .selectOption({ label: 'Customer' });
+  await page
+    .locator('[name="value:northstar.app:field.party_role_status"]')
+    .selectOption({ label: 'Active' });
+  await page
+    .locator('[name="relation:northstar.app:relation.party_role_party"]')
+    .selectOption(customerPartyId);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Create complete');
+
   const suffix = randomUUID().slice(0, 8);
   await page.goto(url('sales_order', 'form'));
   await field('sales_order', 'number', `SO-${suffix}`);
