@@ -2227,7 +2227,7 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 @media (prefers-reduced-motion:no-preference){.sidebar a,.navigation-group>summary,.primary-action,.secondary-action,.list-page-link,.record-link,.data-table-wrap tbody tr,button{transition:background-color var(--motion-duration) var(--motion-easing),border-color var(--motion-duration) var(--motion-easing),color var(--motion-duration) var(--motion-easing),opacity var(--motion-duration) var(--motion-easing)}}
 @media print{body *{visibility:hidden}.packing-document,.packing-document *{visibility:visible}.packing-document{position:absolute;inset:0;width:100%;border:0;box-shadow:none}.print-guidance{display:none}}
 .print-page main{width:min(900px,100%);margin:0 auto;padding:var(--space-6) var(--page-padding)}
-.print-document{display:grid;gap:var(--space-5);color:var(--ink);background:var(--surface-panel);padding:var(--space-6);border:1px solid var(--line);border-radius:var(--radius-container)}
+.print-document{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-5);color:var(--ink);background:var(--surface-panel);padding:var(--space-6);border:1px solid var(--line);border-radius:var(--radius-container)}
 .print-header h1{margin:var(--space-1) 0}
 .print-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:var(--space-3);margin:var(--space-3) 0 0}
 .print-facts dt{color:var(--ink-muted);font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.08em}
@@ -2236,6 +2236,8 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 .print-section th,.print-section td{padding:var(--space-2);border-bottom:1px solid var(--line);text-align:left}
 .print-count,.print-footer{color:var(--ink-muted);font-size:var(--text-micro)}
 .print-note{white-space:pre-wrap}
+.print-table{overflow-x:auto}
+@media print{.print-table{overflow:visible}}
 .print-block h2{margin:0 0 var(--space-1);color:var(--ink-muted);font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.08em}
 .print-block p{margin:0}
 @media print{.print-page main{padding:0}.print-page .print-document,.print-page .print-document *{visibility:visible}.print-page .print-document{border:0;padding:0}}

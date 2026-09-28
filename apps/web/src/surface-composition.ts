@@ -575,14 +575,14 @@ export function renderCompositionPrintDocument(
       return `<section class="print-section"><h2>${h(child!.definition.label)}</h2>${
         child!.rows.length === 0
           ? '<p>None.</p>'
-          : `<table><thead><tr>${columns.map((column) => `<th scope="col">${h(column.label)}</th>`).join('')}</tr></thead><tbody>${child!.rows
+          : `<div class="print-table"><table><thead><tr>${columns.map((column) => `<th scope="col">${h(column.label)}</th>`).join('')}</tr></thead><tbody>${child!.rows
               .map(
                 (row) =>
                   `<tr>${columns.map((column) => `<td>${h(row.cells[column.columnId] ?? '—')}</td>`).join('')}</tr>`,
               )
               .join(
                 '',
-              )}</tbody></table><p class="print-count">${String(child!.rows.length)} ${child!.rows.length === 1 ? 'line' : 'lines'}</p>`
+              )}</tbody></table></div><p class="print-count">${String(child!.rows.length)} ${child!.rows.length === 1 ? 'line' : 'lines'}</p>`
       }</section>`;
     })
     .join('');
@@ -640,7 +640,8 @@ export function renderCompositionFields(
         .filter((value): value is string => !!value && value !== '—');
       return {
         orderKey: place(block.columns[0]!),
-        html: `<div data-composition-block><dt>${h(block.label)}</dt><dd>${lines.length ? lines.map((line) => h(line)).join('<br>') : '—'}</dd></div>`,
+        // One compact line on screen; printed documents keep one per line.
+        html: `<div data-composition-block><dt>${h(block.label)}</dt><dd>${lines.length ? lines.map((line) => h(line)).join(', ') : '—'}</dd></div>`,
       };
     }),
   ].sort((left, right) => left.orderKey - right.orderKey);
