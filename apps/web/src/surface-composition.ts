@@ -528,6 +528,71 @@ function renderPresentedChild(
             .join('')}</tbody></table></div>`;
   return `<section id="${h(definition.datasetId)}" class="panel data-panel composition-collection" data-composition-dataset="${h(definition.datasetId)}" data-resolution="${child.status}"><div class="composition-collection-heading"><h2>${h(definition.label)}</h2>${definition.presentation?.description ? `<details><summary>About these quantities</summary><p class="composition-description">${h(definition.presentation.description)}</p></details>` : ''}</div>${body}</section>`;
 }
+/** The URL of this record's printable document, preserving its scope. */
+export function compositionPrintHref(data: CompositionData): string {
+  const url = new URL(data.url, 'http://surface-runtime.local');
+  for (const name of [...url.searchParams.keys()])
+    if (name === 'dataset' || name === 'selected' || name.startsWith('select:'))
+      url.searchParams.delete(name);
+  url.searchParams.set('print', 'document');
+  return url.pathname + url.search;
+}
+
+/**
+ * A declared printable document (composition `presentation.print`): the header,
+ * each named dataset IN FULL and the note, from the same governed load as the
+ * record page. A dataset that failed or stopped short refuses the document --
+ * a printed order is never the first page of one.
+ */
+export function renderCompositionPrintDocument(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+  generatedAt: Date,
+): { readonly complete: boolean; readonly html: string } {
+  const print = surface.composition?.presentation?.print;
+  const header = surface.composition?.presentation?.header;
+  if (!print || !header) return { complete: false, html: '' };
+  const printed = print.datasets.map((id) =>
+    data.children.find((child) => child.definition.datasetId === id),
+  );
+  if (
+    data.fieldsFailed ||
+    printed.some((child) => !child || child.status === 'failed')
+  )
+    return {
+      complete: false,
+      html: compositionMessage('COMPOSITION_CHILD_FAILED', 'alert'),
+    };
+  const cell = (id: string) => h(data.fields.cells[id] ?? '—');
+  const label = (id: string) =>
+    h(
+      surface.composition!.fields.find((column) => column.columnId === id)
+        ?.label ?? '',
+    );
+  const tables = printed
+    .map((child) => {
+      const columns = ordered(child!.definition.columns);
+      return `<section class="print-section"><h2>${h(child!.definition.label)}</h2>${
+        child!.rows.length === 0
+          ? '<p>None.</p>'
+          : `<table><thead><tr>${columns.map((column) => `<th scope="col">${h(column.label)}</th>`).join('')}</tr></thead><tbody>${child!.rows
+              .map(
+                (row) =>
+                  `<tr>${columns.map((column) => `<td>${h(row.cells[column.columnId] ?? '—')}</td>`).join('')}</tr>`,
+              )
+              .join(
+                '',
+              )}</tbody></table><p class="print-count">${String(child!.rows.length)} ${child!.rows.length === 1 ? 'line' : 'lines'}</p>`
+      }</section>`;
+    })
+    .join('');
+  const note = print.note ? data.fields.cells[print.note] : undefined;
+  return {
+    complete: true,
+    html: `<article class="print-document" data-print-document="${h(surface.surfaceId)}"><header class="print-header"><p class="eyebrow">${h(print.label)}</p><h1>${cell(header.title)}</h1><p>${header.subtitle.map(cell).join(' · ')}</p>${header.status ? `<p class="print-status">${cell(header.status)}</p>` : ''}<dl class="print-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl></header>${tables}${note && note !== '—' ? `<section class="print-section"><h2>${label(print.note!)}</h2><p class="print-note">${h(note)}</p></section>` : ''}<footer class="print-footer"><p>Printed ${h(generatedAt.toISOString().slice(0, 16).replace('T', ' '))} UTC from the current record.</p><p class="print-guidance">Use your browser's Print command to print this document or save it as PDF.</p></footer></article>`,
+  };
+}
+
 export function renderCompositionFields(
   surface: CompiledSurfaceDefinition,
   data: CompositionData,
@@ -606,6 +671,9 @@ export function renderCompositionActions(
     const back = returnTo?.startsWith('/?')
       ? `<a class="composition-back" href="${h(returnTo)}">Back to order</a>`
       : '';
+    const printLink = presentation.print
+      ? `<a class="secondary-action composition-print" href="${h(compositionPrintHref(data))}">Print ${h(presentation.print.label.toLowerCase())}</a>`
+      : '';
     const context = presentation.context;
     const actions = ordered(surface.composition!.actions).filter(
       (value) =>
@@ -649,7 +717,7 @@ export function renderCompositionActions(
               .join('')}</details>`
           : '')
       : '';
-    return `${back}${context ? `<section class="composition-context">${controls ? `<div class="composition-context-heading"><div><h2>${h(context.label)}</h2><p>${h(selection ?? context.description)}</p></div><div class="composition-local-actions" aria-label="Selected record actions">${controls}</div></div>` : ''}<nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav></section>` : ''}`;
+    return `${back}${printLink}${context ? `<section class="composition-context">${controls ? `<div class="composition-context-heading"><div><h2>${h(context.label)}</h2><p>${h(selection ?? context.description)}</p></div><div class="composition-local-actions" aria-label="Selected record actions">${controls}</div></div>` : ''}<nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav></section>` : ''}`;
   }
   const actions = ordered(surface.composition!.actions)
     .filter((action) => applicable(action, data))

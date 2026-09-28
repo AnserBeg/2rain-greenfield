@@ -715,6 +715,8 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'The generic gateway task integration test observes a committed withheld readback and no later step. This census observes its catalog treatment.',
   COMPOSITION_COMPLETE:
     'The real reserve, ship and release paths render this in meta-sales.spec.ts; the independent census checks its registered message text.',
+  LIST_EXPORT_OVER_LIMIT:
+    'A declared List refuses an export larger than its query limit; test/postgres/declared-list.test.ts drives it through a compiled variant whose limit is 5 against real PostgreSQL. A real-path driver here would need 5,001 records.',
   COMPOSITION_INPUT_INVALID:
     'Negative quantity retention is driven through the browser task in meta-sales.spec.ts. This census checks the catalog treatment independently.',
   COMPOSITION_SELECTION_REQUIRED:

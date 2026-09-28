@@ -72,8 +72,10 @@ test('sales fulfillment metadata is a complete order, reservation and shipment d
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
   assert.equal(authored.entities.length, 7);
-  assert.equal(authored.fields.length, 35);
-  assert.equal(authored.operations.length, 27);
+  // SALES-PARITY adds the shipment's carrier, reference type and reference.
+  assert.equal(authored.fields.length, 38);
+  // SALES-PARITY adds sales_order_reopen (ruling F).
+  assert.equal(authored.operations.length, 28);
   assert.equal(authored.permissions.length, 33);
   assert.equal(authored.queries.length, 28);
   assert.equal(authored.surfaces.length, 19);
@@ -118,6 +120,8 @@ test('the state machine releases and cancels only through compiled targets', () 
     [
       'northstar.sales:operation.sales_order_release',
       'northstar.sales:operation.sales_order_draft_cancel',
+      // Ruling F (SALES-PARITY): a closed order reopens to released.
+      'northstar.sales:operation.sales_order_reopen',
     ],
   );
   const stateField = (
@@ -349,4 +353,61 @@ test('sales leads compiled business navigation and fulfillment is registered beh
   );
   assert.match(JSON.stringify(salesModuleDefinition()), /reservation/gu);
   assert.match(JSON.stringify(salesModuleDefinition()), /shipment/gu);
+});
+
+test('ruling F and shipping: the release command reads Confirm, a closed order reopens under confirmation, shipments carry carrier and reference', () => {
+  const authored = salesModuleDefinition() as unknown as {
+    operations: Array<{
+      operationId: string;
+      label?: string;
+      confirmation: string;
+      permission: { targetId: string };
+      precondition: unknown;
+    }>;
+    stateMachines: Array<{
+      transitions: Array<{
+        transitionId: string;
+        fromState: { targetId: string };
+        toState: { targetId: string };
+      }>;
+    }>;
+    fields: Array<{ fieldId: string; presence?: string }>;
+  };
+  const operation = (local: string) =>
+    authored.operations.find(
+      (value) => value.operationId === `northstar.sales:operation.${local}`,
+    )!;
+  // Presentation only: the stable id keeps its verb, so ADR-0056 still puts
+  // it first on the command bar.
+  assert.equal(operation('sales_order_release').label, 'Confirm');
+  const reopen = operation('sales_order_reopen');
+  assert.equal(reopen.confirmation, 'humanRequired');
+  assert.equal(
+    reopen.permission.targetId,
+    'northstar.sales:permission.sales_order_close',
+  );
+  assert.match(
+    JSON.stringify(reopen.precondition),
+    /northstar\.sales:state\.sales_order_closed/u,
+  );
+  const transition = authored.stateMachines[0]!.transitions.find((value) =>
+    value.transitionId.endsWith('transition.sales_order_reopen'),
+  )!;
+  assert.equal(
+    transition.fromState.targetId,
+    'northstar.sales:state.sales_order_closed',
+  );
+  assert.equal(transition.toState.targetId, SALES_IDS.stateIds.released);
+  for (const name of [
+    'carrier',
+    'shipping_reference_kind',
+    'shipping_reference',
+  ])
+    assert.equal(
+      authored.fields.find(
+        (field) => field.fieldId === `northstar.sales:field.shipment_${name}`,
+      )?.presence,
+      'optional',
+      `shipment ${name} is optional on the entity (a correction has none)`,
+    );
 });

@@ -182,7 +182,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     .filter({ hasText: 'Field notebook' })
     .getAttribute('data-record-id'))!;
   expect(orderLineId).toBeTruthy();
-  await command('Release', false);
+  await command('Confirm', false);
 
   await page.goto(url('reservation', 'form'));
   await fill('reservation', 'number', `RSV-${suffix}`);
@@ -347,7 +347,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     .filter({ hasText: 'Field notebook' })
     .getAttribute('data-record-id'))!;
   expect(closureLineId).toBeTruthy();
-  await command('Release', false);
+  await command('Confirm', false);
   await page.goto(url('reservation', 'form'));
   await fill('reservation', 'number', `RSV-CLOSE-${suffix}`);
   await choose('reservation', 'state', 'draft');
@@ -373,6 +373,12 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await command('Close');
   await expect(
     page.locator('.composition-header').getByText('Closed', { exact: true }),
+  ).toBeVisible();
+  // Ruling F: a closed order may be reopened (nothing is invoiced yet); it
+  // returns to the released state, confirmed like any consequential command.
+  await command('Reopen');
+  await expect(
+    page.locator('.composition-header').getByText('Released', { exact: true }),
   ).toBeVisible();
 
   console.log(

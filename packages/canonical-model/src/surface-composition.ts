@@ -160,6 +160,22 @@ export function validateSurfaceCompositions(
         );
       if (!surface.slots.some((slot) => slot.slot === 'titleStatus'))
         fail(surface.surfaceId, 'header presentation requires titleStatus');
+      const print = presentation.print;
+      if (print) {
+        unique(print.datasets, surface.surfaceId);
+        if (
+          print.datasets.some(
+            (id) =>
+              !composition.children.some((child) => child.datasetId === id),
+          )
+        )
+          fail(surface.surfaceId, 'a printed dataset is a declared child');
+        if (
+          print.note &&
+          !composition.fields.some((column) => column.columnId === print.note)
+        )
+          fail(surface.surfaceId, 'a printed note is a declared column');
+      }
     }
     for (const child of composition.children) {
       if (

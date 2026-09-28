@@ -151,8 +151,7 @@ export function orderEntrySurfaces(
       kind: 'draftDocumentEditor',
       headerLabel: 'Order details',
       linesLabel: 'Order lines',
-      saveDescription:
-        'Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.',
+      saveDescription: `Save commits the header and each line in sequence. Drafts do not change stock. ${sales ? 'Confirm' : 'Release'} is a separate action.`,
       saveMode: 'sequential',
       headerFormSurfaceId: id('surface', `${local}_form`),
       recordSurfaceId: id('surface', `${local}_detail`),

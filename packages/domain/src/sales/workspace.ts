@@ -206,6 +206,12 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       recordActions: 'progressive',
       technicalDetails: 'progressive',
       task: { mode: 'nativeDialog', fallback: 'page' },
+      // Owner ruling G: a printable order, saved as PDF by the browser.
+      print: {
+        label: 'Sales order',
+        datasets: [lines],
+        note: id('column', 'notes'),
+      },
     },
     fields: [
       column('order_number', 'Sales order', 10, field('sales_order_number')),
@@ -364,6 +370,13 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             30,
             field('shipment_effective_at'),
           ),
+          column('carrier', 'Carrier', 40, field('shipment_carrier')),
+          column(
+            'shipping_reference',
+            'Tracking or BOL',
+            50,
+            field('shipment_shipping_reference'),
+          ),
         ],
       },
     ],
@@ -415,13 +428,59 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         orderKey: 20,
         datasetId: reservations,
         conditions: [released, active],
-        inputs: [{ ...quantityInput, label: 'Quantity to ship' }],
+        inputs: [
+          { ...quantityInput, label: 'Quantity to ship' },
+          {
+            inputId: id('input', 'carrier'),
+            label: 'Carrier',
+            orderKey: 20,
+            type: 'text',
+            required: true,
+          },
+          {
+            inputId: id('input', 'shipping_reference_kind'),
+            label: 'Reference type',
+            orderKey: 30,
+            type: 'text',
+            required: true,
+            presentation: {
+              kind: 'choice',
+              options: [
+                {
+                  value: id(
+                    'option',
+                    'shipment_shipping_reference_kind_tracking',
+                  ),
+                  label: 'Tracking number',
+                },
+                {
+                  value: id('option', 'shipment_shipping_reference_kind_bol'),
+                  label: 'Bill of lading',
+                },
+              ],
+              defaultValue: id(
+                'option',
+                'shipment_shipping_reference_kind_tracking',
+              ),
+            },
+          },
+          {
+            inputId: id('input', 'shipping_reference'),
+            label: 'Tracking or BOL number',
+            orderKey: 40,
+            type: 'text',
+            required: true,
+          },
+        ],
         steps: [
           create(
             'shipment_draft',
             'shipment',
             {
               // The shipment number is assigned on create (SHP-000001).
+              carrier: input('carrier'),
+              shipping_reference_kind: input('shipping_reference_kind'),
+              shipping_reference: input('shipping_reference'),
               state: literal(id('option', 'shipment_state_draft')),
               kind: literal(id('option', 'shipment_kind_initial')),
               effective_at: generated('instant'),

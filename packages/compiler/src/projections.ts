@@ -543,6 +543,11 @@ function operationCatalogPayload(
     operations: packageRevision.operations.map((operation) => ({
       confirmation: operation.confirmation,
       effect: resolvedEffect(operation.effect, packageRevision),
+      // Declared command words (presentation only); absent, the reader derives
+      // a label from the id, so every existing catalog byte is unchanged.
+      ...('label' in operation && typeof operation.label === 'string'
+        ? { label: operation.label }
+        : {}),
       lifecycle: operation.lifecycle,
       operationId: operation.operationId,
       permissionId: operation.permission.targetId,

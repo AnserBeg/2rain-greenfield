@@ -16,16 +16,23 @@ const reference = (kind: string, targetId: string) => ({
 
 const STATES = [
   ['draft', 'Draft', false],
+  // Owner ruling F asks for "Confirmed"; relabelling a released enum option is
+  // refused as a storage retype (its label is inside the column fingerprint),
+  // so the state label waits for an authorized re-baseline. The command reads
+  // "Confirm" through the operation's declared label.
   ['released', 'Released', false],
   ['closed', 'Closed', false],
   ['cancelled', 'Cancelled', true],
 ] as const;
 
 const TRANSITIONS = [
-  ['release', 'Release order', 10, 'draft', 'released', 'release', true],
+  ['release', 'Confirm order', 10, 'draft', 'released', 'release', true],
   ['draft_cancel', 'Cancel order', 20, 'draft', 'cancelled', 'cancel', true],
   ['close', 'Close order', 30, 'released', 'closed', 'close', false],
   ['cancel', 'Cancel order', 40, 'released', 'cancelled', 'cancel', false],
+  // Ruling F: a closed order may be reopened while nothing on it is invoiced;
+  // no invoice exists yet, so the transition needs no further guard today.
+  ['reopen', 'Reopen order', 50, 'closed', 'released', 'close', true],
 ] as const;
 
 type StateLocalId = (typeof STATES)[number][0];
@@ -552,6 +559,23 @@ function fulfillmentFields(ids: SalesIds): Array<Record<string, unknown>> {
     ],
     ['sales_order_shipped', 'shipped_quantity', 'Shipped quantity', decimal()],
     ['sales_order_shipped', 'unit_id', 'Base unit', text(32)],
+    // Carrier and the carrier's tracking number or bill of lading. Optional on
+    // the entity (a correction has none); the ship task requires them.
+    ['shipment', 'carrier', 'Carrier', text(80), true],
+    [
+      'shipment',
+      'shipping_reference_kind',
+      'Reference type',
+      enumType('shipment', 'shipping_reference_kind', ['tracking', 'bol']),
+      true,
+    ],
+    [
+      'shipment',
+      'shipping_reference',
+      'Tracking or BOL number',
+      text(120),
+      true,
+    ],
   ];
   return specs.map(([local, name, label, type, optional], index) =>
     field(
@@ -669,13 +693,16 @@ function transitionOperation(
   precondition: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
-    confirmation: permission === 'cancel' ? 'humanRequired' : 'none',
+    confirmation:
+      permission === 'cancel' || action === 'reopen' ? 'humanRequired' : 'none',
     effect: {
       kind: 'transitionStateEffect',
       schemaVersion: version,
       transition: reference('transitionReference', ids.transitionIds[action]),
     },
     kind: 'operationDefinition',
+    // The command words; the stable id keeps its verb (ADR-0056 ordering).
+    ...(action === 'release' ? { label: 'Confirm' } : {}),
     module: reference('moduleReference', ids.moduleId),
     operationId: `${ids.namespace}:operation.sales_order_${action}`,
     permission: reference(
@@ -749,6 +776,9 @@ function selectedFieldsForEntity(
       'external_reference',
       'reason_code',
       'reason_narrative',
+      'carrier',
+      'shipping_reference_kind',
+      'shipping_reference',
     ],
     shipment_line: [
       'line_number',

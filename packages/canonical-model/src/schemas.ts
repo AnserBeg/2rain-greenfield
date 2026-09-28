@@ -903,6 +903,18 @@ export const SurfaceCompositionSchema = z.strictObject({
           fallback: z.literal('page'),
         })
         .optional(),
+      /**
+       * A printable document of this record: the header, the named datasets
+       * in full and an optional note column, printed or saved as PDF by the
+       * browser (owner ruling G). Optional v6 key (ADR-0047 §7).
+       */
+      print: z
+        .strictObject({
+          label: LabelSchema,
+          datasets: z.array(CanonicalIdSchema).min(1).max(4),
+          note: CanonicalIdSchema.optional(),
+        })
+        .optional(),
     })
     .optional(),
   kind: z.literal('surfaceComposition'),
@@ -1639,6 +1651,19 @@ export const FieldNumberingSchema = z.strictObject({
   start: z.int().min(1).max(1_000_000_000),
 });
 export type FieldNumbering = z.infer<typeof FieldNumberingSchema>;
+/**
+ * The words a command renders with (for example "Confirm" for an operation
+ * whose stable id ends in `_release`). Presentation only: the id, permission,
+ * precondition and effect are unchanged. Optional v6 key (ADR-0047 §7); absent,
+ * the renderer derives a label from the id as before.
+ */
+const operationLabel = LabelSchema.optional();
+const normalizedV6OperationDefinition = normalizedV3OperationDefinition.extend({
+  label: operationLabel,
+});
+const authoredV6OperationDefinition = authoredV3OperationDefinition.extend({
+  label: operationLabel,
+});
 const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
   numbering: FieldNumberingSchema.optional(),
 });
@@ -1666,6 +1691,7 @@ const authoredV6QueryDefinition = z.union([
 const v6NormalizedShape = {
   ...v5NormalizedShape,
   fields: z.array(normalizedV6FieldDefinition),
+  operations: z.array(normalizedV6OperationDefinition),
   queries: z.array(normalizedV6QueryDefinition),
   languageVersion: v6NodeVersion,
   surfaces: z.array(normalizedV6SurfaceDefinition),
@@ -1792,6 +1818,7 @@ const v5AuthoredShape = {
 const v6AuthoredShape = {
   ...v5AuthoredShape,
   fields: z.array(authoredV6FieldDefinition),
+  operations: z.array(authoredV6OperationDefinition),
   queries: z.array(authoredV6QueryDefinition),
   languageVersion: v6NodeVersion,
   surfaces: z.array(authoredV6SurfaceDefinition),

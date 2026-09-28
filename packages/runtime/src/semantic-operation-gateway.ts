@@ -69,6 +69,8 @@ interface RegisteredOperationDefinitionBase {
     readonly recordIdentity: 'canonicalUuid';
   };
   readonly inputContract?: RegisteredOperationInputContract;
+  /** Declared command words; presentation only. */
+  readonly label?: string;
   readonly lifecycle: 'active' | 'retired';
   readonly operationId: string;
   readonly permissionId: string;
@@ -1289,15 +1291,24 @@ export function assertPinnedOperationDefinition(
   ];
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   const hasInputContract = Object.hasOwn(value, 'inputContract');
+  const hasLabel = Object.hasOwn(value, 'label');
   assertExactKeys(
     value,
     [
       ...expectedKeys,
       ...(hasInfrastructure ? ['infrastructure'] : []),
       ...(hasInputContract ? ['inputContract'] : []),
+      ...(hasLabel ? ['label'] : []),
     ],
     invalid,
   );
+  if (
+    hasLabel &&
+    (typeof value.label !== 'string' ||
+      value.label.trim().length === 0 ||
+      value.label.length > 240)
+  )
+    throw invalid('pinned operation label must be a bounded non-blank string');
   assertCanonicalId(value.operationId, 'operationId', invalid);
   assertCanonicalId(value.permissionId, 'permissionId', invalid);
   assertCanonicalId(value.readBackQueryId, 'readBackQueryId', invalid);

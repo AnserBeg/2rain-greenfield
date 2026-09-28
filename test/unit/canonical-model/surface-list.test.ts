@@ -211,3 +211,39 @@ test('an unknown List key is refused rather than ignored', () => {
     /closed supported schema/u,
   );
 });
+
+test('a printable document is declared over the record composition and refused when it names anything undeclared', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition() as never,
+  );
+  const printed = normalized.surfaces.flatMap((surface) => {
+    const print = (
+      surface as {
+        composition?: { presentation?: { print?: { label: string } } };
+      }
+    ).composition?.presentation?.print;
+    return print ? [[surface.surfaceId, print.label]] : [];
+  });
+  assert.deepEqual(printed.sort(), [
+    [`${ns}:surface.purchase_order_detail`, 'Purchase order'],
+    [`${ns}:surface.sales_order_detail`, 'Sales order'],
+  ]);
+  const print = (app: ReturnType<typeof application>) =>
+    (
+      app.surfaces.find(
+        (value) => value.surfaceId === `${ns}:surface.sales_order_detail`,
+      )!.composition as { presentation: { print: Json } }
+    ).presentation.print;
+  assert.match(
+    refused((app) => {
+      print(app).datasets = [`${ns}:dataset.not_a_child`];
+    }),
+    /a printed dataset is a declared child/u,
+  );
+  assert.match(
+    refused((app) => {
+      print(app).note = `${ns}:column.not_a_column`;
+    }),
+    /a printed note is a declared column/u,
+  );
+});

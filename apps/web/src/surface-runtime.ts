@@ -2,6 +2,7 @@ import {
   loadSurfaceComposition,
   submitCompositionAction,
   displayFieldValue,
+  renderCompositionPrintDocument,
 } from './surface-composition.js';
 import { resolveWorkspaceEntry } from './workspace-entry.js';
 import { documentEditor } from './document-editor.js';
@@ -369,6 +370,23 @@ export async function renderSurfaceRuntimeWithData(
             gateways,
           ),
         };
+        if (
+          url.searchParams.get('print') === 'document' &&
+          selection.selected.composition.presentation?.print &&
+          data.status === 'READY' &&
+          data.composition
+        ) {
+          const printed = renderCompositionPrintDocument(
+            selection.selected,
+            data.composition,
+            new Date(),
+          );
+          return printDocumentPage(
+            selection.selected.composition.presentation.print.label,
+            printed.html,
+            printed.complete ? 200 : 422,
+          );
+        }
       }
       if (
         data.status === 'READY' &&
@@ -1697,6 +1715,22 @@ function renderConfirmationTransition(
  * structural companion: a hardcoded sentence is not caught after the fact, it
  * has nowhere to be passed.
  */
+/**
+ * A declared printable document as its own page: no navigation, commands or
+ * script, only the document and a print stylesheet. The browser's Print command
+ * prints it or saves it as PDF (owner ruling G).
+ */
+function printDocumentPage(
+  title: string,
+  body: string,
+  statusCode: number,
+): SurfaceRuntimeResponse {
+  return Object.freeze({
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><style>${styles}</style></head><body class="standalone print-page"><main>${body}</main></body></html>`,
+    statusCode,
+  });
+}
+
 export function renderApplicationDiagnostic(
   statusCode: number,
   ref: SurfaceMessageRef,
@@ -2189,6 +2223,17 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 @media (prefers-reduced-motion:reduce){.skeleton::after{animation:none;display:none}}
 @media (prefers-reduced-motion:no-preference){.sidebar a,.navigation-group>summary,.primary-action,.secondary-action,.list-page-link,.record-link,.data-table-wrap tbody tr,button{transition:background-color var(--motion-duration) var(--motion-easing),border-color var(--motion-duration) var(--motion-easing),color var(--motion-duration) var(--motion-easing),opacity var(--motion-duration) var(--motion-easing)}}
 @media print{body *{visibility:hidden}.packing-document,.packing-document *{visibility:visible}.packing-document{position:absolute;inset:0;width:100%;border:0;box-shadow:none}.print-guidance{display:none}}
+.print-page main{width:min(900px,100%);margin:0 auto;padding:var(--space-6) var(--page-padding)}
+.print-document{display:grid;gap:var(--space-5);color:var(--ink);background:var(--surface-panel);padding:var(--space-6);border:1px solid var(--line);border-radius:var(--radius-container)}
+.print-header h1{margin:var(--space-1) 0}
+.print-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:var(--space-3);margin:var(--space-3) 0 0}
+.print-facts dt{color:var(--ink-muted);font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.08em}
+.print-facts dd{margin:0;font-weight:var(--weight-emphasis)}
+.print-section table{width:100%;border-collapse:collapse;font-size:var(--text-body)}
+.print-section th,.print-section td{padding:var(--space-2);border-bottom:1px solid var(--line);text-align:left}
+.print-count,.print-footer{color:var(--ink-muted);font-size:var(--text-micro)}
+.print-note{white-space:pre-wrap}
+@media print{.print-page main{padding:0}.print-page .print-document,.print-page .print-document *{visibility:visible}.print-page .print-document{border:0;padding:0}}
 @media(max-width:800px){table.draft-lines.form-fields,.draft-lines tbody,.draft-lines tr,.draft-lines td{display:block;width:auto}.draft-lines thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.draft-line{margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}.draft-line__cell,.draft-line__cell:first-child,.draft-line__cell:last-child{padding:var(--space-1) 0;border:0;border-radius:0;background:transparent;text-align:left}.draft-line__cell::before{content:attr(data-label);display:block;margin-bottom:var(--space-1);font-weight:600;color:var(--ink-muted)}.draft-line__cell--remove::before{content:none}.editor-create__fields{grid-template-columns:minmax(0,1fr)}
 body{padding-bottom:72px}
 .app-shell{display:block}

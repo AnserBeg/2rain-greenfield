@@ -100,6 +100,18 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     expect(new URL(page.url()).searchParams.get('record')).toBe(orderId);
     await capture('sales-saved-reopened');
     const salesUrl = page.url();
+    // Ruling G: the printable order is the same governed record, every line.
+    await page
+      .getByRole('link', { name: 'Print sales order', exact: true })
+      .click();
+    await expect(page.locator('[data-print-document]')).toBeVisible();
+    await expect(page.locator('.print-document h1')).toHaveText(salesNumber);
+    await expect(page.locator('.print-document')).toContainText('2 lines');
+    await expect(page.locator('.print-document .print-note')).toHaveText(
+      'SO-ENTRY-BROWSER',
+    );
+    await capture('sales-print-document');
+    await page.goto(salesUrl);
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
     await expect(
@@ -136,6 +148,12 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       .click();
     expect(new URL(page.url()).searchParams.get('record')).toBe(purchaseId);
     await capture('purchase-saved-reopened');
+    await page
+      .getByRole('link', { name: 'Print purchase order', exact: true })
+      .click();
+    await expect(page.locator('.print-document h1')).toHaveText(purchaseNumber);
+    await expect(page.locator('.print-document')).toContainText('2 lines');
+    await page.goBack();
     const purchaseUrl = page.url();
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
@@ -162,8 +180,9 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       ).toHaveCount(0);
     await page.goto(salesUrl);
     await page.locator('.composition-record-actions > summary').click();
-    await page.getByRole('button', { name: 'Release', exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('Release complete');
+    // Ruling F: a Sales order's release command reads "Confirm".
+    await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('Confirm complete');
     await expect(
       page.getByRole('link', { name: 'Edit', exact: true }),
     ).toHaveCount(0);
@@ -240,6 +259,16 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       .getByRole('button', { name: 'Ship reserved stock', exact: true })
       .click();
     await page.getByLabel('Quantity to ship', { exact: true }).fill('5');
+    // The carrier and its tracking number are required on a shipment.
+    await page.getByLabel('Carrier', { exact: true }).fill('Purolator');
+    await expect(
+      page.getByLabel('Reference type', { exact: true }),
+    ).toHaveValue(
+      'northstar.app:option.shipment_shipping_reference_kind_tracking',
+    );
+    await page
+      .getByLabel('Tracking or BOL number', { exact: true })
+      .fill('PUR-4422-19');
     await page
       .getByRole('button', { name: 'Review shipment', exact: true })
       .click();
@@ -250,6 +279,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page
       .getByRole('link', { name: 'Back to order', exact: true })
       .click();
+    await expect(page.getByText('PUR-4422-19').first()).toBeVisible();
     await measure('shipped');
     await capture('sales-partial-shipment');
     await page.locator('.composition-context-overflow summary').click();

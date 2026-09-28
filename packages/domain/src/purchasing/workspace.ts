@@ -223,6 +223,11 @@ export function purchasingWorkspace(
       recordActions: 'progressive',
       technicalDetails: 'progressive',
       task: { mode: 'nativeDialog', fallback: 'page' },
+      print: {
+        label: 'Purchase order',
+        datasets: [lines],
+        note: id('column', 'purchasing_notes'),
+      },
     },
     fields: [
       column('number', 'Purchase order', 10, f('purchase_order_number')),

@@ -1876,6 +1876,90 @@
     {
       "classification": "internal",
       "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.shipment"
+      },
+      "fieldId": "northstar.app:field.shipment_carrier",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Carrier",
+      "orderKey": 250,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.shipment"
+      },
+      "fieldId": "northstar.app:field.shipment_shipping_reference_kind",
+      "fieldType": {
+        "kind": "enumFieldType",
+        "schemaVersion": "v6",
+        "options": [
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.shipment_shipping_reference_kind_tracking",
+            "label": "tracking",
+            "orderKey": 10
+          },
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.shipment_shipping_reference_kind_bol",
+            "label": "bol",
+            "orderKey": 20
+          }
+        ]
+      },
+      "kind": "fieldDefinition",
+      "label": "Reference type",
+      "orderKey": 260,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.shipment"
+      },
+      "fieldId": "northstar.app:field.shipment_shipping_reference",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 120,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Tracking or BOL number",
+      "orderKey": 270,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
@@ -5923,6 +6007,7 @@
         }
       },
       "kind": "operationDefinition",
+      "label": "Confirm",
       "module": {
         "kind": "moduleReference",
         "schemaVersion": "v6",
@@ -5993,6 +6078,52 @@
           "kind": "textValue",
           "schemaVersion": "v6",
           "value": "northstar.app:state.sales_order_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.sales_order_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "transitionStateEffect",
+        "schemaVersion": "v6",
+        "transition": {
+          "kind": "transitionReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:transition.sales_order_reopen"
+        }
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.sales"
+      },
+      "operationId": "northstar.app:operation.sales_order_reopen",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.sales_order_close"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:state.sales_order_closed"
         }
       },
       "readBack": {
@@ -11819,6 +11950,39 @@
           "orderKey": 80,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.shipment_get_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_carrier"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_get_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference_kind"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_get_10"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference"
+          },
+          "kind": "querySelection",
+          "orderKey": 110,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_get_11"
         }
       ],
       "sourceEntity": {
@@ -11950,6 +12114,39 @@
           "orderKey": 80,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.shipment_list_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_carrier"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_list_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference_kind"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_list_10"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference"
+          },
+          "kind": "querySelection",
+          "orderKey": 110,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_list_11"
         }
       ],
       "sourceEntity": {
@@ -12081,6 +12278,39 @@
           "orderKey": 80,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.shipment_search_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_carrier"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_search_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference_kind"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_search_10"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference"
+          },
+          "kind": "querySelection",
+          "orderKey": 110,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_search_11"
         }
       ],
       "sourceEntity": {
@@ -12226,6 +12456,39 @@
           "orderKey": 80,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.shipment_resolve_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_carrier"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_resolve_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference_kind"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_resolve_10"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference"
+          },
+          "kind": "querySelection",
+          "orderKey": 110,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.shipment_resolve_11"
         }
       ],
       "sourceEntity": {
@@ -21418,7 +21681,7 @@
             "targetId": "northstar.app:state.sales_order_draft"
           },
           "kind": "transitionDefinition",
-          "label": "Release order",
+          "label": "Confirm order",
           "orderKey": 10,
           "permission": {
             "kind": "permissionReference",
@@ -21498,6 +21761,28 @@
             "targetId": "northstar.app:state.sales_order_cancelled"
           },
           "transitionId": "northstar.app:transition.sales_order_cancel"
+        },
+        {
+          "fromState": {
+            "kind": "stateReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:state.sales_order_closed"
+          },
+          "kind": "transitionDefinition",
+          "label": "Reopen order",
+          "orderKey": 50,
+          "permission": {
+            "kind": "permissionReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:permission.sales_order_close"
+          },
+          "schemaVersion": "v6",
+          "toState": {
+            "kind": "stateReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:state.sales_order_released"
+          },
+          "transitionId": "northstar.app:transition.sales_order_reopen"
         }
       ]
     },
@@ -22291,7 +22576,12 @@
           },
           "recordActions": "progressive",
           "technicalDetails": "progressive",
-          "task": { "mode": "nativeDialog", "fallback": "page" }
+          "task": { "mode": "nativeDialog", "fallback": "page" },
+          "print": {
+            "label": "Sales order",
+            "datasets": ["northstar.app:dataset.fulfillment_lines"],
+            "note": "northstar.app:column.notes"
+          }
         },
         "fields": [
           {
@@ -22597,6 +22887,18 @@
                 "label": "Shipped at",
                 "orderKey": 30,
                 "field": "northstar.app:field.shipment_effective_at"
+              },
+              {
+                "columnId": "northstar.app:column.carrier",
+                "label": "Carrier",
+                "orderKey": 40,
+                "field": "northstar.app:field.shipment_carrier"
+              },
+              {
+                "columnId": "northstar.app:column.shipping_reference",
+                "label": "Tracking or BOL",
+                "orderKey": 50,
+                "field": "northstar.app:field.shipment_shipping_reference"
               }
             ]
           }
@@ -22873,6 +23175,41 @@
                 "orderKey": 10,
                 "type": "quantity",
                 "required": true
+              },
+              {
+                "inputId": "northstar.app:input.carrier",
+                "label": "Carrier",
+                "orderKey": 20,
+                "type": "text",
+                "required": true
+              },
+              {
+                "inputId": "northstar.app:input.shipping_reference_kind",
+                "label": "Reference type",
+                "orderKey": 30,
+                "type": "text",
+                "required": true,
+                "presentation": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "value": "northstar.app:option.shipment_shipping_reference_kind_tracking",
+                      "label": "Tracking number"
+                    },
+                    {
+                      "value": "northstar.app:option.shipment_shipping_reference_kind_bol",
+                      "label": "Bill of lading"
+                    }
+                  ],
+                  "defaultValue": "northstar.app:option.shipment_shipping_reference_kind_tracking"
+                }
+              },
+              {
+                "inputId": "northstar.app:input.shipping_reference",
+                "label": "Tracking or BOL number",
+                "orderKey": 40,
+                "type": "text",
+                "required": true
               }
             ],
             "steps": [
@@ -22891,6 +23228,33 @@
                   {
                     "path": ["legalEntityId"],
                     "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.shipment_carrier"],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.carrier"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_shipping_reference_kind"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.shipping_reference_kind"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_shipping_reference"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.shipping_reference"
+                    }
                   },
                   {
                     "path": ["values", "northstar.app:field.shipment_state"],
@@ -23209,7 +23573,7 @@
         "kind": "draftDocumentEditor",
         "headerLabel": "Order details",
         "linesLabel": "Order lines",
-        "saveDescription": "Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.",
+        "saveDescription": "Save commits the header and each line in sequence. Drafts do not change stock. Confirm is a separate action.",
         "saveMode": "sequential",
         "headerFormSurfaceId": "northstar.app:surface.sales_order_form",
         "recordSurfaceId": "northstar.app:surface.sales_order_detail",
@@ -23479,7 +23843,7 @@
         "kind": "draftDocumentEditor",
         "headerLabel": "Order details",
         "linesLabel": "Order lines",
-        "saveDescription": "Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.",
+        "saveDescription": "Save commits the header and each line in sequence. Drafts do not change stock. Confirm is a separate action.",
         "saveMode": "sequential",
         "headerFormSurfaceId": "northstar.app:surface.sales_order_form",
         "recordSurfaceId": "northstar.app:surface.sales_order_detail",
@@ -25484,7 +25848,12 @@
           },
           "recordActions": "progressive",
           "technicalDetails": "progressive",
-          "task": { "mode": "nativeDialog", "fallback": "page" }
+          "task": { "mode": "nativeDialog", "fallback": "page" },
+          "print": {
+            "label": "Purchase order",
+            "datasets": ["northstar.app:dataset.purchasing_lines"],
+            "note": "northstar.app:column.purchasing_notes"
+          }
         },
         "fields": [
           {

@@ -272,8 +272,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     'Unit EA',
   );
   await page.locator('.composition-record-actions > summary').click();
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Release complete');
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Confirm complete');
   expect(await snapshot()).toEqual(initialStock);
 
   releasedLineAttempt.idempotencyKey = randomUUID();

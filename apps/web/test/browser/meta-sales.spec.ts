@@ -250,6 +250,10 @@ for (const javaScriptEnabled of [true, false]) {
           .getByRole('button', { name: 'Ship reserved stock', exact: true })
           .click();
         await page.getByLabel(/^Quantity to (?:reserve|ship)$/).fill('5');
+        await page.getByLabel('Carrier', { exact: true }).fill('Purolator');
+        await page
+          .getByLabel('Tracking or BOL number', { exact: true })
+          .fill('PUR-META-5');
         await page
           .getByRole('button', {
             name: 'Review shipment',
@@ -288,6 +292,10 @@ for (const javaScriptEnabled of [true, false]) {
           task().locator('.composition-task-summary'),
         ).not.toContainText('Ordered');
         await page.getByLabel('Quantity to ship', { exact: true }).fill('2');
+        await page.getByLabel('Carrier', { exact: true }).fill('Purolator');
+        await page
+          .getByLabel('Tracking or BOL number', { exact: true })
+          .fill('PUR-META-2');
         await capture(
           'partial-ship-entry',
           'Entry ship 2 EA; selected reservation remaining 3 EA; not dispatched',
