@@ -37,6 +37,24 @@
           "expected": "missing managed column grant"
         }
       ]
+    },
+    {
+      "name": "replayed-create-keeps-later-column-grants",
+      "claim": "Replaying a company-scoped table's creation for another tenant revokes UPDATE at table level only when a table-level grant exists, so column grants a later release added for a tenant already serving it survive.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "    if (tableLevel.rows[0]?.granted === true)\n",
+      "replacement": "    if (tableLevel.rows.length >= 0)\n",
+      "test": {
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "ADR-0047 \u00a76 refuses a profile-only rollback edge"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/composed-application.test.ts",
+          "name": "ADR-0047 \u00a76 refuses a profile-only rollback edge by name and leaves a source-changing one eligible",
+          "expected": "missing managed column grant"
+        }
+      ]
     }
   ]
 }

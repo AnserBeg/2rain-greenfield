@@ -1677,9 +1677,18 @@ async function createManagedTable(
     await client.query(
       `GRANT SELECT, INSERT ON north_star_module.${quoted(entity.physicalTableName)} TO north_star_module_runtime`,
     );
-    await client.query(
-      `REVOKE UPDATE ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
+    // Revoking UPDATE on a table also revokes it from every column. Tables are
+    // shared by tenants, and another tenant may already serve a later release
+    // whose added columns hold their own UPDATE grants, so the revoke runs only
+    // when there is a table-level grant to remove.
+    const tableLevel = await client.query<{ granted: boolean }>(
+      `SELECT has_table_privilege('north_star_module_runtime', $1, 'UPDATE') AS granted`,
+      [`north_star_module.${quoted(entity.physicalTableName)}`],
     );
+    if (tableLevel.rows[0]?.granted === true)
+      await client.query(
+        `REVOKE UPDATE ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
+      );
     const mutableColumns = entityOwnedMutableColumnNames(target, entity);
     if (mutableColumns.length > 0) {
       await client.query(
