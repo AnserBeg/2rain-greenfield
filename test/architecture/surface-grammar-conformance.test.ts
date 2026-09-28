@@ -242,8 +242,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // the provider persists the value and the web reader passes it through, and
   // no consumer refuses a manifest whose floor exceeds what it supports. So the
   // number is currently a declaration, not a gate. Filed, not fixed -- see
-  // `current-plan.md`, `runtime-capability-floor-unenforced`.
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 4);
+  // `current-plan.md`, `runtime-capability-floor-unenforced`. Draft document
+  // editing and workspace entry require reader 8 even in this flat fixture,
+  // which declares no picker eligibility or typed Task input (those need 9).
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 8);
   assert.equal(flatCompact.navigationEntryIds.length, 4);
   assert.deepEqual(
     navigationRuleIds(
@@ -278,10 +280,13 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // behaviour itself is still gated -- by `payloadSchemaVersion` immediately
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
-  // Typed task summaries and selected row actions require reader 7.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 7);
-  // 13 + Purchasing's six lists + Sales' seven lists.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 26);
+  // Draft document editing and workspace entry require reader 8; picker
+  // eligibility and typed Task inputs require 9.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 9);
+  // Workspace owners and setup lists are in navigation; contextual document,
+  // fulfillment, line and lookup surfaces remain reachable in their documents
+  // and by record/deep link.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 12);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -311,13 +316,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   assert.ok(inventory);
   assert.deepEqual(navigationSurfaceIds([inventory]), [
     'northstar.app:surface.inventory_movement_list',
-    'northstar.app:surface.inventory_on_hand_lookup',
     'northstar.app:surface.inventory_period_lock_list',
-    'northstar.app:surface.inventory_transaction_line_list',
     'northstar.app:surface.inventory_transaction_list',
     'northstar.app:surface.legal_entity_list',
     'northstar.app:surface.posted_stock_balance_list',
-    'northstar.app:surface.stock_count_line_list',
     'northstar.app:surface.stock_count_list',
   ]);
 
@@ -860,11 +862,17 @@ function composedApplicationWithInventory(): Record<string, unknown> {
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
     for (const sourceEntry of source) {
+      const matches: unknown[] =
+        collectionName === 'surfaces'
+          ? target.filter(
+              (candidate) => candidate.surfaceId === sourceEntry.surfaceId,
+            )
+          : target.filter(
+              (candidate) =>
+                JSON.stringify(candidate) === JSON.stringify(sourceEntry),
+            );
       assert.equal(
-        target.filter(
-          (candidate) =>
-            JSON.stringify(candidate) === JSON.stringify(sourceEntry),
-        ).length,
+        matches.length,
         1,
         `composed application must contain each inventory ${collectionName} entry exactly once`,
       );

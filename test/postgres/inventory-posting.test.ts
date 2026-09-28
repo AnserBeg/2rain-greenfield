@@ -90,6 +90,7 @@ import {
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
 } from '../../packages/runtime/src/request-runtime-view.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import {
   amendOrderedQuantity,
@@ -3297,7 +3298,7 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
     const orderPage = await entry.run({ headers: {} }, (view) =>
       renderSurfaceRuntimeWithData(
         view,
-        `/?${new URLSearchParams({ surface: 'northstar.app:surface.purchase_order_detail', record: orderId, 'northstar.app:parameter.purchase_order_get_legal_entity_scope': legalReject })}`,
+        `/?${new URLSearchParams({ surface: 'northstar.app:surface.purchase_order_detail', record: orderId, 'northstar.app:parameter.purchase_order_get_legal_entity_scope': legalReject, dataset: 'northstar.app:dataset.purchasing_lines', selected: orderLineId, 'select:northstar.app:dataset.purchasing_lines': orderLineId })}`,
         {
           applicationExtension: RECEIVING_SURFACE_RUNTIME_EXTENSION,
           queryGateway,
@@ -3309,15 +3310,17 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
     assert.equal(orderPage.statusCode, 200);
     assert.match(
       orderPage.html,
-      /data-receiving-progress/u,
-      'purchase order exposes receiving in the actual Record surface',
+      /data-composition-dataset="northstar\.app:dataset\.purchasing_lines"/u,
+      'purchase order exposes its lines in the actual Record surface',
     );
     assert.match(
       orderPage.html,
-      /<td>10<\/td><td>7<\/td><td>3<\/td>/u,
-      'ordered, received and remaining are resolved on the server',
+      /<td[^>]*data-column-label="Ordered"[^>]*>10<\/td>/u,
+      'the selected order line retains its exact ordered quantity',
     );
-    assert.match(orderPage.html, /Create goods receipt/u);
+    assert.match(orderPage.html, /Receive with actual cost/u);
+    assert.match(orderPage.html, /Receive with cost explicitly absent/u);
+    assert.match(orderPage.html, /Connected receipts/u);
     const originalAfter = await database.adminPool.query(
       `SELECT ${quoted(receiptColumn(binding.receipt, 'goods_receipt_state'))} AS state FROM ${receiptTable(binding.receipt)} WHERE record_id=$1`,
       [first.sourceId],
@@ -6951,16 +6954,12 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
     const inventoryEntries: readonly unknown[] = inventory[
       collection
     ] as readonly unknown[];
-    for (const inventoryEntry of inventoryEntries) {
-      assert.equal(
-        composedEntries.filter(
-          (candidate) =>
-            JSON.stringify(candidate) === JSON.stringify(inventoryEntry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collection} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collection,
+      composedEntries,
+      inventoryEntries,
+      String(applicationBuilder.APPLICATION_NAMESPACE),
+    );
   }
   assert.ok(Array.isArray(definition.modules));
   assert.ok(Array.isArray(inventory.modules));

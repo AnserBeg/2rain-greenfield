@@ -78,6 +78,7 @@ import {
   ordinaryModuleV1,
   ordinaryModuleV2,
 } from '../fixtures/g2/module-conformance/definitions.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
@@ -5615,15 +5616,12 @@ function inventoryOwnedModuleDefinition(): Record<string, unknown> {
     const source = inventory[collection];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
-    for (const sourceEntry of source) {
-      assert.equal(
-        target.filter(
-          (candidate) => canonicalize(candidate) === canonicalize(sourceEntry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collection} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collection,
+      target,
+      source,
+      APPLICATION_NAMESPACE,
+    );
   }
   const modules = application.modules;
   const inventoryModules = inventory.modules;

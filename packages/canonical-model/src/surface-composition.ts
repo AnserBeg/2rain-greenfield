@@ -349,6 +349,50 @@ export function validateSurfaceCompositions(
             surface.surfaceId,
             'only reference inputs declare lookup queries',
           );
+        const presented = input.presentation;
+        if (!presented) continue;
+        if (input.type !== 'text')
+          fail(surface.surfaceId, 'input presentation applies to text inputs');
+        if (presented.kind === 'choice') {
+          const values = presented.options.map((option) => option.value);
+          if (
+            new Set(values).size !== values.length ||
+            (presented.defaultValue !== undefined &&
+              !values.includes(presented.defaultValue)) ||
+            (presented.defaultFrom !== undefined &&
+              !fieldsFor(surface.dataSource.targetId).has(
+                presented.defaultFrom.field,
+              ))
+          )
+            fail(
+              surface.surfaceId,
+              'choice inputs require unique values, a listed default and a declared record default',
+            );
+        }
+        if (presented.kind === 'derived') {
+          // Derived from the row the action selected (or its parent context),
+          // so the value can never come from somewhere the user did not pick.
+          const ancestry = new Set<string>();
+          let dataset = action.datasetId;
+          while (dataset && !ancestry.has(dataset)) {
+            ancestry.add(dataset);
+            const parent = children.get(dataset)?.parent?.value;
+            dataset =
+              parent?.source === 'selected' ? parent.datasetId : undefined;
+          }
+          if (
+            !ancestry.has(presented.column.datasetId) ||
+            !children
+              .get(presented.column.datasetId)
+              ?.columns.some(
+                (column) => column.columnId === presented.column.columnId,
+              )
+          )
+            fail(
+              surface.surfaceId,
+              'derived inputs require a column of the selected dataset or its parent context',
+            );
+        }
       }
       unique(
         action.inputs.map((input) => input.inputId),

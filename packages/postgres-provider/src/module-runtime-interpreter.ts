@@ -1190,6 +1190,7 @@ async function executeQueryOnClient(
           relationPlans,
           readScope,
           parentScopePlan(storage, entity, list),
+          relatedFilterPlan(storage, entity, list),
         );
       }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
@@ -2041,6 +2042,64 @@ interface ListParentScopePlan {
   readonly recordId: string;
 }
 
+interface ListRelatedFilterPlan {
+  readonly related: StorageEntity;
+  readonly relationColumn: string;
+  readonly filters: readonly {
+    readonly column: StorageEntity['columns'][number];
+    readonly value: string;
+  }[];
+}
+
+/**
+ * Resolves a related-record existence filter against the PINNED COMPILED
+ * relation: the related entity must be the relation's source and the queried
+ * entity its target, and every filter field must be a compiled column of the
+ * related entity. Anything else fails closed rather than degrading to an
+ * unfiltered list.
+ */
+function relatedFilterPlan(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  list: AuthorizedSharedListRequest,
+): ListRelatedFilterPlan | null {
+  const requested = list.relatedFilter;
+  if (!list.query.relatedFilter) return null;
+  const relation = requested
+    ? storage.relations.find(
+        (candidate) =>
+          candidate.relationId === requested.relationId &&
+          candidate.sourceEntityId === requested.relatedEntityId &&
+          candidate.targetEntityId === entity.entityId,
+      )
+    : undefined;
+  if (!requested || !relation)
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'related filter does not match the compiled storage relation',
+      list.query.relatedFilter.relationId,
+    );
+  const related = requiredEntity(storage, requested.relatedEntityId);
+  return Object.freeze({
+    related,
+    relationColumn: relation.relationColumn.physicalName,
+    filters: Object.freeze(
+      requested.fieldFilters.map((filter) => {
+        const column = related.columns.find(
+          (candidate) => candidate.canonicalFieldId === filter.fieldId,
+        );
+        if (!column)
+          throw new SharedListContractError(
+            'LIST_FIELD_NOT_AUTHORIZED',
+            'related filter field has no compiled column',
+            filter.fieldId,
+          );
+        return Object.freeze({ column, value: filter.value });
+      }),
+    ),
+  });
+}
+
 /**
  * Resolves an exact parent restriction against the PINNED COMPILED relation,
  * never against caller input. The request names a relation identity; the
@@ -2087,6 +2146,7 @@ async function listSharedRecords(
   relationPlans: readonly ListRelationPlan[],
   readScope: VerifiedLegalEntityReadScope | null,
   parentScope: ListParentScopePlan | null,
+  relatedFilter: ListRelatedFilterPlan | null = null,
 ): Promise<SemanticQueryResultEnvelope> {
   const sourceAlias = 'table_source';
   const selectedColumns = definition.selections.map((selection) => {
@@ -2161,6 +2221,23 @@ async function listSharedRecords(
       )}::uuid`,
     );
   }
+  if (relatedFilter) {
+    // Ahead of the count and the page window, like the parent scope: a page of
+    // customers is a page of the eligible set, never a filtered broader page.
+    const alias = 'table_related_filter';
+    predicates.push(
+      `EXISTS (SELECT 1 FROM north_star_module.${quoted(relatedFilter.related.physicalTableName)} AS ${quoted(alias)}
+        WHERE ${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(alias, relatedFilter.relationColumn)} = ${qualified(sourceAlias, entity.recordIdentity.column)}
+          AND ${qualified(alias, relatedFilter.related.archive.archivedAtColumn)} IS NULL${relatedFilter.filters
+            .map(
+              (filter) =>
+                `\n          AND ${qualified(alias, filter.column.physicalName)}::text = ${parameter(values, filter.value)}`,
+            )
+            .join('')})`,
+    );
+  }
   for (const filter of list.query.fieldFilters ?? []) {
     const column = selectedColumns.find(
       (column) => column.canonicalFieldId === filter.fieldId,
@@ -2225,6 +2302,9 @@ async function listSharedRecords(
       : {}),
     ...(list.query.fieldFilters
       ? { fieldFilters: list.query.fieldFilters }
+      : {}),
+    ...(relatedFilter && list.query.relatedFilter
+      ? { relatedFilter: list.query.relatedFilter }
       : {}),
     projectedSearchValueCount:
       list.query.search.trim() === '' ? 0 : searchExpressions.length,

@@ -1,4 +1,6 @@
 import type { SurfaceComposition } from '../../packages/canonical-model/src/index.js';
+import { documentEditor } from '../../apps/web/src/document-editor.js';
+import { resolveWorkspaceEntry } from '../../apps/web/src/workspace-entry.js';
 import {
   loadSurfaceComposition,
   submitCompositionAction,
@@ -32,6 +34,7 @@ import {
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { encodeSharedListCursor } from '../../packages/runtime/src/list-behavior/index.js';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
@@ -2380,7 +2383,7 @@ class InMemoryGenericExecutor
 
 function semanticGateways(
   policy: CurrentPolicyGateway,
-  executor: InMemoryGenericExecutor,
+  executor: SemanticQueryExecutor & SemanticOperationExecutor,
 ): SurfaceRuntimeGateways {
   const operationMediation = new SemanticOperationMediationAuthority();
   return {
@@ -2834,7 +2837,11 @@ function compileFixture(
       normalizationProfileVersion: normalized.normalizationProfileVersion,
     },
   });
-  assert.equal(result.status, 'compiled');
+  assert.equal(
+    result.status,
+    'compiled',
+    JSON.stringify(result.status === 'failed' ? result.diagnostics : null),
+  );
   return result as CompileSuccess;
 }
 
@@ -2948,6 +2955,68 @@ for (const intent of ['archive', 'create', 'restore', 'update'] as const) {
     );
   });
 }
+
+/**
+ * RAIN WORKSPACE INTERACTION COMPLETION, milestone A. The composed Inventory
+ * period lock declares two update operations (advance and reopen) and no form,
+ * so its read-only List and Record rendered INVALID_SURFACE_BINDING. A family
+ * with no form renders no update at all: the surplus is left unbound and the
+ * read surfaces bind. A surplus that could still render -- archive, on the
+ * Record -- is refused by name exactly as before, and the table above keeps a
+ * family WITH a form refusing its surplus update.
+ */
+test('a form-less family leaves a surplus update unbound and still reads', async () => {
+  const bindings = async (
+    source: Record<string, unknown>,
+    surfaceIds: readonly string[],
+  ) => {
+    const view = await issuedView(
+      runtimeEntry(compileFixture(source), new RecordingPolicy('ALLOW'), {
+        a: identity(tenantA, environmentA, principalA),
+      }),
+      'a',
+    );
+    const surfaces = readCompiledSurfaceManifest(view).surfaces;
+    return surfaceIds.map((surfaceId) => {
+      const surface = surfaces.find(
+        (candidate) => candidate.surfaceId === surfaceId,
+      );
+      assert.ok(surface, surfaceId);
+      return readCompiledSurfaceDataBinding(view, surface);
+    });
+  };
+  // The composed period lock: two update operations, no form.
+  for (const binding of await bindings(composedApplicationDefinition(), [
+    'northstar.app:surface.inventory_period_lock_list',
+    'northstar.app:surface.inventory_period_lock_detail',
+  ]))
+    assert.deepEqual(
+      binding.operations.map((operation) => operation.intent),
+      [],
+    );
+
+  // The same surplus beside a form still refuses by name.
+  const withForm = composedApplicationDefinition();
+  const operations = withForm.operations as Array<Record<string, unknown>>;
+  const update = operations.find(
+    (candidate) =>
+      candidate.operationId === 'northstar.app:operation.party_update',
+  );
+  assert.ok(update);
+  operations.push({
+    ...update,
+    operationId: 'northstar.app:operation.party_update_alternate',
+  });
+  await assert.rejects(
+    async () => bindings(withForm, ['northstar.app:surface.party_list']),
+    (error: unknown) => {
+      assert.ok(error instanceof SurfaceProjectionError);
+      assert.equal(error.code, 'INVALID_SURFACE_BINDING');
+      assert.match(error.message, /\bupdate\b/u);
+      return true;
+    },
+  );
+});
 
 /**
  * THE PACKET'S OWN PREMISE, executable for the first time on this tree.
@@ -4500,10 +4569,3211 @@ type TaskSummary = {
   };
 };
 
+/** Bounded order-entry witnesses: real canonical contracts/gateways, synthetic storage. */
+/**
+ * A well-formed quantity the stub provider refuses as MODULE_FIELD_VALUE_INVALID.
+ * The editor admits it -- it is a plain decimal inside the declared bounds -- so
+ * it stands for a provider rule the editor cannot know, and the refusal arrives
+ * after earlier save steps have committed, which is what F2/F3 exercise.
+ */
+const PROVIDER_REFUSED_QUANTITY = '404';
+/** A line's own value that is visible before read loss and redacted after it. */
+const CHILD_SENTINEL = '424242.4242';
+
+class OrderEntryExecutor
+  implements SemanticQueryExecutor, SemanticOperationExecutor
+{
+  readonly rows = new Map<string, SemanticRecordDto>();
+  readonly owners = new Map<string, string>();
+  readonly calls: SemanticOperationExecutionRequest[] = [];
+  readonly receipts = new Map<string, SemanticOperationResultEnvelope>();
+  readonly failingQueries = new Set<string>();
+  failAt = 0;
+  failAfterCommitAt = 0;
+  onControlledFailure: (() => void) | null = null;
+  withheld = false;
+  namespace = 'northstar.app';
+  /**
+   * Opt-in shared-list paging like the PostgreSQL executor: substring search
+   * over the selected fields, pages of the effective size in insertion order,
+   * and cursors minted for the exact query shape. Off, every list returns all
+   * rows, as the existing witnesses expect.
+   */
+  pageLists = false;
+  /** List executions per query that reached this executor, for bounded-work checks. */
+  readonly listReads = new Map<string, number>();
+  /**
+   * Reads of a query wait while it is held, so a test can deliver answers
+   * out of order. `hold` returns the release.
+   */
+  readonly holds = new Map<string, Promise<void>>();
+  hold(queryId: string) {
+    let release!: () => void;
+    this.holds.set(
+      queryId,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    return () => {
+      this.holds.delete(queryId);
+      release();
+    };
+  }
+  seed(
+    entity: string,
+    values: Record<string, ImmutableJsonValue>,
+    scope?: string,
+  ) {
+    const recordId = randomUUID();
+    this.rows.set(recordId, {
+      recordId,
+      entityId: `${this.namespace}:entity.${entity}`,
+      values,
+      revision: 1,
+      archived: false,
+    });
+    if (scope) this.owners.set(recordId, scope);
+    return recordId;
+  }
+  /** A party with active roles, as the picker's declared eligibility reads them. */
+  seedParty(
+    values: Record<string, ImmutableJsonValue>,
+    roles: readonly ('customer' | 'supplier')[] = ['customer', 'supplier'],
+  ) {
+    const party = this.seed('party', values);
+    for (const role of roles)
+      this.seed('party_role', {
+        [`${this.namespace}:field.party_role_kind`]: `${this.namespace}:option.${role}`,
+        [`${this.namespace}:field.party_role_status`]: `${this.namespace}:option.active`,
+        [`${this.namespace}:relation.party_role_party`]: party,
+      });
+    return party;
+  }
+  async recordNonAccepted() {}
+  execute(
+    request: SemanticQueryExecutionRequest,
+  ): Promise<SemanticQueryResultEnvelope>;
+  execute(
+    request: SemanticOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope>;
+  async execute(
+    request: SemanticQueryExecutionRequest | SemanticOperationExecutionRequest,
+  ): Promise<SemanticQueryResultEnvelope | SemanticOperationResultEnvelope> {
+    if ('arguments' in request) {
+      await this.holds.get(request.definition.queryId);
+      if (this.failingQueries.has(request.definition.queryId))
+        throw new Error('Isolated provider read failure');
+      const args = asRecord(request.arguments);
+      const scope = request.definition.legalEntityScope
+        ? args[request.definition.legalEntityScope.operand.parameterId]
+        : null;
+      const parent = request.list?.query.parentScope;
+      const reference = request.list?.query.referenceScope;
+      const fieldFilters = request.list?.query.fieldFilters;
+      const related = request.list?.relatedFilter;
+      // Like the PostgreSQL executor: exact filters and the related-record
+      // existence check apply before paging, and both are echoed.
+      const selected = [...this.rows.values()].filter(
+        (row) =>
+          row.entityId === request.definition.sourceEntityId &&
+          (!this.owners.has(row.recordId) ||
+            this.owners.get(row.recordId) === scope) &&
+          (!row.archived || args.includeArchived === true) &&
+          (!args.recordId || row.recordId === args.recordId) &&
+          (!parent || row.values[parent.relationId] === parent.recordId) &&
+          (!reference ||
+            row.values[reference.relationId] === reference.recordId) &&
+          (fieldFilters ?? []).every(
+            (filter) => row.values[filter.fieldId] === filter.value,
+          ) &&
+          (!related ||
+            [...this.rows.values()].some(
+              (candidate) =>
+                candidate.entityId === related.relatedEntityId &&
+                !candidate.archived &&
+                candidate.values[related.relationId] === row.recordId &&
+                related.fieldFilters.every(
+                  (filter) => candidate.values[filter.fieldId] === filter.value,
+                ),
+            )),
+      );
+      const echoed = {
+        ...(reference ? { referenceScope: reference } : {}),
+        ...(fieldFilters ? { fieldFilters } : {}),
+        ...(request.list?.query.relatedFilter
+          ? { relatedFilter: request.list.query.relatedFilter }
+          : {}),
+      };
+      if (request.list)
+        this.listReads.set(
+          request.definition.queryId,
+          (this.listReads.get(request.definition.queryId) ?? 0) + 1,
+        );
+      if (request.list && this.pageLists) {
+        const query = request.list.query;
+        const term = query.search.trim().toLowerCase();
+        const matching = term
+          ? selected.filter((row) =>
+              request.definition.selections.some(({ fieldId }) =>
+                String(row.values[fieldId] ?? '')
+                  .toLowerCase()
+                  .includes(term),
+              ),
+            )
+          : selected;
+        const page = matching.slice(
+          query.pageOffset,
+          query.pageOffset + query.effectivePageSize,
+        );
+        const hasMore = query.pageOffset + page.length < matching.length;
+        return {
+          kind: 'semanticQueryResult',
+          schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+          queryId: request.definition.queryId,
+          outcome: 'exact',
+          records: page.map((row) => projectedListRecord(request, row)),
+          unsupportedReason: null,
+          listCoverage: {
+            ...listCoverage(request, page.length),
+            hasMore,
+            nextCursor: hasMore
+              ? encodeSharedListCursor(
+                  request.definition.queryId,
+                  query,
+                  query.pageOffset + page.length,
+                )
+              : null,
+            parentScope: parent ?? null,
+            totalCount: matching.length,
+            ...echoed,
+          },
+        };
+      }
+      const records = request.list
+        ? selected.map((row) => projectedListRecord(request, row))
+        : selected;
+      return {
+        kind: 'semanticQueryResult',
+        schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+        queryId: request.definition.queryId,
+        outcome: records.length || request.list ? 'exact' : 'not-found',
+        records,
+        unsupportedReason: null,
+        ...(request.list
+          ? {
+              listCoverage: {
+                ...listCoverage(request, records.length),
+                parentScope: parent ?? null,
+                ...echoed,
+              },
+            }
+          : {}),
+      };
+    }
+    this.calls.push(request);
+    if (this.failAt === this.calls.length) {
+      this.onControlledFailure?.();
+      throw new Error('Isolated line failure');
+    }
+    const cached = this.receipts.get(request.idempotencyKey);
+    if (cached) return cached;
+    const input = asRecord(request.input);
+    const recordId = String(input.recordId);
+    const previous = this.rows.get(recordId);
+    if (previous && input.expectedRevision !== previous.revision)
+      throw new ModuleRuntimeInterpreterError(
+        'MODULE_REVISION_CONFLICT',
+        'Isolated stale line',
+      );
+    if (
+      previous?.archived &&
+      request.definition.effect.kind === 'archiveRecordEffect'
+    )
+      throw new ModuleRuntimeInterpreterError(
+        'MODULE_MUTATION_CONFLICT',
+        'Isolated duplicate archive',
+      );
+    if (
+      Object.entries(asRecord(input.values ?? input.patch ?? {})).some(
+        ([fieldId, value]) =>
+          fieldId.endsWith('_ordered_quantity') &&
+          value === PROVIDER_REFUSED_QUANTITY,
+      )
+    ) {
+      this.onControlledFailure?.();
+      throw new ModuleRuntimeInterpreterError(
+        'MODULE_FIELD_VALUE_INVALID',
+        'Isolated invalid quantity',
+      );
+    }
+    const local =
+      request.definition.effect.entity.targetId.split(':entity.')[1]!;
+    const stored = operationRecord(request, previous, recordId, {
+      ...(!previous &&
+      ['sales_order', 'service_request', 'purchase_order'].includes(local)
+        ? {
+            [`${this.namespace}:derived_state_field.machine.${local}_lifecycle`]: `${this.namespace}:state.${local}_draft`,
+          }
+        : {}),
+      ...asRecord(input.values ?? input.patch ?? {}),
+      ...asRecord(input.relations ?? {}),
+    });
+    this.rows.set(recordId, stored);
+    if (input.legalEntityId)
+      this.owners.set(recordId, String(input.legalEntityId));
+    const result: SemanticOperationResultEnvelope = {
+      kind: 'semanticOperationResult',
+      schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+      operationId: request.definition.operationId,
+      outcome: 'succeeded',
+      readBack: this.withheld ? null : stored,
+      unsupportedReason: null,
+      trust: {
+        changeDocumentId: randomUUID(),
+        domainEventId: randomUUID(),
+        invocationId: randomUUID(),
+        outboxId: randomUUID(),
+      },
+    };
+    this.receipts.set(request.idempotencyKey, result);
+    if (this.failAfterCommitAt === this.calls.length) {
+      this.onControlledFailure?.();
+      throw new Error('Isolated response failure after commit');
+    }
+    return result;
+  }
+}
+async function orderEntryWitness(
+  variant = false,
+  /** A metadata variation applied to the authored package before it compiles. */
+  mutate: (
+    source: ReturnType<typeof composedApplicationDefinition>,
+  ) => void = () => {},
+) {
+  const source = composedApplicationDefinition();
+  mutate(source);
+  if (variant)
+    for (const surface of source.surfaces as Array<Record<string, unknown>>) {
+      if (String(surface.surfaceId).endsWith(':surface.purchase_order_detail'))
+        surface.label = 'Service procurement';
+      const editor = surface.documentEditor as
+        { lineFields: Array<{ fieldId: string; label: string }> } | undefined;
+      if (
+        editor &&
+        String(surface.surfaceId).includes(':surface.purchase_order_')
+      )
+        for (const field of editor.lineFields)
+          if (field.label === 'Quantity') field.label = 'Requested units';
+    }
+  const compiled = compileFixture(source);
+  const executor = new OrderEntryExecutor();
+  const ns = executor.namespace;
+  const scopes = [randomUUID(), randomUUID()];
+  const allowed = new Set<string>(scopes);
+  const deniedReads = new Set<string>();
+  const policy = new RecordingPolicy((request) => {
+    const input = asRecord(request.decisionInput);
+    return deniedReads.has(request.permissionId) ||
+      (input.kind === 'legalEntityReadScopePolicyInput' &&
+        !allowed.has(String(input.legalEntityId)))
+      ? 'DENY'
+      : 'ALLOW';
+  });
+  for (const [index, scope] of scopes.entries())
+    executor.rows.set(scope, {
+      entityId: `${ns}:entity.legal_entity`,
+      recordId: scope,
+      revision: 1,
+      archived: false,
+      values: {
+        [`${ns}:field.legal_entity_name`]: `Company ${index + 1}`,
+        [`${ns}:field.legal_entity_status`]: `${ns}:option.legal_entity_status_active`,
+      },
+    });
+  const party = executor.seedParty({
+    [`${ns}:field.party_name`]: 'Readable customer',
+  });
+  const item = executor.seed('item', {
+    [`${ns}:field.item_name`]: 'Readable product',
+    [`${ns}:field.item_sku`]: 'SKU-WITNESS',
+    [`${ns}:field.item_base_unit`]: 'EA',
+  });
+  const principal = randomUUID();
+  const entry = runtimeEntry(compiled, policy, {
+    a: identity(tenantA, environmentA, principal),
+    b: identity(tenantA, environmentB, principal),
+    c: identity(tenantB, environmentA, principal),
+    d: identity(tenantA, environmentA, randomUUID()),
+  });
+  const view = await issuedView(entry, 'a');
+  const surfaces = readCompiledSurfaceManifest(view).surfaces;
+  const local = variant ? 'purchase_order' : 'sales_order';
+  const form = surfaces.find(
+    (value) => value.surfaceId === `${ns}:surface.${local}_form`,
+  )!;
+  const list = surfaces.find(
+    (value) => value.surfaceId === `${ns}:surface.${local}_list`,
+  )!;
+  const gateways: SurfaceRuntimeGateways = {
+    ...semanticGateways(policy, executor),
+    queryGateway: new SemanticQueryGateway(
+      policy,
+      executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': async ({ result }) => result,
+      },
+    ),
+  };
+  const url = new URL(
+    `http://fixture.local/?surface=${encodeURIComponent(form.surfaceId)}&${encodeURIComponent(`${ns}:parameter.${local}_get_legal_entity_scope`)}=${scopes[0]}`,
+  );
+  const open = () =>
+    documentEditor(view, form, surfaces, url, scopes[0]!, gateways);
+  const post = (
+    rendered: NonNullable<Awaited<ReturnType<typeof open>>>,
+    action: string,
+    values: Record<string, string> = {},
+  ) =>
+    documentEditor(view, form, surfaces, url, scopes[0]!, gateways, {
+      draftSession: hiddenValue(rendered.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(rendered.slots!.keyFacts!, 'draftVersion'),
+      draftAction: action,
+      ...values,
+    });
+  const values = (rendered: NonNullable<Awaited<ReturnType<typeof open>>>) => {
+    const result: Record<string, string> = {};
+    const html = Object.values(rendered.slots!).join('');
+    for (const match of html.matchAll(/name="(draft:[^"]+)"/g)) {
+      const field = match[1]!;
+      const name = field.split(':field.')[1]!;
+      result[field] = name.endsWith('_number')
+        ? 'SO-WITNESS'
+        : name.endsWith('_customer_party_id') ||
+            name.endsWith('_supplier_party_id')
+          ? party
+          : name.endsWith('_item_id')
+            ? item
+            : name.endsWith('_order_date')
+              ? '2026-09-15T12:00'
+              : name.endsWith('_currency')
+                ? 'CAD'
+                : name.endsWith('_ordered_quantity')
+                  ? '10'
+                  : name.endsWith('_unit_id')
+                    ? 'EA'
+                    : name.endsWith('_unit_price')
+                      ? '12.5'
+                      : '';
+    }
+    return result;
+  };
+  return {
+    executor,
+    ns,
+    party,
+    item,
+    scopes,
+    allowed,
+    deniedReads,
+    entry,
+    view,
+    surfaces,
+    form,
+    list,
+    gateways,
+    url,
+    open,
+    post,
+    values,
+  };
+}
+
+type OrderEntryWitness = Awaited<ReturnType<typeof orderEntryWitness>>;
+
+async function persistedDraft(f: OrderEntryWitness, lineCount = 1) {
+  let editor = (await f.open())!;
+  for (let index = 1; index < lineCount; index++)
+    editor = (await f.post(editor, 'add', f.values(editor)))!;
+  const saved = (await f.post(editor, 'save', f.values(editor)))!;
+  assert.equal(saved.statusCode, 303);
+  const recordId = new URL(
+    saved.location!,
+    'http://fixture.local',
+  ).searchParams.get('record')!;
+  f.url.searchParams.set('record', recordId);
+  return { editor: (await f.open())!, recordId };
+}
+
+function draftField(
+  values: Record<string, string>,
+  rowId: string,
+  suffix: string,
+) {
+  const field = Object.keys(values).find(
+    (candidate) => candidate.includes(rowId) && candidate.endsWith(suffix),
+  );
+  assert.ok(field, `missing ${suffix} input for ${rowId}`);
+  return field;
+}
+
+const assertDraftOutcomeRedacted = (response: {
+  html: string;
+  statusCode: number;
+}) => {
+  assert.equal(response.statusCode, 200);
+  assert.match(response.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
+  assert.doesNotMatch(
+    response.html,
+    /PROTECTED_(?:ROOT|CHILD)_SENTINEL|424242\.4242|<form\b|<button\b|data-draft-line/,
+  );
+};
+
+test('order entry: unrelated metadata renders the shared editor; partial save freezes exact retry and duplicate replay', async () => {
+  const f = await orderEntryWitness(true);
+  let form = (await f.open())!;
+  // The product picker searches the declared list query; nothing is preloaded.
+  assert.doesNotMatch(form.slots!.sections!, /Readable product/);
+  assert.match(form.slots!.sections!, /Requested units/);
+  const lineId = /data-draft-line="([^"]+)"/.exec(form.slots!.sections!)![1]!;
+  const productField = `${f.ns}:field.purchase_order_line_item_id`;
+  form = (await f.post(form, `search:${lineId}:${productField}`, {
+    [`draftSearch:${lineId}:${productField}`]: 'Readable',
+  }))!;
+  assert.match(
+    form.slots!.sections!,
+    /<strong>Readable product<\/strong><small>SKU-WITNESS · EA<\/small>/,
+  );
+  form = (await f.post(form, 'add', f.values(form)))!;
+  const values = f.values(form);
+  f.executor.failAt = 3;
+  const failed = (await f.post(form, 'save', values))!;
+  assert.equal(failed.statusCode, 422);
+  assert.match(failed.slots!.keyFacts!, /committed/);
+  assert.match(failed.slots!.commandBar!, /Retry save/);
+  assert.equal(
+    [...f.executor.rows.values()].filter((row) =>
+      row.entityId.endsWith(':entity.purchase_order_line'),
+    ).length,
+    1,
+  );
+  const failedCall = f.executor.calls[2]!;
+  const input = structuredClone(failedCall.input);
+  f.executor.failAt = 0;
+  f.url.searchParams.set(
+    'record',
+    String(asRecord(f.executor.calls[0]!.input).recordId),
+  );
+  const completed = await f.post(
+    failed,
+    'retry',
+    Object.fromEntries(Object.keys(values).map((key) => [key, 'forged'])),
+  );
+  assert.equal(completed!.statusCode, 303);
+  assert.deepEqual(f.executor.calls[3]!.input, input);
+  assert.equal(f.executor.calls[3]!.idempotencyKey, failedCall.idempotencyKey);
+  assert.equal(
+    f.executor.calls.filter((call) =>
+      call.definition.operationId.endsWith('.purchase_order_create'),
+    ).length,
+    1,
+  );
+  const duplicate = await f.post(failed, 'retry');
+  assert.equal(duplicate!.location, completed!.location);
+  assert.equal(f.executor.calls.length, 4);
+  const lines = [...f.executor.rows.values()].filter((row) =>
+    row.entityId.endsWith(':entity.purchase_order_line'),
+  );
+  assert.equal(lines.length, 2);
+  assert.ok(
+    lines.every(
+      (row) =>
+        row.values[`${f.ns}:relation.purchase_order_line_order`] ===
+          f.url.searchParams.get('record') &&
+        f.executor.owners.get(row.recordId) === f.scopes[0],
+    ),
+  );
+});
+
+test('order entry F1: a receipt-persisted header update bypasses only the fresh-edit check and retries its exact frozen request', async () => {
+  const f = await orderEntryWitness();
+  const { editor, recordId } = await persistedDraft(f);
+  const line = [...f.executor.rows.values()].find((candidate) =>
+    candidate.entityId.endsWith(':entity.sales_order_line'),
+  )!;
+  const changed = f.values(editor);
+  changed[draftField(changed, recordId, '_notes')] = 'recovered header';
+  changed[draftField(changed, line.recordId, '_ordered_quantity')] = '11';
+  f.executor.failAfterCommitAt = f.executor.calls.length + 1;
+  const failed = (await f.post(editor, 'save', changed))!;
+  assert.equal(failed.statusCode, 422);
+  const failedCall = f.executor.calls.at(-1)!;
+  assert.ok(f.executor.receipts.has(failedCall.idempotencyKey));
+  assert.equal(f.executor.rows.get(recordId)!.revision, 2);
+  f.executor.failAfterCommitAt = 0;
+  const retried = await f.post(
+    failed,
+    'retry',
+    Object.fromEntries(Object.keys(changed).map((key) => [key, 'forged'])),
+  );
+  assert.equal(retried!.statusCode, 303);
+  const replay = f.executor.calls.at(-2)!;
+  assert.equal(replay.idempotencyKey, failedCall.idempotencyKey);
+  assert.deepEqual(replay.input, failedCall.input);
+  assert.equal(f.executor.rows.get(recordId)!.revision, 2);
+  assert.equal(
+    f.executor.rows.get(line.recordId)!.values[
+      `${f.ns}:field.sales_order_line_ordered_quantity`
+    ],
+    '11',
+  );
+
+  const denied = await orderEntryWitness();
+  const deniedDraft = await persistedDraft(denied);
+  const deniedValues = denied.values(deniedDraft.editor);
+  deniedValues[draftField(deniedValues, deniedDraft.recordId, '_notes')] =
+    'authorized once';
+  denied.executor.failAfterCommitAt = denied.executor.calls.length + 1;
+  const deniedFailure = (await denied.post(
+    deniedDraft.editor,
+    'save',
+    deniedValues,
+  ))!;
+  const deniedRequest = denied.executor.calls.at(-1)!;
+  denied.deniedReads.add(deniedRequest.definition.permissionId);
+  denied.executor.failAfterCommitAt = 0;
+  const callCount = denied.executor.calls.length;
+  const refused = await denied.post(deniedFailure, 'retry');
+  assert.equal(refused!.statusCode, 422);
+  assert.equal(denied.executor.calls.length, callCount);
+});
+
+test('order entry F2: a completed archive is reconciled after correctable line input while an unexecuted removal still confirms', async () => {
+  const f = await orderEntryWitness();
+  let { editor } = await persistedDraft(f, 2);
+  const lines = [...f.executor.rows.values()].filter((candidate) =>
+    candidate.entityId.endsWith(':entity.sales_order_line'),
+  );
+  const [removed, corrected] = lines;
+  const invalid = f.values(editor);
+  invalid[draftField(invalid, corrected!.recordId, '_ordered_quantity')] =
+    PROVIDER_REFUSED_QUANTITY;
+  editor = (await f.post(editor, `remove:${removed!.recordId}`, invalid))!;
+  const review = (await f.post(editor, 'save', invalid))!;
+  assert.match(review.slots!.commandBar!, /Confirm removal and save/);
+  const failed = (await f.post(review, 'confirm'))!;
+  assert.equal(failed.statusCode, 422);
+  assert.equal(f.executor.rows.get(removed!.recordId)!.archived, true);
+  const repaired = f.values(failed);
+  repaired[draftField(repaired, corrected!.recordId, '_ordered_quantity')] =
+    '12';
+  const completed = await f.post(failed, 'save', repaired);
+  assert.equal(completed!.statusCode, 303);
+  assert.equal(
+    f.executor.calls.filter(
+      (call) => call.definition.effect.kind === 'archiveRecordEffect',
+    ).length,
+    1,
+  );
+  assert.equal(
+    f.executor.rows.get(corrected!.recordId)!.values[
+      `${f.ns}:field.sales_order_line_ordered_quantity`
+    ],
+    '12',
+  );
+
+  const pending = await orderEntryWitness();
+  ({ editor } = await persistedDraft(pending, 2));
+  const pendingLines = [...pending.executor.rows.values()].filter((candidate) =>
+    candidate.entityId.endsWith(':entity.sales_order_line'),
+  );
+  const [invalidLine, stillRemoved] = pendingLines;
+  const pendingValues = pending.values(editor);
+  pendingValues[
+    draftField(pendingValues, invalidLine!.recordId, '_ordered_quantity')
+  ] = PROVIDER_REFUSED_QUANTITY;
+  editor = (await pending.post(
+    editor,
+    `remove:${stillRemoved!.recordId}`,
+    pendingValues,
+  ))!;
+  const pendingReview = (await pending.post(editor, 'save', pendingValues))!;
+  const pendingFailure = (await pending.post(pendingReview, 'confirm'))!;
+  const correctedValues = pending.values(pendingFailure);
+  correctedValues[
+    draftField(correctedValues, invalidLine!.recordId, '_ordered_quantity')
+  ] = '12';
+  const secondReview = (await pending.post(
+    pendingFailure,
+    'save',
+    correctedValues,
+  ))!;
+  assert.match(secondReview.slots!.commandBar!, /Confirm removal and save/);
+  assert.equal(
+    pending.executor.calls.filter(
+      (call) => call.definition.effect.kind === 'archiveRecordEffect',
+    ).length,
+    0,
+  );
+});
+
+test('order entry F3: post-execution read refusal returns a redacted partial-commit outcome without another mutation', async (t) => {
+  const exercise = async (readFailure: 'authorization' | 'provider') => {
+    const f = await orderEntryWitness();
+    const { editor, recordId } = await persistedDraft(f);
+    const line = [...f.executor.rows.values()].find((candidate) =>
+      candidate.entityId.endsWith(':entity.sales_order_line'),
+    )!;
+    const changed = f.values(editor);
+    changed[draftField(changed, recordId, '_notes')] =
+      'PROTECTED_ROOT_SENTINEL';
+    changed[draftField(changed, line.recordId, '_ordered_quantity')] = '13';
+    f.executor.failAt = f.executor.calls.length + 2;
+    f.executor.onControlledFailure = () => {
+      if (readFailure === 'authorization') {
+        f.deniedReads.add(`${f.ns}:permission.sales_order_read`);
+        f.deniedReads.add(`${f.ns}:permission.sales_order_line_read`);
+      } else f.executor.failingQueries.add(f.form.dataSourceQueryId);
+    };
+    const submission = {
+      draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+      draftAction: 'save',
+      ...changed,
+    };
+    const response = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      submission,
+      f.gateways,
+    );
+    assertDraftOutcomeRedacted(response);
+    const calls = f.executor.calls.length;
+    const repeated = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      submission,
+      f.gateways,
+    );
+    assertDraftOutcomeRedacted(repeated);
+    assert.equal(f.executor.calls.length, calls);
+  };
+  await t.test('authorization withdrawn', () => exercise('authorization'));
+  await t.test('provider read failure', () => exercise('provider'));
+
+  await t.test(
+    'correctable failure clears pending but retains commitment',
+    async () => {
+      const f = await orderEntryWitness();
+      let { editor } = await persistedDraft(f, 2);
+      const lines = [...f.executor.rows.values()].filter((candidate) =>
+        candidate.entityId.endsWith(':entity.sales_order_line'),
+      );
+      const [removed, invalidLine] = lines;
+      const invalid = f.values(editor);
+      invalid[draftField(invalid, invalidLine!.recordId, '_ordered_quantity')] =
+        PROVIDER_REFUSED_QUANTITY;
+      editor = (await f.post(editor, `remove:${removed!.recordId}`, invalid))!;
+      const review = (await f.post(editor, 'save', invalid))!;
+      f.executor.onControlledFailure = () => {
+        f.deniedReads.add(`${f.ns}:permission.sales_order_read`);
+        f.deniedReads.add(`${f.ns}:permission.sales_order_line_read`);
+      };
+      const confirmation = {
+        draftSession: hiddenValue(review.slots!.keyFacts!, 'draftSession'),
+        draftVersion: hiddenValue(review.slots!.keyFacts!, 'draftVersion'),
+        draftAction: 'confirm',
+      };
+      const response = await submitSurfaceRuntimeIntent(
+        f.view,
+        f.url.pathname + f.url.search,
+        confirmation,
+        f.gateways,
+      );
+      assertDraftOutcomeRedacted(response);
+      const calls = f.executor.calls.length;
+      assert.equal(f.executor.rows.get(removed!.recordId)!.archived, true);
+      assertDraftOutcomeRedacted(
+        await submitSurfaceRuntimeIntent(
+          f.view,
+          f.url.pathname + f.url.search,
+          confirmation,
+          f.gateways,
+        ),
+      );
+      assert.equal(f.executor.calls.length, calls);
+    },
+  );
+
+  const unknown = await orderEntryWitness();
+  const unknownDraft = await persistedDraft(unknown);
+  unknown.executor.failingQueries.add(unknown.form.dataSourceQueryId);
+  const calls = unknown.executor.calls.length;
+  const refused = await submitSurfaceRuntimeIntent(
+    unknown.view,
+    unknown.url.pathname + unknown.url.search,
+    {
+      draftSession: hiddenValue(
+        unknownDraft.editor.slots!.keyFacts!,
+        'draftSession',
+      ),
+      draftVersion: hiddenValue(
+        unknownDraft.editor.slots!.keyFacts!,
+        'draftVersion',
+      ),
+      draftAction: 'save',
+      ...unknown.values(unknownDraft.editor),
+    },
+    unknown.gateways,
+  );
+  assert.equal(refused.statusCode, 422);
+  assert.equal(unknown.executor.calls.length, calls);
+});
+
+test('order entry F3: read loss between partial-save submissions redacts acknowledged work before retry', async (t) => {
+  const partialFailure = async (pending: 'cleared' | 'retained') => {
+    const f = await orderEntryWitness();
+    const { editor, recordId } = await persistedDraft(f);
+    const line = [...f.executor.rows.values()].find((candidate) =>
+      candidate.entityId.endsWith(':entity.sales_order_line'),
+    )!;
+    const changed = f.values(editor);
+    changed[draftField(changed, recordId, '_notes')] =
+      'PROTECTED_ROOT_SENTINEL';
+    changed[draftField(changed, line.recordId, '_unit_price')] = CHILD_SENTINEL;
+    const quantity = draftField(changed, line.recordId, '_ordered_quantity');
+    changed[quantity] =
+      pending === 'cleared' ? PROVIDER_REFUSED_QUANTITY : '13';
+    if (pending === 'retained') f.executor.failAt = f.executor.calls.length + 2;
+
+    const first = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      {
+        draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+        draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+        draftAction: 'save',
+        ...changed,
+      },
+      f.gateways,
+    );
+    assert.equal(first.statusCode, 422);
+    assert.match(first.html, /PROTECTED_ROOT_SENTINEL/);
+    assert.match(first.html, new RegExp(CHILD_SENTINEL.replace('.', '\\.')));
+    assert.match(first.html, /<form\b[^>]*data-document-editor/);
+    assert.doesNotMatch(first.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
+    if (pending === 'cleared') {
+      assert.match(first.html, /1 save operations committed/);
+      assert.match(first.html, />Save draft<\/button>/);
+    } else {
+      assert.match(first.html, /data-save-progress/);
+      assert.match(first.html, />Retry save<\/button>/);
+    }
+
+    const retryValues = { ...changed, [quantity]: '12' };
+    return {
+      f,
+      retry: {
+        draftSession: hiddenValue(first.html, 'draftSession'),
+        draftVersion: hiddenValue(first.html, 'draftVersion'),
+        draftAction: pending === 'cleared' ? 'save' : 'retry',
+        ...retryValues,
+      },
+    };
+  };
+
+  for (const scenario of [
+    {
+      name: 'cleared pending, header policy denial',
+      pending: 'cleared',
+      read: 'header',
+      failure: 'policy',
+    },
+    {
+      name: 'cleared pending, child provider failure',
+      pending: 'cleared',
+      read: 'child',
+      failure: 'provider',
+    },
+    {
+      name: 'retained pending, child policy denial',
+      pending: 'retained',
+      read: 'child',
+      failure: 'policy',
+    },
+    {
+      name: 'retained pending, header provider failure',
+      pending: 'retained',
+      read: 'header',
+      failure: 'provider',
+    },
+  ] as const) {
+    await t.test(scenario.name, async () => {
+      const { f, retry } = await partialFailure(scenario.pending);
+      if (scenario.failure === 'policy')
+        f.deniedReads.add(
+          `${f.ns}:permission.sales_order${scenario.read === 'child' ? '_line' : ''}_read`,
+        );
+      else
+        f.executor.failingQueries.add(
+          scenario.read === 'header'
+            ? f.form.dataSourceQueryId
+            : f.form.documentEditor!.lineQueryId,
+        );
+      const calls = f.executor.calls.length;
+      const second = await submitSurfaceRuntimeIntent(
+        f.view,
+        f.url.pathname + f.url.search,
+        retry,
+        f.gateways,
+      );
+      assertDraftOutcomeRedacted(second);
+      assert.equal(f.executor.calls.length, calls);
+      assertDraftOutcomeRedacted(
+        await submitSurfaceRuntimeIntent(
+          f.view,
+          f.url.pathname + f.url.search,
+          retry,
+          f.gateways,
+        ),
+      );
+      assert.equal(f.executor.calls.length, calls);
+    });
+  }
+
+  await t.test('authorized retained retry still completes', async () => {
+    const { f, retry } = await partialFailure('retained');
+    f.executor.failAt = 0;
+    const completed = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      retry,
+      f.gateways,
+    );
+    assert.equal(completed.statusCode, 303);
+  });
+
+  await t.test('invalid and foreign continuations remain refused', async () => {
+    const { f, retry } = await partialFailure('retained');
+    const calls = f.executor.calls.length;
+    for (const [view, submission] of [
+      [f.view, { ...retry, draftSession: randomUUID() }],
+      [await issuedView(f.entry, 'd'), retry],
+    ] as const) {
+      const refused = await submitSurfaceRuntimeIntent(
+        view,
+        f.url.pathname + f.url.search,
+        submission,
+        f.gateways,
+      );
+      assert.equal(refused.statusCode, 422);
+      assert.doesNotMatch(refused.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
+    }
+    assert.equal(f.executor.calls.length, calls);
+  });
+
+  await t.test(
+    'uncertain-only execution retains ordinary refusal',
+    async () => {
+      const f = await orderEntryWitness();
+      const { editor, recordId } = await persistedDraft(f);
+      const changed = f.values(editor);
+      changed[draftField(changed, recordId, '_notes')] = 'uncertain header';
+      f.executor.failAfterCommitAt = f.executor.calls.length + 1;
+      const first = (await f.post(editor, 'save', changed))!;
+      assert.equal(first.statusCode, 422);
+      assert.doesNotMatch(
+        Object.values(first.slots!).join(''),
+        /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/,
+      );
+      f.executor.failAfterCommitAt = 0;
+      f.executor.failingQueries.add(f.form.dataSourceQueryId);
+      const calls = f.executor.calls.length;
+      const refused = await submitSurfaceRuntimeIntent(
+        f.view,
+        f.url.pathname + f.url.search,
+        {
+          draftSession: hiddenValue(first.slots!.keyFacts!, 'draftSession'),
+          draftVersion: hiddenValue(first.slots!.keyFacts!, 'draftVersion'),
+          draftAction: 'retry',
+        },
+        f.gateways,
+      );
+      assert.equal(refused.statusCode, 422);
+      assert.doesNotMatch(refused.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
+      assert.equal(f.executor.calls.length, calls);
+    },
+  );
+});
+
+test('order entry picker and quick create: offered-only selection, verified carrier, governed create with stable keys', async (t) => {
+  type Rendered = NonNullable<Awaited<ReturnType<OrderEntryWitness['open']>>>;
+  const html = (rendered: Rendered) => Object.values(rendered.slots!).join('');
+  const headerOf = (rendered: Rendered) =>
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+      rendered.slots!.keyFacts!,
+    )![1]!;
+  const carrier = (rendered: Rendered, rowId: string, fieldId: string) =>
+    new RegExp(`name="draft:${rowId}:${fieldId}" value="([^"]*)"`).exec(
+      html(rendered),
+    )![1]!;
+  const creates = (f: OrderEntryWitness, local: string) =>
+    f.executor.calls.filter(
+      (call) =>
+        call.definition.operationId === `${f.ns}:operation.${local}_create`,
+    );
+  const submitCreate = (
+    f: OrderEntryWitness,
+    rendered: Rendered,
+    values: Record<string, string>,
+    verb = 'submit',
+    task = hiddenValue(rendered.slots!.keyFacts!, 'draftCreateTask'),
+  ) =>
+    documentEditor(
+      f.view,
+      f.form,
+      f.surfaces,
+      f.url,
+      f.scopes[0]!,
+      f.gateways,
+      {
+        draftSession: hiddenValue(rendered.slots!.keyFacts!, 'draftSession'),
+        draftVersion: hiddenValue(rendered.slots!.keyFacts!, 'draftVersion'),
+        draftCreateTask: task,
+        draftCreate: verb,
+        ...values,
+      },
+    ) as Promise<Rendered>;
+  const openCreate = async (f: OrderEntryWitness, term: string) => {
+    const editor = (await f.open())!;
+    const header = headerOf(editor);
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    const opened = (await f.post(editor, `create:${header}:${customer}`, {
+      [`draft:${header}:${f.ns}:field.sales_order_number`]: 'SO-KEPT',
+      [`draftSearch:${header}:${customer}`]: term,
+    }))!;
+    return { header, customer, opened };
+  };
+
+  await t.test(
+    'selection comes only from offered results and is re-read',
+    async () => {
+      const f = await orderEntryWitness();
+      let editor = (await f.open())!;
+      const header = headerOf(editor);
+      const customer = `${f.ns}:field.sales_order_customer_party_id`;
+      const forged = (await f.post(
+        editor,
+        `select:${header}:${customer}:${f.party}`,
+      ))!;
+      assert.equal(forged.statusCode, 422);
+      assert.equal(carrier(forged, header, customer), '');
+      editor = (await f.post(forged, `search:${header}:${customer}`, {
+        [`draftSearch:${header}:${customer}`]: 'Readable',
+      }))!;
+      assert.match(
+        editor.slots!.keyFacts!,
+        /class="reference-option"[^>]*><strong>Readable customer<\/strong>/,
+      );
+      const selected = (await f.post(
+        editor,
+        `select:${header}:${customer}:${f.party}`,
+      ))!;
+      assert.equal(selected.statusCode, 200);
+      assert.equal(carrier(selected, header, customer), f.party);
+      assert.match(
+        selected.slots!.keyFacts!,
+        /data-selected-label="Readable customer"/,
+      );
+      assert.equal(f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'a form-changed carrier needs an authorized exact read',
+    async () => {
+      const f = await orderEntryWitness();
+      const editor = (await f.open())!;
+      const header = headerOf(editor);
+      const customer = `${f.ns}:field.sales_order_customer_party_id`;
+      const unknown = (await f.post(editor, 'refresh', {
+        [`draft:${header}:${customer}`]: randomUUID(),
+      }))!;
+      assert.equal(unknown.statusCode, 422);
+      assert.match(unknown.slots!.keyFacts!, /data-editor-reference-refused/);
+      assert.equal(carrier(unknown, header, customer), '');
+      const other = f.executor.seedParty({
+        [`${f.ns}:field.party_name`]: 'Unreadable customer',
+      });
+      f.deniedReads.add(`${f.ns}:permission.party_read`);
+      const denied = (await f.post(unknown, 'refresh', {
+        [`draft:${header}:${customer}`]: other,
+      }))!;
+      assert.equal(denied.statusCode, 422);
+      assert.equal(carrier(denied, header, customer), '');
+      f.deniedReads.delete(`${f.ns}:permission.party_read`);
+      const readable = (await f.post(denied, 'refresh', {
+        [`draft:${header}:${customer}`]: other,
+      }))!;
+      assert.equal(readable.statusCode, 200);
+      assert.equal(carrier(readable, header, customer), other);
+      // The derived unit is never taken from the form.
+      const line = /data-draft-line="([^"]+)"/.exec(
+        readable.slots!.sections!,
+      )![1]!;
+      const item = `${f.ns}:field.sales_order_line_item_id`;
+      const derived = (await f.post(readable, 'refresh', {
+        [`draft:${line}:${item}`]: f.item,
+        [`draft:${line}:${f.ns}:field.sales_order_line_unit_id`]: 'FORGED',
+      }))!;
+      assert.match(derived.slots!.sections!, /class="derived-value"[^>]*>EA</);
+      assert.doesNotMatch(derived.slots!.sections!, /FORGED/);
+    },
+  );
+
+  await t.test(
+    'create uses governed steps with stable keys, then selects',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(
+        f,
+        'Zenith Glazing',
+      );
+      assert.match(
+        opened.slots!.keyFacts!,
+        /<dialog class="editor-create" open/,
+      );
+      assert.match(
+        opened.slots!.keyFacts!,
+        /name="create:northstar\.app:field\.party_name" value="Zenith Glazing"/,
+      );
+      const paused = (await f.post(opened, 'add'))!;
+      assert.equal(paused.statusCode, 409);
+      assert.match(paused.slots!.keyFacts!, /data-editor-paused/);
+      assert.equal(
+        paused.slots!.sections!.match(/data-draft-line=/g)!.length,
+        1,
+      );
+      const created = await submitCreate(f, paused, {
+        [`create:${f.ns}:field.party_number`]: 'C-100',
+        [`create:${f.ns}:field.party_name`]: 'Zenith Glazing',
+      });
+      assert.equal(created.statusCode, 200);
+      assert.match(created.slots!.keyFacts!, /data-editor-create-selected/);
+      assert.doesNotMatch(created.slots!.keyFacts!, /<dialog/);
+      assert.match(created.slots!.keyFacts!, /value="SO-KEPT"/);
+      const [party] = creates(f, 'party');
+      const [role] = creates(f, 'party_role');
+      assert.equal(creates(f, 'party').length, 1);
+      assert.equal(creates(f, 'party_role').length, 1);
+      const partyId = String(asRecord(party!.input).recordId);
+      assert.equal(carrier(created, header, customer), partyId);
+      assert.deepEqual(asRecord(asRecord(role!.input).values), {
+        [`${f.ns}:field.party_role_kind`]: `${f.ns}:option.customer`,
+        [`${f.ns}:field.party_role_status`]: `${f.ns}:option.active`,
+      });
+      assert.deepEqual(asRecord(asRecord(role!.input).relations), {
+        [`${f.ns}:relation.party_role_party`]: partyId,
+      });
+      // A replay of the same create form is a stale version; nothing is written.
+      const replay = await submitCreate(f, paused, {
+        [`create:${f.ns}:field.party_number`]: 'C-100',
+        [`create:${f.ns}:field.party_name`]: 'Zenith Glazing',
+      });
+      assert.equal(replay.statusCode, 409);
+      // A current version carrying a closed task is refused, not re-run.
+      const stale = await submitCreate(
+        f,
+        created,
+        { [`create:${f.ns}:field.party_name`]: 'Zenith Glazing' },
+        'submit',
+        hiddenValue(paused.slots!.keyFacts!, 'draftCreateTask'),
+      );
+      assert.equal(stale.statusCode, 422);
+      assert.equal(creates(f, 'party').length, 1);
+      assert.equal(creates(f, 'party_role').length, 1);
+    },
+  );
+
+  await t.test(
+    'cancel writes nothing and returns to the kept draft',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(f, 'Ghost Supply');
+      const cancelled = await submitCreate(f, opened, {}, 'cancel');
+      assert.equal(cancelled.statusCode, 200);
+      assert.equal(f.executor.calls.length, 0);
+      assert.doesNotMatch(cancelled.slots!.keyFacts!, /<dialog/);
+      assert.match(cancelled.slots!.keyFacts!, /value="SO-KEPT"/);
+      assert.equal(carrier(cancelled, header, customer), '');
+      assert.match(
+        cancelled.slots!.keyFacts!,
+        /role="combobox"[^>]*aria-label="Customer"[^>]*autofocus/,
+      );
+    },
+  );
+
+  await t.test(
+    'a denied create is reported without a write or a selection',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(f, 'Denied Party');
+      f.deniedReads.add(`${f.ns}:permission.party_create`);
+      const denied = await submitCreate(f, opened, {
+        [`create:${f.ns}:field.party_number`]: 'C-DENIED',
+        [`create:${f.ns}:field.party_name`]: 'Denied Party',
+      });
+      assert.equal(denied.statusCode, 422);
+      assert.match(
+        denied.slots!.keyFacts!,
+        /data-diagnostic-code="OPERATION_PERMISSION_DENIED"/,
+      );
+      assert.match(
+        denied.slots!.keyFacts!,
+        /<dialog class="editor-create" open/,
+      );
+      assert.equal(f.executor.calls.length, 0);
+      assert.equal(carrier(denied, header, customer), '');
+    },
+  );
+
+  await t.test(
+    'a partial create is named, never selected, and retry reuses its keys',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(f, 'Partial Party');
+      f.executor.failAt = f.executor.calls.length + 2;
+      const partial = await submitCreate(f, opened, {
+        [`create:${f.ns}:field.party_number`]: 'C-PART',
+        [`create:${f.ns}:field.party_name`]: 'Partial Party',
+      });
+      assert.equal(partial.statusCode, 422);
+      assert.match(partial.slots!.keyFacts!, /1 of 2 create steps committed/);
+      assert.match(partial.slots!.keyFacts!, />Retry<\/button>/);
+      assert.equal(carrier(partial, header, customer), '');
+      f.executor.failAt = 0;
+      const retried = await submitCreate(f, partial, {
+        [`create:${f.ns}:field.party_name`]: 'forged',
+      });
+      assert.equal(retried.statusCode, 200);
+      assert.match(retried.slots!.keyFacts!, /data-editor-create-selected/);
+      const parties = creates(f, 'party');
+      const roles = creates(f, 'party_role');
+      assert.equal(parties.length, 1);
+      assert.equal(roles.length, 2);
+      assert.equal(roles[0]!.idempotencyKey, roles[1]!.idempotencyKey);
+      assert.deepEqual(roles[0]!.input, roles[1]!.input);
+      const party = f.executor.rows.get(
+        String(asRecord(parties[0]!.input).recordId),
+      )!;
+      assert.equal(party.values[`${f.ns}:field.party_name`], 'Partial Party');
+      assert.equal(carrier(retried, header, customer), party.recordId);
+    },
+  );
+
+  await t.test(
+    'a created record that cannot be read back is not selected',
+    async () => {
+      const f = await orderEntryWitness();
+      const { header, customer, opened } = await openCreate(
+        f,
+        'Withheld Party',
+      );
+      f.deniedReads.add(`${f.ns}:permission.party_read`);
+      const withheld = await submitCreate(f, opened, {
+        [`create:${f.ns}:field.party_number`]: 'C-HELD',
+        [`create:${f.ns}:field.party_name`]: 'Withheld Party',
+      });
+      assert.match(withheld.slots!.keyFacts!, /data-editor-create-withheld/);
+      assert.equal(carrier(withheld, header, customer), '');
+      assert.equal(creates(f, 'party').length, 1);
+    },
+  );
+});
+
+test('order entry values: exact decimals, bounded before any write, choice set and stored values kept', async (t) => {
+  await t.test(
+    'decimals are canonical, compared by value and bounded before any write',
+    async () => {
+      const f = await orderEntryWitness();
+      const key = (rendered: Record<string, string>, suffix: string) =>
+        Object.keys(rendered).find((candidate) => candidate.endsWith(suffix))!;
+      let editor = (await f.open())!;
+      {
+        // A header problem: the label holds only the field's name, and the
+        // message after the control describes it (aria-describedby).
+        const values = f.values(editor);
+        const refused = (await f.post(editor, 'save', {
+          ...values,
+          [key(values, 'field.sales_order_number')]: '',
+        }))!;
+        assert.equal(refused.statusCode, 422);
+        const header = refused.slots!.keyFacts!;
+        assert.match(
+          header,
+          /<label class="form-field__label" for="([^"]+)">Order number \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
+        );
+        assert.match(header, /<small class="field-error" id="[^"]+-error">/);
+        assert.doesNotMatch(
+          header,
+          /<label\b(?:(?!<\/label>)[\s\S])*class="field-error"/,
+        );
+        assert.equal(f.executor.calls.length, 0);
+        editor = refused;
+      }
+      for (const [entry, message] of [
+        [
+          '1.1234567890123456789012',
+          /Use at most 18 digits after the decimal point/,
+        ],
+        ['1e3', /Enter a plain number, such as 12\.5\./],
+      ] as const) {
+        const values = f.values(editor);
+        editor = (await f.post(editor, 'save', {
+          ...values,
+          [key(values, '_ordered_quantity')]: entry,
+        }))!;
+        assert.equal(editor.statusCode, 422);
+        assert.match(editor.slots!.keyFacts!, /data-editor-problems/);
+        assert.match(editor.slots!.sections!, message);
+        // A problem describes its control; it never becomes part of a label.
+        assert.doesNotMatch(
+          editor.slots!.keyFacts! + editor.slots!.sections!,
+          /<label\b(?:(?!<\/label>)[\s\S])*class="field-error"/,
+        );
+        // The refused entry is kept exactly as typed.
+        assert.ok(editor.slots!.sections!.includes(`value="${entry}"`));
+        assert.equal(f.executor.calls.length, 0);
+      }
+      const values = f.values(editor);
+      const saved = (await f.post(editor, 'save', {
+        ...values,
+        [key(values, '_ordered_quantity')]: '010.500',
+        [key(values, '_unit_price')]: '12.50',
+      }))!;
+      assert.equal(saved.statusCode, 303);
+      const lineCall = f.executor.calls.find((call) =>
+        call.definition.operationId.endsWith('.sales_order_line_create'),
+      )!;
+      const lineValues = asRecord(asRecord(lineCall.input).values);
+      assert.equal(
+        lineValues[`${f.ns}:field.sales_order_line_ordered_quantity`],
+        '10.5',
+      );
+      assert.equal(
+        lineValues[`${f.ns}:field.sales_order_line_unit_price`],
+        '12.5',
+      );
+      // A stored spelling with trailing zeros is the same exact value:
+      // reopening shows it canonically and an unchanged save plans no update.
+      const line = f.executor.rows.get(
+        String(asRecord(lineCall.input).recordId),
+      )!;
+      f.executor.rows.set(line.recordId, {
+        ...line,
+        values: {
+          ...line.values,
+          [`${f.ns}:field.sales_order_line_ordered_quantity`]:
+            '10.500000000000000000',
+        },
+      });
+      f.url.searchParams.set(
+        'record',
+        new URL(saved.location!, 'http://fixture.local').searchParams.get(
+          'record',
+        )!,
+      );
+      const reopened = (await f.open())!;
+      assert.match(reopened.slots!.sections!, /value="10\.5"/);
+      const calls = f.executor.calls.length;
+      const unchanged = (await f.post(reopened, 'save'))!;
+      assert.equal(unchanged.statusCode, 303);
+      assert.equal(f.executor.calls.length, calls);
+    },
+  );
+
+  await t.test(
+    'a choice admits only its offered set; a stored value outside it is kept',
+    async () => {
+      const f = await orderEntryWitness();
+      const editor = (await f.open())!;
+      assert.match(
+        editor.slots!.keyFacts!,
+        /<option value="CAD" selected>CAD · Canadian dollar<\/option>/,
+      );
+      const values = f.values(editor);
+      const currency = Object.keys(values).find((key) =>
+        key.endsWith('_currency'),
+      )!;
+      const refused = (await f.post(editor, 'save', {
+        ...values,
+        [currency]: 'XYZ',
+      }))!;
+      assert.equal(refused.statusCode, 422);
+      assert.match(
+        refused.slots!.keyFacts!,
+        /Currency: choose one of the offered values/,
+      );
+      assert.equal(f.executor.calls.length, 0);
+      const { recordId } = await persistedDraft(f);
+      const header = f.executor.rows.get(recordId)!;
+      f.executor.rows.set(recordId, {
+        ...header,
+        values: {
+          ...header.values,
+          [`${f.ns}:field.sales_order_currency`]: 'GBP',
+        },
+      });
+      const reopened = (await f.open())!;
+      assert.match(
+        reopened.slots!.keyFacts!,
+        /<option value="GBP" selected>GBP \(current value\)<\/option>/,
+      );
+      const kept = f.values(reopened);
+      kept[draftField(kept, recordId, '_currency')] = 'GBP';
+      kept[draftField(kept, recordId, '_notes')] = 'unrelated edit';
+      const saved = (await f.post(reopened, 'save', kept))!;
+      assert.equal(saved.statusCode, 303);
+      const update = f.executor.calls.at(-1)!;
+      assert.equal(
+        asRecord(asRecord(update.input).patch)[
+          `${f.ns}:field.sales_order_currency`
+        ],
+        'GBP',
+      );
+    },
+  );
+});
+
+/**
+ * RAIN WORKSPACE INTERACTION COMPLETION, milestone A. Customer and vendor
+ * pickers offer only parties with an active role of that kind, filtered by the
+ * list query itself, and every selection route re-checks it. A quick create is
+ * offered only when current policy would let the principal start every step,
+ * asked without executing anything; a revocation is observed on the next
+ * render and the create action is refused rather than opened.
+ */
+test('Milestone A: role-eligible lookups and policy-aware quick create', async (t) => {
+  type Rendered = NonNullable<Awaited<ReturnType<OrderEntryWitness['open']>>>;
+  const keyFacts = (rendered: Rendered) => rendered.slots!.keyFacts!;
+  const headerOf = (rendered: Rendered) =>
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.(?:sales|purchase)_order_number"/.exec(
+      keyFacts(rendered),
+    )![1]!;
+  const optionNames = (rendered: Rendered) =>
+    [
+      ...keyFacts(rendered).matchAll(
+        /class="reference-option"[^>]*><strong>([^<]+)<\/strong>/g,
+      ),
+    ].map((match) => match[1]);
+  const seeded = (f: OrderEntryWitness) => ({
+    // Server search over the selected fields, as the PostgreSQL executor does.
+    paged: (f.executor.pageLists = true),
+    supplierOnly: f.executor.seedParty(
+      {
+        [`${f.ns}:field.party_name`]: 'Supplier only co',
+      },
+      ['supplier'],
+    ),
+    customerOnly: f.executor.seedParty(
+      {
+        [`${f.ns}:field.party_name`]: 'Customer only co',
+      },
+      ['customer'],
+    ),
+    dual: f.executor.seedParty({
+      [`${f.ns}:field.party_name`]: 'Dual role co',
+    }),
+    inactive: (() => {
+      const party = f.executor.seed('party', {
+        [`${f.ns}:field.party_name`]: 'Inactive role co',
+      });
+      f.executor.seed('party_role', {
+        [`${f.ns}:field.party_role_kind`]: `${f.ns}:option.customer`,
+        [`${f.ns}:field.party_role_status`]: `${f.ns}:option.inactive`,
+        [`${f.ns}:relation.party_role_party`]: party,
+      });
+      return party;
+    })(),
+    none: f.executor.seed('party', {
+      [`${f.ns}:field.party_name`]: 'No role co',
+    }),
+  });
+
+  await t.test(
+    'lookups offer only active roles of the picker kind',
+    async () => {
+      for (const variant of [false, true]) {
+        const f = await orderEntryWitness(variant);
+        seeded(f);
+        const editor = (await f.open())!;
+        const header = headerOf(editor);
+        const field = `${f.ns}:field.${variant ? 'purchase_order_supplier' : 'sales_order_customer'}_party_id`;
+        const searched = (await f.post(editor, `search:${header}:${field}`, {
+          [`draftSearch:${header}:${field}`]: 'co',
+        }))!;
+        assert.deepEqual(
+          optionNames(searched).sort(),
+          variant
+            ? ['Dual role co', 'Supplier only co']
+            : ['Customer only co', 'Dual role co'],
+        );
+        assert.equal(f.executor.calls.length, 0, 'a lookup writes nothing');
+      }
+    },
+  );
+
+  await t.test('every selection route re-checks eligibility', async () => {
+    const f = await orderEntryWitness();
+    const parties = seeded(f);
+    const editor = (await f.open())!;
+    const header = headerOf(editor);
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    // A readable supplier-only party forged into the form carrier is refused.
+    const forged = (await f.post(editor, 'refresh', {
+      [`draft:${header}:${customer}`]: parties.supplierOnly,
+    }))!;
+    assert.equal(forged.statusCode, 422);
+    assert.match(keyFacts(forged), /data-editor-reference-refused/);
+    // An offered party that loses its role before selection is refused.
+    const searched = (await f.post(forged, `search:${header}:${customer}`, {
+      [`draftSearch:${header}:${customer}`]: 'Customer only',
+    }))!;
+    assert.deepEqual(optionNames(searched), ['Customer only co']);
+    for (const row of f.executor.rows.values())
+      if (
+        row.values[`${f.ns}:relation.party_role_party`] === parties.customerOnly
+      )
+        f.executor.rows.set(row.recordId, {
+          ...row,
+          values: {
+            ...row.values,
+            [`${f.ns}:field.party_role_status`]: `${f.ns}:option.inactive`,
+          },
+        });
+    const lost = (await f.post(
+      searched,
+      `select:${header}:${customer}:${parties.customerOnly}`,
+    ))!;
+    assert.equal(lost.statusCode, 422);
+    assert.doesNotMatch(
+      keyFacts(lost),
+      new RegExp(
+        `name="draft:${header}:${customer}" value="${parties.customerOnly}"`,
+      ),
+    );
+    // A dual-role party is a legitimate customer.
+    const dual = (await f.post(lost, `search:${header}:${customer}`, {
+      [`draftSearch:${header}:${customer}`]: 'Dual',
+    }))!;
+    const chosen = (await f.post(
+      dual,
+      `select:${header}:${customer}:${parties.dual}`,
+    ))!;
+    assert.equal(chosen.statusCode, 200);
+    assert.match(
+      keyFacts(chosen),
+      new RegExp(`name="draft:${header}:${customer}" value="${parties.dual}"`),
+    );
+  });
+
+  await t.test(
+    'quick create is offered only when every step may start',
+    async () => {
+      const f = await orderEntryWitness();
+      let editor = (await f.open())!;
+      assert.match(keyFacts(editor), /\+ New customer/);
+      for (const permission of ['party_create', 'party_role_create']) {
+        f.deniedReads.add(`${f.ns}:permission.${permission}`);
+        editor = (await f.post(editor, 'refresh'))!;
+        assert.doesNotMatch(keyFacts(editor), /\+ New customer/, permission);
+        const header = headerOf(editor);
+        const customer = `${f.ns}:field.sales_order_customer_party_id`;
+        const refused = (await f.post(editor, `create:${header}:${customer}`))!;
+        assert.equal(refused.statusCode, 422, permission);
+        assert.doesNotMatch(
+          keyFacts(refused),
+          /<form[^>]*data-editor-create[\s>]/,
+          permission,
+        );
+        f.deniedReads.delete(`${f.ns}:permission.${permission}`);
+        editor = (await f.post(refused, 'refresh'))!;
+        assert.match(keyFacts(editor), /\+ New customer/, permission);
+      }
+      assert.equal(f.executor.calls.length, 0, 'the preview never writes');
+    },
+  );
+
+  await t.test(
+    'quick create names existing matches before a second record is made',
+    async () => {
+      const f = await orderEntryWitness();
+      seeded(f);
+      const editor = (await f.open())!;
+      const header = headerOf(editor);
+      const customer = `${f.ns}:field.sales_order_customer_party_id`;
+      const opened = (await f.post(editor, `create:${header}:${customer}`, {
+        [`draftSearch:${header}:${customer}`]: 'only co',
+      }))!;
+      const warning =
+        /<section class="editor-create__duplicates"[\s\S]*?<\/section>/.exec(
+          keyFacts(opened),
+        )?.[0] ?? '';
+      // Every match is named, read now; only one this field offers can be
+      // chosen instead of creating.
+      assert.match(
+        warning,
+        /Customer only co<\/strong>(?:(?!<li>)[\s\S])*already offered in this field/,
+      );
+      assert.match(
+        warning,
+        /Supplier only co<\/strong>(?:(?!<li>)[\s\S])*exists, but is not offered in this field/,
+      );
+      assert.match(keyFacts(opened), /<form[^>]*data-editor-create[\s>]/);
+      assert.equal(f.executor.calls.length, 0, 'the warning never writes');
+      // A failed read omits the warning; nothing read earlier is shown again.
+      f.executor.failingQueries.add(`${f.ns}:query.party_list`);
+      const failed = (await f.post(opened, 'refresh'))!;
+      assert.match(keyFacts(failed), /<form[^>]*data-editor-create[\s>]/);
+      assert.doesNotMatch(
+        keyFacts(failed),
+        /editor-create__duplicates|Supplier only co/,
+      );
+      f.executor.failingQueries.delete(`${f.ns}:query.party_list`);
+      // A name nothing matches warns about nothing.
+      const cancelled = (await f.post(failed, 'refresh', {
+        draftCreateTask: hiddenValue(keyFacts(failed), 'draftCreateTask'),
+        draftCreate: 'cancel',
+      }))!;
+      const fresh = (await f.post(cancelled, `create:${header}:${customer}`, {
+        [`draftSearch:${header}:${customer}`]: 'Unmatched Glazing',
+      }))!;
+      assert.match(keyFacts(fresh), /<form[^>]*data-editor-create[\s>]/);
+      assert.doesNotMatch(keyFacts(fresh), /editor-create__duplicates/);
+      assert.equal(f.executor.calls.length, 0);
+    },
+  );
+});
+
+/**
+ * RAIN WORKSPACE INTERACTION COMPLETION, milestone B. A reference field is
+ * answered in place: a lookup answers only its own region, a selection only its
+ * field and that row's declared dependents. Every answer is bound to the draft
+ * session, the field's newest lookup request and its selection generation, so a
+ * late or duplicated answer can neither overwrite a newer edit nor select from
+ * superseded results, and two fields answering out of order never touch each
+ * other. Nothing here captures the form or advances the page's draft version.
+ */
+test('Milestone B: reference fields answer in place, bound to their own request and generation', async (t) => {
+  type Answer = NonNullable<Awaited<ReturnType<typeof documentEditor>>>;
+  const setup = async () => {
+    const f = await orderEntryWitness();
+    f.executor.pageLists = true;
+    const dual = f.executor.seedParty({
+      [`${f.ns}:field.party_name`]: 'Dual role co',
+    });
+    const editor = (await f.open())!;
+    const all = Object.values(editor.slots!).join('');
+    const header =
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+        all,
+      )![1]!;
+    const line =
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_line_item_id"/.exec(
+        all,
+      )![1]!;
+    const session = hiddenValue(editor.slots!.keyFacts!, 'draftSession');
+    const version = hiddenValue(editor.slots!.keyFacts!, 'draftVersion');
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    const product = `${f.ns}:field.sales_order_line_item_id`;
+    const fragment = (values: Record<string, string>, scope = f.scopes[0]!) =>
+      documentEditor(
+        f.view,
+        f.form,
+        f.surfaces,
+        f.url,
+        scope,
+        f.gateways,
+        { draftSession: session, draftVersion: version, ...values },
+        'fragment',
+      ) as Promise<Answer>;
+    const search = (
+      rowId: string,
+      fieldId: string,
+      term: string,
+      seq: number,
+    ) =>
+      fragment({
+        draftAction: `search:${rowId}:${fieldId}`,
+        draftLookupSeq: String(seq),
+        [`draftSearch:${rowId}:${fieldId}`]: term,
+      });
+    const select = (
+      rowId: string,
+      fieldId: string,
+      recordId: string,
+      seq: number,
+      generation: number,
+    ) =>
+      fragment({
+        draftAction: `select:${rowId}:${fieldId}:${recordId}`,
+        draftLookupSeq: String(seq),
+        draftFieldGeneration: String(generation),
+      });
+    const targets = (answer: Answer) =>
+      [...answer.html.matchAll(/data-fragment-target="([^"]+)"/g)].map(
+        (match) => match[1]!,
+      );
+    const id = (rowId: string, fieldId: string) =>
+      `editor-${rowId}-${fieldId.replace(/[^a-z0-9]/giu, '-')}`;
+    return {
+      f,
+      dual,
+      header,
+      line,
+      session,
+      customer,
+      product,
+      fragment,
+      search,
+      select,
+      targets,
+      id,
+      editor,
+    };
+  };
+
+  await t.test(
+    'a lookup answers only its own region and writes nothing',
+    async () => {
+      const s = await setup();
+      const answer = await s.search(s.header, s.customer, 'Readable', 1);
+      assert.equal(answer.fragment, true);
+      assert.equal(answer.statusCode, 200);
+      assert.deepEqual(s.targets(answer), [
+        `${s.id(s.header, s.customer)}-lookup`,
+      ]);
+      assert.match(answer.html, /<strong>Readable customer<\/strong>/);
+      // "+ New customer" is the popup's last row.
+      assert.match(answer.html, /\+ New customer<\/button><\/li><\/ul>/);
+      // No document: no form, fieldset or other field of the order.
+      assert.doesNotMatch(
+        answer.html,
+        /<form|<fieldset|data-document-editor|sales_order_number/,
+      );
+      assert.equal(s.f.executor.calls.length, 0);
+      // The page's draft version did not move: its next full submit applies.
+      const page = (await s.f.post(s.editor, 'refresh'))!;
+      assert.equal(page.statusCode, 200);
+    },
+  );
+
+  await t.test(
+    'an older lookup answer is superseded and cannot be selected from',
+    async () => {
+      const s = await setup();
+      assert.equal(
+        (await s.search(s.header, s.customer, 'Readable', 2)).statusCode,
+        200,
+      );
+      const older = await s.search(s.header, s.customer, 'Dual', 1);
+      assert.equal(older.statusCode, 409);
+      assert.equal(older.html, '');
+      const newer = await s.search(s.header, s.customer, 'Dual', 3);
+      assert.match(newer.html, /Dual role co/);
+      assert.doesNotMatch(newer.html, /Readable customer/);
+      // A record only the superseded request offered is not selectable any more.
+      const stale = await s.select(s.header, s.customer, s.f.party, 2, 0);
+      assert.equal(stale.statusCode, 409);
+      assert.match(stale.html, /Those results changed/);
+      const chosen = await s.select(s.header, s.customer, s.dual, 3, 0);
+      assert.equal(chosen.statusCode, 200);
+      assert.match(chosen.html, /data-selected-label="Dual role co"/);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'two fields answering out of order never touch each other',
+    async () => {
+      const s = await setup();
+      // The customer lookup is held; the product lookup and selection finish
+      // first; then the customer answer arrives and applies to its field only.
+      const release = s.f.executor.hold(`${s.f.ns}:query.party_list`);
+      const slowCustomer = s.search(s.header, s.customer, 'Readable', 1);
+      const productLookup = await s.search(s.line, s.product, 'Readable', 1);
+      assert.deepEqual(s.targets(productLookup), [
+        `${s.id(s.line, s.product)}-lookup`,
+      ]);
+      const productChosen = await s.select(s.line, s.product, s.f.item, 1, 0);
+      assert.equal(productChosen.statusCode, 200);
+      // The field and its declared dependent (Unit), and nothing else.
+      assert.deepEqual(s.targets(productChosen), [
+        `${s.id(s.line, s.product)}-field`,
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_id`),
+      ]);
+      assert.match(productChosen.html, />EA</);
+      release();
+      const customerLookup = await slowCustomer;
+      assert.equal(customerLookup.statusCode, 200);
+      assert.deepEqual(s.targets(customerLookup), [
+        `${s.id(s.header, s.customer)}-lookup`,
+      ]);
+      assert.doesNotMatch(customerLookup.html, /Readable product/);
+      const customerChosen = await s.select(
+        s.header,
+        s.customer,
+        s.f.party,
+        1,
+        0,
+      );
+      assert.equal(customerChosen.statusCode, 200);
+      // A full save then carries both in-place selections exactly.
+      const values = s.f.values(s.editor);
+      const saved = (await s.f.post(s.editor, 'save', values))!;
+      assert.equal(saved.statusCode, 303);
+      const stored = [...s.f.executor.rows.values()];
+      assert.ok(stored.some((row) => row.values[s.customer] === s.f.party));
+      assert.ok(stored.some((row) => row.values[s.product] === s.f.item));
+    },
+  );
+
+  await t.test(
+    'a late or replayed selection cannot overwrite a newer one',
+    async () => {
+      const s = await setup();
+      await s.search(s.header, s.customer, 'Readable', 1);
+      const winner = await s.select(s.header, s.customer, s.f.party, 1, 0);
+      assert.equal(winner.statusCode, 200);
+      await s.search(s.header, s.customer, 'Dual', 2);
+      // Replayed with the generation it was based on: refused, current value shown.
+      const replayed = await s.select(s.header, s.customer, s.dual, 2, 0);
+      assert.equal(replayed.statusCode, 409);
+      assert.match(replayed.html, /changed meanwhile/);
+      assert.match(replayed.html, /data-selected-label="Readable customer"/);
+      // Overtaken while its exact read was in flight: a clear lands first.
+      const hold = s.f.executor.hold(`${s.f.ns}:query.party_get`);
+      const overtaken = s.select(s.header, s.customer, s.dual, 2, 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      const cleared = await s.fragment({
+        draftAction: `clear:${s.header}:${s.customer}`,
+        draftFieldGeneration: '1',
+      });
+      assert.equal(cleared.statusCode, 200);
+      hold();
+      const late = await overtaken;
+      assert.equal(late.statusCode, 409);
+      assert.doesNotMatch(late.html, /data-selected-label="Dual role co"/);
+      assert.match(
+        late.html,
+        new RegExp(`name="draft:${s.header}:${s.customer}" value=""`),
+      );
+    },
+  );
+
+  await t.test(
+    'a withdrawn read drops the results and discloses nothing',
+    async () => {
+      const s = await setup();
+      assert.match(
+        (await s.search(s.header, s.customer, 'Readable', 1)).html,
+        /Readable customer/,
+      );
+      s.f.deniedReads.add(`${s.f.ns}:permission.party_read`);
+      const denied = await s.search(s.header, s.customer, 'Readable', 2);
+      assert.equal(denied.statusCode, 422);
+      assert.doesNotMatch(denied.html, /Readable customer/);
+      assert.match(denied.html, /data-message=/);
+      const selectDenied = await s.select(
+        s.header,
+        s.customer,
+        s.f.party,
+        2,
+        0,
+      );
+      assert.notEqual(selectDenied.statusCode, 200);
+      assert.doesNotMatch(selectDenied.html, /Readable customer/);
+    },
+  );
+
+  await t.test(
+    'a failed read answers with its refusal and no earlier results',
+    async () => {
+      const s = await setup();
+      assert.match(
+        (await s.search(s.header, s.customer, 'Readable', 1)).html,
+        /Readable customer/,
+      );
+      s.f.executor.failingQueries.add(`${s.f.ns}:query.party_list`);
+      const failed = await s.search(s.header, s.customer, 'Readable', 2);
+      assert.equal(failed.statusCode, 422);
+      assert.deepEqual(s.targets(failed), [
+        `${s.id(s.header, s.customer)}-lookup`,
+      ]);
+      assert.doesNotMatch(failed.html, /Readable customer/);
+      assert.match(failed.html, /data-message=/);
+      s.f.executor.failingQueries.delete(`${s.f.ns}:query.party_list`);
+      // The dropped lookup offers nothing to select from.
+      const orphan = await s.select(s.header, s.customer, s.f.party, 2, 0);
+      assert.equal(orphan.statusCode, 409);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'a removed row, another company and an expired session are not answered in place',
+    async () => {
+      const s = await setup();
+      let editor = (await s.f.post(s.editor, 'add', s.f.values(s.editor)))!;
+      const extra = [
+        ...Object.values(editor.slots!)
+          .join('')
+          .matchAll(
+            /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_line_item_id"/g,
+          ),
+      ]
+        .map((match) => match[1]!)
+        .find((rowId) => rowId !== s.line)!;
+      editor = (await s.f.post(editor, `remove:${extra}`))!;
+      assert.equal(editor.statusCode, 200);
+      const removed = await s.search(extra, s.product, 'Readable', 1);
+      assert.equal(removed.statusCode, 422);
+      assert.equal(removed.fragment, true);
+      const foreign = await s.fragment(
+        {
+          draftAction: `search:${s.header}:${s.customer}`,
+          draftLookupSeq: '1',
+        },
+        s.f.scopes[1]!,
+      );
+      assert.equal(foreign.fallback, true);
+      const expired = await documentEditor(
+        s.f.view,
+        s.f.form,
+        s.f.surfaces,
+        s.f.url,
+        s.f.scopes[0]!,
+        s.f.gateways,
+        {
+          draftSession: randomUUID(),
+          draftAction: `search:${s.header}:${s.customer}`,
+          draftLookupSeq: '1',
+        },
+        'fragment',
+      );
+      assert.equal(expired?.fallback, true);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'create opens in place, returns to its field and is truthful when refused',
+    async () => {
+      const s = await setup();
+      const opened = await s.fragment({
+        draftAction: `create:${s.header}:${s.customer}`,
+        draftFieldGeneration: '0',
+        [`draftSearch:${s.header}:${s.customer}`]: 'Zenith Glazing',
+      });
+      assert.deepEqual(s.targets(opened), ['editor-create-slot']);
+      assert.match(opened.html, /data-editor-create-fragment/);
+      assert.match(
+        opened.html,
+        /name="create:[^"]+party_name" value="Zenith Glazing"/,
+      );
+      assert.doesNotMatch(opened.html, /data-task-close/);
+      const task = hiddenValue(opened.html, 'draftCreateTask');
+      // While it is open the order is paused, in place as well as in full.
+      const paused = await s.search(s.header, s.customer, 'x', 1);
+      assert.equal(paused.statusCode, 409);
+      const created = await s.fragment({
+        draftCreateTask: task,
+        draftCreate: 'submit',
+        [`create:${s.f.ns}:field.party_number`]: 'C-ZEN',
+        [`create:${s.f.ns}:field.party_name`]: 'Zenith Glazing',
+      });
+      assert.equal(created.statusCode, 200);
+      assert.deepEqual(s.targets(created), [
+        'editor-create-slot',
+        `${s.id(s.header, s.customer)}-field`,
+      ]);
+      assert.match(created.html, /data-selected-label="Zenith Glazing"/);
+      assert.match(created.html, /data-editor-create-selected/);
+      assert.equal(s.f.executor.calls.length, 2);
+
+      // Refused by current policy after the flow opened: Cancel only.
+      const again = await s.fragment({
+        draftAction: `create:${s.header}:${s.customer}`,
+        draftFieldGeneration: /data-reference-generation="(\d+)"/.exec(
+          created.html,
+        )![1]!,
+        [`draftSearch:${s.header}:${s.customer}`]: 'Refused Co',
+      });
+      const refusedTask = hiddenValue(again.html, 'draftCreateTask');
+      s.f.deniedReads.add(`${s.f.ns}:permission.party_create`);
+      const refused = await s.fragment({
+        draftCreateTask: refusedTask,
+        draftCreate: 'submit',
+        [`create:${s.f.ns}:field.party_number`]: 'C-REF',
+        [`create:${s.f.ns}:field.party_name`]: 'Refused Co',
+      });
+      assert.equal(refused.statusCode, 422);
+      assert.match(refused.html, /data-editor-create-denied/);
+      assert.doesNotMatch(refused.html, /value="submit"/);
+      const cancelled = await s.fragment({
+        draftCreateTask: refusedTask,
+        draftCreate: 'cancel',
+      });
+      assert.deepEqual(s.targets(cancelled), [
+        'editor-create-slot',
+        `${s.id(s.header, s.customer)}-field`,
+      ]);
+      assert.match(cancelled.html, /data-selected-label="Zenith Glazing"/);
+      assert.equal(s.f.executor.calls.length, 2, 'nothing more was written');
+    },
+  );
+
+  await t.test(
+    'a selection from a superseded offered set is refused after its read',
+    async () => {
+      const s = await setup();
+      await s.search(s.header, s.customer, 'Dual', 1);
+      // The chosen record's exact read is held while a newer search replaces
+      // the offered set with one that does not contain it.
+      const hold = s.f.executor.hold(`${s.f.ns}:query.party_get`);
+      const older = s.select(s.header, s.customer, s.dual, 1, 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      const newer = await s.search(s.header, s.customer, 'Readable', 2);
+      assert.equal(newer.statusCode, 200);
+      assert.doesNotMatch(newer.html, /Dual role co/);
+      hold();
+      const late = await older;
+      assert.equal(late.statusCode, 409);
+      assert.doesNotMatch(late.html, /data-selected-label="Dual role co"/);
+      assert.match(
+        late.html,
+        new RegExp(`name="draft:${s.header}:${s.customer}" value=""`),
+      );
+      // The newer lookup survives, and its own result can be chosen.
+      const chosen = await s.select(s.header, s.customer, s.f.party, 2, 0);
+      assert.equal(chosen.statusCode, 200);
+      assert.match(chosen.html, /data-selected-label="Readable customer"/);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'a create-open that finishes late never replaces the open create',
+    async () => {
+      const s = await setup();
+      const open = (name: string, generation: string) =>
+        s.fragment({
+          draftAction: `create:${s.header}:${s.customer}`,
+          draftFieldGeneration: generation,
+          [`draftSearch:${s.header}:${s.customer}`]: name,
+        });
+      // The first availability check is held; a second create-open overtakes it.
+      const gateway = s.f.gateways.operationGateway;
+      const preview = gateway.previewEligibility.bind(gateway);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let first = true;
+      gateway.previewEligibility = (async (
+        ...args: Parameters<typeof preview>
+      ) => {
+        if (first) {
+          first = false;
+          await gate;
+        }
+        return preview(...args);
+      }) as typeof gateway.previewEligibility;
+      try {
+        const slow = open('Slow Glazing', '0');
+        await new Promise((resolve) => setImmediate(resolve));
+        const fast = await open('Fast Glazing', '0');
+        assert.deepEqual(s.targets(fast), ['editor-create-slot']);
+        const fastTask = hiddenValue(fast.html, 'draftCreateTask');
+        release();
+        const late = await slow;
+        assert.equal(late.statusCode, 409);
+        assert.doesNotMatch(late.html, /data-editor-create-fragment/);
+        // The create that opened first still owns the flow and its keys.
+        const cancelled = await s.fragment({
+          draftCreateTask: fastTask,
+          draftCreate: 'cancel',
+        });
+        assert.equal(cancelled.statusCode, 200);
+        assert.deepEqual(s.targets(cancelled), [
+          'editor-create-slot',
+          `${s.id(s.header, s.customer)}-field`,
+        ]);
+      } finally {
+        gateway.previewEligibility = preview;
+      }
+      // A create-open based on an older field generation opens nothing.
+      await s.search(s.header, s.customer, 'Readable', 1);
+      assert.equal(
+        (await s.select(s.header, s.customer, s.f.party, 1, 0)).statusCode,
+        200,
+      );
+      const stale = await open('Stale Glazing', '0');
+      assert.equal(stale.statusCode, 409);
+      assert.match(stale.html, /changed meanwhile/);
+      assert.doesNotMatch(stale.html, /data-editor-create-fragment/);
+      assert.equal(s.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test('a refused quick create focuses its first problem', async () => {
+    const s = await setup();
+    const opened = await s.fragment({
+      draftAction: `create:${s.header}:${s.customer}`,
+      draftFieldGeneration: '0',
+      [`draftSearch:${s.header}:${s.customer}`]: 'Focus Glazing',
+    });
+    const refused = await s.fragment({
+      draftCreateTask: hiddenValue(opened.html, 'draftCreateTask'),
+      draftCreate: 'submit',
+      [`create:${s.f.ns}:field.party_number`]: 'C-FOCUS',
+      [`create:${s.f.ns}:field.party_name`]: '',
+    });
+    // The number is valid and comes first; the problem is the name, and it
+    // alone is marked for the script and autofocused natively.
+    assert.match(
+      refused.html,
+      /name="create:[^"]+party_name"[^>]*data-task-initial-focus autofocus/,
+    );
+    assert.equal(
+      refused.html.match(/\sdata-task-initial-focus[\s>]/g)?.length,
+      1,
+    );
+    assert.equal(s.f.executor.calls.length, 0);
+  });
+});
+
+/**
+ * The fragment transport over HTTP: only the owned script's same-origin POST,
+ * carrying the custom header, is answered in place. A cross-site request is
+ * refused, an ordinary POST stays a page, anything the page must answer asks
+ * for the fallback, and the page's CSP admits same-origin fetch and nothing
+ * more.
+ */
+test('Milestone B: the fragment transport is same-origin, header-bound and falls back to the page', async () => {
+  const f = await orderEntryWitness();
+  const server = createSurfaceRuntimeServer(f.entry, f.gateways);
+  const baseUrl = await listen(server);
+  const path = f.url.pathname + f.url.search;
+  try {
+    const page = await fetch(`${baseUrl}${path}`, {
+      headers: { authorization: 'a' },
+    });
+    const html = await page.text();
+    assert.equal(page.status, 200);
+    assert.match(
+      page.headers.get('content-security-policy')!,
+      /connect-src 'self';/,
+    );
+    assert.match(html, /<script>/);
+    const session = hiddenValue(html, 'draftSession');
+    const header =
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+        html,
+      )![1]!;
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    const body = new URLSearchParams({
+      draftSession: session,
+      draftVersion: '0',
+      draftAction: `search:${header}:${customer}`,
+      draftLookupSeq: '1',
+      [`draftSearch:${header}:${customer}`]: 'Readable',
+    });
+    const post = (headers: Record<string, string>, form = body) =>
+      fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          authorization: 'a',
+          'content-type': 'application/x-www-form-urlencoded',
+          ...headers,
+        },
+        body: form,
+        redirect: 'manual',
+      });
+    const inPlace = await post({
+      'x-rain-fragment': '1',
+      'sec-fetch-site': 'same-origin',
+    });
+    assert.equal(inPlace.status, 200);
+    assert.equal(inPlace.headers.get('x-rain-fragment'), 'fragment');
+    const answer = await inPlace.text();
+    assert.match(answer, /^<template data-fragment-target="[^"]+-lookup">/);
+    assert.match(answer, /Readable customer/);
+    const crossSite = await post({
+      'x-rain-fragment': '1',
+      'sec-fetch-site': 'cross-site',
+    });
+    assert.equal(crossSite.status, 403);
+    assert.equal(await crossSite.text(), '');
+    // Without fetch metadata the request must name this server as its origin.
+    const noMetadata = await post({ 'x-rain-fragment': '1' });
+    assert.equal(noMetadata.status, 403);
+    const foreignOrigin = await post({
+      'x-rain-fragment': '1',
+      origin: 'https://elsewhere.example',
+    });
+    assert.equal(foreignOrigin.status, 403);
+    const next = new URLSearchParams(body);
+    next.set('draftLookupSeq', '2');
+    const ownOrigin = await post(
+      { 'x-rain-fragment': '1', origin: new URL(baseUrl).origin },
+      next,
+    );
+    assert.equal(ownOrigin.status, 200);
+    assert.equal(ownOrigin.headers.get('x-rain-fragment'), 'fragment');
+    const ordinary = await post({});
+    assert.match(await ordinary.text(), /^<!doctype html>/);
+    const unknown = new URLSearchParams(body);
+    unknown.set('draftSession', randomUUID());
+    const expired = await post(
+      { 'x-rain-fragment': '1', 'sec-fetch-site': 'same-origin' },
+      unknown,
+    );
+    assert.equal(expired.status, 409);
+    assert.equal(expired.headers.get('x-rain-fragment-fallback'), 'page');
+    assert.equal(f.executor.calls.length, 0);
+  } finally {
+    await close(server);
+  }
+});
+
+/**
+ * RAIN WORKSPACE INTERACTION COMPLETION, milestone C. A composed Task reuses
+ * the editor's control semantics. Receiving shows the selected line's product
+ * base unit read on the server (a forged unit is ignored), offers the declared
+ * currency codes starting from the order's own currency (a forged code is
+ * refused), and takes the bound field's exact-decimal bounds for the cost (a
+ * malformed cost is named beside its input). Nothing runs until every input is
+ * admitted; the committed line carries exactly the reviewed values.
+ */
+test('Milestone C: receiving inputs are derived, offered and exact, never free text', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const order = f.executor.seed(
+    'purchase_order',
+    {
+      [`${ns}:field.purchase_order_number`]: 'PO-RECEIVE',
+      [`${ns}:field.purchase_order_supplier_party_id`]: f.party,
+      [`${ns}:field.purchase_order_currency`]: 'USD',
+      [`${ns}:field.purchase_order_order_date`]: '2026-09-26T09:30:00Z',
+      // Selected but unset, as the provider returns them.
+      [`${ns}:field.purchase_order_expected_date`]: null,
+      [`${ns}:field.purchase_order_notes`]: null,
+      [`${ns}:derived_state_field.machine.purchase_order_lifecycle`]: `${ns}:state.purchase_order_released`,
+    },
+    scope,
+  );
+  const line = f.executor.seed(
+    'purchase_order_line',
+    {
+      [`${ns}:field.purchase_order_line_line_number`]: '1',
+      [`${ns}:field.purchase_order_line_item_id`]: f.item,
+      [`${ns}:field.purchase_order_line_ordered_quantity`]: '10',
+      [`${ns}:field.purchase_order_line_unit_price`]: '2.4',
+      [`${ns}:relation.purchase_order_line_order`]: order,
+    },
+    scope,
+  );
+  const location = f.executor.seed('location', {
+    [`${ns}:field.location_name`]: 'Calgary warehouse',
+  });
+  const lines = `${ns}:dataset.purchasing_lines`;
+  const params = new URLSearchParams({
+    surface: `${ns}:surface.purchase_order_detail`,
+    record: order,
+    [`${ns}:parameter.purchase_order_get_legal_entity_scope`]: scope,
+    dataset: lines,
+    selected: line,
+    [`select:${lines}`]: line,
+  });
+  const path = `/?${params}`;
+  const input = (name: string) => `${ns}:input.receive_${name}`;
+  const submit = (body: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      { compositionAction: `${ns}:action.receive_known`, ...body },
+      f.gateways,
+    );
+  const entry = await submit({});
+  assert.equal(entry.statusCode, 200);
+  const taskToken = hiddenValue(entry.html, 'taskToken');
+  // The unit is shown, not asked for; the currency is a choice starting from
+  // the order's USD; the cost is a decimal input.
+  assert.match(
+    entry.html,
+    /<output class="derived-value" data-derived-input>EA<\/output>/,
+  );
+  assert.doesNotMatch(entry.html, new RegExp(`name="${input('unit')}"`));
+  assert.match(
+    entry.html,
+    new RegExp(
+      `<select name="${input('currency')}"[^>]*>[\\s\\S]*?<option value="USD" selected>`,
+    ),
+  );
+  assert.match(
+    entry.html,
+    new RegExp(`<input name="${input('cost')}"[^>]*inputmode="decimal"`),
+  );
+  const forged = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    [input('quantity')]: '2',
+    [input('unit')]: 'BOX',
+    [input('location')]: location,
+    [input('cost')]: '2.4.5',
+    [input('currency')]: 'GBP',
+  });
+  assert.match(forged.html, /COMPOSITION_INPUT_INVALID/);
+  assert.match(forged.html, /Choose one of the offered values\./);
+  assert.match(forged.html, /Enter a plain number, such as 12\.5\./);
+  // The first input with a problem takes focus (autofocus without the script);
+  // each message follows its label and describes the input.
+  assert.match(
+    forged.html,
+    new RegExp(
+      `<input name="${input('cost')}"[^>]*data-task-initial-focus autofocus`,
+    ),
+  );
+  assert.equal(forged.html.match(/\sdata-task-initial-focus[\s>]/g)?.length, 1);
+  assert.match(
+    forged.html,
+    /<\/label><small class="field-error" id="[^"]*receive_cost-error">Enter a plain number/,
+  );
+  assert.equal(f.executor.calls.length, 0, 'nothing runs before admission');
+  const review = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    [input('quantity')]: '2',
+    [input('unit')]: 'BOX',
+    [input('location')]: location,
+    [input('cost')]: '2.450',
+    [input('currency')]: 'CAD',
+  });
+  assert.match(review.html, /<dt>Base unit<\/dt><dd>EA<\/dd>/);
+  assert.match(review.html, /<dd>2\.45<\/dd>/);
+  assert.match(review.html, /<dd>CAD · Canadian dollar<\/dd>/);
+  assert.equal(f.executor.calls.length, 0);
+  await submit({
+    taskToken,
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  const receiptLine = f.executor.calls.find((call) =>
+    call.definition.operationId.endsWith(
+      ':operation.goods_receipt_line_create',
+    ),
+  );
+  assert.ok(receiptLine, 'the receipt line create ran');
+  const values = asRecord(asRecord(receiptLine.input).values);
+  assert.equal(values[`${ns}:field.goods_receipt_line_unit_id`], 'EA');
+  assert.equal(values[`${ns}:field.goods_receipt_line_currency`], 'CAD');
+  assert.equal(values[`${ns}:field.goods_receipt_line_unit_cost`], '2.45');
+  assert.equal(values[`${ns}:field.goods_receipt_line_quantity`], '2');
+});
+
+/**
+ * The same shared semantics in an unrelated, renamed package: a declared
+ * choice on a workshop Task admits only its offered values, starting from its
+ * declared default, with no Sales or Purchasing identity anywhere in the path.
+ */
+test('Milestone C: a renamed non-Sales Task input uses the same declared choice semantics', async () => {
+  const definition = workshopComposition('Work title');
+  const authoredSurface = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).find((surface) => surface.composition)!;
+  const composition = authoredSurface.composition as unknown as {
+    actions: unknown[];
+    children: unknown[];
+  };
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  composition.children = [];
+  composition.actions = [
+    {
+      actionId: 'workshop.jobs:action.classify',
+      label: 'Classify work',
+      description: 'Choose the work class.',
+      orderKey: 10,
+      conditions: [],
+      inputs: [
+        {
+          inputId: 'workshop.jobs:input.class',
+          label: 'Work class',
+          orderKey: 10,
+          type: 'text',
+          required: true,
+          presentation: {
+            kind: 'choice',
+            options: [
+              { value: 'Routine', label: 'Routine work' },
+              { value: 'Urgent', label: 'Urgent work' },
+            ],
+            defaultValue: 'Routine',
+          },
+        },
+      ],
+      steps: [
+        {
+          stepId: 'workshop.jobs:step.classify',
+          operation: ref(
+            'operationReference',
+            'workshop.jobs:operation.job_update',
+          ),
+          bindings: [
+            {
+              path: ['recordId'],
+              value: { source: 'record', field: 'recordId' },
+            },
+            {
+              path: ['expectedRevision'],
+              value: { source: 'record', field: 'revision' },
+            },
+            {
+              path: ['patch', 'workshop.jobs:field.job_name'],
+              value: { source: 'input', inputId: 'workshop.jobs:input.class' },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+  const compiled = compileFixture(definition);
+  const policy = new RecordingPolicy('ALLOW');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const surface = readCompiledSurfaceManifest(view).surfaces.find(
+    (value) => value.surfaceId === 'workshop.jobs:surface.job_record',
+  )!;
+  const root: SemanticRecordDto = {
+    entityId: 'workshop.jobs:entity.job',
+    recordId: randomUUID(),
+    revision: 3,
+    archived: false,
+    values: { 'workshop.jobs:field.job_name': 'Original' },
+  };
+  const calls: SemanticOperationExecutionRequest[] = [];
+  const mediation = new SemanticOperationMediationAuthority();
+  const gateways: SurfaceRuntimeGateways = {
+    queryGateway: fixedQueryGateway('exact', [root]),
+    operationMediation: mediation,
+    operationGateway: new SemanticOperationGateway(
+      policy,
+      {
+        async execute(request) {
+          calls.push(request);
+          return {
+            kind: 'semanticOperationResult',
+            schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+            operationId: request.definition.operationId,
+            outcome: 'succeeded',
+            readBack: { ...root, revision: 4 },
+            unsupportedReason: null,
+            trust: {
+              invocationId: randomUUID(),
+              changeDocumentId: randomUUID(),
+              domainEventId: randomUUID(),
+              outboxId: randomUUID(),
+            },
+          };
+        },
+        async recordNonAccepted() {},
+      },
+      mediation,
+    ),
+  };
+  const url = `/?surface=${encodeURIComponent(surface.surfaceId)}&record=${root.recordId}`;
+  const submit = (body: Record<string, string>) =>
+    submitCompositionAction(
+      view,
+      surface,
+      url,
+      { compositionAction: 'workshop.jobs:action.classify', ...body },
+      gateways,
+      (html) => ({ statusCode: 200, html }),
+    );
+  const initial = await submit({});
+  assert.match(
+    initial.html,
+    /<select name="workshop\.jobs:input\.class" required>[\s\S]*?<option value="Routine" selected>Routine work<\/option>/,
+  );
+  const taskToken = hiddenValue(initial.html, 'taskToken');
+  const forged = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    'workshop.jobs:input.class': 'Anything',
+  });
+  assert.match(forged.html, /Choose one of the offered values\./);
+  assert.equal(calls.length, 0);
+  const review = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    'workshop.jobs:input.class': 'Urgent',
+  });
+  assert.match(review.html, /<dd>Urgent work<\/dd>/);
+  const done = await submit({
+    taskToken,
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.match(done.html, /data-task-result/);
+  assert.match(done.html, /Classify work: done/);
+  assert.deepEqual(asRecord(calls[0]!.input).patch, {
+    'workshop.jobs:field.job_name': 'Urgent',
+  });
+});
+
+test('FORM-1: unselected lookup results are shown only under the current read authority of each response', async () => {
+  const f = await orderEntryWitness();
+  const sentinelId = f.executor.seedParty({
+    [`${f.ns}:field.party_name`]: 'FORM1_NAME_SENTINEL',
+    [`${f.ns}:field.party_number`]: 'FORM1-NUMBER-SENTINEL',
+  });
+  const protectedResults = /FORM1_NAME_SENTINEL|FORM1-NUMBER-SENTINEL/;
+  const path = f.url.pathname + f.url.search;
+  const customer = `${f.ns}:field.sales_order_customer_party_id`;
+  // Every request below goes through SurfaceRuntime and the real gateways.
+  let page = await renderSurfaceRuntimeWithData(f.view, path, f.gateways);
+  const header =
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+      page.html,
+    )![1]!;
+  const submit = async (action: string, extra: Record<string, string> = {}) => {
+    page = await submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      {
+        draftSession: hiddenValue(page.html, 'draftSession'),
+        draftVersion: hiddenValue(page.html, 'draftVersion'),
+        draftAction: action,
+        [`draft:${header}:${f.ns}:field.sales_order_number`]: 'SO-FORM1',
+        ...extra,
+      },
+      f.gateways,
+    );
+    return page;
+  };
+  const search = { [`draftSearch:${header}:${customer}`]: 'FORM1' };
+
+  await submit(`search:${header}:${customer}`, search);
+  assert.match(page.html, /<strong>FORM1_NAME_SENTINEL<\/strong>/);
+  assert.match(page.html, /<small>FORM1-NUMBER-SENTINEL<\/small>/);
+  const calls = f.executor.calls.length;
+
+  // Read access is withdrawn between requests; company/order access remains.
+  f.deniedReads.add(`${f.ns}:permission.party_read`);
+  await submit('add');
+  assert.equal(page.html.match(/data-draft-line=/g)!.length, 2);
+  assert.doesNotMatch(page.html, protectedResults);
+  await submit(`search:${header}:${customer}`, search);
+  assert.doesNotMatch(page.html, protectedResults);
+  await submit(`more:${header}:${customer}`);
+  assert.doesNotMatch(page.html, protectedResults);
+  assert.match(page.html, /value="SO-FORM1"/);
+  // Read handling performed no business mutation.
+  assert.equal(f.executor.calls.length, calls);
+
+  // Authorized control: search, More and selection work again.
+  f.deniedReads.delete(`${f.ns}:permission.party_read`);
+  await submit(`search:${header}:${customer}`, search);
+  assert.match(page.html, /<strong>FORM1_NAME_SENTINEL<\/strong>/);
+  await submit(`more:${header}:${customer}`);
+  assert.match(page.html, /<strong>FORM1_NAME_SENTINEL<\/strong>/);
+  await submit(`select:${header}:${customer}:${sentinelId}`);
+  assert.ok(
+    page.html.includes(
+      `name="draft:${header}:${customer}" value="${sentinelId}"`,
+    ),
+  );
+  assert.match(page.html, /data-selected-label="FORM1_NAME_SENTINEL"/);
+  assert.equal(f.executor.calls.length, calls);
+});
+
+test('FORM-PAGING: a bounded lookup says when more matches exist beyond its display limit', async (t) => {
+  const limitMessage = 'More matches exist. Refine your search.';
+  const paged = async (count: number) => {
+    const f = await orderEntryWitness();
+    f.executor.pageLists = true;
+    const ids = Array.from({ length: count }, (_, index) =>
+      f.executor.seedParty({
+        [`${f.ns}:field.party_name`]: `Paging match ${String(index + 1).padStart(3, '0')}`,
+        [`${f.ns}:field.party_number`]: `PM-${index + 1}`,
+      }),
+    );
+    const path = f.url.pathname + f.url.search;
+    const customer = `${f.ns}:field.sales_order_customer_party_id`;
+    // Every request goes through SurfaceRuntime and the real gateways.
+    let page = await renderSurfaceRuntimeWithData(f.view, path, f.gateways);
+    const header =
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+        page.html,
+      )![1]!;
+    const submit = async (
+      action: string,
+      extra: Record<string, string> = {},
+    ) => {
+      page = await submitSurfaceRuntimeIntent(
+        f.view,
+        path,
+        {
+          draftSession: hiddenValue(page.html, 'draftSession'),
+          draftVersion: hiddenValue(page.html, 'draftVersion'),
+          draftAction: action,
+          [`draft:${header}:${f.ns}:field.sales_order_number`]: 'SO-PAGING',
+          ...extra,
+        },
+        f.gateways,
+      );
+      return page;
+    };
+    const search = (term: string) =>
+      submit(`search:${header}:${customer}`, {
+        [`draftSearch:${header}:${customer}`]: term,
+      });
+    const more = () => submit(`more:${header}:${customer}`);
+    const shown = () =>
+      page.html.match(/class="reference-option"/g)?.length ?? 0;
+    const moreOffered = () =>
+      page.html.includes(`value="more:${header}:${customer}"`);
+    return {
+      f,
+      ids,
+      header,
+      customer,
+      submit,
+      search,
+      more,
+      shown,
+      moreOffered,
+      html: () => page.html,
+    };
+  };
+
+  await t.test(
+    '201 matches: the limit is stated, never presented as exhaustion; narrowing finds match 201',
+    async () => {
+      const p = await paged(201);
+      await p.search('Paging match');
+      assert.equal(p.shown(), 20);
+      assert.ok(p.moreOffered());
+      assert.ok(!p.html().includes(limitMessage));
+      // Below the cap with more pages, More works normally.
+      await p.more();
+      assert.equal(p.shown(), 40);
+      assert.ok(p.moreOffered());
+      for (let page = 3; page <= 10; page++) await p.more();
+      assert.equal(p.shown(), 200);
+      assert.ok(p.html().includes(limitMessage));
+      assert.ok(!p.moreOffered(), 'no More button that cannot advance');
+      assert.doesNotMatch(p.html(), /No customer matches/);
+      // The refinement field is described by the message and receives focus.
+      const searchBox = /<input type="text" role="combobox"[^>]*>/.exec(
+        p.html(),
+      )![0];
+      const status = /aria-describedby="[^"]*?([^" ]*-status)"/.exec(
+        searchBox,
+      )![1]!;
+      assert.match(
+        p.html(),
+        new RegExp(
+          `id="${status}" role="status"><p class="reference-empty reference-limit"`,
+        ),
+      );
+      assert.match(searchBox, /\sautofocus[\s>]/);
+      // A directly submitted More at the cap: bounded work, the same truthful state.
+      const partyReads = () =>
+        p.f.executor.listReads.get(`${p.f.ns}:query.party_list`) ?? 0;
+      const reads = partyReads();
+      const capped = await p.more();
+      assert.equal(capped.statusCode, 200);
+      // At most the ten displayed pages, re-read once under this request's authority.
+      assert.ok(partyReads() - reads <= 10);
+      assert.equal(p.shown(), 200);
+      assert.ok(p.html().includes(limitMessage));
+      assert.ok(!p.moreOffered());
+      // A narrower search starts again at page one and replaces the offered set.
+      await p.search('Paging match 201');
+      assert.equal(p.shown(), 1);
+      assert.match(p.html(), /<strong>Paging match 201<\/strong>/);
+      assert.ok(!p.html().includes(limitMessage));
+      const earlier = await p.submit(
+        `select:${p.header}:${p.customer}:${p.ids[4]}`,
+      );
+      assert.equal(earlier.statusCode, 422);
+      assert.ok(
+        p.html().includes(`name="draft:${p.header}:${p.customer}" value=""`),
+      );
+      await p.submit(`select:${p.header}:${p.customer}:${p.ids[200]}`);
+      assert.ok(
+        p
+          .html()
+          .includes(
+            `name="draft:${p.header}:${p.customer}" value="${p.ids[200]}"`,
+          ),
+      );
+      assert.match(p.html(), /data-selected-label="Paging match 201"/);
+      assert.match(p.html(), /value="SO-PAGING"/);
+      assert.equal(p.f.executor.calls.length, 0);
+    },
+  );
+
+  await t.test(
+    'exactly 200 matches: genuine exhaustion is not called truncation',
+    async () => {
+      const p = await paged(200);
+      await p.search('Paging match');
+      for (let page = 2; page <= 10; page++) await p.more();
+      assert.equal(p.shown(), 200);
+      assert.ok(!p.html().includes(limitMessage));
+      assert.ok(!p.moreOffered());
+    },
+  );
+
+  await t.test(
+    'read withdrawn at the limit: no earlier labels and no availability claim',
+    async () => {
+      const p = await paged(201);
+      await p.search('Paging match');
+      for (let page = 2; page <= 10; page++) await p.more();
+      assert.ok(p.html().includes(limitMessage));
+      p.f.deniedReads.add(`${p.f.ns}:permission.party_read`);
+      for (const response of [await p.submit('add'), await p.more()]) {
+        assert.doesNotMatch(response.html, /Paging match|PM-\d/);
+        assert.ok(!response.html.includes(limitMessage));
+      }
+      assert.equal(p.f.executor.calls.length, 0);
+    },
+  );
+});
+
+test('FORM-3: a declared choice inside quick create is rendered, defaulted and admitted before any create step', async (t) => {
+  type Rendered = NonNullable<Awaited<ReturnType<OrderEntryWitness['open']>>>;
+  const choice = {
+    kind: 'choice',
+    options: [
+      { value: 'EA', label: 'EA · Each' },
+      { value: 'BOX', label: 'BOX · Box' },
+    ],
+    defaultValue: 'EA',
+  };
+  const createSubmit = (
+    f: OrderEntryWitness,
+    rendered: Rendered,
+    values: Record<string, string>,
+  ) =>
+    documentEditor(
+      f.view,
+      f.form,
+      f.surfaces,
+      f.url,
+      f.scopes[0]!,
+      f.gateways,
+      {
+        draftSession: hiddenValue(rendered.slots!.keyFacts!, 'draftSession'),
+        draftVersion: hiddenValue(rendered.slots!.keyFacts!, 'draftVersion'),
+        draftCreateTask: hiddenValue(
+          rendered.slots!.keyFacts!,
+          'draftCreateTask',
+        ),
+        draftCreate: 'submit',
+        ...values,
+      },
+    ) as Promise<Rendered>;
+  const selectFor = (html: string, name: string) =>
+    new RegExp(`<select[^>]*name="${name}"[^>]*>(.*?)</select>`, 's').exec(
+      html,
+    )?.[1];
+
+  await t.test(
+    'Sales product create: base unit is a declared choice',
+    async () => {
+      const f = await orderEntryWitness(false, (source) => {
+        for (const surface of source.surfaces as Array<
+          Record<string, unknown>
+        >) {
+          const editor = surface.documentEditor as
+            | {
+                lineFields: Array<{
+                  fieldId: string;
+                  reference?: {
+                    create: {
+                      fields: Array<{
+                        fieldId: string;
+                        presentation?: unknown;
+                      }>;
+                    };
+                  };
+                }>;
+              }
+            | undefined;
+          if (!String(surface.surfaceId).endsWith(':surface.sales_order_form'))
+            continue;
+          const product = editor!.lineFields.find((field) =>
+            field.fieldId.endsWith('_line_item_id'),
+          )!;
+          for (const collected of product.reference!.create.fields)
+            if (String(collected.fieldId).endsWith(':field.item_base_unit'))
+              collected.presentation = choice;
+        }
+      });
+      const unit = `create:${f.ns}:field.item_base_unit`;
+      let editor = (await f.open())!;
+      const line = /data-draft-line="([^"]+)"/.exec(
+        editor.slots!.sections!,
+      )![1]!;
+      const productField = `${f.ns}:field.sales_order_line_item_id`;
+      editor = (await f.post(editor, `create:${line}:${productField}`, {
+        [`draftSearch:${line}:${productField}`]: 'Pallet jack',
+      }))!;
+      const options = selectFor(editor.slots!.keyFacts!, unit);
+      assert.ok(options, 'the declared choice renders as a select');
+      assert.match(options, /<option value="EA" selected>EA · Each<\/option>/);
+      assert.match(options, /<option value="BOX">BOX · Box<\/option>/);
+      const forged = await createSubmit(f, editor, {
+        [`create:${f.ns}:field.item_sku`]: 'PJ-1',
+        [`create:${f.ns}:field.item_name`]: 'Pallet jack',
+        [unit]: 'PALLET',
+      });
+      assert.equal(forged.statusCode, 422);
+      assert.match(
+        forged.slots!.keyFacts!,
+        /Base unit: choose one of the offered values/,
+      );
+      assert.equal(f.executor.calls.length, 0);
+      // The entered, refused value is not replaced by the default; the form stays open.
+      assert.doesNotMatch(
+        selectFor(forged.slots!.keyFacts!, unit) ?? '',
+        /value="EA" selected/,
+      );
+      const created = await createSubmit(f, forged, {
+        [`create:${f.ns}:field.item_sku`]: 'PJ-1',
+        [`create:${f.ns}:field.item_name`]: 'Pallet jack',
+        [unit]: 'BOX',
+      });
+      assert.equal(created.statusCode, 200);
+      assert.match(created.slots!.keyFacts!, /data-editor-create-selected/);
+      const [item] = f.executor.calls;
+      assert.equal(f.executor.calls.length, 1);
+      assert.equal(
+        asRecord(asRecord(item!.input).values)[`${f.ns}:field.item_base_unit`],
+        'BOX',
+      );
+      assert.match(created.slots!.sections!, /class="derived-value"[^>]*>BOX</);
+    },
+  );
+
+  await t.test(
+    'non-Sales two-step create: a refused later-step choice commits no step',
+    async () => {
+      const id = (kind: string, local: string) =>
+        `northstar.app:${kind}.${local}`;
+      const f = await orderEntryWitness(true, (source) => {
+        for (const surface of source.surfaces as Array<
+          Record<string, unknown>
+        >) {
+          if (
+            !String(surface.surfaceId).endsWith(':surface.purchase_order_form')
+          )
+            continue;
+          const editor = surface.documentEditor as {
+            headerFields: Array<Record<string, unknown>>;
+          };
+          const notes = editor.headerFields.find((field) =>
+            String(field.fieldId).endsWith('_notes'),
+          )!;
+          delete notes.presentation;
+          notes.label = 'Adjustment';
+          notes.reference = {
+            queryId: id('query', 'inventory_transaction_list'),
+            getQueryId: id('query', 'inventory_transaction_get'),
+            labelFieldIds: [id('field', 'inventory_transaction_number')],
+            create: {
+              label: 'New adjustment',
+              explanation: 'Creates the adjustment and its first line.',
+              fields: [
+                {
+                  fieldId: id('field', 'inventory_transaction_number'),
+                  label: 'Adjustment number',
+                },
+                {
+                  fieldId: id('field', 'inventory_transaction_line_unit_id'),
+                  label: 'Line unit',
+                  presentation: choice,
+                },
+              ],
+              steps: [
+                {
+                  operationId: id('operation', 'inventory_transaction_create'),
+                  fixed: [
+                    {
+                      fieldId: id('field', 'inventory_transaction_state'),
+                      value: id('option', 'inventory_transaction_state_draft'),
+                    },
+                    {
+                      fieldId: id('field', 'inventory_transaction_type'),
+                      value: id(
+                        'option',
+                        'inventory_transaction_type_adjustment',
+                      ),
+                    },
+                  ],
+                },
+                {
+                  operationId: id(
+                    'operation',
+                    'inventory_transaction_line_create',
+                  ),
+                  relations: [
+                    {
+                      relationId: id(
+                        'relation',
+                        'inventory_transaction_line_transaction',
+                      ),
+                      step: 0,
+                    },
+                  ],
+                },
+              ],
+              selectStep: 0,
+            },
+          };
+        }
+      });
+      const unit = `create:${f.ns}:field.inventory_transaction_line_unit_id`;
+      let editor = (await f.open())!;
+      const header =
+        /name="draft:([0-9a-f-]{36}):northstar\.app:field\.purchase_order_number"/.exec(
+          editor.slots!.keyFacts!,
+        )![1]!;
+      const notes = `${f.ns}:field.purchase_order_notes`;
+      editor = (await f.post(editor, `create:${header}:${notes}`))!;
+      assert.match(
+        selectFor(editor.slots!.keyFacts!, unit) ?? '',
+        /<option value="EA" selected>/,
+      );
+      const forged = await createSubmit(f, editor, {
+        [`create:${f.ns}:field.inventory_transaction_number`]: 'ADJ-FORM3',
+        [unit]: 'PALLET',
+      });
+      assert.equal(forged.statusCode, 422);
+      assert.match(
+        forged.slots!.keyFacts!,
+        /Line unit: choose one of the offered values/,
+      );
+      // Zero create-step effects: not even the earlier transaction step ran.
+      assert.equal(f.executor.calls.length, 0);
+      const created = await createSubmit(f, forged, {
+        [`create:${f.ns}:field.inventory_transaction_number`]: 'ADJ-FORM3',
+        [unit]: 'BOX',
+      });
+      assert.match(created.slots!.keyFacts!, /data-editor-create-selected/);
+      const [transaction, line] = f.executor.calls;
+      assert.equal(f.executor.calls.length, 2);
+      assert.equal(
+        asRecord(asRecord(line!.input).values)[
+          `${f.ns}:field.inventory_transaction_line_unit_id`
+        ],
+        'BOX',
+      );
+      assert.equal(
+        asRecord(asRecord(line!.input).relations)[
+          `${f.ns}:relation.inventory_transaction_line_transaction`
+        ],
+        asRecord(transaction!.input).recordId,
+      );
+    },
+  );
+});
+
+test('order entry: choice, advisory preference invalidation, foreign scope and identity separation never retarget an open buffer', async () => {
+  const f = await orderEntryWitness();
+  const entryUrl = new URL(
+    `http://fixture.local/?surface=${encodeURIComponent(f.list.surfaceId)}`,
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.selected,
+    null,
+  );
+  const explicit = new URL(entryUrl);
+  explicit.searchParams.set(
+    `${f.ns}:parameter.sales_order_list_legal_entity_scope`,
+    f.scopes[1]!,
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      explicit,
+      f.gateways.queryGateway,
+    ))!.selected,
+    f.scopes[1],
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.selected,
+    f.scopes[1],
+  );
+  for (const token of ['b', 'c', 'd'])
+    assert.equal(
+      (await resolveWorkspaceEntry(
+        await issuedView(f.entry, token),
+        f.list,
+        new URL(entryUrl),
+        f.gateways.queryGateway,
+      ))!.selected,
+      null,
+    );
+  const duplicate = new URL(explicit);
+  duplicate.searchParams.append(
+    `${f.ns}:parameter.sales_order_list_legal_entity_scope`,
+    f.scopes[0]!,
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      duplicate,
+      f.gateways.queryGateway,
+    ))!.invalid,
+    true,
+  );
+  const company = f.executor.rows.get(f.scopes[1]!)!;
+  f.executor.rows.set(company.recordId, {
+    ...company,
+    values: {
+      ...company.values,
+      [`${f.ns}:field.legal_entity_status`]: `${f.ns}:option.legal_entity_status_inactive`,
+    },
+  });
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.selected,
+    f.scopes[0],
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      explicit,
+      f.gateways.queryGateway,
+    ))!.invalid,
+    true,
+  );
+  f.executor.rows.set(company.recordId, company);
+  await assert.rejects(
+    f.gateways.queryGateway.invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: `${f.ns}:query.sales_order_list`,
+      arguments: { includeArchived: false },
+    }),
+  );
+  const draft = (await f.open())!;
+  f.allowed.delete(f.scopes[1]!);
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.selected,
+    f.scopes[0],
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      explicit,
+      f.gateways.queryGateway,
+    ))!.invalid,
+    true,
+  );
+  explicit.searchParams.set(
+    `${f.ns}:parameter.sales_order_list_legal_entity_scope`,
+    randomUUID(),
+  );
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      explicit,
+      f.gateways.queryGateway,
+    ))!.invalid,
+    true,
+  );
+  const saved = await f.post(draft, 'save', f.values(draft));
+  assert.equal(saved!.statusCode, 303);
+  assert.equal(
+    f.executor.owners.get(
+      String(asRecord(f.executor.calls[0]!.input).recordId),
+    ),
+    f.scopes[0],
+  );
+  const pinned = (await f.open())!;
+  f.allowed.delete(f.scopes[0]!);
+  const beforeRevocation = f.executor.calls.length;
+  const denied = await submitSurfaceRuntimeIntent(
+    f.view,
+    f.url.pathname + f.url.search,
+    {
+      draftSession: hiddenValue(pinned.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(pinned.slots!.keyFacts!, 'draftVersion'),
+      draftAction: 'save',
+      ...f.values(pinned),
+    },
+    f.gateways,
+  );
+  assert.equal(denied.statusCode, 422);
+  assert.match(denied.html, /WORKSPACE_COMPANY_UNAVAILABLE/);
+  assert.equal(f.executor.calls.length, beforeRevocation);
+  f.allowed.clear();
+  assert.equal(
+    (await resolveWorkspaceEntry(
+      f.view,
+      f.list,
+      new URL(entryUrl),
+      f.gateways.queryGateway,
+    ))!.options.length,
+    0,
+  );
+});
+test('order entry: stale edits retain inputs, released documents stay locked, persisted removal confirms immutable archive and committed readback never retries', async () => {
+  const f = await orderEntryWitness();
+  let editor = (await f.open())!;
+  const initial = await f.post(editor, 'save', f.values(editor));
+  const id = new URL(
+    initial!.location!,
+    'http://fixture.local',
+  ).searchParams.get('record')!;
+  f.url.searchParams.set('record', id);
+  editor = (await f.open())!;
+  const header = f.executor.rows.get(id)!;
+  f.executor.rows.set(id, { ...header, revision: header.revision + 1 });
+  const values = f.values(editor);
+  const notes = Object.keys(values).find((key) => key.endsWith('_notes'))!;
+  values[notes] = 'Retained stale input';
+  const stale = (await f.post(editor, 'save', values))!;
+  assert.equal(stale.statusCode, 409);
+  assert.match(stale.slots!.keyFacts!, /Retained stale input/);
+  editor = (await f.open())!;
+  const line = [...f.executor.rows.values()].find((row) =>
+    row.entityId.endsWith(':entity.sales_order_line'),
+  )!;
+  const removalValues = f.values(editor);
+  removalValues[
+    Object.keys(removalValues).find(
+      (key) => key.includes(line.recordId) && key.endsWith('_ordered_quantity'),
+    )!
+  ] = '999';
+  editor = (await f.post(editor, `remove:${line.recordId}`, removalValues))!;
+  const before = f.executor.calls.length;
+  const review = (await f.post(editor, 'save', f.values(editor)))!;
+  assert.equal(f.executor.calls.length, before);
+  assert.match(review.slots!.commandBar!, /Confirm removal and save/);
+  assert.doesNotMatch(review.slots!.sections!, /value="999"/);
+  await f.post(review, 'confirm', {
+    [`draft:${line.recordId}:${f.ns}:field.sales_order_line_ordered_quantity`]:
+      '999',
+  });
+  assert.equal(f.executor.rows.get(line.recordId)!.archived, true);
+  const updated = f.executor.rows.get(id)!;
+  f.executor.rows.set(id, {
+    ...updated,
+    values: {
+      ...updated.values,
+      [`${f.ns}:derived_state_field.machine.sales_order_lifecycle`]: `${f.ns}:state.sales_order_released`,
+    },
+  });
+  const locked = await f.open();
+  assert.equal(locked!.statusCode, 422);
+  assert.match(locked!.html, /DRAFT_EDITOR_LOCKED/);
+  const g = await orderEntryWitness();
+  const open = (await g.open())!;
+  g.executor.withheld = true;
+  const committed = (await g.post(open, 'save', g.values(open)))!;
+  assert.equal(committed.statusCode, 200);
+  assert.match(committed.html, /OPERATION_COMMITTED_READBACK_WITHHELD/);
+  assert.doesNotMatch(
+    committed.html,
+    /Readable customer|Readable product|Retry save/,
+  );
+  g.deniedReads.add(`${g.ns}:permission.sales_order_read`);
+  g.deniedReads.add(`${g.ns}:permission.sales_order_line_read`);
+  assert.equal((await g.post(open, 'retry'))!.statusCode, 200);
+  assert.equal(g.executor.calls.length, 1);
+});
+
+test('order entry: buffered persisted lines recheck read authority before edits and redact withheld repeats', async () => {
+  const f = await orderEntryWitness();
+  const initial = (await f.open())!;
+  const saved = (await f.post(initial, 'save', f.values(initial)))!;
+  f.url.searchParams.set(
+    'record',
+    new URL(saved.location!, 'http://fixture.local').searchParams.get(
+      'record',
+    )!,
+  );
+  const editor = (await f.open())!;
+  f.deniedReads.add(`${f.ns}:permission.sales_order_line_read`);
+  const before = f.executor.calls.length;
+  const denied = await submitSurfaceRuntimeIntent(
+    f.view,
+    f.url.pathname + f.url.search,
+    {
+      draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+      draftAction: 'save',
+      ...f.values(editor),
+    },
+    f.gateways,
+  );
+  assert.equal(denied.statusCode, 422);
+  assert.doesNotMatch(
+    denied.html,
+    /Readable customer|Readable product|<fieldset[^>]*data-draft-line/,
+  );
+  assert.equal(f.executor.calls.length, before);
+});
+
 test('native Task policy reuses non-Sales forms, fresh Record context and exact prepared identity', async () => {
   const fixture = await correctionTaskFixture(true);
   const review = await fixture.prepare('8', fixture.locations[0]!.recordId);
   assert.equal((review.html.match(/<dialog /g) ?? []).length, 1);
+  assert.equal((review.html.match(/<script\b/g) ?? []).length, 1);
   assert.match(review.html, /data-task-fallback="page"/);
   assert.match(review.html, /data-task-phase="review"/);
   assert.match(

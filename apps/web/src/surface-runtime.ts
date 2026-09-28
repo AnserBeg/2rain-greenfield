@@ -2,6 +2,8 @@ import {
   loadSurfaceComposition,
   submitCompositionAction,
 } from './surface-composition.js';
+import { resolveWorkspaceEntry } from './workspace-entry.js';
+import { documentEditor } from './document-editor.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -59,6 +61,7 @@ import {
 export interface SurfaceRuntimeResponse {
   readonly html: string;
   readonly statusCode: number;
+  readonly location?: string;
 }
 
 export interface SurfaceRuntimeGateways {
@@ -153,6 +156,18 @@ export async function renderSurfaceRuntimeWithData(
   }
 
   const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const entry = await resolveWorkspaceEntry(
+    view,
+    selection.selected,
+    url,
+    gateways.queryGateway,
+  );
+  if (entry?.redirect)
+    return { html: '', statusCode: 303, location: entry.redirect };
+  if (entry?.invalid)
+    return renderApplicationDiagnostic(422, {
+      code: 'WORKSPACE_COMPANY_UNAVAILABLE',
+    });
   const legalEntitySelection = legalEntitySelectionForSurface(binding, url);
   const queryParameterValues = queryParameterValuesForSurface(binding, url);
   const workspaceContext = await loadWorkspaceContextBar(
@@ -167,7 +182,13 @@ export async function renderSurfaceRuntimeWithData(
     return renderSelectedSurface(
       view,
       selection,
-      { code: 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED', status: 'DIAGNOSTIC' },
+      {
+        code:
+          entry?.options.length === 0
+            ? 'WORKSPACE_COMPANY_UNAVAILABLE'
+            : 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED',
+        status: 'DIAGNOSTIC',
+      },
       feedback,
       binding.operations,
       422,
@@ -176,6 +197,43 @@ export async function renderSurfaceRuntimeWithData(
       queryParameterValues,
       binding.relationInputs,
     );
+  }
+  if (
+    selection.selected.documentEditor &&
+    selection.selected.surfaceRole === 'form' &&
+    legalEntitySelection.length === 1
+  ) {
+    try {
+      const editor = await documentEditor(
+        view,
+        selection.selected,
+        selection.surfaces,
+        url,
+        legalEntitySelection[0]!,
+        gateways,
+      );
+      if (editor)
+        return editor.slots
+          ? renderSelectedSurface(
+              view,
+              selection,
+              {
+                status: 'READY',
+                records: editor.record ? [editor.record] : [],
+                documentEditorSlots: editor.slots,
+              },
+              null,
+              binding.operations,
+              editor.statusCode,
+              legalEntitySelection,
+              workspaceContext,
+            )
+          : editor;
+    } catch (error) {
+      return renderApplicationDiagnostic(422, {
+        code: queryMessageCode(error),
+      });
+    }
   }
   if (binding.query.queryType === 'aggregate') {
     const scopeParameterId =
@@ -301,6 +359,69 @@ export async function renderSurfaceRuntimeWithData(
   );
 }
 
+/** Sent by the owned script only; a cross-site form cannot set a header. */
+export const FRAGMENT_REQUEST_HEADER = 'x-rain-fragment';
+
+export interface SurfaceRuntimeFragmentResponse extends SurfaceRuntimeResponse {
+  /** Repeat the action as the ordinary full-page submit instead. */
+  readonly fallback?: true;
+}
+
+/**
+ * ADR-0036 behaviour 7: one draft-editor reference field answered in place.
+ * The same selection, binding, company scope and continuation checks as the
+ * page decide it; the answer is escaped server HTML naming the one element it
+ * replaces. Anything that is not an in-place answer -- an unknown surface, no
+ * draft session, an expired buffer, a withheld save -- becomes `fallback`, and
+ * the script then performs the ordinary submit, which answers it as a page.
+ */
+export async function submitSurfaceRuntimeFragment(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  submission: SurfaceRuntimeSubmission,
+  gateways: SurfaceRuntimeGateways,
+): Promise<SurfaceRuntimeFragmentResponse> {
+  assertRequestRuntimeView(view);
+  const fallback = Object.freeze({
+    html: '',
+    statusCode: 409,
+    fallback: true as const,
+  });
+  const selection = selectSurface(view, requestUrl);
+  if (
+    'statusCode' in selection ||
+    !selection.selected.documentEditor ||
+    !submission.draftSession
+  )
+    return fallback;
+  let binding: CompiledSurfaceDataBinding;
+  try {
+    binding = readCompiledSurfaceDataBinding(view, selection.selected);
+  } catch {
+    return fallback;
+  }
+  const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const scope = legalEntitySelectionForSurface(binding, url);
+  if (scope.length !== 1) return fallback;
+  try {
+    const editor = await documentEditor(
+      view,
+      selection.selected,
+      selection.surfaces,
+      url,
+      scope[0]!,
+      gateways,
+      submission,
+      'fragment',
+    );
+    return editor?.fragment
+      ? Object.freeze({ html: editor.html, statusCode: editor.statusCode })
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /**
  * Resolves a submission to one pinned operation, SELECTED by the posted id and
  * AUTHORIZED only by the compiled binding.
@@ -330,7 +451,36 @@ export async function submitSurfaceRuntimeIntent(
   } catch {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
+  // Existing continuations carry their own pinned authority and reauthorization.
+  // Entry must not turn a committed, redacted Task/draft replay into a new failure.
+  const entry =
+    (selection.selected.composition &&
+      submission.compositionAction &&
+      submission.taskToken) ||
+    (selection.selected.documentEditor && submission.draftSession)
+      ? null
+      : await resolveWorkspaceEntry(
+          view,
+          selection.selected,
+          new URL(requestUrl, 'http://surface-runtime.local'),
+          gateways.queryGateway,
+        );
+  if (entry?.invalid)
+    return renderApplicationDiagnostic(422, {
+      code: 'WORKSPACE_COMPANY_UNAVAILABLE',
+    });
   if (selection.selected.composition && submission.compositionAction) {
+    const workspaceContext = await loadWorkspaceContextBar(
+      view,
+      selection,
+      binding,
+      gateways.queryGateway,
+      legalEntitySelectionForSurface(
+        binding,
+        new URL(requestUrl, 'http://surface-runtime.local'),
+      ),
+      new URL(requestUrl, 'http://surface-runtime.local'),
+    );
     return submitCompositionAction(
       view,
       selection.selected,
@@ -352,6 +502,7 @@ export async function submitSurfaceRuntimeIntent(
               binding.operations,
               statusCode,
               data.scope ? [data.scope] : [],
+              workspaceContext,
             )
           : {
               statusCode,
@@ -364,6 +515,52 @@ export async function submitSurfaceRuntimeIntent(
               ),
             },
     );
+  }
+  if (selection.selected.documentEditor && submission.draftSession) {
+    const url = new URL(requestUrl, 'http://surface-runtime.local');
+    const scope = legalEntitySelectionForSurface(binding, url);
+    if (scope.length !== 1)
+      return operationDiagnostic('OPERATION_INPUT_INVALID', 422);
+    try {
+      const editor = await documentEditor(
+        view,
+        selection.selected,
+        selection.surfaces,
+        url,
+        scope[0]!,
+        gateways,
+        submission,
+      );
+      if (!editor) return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+      const context = await loadWorkspaceContextBar(
+        view,
+        selection,
+        binding,
+        gateways.queryGateway,
+        scope,
+        url,
+      );
+      return editor.slots
+        ? renderSelectedSurface(
+            view,
+            selection,
+            {
+              status: 'READY',
+              records: editor.record ? [editor.record] : [],
+              documentEditorSlots: editor.slots,
+            },
+            null,
+            binding.operations,
+            editor.statusCode,
+            scope,
+            context,
+          )
+        : editor;
+    } catch (error) {
+      return renderApplicationDiagnostic(422, {
+        code: queryMessageCode(error),
+      });
+    }
   }
   const operation = boundOperation(binding, submission.operationId);
   if (
@@ -549,6 +746,15 @@ function renderSelectedSurface(
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
       ${renderedSlots.map((result) => result.html).join('')}
     </div>`;
+  // The one hash-pinned script also enhances draft-editor reference controls and
+  // their create dialog, and is emitted only when this response renders one.
+  // Matched inside a tag: escaped record text can never form `<... data-...`.
+  const enhanceTaskDialog =
+    /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create)\b/u.test(body) ||
+    (data.status === 'READY' &&
+      selected.composition?.presentation?.task?.mode === 'nativeDialog' &&
+      data.compositionTask?.includes('<dialog ') === true &&
+      data.compositionTask.includes('data-composition-task'));
 
   return Object.freeze({
     html: shellDocument(
@@ -558,6 +764,7 @@ function renderSelectedSurface(
       selected,
       body,
       workspaceContext,
+      enhanceTaskDialog,
     ),
     statusCode,
   });
@@ -734,9 +941,16 @@ async function loadWorkspaceContextBar(
   if (!legalEntityList || legalEntityList.binding.query.legalEntityScope) {
     return null;
   }
-  const targetSurface =
-    selection.selected.surfaceRole === 'list' ||
-    selectedBinding.query.queryType === 'aggregate'
+  const owner = selection.selected.workspace?.ownerSurfaceId
+    ? selection.surfaces.find(
+        (surface) =>
+          surface.surfaceId === selection.selected.workspace!.ownerSurfaceId,
+      )
+    : null;
+  const targetSurface = owner
+    ? { surface: owner, binding: readCompiledSurfaceDataBinding(view, owner) }
+    : selection.selected.surfaceRole === 'list' ||
+        selectedBinding.query.queryType === 'aggregate'
       ? { binding: selectedBinding, surface: selection.selected }
       : selection.surfaces
           .filter((surface) => surface.surfaceRole === 'list')
@@ -755,12 +969,15 @@ async function loadWorkspaceContextBar(
     targetSurface?.binding.query.legalEntityScope?.operand.parameterId;
   if (!targetSurface || !parameterId) return null;
 
-  const enumeration = await recordPickerOptions(
+  const entry = await resolveWorkspaceEntry(
     view,
-    legalEntityList,
+    selection.selected,
+    currentUrl,
     queryGateway,
-    [],
   );
+  const enumeration = entry
+    ? { options: entry.options }
+    : await recordPickerOptions(view, legalEntityList, queryGateway, []);
   if (!enumeration) return null;
   return Object.freeze({
     options: enumeration.options,
@@ -1334,6 +1551,7 @@ function shellDocument(
   selected: CompiledSurfaceDefinition | null,
   body: string,
   workspaceContext: WorkspaceContextBar | null = null,
+  enhanceTaskDialog = false,
 ): string {
   const title = selected?.label ?? 'Release diagnostic';
   const navigation = navigationEntries(surfaces, compiledNavigation);
@@ -1373,7 +1591,7 @@ function shellDocument(
         <main id="surface-content" tabindex="-1">${body}</main>
       </div>
     </div>
-    <script>${SURFACE_CLIENT_SCRIPT}</script>
+    ${enhanceTaskDialog ? `<script>${SURFACE_CLIENT_SCRIPT}</script>` : ''}
   </body>
 </html>`;
 }
@@ -1413,10 +1631,12 @@ function navigationLink(
   label: string,
   workspaceContext: WorkspaceContextBar | null,
 ): string {
-  const current = selected
-    ? surface.surfaceId === selected.surfaceId ||
-      sharesSurfaceEntity(view, surface, selected)
-    : false;
+  const current = selected?.workspace?.ownerSurfaceId
+    ? selected.workspace.ownerSurfaceId === surface.surfaceId
+    : selected
+      ? surface.surfaceId === selected.surfaceId ||
+        sharesSurfaceEntity(view, surface, selected)
+      : false;
   const parameters = new URLSearchParams({ surface: surface.surfaceId });
   if (workspaceContext?.selectedRecordId) {
     try {
@@ -1437,11 +1657,11 @@ function navigationLink(
 }
 
 function renderWorkspaceContextBar(context: WorkspaceContextBar): string {
-  return `<nav class="workspace-context-bar" aria-label="Legal entity" data-shell-region="workspace-context-bar" data-scope-parameter-id="${escapeHtml(context.parameterId)}">
-    <span class="workspace-context-bar__label">Legal entity</span>
+  return `<nav class="workspace-context-bar" aria-label="Company" data-shell-region="workspace-context-bar" data-scope-parameter-id="${escapeHtml(context.parameterId)}">
+    <span class="workspace-context-bar__label">Company</span>
     <span class="workspace-context-bar__options">${
       context.options.length === 0
-        ? '<span class="muted">No legal entities available</span>'
+        ? '<span class="muted">No authorized active companies available. Contact your administrator for access or setup.</span>'
         : context.options
             .map((option) => {
               const parameters = new URLSearchParams(
@@ -1528,13 +1748,13 @@ function navigationLabel(surface: CompiledSurfaceDefinition): string {
 }
 
 function isNavigationSurface(surface: CompiledSurfaceDefinition): boolean {
-  return (
-    surface.surfaceRole === 'list' ||
-    (surface.surfaceRole === null &&
-      (surface.archetype === 'list' ||
-        surface.archetype === 'home' ||
-        surface.archetype === 'task'))
-  );
+  return surface.workspace
+    ? surface.workspace.membership !== 'contextual'
+    : surface.surfaceRole === 'list' ||
+        (surface.surfaceRole === null &&
+          (surface.archetype === 'list' ||
+            surface.archetype === 'home' ||
+            surface.archetype === 'task'));
 }
 
 function sharesSurfaceEntity(
@@ -1654,6 +1874,8 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .record-breadcrumb a{color:var(--accent-ink)}
 .command-bar{display:flex;gap:var(--space-2);align-items:center;min-height:56px;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
 .command-bar .action-overflow{margin-left:auto}
+.command-bar:has([data-save-boundary]){flex-wrap:wrap}
+.command-bar [data-save-boundary]{flex-basis:100%;margin:0}
 .action-overflow{width:max-content}
 .action-overflow summary{display:grid;place-items:center;min-height:44px;padding:var(--space-2) var(--space-4);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--accent-ink);font-weight:var(--weight-emphasis);cursor:pointer;list-style:none}
 .action-overflow summary::-webkit-details-marker{display:none}
@@ -1690,14 +1912,57 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .key-facts-panel{grid-column:span 12}
 .record-fields dd{margin:var(--space-1) 0 0}
 .form-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4);margin:var(--space-4) 0}
+/* Draft document editor. The line table and create form sit inside .form-fields so their controls use the already-measured focus rings; this block declares no new focus-ring selectors. */
+table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:separate;border-spacing:0 var(--space-2);table-layout:fixed}
+.draft-lines th{padding:0 var(--space-2) var(--space-1);text-align:left;font-size:var(--text-body);font-weight:600;color:var(--ink-muted)}
+.draft-lines__heading--reference{width:46%}.draft-lines__heading--value{width:17%}.draft-lines__heading--derived{width:10%}.draft-lines__heading--remove{width:6.5rem}
+.draft-line__cell{padding:var(--space-2);vertical-align:top;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface-panel)}
+.draft-line__cell:first-child{border-left:1px solid var(--line);border-radius:var(--radius-control) 0 0 var(--radius-control)}
+.draft-line__cell:last-child{border-right:1px solid var(--line);border-radius:0 var(--radius-control) var(--radius-control) 0;text-align:right}
+.draft-line__cell input,.draft-line__cell select{width:100%;min-width:0}
+.draft-line--removed td{padding:var(--space-2);color:var(--ink-muted)}
+.derived-value{display:inline-flex;align-items:center;min-height:44px;font-weight:600;color:var(--ink-strong)}.derived-empty{font-weight:400;color:var(--ink-muted)}
+.reference-control{display:grid;gap:var(--space-2)}.reference-search{position:relative;display:flex;flex-wrap:wrap;gap:var(--space-2)}.reference-search input{flex:1 1 12rem;min-width:0}.reference-lookup{display:grid;flex-basis:100%;gap:var(--space-2)}.reference-status:empty{display:none}.reference-status p{margin:0}.reference-selected-detail{color:var(--ink-muted)}
+/* Enhanced (ADR-0036 behaviour 7): the lookup becomes a bounded popup under the box; Search is the no-script path. */
+body[data-reference-enhanced] [data-reference-submit]{display:none}
+body[data-reference-enhanced] .reference-lookup{display:none}
+body[data-reference-enhanced] [data-reference-open] .reference-lookup{display:grid;position:absolute;z-index:6;top:calc(100% + 2px);left:0;right:0;gap:0;padding:var(--space-1);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);box-shadow:var(--elevation-overlay)}
+body[data-reference-enhanced] [data-reference-open] .reference-results{max-height:18rem;padding:0;border:0}
+body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .reference-search input{cursor:progress}
+.reference-option[aria-selected="true"],.reference-create[aria-selected="true"],.reference-more[aria-selected="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent-ground)}
+.reference-results{display:grid;gap:2px;max-height:16rem;margin:0;padding:var(--space-1);overflow:auto;list-style:none;border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel)}
+.reference-option{display:grid;gap:2px;width:100%;min-height:44px;padding:var(--space-2);text-align:left;border:0;border-radius:var(--radius-control);background:transparent;color:var(--ink);cursor:pointer}
+.reference-option:hover{background:var(--surface-sunken)}.reference-option small,.reference-selected small{color:var(--ink-muted)}
+.reference-empty{padding:var(--space-2);color:var(--ink-muted)}.reference-limit{margin:0}
+.reference-create{display:block;width:100%;min-height:44px;padding:var(--space-2);border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;color:var(--accent-ink);font-weight:600;text-align:left;cursor:pointer}.reference-create:hover{background:var(--surface-sunken)}.reference-more{width:100%;text-align:left}
+.reference-selected{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-height:44px;padding:var(--space-1) var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken)}.reference-selected__text{display:grid}
+.link-action{min-height:44px;padding:var(--space-1);border:0;background:transparent;color:var(--accent-ink);text-decoration:underline;cursor:pointer}
+.form-field--wide{grid-column:1/-1}.draft-header textarea,.editor-create__fields textarea{width:100%;resize:vertical}
+.field-error{display:block;margin-top:var(--space-1);color:var(--status-blocked-ink);font-size:var(--text-body);font-weight:600;letter-spacing:normal;text-transform:none}
+.draft-lines [aria-invalid="true"],.draft-header [aria-invalid="true"]{border-color:var(--status-blocked-ink)}
+.draft-note{margin:0 0 var(--space-3);padding:var(--space-2) var(--space-3);border-left:3px solid var(--status-attention-ink);border-radius:var(--radius-control);background:var(--status-attention-ground);color:var(--status-attention-ink)}.draft-note p{margin:0}
+.draft-note--done{border-left-color:var(--status-success-ink);background:var(--status-success-ground);color:var(--status-success-ink)}.draft-note--problem{border-left-color:var(--status-blocked-ink);background:var(--status-blocked-ground);color:var(--status-blocked-ink)}
+.editor-create__fields input:disabled,.editor-create__fields textarea:disabled,.draft-header input:disabled,.draft-header select:disabled,.draft-header textarea:disabled,.draft-lines input:disabled{background:var(--surface-sunken);color:var(--ink-muted);cursor:not-allowed}
+.draft-create-resume{grid-column:1/-1;margin:0 0 var(--space-3)}.draft-create-resume[hidden]{display:none}
+.draft-paused{margin:0 0 var(--space-3);padding:var(--space-2) var(--space-3);border-left:3px solid var(--accent-ground);background:var(--surface-sunken)}
+.editor-create{width:calc(100% - 2 * var(--space-4));max-width:42rem;margin:var(--space-4) auto;padding:var(--space-5);border:1px solid var(--line-strong);border-radius:var(--radius-container);background:var(--surface-panel);color:var(--ink)}
+.editor-create::backdrop{background:rgb(0 0 0 / 35%)}.editor-create__header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)}.editor-create__header h2{margin:0}
+.editor-create__explanation{color:var(--ink-muted)}
+/* The house .form-fields span rule styles labels as micro caps. Editor labels stay readable sentence case, and record data inside the editor is never transformed. */
+.draft-header .form-field__label,.draft-lines th{font-size:var(--text-body);font-weight:600;letter-spacing:normal;text-transform:none;color:var(--ink)}
+.draft-lines .derived-empty,.draft-lines .derived-value,.reference-control span,.reference-selected span{font-size:inherit;letter-spacing:normal;text-transform:none}
+.draft-header textarea,.editor-create__fields textarea{padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit;font-weight:400}
+/* Without JavaScript the create form stays in the page flow rather than overlapping it. */
+.editor-create[open]:not(:modal){position:static;inset:auto;grid-column:1/-1;box-sizing:border-box;width:100%;max-width:none;margin:0 0 var(--space-4)}.editor-create__footer{display:flex;justify-content:flex-start;gap:var(--space-2);margin-top:var(--space-4)}
 .form-field{display:grid;align-content:start;gap:var(--space-2)}
 .form-fields label{display:grid;gap:var(--space-1)}
+[data-document-editor] fieldset,[data-draft-line]{min-width:0;margin:var(--space-4) 0;padding:var(--space-4);border:1px solid var(--line);border-radius:var(--radius-control)}
 .form-fields .form-empty-intent{padding-top:var(--space-1)}
 .form-unavailable-value{display:block;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken);color:var(--ink-muted);font-size:var(--text-body);line-height:1.45}
 .form-unavailable-value code{color:var(--ink);overflow-wrap:anywhere}
 .form-fields input,.form-fields select{width:100%;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .form-fields input[type="checkbox"]{width:24px;height:24px;min-height:24px;padding:0;justify-self:start;margin:10px 0}
-.form-fields input:focus-visible,.form-fields select:focus-visible,button:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
 button{min-height:44px;padding:var(--space-2) var(--space-4);border:0;border-radius:var(--radius-control);background:var(--accent-ground);color:var(--ink-on-accent);font:inherit;font-weight:var(--weight-emphasis);cursor:pointer}
 button:hover{background:var(--accent-ground-hover)}
 button:active{background:var(--accent-ground-pressed)}
@@ -1721,7 +1986,7 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 @media (prefers-reduced-motion:reduce){.skeleton::after{animation:none;display:none}}
 @media (prefers-reduced-motion:no-preference){.sidebar a,.navigation-group>summary,.primary-action,.secondary-action,.list-page-link,.record-link,.data-table-wrap tbody tr,button{transition:background-color var(--motion-duration) var(--motion-easing),border-color var(--motion-duration) var(--motion-easing),color var(--motion-duration) var(--motion-easing),opacity var(--motion-duration) var(--motion-easing)}}
 @media print{body *{visibility:hidden}.packing-document,.packing-document *{visibility:visible}.packing-document{position:absolute;inset:0;width:100%;border:0;box-shadow:none}.print-guidance{display:none}}
-@media(max-width:800px){
+@media(max-width:800px){table.draft-lines.form-fields,.draft-lines tbody,.draft-lines tr,.draft-lines td{display:block;width:auto}.draft-lines thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.draft-line{margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}.draft-line__cell,.draft-line__cell:first-child,.draft-line__cell:last-child{padding:var(--space-1) 0;border:0;border-radius:0;background:transparent;text-align:left}.draft-line__cell::before{content:attr(data-label);display:block;margin-bottom:var(--space-1);font-weight:600;color:var(--ink-muted)}.draft-line__cell--remove::before{content:none}.editor-create__fields{grid-template-columns:minmax(0,1fr)}
 body{padding-bottom:72px}
 .app-shell{display:block}
 .sidebar{position:fixed;z-index:4;top:auto;right:0;bottom:0;left:0;width:100%;height:auto;padding:var(--space-1);border-top:1px solid var(--line-on-rail);background:var(--surface-rail)}
@@ -1834,6 +2099,7 @@ body{padding-bottom:72px}
 .composition-task-context .record-fields dd{font-size:var(--text-body)}
 .composition-task-context section+section{margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--line)}
 .composition-task-consequence{margin:var(--space-3) 0;color:var(--ink-muted)}
+.composition-task-result{margin-bottom:var(--space-4);padding:var(--space-3);border-left:3px solid var(--status-success-ink);border-radius:var(--radius-control);background:var(--status-success-ground);color:var(--status-success-ink)}.composition-task-result h3{margin:0 0 var(--space-2);font-size:var(--text-section)}.composition-task-result dd,.composition-task-result dt{color:var(--status-success-ink)}
 .composition-task-summary,.composition-task-confirmation{margin-bottom:var(--space-4);padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken)}
 .composition-task-summary>strong{margin-right:var(--space-2)}
 .composition-task-summary p,.composition-task-confirmation p{margin:var(--space-2) 0 0}
@@ -1843,6 +2109,14 @@ body{padding-bottom:72px}
 .composition-task-support .record-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .composition-inputs{display:grid;gap:var(--space-4)}
 .composition-inputs .field{display:grid;gap:var(--space-2);font-weight:var(--weight-emphasis)}
+.composition-inputs .composition-input{display:grid;gap:var(--space-1)}
+.composition-task-dialog:modal{scroll-padding-bottom:7rem}
+.composition-inputs input,.composition-inputs select,.composition-inputs textarea{scroll-margin-bottom:7rem}
+.draft-header>.form-field:not(.form-field--reference){gap:var(--space-1)}
+.editor-create__duplicates{margin:var(--space-3) 0;padding:var(--space-3);border-left:4px solid var(--status-attention-ink);border-radius:var(--radius-control);background:var(--status-attention-ground);color:var(--ink)}
+.editor-create__duplicates p{margin:0 0 var(--space-2)}.editor-create__duplicates ul{margin:0 0 var(--space-2);padding-left:var(--space-5)}
+.composition-inputs .derived-value{min-height:auto}.composition-inputs .field-error{font-weight:600}
+.composition-inputs textarea{width:100%;box-sizing:border-box;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .composition-inputs input,.composition-inputs select{width:100%;box-sizing:border-box;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .composition-reviewed-inputs{display:flex;gap:var(--space-5);flex-wrap:wrap;margin:var(--space-4) 0}
 .composition-reviewed-inputs dt{color:var(--ink-muted);font-size:var(--text-micro)}

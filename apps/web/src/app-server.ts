@@ -10,9 +10,11 @@ import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtim
 import { SURFACE_CLIENT_CSP_HASH } from './surface-client.js';
 
 import {
+  FRAGMENT_REQUEST_HEADER,
   renderApplicationDiagnostic,
   renderSurfaceRuntime,
   renderSurfaceRuntimeWithData,
+  submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
   type SurfaceRuntimeGateways,
   type SurfaceRuntimeResponse,
@@ -39,7 +41,9 @@ async function handleRequest(
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
     'content-security-policy',
-    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
+    // `connect-src 'self'` admits only the owned script's same-origin fragment
+    // POSTs (ADR-0036 behaviour 7); script, style and form rules are unchanged.
+    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'; style-src 'unsafe-inline'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
   );
   response.setHeader('x-content-type-options', 'nosniff');
 
@@ -63,6 +67,47 @@ async function handleRequest(
       response,
       renderApplicationDiagnostic(404, { code: 'ROUTE_NOT_FOUND' }),
     );
+    return;
+  }
+
+  // A fragment is the owned script's same-origin POST: it must carry the custom
+  // header (which a cross-site form cannot set) and prove its origin -- by
+  // same-origin fetch metadata where the browser sends it, otherwise by an
+  // Origin naming this server. Anything else is an ordinary request.
+  const fragment =
+    request.method === 'POST' &&
+    gateways !== undefined &&
+    request.headers[FRAGMENT_REQUEST_HEADER] === '1';
+  if (fragment) {
+    const site = request.headers['sec-fetch-site'];
+    response.setHeader(FRAGMENT_REQUEST_HEADER, 'fragment');
+    const fallback = () => {
+      response.setHeader(`${FRAGMENT_REQUEST_HEADER}-fallback`, 'page');
+      writeHtml(response, { html: '', statusCode: 409 });
+    };
+    const origin = request.headers.origin;
+    let sameOrigin = site === 'same-origin';
+    if (site === undefined && typeof origin === 'string') {
+      try {
+        sameOrigin = new URL(origin).host === request.headers.host;
+      } catch {
+        sameOrigin = false;
+      }
+    }
+    if (!sameOrigin) {
+      writeHtml(response, { html: '', statusCode: 403 });
+      return;
+    }
+    try {
+      const submission = await readFormSubmission(request);
+      const result = await entry.run({ headers: request.headers }, (view) =>
+        submitSurfaceRuntimeFragment(view, url.href, submission, gateways),
+      );
+      if (result.fallback) fallback();
+      else writeHtml(response, result);
+    } catch {
+      fallback();
+    }
     return;
   }
 
@@ -152,6 +197,7 @@ function writeHtml(
   result: SurfaceRuntimeResponse,
 ): void {
   response.statusCode = result.statusCode;
+  if (result.location) response.setHeader('location', result.location);
   response.setHeader('content-type', 'text/html; charset=utf-8');
   response.end(result.html);
 }

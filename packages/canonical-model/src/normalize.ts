@@ -2,6 +2,7 @@ import {
   validateSurfaceCompositions,
   normalizeSurfaceComposition,
 } from './surface-composition.js';
+import { validateSurfaceWorkspaces } from './surface-workspace.js';
 import { ZodError } from 'zod';
 
 import { canonicalize } from './canonicalize.js';
@@ -150,6 +151,7 @@ export function parseNormalizedApplicationPackageJson(
   enforceFamilyBounds(normalized);
   validateSemantics(normalized);
   validateSurfaceCompositions(normalized);
+  validateSurfaceWorkspaces(normalized);
   enforceValueBounds(normalized);
   validateNormalizedDerivation(normalized);
   return deepFreeze(normalized);
@@ -463,6 +465,7 @@ export function normalizeApplicationPackage(
   }
   validateSemantics(normalized);
   validateSurfaceCompositions(normalized);
+  validateSurfaceWorkspaces(normalized);
   enforceValueBounds(normalized);
   const normalizedBytes = new TextEncoder().encode(canonicalize(normalized));
   if (

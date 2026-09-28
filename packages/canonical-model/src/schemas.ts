@@ -748,6 +748,37 @@ const compositionCondition = z.strictObject({
   operator: z.enum(['equals', 'notEquals', 'positive']),
   compare: z.union([z.string(), z.number(), z.boolean(), z.null()]),
 });
+const compositionTaskColumn = z.strictObject({
+  datasetId: CanonicalIdSchema,
+  columnId: CanonicalIdSchema,
+});
+/**
+ * How a Task presents one of its text inputs, reusing the draft editor's
+ * vocabulary. `choice` offers a fixed set (optionally defaulting to a stored
+ * record value that is itself offered); `derived` is read on the server from
+ * the selected row's declared column and never from the submission; both are
+ * presentation policy over the input, never a domain rule.
+ */
+const compositionInputPresentation = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('multiline') }),
+  z.strictObject({
+    kind: z.literal('choice'),
+    options: z
+      .array(
+        z.strictObject({
+          value: z.string().min(1).max(64),
+          label: LabelSchema,
+        }),
+      )
+      .min(1)
+      .max(20),
+    defaultValue: z.string().min(1).max(64).optional(),
+    defaultFrom: z
+      .strictObject({ source: z.literal('record'), field: z.string().min(1) })
+      .optional(),
+  }),
+  z.strictObject({ kind: z.literal('derived'), column: compositionTaskColumn }),
+]);
 const compositionInput = z.strictObject({
   inputId: CanonicalIdSchema,
   label: LabelSchema,
@@ -756,6 +787,7 @@ const compositionInput = z.strictObject({
   required: z.boolean(),
   query: compositionReference('queryReference').optional(),
   labelField: compositionReference('fieldReference').optional(),
+  presentation: compositionInputPresentation.optional(),
 });
 const compositionStep = z.strictObject({
   stepId: CanonicalIdSchema,
@@ -769,10 +801,6 @@ const compositionStep = z.strictObject({
     )
     .min(1)
     .max(60),
-});
-const compositionTaskColumn = z.strictObject({
-  datasetId: CanonicalIdSchema,
-  columnId: CanonicalIdSchema,
 });
 const compositionTaskValue = z.discriminatedUnion('source', [
   z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
@@ -884,8 +912,171 @@ export const SurfaceCompositionSchema = z.strictObject({
   actions: z.array(compositionAction).max(12),
 });
 export type SurfaceComposition = z.infer<typeof SurfaceCompositionSchema>;
+/** Optional v6 workspace declarations; absence preserves historical bytes. */
+export const SurfaceWorkspaceSchema = z.strictObject({
+  membership: z.enum(['operational', 'setup', 'contextual']),
+  ownerSurfaceId: CanonicalIdSchema.optional(),
+  entry: z
+    .strictObject({
+      companyQueryId: CanonicalIdSchema,
+      authorizationQueryId: CanonicalIdSchema,
+      companyNameFieldId: CanonicalIdSchema,
+      companyStateFieldId: CanonicalIdSchema,
+      activeStateId: CanonicalIdSchema,
+      policy: z.literal('authorizedSingleOrPreference'),
+    })
+    .optional(),
+});
+export type SurfaceWorkspace = z.infer<typeof SurfaceWorkspaceSchema>;
+/**
+ * How the draft editor presents one declared field. Every variant is an EDITOR
+ * policy, never a domain rule: the field keeps its own type and server-side
+ * admission, so UI, API and agent writes stay subject to the same validation.
+ * `choice` in particular offers a fixed set; it does not narrow what the domain
+ * admits, and a stored value outside the set is preserved rather than replaced.
+ */
+const editorPresentation = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('multiline') }),
+  z.strictObject({
+    kind: z.literal('choice'),
+    options: z
+      .array(
+        z.strictObject({
+          value: z.string().min(1).max(64),
+          label: LabelSchema,
+        }),
+      )
+      .min(1)
+      .max(20),
+    defaultValue: z.string().min(1).max(64).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal('derived'),
+    /** A sibling reference field in the same row whose record supplies the value. */
+    referenceFieldId: CanonicalIdSchema,
+    /** A field selected by that reference's list query. */
+    sourceFieldId: CanonicalIdSchema,
+  }),
+]);
+/**
+ * An in-context create flow for a reference: an ordered set of existing
+ * governed create operations. Collected fields route to the step whose entity
+ * owns them; `fixed` values and `relations` bind the steps together. The record
+ * created by `selectStep` becomes the selected value of the originating field.
+ */
+const editorCreate = z.strictObject({
+  label: LabelSchema,
+  explanation: z.string().min(1).max(500),
+  fields: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        label: LabelSchema,
+        presentation: editorPresentation.optional(),
+      }),
+    )
+    .min(1)
+    .max(8),
+  steps: z
+    .array(
+      z.strictObject({
+        operationId: CanonicalIdSchema,
+        fixed: z
+          .array(
+            z.strictObject({
+              fieldId: CanonicalIdSchema,
+              value: z.string().min(1).max(200),
+            }),
+          )
+          .max(8)
+          .optional(),
+        relations: z
+          .array(
+            z.strictObject({
+              relationId: CanonicalIdSchema,
+              step: z.number().int().min(0).max(3),
+            }),
+          )
+          .max(4)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+  selectStep: z.number().int().min(0).max(3),
+});
+const editorField = z.strictObject({
+  fieldId: CanonicalIdSchema,
+  label: LabelSchema,
+  presentation: editorPresentation.optional(),
+  reference: z
+    .strictObject({
+      queryId: CanonicalIdSchema,
+      /**
+       * The exact read for one selected record, so the picker can label and
+       * derive from a selection without scanning the list. Optional only so
+       * older releases in the lineage still parse; the validator requires it
+       * wherever search, detail, create or derivation is declared.
+       */
+      getQueryId: CanonicalIdSchema.optional(),
+      labelFieldIds: z.array(CanonicalIdSchema).min(1).max(3),
+      /** Secondary text shown under each result, such as SKU and base unit. */
+      detailFieldIds: z.array(CanonicalIdSchema).min(1).max(3).optional(),
+      /**
+       * Which records may be chosen: those an active record of another entity
+       * points at through a declared relation, matching exact values -- for
+       * example parties with an active customer role. Applied by the list
+       * query before paging, and to every selection route.
+       */
+      eligibility: z
+        .strictObject({
+          queryId: CanonicalIdSchema,
+          relationId: CanonicalIdSchema,
+          filters: z
+            .array(
+              z.strictObject({
+                fieldId: CanonicalIdSchema,
+                value: z.string().min(1).max(200),
+              }),
+            )
+            .min(1)
+            .max(4),
+        })
+        .optional(),
+      create: editorCreate.optional(),
+    })
+    .optional(),
+});
+export const SurfaceDocumentEditorSchema = z.strictObject({
+  headerLabel: LabelSchema.optional(),
+  linesLabel: LabelSchema.optional(),
+  saveDescription: z.string().min(1).max(2000).optional(),
+  kind: z.literal('draftDocumentEditor'),
+  headerFormSurfaceId: CanonicalIdSchema,
+  recordSurfaceId: CanonicalIdSchema,
+  lineFormSurfaceId: CanonicalIdSchema,
+  lineQueryId: CanonicalIdSchema,
+  parentRelationId: CanonicalIdSchema,
+  stateFieldId: CanonicalIdSchema,
+  editableStateIds: z.array(CanonicalIdSchema).min(1),
+  headerFields: z.array(editorField).min(1).max(20),
+  lineFields: z.array(editorField).min(1).max(15),
+  lineNumberFieldId: CanonicalIdSchema,
+  saveMode: z.literal('sequential'),
+});
+export type SurfaceDocumentEditor = z.infer<typeof SurfaceDocumentEditorSchema>;
+export type SurfaceEditorField = SurfaceDocumentEditor['headerFields'][number];
+export type SurfaceEditorPresentation = NonNullable<
+  SurfaceEditorField['presentation']
+>;
+export type SurfaceEditorReference = NonNullable<
+  SurfaceEditorField['reference']
+>;
+export type SurfaceEditorCreate = NonNullable<SurfaceEditorReference['create']>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   composition: SurfaceCompositionSchema.optional(),
+  workspace: SurfaceWorkspaceSchema.optional(),
+  documentEditor: SurfaceDocumentEditorSchema.optional(),
 });
 const authoredV6SurfaceDefinition = normalizedV6SurfaceDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),

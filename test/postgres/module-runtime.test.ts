@@ -120,6 +120,7 @@ import {
   ordinaryModuleV2,
   ordinaryModuleV2ForNamespace,
 } from '../fixtures/g2/module-conformance/definitions.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
@@ -4816,15 +4817,12 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
     'surfaces',
   ] as const) {
     const composed = application[collection] as unknown[];
-    for (const entry of inventory[collection] as unknown[]) {
-      assert.equal(
-        composed.filter(
-          (candidate) => JSON.stringify(candidate) === JSON.stringify(entry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collection} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collection,
+      composed,
+      inventory[collection] as unknown[],
+      APPLICATION_NAMESPACE,
+    );
   }
   (application.queries as Array<Record<string, unknown>>).push({
     aggregate: {

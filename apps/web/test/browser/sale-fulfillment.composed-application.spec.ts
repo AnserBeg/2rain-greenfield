@@ -133,33 +133,56 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.goto(url('inventory_transaction', 'detail', transactionId));
   await command('Post');
 
-  await page.goto(url('sales_order', 'form'));
-  await fill('sales_order', 'number', `SO-FUL-${suffix}`);
-  await fill('sales_order', 'customer_party_id', customerPartyId);
-  await fill('sales_order', 'order_date', instant);
-  await fill('sales_order', 'requested_date', instant);
-  await fill('sales_order', 'currency', 'CAD');
-  await fill('sales_order', 'notes', 'Partial shipment and correction');
-  const orderId = await save();
-  await page.goto(url('sales_order_line', 'form'));
-  await fill('sales_order_line', 'line_number', '1');
-  await fill('sales_order_line', 'item_id', itemId);
-  await fill('sales_order_line', 'unit_id', 'EA');
-  await fill('sales_order_line', 'ordered_quantity', '10');
-  await fill('sales_order_line', 'unit_price', '12.5');
-  await relate('sales_order_line_order', orderId);
-  const orderLineId = await save();
-  await page.goto(url('sales_order', 'detail', orderId));
-  await command('Release', false);
-
-  // Eligibility is checked from current persisted party-role facts when the
-  // reservation is activated. The released order deliberately predates this
-  // role so historical orders cannot bypass the same server-side check.
+  // Draft-editor pickers: type into the field's combobox and choose an offered
+  // result -- in place with the owned script, as ordinary submits without it --
+  // then wait for the field to show the selection before the next step.
+  const pick = async (name: string, term: string, option: string) => {
+    const box = page.getByRole('combobox', { name, exact: true });
+    await box.fill(term);
+    if (!(await page.locator('body[data-reference-enhanced]').count()))
+      await page
+        .locator('[data-reference-control]')
+        .filter({ has: box })
+        .getByRole('button', { name: 'Search', exact: true })
+        .click();
+    await page
+      .getByRole('option')
+      .filter({ has: page.locator('strong', { hasText: option }) })
+      .first()
+      .click();
+    await expect(
+      page.getByRole('combobox', { name, exact: true }),
+    ).toHaveAttribute('data-selected-label', option);
+  };
+  // The customer picker offers only parties with an active customer role, so
+  // the role exists before the order. Reservation activation still checks the
+  // current persisted party-role facts on the server.
   await page.goto(url('party_role', 'form'));
   await choose('party_role', 'kind', 'Customer');
   await choose('party_role', 'status', 'Active');
   await relate('party_role_party', customerPartyId);
   await save();
+  await page.goto(url('sales_order', 'form'));
+  await page.getByLabel('Order number *').fill(`SO-FUL-${suffix}`);
+  await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
+  await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
+  await page.getByLabel('Notes').fill('Partial shipment and correction');
+  await pick('Customer', 'Alpine', 'Alpine Office Supply');
+  // The declared currency default; the unit follows the product's base unit.
+  await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
+  await expect(page.locator('output.derived-value').first()).toHaveText('EA');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
+  await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/sales_order_detail/u);
+  const orderId = new URL(page.url()).searchParams.get('record')!;
+  const orderLineId = (await page
+    .locator('[data-composition-dataset$="dataset.fulfillment_lines"] tbody tr')
+    .filter({ hasText: 'Field notebook' })
+    .getAttribute('data-record-id'))!;
+  expect(orderLineId).toBeTruthy();
+  await command('Release', false);
 
   await page.goto(url('reservation', 'form'));
   await fill('reservation', 'number', `RSV-${suffix}`);
@@ -314,21 +337,22 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   // A second, fully shipped order demonstrates explicit closure independently
   // of the cancelled-and-reversed order above.
   await page.goto(url('sales_order', 'form'));
-  await fill('sales_order', 'number', `SO-CLOSE-${suffix}`);
-  await fill('sales_order', 'customer_party_id', customerPartyId);
-  await fill('sales_order', 'order_date', instant);
-  await fill('sales_order', 'requested_date', instant);
-  await fill('sales_order', 'currency', 'CAD');
-  const closureOrderId = await save();
-  await page.goto(url('sales_order_line', 'form'));
-  await fill('sales_order_line', 'line_number', '1');
-  await fill('sales_order_line', 'item_id', itemId);
-  await fill('sales_order_line', 'unit_id', 'EA');
-  await fill('sales_order_line', 'ordered_quantity', '2');
-  await fill('sales_order_line', 'unit_price', '12.5');
-  await relate('sales_order_line_order', closureOrderId);
-  const closureLineId = await save();
-  await page.goto(url('sales_order', 'detail', closureOrderId));
+  await page.getByLabel('Order number *').fill(`SO-CLOSE-${suffix}`);
+  await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
+  await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
+  await pick('Customer', 'Alpine', 'Alpine Office Supply');
+  await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
+  await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/sales_order_detail/u);
+  const closureOrderId = new URL(page.url()).searchParams.get('record')!;
+  const closureLineId = (await page
+    .locator('[data-composition-dataset$="dataset.fulfillment_lines"] tbody tr')
+    .filter({ hasText: 'Field notebook' })
+    .getAttribute('data-record-id'))!;
+  expect(closureLineId).toBeTruthy();
   await command('Release', false);
   await page.goto(url('reservation', 'form'));
   await fill('reservation', 'number', `RSV-CLOSE-${suffix}`);

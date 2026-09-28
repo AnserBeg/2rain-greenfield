@@ -2,6 +2,12 @@ import {
   SurfaceCompositionSchema,
   type SurfaceComposition,
 } from '../../../packages/canonical-model/src/index.js';
+import {
+  SurfaceWorkspaceSchema,
+  SurfaceDocumentEditorSchema,
+  type SurfaceWorkspace,
+  type SurfaceDocumentEditor,
+} from '../../../packages/canonical-model/src/schemas.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import {
@@ -230,7 +236,9 @@ export type SurfaceOperationIntent =
  * something other than the operation -- `create` and `update` by the form
  * role's one Save button, `archive` and `restore` by whether the record is
  * archived. A second operation on any of those has nowhere to render, so it
- * stays refused BY NAME rather than binding invisibly.
+ * stays refused BY NAME rather than binding invisibly. A family with no form
+ * renders no `create` or `update` at all; there a surplus of either is left
+ * unbound rather than refusing the family's read surfaces.
  *
  * `command` is the exception because each command renders its own named
  * button, which is the whole reason this limit lifted.
@@ -264,6 +272,8 @@ export interface CompiledSurfaceSlot {
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly workspace?: SurfaceWorkspace;
+  readonly documentEditor?: SurfaceDocumentEditor;
   readonly composition?: SurfaceComposition;
   readonly archetype: CompiledSurfaceArchetype;
   readonly dataSourceQueryId: string;
@@ -326,6 +336,12 @@ export interface CompiledSurfaceOperationBinding {
 }
 
 export interface CompiledSurfaceInputField {
+  readonly temporal?: RegisteredOperationInputContract['fields'][number]['temporal'];
+  /**
+   * The pinned contract's value bounds, so an editor can refuse an out-of-range
+   * decimal before any step commits. The provider still enforces them.
+   */
+  readonly bounds?: RegisteredOperationInputContract['fields'][number]['bounds'];
   readonly fieldId: string;
   readonly kind: RegisteredOperationInputContract['fields'][number]['fieldKind'];
   readonly required: boolean;
@@ -476,6 +492,7 @@ export function readCompiledSurfaceDataBinding(
 
   const byOperationId = new Map<string, CompiledSurfaceOperationBinding>();
   const intentCount = new Map<SurfaceOperationIntent, number>();
+  const surplus = new Map<SurfaceOperationIntent, string>();
   let relationInputs: readonly CompiledSurfaceRelationInput[] | null = null;
   let authorityUnavailable = false;
   for (const value of operationCatalog) {
@@ -511,11 +528,14 @@ export function readCompiledSurfaceDataBinding(
     // this packet answered. `command` now admits many; the other four still
     // refuse, and INTENT_RENDERED_ARITY carries the reason.
     const bound = (intentCount.get(operation.intent) ?? 0) + 1;
-    if (bound > INTENT_RENDERED_ARITY[operation.intent]) {
-      throw invalidBinding(
+    if (
+      bound > INTENT_RENDERED_ARITY[operation.intent] &&
+      !surplus.has(operation.intent)
+    )
+      surplus.set(
+        operation.intent,
         `surface entity has more than one active ${operation.tier} ${operation.intent} operation`,
       );
-    }
     intentCount.set(operation.intent, bound);
     byOperationId.set(
       operation.operationId,
@@ -530,6 +550,21 @@ export function readCompiledSurfaceDataBinding(
         systemInputArgumentKey: operation.systemInputArgumentKey,
       }),
     );
+  }
+
+  // A surplus is refused by name wherever it could render. `create` and
+  // `update` render only through the family's form; a family that declares no
+  // active form has nowhere to render either, so its surplus is left unbound
+  // (the operations stay governed through their own gateways) instead of making
+  // its read-only List and Record unreadable.
+  for (const [intent, message] of surplus) {
+    if (
+      (intent !== 'create' && intent !== 'update') ||
+      familyDeclaresForm(view, query.sourceEntityId)
+    )
+      throw invalidBinding(message);
+    for (const [operationId, operation] of byOperationId)
+      if (operation.intent === intent) byOperationId.delete(operationId);
   }
 
   return Object.freeze({
@@ -552,6 +587,20 @@ export function readCompiledSurfaceDataBinding(
         ? Object.freeze({ status: 'unavailable' as const })
         : Object.freeze({ relationInputs, status: 'known' as const }),
   });
+}
+
+/** Whether any active form surface in the pinned release edits this entity. */
+function familyDeclaresForm(
+  view: RuntimeViewContract.RequestRuntimeView,
+  entityId: string,
+): boolean {
+  return readCompiledSurfaceManifest(view).surfaces.some(
+    (surface) =>
+      surface.lifecycle === 'active' &&
+      surface.surfaceRole === 'form' &&
+      registeredSemanticQueryFromPinnedView(view, surface.dataSourceQueryId)
+        ?.sourceEntityId === entityId,
+  );
 }
 
 function displayFieldIdFromPinnedQueries(
@@ -818,13 +867,13 @@ function navigationSurfaceIds(entry: CompiledNavigationEntry): string[] {
 }
 
 function isNavigationSurface(surface: CompiledSurfaceDefinition): boolean {
-  return (
-    surface.surfaceRole === 'list' ||
-    (surface.surfaceRole === null &&
-      (surface.archetype === 'list' ||
-        surface.archetype === 'home' ||
-        surface.archetype === 'task'))
-  );
+  return surface.workspace
+    ? surface.workspace.membership !== 'contextual'
+    : surface.surfaceRole === 'list' ||
+        (surface.surfaceRole === null &&
+          (surface.archetype === 'list' ||
+            surface.archetype === 'home' ||
+            surface.archetype === 'task'));
 }
 
 function invalidNavigation(message: string): SurfaceProjectionError {
@@ -880,6 +929,16 @@ function parseSurface(
     ...(value.composition === undefined
       ? {}
       : { composition: SurfaceCompositionSchema.parse(value.composition) }),
+    ...(value.workspace === undefined
+      ? {}
+      : { workspace: SurfaceWorkspaceSchema.parse(value.workspace) }),
+    ...(value.documentEditor === undefined
+      ? {}
+      : {
+          documentEditor: SurfaceDocumentEditorSchema.parse(
+            value.documentEditor,
+          ),
+        }),
     archetype,
     dataSourceQueryId: value.dataSourceQueryId,
     fieldIds: Object.freeze([...value.fieldIds]),
@@ -1124,6 +1183,8 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
                 Object.freeze({
                   fieldId: field.fieldId,
                   kind: field.fieldKind,
+                  temporal: field.temporal,
+                  bounds: field.bounds,
                   required: field.required,
                 }),
               ),

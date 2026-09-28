@@ -71,10 +71,14 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // MEASURED from the composed release after RECEIPT because Purchasing now
     // consumes Inventory contracts and cannot be compiled truthfully in
     // isolation. Selecting Purchasing's authored surfaces from that release
-    // observes 60 residuals across its purchase-order and receipt journey.
-    // Nothing here is a new violation KIND; closing the shared grammar debt is
-    // platform work rather than a receipt-specific renderer rewrite.
-    violationCount: 60,
+    // observed 60 residuals across its purchase-order and receipt journey.
+    // RAIN-ORDER-ENTRY supplies childTables on purchase-order detail, removing
+    // exactly SG003 + SG009 there. Its one operational workspace owner also
+    // closes the former compact-navigation budget violation while contextual
+    // lists remain reachable from the owner or by deep link. Nothing here is a
+    // new violation KIND; closing the remaining shared grammar debt is platform
+    // work rather than an order-entry-specific renderer rewrite.
+    violationCount: 57,
   }),
   Object.freeze({
     moduleId: 'northstar.sales:module.sales',
@@ -87,6 +91,9 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // renderer exemption is introduced by this ratchet move.
     // RAIN-META-SALES supplies childTables on order and shipment details,
     // removing exactly SG003 + SG009 on each of those two compiled surfaces.
-    violationCount: 62,
+    // RAIN-ORDER-ENTRY's one operational workspace owner closes the former
+    // compact-navigation budget violation while contextual fulfillment lists
+    // remain reachable from that owner or by deep link.
+    violationCount: 61,
   }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);

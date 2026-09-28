@@ -39,7 +39,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     quantities: string[],
     details: string[] = [],
   ) =>
-    columns.map((value, index) => ({
+    columns.map((value) => ({
       ...value,
       ...(value.columnId === id('column', primary) ||
       [...secondary, ...quantities, ...details].some(
@@ -192,12 +192,16 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         title: id('column', 'order_number'),
         subtitle: [id('column', 'customer')],
         status: id('column', 'order_state'),
-        facts: [id('column', 'requested_date')],
+        facts: [
+          id('column', 'order_date'),
+          id('column', 'requested_date'),
+          id('column', 'currency'),
+        ],
       },
       context: {
         label: 'Fulfillment',
         description:
-          'Select a line to reserve stock, or a reservation to ship.',
+          'Choose a line to reserve stock, or a reservation to ship.',
       },
       recordActions: 'progressive',
       technicalDetails: 'progressive',
@@ -218,12 +222,16 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         field('sales_order_customer_party_id'),
         ['party_get', 'party_name'],
       ),
+      column('order_date', 'Order date', 25, field('sales_order_order_date')),
       column(
         'requested_date',
         'Requested date',
         30,
         field('sales_order_requested_date'),
       ),
+      column('currency', 'Currency', 35, field('sales_order_currency')),
+      // Read back as stored; shown in the document's sections.
+      column('notes', 'Notes', 40, field('sales_order_notes')),
     ],
     children: [
       {
@@ -261,12 +269,18 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
               field('sales_order_line_ordered_quantity'),
             ),
             column('unit', 'Unit', 40, field('sales_order_line_unit_id')),
+            column(
+              'unit_price',
+              'Unit price',
+              45,
+              field('sales_order_line_unit_price'),
+            ),
             column('coverage', 'Reserved', 50, id('metric', 'coverage')),
             column('shipped', 'Shipped', 60, id('metric', 'shipped')),
             column('open', 'Open to ship', 70, id('metric', 'open_to_ship')),
           ],
           'item',
-          ['sku', 'unit'],
+          ['sku', 'unit', 'unit_price'],
           ['ordered', 'coverage', 'shipped', 'open'],
         ),
       },

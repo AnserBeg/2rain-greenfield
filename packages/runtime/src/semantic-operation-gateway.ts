@@ -635,6 +635,57 @@ export class SemanticOperationGateway {
     this.#capabilityExecutors = registrations;
   }
 
+  /**
+   * Whether current policy would let this principal START each named
+   * operation, asked without executing anything: no input is parsed, no record
+   * is read or written, no evidence is recorded and no grant is minted. The
+   * boundary and per-operation permissions `invoke` checks are evaluated
+   * against an eligibility-only decision input that carries the company scope,
+   * if any. `eligible` is not authority -- `invoke` decides again against the
+   * submitted input, so a later revocation is still refused there. A missing,
+   * retired or confirmation-gated operation is `ineligible`; a policy failure
+   * throws, and a caller must then withhold the claim rather than assume.
+   */
+  async previewEligibility(
+    view: IssuedRequestRuntimeView,
+    operationIds: readonly string[],
+    legalEntityId: string | null,
+  ): Promise<'eligible' | 'ineligible'> {
+    assertRequestRuntimeView(view);
+    const catalog = readPinnedOperationCatalog(view);
+    const allows = async (permissionId: string, operationId: string) =>
+      (
+        await authorizeCurrentPolicy(
+          this.currentPolicy,
+          view,
+          permissionId,
+          Object.freeze({
+            input: Object.freeze(
+              legalEntityId === null ? {} : { legalEntityId },
+            ),
+            kind: 'semanticOperationEligibilityPolicyInput',
+            operationId,
+            requestId: view.requestId,
+            schemaVersion: OPERATION_POLICY_INPUT_VERSION,
+          }),
+        )
+      ).decision === 'ALLOW';
+    for (const operationId of operationIds) {
+      const definition = catalog.find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      if (
+        !definition ||
+        definition.lifecycle !== 'active' ||
+        definition.confirmation === 'humanRequired' ||
+        !(await allows(OPERATION_BOUNDARY_PERMISSION_ID, operationId)) ||
+        !(await allows(definition.permissionId, operationId))
+      )
+        return 'ineligible';
+    }
+    return 'eligible';
+  }
+
   async invoke(
     view: IssuedRequestRuntimeView,
     requestInput: unknown,

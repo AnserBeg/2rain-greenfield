@@ -164,8 +164,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    // 7 honours explicit task summaries, frozen action previews and selected row controls.
-    maximumSupportedVersion: 7,
+    // 8 adds declared workspaces and the shared scoped draft document editor.
+    // 9 adds picker eligibility and typed Task input presentation.
+    maximumSupportedVersion: 9,
   },
 });
 

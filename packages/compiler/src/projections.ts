@@ -3,6 +3,7 @@ import {
   LANGUAGE_VERSION,
   languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
+  type SurfaceDocumentEditor,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
@@ -675,7 +676,7 @@ function surfaceManifestPayload(
     | typeof COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION;
   readonly requiredRuntimeCapability: RuntimeCapabilityRequirement;
 } {
-  const navigation = surfaceNavigationTree(packageRevision);
+  const navigation = surfaceNavigationTree(original);
   const fieldById = new Map(
     packageRevision.fields.map((field) => [field.fieldId, field]),
   );
@@ -703,11 +704,22 @@ function surfaceManifestPayload(
       ...(navigation ? { navigation } : {}),
       schemaVersion: payloadSchemaVersion,
       surfaces: packageRevision.surfaces.map((surface) => {
+        const declared = original.surfaces.find(
+          (item) => item.surfaceId === surface.surfaceId,
+        );
         const fieldIds =
           queryById
             .get(surface.dataSource.targetId)
             ?.selections.map((selection) => selection.field.targetId) ?? [];
         return {
+          ...(declared && 'workspace' in declared && declared.workspace
+            ? { workspace: declared.workspace }
+            : {}),
+          ...(declared &&
+          'documentEditor' in declared &&
+          declared.documentEditor
+            ? { documentEditor: declared.documentEditor }
+            : {}),
           ...(compositions.get(surface.surfaceId)
             ? { composition: compositions.get(surface.surfaceId) }
             : {}),
@@ -795,38 +807,65 @@ function surfaceManifestPayload(
     // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
-      minimumVersion: [...compositions.values()].some(
-        (value) =>
-          value?.actions.some((action) => action.presentation?.task) ||
-          value?.children.some((child) => child.presentation?.selectedActions),
-      )
-        ? 7
-        : [...compositions.values()].some(
-              (value) =>
-                value?.presentation?.task ||
-                value?.children.some(
-                  (child) => child.sort?.length || child.presentation?.compact,
-                ),
+      // 9: picker eligibility and typed Task inputs. A reader that dropped
+      // either would offer every party as a customer, or ask for free text
+      // where a governed value is declared -- a wrong render, not a lesser one.
+      minimumVersion: original.surfaces.some((surface) => {
+        const editor =
+          'documentEditor' in surface
+            ? (surface.documentEditor as SurfaceDocumentEditor | undefined)
+            : undefined;
+        const composition = compositions.get(surface.surfaceId);
+        return (
+          [...(editor?.headerFields ?? []), ...(editor?.lineFields ?? [])].some(
+            (field) => field.reference?.eligibility,
+          ) ||
+          composition?.actions.some((action) =>
+            action.inputs.some((input) => input.presentation),
+          ) === true
+        );
+      })
+        ? 9
+        : original.surfaces.some(
+              (surface) =>
+                'workspace' in surface || 'documentEditor' in surface,
             )
-          ? 6
+          ? 8
           : [...compositions.values()].some(
                 (value) =>
-                  value?.presentation ||
+                  value?.actions.some((action) => action.presentation?.task) ||
                   value?.children.some(
-                    (child) =>
-                      child.presentation ||
-                      child.columns.some((column) => column.presentation),
-                  ) ||
-                  value?.actions.some((action) => action.presentation),
+                    (child) => child.presentation?.selectedActions,
+                  ),
               )
-            ? 5
-            : composed
-              ? 4
-              : emitsFieldKinds
-                ? 3
-                : navigation
-                  ? 2
-                  : 1,
+            ? 7
+            : [...compositions.values()].some(
+                  (value) =>
+                    value?.presentation?.task ||
+                    value?.children.some(
+                      (child) =>
+                        child.sort?.length || child.presentation?.compact,
+                    ),
+                )
+              ? 6
+              : [...compositions.values()].some(
+                    (value) =>
+                      value?.presentation ||
+                      value?.children.some(
+                        (child) =>
+                          child.presentation ||
+                          child.columns.some((column) => column.presentation),
+                      ) ||
+                      value?.actions.some((action) => action.presentation),
+                  )
+                ? 5
+                : composed
+                  ? 4
+                  : emitsFieldKinds
+                    ? 3
+                    : navigation
+                      ? 2
+                      : 1,
     },
   };
 }
@@ -845,7 +884,9 @@ interface SurfaceNavigationGroup {
   readonly navigationId: string;
 }
 
-function surfaceNavigationTree(packageRevision: NormalizedApplicationPackage): {
+function surfaceNavigationTree(
+  packageRevision: VersionedNormalizedApplicationPackage,
+): {
   readonly entries: readonly SurfaceNavigationGroup[];
   readonly kind: 'navigationTree';
 } | null {
@@ -892,13 +933,13 @@ function surfaceNavigationTree(packageRevision: NormalizedApplicationPackage): {
 function isNavigationSurface(
   surface: NormalizedApplicationPackage['surfaces'][number],
 ): boolean {
-  return (
-    surface.surfaceRole === 'list' ||
-    (surface.surfaceRole === undefined &&
-      (surface.archetype === 'list' ||
-        surface.archetype === 'home' ||
-        surface.archetype === 'task'))
-  );
+  return 'workspace' in surface && surface.workspace
+    ? (surface.workspace as { membership: string }).membership !== 'contextual'
+    : surface.surfaceRole === 'list' ||
+        (surface.surfaceRole === undefined &&
+          (surface.archetype === 'list' ||
+            surface.archetype === 'home' ||
+            surface.archetype === 'task'));
 }
 
 function reportingPayload(

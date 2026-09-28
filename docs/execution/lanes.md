@@ -10,7 +10,7 @@
 
 | lane | packet | state |
 |---|---|---|
-| **BUILD** | `RAIN-META-SALES` | visual evidence_ready at `d05651c8`: corrected explicit Task summary, frozen proposal, mobile lines and business navigation; serving `b7ffe632` on 38637; [actual checkpoint](packets/RAIN-META-SALES-task-context-visual.md); stop for owner visual decision, no new reviewer or merge |
+| **BUILD** | `RAIN-ORDER-ENTRY` | workspace interaction completion at `d9eca60a` (Inventory destinations, eligible pickers, in-place references, shared Task controls); sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; ONLINE review complete (D1-D5 closed); [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / owner acceptance; stopped without integration; retained databases preserved |
 | **SUPPORT** | — | idle |
 
 
