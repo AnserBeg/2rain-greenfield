@@ -154,6 +154,14 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
       page.getByRole('combobox', { name, exact: true }),
     ).toHaveAttribute('data-selected-label', option);
   };
+  // Confirm needs a complete ship-to (ruling E). This customer has no address
+  // book, so the order's own ship-to lines are typed after it is chosen.
+  const fillShipTo = async () => {
+    await page.getByLabel('Street', { exact: true }).fill('100 Industrial Way');
+    await page.getByLabel('City', { exact: true }).fill('Calgary');
+    await page.getByLabel('Postal code', { exact: true }).fill('T2P 0A1');
+    await page.getByLabel('Country', { exact: true }).fill('Canada');
+  };
   // The customer picker offers only parties with an active customer role, so
   // the role exists before the order. Reservation activation still checks the
   // current persisted party-role facts on the server.
@@ -170,6 +178,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await pick('Customer', 'Alpine', 'Alpine Office Supply');
   // The declared currency default; the unit follows the product's base unit.
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
+  await fillShipTo();
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await expect(page.locator('output.derived-value').first()).toHaveText('EA');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
@@ -336,6 +345,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
   await pick('Customer', 'Alpine', 'Alpine Office Supply');
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
+  await fillShipTo();
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
   await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');

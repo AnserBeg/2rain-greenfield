@@ -7,6 +7,7 @@ import { catalogModuleDefinition } from '../catalog/definition.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
+import { partyWorkspace } from '../party/workspace.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
 import { orderEntrySurfaces } from './order-entry.js';
@@ -54,7 +55,11 @@ const MODULE_REGISTRY = Object.freeze([
     moduleName: 'purchasing',
   }),
   Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
-  Object.freeze({ create: partyModuleDefinition, moduleName: 'party' }),
+  Object.freeze({
+    create: (namespace: string) =>
+      partyModuleDefinition(namespace, { salesMasterData: true }),
+    moduleName: 'party',
+  }),
   Object.freeze({ create: catalogModuleDefinition, moduleName: 'catalog' }),
   Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),
 ] as const);
@@ -63,6 +68,7 @@ const MODULE_REGISTRY = Object.freeze([
 const RECORD_COMPOSITIONS: Readonly<
   Record<string, (namespace: string) => Record<string, unknown>>
 > = Object.freeze({
+  party_detail: partyWorkspace,
   sales_order_detail: salesWorkspace,
   purchase_order_detail: purchasingWorkspace,
   shipment_detail: packingWorkspace,
@@ -248,11 +254,40 @@ export const APPLICATION_IDS = Object.freeze({
   namespace: APPLICATION_NAMESPACE,
   packageId,
   party: Object.freeze({
+    address: Object.freeze({
+      createOperationId: `${APPLICATION_NAMESPACE}:operation.party_address_create`,
+      fieldIds: Object.freeze({
+        city: `${APPLICATION_NAMESPACE}:field.party_address_city`,
+        country: `${APPLICATION_NAMESPACE}:field.party_address_country`,
+        label: `${APPLICATION_NAMESPACE}:field.party_address_label`,
+        postalCode: `${APPLICATION_NAMESPACE}:field.party_address_postal_code`,
+        recipient: `${APPLICATION_NAMESPACE}:field.party_address_recipient`,
+        region: `${APPLICATION_NAMESPACE}:field.party_address_region`,
+        street: `${APPLICATION_NAMESPACE}:field.party_address_street`,
+      }),
+      partyRelationId: `${APPLICATION_NAMESPACE}:relation.party_address_party`,
+    }),
     createOperationId: `${APPLICATION_NAMESPACE}:operation.party_create`,
     fieldIds: Object.freeze({
       contactSummary: `${APPLICATION_NAMESPACE}:field.party_contact_summary`,
+      defaultCurrency: `${APPLICATION_NAMESPACE}:field.party_default_currency`,
+      defaultSalespersonPartyId: `${APPLICATION_NAMESPACE}:field.party_default_salesperson_party_id`,
+      defaultShipToAddressId: `${APPLICATION_NAMESPACE}:field.party_default_ship_to_address_id`,
       name: `${APPLICATION_NAMESPACE}:field.party_name`,
       number: `${APPLICATION_NAMESPACE}:field.party_number`,
+      paymentTerms: `${APPLICATION_NAMESPACE}:field.party_payment_terms`,
+    }),
+    currencyOptionIds: Object.freeze({
+      cad: `${APPLICATION_NAMESPACE}:option.party_default_currency_cad`,
+      eur: `${APPLICATION_NAMESPACE}:option.party_default_currency_eur`,
+      usd: `${APPLICATION_NAMESPACE}:option.party_default_currency_usd`,
+    }),
+    paymentTermOptionIds: Object.freeze({
+      dueOnReceipt: `${APPLICATION_NAMESPACE}:option.party_payment_terms_due_on_receipt`,
+      net15: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_15`,
+      net30: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_30`,
+      net45: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_45`,
+      net60: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_60`,
     }),
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_form`,
     listQueryId: `${APPLICATION_NAMESPACE}:query.party_list`,
@@ -266,6 +301,7 @@ export const APPLICATION_IDS = Object.freeze({
       optionIds: Object.freeze({
         active: `${APPLICATION_NAMESPACE}:option.active`,
         customer: `${APPLICATION_NAMESPACE}:option.customer`,
+        salesperson: `${APPLICATION_NAMESPACE}:option.salesperson`,
         supplier: `${APPLICATION_NAMESPACE}:option.supplier`,
       }),
       partyRelationId: `${APPLICATION_NAMESPACE}:relation.party_role_party`,

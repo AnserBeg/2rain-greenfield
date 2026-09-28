@@ -220,7 +220,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     flatManifest.surfaces,
     flatManifest.navigation,
   );
-  assert.equal(flatManifest.surfaces.length, 12);
+  // Party, Catalog and Location; SALES-PARITY adds Party's ship-to address
+  // book (list, detail, form), contextual to the Party list.
+  assert.equal(flatManifest.surfaces.length, 15);
   assert.equal(flatManifest.navigation, null);
   assert.equal(
     flatManifest.payloadSchemaVersion,
@@ -242,10 +244,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // the provider persists the value and the web reader passes it through, and
   // no consumer refuses a manifest whose floor exceeds what it supports. So the
   // number is currently a declaration, not a gate. Filed, not fixed -- see
-  // `current-plan.md`, `runtime-capability-floor-unenforced`. Draft document
-  // editing and workspace entry require reader 8 even in this flat fixture,
-  // which declares no picker eligibility or typed Task input (those need 9).
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 8);
+  // `current-plan.md`, `runtime-capability-floor-unenforced`. This flat
+  // fixture keeps Party, whose customer workspace (SALES-PARITY) offers a
+  // salesperson Task input with declared eligibility, so it requires 11.
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 11);
   assert.equal(flatCompact.navigationEntryIds.length, 4);
   assert.deepEqual(
     navigationRuleIds(
@@ -264,8 +266,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const grouped = groupedManifest.navigation;
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
-  // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces.
-  assert.equal(groupedManifest.surfaces.length, 70);
+  // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces,
+  // + Party's three ship-to address surfaces (SALES-PARITY).
+  assert.equal(groupedManifest.surfaces.length, 73);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -281,8 +284,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
   // Draft document editing and workspace entry require reader 8; picker
-  // eligibility and typed Task inputs require 9; declared Lists require 10.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 10);
+  // eligibility and typed Task inputs require 9; declared Lists require 10;
+  // editor defaults, scoped pickers and Task input eligibility require 11.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 11);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.

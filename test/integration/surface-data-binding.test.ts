@@ -6230,6 +6230,24 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       );
     const id = (rowId: string, fieldId: string) =>
       `editor-${rowId}-${fieldId.replace(/[^a-z0-9]/giu, '-')}`;
+    // The customer's declared followers (ruling E), in declaration order: a
+    // follower that is a picker is replaced whole, any other by its control.
+    const customerFollowers = (rowId: string) =>
+      [
+        ['salesperson_party_id', true],
+        ['currency', false],
+        ['payment_terms', false],
+        ['ship_to_address_id', true],
+        ['ship_to_name', false],
+        ['ship_to_street', false],
+        ['ship_to_city', false],
+        ['ship_to_region', false],
+        ['ship_to_postal_code', false],
+        ['ship_to_country', false],
+      ].map(
+        ([name, picker]) =>
+          `${id(rowId, `${f.ns}:field.sales_order_${String(name)}`)}${picker ? '-field' : ''}`,
+      );
     return {
       f,
       dual,
@@ -6243,6 +6261,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       select,
       targets,
       id,
+      customerFollowers,
       editor,
     };
   };
@@ -6500,6 +6519,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       assert.deepEqual(s.targets(created), [
         'editor-create-slot',
         `${s.id(s.header, s.customer)}-field`,
+        ...s.customerFollowers(s.header),
       ]);
       assert.match(created.html, /data-selected-label="Zenith Glazing"/);
       assert.match(created.html, /data-editor-create-selected/);
@@ -6531,6 +6551,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       assert.deepEqual(s.targets(cancelled), [
         'editor-create-slot',
         `${s.id(s.header, s.customer)}-field`,
+        ...s.customerFollowers(s.header),
       ]);
       assert.match(cancelled.html, /data-selected-label="Zenith Glazing"/);
       assert.equal(s.f.executor.calls.length, 2, 'nothing more was written');
@@ -6612,6 +6633,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
         assert.deepEqual(s.targets(cancelled), [
           'editor-create-slot',
           `${s.id(s.header, s.customer)}-field`,
+          ...s.customerFollowers(s.header),
         ]);
       } finally {
         gateway.previewEligibility = preview;

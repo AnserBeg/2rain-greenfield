@@ -1,6 +1,6 @@
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
-import { inspectPredicateForExecution } from './predicate-kernel.js';
+import { pickerEligibilityProblem } from './picker-eligibility.js';
 
 /** Typed declarations also prove their cross-entity and contextual references. */
 export function validateSurfaceWorkspaces(
@@ -280,10 +280,6 @@ export function validateSurfaceWorkspaces(
         }
       });
     };
-    // Eligibility reads another entity's whole unscoped, unfiltered List: its
-    // owned relation must point from that entity to the picker's (so one
-    // record's eligibility is an exact parent-scoped read), and every filter
-    // must be a selected field of it with an admissible value.
     const checkEligibility = (
       eligibility: NonNullable<
         NonNullable<
@@ -292,40 +288,12 @@ export function validateSurfaceWorkspaces(
       >,
       pickerEntityId: string,
     ) => {
-      const query = queries.get(eligibility.queryId);
-      const relation = model.relations.find(
-        (value) => value.relationId === eligibility.relationId,
+      const problem = pickerEligibilityProblem(
+        model,
+        eligibility,
+        pickerEntityId,
       );
-      if (
-        query?.queryType !== 'list' ||
-        ('legalEntityScope' in query && query.legalEntityScope) ||
-        ('filter' in query &&
-          query.filter &&
-          inspectPredicateForExecution(query.filter).outcome !== 'accepted') ||
-        relation?.sourceEntity.targetId !== query.sourceEntity.targetId ||
-        relation.targetEntity.targetId !== pickerEntityId ||
-        relation.ownership !== 'parentScopedChild' ||
-        new Set(eligibility.filters.map((filter) => filter.fieldId)).size !==
-          eligibility.filters.length
-      )
-        fail(
-          surface.surfaceId,
-          'picker eligibility requires an unscoped List of an entity related to the picker entity',
-        );
-      for (const filter of eligibility.filters) {
-        const type = fields.get(filter.fieldId)?.fieldType;
-        if (
-          !selects(eligibility.queryId, [filter.fieldId]) ||
-          (type?.kind === 'enumFieldType'
-            ? !type.options.some((option) => option.optionId === filter.value)
-            : type?.kind !== 'textFieldType' ||
-              filter.value.length > type.maximumLength)
-        )
-          fail(
-            surface.surfaceId,
-            'picker eligibility filters require selected fields and admissible values',
-          );
-      }
+      if (problem) fail(surface.surfaceId, problem);
     };
     const checkFields = (
       declared: typeof editor.headerFields,
@@ -390,6 +358,7 @@ export function validateSurfaceWorkspaces(
                 queries.get(field.reference.queryId)!.sourceEntity.targetId,
               ),
             );
+          if (field.reference.within) checkWithin(field, declared);
           if (field.reference.create)
             checkCreate(
               field.reference.create,
@@ -398,7 +367,111 @@ export function validateSurfaceWorkspaces(
               ),
             );
         }
+        if (field.defaultFrom) checkDefault(field, declared);
       }
+      // Defaults cascade (a customer's default address, then that address's
+      // lines), so a cycle would never settle.
+      for (const field of declared) {
+        const seen = new Set<string>();
+        let current: (typeof declared)[number] | undefined = field;
+        while (current?.defaultFrom) {
+          if (seen.has(current.fieldId))
+            fail(surface.surfaceId, 'editor defaults must not form a cycle');
+          seen.add(current.fieldId);
+          const next: string = current.defaultFrom.referenceFieldId;
+          current = declared.find((value) => value.fieldId === next);
+        }
+      }
+    };
+    const siblingReference = (
+      declared: typeof editor.headerFields,
+      referenceFieldId: string,
+      fieldId: string,
+    ) => {
+      const source = declared.find(
+        (value) => value.fieldId === referenceFieldId,
+      );
+      return source?.reference?.getQueryId && source.fieldId !== fieldId
+        ? { ...source.reference, getQueryId: source.reference.getQueryId }
+        : null;
+    };
+    // A scoped picker lists the records an owned relation ties to the sibling's
+    // selection -- an exact parent-scoped read. It cannot also create, because
+    // a created record would need that relation bound as well.
+    const checkWithin = (
+      field: (typeof editor.headerFields)[number],
+      declared: typeof editor.headerFields,
+    ) => {
+      const within = field.reference!.within!;
+      const sibling = siblingReference(
+        declared,
+        within.referenceFieldId,
+        field.fieldId,
+      );
+      const relation = model.relations.find(
+        (value) => value.relationId === within.relationId,
+      );
+      const picker = queries.get(field.reference!.queryId);
+      if (
+        !sibling ||
+        !field.reference!.getQueryId ||
+        field.reference!.create ||
+        relation?.ownership !== 'parentScopedChild' ||
+        relation.sourceEntity.targetId !== picker?.sourceEntity.targetId ||
+        relation.targetEntity.targetId !==
+          queries.get(sibling.queryId)?.sourceEntity.targetId ||
+        ('legalEntityScope' in picker && picker.legalEntityScope)
+      )
+        fail(
+          surface.surfaceId,
+          'a scoped picker requires an unscoped List whose owned relation targets a sibling reference, and cannot create',
+        );
+    };
+    // A default copies a value the sibling's record already holds into a field
+    // that can hold it: text into text at least as long, an enumeration's label
+    // into text that fits it, an enumeration into one offering each of the
+    // same labels once, never into a derived field.
+    const checkDefault = (
+      field: (typeof editor.headerFields)[number],
+      declared: typeof editor.headerFields,
+    ) => {
+      const declaredDefault = field.defaultFrom!;
+      const sibling = siblingReference(
+        declared,
+        declaredDefault.referenceFieldId,
+        field.fieldId,
+      );
+      const target = fields.get(field.fieldId)?.fieldType;
+      const source = fields.get(declaredDefault.sourceFieldId)?.fieldType;
+      // Text takes text no longer than itself, or an enumeration's label.
+      const compatible =
+        target?.kind === 'textFieldType'
+          ? source?.kind === 'textFieldType'
+            ? source.maximumLength <= target.maximumLength
+            : source?.kind === 'enumFieldType' &&
+              source.options.every(
+                (option) => [...option.label].length <= target.maximumLength,
+              )
+          : target?.kind === 'enumFieldType' &&
+            source?.kind === 'enumFieldType' &&
+            source.options.every(
+              (option) =>
+                target.options.filter((value) => value.label === option.label)
+                  .length === 1,
+            );
+      if (
+        !sibling ||
+        field.presentation?.kind === 'derived' ||
+        !compatible ||
+        !selects(sibling.queryId, [declaredDefault.sourceFieldId]) ||
+        !reads(sibling.getQueryId, sibling.queryId, [
+          declaredDefault.sourceFieldId,
+        ])
+      )
+        fail(
+          surface.surfaceId,
+          'an editor default requires a sibling reference whose record holds a compatible selected source',
+        );
     };
     checkFields(editor.headerFields, headerQuery!.sourceEntity.targetId);
     checkFields(editor.lineFields, lineQuery!.sourceEntity.targetId);

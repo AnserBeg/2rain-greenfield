@@ -166,6 +166,7 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'tenantShared', familyId: 'legal_entity' },
   { classification: 'tenantShared', familyId: 'party' },
   { classification: 'tenantShared', familyId: 'party_role' },
+  { classification: 'tenantShared', familyId: 'party_address' },
   { classification: 'tenantShared', familyId: 'item' },
   { classification: 'tenantShared', familyId: 'location' },
   { classification: 'entityOwned', familyId: 'inventory_movement' },
@@ -214,6 +215,11 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
   {
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'party_role',
+    targetFamilyId: 'party',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'party_address',
     targetFamilyId: 'party',
   },
   {

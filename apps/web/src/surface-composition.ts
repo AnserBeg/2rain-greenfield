@@ -587,9 +587,18 @@ export function renderCompositionPrintDocument(
     })
     .join('');
   const note = print.note ? data.fields.cells[print.note] : undefined;
+  // A block prints its present lines in order, such as a ship-to address.
+  const blocks = (print.blocks ?? [])
+    .map((block) => {
+      const lines = block.columns
+        .map((id) => data.fields.cells[id])
+        .filter((value): value is string => !!value && value !== '—');
+      return `<section class="print-block"><h2>${h(block.label)}</h2>${lines.length ? `<p>${lines.map((line) => h(line)).join('<br>')}</p>` : '<p>None.</p>'}</section>`;
+    })
+    .join('');
   return {
     complete: true,
-    html: `<article class="print-document" data-print-document="${h(surface.surfaceId)}"><header class="print-header"><p class="eyebrow">${h(print.label)}</p><h1>${cell(header.title)}</h1><p>${header.subtitle.map(cell).join(' · ')}</p>${header.status ? `<p class="print-status">${cell(header.status)}</p>` : ''}<dl class="print-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl></header>${tables}${note && note !== '—' ? `<section class="print-section"><h2>${label(print.note!)}</h2><p class="print-note">${h(note)}</p></section>` : ''}<footer class="print-footer"><p>Printed ${h(generatedAt.toISOString().slice(0, 16).replace('T', ' '))} UTC from the current record.</p><p class="print-guidance">Use your browser's Print command to print this document or save it as PDF.</p></footer></article>`,
+    html: `<article class="print-document" data-print-document="${h(surface.surfaceId)}"><header class="print-header"><p class="eyebrow">${h(print.label)}</p><h1>${cell(header.title)}</h1><p>${header.subtitle.map(cell).join(' · ')}</p>${header.status ? `<p class="print-status">${cell(header.status)}</p>` : ''}<dl class="print-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl></header>${blocks}${tables}${note && note !== '—' ? `<section class="print-section"><h2>${label(print.note!)}</h2><p class="print-note">${h(note)}</p></section>` : ''}<footer class="print-footer"><p>Printed ${h(generatedAt.toISOString().slice(0, 16).replace('T', ' '))} UTC from the current record.</p><p class="print-guidance">Use your browser's Print command to print this document or save it as PDF.</p></footer></article>`,
   };
 }
 
@@ -708,6 +717,12 @@ export function renderCompositionActions(
             })
             .join(' · ')
         : null;
+    // Record-level tasks (no dataset to select from) are offered together,
+    // beside the context they change, such as a customer's order defaults.
+    const recordTasks = ordered(surface.composition!.actions).filter(
+      (value) =>
+        !value.presentation && !value.datasetId && applicable(value, data),
+    );
     const controls = actions.length
       ? actionLink(actions[0]!, data, view) +
         (actions.length > 1
@@ -717,7 +732,12 @@ export function renderCompositionActions(
               .join('')}</details>`
           : '')
       : '';
-    return `${back}${printLink}${context ? `<section class="composition-context">${controls ? `<div class="composition-context-heading"><div><h2>${h(context.label)}</h2><p>${h(selection ?? context.description)}</p></div><div class="composition-local-actions" aria-label="Selected record actions">${controls}</div></div>` : ''}<nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav></section>` : ''}`;
+    // The printable document is offered beside the section links, so it adds
+    // no row above the document's first lines.
+    const tasks = recordTasks.length
+      ? `<div class="composition-local-actions" aria-label="Record tasks">${recordTasks.map((action) => actionLink(action, data, view)).join('')}</div>`
+      : '';
+    return `${back}${context ? '' : printLink}${context ? `<section class="composition-context">${controls || tasks ? `<div class="composition-context-heading"><div><h2>${h(context.label)}</h2><p>${h(selection ?? context.description)}</p></div>${controls ? `<div class="composition-local-actions" aria-label="Selected record actions">${controls}</div>` : ''}${tasks}</div>` : ''}<div class="composition-context-links"><nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav>${printLink}</div></section>` : ''}`;
   }
   const actions = ordered(surface.composition!.actions)
     .filter((action) => applicable(action, data))
@@ -1488,6 +1508,18 @@ async function referenceChoices(
     throw new Error('Reference input requires a list');
   const records: SemanticRecordDto[] = [];
   let cursor: string | null = null;
+  // Declared eligibility narrows the list before paging, as a draft editor
+  // picker's does; an executor that did not apply it cannot echo it.
+  const relatedFilter = input.eligibility
+    ? {
+        queryId: input.eligibility.queryId,
+        relationId: input.eligibility.relationId,
+        fieldFilters: input.eligibility.filters.map((filter) => ({
+          fieldId: filter.fieldId,
+          value: filter.value,
+        })),
+      }
+    : undefined;
   do {
     const page: ReturnType<typeof requireSharedListResult<SemanticRecordDto>> =
       requireSharedListResult(
@@ -1501,9 +1533,23 @@ async function referenceChoices(
             search: '',
             sort: [],
             relationLabels: [],
+            ...(relatedFilter ? { relatedFilter } : {}),
           },
         }),
       );
+    const applied = page.listCoverage.relatedFilter;
+    if (
+      relatedFilter &&
+      (applied?.queryId !== relatedFilter.queryId ||
+        applied.relationId !== relatedFilter.relationId ||
+        applied.fieldFilters?.length !== relatedFilter.fieldFilters.length ||
+        relatedFilter.fieldFilters.some(
+          (filter, index) =>
+            applied.fieldFilters?.[index]?.fieldId !== filter.fieldId ||
+            applied.fieldFilters[index]?.value !== filter.value,
+        ))
+    )
+      throw new Error('Reference eligibility was not applied');
     records.push(...page.records);
     if (
       page.listCoverage.hasMore &&

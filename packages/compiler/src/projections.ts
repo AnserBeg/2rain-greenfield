@@ -816,76 +816,97 @@ function surfaceManifestPayload(
     // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
+      // 11: editor defaults, scoped pickers and Task input eligibility. A
+      // reader that dropped them would leave a customer's terms unapplied,
+      // offer every customer's addresses as this order's ship-to, or offer
+      // every party as a salesperson.
       // 10: a declared List. A reader that dropped it would page an undeclared
       // order and offer no views, filters or export -- the list the metadata
       // describes would silently not be the one served.
       // 9: picker eligibility and typed Task inputs. A reader that dropped
       // either would offer every party as a customer, or ask for free text
       // where a governed value is declared -- a wrong render, not a lesser one.
-      minimumVersion: original.surfaces.some(
-        (surface) => 'list' in surface && surface.list,
-      )
-        ? 10
-        : original.surfaces.some((surface) => {
-              const editor =
-                'documentEditor' in surface
-                  ? (surface.documentEditor as
-                      SurfaceDocumentEditor | undefined)
-                  : undefined;
-              const composition = compositions.get(surface.surfaceId);
-              return (
-                [
-                  ...(editor?.headerFields ?? []),
-                  ...(editor?.lineFields ?? []),
-                ].some((field) => field.reference?.eligibility) ||
-                composition?.actions.some((action) =>
-                  action.inputs.some((input) => input.presentation),
-                ) === true
-              );
-            })
-          ? 9
-          : original.surfaces.some(
-                (surface) =>
-                  'workspace' in surface || 'documentEditor' in surface,
-              )
-            ? 8
-            : [...compositions.values()].some(
-                  (value) =>
-                    value?.actions.some(
-                      (action) => action.presentation?.task,
-                    ) ||
-                    value?.children.some(
-                      (child) => child.presentation?.selectedActions,
-                    ),
+      minimumVersion: original.surfaces.some((surface) => {
+        const editor =
+          'documentEditor' in surface
+            ? (surface.documentEditor as SurfaceDocumentEditor | undefined)
+            : undefined;
+        return (
+          [...(editor?.headerFields ?? []), ...(editor?.lineFields ?? [])].some(
+            (field) => field.defaultFrom || field.reference?.within,
+          ) ||
+          compositions
+            .get(surface.surfaceId)
+            ?.actions.some((action) =>
+              action.inputs.some((input) => input.eligibility),
+            ) === true
+        );
+      })
+        ? 11
+        : original.surfaces.some((surface) => 'list' in surface && surface.list)
+          ? 10
+          : original.surfaces.some((surface) => {
+                const editor =
+                  'documentEditor' in surface
+                    ? (surface.documentEditor as
+                        SurfaceDocumentEditor | undefined)
+                    : undefined;
+                const composition = compositions.get(surface.surfaceId);
+                return (
+                  [
+                    ...(editor?.headerFields ?? []),
+                    ...(editor?.lineFields ?? []),
+                  ].some((field) => field.reference?.eligibility) ||
+                  composition?.actions.some((action) =>
+                    action.inputs.some((input) => input.presentation),
+                  ) === true
+                );
+              })
+            ? 9
+            : original.surfaces.some(
+                  (surface) =>
+                    'workspace' in surface || 'documentEditor' in surface,
                 )
-              ? 7
+              ? 8
               : [...compositions.values()].some(
                     (value) =>
-                      value?.presentation?.task ||
+                      value?.actions.some(
+                        (action) => action.presentation?.task,
+                      ) ||
                       value?.children.some(
-                        (child) =>
-                          child.sort?.length || child.presentation?.compact,
+                        (child) => child.presentation?.selectedActions,
                       ),
                   )
-                ? 6
+                ? 7
                 : [...compositions.values()].some(
                       (value) =>
-                        value?.presentation ||
+                        value?.presentation?.task ||
                         value?.children.some(
                           (child) =>
-                            child.presentation ||
-                            child.columns.some((column) => column.presentation),
-                        ) ||
-                        value?.actions.some((action) => action.presentation),
+                            child.sort?.length || child.presentation?.compact,
+                        ),
                     )
-                  ? 5
-                  : composed
-                    ? 4
-                    : emitsFieldKinds
-                      ? 3
-                      : navigation
-                        ? 2
-                        : 1,
+                  ? 6
+                  : [...compositions.values()].some(
+                        (value) =>
+                          value?.presentation ||
+                          value?.children.some(
+                            (child) =>
+                              child.presentation ||
+                              child.columns.some(
+                                (column) => column.presentation,
+                              ),
+                          ) ||
+                          value?.actions.some((action) => action.presentation),
+                      )
+                    ? 5
+                    : composed
+                      ? 4
+                      : emitsFieldKinds
+                        ? 3
+                        : navigation
+                          ? 2
+                          : 1,
     },
   };
 }

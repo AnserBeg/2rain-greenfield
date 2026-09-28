@@ -35,6 +35,36 @@ const TRANSITIONS = [
   ['reopen', 'Reopen order', 50, 'closed', 'released', 'close', true],
 ] as const;
 
+/**
+ * Payment terms (owner ruling B). The labels are the same as the Party's
+ * customer default, because the editor maps that default onto this field by
+ * label and the validator refuses a label the two do not share.
+ */
+const PAYMENT_TERMS = [
+  ['due_on_receipt', 'Due on receipt'],
+  ['net_15', 'Net 15'],
+  ['net_30', 'Net 30'],
+  ['net_45', 'Net 45'],
+  ['net_60', 'Net 60'],
+] as const;
+
+/** The ship-to lines an order copies and a shipment carries (owner ruling E). */
+const SHIP_TO_FIELDS = [
+  ['ship_to_name', 'Ship-to recipient', 240],
+  ['ship_to_street', 'Ship-to street', 500],
+  ['ship_to_city', 'Ship-to city', 120],
+  ['ship_to_region', 'Ship-to province or state', 120],
+  ['ship_to_postal_code', 'Ship-to postal code', 20],
+  ['ship_to_country', 'Ship-to country', 60],
+] as const;
+/** A ship-to is complete when it names a street, city, postal code and country. */
+const SHIP_TO_REQUIRED = [
+  'ship_to_street',
+  'ship_to_city',
+  'ship_to_postal_code',
+  'ship_to_country',
+] as const;
+
 type StateLocalId = (typeof STATES)[number][0];
 type TransitionLocalId = (typeof TRANSITIONS)[number][0];
 type TransitionPermissionLocalId = (typeof TRANSITIONS)[number][5];
@@ -78,6 +108,15 @@ function ids(namespace: string) {
         number: field('sales_order', 'number'),
         orderDate: field('sales_order', 'order_date'),
         requestedDate: field('sales_order', 'requested_date'),
+        salespersonPartyId: field('sales_order', 'salesperson_party_id'),
+        paymentTerms: field('sales_order', 'payment_terms'),
+        shipToAddressId: field('sales_order', 'ship_to_address_id'),
+        shipToName: field('sales_order', 'ship_to_name'),
+        shipToStreet: field('sales_order', 'ship_to_street'),
+        shipToCity: field('sales_order', 'ship_to_city'),
+        shipToRegion: field('sales_order', 'ship_to_region'),
+        shipToPostalCode: field('sales_order', 'ship_to_postal_code'),
+        shipToCountry: field('sales_order', 'ship_to_country'),
       },
       salesOrderLine: {
         itemId: field('sales_order_line', 'item_id'),
@@ -241,6 +280,47 @@ export function salesModuleDefinition(
         text(1000),
         { optional: true },
       ),
+      // Master data (owner ruling E): an optional salesperson, the payment
+      // terms, and the order's own copy of its ship-to address -- copied from
+      // the customer's address book when chosen, then the order's to change.
+      field(
+        definitionIds,
+        entityIds.salesOrder,
+        fieldIds.salesOrder.salespersonPartyId,
+        'Salesperson',
+        70,
+        text(80),
+        { optional: true },
+      ),
+      field(
+        definitionIds,
+        entityIds.salesOrder,
+        fieldIds.salesOrder.paymentTerms,
+        'Payment terms',
+        80,
+        enumeration(definitionIds, 'sales_order_payment_terms', PAYMENT_TERMS),
+        { optional: true },
+      ),
+      field(
+        definitionIds,
+        entityIds.salesOrder,
+        fieldIds.salesOrder.shipToAddressId,
+        'Ship-to address',
+        90,
+        text(80),
+        { optional: true },
+      ),
+      ...SHIP_TO_FIELDS.map(([name, label, maximumLength], index) =>
+        field(
+          definitionIds,
+          entityIds.salesOrder,
+          `${namespace}:field.sales_order_${name}`,
+          label,
+          100 + index * 10,
+          text(maximumLength),
+          { optional: true },
+        ),
+      ),
       field(
         definitionIds,
         entityIds.salesOrderLine,
@@ -334,6 +414,34 @@ export function salesModuleDefinition(
           `${namespace}:field.shipment_state`,
           `${namespace}:option.shipment_state_draft`,
         ),
+        // An initial shipment is written and kept only with a complete ship-to
+        // (owner ruling E), whoever creates it; a correction or reversal
+        // restates movements of one that had it.
+        {
+          kind: 'allPredicate',
+          schemaVersion: version,
+          terms: [
+            fieldComparison(
+              `${namespace}:field.shipment_state`,
+              `${namespace}:option.shipment_state_draft`,
+            ),
+            {
+              kind: 'anyPredicate',
+              schemaVersion: version,
+              terms: [
+                {
+                  kind: 'notPredicate',
+                  schemaVersion: version,
+                  term: fieldComparison(
+                    `${namespace}:field.shipment_kind`,
+                    `${namespace}:option.shipment_kind_initial`,
+                  ),
+                },
+                shipToComplete(namespace, 'shipment'),
+              ],
+            },
+          ],
+        },
       ),
       ...operations(definitionIds, 'shipment_line', entityIds.shipmentLine),
       fulfillmentOperation(definitionIds, 'reservation', 'reserve'),
@@ -346,7 +454,18 @@ export function salesModuleDefinition(
           definitionIds,
           local,
           permission,
-          inState(stateFieldId, definitionIds.stateIds[fromState]),
+          // Confirm needs a complete ship-to: a confirmed order's header is
+          // no longer editable, and it may only ship to a complete address.
+          local === 'release'
+            ? {
+                kind: 'allPredicate',
+                schemaVersion: version,
+                terms: [
+                  inState(stateFieldId, definitionIds.stateIds[fromState]),
+                  shipToComplete(namespace, 'sales_order'),
+                ],
+              }
+            : inState(stateFieldId, definitionIds.stateIds[fromState]),
         ),
       ),
     ],
@@ -576,6 +695,12 @@ function fulfillmentFields(ids: SalesIds): Array<Record<string, unknown>> {
       text(120),
       true,
     ],
+    // The ship-to the shipment went to, copied from its order. Optional on
+    // the entity; an initial shipment is refused without a complete one.
+    ...SHIP_TO_FIELDS.map(
+      ([name, label, maximumLength]) =>
+        ['shipment', name, label, text(maximumLength), true] as const,
+    ),
   ];
   return specs.map(([local, name, label, type, optional], index) =>
     field(
@@ -736,6 +861,42 @@ function inState(fieldId: string, stateId: string): Record<string, unknown> {
   return fieldComparison(fieldId, stateId);
 }
 
+/** Each required ship-to line is present and not blank (absent compares false). */
+function shipToComplete(
+  namespace: string,
+  local: 'sales_order' | 'shipment',
+): Record<string, unknown> {
+  return {
+    kind: 'allPredicate',
+    schemaVersion: version,
+    terms: SHIP_TO_REQUIRED.map((name) => ({
+      field: reference('fieldReference', `${namespace}:field.${local}_${name}`),
+      kind: 'fieldComparisonPredicate',
+      operator: 'notEquals',
+      schemaVersion: version,
+      value: { kind: 'textValue', schemaVersion: version, value: '' },
+    })),
+  };
+}
+
+function enumeration(
+  ids: SalesIds,
+  prefix: string,
+  options: ReadonlyArray<readonly [string, string]>,
+): FieldType {
+  return {
+    kind: 'enumFieldType',
+    schemaVersion: version,
+    options: options.map(([value, label], index) => ({
+      kind: 'enumOption',
+      schemaVersion: version,
+      optionId: `${ids.namespace}:option.${prefix}_${value}`,
+      label,
+      orderKey: (index + 1) * 10,
+    })),
+  };
+}
+
 function editableStates(ids: SalesIds): Record<string, unknown> {
   return {
     kind: 'allPredicate',
@@ -779,6 +940,7 @@ function selectedFieldsForEntity(
       'carrier',
       'shipping_reference_kind',
       'shipping_reference',
+      ...SHIP_TO_FIELDS.map(([name]) => name),
     ],
     shipment_line: [
       'line_number',
@@ -984,7 +1146,13 @@ function operations(
   local: string,
   entityId: string,
   precondition?: Record<string, unknown>,
+  /** A stricter guard for the create and update images, when declared. */
+  writePrecondition: Record<string, unknown> | undefined = precondition,
 ): Array<Record<string, unknown>> {
+  const guardFor = (action: string) =>
+    action === 'create' || action === 'update'
+      ? writePrecondition
+      : precondition;
   return (
     [
       ['create', 'createRecordEffect'],
@@ -1006,7 +1174,7 @@ function operations(
       'permissionReference',
       `${ids.namespace}:permission.${local}_${action}`,
     ),
-    ...(precondition ? { precondition } : {}),
+    ...(guardFor(action) ? { precondition: guardFor(action) } : {}),
     readBack: reference(
       'queryReference',
       `${ids.namespace}:query.${local}_get`,

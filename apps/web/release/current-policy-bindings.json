@@ -229,6 +229,31 @@
       },
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.party_address_archive",
+        "resource": "northstar.app:entity.party_address"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.party_address_create",
+        "resource": "northstar.app:entity.party_address"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.party_address_read",
+        "resource": "northstar.app:entity.party_address"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.party_address_restore",
+        "resource": "northstar.app:entity.party_address"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.party_address_update",
+        "resource": "northstar.app:entity.party_address"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.party_archive",
         "resource": "northstar.app:entity.party"
       },

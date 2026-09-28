@@ -142,6 +142,59 @@ async function seed(
       {},
       false,
     );
+  // Ruling E: the demo customer carries order defaults -- a salesperson, Net
+  // 30, CAD and a default ship-to from its address book -- so choosing it in
+  // the editor fills them, and Confirm finds a complete ship-to.
+  const salesperson = await create(
+    'party',
+    {
+      number: 'SP-TEST',
+      name: 'Morgan Lee',
+      contact_summary: 'Salesperson · morgan@rain-distribution.example',
+    },
+    {},
+    false,
+  );
+  await create(
+    'party_role',
+    { kind: `${ns}:option.salesperson`, status: `${ns}:option.active` },
+    { party: salesperson.recordId },
+    false,
+  );
+  const shipToAddress = await create(
+    'party_address',
+    {
+      label: 'Main delivery',
+      recipient: 'Alpine receiving',
+      street: '100 Industrial Way',
+      city: 'Calgary',
+      region: 'AB',
+      postal_code: 'T2P 0A1',
+      country: 'Canada',
+    },
+    { party: customer },
+    false,
+  );
+  const defaulted = await invoke('party_update', {
+    recordId: customer,
+    expectedRevision: 1,
+    patch: {
+      [`${ns}:field.party_default_currency`]: `${ns}:option.party_default_currency_cad`,
+      [`${ns}:field.party_payment_terms`]: `${ns}:option.party_payment_terms_net_30`,
+      [`${ns}:field.party_default_salesperson_party_id`]: salesperson.recordId,
+      [`${ns}:field.party_default_ship_to_address_id`]: shipToAddress.recordId,
+    },
+  });
+  assert.equal(defaulted.outcome, 'succeeded');
+  /** A complete ship-to, which Confirm requires (ruling E). */
+  const shipTo = {
+    ship_to_name: 'Receiving dock',
+    ship_to_street: '100 Industrial Way',
+    ship_to_city: 'Calgary',
+    ship_to_region: 'AB',
+    ship_to_postal_code: 'T2P 0A1',
+    ship_to_country: 'Canada',
+  };
   const now = new Date().toISOString();
   const stock = await create('inventory_transaction', {
     actor_id: 'order-entry-fixture',
@@ -220,6 +273,7 @@ async function seed(
         requested_date: new Date(day.getTime() + 21 * 86_400_000).toISOString(),
         currency: index % 5 === 0 ? 'EUR' : index % 4 === 0 ? 'USD' : 'CAD',
         notes: null,
+        ...shipTo,
       });
       if (index % 3 === 0)
         await invoke('sales_order_release', {
@@ -298,6 +352,7 @@ async function seed(
           requested_date: now,
           currency: 'CAD',
           notes: 'Catalog real-path fixture',
+          ...shipTo,
         });
       catalogConflict = await order();
       const locked = await order();

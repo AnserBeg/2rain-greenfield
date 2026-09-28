@@ -2,6 +2,16 @@ export const FULFILLMENT_READ_MODEL_BINDINGS = Object.freeze({
   line: 'northstar.sales:read_model.line',
   reservation: 'northstar.sales:read_model.reservation',
 });
+/** The order's ship-to lines, as the workspace shows and prints them. */
+const SHIP_TO_LINES = [
+  ['ship_to_name', 'Ship-to recipient'],
+  ['ship_to_street', 'Ship-to street'],
+  ['ship_to_city', 'Ship-to city'],
+  ['ship_to_region', 'Ship-to province or state'],
+  ['ship_to_postal_code', 'Ship-to postal code'],
+  ['ship_to_country', 'Ship-to country'],
+] as const;
+
 /** RAIN-META-SALES: product composition; the runtime interprets the same data for any module. */
 export function salesWorkspace(namespace: string): Record<string, unknown> {
   const id = (type: string, name: string) => `${namespace}:${type}.${name}`;
@@ -196,6 +206,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           id('column', 'order_date'),
           id('column', 'requested_date'),
           id('column', 'currency'),
+          id('column', 'salesperson'),
+          id('column', 'payment_terms'),
         ],
       },
       context: {
@@ -211,6 +223,12 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         label: 'Sales order',
         datasets: [lines],
         note: id('column', 'notes'),
+        blocks: [
+          {
+            label: 'Ship to',
+            columns: SHIP_TO_LINES.map(([name]) => id('column', name)),
+          },
+        ],
       },
     },
     fields: [
@@ -238,6 +256,22 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       column('currency', 'Currency', 35, field('sales_order_currency')),
       // Read back as stored; shown in the document's sections.
       column('notes', 'Notes', 40, field('sales_order_notes')),
+      column(
+        'salesperson',
+        'Salesperson',
+        45,
+        field('sales_order_salesperson_party_id'),
+        ['party_get', 'party_name'],
+      ),
+      column(
+        'payment_terms',
+        'Payment terms',
+        50,
+        field('sales_order_payment_terms'),
+      ),
+      ...SHIP_TO_LINES.map(([name, label], index) =>
+        column(name, label, 55 + index, field(`sales_order_${name}`)),
+      ),
     ],
     children: [
       {
@@ -488,6 +522,13 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
               external_reference: literal(null),
               reason_code: literal('SHIP'),
               reason_narrative: literal('Ship reserved stock'),
+              // The shipment keeps the address it went to (ruling E).
+              ...Object.fromEntries(
+                SHIP_TO_LINES.map(([name]) => [
+                  name,
+                  record(field(`sales_order_${name}`)),
+                ]),
+              ),
             },
             { order: record('recordId') },
           ),
@@ -684,6 +725,16 @@ export function packingWorkspace(namespace: string): Record<string, unknown> {
       ]),
       column('date', 'Shipped at', 30, 'shipment_effective_at'),
       column('state', 'Shipment state', 40, 'shipment_state'),
+      column('carrier', 'Carrier', 50, 'shipment_carrier'),
+      column(
+        'shipping_reference',
+        'Tracking or BOL',
+        60,
+        'shipment_shipping_reference',
+      ),
+      ...SHIP_TO_LINES.map(([name, label], index) =>
+        column(name, label, 70 + index, `shipment_${name}`),
+      ),
     ],
     children: [
       {

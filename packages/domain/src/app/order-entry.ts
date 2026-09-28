@@ -147,11 +147,63 @@ export function orderEntrySurfaces(
         defaultValue: 'CAD',
       },
     };
+    const fromCustomer = (source: string) => ({
+      defaultFrom: {
+        referenceFieldId: id('field', `${local}_customer_party_id`),
+        sourceFieldId: id('field', source),
+      },
+    });
+    const fromAddress = (source: string) => ({
+      defaultFrom: {
+        referenceFieldId: id('field', `${local}_ship_to_address_id`),
+        sourceFieldId: id('field', `party_address_${source}`),
+      },
+    });
+    // A salesperson is a Party with an active salesperson role (ruling E).
+    const salesperson = {
+      reference: {
+        queryId: id('query', 'party_list'),
+        getQueryId: id('query', 'party_get'),
+        labelFieldIds: [id('field', 'party_name')],
+        detailFieldIds: [id('field', 'party_number')],
+        eligibility: {
+          queryId: id('query', 'party_role_list'),
+          relationId: id('relation', 'party_role_party'),
+          filters: [
+            {
+              fieldId: id('field', 'party_role_kind'),
+              value: id('option', 'salesperson'),
+            },
+            {
+              fieldId: id('field', 'party_role_status'),
+              value: id('option', 'active'),
+            },
+          ],
+        },
+      },
+    };
+    const shipTo = {
+      reference: {
+        queryId: id('query', 'party_address_list'),
+        getQueryId: id('query', 'party_address_get'),
+        labelFieldIds: [id('field', 'party_address_label')],
+        detailFieldIds: [
+          id('field', 'party_address_street'),
+          id('field', 'party_address_city'),
+        ],
+        within: {
+          referenceFieldId: id('field', `${local}_customer_party_id`),
+          relationId: id('relation', 'party_address_party'),
+        },
+      },
+    };
     return {
       kind: 'draftDocumentEditor',
       headerLabel: 'Order details',
       linesLabel: 'Order lines',
-      saveDescription: `Save commits the header and each line in sequence. Drafts do not change stock. ${sales ? 'Confirm' : 'Release'} is a separate action.`,
+      saveDescription: sales
+        ? 'Save commits the header and each line in sequence. Drafts do not change stock. Confirm is a separate action, offered once the order has a complete ship-to address (street, city, postal code and country).'
+        : 'Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.',
       saveMode: 'sequential',
       headerFormSurfaceId: id('surface', `${local}_form`),
       recordSurfaceId: id('surface', `${local}_detail`),
@@ -162,19 +214,79 @@ export function orderEntrySurfaces(
       editableStateIds: [id('state', `${local}_draft`)],
       lineNumberFieldId: id('field', `${local}_line_line_number`),
       // The order number is assigned by the server on first save.
-      headerFields: [
-        field(
-          `${local}_${party}_party_id`,
-          sales ? 'Customer' : 'Vendor',
-          counterparty(sales ? 'customer' : 'supplier'),
-        ),
-        field(`${local}_order_date`, 'Order date'),
-        field(`${local}_${date}`, sales ? 'Requested date' : 'Expected date'),
-        field(`${local}_currency`, 'Currency', currency),
-        field(`${local}_notes`, 'Notes', {
-          presentation: { kind: 'multiline' },
-        }),
-      ],
+      headerFields: sales
+        ? [
+            field(
+              `${local}_customer_party_id`,
+              'Customer',
+              counterparty('customer'),
+            ),
+            // Customer defaults (owner ruling E): choosing a customer resets
+            // each of these to that customer's value, then they are the
+            // order's to change.
+            field(`${local}_salesperson_party_id`, 'Salesperson', {
+              ...salesperson,
+              ...fromCustomer('party_default_salesperson_party_id'),
+            }),
+            field(`${local}_order_date`, 'Order date'),
+            field(`${local}_requested_date`, 'Requested date'),
+            field(`${local}_currency`, 'Currency', {
+              ...currency,
+              ...fromCustomer('party_default_currency'),
+            }),
+            field(
+              `${local}_payment_terms`,
+              'Payment terms',
+              fromCustomer('party_payment_terms'),
+            ),
+            // The ship-to address is chosen from that customer's own book; the
+            // order keeps its own copy of the lines, filled from the choice.
+            field(`${local}_ship_to_address_id`, 'Ship-to address', {
+              ...shipTo,
+              ...fromCustomer('party_default_ship_to_address_id'),
+            }),
+            field(
+              `${local}_ship_to_name`,
+              'Recipient',
+              fromAddress('recipient'),
+            ),
+            field(`${local}_ship_to_street`, 'Street', {
+              presentation: { kind: 'multiline' },
+              ...fromAddress('street'),
+            }),
+            field(`${local}_ship_to_city`, 'City', fromAddress('city')),
+            field(
+              `${local}_ship_to_region`,
+              'Province or state',
+              fromAddress('region'),
+            ),
+            field(
+              `${local}_ship_to_postal_code`,
+              'Postal code',
+              fromAddress('postal_code'),
+            ),
+            field(
+              `${local}_ship_to_country`,
+              'Country',
+              fromAddress('country'),
+            ),
+            field(`${local}_notes`, 'Notes', {
+              presentation: { kind: 'multiline' },
+            }),
+          ]
+        : [
+            field(
+              `${local}_${party}_party_id`,
+              'Vendor',
+              counterparty('supplier'),
+            ),
+            field(`${local}_order_date`, 'Order date'),
+            field(`${local}_${date}`, 'Expected date'),
+            field(`${local}_currency`, 'Currency', currency),
+            field(`${local}_notes`, 'Notes', {
+              presentation: { kind: 'multiline' },
+            }),
+          ],
       lineFields: [
         field(`${local}_line_item_id`, 'Product', product),
         field(`${local}_line_ordered_quantity`, 'Quantity'),
@@ -222,6 +334,11 @@ export function orderEntrySurfaces(
     inventory_transaction_line: 'inventory_transaction',
     stock_count_line: 'stock_count',
   };
+  // A tenant-level child belongs to its master's workspace, such as a
+  // customer's ship-to addresses; it has no company entry to resolve.
+  const masterOwners: Readonly<Record<string, string>> = {
+    party_address: 'party',
+  };
   return surfaces.map((surface) => {
     const name = String(surface.surfaceId).split(':surface.')[1]!;
     const role = surface.surfaceRole;
@@ -239,6 +356,7 @@ export function orderEntrySurfaces(
             ].includes(local)
           ? 'sales_order'
           : (lineOwners[local] ?? null);
+    const master = masterOwners[local] ?? null;
     const listQueryId = String(
       (surface.dataSource as { targetId?: unknown } | undefined)?.targetId,
     );
@@ -258,11 +376,13 @@ export function orderEntrySurfaces(
           role === 'list'
             ? editor || local === 'posted_stock_balance'
               ? 'operational'
-              : owner
+              : owner || master
                 ? 'contextual'
                 : 'setup'
             : 'contextual',
-        ...(owner ? { ownerSurfaceId: id('surface', `${owner}_list`) } : {}),
+        ...(owner || master
+          ? { ownerSurfaceId: id('surface', `${owner ?? master}_list`) }
+          : {}),
         ...(editor ||
         owner ||
         local === 'posted_stock_balance' ||

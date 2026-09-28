@@ -3,6 +3,7 @@ import type {
   VersionedNormalizedApplicationPackage,
 } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
+import { pickerEligibilityProblem } from './picker-eligibility.js';
 
 /** Closed, cross-reference checked composition. No expression or arbitrary property path executes. */
 export function validateSurfaceCompositions(
@@ -175,6 +176,16 @@ export function validateSurfaceCompositions(
           !composition.fields.some((column) => column.columnId === print.note)
         )
           fail(surface.surfaceId, 'a printed note is a declared column');
+        for (const block of print.blocks ?? []) {
+          unique(block.columns, surface.surfaceId);
+          if (
+            block.columns.some(
+              (id) =>
+                !composition.fields.some((column) => column.columnId === id),
+            )
+          )
+            fail(surface.surfaceId, 'a printed block lists declared columns');
+        }
       }
     }
     for (const child of composition.children) {
@@ -360,7 +371,15 @@ export function validateSurfaceCompositions(
               surface.surfaceId,
               'reference input requires a declared list and label',
             );
-        } else if (input.query || input.labelField)
+          const problem = input.eligibility
+            ? pickerEligibilityProblem(
+                model,
+                input.eligibility,
+                String(query!.sourceEntity.targetId),
+              )
+            : null;
+          if (problem) fail(surface.surfaceId, problem);
+        } else if (input.query || input.labelField || input.eligibility)
           fail(
             surface.surfaceId,
             'only reference inputs declare lookup queries',

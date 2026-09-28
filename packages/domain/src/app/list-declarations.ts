@@ -52,6 +52,8 @@ function documentList(
   document: 'sales_order' | 'purchase_order',
   counterparty: { field: string; label: string },
   dateColumns: readonly { field: string; label: string }[],
+  /** Further parties named on the document, such as the salesperson. */
+  namedParties: readonly { field: string; label: string }[] = [],
 ): ListSpec {
   const field = (local: string) => `${namespace}:field.${document}_${local}`;
   const state = (local: string) => `${namespace}:state.${document}_${local}`;
@@ -74,6 +76,15 @@ function documentList(
           labelField: `${namespace}:field.party_name`,
         },
       },
+      ...namedParties.map((party) => ({
+        local: party.field,
+        label: party.label,
+        field: field(party.field),
+        reference: {
+          query: `${namespace}:query.party_list`,
+          labelField: `${namespace}:field.party_name`,
+        },
+      })),
       ...dateColumns.map((column) => ({
         local: column.field,
         label: column.label,
@@ -137,6 +148,7 @@ export function composedListSpecs(
         { field: 'order_date', label: 'Order date' },
         { field: 'requested_date', label: 'Requested' },
       ],
+      [{ field: 'salesperson_party_id', label: 'Salesperson' }],
     ),
     purchase_order_list: documentList(
       namespace,

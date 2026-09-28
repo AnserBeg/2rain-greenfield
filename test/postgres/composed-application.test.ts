@@ -5832,10 +5832,12 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
   for (const [local, count] of Object.entries({
     reservation: 14,
     reservation_balance: 10,
-    sales_order: 12,
+    // SALES-PARITY: salesperson, terms, ship-to address and six ship-to lines.
+    sales_order: 22,
     sales_order_line: 12,
     sales_order_shipped: 10,
-    shipment: 19,
+    // SALES-PARITY: carrier, reference type and reference, then six ship-to lines.
+    shipment: 29,
     shipment_line: 14,
   })) {
     assert.equal(

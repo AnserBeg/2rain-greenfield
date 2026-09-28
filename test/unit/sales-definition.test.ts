@@ -72,8 +72,10 @@ test('sales fulfillment metadata is a complete order, reservation and shipment d
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
   assert.equal(authored.entities.length, 7);
-  // SALES-PARITY adds the shipment's carrier, reference type and reference.
-  assert.equal(authored.fields.length, 38);
+  // SALES-PARITY adds the shipment's carrier, reference type and reference,
+  // then (ruling E) the order's salesperson, terms, ship-to address and six
+  // ship-to lines, and the same six lines on the shipment.
+  assert.equal(authored.fields.length, 53);
   // SALES-PARITY adds sales_order_reopen (ruling F).
   assert.equal(authored.operations.length, 28);
   assert.equal(authored.permissions.length, 33);
@@ -410,4 +412,62 @@ test('ruling F and shipping: the release command reads Confirm, a closed order r
       'optional',
       `shipment ${name} is optional on the entity (a correction has none)`,
     );
+});
+
+test('ruling E: Confirm and an initial shipment require a complete ship-to; a correction does not', () => {
+  const authored = definition();
+  type Precondition = Parameters<
+    typeof evaluateRegisteredOperationPrecondition
+  >[0];
+  type Image = Parameters<typeof evaluateRegisteredOperationPrecondition>[1];
+  const operation = (local: string) =>
+    authored.operations.find(
+      (value) => value.operationId === `northstar.sales:operation.${local}`,
+    )!;
+  const outcome = (local: string, image: Record<string, string>) =>
+    evaluateRegisteredOperationPrecondition(
+      operation(local).precondition as Precondition,
+      image as Image,
+    ).outcome;
+  const shipTo = (entity: 'sales_order' | 'shipment', blank?: string) =>
+    Object.fromEntries(
+      ['street', 'city', 'postal_code', 'country'].map((name) => [
+        `northstar.sales:field.${entity}_ship_to_${name}`,
+        name === blank ? '' : `${name} value`,
+      ]),
+    );
+  const draft = { [SALES_IDS.stateFieldId]: SALES_IDS.stateIds.draft };
+  assert.equal(
+    outcome('sales_order_release', { ...draft, ...shipTo('sales_order') }),
+    'holds',
+  );
+  for (const blank of ['street', 'city', 'postal_code', 'country'])
+    assert.equal(
+      outcome('sales_order_release', {
+        ...draft,
+        ...shipTo('sales_order', blank),
+      }),
+      'refused',
+      `Confirm must refuse a blank ${blank}`,
+    );
+  assert.equal(outcome('sales_order_release', draft), 'refused');
+  const shipment = (kind: string) => ({
+    'northstar.sales:field.shipment_state':
+      'northstar.sales:option.shipment_state_draft',
+    'northstar.sales:field.shipment_kind': `northstar.sales:option.shipment_kind_${kind}`,
+  });
+  for (const local of ['shipment_create', 'shipment_update']) {
+    assert.equal(
+      outcome(local, { ...shipment('initial'), ...shipTo('shipment') }),
+      'holds',
+    );
+    assert.equal(outcome(local, shipment('initial')), 'refused');
+    assert.equal(
+      outcome(local, { ...shipment('initial'), ...shipTo('shipment', 'city') }),
+      'refused',
+    );
+    assert.equal(outcome(local, shipment('correction')), 'holds');
+  }
+  // Archiving a draft shipment keeps its original guard: state only.
+  assert.equal(outcome('shipment_archive', shipment('initial')), 'holds');
 });

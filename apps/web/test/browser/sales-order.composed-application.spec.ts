@@ -190,6 +190,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await field('sales_order', 'requested_date', new Date().toISOString());
   await field('sales_order', 'currency', 'CAD');
   await field('sales_order', 'notes', 'Initial sales order');
+  // Confirm needs a complete ship-to (ruling E); this customer has no address
+  // book, so the order's own lines are typed. Submitted with the customer, they
+  // are kept rather than reset to the customer's (absent) default.
+  await field('sales_order', 'ship_to_street', '100 Industrial Way');
+  await field('sales_order', 'ship_to_city', 'Calgary');
+  await field('sales_order', 'ship_to_postal_code', 'T2P 0A1');
+  await field('sales_order', 'ship_to_country', 'Canada');
   // The unit is derived from the selected product's base unit, not entered.
   await field('sales_order_line', 'item_id', itemId);
   await field('sales_order_line', 'ordered_quantity', '10');

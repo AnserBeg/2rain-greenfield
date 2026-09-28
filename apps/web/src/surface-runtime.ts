@@ -2233,6 +2233,8 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 .print-section th,.print-section td{padding:var(--space-2);border-bottom:1px solid var(--line);text-align:left}
 .print-count,.print-footer{color:var(--ink-muted);font-size:var(--text-micro)}
 .print-note{white-space:pre-wrap}
+.print-block h2{margin:0 0 var(--space-1);color:var(--ink-muted);font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.08em}
+.print-block p{margin:0}
 @media print{.print-page main{padding:0}.print-page .print-document,.print-page .print-document *{visibility:visible}.print-page .print-document{border:0;padding:0}}
 @media(max-width:800px){table.draft-lines.form-fields,.draft-lines tbody,.draft-lines tr,.draft-lines td{display:block;width:auto}.draft-lines thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.draft-line{margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}.draft-line__cell,.draft-line__cell:first-child,.draft-line__cell:last-child{padding:var(--space-1) 0;border:0;border-radius:0;background:transparent;text-align:left}.draft-line__cell::before{content:attr(data-label);display:block;margin-bottom:var(--space-1);font-weight:600;color:var(--ink-muted)}.draft-line__cell--remove::before{content:none}.editor-create__fields{grid-template-columns:minmax(0,1fr)}
 body{padding-bottom:72px}
@@ -2300,6 +2302,7 @@ body{padding-bottom:72px}
 .composition-context h2{font-size:var(--text-section);margin:0}
 .composition-context p{margin:var(--space-1) 0}
 .composition-context nav{display:flex;flex-wrap:wrap;gap:var(--space-3)}
+.composition-context-links{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-3)}
 .composition-context-overflow summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--ink-muted)}
 .composition-context-overflow[open]{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control)}
 .composition-back{grid-column:1/-1;width:fit-content}

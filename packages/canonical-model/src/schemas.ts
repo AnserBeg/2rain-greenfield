@@ -781,6 +781,25 @@ const compositionInputPresentation = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ kind: z.literal('derived'), column: compositionTaskColumn }),
 ]);
+/**
+ * Which records a picker may offer: those an active record of another entity
+ * points at through a declared relation, matching exact values -- for example
+ * parties with an active customer role. Applied by the list query before
+ * paging, and to every selection route.
+ */
+const pickerEligibility = z.strictObject({
+  queryId: CanonicalIdSchema,
+  relationId: CanonicalIdSchema,
+  filters: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        value: z.string().min(1).max(200),
+      }),
+    )
+    .min(1)
+    .max(4),
+});
 const compositionInput = z.strictObject({
   inputId: CanonicalIdSchema,
   label: LabelSchema,
@@ -790,6 +809,8 @@ const compositionInput = z.strictObject({
   query: compositionReference('queryReference').optional(),
   labelField: compositionReference('fieldReference').optional(),
   presentation: compositionInputPresentation.optional(),
+  /** A reference input's eligibility, as a draft editor picker declares it. Optional v6 key. */
+  eligibility: pickerEligibility.optional(),
 });
 const compositionStep = z.strictObject({
   stepId: CanonicalIdSchema,
@@ -915,6 +936,16 @@ export const SurfaceCompositionSchema = z.strictObject({
           label: LabelSchema,
           datasets: z.array(CanonicalIdSchema).min(1).max(4),
           note: CanonicalIdSchema.optional(),
+          /** Labelled blocks of declared columns printed as lines, such as a ship-to address. */
+          blocks: z
+            .array(
+              z.strictObject({
+                label: LabelSchema,
+                columns: z.array(CanonicalIdSchema).min(1).max(8),
+              }),
+            )
+            .max(3)
+            .optional(),
         })
         .optional(),
     })
@@ -1036,28 +1067,33 @@ const editorField = z.strictObject({
       labelFieldIds: z.array(CanonicalIdSchema).min(1).max(3),
       /** Secondary text shown under each result, such as SKU and base unit. */
       detailFieldIds: z.array(CanonicalIdSchema).min(1).max(3).optional(),
+      /** Which records may be chosen (see `pickerEligibility`). */
+      eligibility: pickerEligibility.optional(),
       /**
-       * Which records may be chosen: those an active record of another entity
-       * points at through a declared relation, matching exact values -- for
-       * example parties with an active customer role. Applied by the list
-       * query before paging, and to every selection route.
+       * Only records whose declared relation points at the record a sibling
+       * reference selects -- for example the chosen customer's ship-to
+       * addresses. Changing that sibling clears this selection unless a
+       * default re-selects one. Optional v6 key (ADR-0047 §7).
        */
-      eligibility: z
+      within: z
         .strictObject({
-          queryId: CanonicalIdSchema,
+          referenceFieldId: CanonicalIdSchema,
           relationId: CanonicalIdSchema,
-          filters: z
-            .array(
-              z.strictObject({
-                fieldId: CanonicalIdSchema,
-                value: z.string().min(1).max(200),
-              }),
-            )
-            .min(1)
-            .max(4),
         })
         .optional(),
       create: editorCreate.optional(),
+    })
+    .optional(),
+  /**
+   * An editable default read from the record a sibling reference selects.
+   * Each change of that selection resets this field to the record's value, or
+   * to the field's own declared default when the record has none; the user
+   * may then change it. Optional v6 key (ADR-0047 §7).
+   */
+  defaultFrom: z
+    .strictObject({
+      referenceFieldId: CanonicalIdSchema,
+      sourceFieldId: CanonicalIdSchema,
     })
     .optional(),
 });

@@ -25,10 +25,10 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
           ),
         ).toBe(true);
         if (name.endsWith('draft-editor')) {
+          // Sales confirms (ruling F) once a ship-to is complete; Purchasing releases.
           const boundary = await page
             .getByText(
-              'Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.',
-              { exact: true },
+              /^Save commits the header and each line in sequence\. Drafts do not change stock\. (Confirm is a separate action, offered once the order has a complete ship-to address \(street, city, postal code and country\)|Release is a separate action)\.$/u,
             )
             .boundingBox();
           const save = await page
@@ -420,8 +420,13 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await page.getByLabel('Currency *').selectOption('USD');
     await page.getByLabel('Notes').fill('Dock 4\nCall ahead');
+    // Notes typed before the pickers survive every round trip. Currency is a
+    // customer default (ruling E): USD as typed until a customer is chosen,
+    // then that customer's default -- CAD for each customer chosen here, and
+    // the declared CAD for a new customer that has none.
+    let expectedCurrency = 'USD';
     const kept = async () => {
-      await expect(page.getByLabel('Currency *')).toHaveValue('USD');
+      await expect(page.getByLabel('Currency *')).toHaveValue(expectedCurrency);
       await expect(page.getByLabel('Notes')).toHaveValue('Dock 4\nCall ahead');
     };
     const loaded = documents;
@@ -503,6 +508,21 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     );
     await expect(customer).toBeFocused();
     expect(new URL(page.url()).searchParams.get('record')).toBeNull();
+    // The customer's defaults land in place with it: salesperson, terms and
+    // its default ship-to address, whose lines fill the order's own copy.
+    expectedCurrency = 'CAD';
+    await expect(
+      page.getByRole('combobox', { name: 'Salesperson', exact: true }),
+    ).toHaveAttribute('data-selected-label', 'Jordan Blake');
+    await expect(page.getByLabel('Payment terms')).toHaveValue(
+      'northstar.app:option.sales_order_payment_terms_net_30',
+    );
+    await expect(
+      page.getByRole('combobox', { name: 'Ship-to address', exact: true }),
+    ).toHaveAttribute('data-selected-label', 'Main delivery');
+    await expect(page.getByLabel('City', { exact: true })).toHaveValue(
+      'Whitecourt',
+    );
     await kept();
     // Escape closes the popup first and leaves the selection as it was.
     await customer.fill('Alp');

@@ -157,12 +157,22 @@ test(
             stock.revision,
           );
 
+          // Ruling E: Confirm and an initial shipment need a complete ship-to.
+          const shipTo = {
+            ship_to_name: 'Receiving dock',
+            ship_to_street: '100 Industrial Way',
+            ship_to_city: 'Calgary',
+            ship_to_region: 'AB',
+            ship_to_postal_code: 'T2P 0A1',
+            ship_to_country: 'Canada',
+          };
           const order = await create('sales_order', {
             currency: 'CAD',
             customer_party_id: customerPartyId,
             notes: 'Critical fulfillment race',
             order_date: now,
             requested_date: now,
+            ...shipTo,
           });
           const line = await create(
             'sales_order_line',
@@ -512,6 +522,7 @@ test(
                 reason_code: 'SHIP',
                 reason_narrative: 'Competing shipment',
                 state: `${ns}:option.shipment_state_draft`,
+                ...shipTo,
               },
               {
                 order: options.orderId ?? order.recordId,
@@ -535,6 +546,36 @@ test(
             );
             return header;
           };
+
+          // Ruling E: an initial shipment without a complete ship-to is
+          // refused by the operation's own guard, whoever writes it.
+          await assert.rejects(
+            invoke('shipment_create', {
+              legalEntityId,
+              recordId: randomUUID(),
+              relations: { [`${ns}:relation.shipment_order`]: order.recordId },
+              values: Object.fromEntries(
+                Object.entries({
+                  effective_at: now,
+                  external_reference: randomUUID(),
+                  kind: `${ns}:option.shipment_kind_initial`,
+                  location_id: locationA,
+                  reason_code: 'SHIP',
+                  reason_narrative: 'No ship-to',
+                  state: `${ns}:option.shipment_state_draft`,
+                  ...shipTo,
+                  ship_to_city: '',
+                }).map(([name, value]) => [
+                  `${ns}:field.shipment_${name}`,
+                  value,
+                ]),
+              ),
+            }),
+            (error: unknown) =>
+              (error as { code?: unknown }).code ===
+              'MODULE_OPERATION_PRECONDITION_REFUSED',
+            'an initial shipment needs a complete ship-to',
+          );
 
           // F1 review regression. Build an independent exact five-unit loop at
           // location B, consume all coverage, permit an ordinary negative
@@ -575,6 +616,7 @@ test(
             notes: 'Resulting reservation coverage regression',
             order_date: now,
             requested_date: now,
+            ...shipTo,
           });
           const correctionOrderLine = await create(
             'sales_order_line',

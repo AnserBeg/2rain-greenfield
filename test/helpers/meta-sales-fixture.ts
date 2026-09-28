@@ -138,6 +138,13 @@ async function seed(
     requested_date: now,
     currency: 'CAD',
     notes: 'Metadata-rendered fulfillment',
+    // Confirm needs a complete ship-to (ruling E); the shipment copies it.
+    ship_to_name: 'Receiving dock',
+    ship_to_street: '100 Industrial Way',
+    ship_to_city: 'Calgary',
+    ship_to_region: 'AB',
+    ship_to_postal_code: 'T2P 0A1',
+    ship_to_country: 'Canada',
   });
   const line = await create(
     'sales_order_line',
