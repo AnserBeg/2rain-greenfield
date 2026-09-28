@@ -75,6 +75,9 @@ async function main(): Promise<void> {
         client.release();
       }
     },
+    // Every lineage entry's install keeps its release artifacts and their
+    // write-ahead log; nineteen entries overflow the default 256 MB.
+    { dataSizeMegabytes: 1024 },
   );
 }
 
