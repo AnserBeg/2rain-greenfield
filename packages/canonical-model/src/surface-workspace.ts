@@ -192,18 +192,84 @@ export function validateSurfaceWorkspaces(
       const source = siblings.find(
         (value) => value.fieldId === presentation.referenceFieldId,
       );
+      const sources = [
+        presentation.sourceFieldId,
+        ...(presentation.sourceByHeader?.cases ?? []).map(
+          (value) => value.sourceFieldId,
+        ),
+      ];
       if (
-        type?.kind !== 'textFieldType' ||
+        (type?.kind !== 'textFieldType' &&
+          type?.kind !== 'exactDecimalFieldType') ||
         !source?.reference?.getQueryId ||
-        !selects(source.reference.queryId, [presentation.sourceFieldId]) ||
-        !reads(source.reference.getQueryId, source.reference.queryId, [
-          presentation.sourceFieldId,
-        ])
+        !sources.every((id) => holds(type, fields.get(id)?.fieldType)) ||
+        !selects(source.reference.queryId, sources) ||
+        !reads(
+          source.reference.getQueryId,
+          source.reference.queryId,
+          sources,
+        ) ||
+        (presentation.sourceByHeader &&
+          !headerChooses(presentation.sourceByHeader, fieldId))
       )
         fail(
           surface.surfaceId,
-          'derived presentation requires a text field and a sibling reference whose list selects the source',
+          'derived presentation requires a text or decimal field and a sibling reference whose list selects a compatible source',
         );
+    };
+    // Whether a field of type `target` can hold a value of type `source`:
+    // text no longer than itself or an enumeration's label; an enumeration
+    // offering each source label once; a decimal of at least the same scale.
+    const holds = (
+      target: (typeof model.fields)[number]['fieldType'] | undefined,
+      source: (typeof model.fields)[number]['fieldType'] | undefined,
+    ): boolean => {
+      if (target?.kind === 'textFieldType')
+        return source?.kind === 'textFieldType'
+          ? source.maximumLength <= target.maximumLength
+          : source?.kind === 'enumFieldType' &&
+              source.options.every(
+                (option) => [...option.label].length <= target.maximumLength,
+              );
+      if (target?.kind === 'enumFieldType')
+        return (
+          source?.kind === 'enumFieldType' &&
+          source.options.every(
+            (option) =>
+              target.options.filter((value) => value.label === option.label)
+                .length === 1,
+          )
+        );
+      if (target?.kind === 'exactDecimalFieldType')
+        return (
+          source?.kind === 'exactDecimalFieldType' &&
+          source.scale <= target.scale &&
+          source.precision - source.scale <= target.precision - target.scale
+        );
+      return false;
+    };
+    // A header field chooses the source by the value it holds: a declared
+    // header field (not the chosen one itself), unique values it can hold.
+    const headerChooses = (
+      chooser: { headerFieldId: string; cases: readonly { value: string }[] },
+      fieldId: string,
+    ) => {
+      const header = editor.headerFields.find(
+        (value) => value.fieldId === chooser.headerFieldId,
+      );
+      const type = fields.get(chooser.headerFieldId)?.fieldType;
+      const values = chooser.cases.map((value) => value.value);
+      return (
+        !!header &&
+        chooser.headerFieldId !== fieldId &&
+        new Set(values).size === values.length &&
+        values.every((value) =>
+          type?.kind === 'enumFieldType'
+            ? type.options.some((option) => option.optionId === value)
+            : type?.kind === 'textFieldType' &&
+              [...value].length <= type.maximumLength,
+        )
+      );
     };
     const operations = new Map(
       model.operations.map((value) => [String(value.operationId), value]),
@@ -442,32 +508,29 @@ export function validateSurfaceWorkspaces(
         field.fieldId,
       );
       const target = fields.get(field.fieldId)?.fieldType;
-      const source = fields.get(declaredDefault.sourceFieldId)?.fieldType;
-      // Text takes text no longer than itself, or an enumeration's label.
-      const compatible =
-        target?.kind === 'textFieldType'
-          ? source?.kind === 'textFieldType'
-            ? source.maximumLength <= target.maximumLength
-            : source?.kind === 'enumFieldType' &&
-              source.options.every(
-                (option) => [...option.label].length <= target.maximumLength,
-              )
-          : target?.kind === 'enumFieldType' &&
-            source?.kind === 'enumFieldType' &&
-            source.options.every(
-              (option) =>
-                target.options.filter((value) => value.label === option.label)
-                  .length === 1,
-            );
-      if (
-        !sibling ||
-        field.presentation?.kind === 'derived' ||
-        !compatible ||
-        !selects(sibling.queryId, [declaredDefault.sourceFieldId]) ||
-        !reads(sibling.getQueryId, sibling.queryId, [
-          declaredDefault.sourceFieldId,
-        ])
-      )
+      const sources = [
+        ...(declaredDefault.sourceFieldId
+          ? [declaredDefault.sourceFieldId]
+          : []),
+        ...(declaredDefault.sourceByHeader?.cases ?? []).map(
+          (value) => value.sourceFieldId,
+        ),
+      ];
+      // Either the header's value of a field, or the sibling's record.
+      const fromHeader = declaredDefault.headerFieldId;
+      const valid = fromHeader
+        ? sources.length === 0 &&
+          fromHeader !== field.fieldId &&
+          editor.headerFields.some((value) => value.fieldId === fromHeader) &&
+          holds(target, fields.get(fromHeader)?.fieldType)
+        : sources.length > 0 &&
+          sources.every((id) => holds(target, fields.get(id)?.fieldType)) &&
+          !!sibling &&
+          selects(sibling.queryId, sources) &&
+          reads(sibling.getQueryId, sibling.queryId, sources) &&
+          (!declaredDefault.sourceByHeader ||
+            headerChooses(declaredDefault.sourceByHeader, field.fieldId));
+      if (!sibling || field.presentation?.kind === 'derived' || !valid)
         fail(
           surface.surfaceId,
           'an editor default requires a sibling reference whose record holds a compatible selected source',

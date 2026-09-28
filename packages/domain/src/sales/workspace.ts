@@ -2,6 +2,16 @@ export const FULFILLMENT_READ_MODEL_BINDINGS = Object.freeze({
   line: 'northstar.sales:read_model.line',
   reservation: 'northstar.sales:read_model.reservation',
 });
+/** Line amounts and order totals, computed on read (owner ruling B). */
+export const COMMERCIAL_READ_MODEL_BINDINGS = Object.freeze({
+  line: 'northstar.sales:read_model.commercial_line',
+  order: 'northstar.sales:read_model.commercial_order',
+});
+/** The commercial outputs, by read-model binding. */
+export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
+  line: ['line_amount', 'line_tax', 'price_basis'],
+  order: ['order_subtotal', 'order_charges', 'order_tax', 'order_total'],
+} as const);
 /** The order's ship-to lines, as the workspace shows and prints them. */
 const SHIP_TO_LINES = [
   ['ship_to_name', 'Ship-to recipient'],
@@ -122,6 +132,11 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       bind(['expectedRevision'], stepValue(source, 'revision')),
     ]);
   const lines = id('dataset', 'fulfillment_lines');
+  const pricedLines = id('dataset', 'order_lines');
+  // An order total, read with the record: the detail surface reads through
+  // the commercial order query, whose read model states the totals.
+  const totalColumn = (name: string, label: string, orderKey: number) =>
+    column(`order_${name}`, label, orderKey, id('metric', `order_${name}`));
   const reservations = id('dataset', 'line_reservations');
   const shipments = id('dataset', 'order_shipments');
   const taskColumn = (datasetId: string, name: string) => ({
@@ -208,6 +223,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           id('column', 'currency'),
           id('column', 'salesperson'),
           id('column', 'payment_terms'),
+          id('column', 'order_total'),
         ],
       },
       context: {
@@ -221,8 +237,15 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       // Owner ruling G: a printable order, saved as PDF by the browser.
       print: {
         label: 'Sales order',
-        datasets: [lines],
+        datasets: [pricedLines],
         note: id('column', 'notes'),
+        totals: [
+          id('column', 'order_subtotal'),
+          id('column', 'freight'),
+          id('column', 'other_fee'),
+          id('column', 'order_tax'),
+          id('column', 'order_total'),
+        ],
       },
       // The ship-to lines read as one address, on screen and when printed.
       blocks: [
@@ -273,12 +296,122 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       ...SHIP_TO_LINES.map(([name, label], index) =>
         column(name, label, 55 + index, field(`sales_order_${name}`)),
       ),
+      // Commercial terms and totals (owner ruling B).
+      column('tax_code', 'Tax code', 65, field('sales_order_tax_code_id'), [
+        'tax_code_get',
+        'tax_code_code',
+      ]),
+      column('freight', 'Freight', 66, field('sales_order_freight_amount')),
+      column(
+        'freight_tax_code',
+        'Freight tax code',
+        67,
+        field('sales_order_freight_tax_code_id'),
+        ['tax_code_get', 'tax_code_code'],
+      ),
+      column(
+        'other_fee',
+        'Other fee',
+        68,
+        field('sales_order_other_fee_amount'),
+      ),
+      column(
+        'other_fee_tax_code',
+        'Other fee tax code',
+        69,
+        field('sales_order_other_fee_tax_code_id'),
+        ['tax_code_get', 'tax_code_code'],
+      ),
+      totalColumn('subtotal', 'Subtotal', 70),
+      totalColumn('charges', 'Charges', 71),
+      totalColumn('tax', 'Tax', 72),
+      totalColumn('total', 'Total', 73),
     ],
     children: [
       {
+        // What each line costs: price, discount, tax and amount (ruling B).
+        datasetId: pricedLines,
+        presentation: { selection: 'none' },
+        label: 'Order lines',
+        orderKey: 5,
+        query: q('commercial_order_lines'),
+        sort: [
+          {
+            fieldId: field('sales_order_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        parent: {
+          relationId: id('relation', 'sales_order_line_order'),
+          value: record('recordId'),
+          ownership: 'parentScopedChild',
+        },
+        columns: hierarchy(
+          [
+            column(
+              'priced_line',
+              'Line',
+              10,
+              field('sales_order_line_line_number'),
+            ),
+            column(
+              'priced_item',
+              'Item',
+              20,
+              field('sales_order_line_item_id'),
+              ['item_get', 'item_name'],
+            ),
+            column(
+              'priced_quantity',
+              'Quantity',
+              30,
+              field('sales_order_line_ordered_quantity'),
+            ),
+            column(
+              'priced_unit',
+              'Unit',
+              35,
+              field('sales_order_line_unit_id'),
+            ),
+            column(
+              'priced_unit_price',
+              'Unit price',
+              40,
+              field('sales_order_line_unit_price'),
+            ),
+            column('priced_basis', 'Price', 45, id('metric', 'price_basis')),
+            column(
+              'priced_list_price',
+              'List price',
+              50,
+              field('sales_order_line_list_price'),
+            ),
+            column(
+              'priced_discount',
+              'Discount %',
+              55,
+              field('sales_order_line_discount_percent'),
+            ),
+            column(
+              'priced_tax_code',
+              'Tax code',
+              60,
+              field('sales_order_line_tax_code_id'),
+              ['tax_code_get', 'tax_code_code'],
+            ),
+            column('priced_tax', 'Tax', 70, id('metric', 'line_tax')),
+            column('priced_amount', 'Amount', 80, id('metric', 'line_amount')),
+          ],
+          'priced_item',
+          ['priced_unit', 'priced_unit_price', 'priced_basis'],
+          ['priced_quantity', 'priced_tax', 'priced_amount'],
+          ['priced_list_price', 'priced_discount', 'priced_tax_code'],
+        ),
+      },
+      {
         datasetId: lines,
         presentation: { selection: 'explicit', selectedActions: 'row' },
-        label: 'Order lines',
+        label: 'Fulfillment',
         orderKey: 10,
         query: q('sales_order_line_list'),
         sort: [
@@ -630,6 +763,45 @@ export function salesWorkspaceQueries(
     'workspace_stock_reservations',
   );
   const stock = clone('posted_stock_balance_list', 'workspace_stock');
+  // Commercial reads: priced order lines, and order totals over the lines
+  // (read through a plain clone, as read models do not nest).
+  const commercial = (
+    kind: keyof typeof COMMERCIAL_READ_MODEL_BINDINGS,
+    query: Record<string, unknown>,
+    dependencyQueries: Record<string, string>,
+  ) => ({
+    ...query,
+    readModel: {
+      capability: ref(
+        'capabilityReference',
+        'northstar.sales:capability.commercial',
+      ),
+      binding: COMMERCIAL_READ_MODEL_BINDINGS[kind],
+      queries: Object.fromEntries(
+        Object.entries(dependencyQueries).map(([key, value]) => [
+          key,
+          ref('queryReference', `${namespace}:query.${value}`),
+        ]),
+      ),
+      resultFields: Object.fromEntries(
+        COMMERCIAL_READ_MODEL_OUTPUTS[kind].map((key) => [
+          key,
+          `${namespace}:metric.${key}`,
+        ]),
+      ),
+    },
+  });
+  const commercialLines = clone('sales_order_line_list', 'commercial_lines');
+  const pricedLines = commercial(
+    'line',
+    clone('sales_order_line_list', 'commercial_order_lines'),
+    {},
+  );
+  const orderTotals = commercial(
+    'order',
+    clone('sales_order_get', 'commercial_order_get'),
+    { lines: 'commercial_lines' },
+  );
   const dependencies = {
     reservations: 'workspace_reservations',
     balances: 'reservation_balance_get',
@@ -673,6 +845,9 @@ export function salesWorkspaceQueries(
     plain,
     stockReservations,
     stock,
+    commercialLines,
+    pricedLines,
+    orderTotals,
   ];
 }
 

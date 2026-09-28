@@ -6237,6 +6237,13 @@ test('Milestone B: reference fields answer in place, bound to their own request 
         ['salesperson_party_id', true],
         ['currency', false],
         ['payment_terms', false],
+        // Ruling B: the order's tax code, then each charge's code and the
+        // rate frozen from it.
+        ['tax_code_id', true],
+        ['freight_tax_code_id', true],
+        ['freight_tax_rate_percent', false],
+        ['other_fee_tax_code_id', true],
+        ['other_fee_tax_rate_percent', false],
         ['ship_to_address_id', true],
         ['ship_to_name', false],
         ['ship_to_street', false],
@@ -6330,10 +6337,16 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       ]);
       const productChosen = await s.select(s.line, s.product, s.f.item, 1, 0);
       assert.equal(productChosen.statusCode, 200);
-      // The field and its declared dependent (Unit), and nothing else.
+      // The field and its declared dependents -- the unit, the price in the
+      // order's currency and its list price, the tax code from the order and
+      // the rate frozen from it (ruling B) -- and nothing else.
       assert.deepEqual(s.targets(productChosen), [
         `${s.id(s.line, s.product)}-field`,
         s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_id`),
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_price`),
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_list_price`),
+        `${s.id(s.line, `${s.f.ns}:field.sales_order_line_tax_code_id`)}-field`,
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_tax_rate_percent`),
       ]);
       assert.match(productChosen.html, />EA</);
       release();

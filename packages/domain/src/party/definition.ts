@@ -24,6 +24,7 @@ function ids(namespace: string) {
       defaultCurrency: `${namespace}:field.party_default_currency`,
       defaultSalespersonPartyId: `${namespace}:field.party_default_salesperson_party_id`,
       defaultShipToAddressId: `${namespace}:field.party_default_ship_to_address_id`,
+      defaultTaxCodeId: `${namespace}:field.party_default_tax_code_id`,
       name: `${namespace}:field.party_name`,
       number: `${namespace}:field.party_number`,
       paymentTerms: `${namespace}:field.party_payment_terms`,
@@ -115,6 +116,7 @@ export function partyModuleDefinition(
       fieldIds.paymentTerms,
       fieldIds.defaultSalespersonPartyId,
       fieldIds.defaultShipToAddressId,
+      fieldIds.defaultTaxCodeId,
     ]),
   ];
   const roleFields = [fieldIds.roleKind, fieldIds.roleStatus];
@@ -272,6 +274,16 @@ export function partyModuleDefinition(
           label: 'Default ship-to address',
           maximumLength: 80,
           orderKey: 140,
+          presence: 'optional',
+          searchable: false,
+        }),
+        // The tax code a customer's orders are taxed by (ruling B).
+        textField({
+          entityId: entityIds.party,
+          fieldId: fieldIds.defaultTaxCodeId,
+          label: 'Default tax code',
+          maximumLength: 80,
+          orderKey: 150,
           presence: 'optional',
           searchable: false,
         }),

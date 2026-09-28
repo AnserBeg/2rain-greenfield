@@ -175,10 +175,29 @@ async function seed(
     { party: customer },
     false,
   );
+  // Ruling B: a fixed-rate tax code the customer's orders are taxed by, and
+  // the product's selling price in each order currency.
+  const taxCode = await create(
+    'tax_code',
+    { code: 'GST-AB', name: 'GST 5% (Alberta)', rate_percent: '5' },
+    {},
+    false,
+  );
+  const priced = await invoke('item_update', {
+    recordId: item,
+    expectedRevision: 1,
+    patch: {
+      [`${ns}:field.item_price_cad`]: '12.50',
+      [`${ns}:field.item_price_usd`]: '9.25',
+      [`${ns}:field.item_price_eur`]: '8.50',
+    },
+  });
+  assert.equal(priced.outcome, 'succeeded');
   const defaulted = await invoke('party_update', {
     recordId: customer,
     expectedRevision: 1,
     patch: {
+      [`${ns}:field.party_default_tax_code_id`]: taxCode.recordId,
       [`${ns}:field.party_default_currency`]: `${ns}:option.party_default_currency_cad`,
       [`${ns}:field.party_payment_terms`]: `${ns}:option.party_payment_terms_net_30`,
       [`${ns}:field.party_default_salesperson_party_id`]: salesperson.recordId,
@@ -582,6 +601,7 @@ async function seed(
     customer,
     listOrders,
     measure,
+    taxCode: taxCode.recordId,
   };
 }
 if (process.argv.includes('--serve')) {

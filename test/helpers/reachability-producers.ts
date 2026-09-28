@@ -35,6 +35,7 @@ export const reachabilityProducers = [
     'test/unit/canonical-model/predicate-admission.test.ts',
     'test/unit/canonical-model/surface-list.test.ts',
     'test/unit/catalog-definition.test.ts',
+    'test/unit/commercial-amounts.test.ts',
     'test/unit/dev-environment.test.ts',
     'test/unit/language-conformance-ledger.test.ts',
     'test/unit/location-definition.test.ts',

@@ -635,6 +635,30 @@
       "schemaVersion": "v6"
     },
     {
+      "assertionId": "northstar.app:assertion.tax_code_walking_slice",
+      "evidenceKinds": [
+        "structure",
+        "provider",
+        "userInterface",
+        "agent",
+        "migration",
+        "recovery"
+      ],
+      "expectedDiagnosticCode": null,
+      "expectedOutcome": "succeeds",
+      "invocation": {
+        "kind": "queryInvocation",
+        "query": {
+          "kind": "queryReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:query.tax_code_get"
+        },
+        "schemaVersion": "v6"
+      },
+      "kind": "assertionDefinition",
+      "schemaVersion": "v6"
+    },
+    {
       "assertionId": "northstar.app:assertion.location_walking_slice",
       "evidenceKinds": [
         "structure",
@@ -662,6 +686,24 @@
   "capabilityRequirements": [
     {
       "capabilityId": "northstar.app:capability.standard_surface_content",
+      "capabilityVersion": 1,
+      "declaredEffects": ["read"],
+      "kind": "capabilityRequirement",
+      "requiredProjections": [
+        "storage",
+        "policy",
+        "query",
+        "operation",
+        "surface",
+        "agent",
+        "reporting",
+        "verification"
+      ],
+      "schemaVersion": "v6",
+      "supportStatus": "supported"
+    },
+    {
+      "capabilityId": "northstar.sales:capability.commercial",
       "capabilityVersion": 1,
       "declaredEffects": ["read"],
       "kind": "capabilityRequirement",
@@ -1148,6 +1190,23 @@
         "kind": "storageMappingReference",
         "schemaVersion": "v6",
         "targetId": "northstar.app:storage.item"
+      }
+    },
+    {
+      "entityId": "northstar.app:entity.tax_code",
+      "kind": "entityDefinition",
+      "label": "Tax code",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "orderKey": 20,
+      "schemaVersion": "v6",
+      "storage": {
+        "kind": "storageMappingReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:storage.tax_code"
       }
     },
     {
@@ -2428,6 +2487,175 @@
     {
       "classification": "internal",
       "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "fieldId": "northstar.app:field.sales_order_tax_code_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Tax code",
+      "orderKey": 160,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "fieldId": "northstar.app:field.sales_order_freight_amount",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Freight",
+      "orderKey": 170,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "fieldId": "northstar.app:field.sales_order_freight_tax_code_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Freight tax code",
+      "orderKey": 180,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "fieldId": "northstar.app:field.sales_order_other_fee_amount",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Other fee",
+      "orderKey": 190,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "fieldId": "northstar.app:field.sales_order_other_fee_tax_code_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Other fee tax code",
+      "orderKey": 200,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "fieldId": "northstar.app:field.sales_order_freight_tax_rate_percent",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Freight tax rate %",
+      "orderKey": 210,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "fieldId": "northstar.app:field.sales_order_other_fee_tax_rate_percent",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Other fee tax rate %",
+      "orderKey": 220,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
@@ -2539,6 +2767,104 @@
       "kind": "fieldDefinition",
       "label": "Unit price",
       "orderKey": 50,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "fieldId": "northstar.app:field.sales_order_line_list_price",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "List price",
+      "orderKey": 60,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "fieldId": "northstar.app:field.sales_order_line_discount_percent",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Discount %",
+      "orderKey": 70,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "fieldId": "northstar.app:field.sales_order_line_tax_code_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Tax code",
+      "orderKey": 80,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "fieldId": "northstar.app:field.sales_order_line_tax_rate_percent",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Tax rate %",
+      "orderKey": 90,
       "presence": "optional",
       "reportable": true,
       "schemaVersion": "v6",
@@ -5165,6 +5491,29 @@
     {
       "classification": "internal",
       "collation": "unicodeCaseInsensitive",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.party"
+      },
+      "fieldId": "northstar.app:field.party_default_tax_code_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Default tax code",
+      "orderKey": 150,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "unicodeCaseInsensitive",
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
@@ -5411,6 +5760,153 @@
       "kind": "fieldDefinition",
       "label": "Base unit",
       "orderKey": 40,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.item"
+      },
+      "fieldId": "northstar.app:field.item_price_cad",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Price (CAD)",
+      "orderKey": 50,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.item"
+      },
+      "fieldId": "northstar.app:field.item_price_usd",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Price (USD)",
+      "orderKey": 60,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.item"
+      },
+      "fieldId": "northstar.app:field.item_price_eur",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Price (EUR)",
+      "orderKey": 70,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "businessKey": "tenantEnvironmentCaseInsensitiveUnique",
+      "classification": "internal",
+      "collation": "unicodeCaseInsensitive",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "fieldId": "northstar.app:field.tax_code_code",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 20,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Tax code",
+      "orderKey": 10,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": true
+    },
+    {
+      "classification": "internal",
+      "collation": "unicodeCaseInsensitive",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "fieldId": "northstar.app:field.tax_code_name",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 120,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Name",
+      "orderKey": 20,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": true
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "fieldId": "northstar.app:field.tax_code_rate_percent",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Rate %",
+      "orderKey": 30,
       "presence": "required",
       "reportable": true,
       "schemaVersion": "v6",
@@ -9686,6 +10182,130 @@
         "entity": {
           "kind": "entityReference",
           "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.tax_code"
+        },
+        "kind": "createRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "operationId": "northstar.app:operation.tax_code_create",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.tax_code_create"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.tax_code_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.tax_code"
+        },
+        "kind": "updateRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "operationId": "northstar.app:operation.tax_code_update",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.tax_code_update"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.tax_code_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.tax_code"
+        },
+        "kind": "archiveRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "operationId": "northstar.app:operation.tax_code_archive",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.tax_code_archive"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.tax_code_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.tax_code"
+        },
+        "kind": "restoreRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "operationId": "northstar.app:operation.tax_code_restore",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.tax_code_restore"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.tax_code_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
           "targetId": "northstar.app:entity.location"
         },
         "kind": "createRecordEffect",
@@ -11209,6 +11829,66 @@
     {
       "action": "create",
       "kind": "permissionDefinition",
+      "label": "tax_code create",
+      "permissionId": "northstar.app:permission.tax_code_create",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "read",
+      "kind": "permissionDefinition",
+      "label": "tax_code read",
+      "permissionId": "northstar.app:permission.tax_code_read",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "update",
+      "kind": "permissionDefinition",
+      "label": "tax_code update",
+      "permissionId": "northstar.app:permission.tax_code_update",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "archive",
+      "kind": "permissionDefinition",
+      "label": "tax_code archive",
+      "permissionId": "northstar.app:permission.tax_code_archive",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "restore",
+      "kind": "permissionDefinition",
+      "label": "tax_code restore",
+      "permissionId": "northstar.app:permission.tax_code_restore",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "create",
+      "kind": "permissionDefinition",
       "label": "location create",
       "permissionId": "northstar.app:permission.location_create",
       "resource": {
@@ -11478,6 +12158,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_get_16"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 170,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_get_17"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 180,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_get_18"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 190,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_get_19"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 200,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_get_20"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 210,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_get_21"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 220,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_get_22"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 230,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_get_23"
         }
       ],
       "sourceEntity": {
@@ -11698,6 +12455,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_list_16"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 170,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_list_17"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 180,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_list_18"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 190,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_list_19"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 200,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_list_20"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 210,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_list_21"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 220,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_list_22"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 230,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_list_23"
         }
       ],
       "sourceEntity": {
@@ -11917,6 +12751,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_search_16"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 170,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_search_17"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 180,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_search_18"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 190,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_search_19"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 200,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_search_20"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 210,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_search_21"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 220,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_search_22"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 230,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_search_23"
         }
       ],
       "sourceEntity": {
@@ -12150,6 +13061,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_resolve_16"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 170,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_resolve_17"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 180,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_resolve_18"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 190,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_resolve_19"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 200,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_resolve_20"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 210,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_resolve_21"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 220,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_resolve_22"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 230,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_resolve_23"
         }
       ],
       "sourceEntity": {
@@ -12248,6 +13236,50 @@
           "orderKey": 50,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_line_get_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_list_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_get_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_discount_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_get_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_get_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_get_9"
         }
       ],
       "sourceEntity": {
@@ -12346,6 +13378,50 @@
           "orderKey": 50,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_line_list_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_list_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_list_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_discount_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_list_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_list_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_list_9"
         }
       ],
       "sourceEntity": {
@@ -12484,6 +13560,50 @@
           "orderKey": 50,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_line_search_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_list_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_search_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_discount_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_search_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_search_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_search_9"
         }
       ],
       "sourceEntity": {
@@ -12596,6 +13716,50 @@
           "orderKey": 50,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_line_resolve_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_list_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_resolve_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_discount_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_resolve_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_resolve_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_resolve_9"
         }
       ],
       "sourceEntity": {
@@ -21591,6 +22755,17 @@
           "orderKey": 70,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.party_get_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_default_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_get_8"
         }
       ],
       "sourceEntity": {
@@ -21693,6 +22868,17 @@
           "orderKey": 70,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.party_list_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_default_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_list_8"
         }
       ],
       "sourceEntity": {
@@ -21795,6 +22981,17 @@
           "orderKey": 70,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.party_search_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_default_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_search_8"
         }
       ],
       "sourceEntity": {
@@ -21923,6 +23120,17 @@
           "orderKey": 70,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.party_resolve_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_default_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_resolve_8"
         }
       ],
       "sourceEntity": {
@@ -22616,6 +23824,39 @@
           "orderKey": 40,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.item_get_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_cad"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_get_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_usd"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_get_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_eur"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_get_7"
         }
       ],
       "sourceEntity": {
@@ -22685,6 +23926,39 @@
           "orderKey": 40,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.item_list_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_cad"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_list_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_usd"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_list_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_eur"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_list_7"
         }
       ],
       "sourceEntity": {
@@ -22754,6 +24028,39 @@
           "orderKey": 40,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.item_search_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_cad"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_search_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_usd"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_search_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_eur"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_search_7"
         }
       ],
       "sourceEntity": {
@@ -22849,12 +24156,291 @@
           "orderKey": 40,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.item_resolve_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_cad"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_resolve_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_usd"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_resolve_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_eur"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_resolve_7"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
         "schemaVersion": "v6",
         "targetId": "northstar.app:entity.item"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.tax_code_read"
+      },
+      "queryId": "northstar.app:query.tax_code_get",
+      "queryType": "get",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_get_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_get_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_get_3"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.tax_code_read"
+      },
+      "queryId": "northstar.app:query.tax_code_list",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_list_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_list_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_list_3"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.tax_code_read"
+      },
+      "queryId": "northstar.app:query.tax_code_search",
+      "queryType": "search",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_search_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_search_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_search_3"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.tax_code_read"
+      },
+      "queryId": "northstar.app:query.tax_code_resolve",
+      "queryType": "resolve",
+      "resolveMatchKeys": [
+        {
+          "authority": "identifier",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_code"
+          },
+          "kind": "resolveMatchKey",
+          "matchKeyId": "northstar.app:resolve-key.tax_code_code",
+          "orderKey": 10,
+          "schemaVersion": "v6"
+        }
+      ],
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_resolve_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_resolve_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.tax_code_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.tax_code_resolve_3"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
       },
       "tier": "q0"
     },
@@ -23443,6 +25029,621 @@
         "targetId": "northstar.app:entity.posted_stock_balance"
       },
       "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.commercial_lines_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.commercial_lines_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.sales"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.sales_order_line_read"
+      },
+      "queryId": "northstar.app:query.commercial_lines",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_line_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_ordered_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_unit_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_list_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_discount_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_9"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.commercial_order_lines_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.commercial_order_lines_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.sales"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.sales_order_line_read"
+      },
+      "queryId": "northstar.app:query.commercial_order_lines",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_line_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_ordered_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_unit_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_list_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_discount_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_9"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.sales:capability.commercial"
+        },
+        "binding": "northstar.sales:read_model.commercial_line",
+        "queries": {},
+        "resultFields": {
+          "line_amount": "northstar.app:metric.line_amount",
+          "line_tax": "northstar.app:metric.line_tax",
+          "price_basis": "northstar.app:metric.price_basis"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.commercial_order_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.commercial_order_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.sales"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.sales_order_read"
+      },
+      "queryId": "northstar.app:query.commercial_order_get",
+      "queryType": "get",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_currency"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_customer_party_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_notes"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_order_date"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_requested_date"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_salesperson_party_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_payment_terms"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_ship_to_address_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_10"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_ship_to_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 110,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_11"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_ship_to_street"
+          },
+          "kind": "querySelection",
+          "orderKey": 120,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_12"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_ship_to_city"
+          },
+          "kind": "querySelection",
+          "orderKey": 130,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_13"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_ship_to_region"
+          },
+          "kind": "querySelection",
+          "orderKey": 140,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_14"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_ship_to_postal_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 150,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_15"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_ship_to_country"
+          },
+          "kind": "querySelection",
+          "orderKey": 160,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_16"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 170,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_17"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 180,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_18"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 190,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_19"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 200,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_20"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 210,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_21"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_freight_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 220,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_22"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_other_fee_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 230,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_23"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.sales:capability.commercial"
+        },
+        "binding": "northstar.sales:read_model.commercial_order",
+        "queries": {
+          "lines": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_lines"
+          }
+        },
+        "resultFields": {
+          "order_subtotal": "northstar.app:metric.order_subtotal",
+          "order_charges": "northstar.app:metric.order_charges",
+          "order_tax": "northstar.app:metric.order_tax",
+          "order_total": "northstar.app:metric.order_total"
+        }
+      }
     }
   ],
   "relations": [
@@ -24702,6 +26903,17 @@
       "entity": {
         "kind": "entityReference",
         "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.tax_code"
+      },
+      "kind": "storageMappingDefinition",
+      "schemaVersion": "v6",
+      "storageClass": "dedicatedTable",
+      "storageMappingId": "northstar.app:storage.tax_code"
+    },
+    {
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
         "targetId": "northstar.app:entity.location"
       },
       "kind": "storageMappingDefinition",
@@ -24975,7 +27187,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.sales_order_get"
+        "targetId": "northstar.app:query.commercial_order_get"
       },
       "kind": "surfaceDefinition",
       "label": "Sales order detail",
@@ -25075,7 +27287,8 @@
               "northstar.app:column.requested_date",
               "northstar.app:column.currency",
               "northstar.app:column.salesperson",
-              "northstar.app:column.payment_terms"
+              "northstar.app:column.payment_terms",
+              "northstar.app:column.order_total"
             ]
           },
           "context": {
@@ -25087,8 +27300,15 @@
           "task": { "mode": "nativeDialog", "fallback": "page" },
           "print": {
             "label": "Sales order",
-            "datasets": ["northstar.app:dataset.fulfillment_lines"],
-            "note": "northstar.app:column.notes"
+            "datasets": ["northstar.app:dataset.order_lines"],
+            "note": "northstar.app:column.notes",
+            "totals": [
+              "northstar.app:column.order_subtotal",
+              "northstar.app:column.freight",
+              "northstar.app:column.other_fee",
+              "northstar.app:column.order_tax",
+              "northstar.app:column.order_total"
+            ]
           },
           "blocks": [
             {
@@ -25218,16 +27438,230 @@
             "label": "Ship-to country",
             "orderKey": 60,
             "field": "northstar.app:field.sales_order_ship_to_country"
+          },
+          {
+            "columnId": "northstar.app:column.tax_code",
+            "label": "Tax code",
+            "orderKey": 65,
+            "field": "northstar.app:field.sales_order_tax_code_id",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.tax_code_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.tax_code_code"
+              }
+            }
+          },
+          {
+            "columnId": "northstar.app:column.freight",
+            "label": "Freight",
+            "orderKey": 66,
+            "field": "northstar.app:field.sales_order_freight_amount"
+          },
+          {
+            "columnId": "northstar.app:column.freight_tax_code",
+            "label": "Freight tax code",
+            "orderKey": 67,
+            "field": "northstar.app:field.sales_order_freight_tax_code_id",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.tax_code_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.tax_code_code"
+              }
+            }
+          },
+          {
+            "columnId": "northstar.app:column.other_fee",
+            "label": "Other fee",
+            "orderKey": 68,
+            "field": "northstar.app:field.sales_order_other_fee_amount"
+          },
+          {
+            "columnId": "northstar.app:column.other_fee_tax_code",
+            "label": "Other fee tax code",
+            "orderKey": 69,
+            "field": "northstar.app:field.sales_order_other_fee_tax_code_id",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.tax_code_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.tax_code_code"
+              }
+            }
+          },
+          {
+            "columnId": "northstar.app:column.order_subtotal",
+            "label": "Subtotal",
+            "orderKey": 70,
+            "field": "northstar.app:metric.order_subtotal"
+          },
+          {
+            "columnId": "northstar.app:column.order_charges",
+            "label": "Charges",
+            "orderKey": 71,
+            "field": "northstar.app:metric.order_charges"
+          },
+          {
+            "columnId": "northstar.app:column.order_tax",
+            "label": "Tax",
+            "orderKey": 72,
+            "field": "northstar.app:metric.order_tax"
+          },
+          {
+            "columnId": "northstar.app:column.order_total",
+            "label": "Total",
+            "orderKey": 73,
+            "field": "northstar.app:metric.order_total"
           }
         ],
         "children": [
+          {
+            "datasetId": "northstar.app:dataset.order_lines",
+            "presentation": { "selection": "none" },
+            "label": "Order lines",
+            "orderKey": 5,
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.commercial_order_lines"
+            },
+            "sort": [
+              {
+                "fieldId": "northstar.app:field.sales_order_line_line_number",
+                "direction": "ascending"
+              }
+            ],
+            "parent": {
+              "relationId": "northstar.app:relation.sales_order_line_order",
+              "value": { "source": "record", "field": "recordId" },
+              "ownership": "parentScopedChild"
+            },
+            "columns": [
+              {
+                "columnId": "northstar.app:column.priced_line",
+                "label": "Line",
+                "orderKey": 10,
+                "field": "northstar.app:field.sales_order_line_line_number"
+              },
+              {
+                "columnId": "northstar.app:column.priced_item",
+                "label": "Item",
+                "orderKey": 20,
+                "field": "northstar.app:field.sales_order_line_item_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.item_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.item_name"
+                  }
+                },
+                "presentation": { "role": "primary", "priority": 20 }
+              },
+              {
+                "columnId": "northstar.app:column.priced_quantity",
+                "label": "Quantity",
+                "orderKey": 30,
+                "field": "northstar.app:field.sales_order_line_ordered_quantity",
+                "presentation": { "role": "quantity", "priority": 30 }
+              },
+              {
+                "columnId": "northstar.app:column.priced_unit",
+                "label": "Unit",
+                "orderKey": 35,
+                "field": "northstar.app:field.sales_order_line_unit_id",
+                "presentation": { "role": "secondary", "priority": 35 }
+              },
+              {
+                "columnId": "northstar.app:column.priced_unit_price",
+                "label": "Unit price",
+                "orderKey": 40,
+                "field": "northstar.app:field.sales_order_line_unit_price",
+                "presentation": { "role": "secondary", "priority": 40 }
+              },
+              {
+                "columnId": "northstar.app:column.priced_basis",
+                "label": "Price",
+                "orderKey": 45,
+                "field": "northstar.app:metric.price_basis",
+                "presentation": { "role": "secondary", "priority": 45 }
+              },
+              {
+                "columnId": "northstar.app:column.priced_list_price",
+                "label": "List price",
+                "orderKey": 50,
+                "field": "northstar.app:field.sales_order_line_list_price",
+                "presentation": { "role": "detail", "priority": 50 }
+              },
+              {
+                "columnId": "northstar.app:column.priced_discount",
+                "label": "Discount %",
+                "orderKey": 55,
+                "field": "northstar.app:field.sales_order_line_discount_percent",
+                "presentation": { "role": "detail", "priority": 55 }
+              },
+              {
+                "columnId": "northstar.app:column.priced_tax_code",
+                "label": "Tax code",
+                "orderKey": 60,
+                "field": "northstar.app:field.sales_order_line_tax_code_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.tax_code_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.tax_code_code"
+                  }
+                },
+                "presentation": { "role": "detail", "priority": 60 }
+              },
+              {
+                "columnId": "northstar.app:column.priced_tax",
+                "label": "Tax",
+                "orderKey": 70,
+                "field": "northstar.app:metric.line_tax",
+                "presentation": { "role": "quantity", "priority": 70 }
+              },
+              {
+                "columnId": "northstar.app:column.priced_amount",
+                "label": "Amount",
+                "orderKey": 80,
+                "field": "northstar.app:metric.line_amount",
+                "presentation": { "role": "quantity", "priority": 80 }
+              }
+            ]
+          },
           {
             "datasetId": "northstar.app:dataset.fulfillment_lines",
             "presentation": {
               "selection": "explicit",
               "selectedActions": "row"
             },
-            "label": "Order lines",
+            "label": "Fulfillment",
             "orderKey": 10,
             "query": {
               "kind": "queryReference",
@@ -26353,6 +28787,20 @@
             }
           },
           {
+            "fieldId": "northstar.app:field.sales_order_tax_code_id",
+            "label": "Tax code",
+            "reference": {
+              "queryId": "northstar.app:query.tax_code_list",
+              "getQueryId": "northstar.app:query.tax_code_get",
+              "labelFieldIds": ["northstar.app:field.tax_code_code"],
+              "detailFieldIds": ["northstar.app:field.tax_code_name"]
+            },
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_customer_party_id",
+              "sourceFieldId": "northstar.app:field.party_default_tax_code_id"
+            }
+          },
+          {
             "fieldId": "northstar.app:field.sales_order_ship_to_address_id",
             "label": "Ship-to address",
             "reference": {
@@ -26420,6 +28868,60 @@
             "defaultFrom": {
               "referenceFieldId": "northstar.app:field.sales_order_ship_to_address_id",
               "sourceFieldId": "northstar.app:field.party_address_country"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_freight_amount",
+            "label": "Freight"
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_freight_tax_code_id",
+            "label": "Freight tax code",
+            "reference": {
+              "queryId": "northstar.app:query.tax_code_list",
+              "getQueryId": "northstar.app:query.tax_code_get",
+              "labelFieldIds": ["northstar.app:field.tax_code_code"],
+              "detailFieldIds": ["northstar.app:field.tax_code_name"]
+            },
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_tax_code_id",
+              "headerFieldId": "northstar.app:field.sales_order_tax_code_id"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_freight_tax_rate_percent",
+            "label": "Freight tax rate %",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_freight_tax_code_id",
+              "sourceFieldId": "northstar.app:field.tax_code_rate_percent"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_other_fee_amount",
+            "label": "Other fee"
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_other_fee_tax_code_id",
+            "label": "Other fee tax code",
+            "reference": {
+              "queryId": "northstar.app:query.tax_code_list",
+              "getQueryId": "northstar.app:query.tax_code_get",
+              "labelFieldIds": ["northstar.app:field.tax_code_code"],
+              "detailFieldIds": ["northstar.app:field.tax_code_name"]
+            },
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_tax_code_id",
+              "headerFieldId": "northstar.app:field.sales_order_tax_code_id"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_other_fee_tax_rate_percent",
+            "label": "Other fee tax rate %",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_other_fee_tax_code_id",
+              "sourceFieldId": "northstar.app:field.tax_code_rate_percent"
             }
           },
           {
@@ -26493,7 +28995,80 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_line_unit_price",
-            "label": "Unit price"
+            "label": "Unit price",
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_line_item_id",
+              "sourceByHeader": {
+                "headerFieldId": "northstar.app:field.sales_order_currency",
+                "cases": [
+                  {
+                    "value": "CAD",
+                    "sourceFieldId": "northstar.app:field.item_price_cad"
+                  },
+                  {
+                    "value": "USD",
+                    "sourceFieldId": "northstar.app:field.item_price_usd"
+                  },
+                  {
+                    "value": "EUR",
+                    "sourceFieldId": "northstar.app:field.item_price_eur"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_list_price",
+            "label": "List price",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_line_item_id",
+              "sourceFieldId": "northstar.app:field.item_price_cad",
+              "sourceByHeader": {
+                "headerFieldId": "northstar.app:field.sales_order_currency",
+                "cases": [
+                  {
+                    "value": "CAD",
+                    "sourceFieldId": "northstar.app:field.item_price_cad"
+                  },
+                  {
+                    "value": "USD",
+                    "sourceFieldId": "northstar.app:field.item_price_usd"
+                  },
+                  {
+                    "value": "EUR",
+                    "sourceFieldId": "northstar.app:field.item_price_eur"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_discount_percent",
+            "label": "Discount %"
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_tax_code_id",
+            "label": "Tax code",
+            "reference": {
+              "queryId": "northstar.app:query.tax_code_list",
+              "getQueryId": "northstar.app:query.tax_code_get",
+              "labelFieldIds": ["northstar.app:field.tax_code_code"],
+              "detailFieldIds": ["northstar.app:field.tax_code_name"]
+            },
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_line_item_id",
+              "headerFieldId": "northstar.app:field.sales_order_tax_code_id"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_tax_rate_percent",
+            "label": "Tax rate %",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_line_tax_code_id",
+              "sourceFieldId": "northstar.app:field.tax_code_rate_percent"
+            }
           }
         ]
       },
@@ -26733,6 +29308,20 @@
             }
           },
           {
+            "fieldId": "northstar.app:field.sales_order_tax_code_id",
+            "label": "Tax code",
+            "reference": {
+              "queryId": "northstar.app:query.tax_code_list",
+              "getQueryId": "northstar.app:query.tax_code_get",
+              "labelFieldIds": ["northstar.app:field.tax_code_code"],
+              "detailFieldIds": ["northstar.app:field.tax_code_name"]
+            },
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_customer_party_id",
+              "sourceFieldId": "northstar.app:field.party_default_tax_code_id"
+            }
+          },
+          {
             "fieldId": "northstar.app:field.sales_order_ship_to_address_id",
             "label": "Ship-to address",
             "reference": {
@@ -26800,6 +29389,60 @@
             "defaultFrom": {
               "referenceFieldId": "northstar.app:field.sales_order_ship_to_address_id",
               "sourceFieldId": "northstar.app:field.party_address_country"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_freight_amount",
+            "label": "Freight"
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_freight_tax_code_id",
+            "label": "Freight tax code",
+            "reference": {
+              "queryId": "northstar.app:query.tax_code_list",
+              "getQueryId": "northstar.app:query.tax_code_get",
+              "labelFieldIds": ["northstar.app:field.tax_code_code"],
+              "detailFieldIds": ["northstar.app:field.tax_code_name"]
+            },
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_tax_code_id",
+              "headerFieldId": "northstar.app:field.sales_order_tax_code_id"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_freight_tax_rate_percent",
+            "label": "Freight tax rate %",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_freight_tax_code_id",
+              "sourceFieldId": "northstar.app:field.tax_code_rate_percent"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_other_fee_amount",
+            "label": "Other fee"
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_other_fee_tax_code_id",
+            "label": "Other fee tax code",
+            "reference": {
+              "queryId": "northstar.app:query.tax_code_list",
+              "getQueryId": "northstar.app:query.tax_code_get",
+              "labelFieldIds": ["northstar.app:field.tax_code_code"],
+              "detailFieldIds": ["northstar.app:field.tax_code_name"]
+            },
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_tax_code_id",
+              "headerFieldId": "northstar.app:field.sales_order_tax_code_id"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_other_fee_tax_rate_percent",
+            "label": "Other fee tax rate %",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_other_fee_tax_code_id",
+              "sourceFieldId": "northstar.app:field.tax_code_rate_percent"
             }
           },
           {
@@ -26873,7 +29516,80 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_line_unit_price",
-            "label": "Unit price"
+            "label": "Unit price",
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_line_item_id",
+              "sourceByHeader": {
+                "headerFieldId": "northstar.app:field.sales_order_currency",
+                "cases": [
+                  {
+                    "value": "CAD",
+                    "sourceFieldId": "northstar.app:field.item_price_cad"
+                  },
+                  {
+                    "value": "USD",
+                    "sourceFieldId": "northstar.app:field.item_price_usd"
+                  },
+                  {
+                    "value": "EUR",
+                    "sourceFieldId": "northstar.app:field.item_price_eur"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_list_price",
+            "label": "List price",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_line_item_id",
+              "sourceFieldId": "northstar.app:field.item_price_cad",
+              "sourceByHeader": {
+                "headerFieldId": "northstar.app:field.sales_order_currency",
+                "cases": [
+                  {
+                    "value": "CAD",
+                    "sourceFieldId": "northstar.app:field.item_price_cad"
+                  },
+                  {
+                    "value": "USD",
+                    "sourceFieldId": "northstar.app:field.item_price_usd"
+                  },
+                  {
+                    "value": "EUR",
+                    "sourceFieldId": "northstar.app:field.item_price_eur"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_discount_percent",
+            "label": "Discount %"
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_tax_code_id",
+            "label": "Tax code",
+            "reference": {
+              "queryId": "northstar.app:query.tax_code_list",
+              "getQueryId": "northstar.app:query.tax_code_get",
+              "labelFieldIds": ["northstar.app:field.tax_code_code"],
+              "detailFieldIds": ["northstar.app:field.tax_code_name"]
+            },
+            "defaultFrom": {
+              "referenceFieldId": "northstar.app:field.sales_order_line_item_id",
+              "headerFieldId": "northstar.app:field.sales_order_tax_code_id"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_tax_rate_percent",
+            "label": "Tax rate %",
+            "presentation": {
+              "kind": "derived",
+              "referenceFieldId": "northstar.app:field.sales_order_line_tax_code_id",
+              "sourceFieldId": "northstar.app:field.tax_code_rate_percent"
+            }
           }
         ]
       },
@@ -33211,7 +35927,8 @@
               "northstar.app:column.party_default_currency",
               "northstar.app:column.party_payment_terms",
               "northstar.app:column.party_default_salesperson",
-              "northstar.app:column.party_default_ship_to"
+              "northstar.app:column.party_default_ship_to",
+              "northstar.app:column.party_default_tax_code"
             ]
           },
           "context": {
@@ -33286,6 +36003,24 @@
                 "kind": "fieldReference",
                 "schemaVersion": "v6",
                 "targetId": "northstar.app:field.party_address_label"
+              }
+            }
+          },
+          {
+            "columnId": "northstar.app:column.party_default_tax_code",
+            "label": "Default tax code",
+            "orderKey": 80,
+            "field": "northstar.app:field.party_default_tax_code_id",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.tax_code_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.tax_code_code"
               }
             }
           }
@@ -33650,6 +36385,62 @@
                     "value": {
                       "source": "input",
                       "inputId": "northstar.app:input.party_salesperson"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.party_set_tax_code",
+            "label": "Set default tax code",
+            "description": "New sales orders for this customer are taxed by this code; each order and line can still change it.",
+            "orderKey": 35,
+            "conditions": [],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.party_tax_code",
+                "label": "Tax code",
+                "orderKey": 10,
+                "type": "reference",
+                "required": true,
+                "query": {
+                  "kind": "queryReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:query.tax_code_list"
+                },
+                "labelField": {
+                  "kind": "fieldReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:field.tax_code_name"
+                }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.party_tax_code_update",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.party_update"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": [
+                      "patch",
+                      "northstar.app:field.party_default_tax_code_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.party_tax_code"
                     }
                   }
                 ]
@@ -34603,6 +37394,228 @@
       ],
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.item_form",
+      "surfaceRole": "form",
+      "workspace": { "membership": "contextual" }
+    },
+    {
+      "archetype": "list",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.tax_code_list"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Tax code list",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "title",
+          "slotId": "northstar.app:slot.tax_code_list_title"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "dataGrid",
+          "slotId": "northstar.app:slot.tax_code_list_data_grid"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "bulkActions",
+          "slotId": "northstar.app:slot.tax_code_list_bulk_actions"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.tax_code_list",
+      "surfaceRole": "list",
+      "workspace": { "membership": "setup" }
+    },
+    {
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.tax_code_get"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Tax code detail",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "breadcrumb",
+          "slotId": "northstar.app:slot.tax_code_detail_breadcrumb"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "titleStatus",
+          "slotId": "northstar.app:slot.tax_code_detail_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.tax_code_detail_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.tax_code_detail_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.tax_code_detail_sections"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.tax_code_detail",
+      "surfaceRole": "record",
+      "workspace": { "membership": "contextual" }
+    },
+    {
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.tax_code_get"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Tax code form",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "breadcrumb",
+          "slotId": "northstar.app:slot.tax_code_form_breadcrumb"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "titleStatus",
+          "slotId": "northstar.app:slot.tax_code_form_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.tax_code_form_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.tax_code_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.tax_code_form_sections"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.tax_code_form",
       "surfaceRole": "form",
       "workspace": { "membership": "contextual" }
     },

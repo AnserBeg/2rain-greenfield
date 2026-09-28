@@ -74,8 +74,10 @@ test('sales fulfillment metadata is a complete order, reservation and shipment d
   assert.equal(authored.entities.length, 7);
   // SALES-PARITY adds the shipment's carrier, reference type and reference,
   // then (ruling E) the order's salesperson, terms, ship-to address and six
-  // ship-to lines, and the same six lines on the shipment.
-  assert.equal(authored.fields.length, 53);
+  // ship-to lines, and the same six lines on the shipment; then (ruling B)
+  // the order's tax code and two charges with codes and frozen rates, and the
+  // line's list price, discount, tax code and frozen rate.
+  assert.equal(authored.fields.length, 64);
   // SALES-PARITY adds sales_order_reopen (ruling F).
   assert.equal(authored.operations.length, 28);
   assert.equal(authored.permissions.length, 33);

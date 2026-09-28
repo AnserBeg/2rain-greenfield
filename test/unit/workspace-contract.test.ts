@@ -574,3 +574,93 @@ test('editor defaults, scoped pickers, Task input eligibility and print blocks a
     ).presentation.blocks[0]!.columns.push('northstar.app:column.currency');
   }, /a block lists declared columns the header does not show/);
 });
+
+test('ruling B declarations: prices chosen by the order currency, a line tax code from the order, frozen rates and printed totals', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = {
+    fieldId: string;
+    presentation?: Loose & {
+      sourceByHeader?: {
+        headerFieldId: string;
+        cases: { value: string; sourceFieldId: string }[];
+      };
+    };
+    defaultFrom?: Loose & {
+      headerFieldId?: string;
+      sourceByHeader?: {
+        headerFieldId: string;
+        cases: { value: string; sourceFieldId: string }[];
+      };
+    };
+    [key: string]: unknown;
+  };
+  const editor = (candidate: Loose) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!.documentEditor as { lineFields: EditorField[] };
+  const line = (candidate: Loose, name: string) =>
+    editor(candidate).lineFields.find((field) =>
+      field.fieldId.endsWith(`:field.sales_order_line_${name}`),
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The chooser is a declared header field, and each value is one it holds.
+  refuse((candidate) => {
+    line(candidate, 'unit_price').defaultFrom!.sourceByHeader!.headerFieldId =
+      'northstar.app:field.sales_order_line_line_number';
+  }, /an editor default requires a sibling reference/);
+  refuse((candidate) => {
+    line(candidate, 'unit_price').defaultFrom!.sourceByHeader!.cases[0]!.value =
+      'CADX';
+  }, /an editor default requires a sibling reference/);
+  refuse((candidate) => {
+    const cases = line(candidate, 'unit_price').defaultFrom!.sourceByHeader!
+      .cases;
+    cases[1]!.value = cases[0]!.value;
+  }, /an editor default requires a sibling reference/);
+  // A price chosen by currency is a decimal the line can hold.
+  refuse((candidate) => {
+    line(
+      candidate,
+      'unit_price',
+    ).defaultFrom!.sourceByHeader!.cases[0]!.sourceFieldId =
+      'northstar.app:field.item_name';
+  }, /an editor default requires a sibling reference/);
+  // A derived decimal (the list price) reads a decimal.
+  refuse((candidate) => {
+    line(candidate, 'list_price').presentation!.sourceFieldId =
+      'northstar.app:field.item_sku';
+  }, /derived presentation requires a text or decimal field/);
+  // A line copying a header value copies one it can hold.
+  refuse((candidate) => {
+    line(candidate, 'tax_code_id').defaultFrom!.headerFieldId =
+      'northstar.app:field.sales_order_freight_amount';
+  }, /an editor default requires a sibling reference/);
+  // A header copy names no record source as well.
+  refuse((candidate) => {
+    line(candidate, 'tax_code_id').defaultFrom!.sourceFieldId =
+      'northstar.app:field.item_name';
+  }, /an editor default requires a sibling reference/);
+  // Printed totals are declared columns.
+  refuse((candidate) => {
+    (
+      (candidate.surfaces as Loose[]).find((value) =>
+        String(value.surfaceId).endsWith(':surface.sales_order_detail'),
+      )!.composition as {
+        presentation: { print: { totals: string[] } };
+      }
+    ).presentation.print.totals.push('northstar.app:column.not_declared');
+  }, /printed totals are declared columns/);
+});

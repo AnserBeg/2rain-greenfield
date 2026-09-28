@@ -74,7 +74,11 @@ for (const javaScriptEnabled of [true, false]) {
           'unreserved',
           'Released; ordered 10 EA, reserved 0, shipped 0, open 10',
         );
-        const lineTop = await lines().boundingBox();
+        // The order's lines lead the document on the first screen: its priced
+        // lines (ruling B), with fulfillment by line below them.
+        const lineTop = await page
+          .locator('[data-composition-dataset$="dataset.order_lines"]')
+          .boundingBox();
         expect(lineTop!.y).toBeLessThan(650);
         await expect(page.locator('.composition-header')).toContainText(
           'Released',

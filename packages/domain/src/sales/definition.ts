@@ -5,6 +5,10 @@ export const SALES_NAMESPACE = 'northstar.sales' as const;
 export const FULFILLMENT_CAPABILITY_ID =
   'northstar.sales:capability.fulfillment' as const;
 export const FULFILLMENT_CAPABILITY_VERSION = 1 as const;
+/** Line amounts and order totals (owner ruling B), computed on read. */
+export const COMMERCIAL_CAPABILITY_ID =
+  'northstar.sales:capability.commercial' as const;
+export const COMMERCIAL_CAPABILITY_VERSION = 1 as const;
 
 type FieldType = Record<string, unknown>;
 
@@ -117,6 +121,16 @@ function ids(namespace: string) {
         shipToRegion: field('sales_order', 'ship_to_region'),
         shipToPostalCode: field('sales_order', 'ship_to_postal_code'),
         shipToCountry: field('sales_order', 'ship_to_country'),
+        taxCodeId: field('sales_order', 'tax_code_id'),
+        freightAmount: field('sales_order', 'freight_amount'),
+        freightTaxCodeId: field('sales_order', 'freight_tax_code_id'),
+        otherFeeAmount: field('sales_order', 'other_fee_amount'),
+        otherFeeTaxCodeId: field('sales_order', 'other_fee_tax_code_id'),
+        freightTaxRatePercent: field('sales_order', 'freight_tax_rate_percent'),
+        otherFeeTaxRatePercent: field(
+          'sales_order',
+          'other_fee_tax_rate_percent',
+        ),
       },
       salesOrderLine: {
         itemId: field('sales_order_line', 'item_id'),
@@ -124,6 +138,10 @@ function ids(namespace: string) {
         orderedQuantity: field('sales_order_line', 'ordered_quantity'),
         unitId: field('sales_order_line', 'unit_id'),
         unitPrice: field('sales_order_line', 'unit_price'),
+        listPrice: field('sales_order_line', 'list_price'),
+        discountPercent: field('sales_order_line', 'discount_percent'),
+        taxCodeId: field('sales_order_line', 'tax_code_id'),
+        taxRatePercent: field('sales_order_line', 'tax_rate_percent'),
       },
     },
     machineId,
@@ -188,6 +206,24 @@ export function salesModuleDefinition(
       {
         capabilityId: definitionIds.contentCapabilityId,
         capabilityVersion: 1,
+        declaredEffects: ['read'],
+        kind: 'capabilityRequirement',
+        requiredProjections: [
+          'storage',
+          'policy',
+          'query',
+          'operation',
+          'surface',
+          'agent',
+          'reporting',
+          'verification',
+        ],
+        schemaVersion: version,
+        supportStatus: 'supported',
+      },
+      {
+        capabilityId: COMMERCIAL_CAPABILITY_ID,
+        capabilityVersion: COMMERCIAL_CAPABILITY_VERSION,
         declaredEffects: ['read'],
         kind: 'capabilityRequirement',
         requiredProjections: [
@@ -321,6 +357,30 @@ export function salesModuleDefinition(
           { optional: true },
         ),
       ),
+      // Commercial terms (owner ruling B): the order's tax code, which new
+      // lines start from, and two charges, each taxed by its own code.
+      ...(
+        [
+          ['taxCodeId', 'Tax code', text(80)],
+          ['freightAmount', 'Freight', decimal()],
+          ['freightTaxCodeId', 'Freight tax code', text(80)],
+          ['otherFeeAmount', 'Other fee', decimal()],
+          ['otherFeeTaxCodeId', 'Other fee tax code', text(80)],
+          // Each charge's rate, frozen from its tax code when chosen.
+          ['freightTaxRatePercent', 'Freight tax rate %', decimal()],
+          ['otherFeeTaxRatePercent', 'Other fee tax rate %', decimal()],
+        ] as const
+      ).map(([key, label, type], index) =>
+        field(
+          definitionIds,
+          entityIds.salesOrder,
+          fieldIds.salesOrder[key],
+          label,
+          160 + index * 10,
+          type,
+          { optional: true },
+        ),
+      ),
       field(
         definitionIds,
         entityIds.salesOrderLine,
@@ -361,6 +421,46 @@ export function salesModuleDefinition(
         fieldIds.salesOrderLine.unitPrice,
         'Unit price',
         50,
+        decimal(),
+        { optional: true },
+      ),
+      // The item's price in the order currency when the product was chosen,
+      // kept so a changed unit price reads as a manual override (ruling B).
+      field(
+        definitionIds,
+        entityIds.salesOrderLine,
+        fieldIds.salesOrderLine.listPrice,
+        'List price',
+        60,
+        decimal(),
+        { optional: true },
+      ),
+      field(
+        definitionIds,
+        entityIds.salesOrderLine,
+        fieldIds.salesOrderLine.discountPercent,
+        'Discount %',
+        70,
+        decimal(),
+        { optional: true },
+      ),
+      field(
+        definitionIds,
+        entityIds.salesOrderLine,
+        fieldIds.salesOrderLine.taxCodeId,
+        'Tax code',
+        80,
+        text(80),
+        { optional: true },
+      ),
+      // The rate the line is taxed at, frozen from its tax code when chosen
+      // (ruling B): a later change of the code's rate leaves the line alone.
+      field(
+        definitionIds,
+        entityIds.salesOrderLine,
+        fieldIds.salesOrderLine.taxRatePercent,
+        'Tax rate %',
+        90,
         decimal(),
         { optional: true },
       ),

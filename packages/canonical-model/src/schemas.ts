@@ -936,6 +936,8 @@ export const SurfaceCompositionSchema = z.strictObject({
           label: LabelSchema,
           datasets: z.array(CanonicalIdSchema).min(1).max(4),
           note: CanonicalIdSchema.optional(),
+          /** Declared columns printed as labelled totals, such as subtotal, tax and total. */
+          totals: z.array(CanonicalIdSchema).min(1).max(6).optional(),
         })
         .optional(),
       /**
@@ -984,6 +986,23 @@ export type SurfaceWorkspace = z.infer<typeof SurfaceWorkspaceSchema>;
  * `choice` in particular offers a fixed set; it does not narrow what the domain
  * admits, and a stored value outside the set is preserved rather than replaced.
  */
+/**
+ * A source field chosen by the value a header field holds, such as the item
+ * price in the order's currency. With none matching there is no value -- a
+ * price in another currency is never offered in its place.
+ */
+const sourceByHeader = z.strictObject({
+  headerFieldId: CanonicalIdSchema,
+  cases: z
+    .array(
+      z.strictObject({
+        value: z.string().min(1).max(64),
+        sourceFieldId: CanonicalIdSchema,
+      }),
+    )
+    .min(1)
+    .max(8),
+});
 const editorPresentation = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('multiline') }),
   z.strictObject({
@@ -1005,6 +1024,8 @@ const editorPresentation = z.discriminatedUnion('kind', [
     referenceFieldId: CanonicalIdSchema,
     /** A field selected by that reference's list query. */
     sourceFieldId: CanonicalIdSchema,
+    /** The source instead chosen by a header value. Optional v6 key (ADR-0047 §7). */
+    sourceByHeader: sourceByHeader.optional(),
   }),
 ]);
 /**
@@ -1097,7 +1118,15 @@ const editorField = z.strictObject({
   defaultFrom: z
     .strictObject({
       referenceFieldId: CanonicalIdSchema,
-      sourceFieldId: CanonicalIdSchema,
+      /** A field of the record the sibling selects. */
+      sourceFieldId: CanonicalIdSchema.optional(),
+      /** That record's field chosen by a header value, such as the order currency. */
+      sourceByHeader: sourceByHeader.optional(),
+      /**
+       * Instead of the record, the header's current value of this field -- a
+       * line's tax code from the order's, taken when its product is chosen.
+       */
+      headerFieldId: CanonicalIdSchema.optional(),
     })
     .optional(),
 });
@@ -1113,7 +1142,9 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
   parentRelationId: CanonicalIdSchema,
   stateFieldId: CanonicalIdSchema,
   editableStateIds: z.array(CanonicalIdSchema).min(1),
-  headerFields: z.array(editorField).min(1).max(20),
+  // 30, widened from 20 (a document the narrower bound admitted is still
+  // admitted): a sales order's header carries its ship-to and its charges.
+  headerFields: z.array(editorField).min(1).max(30),
   lineFields: z.array(editorField).min(1).max(15),
   lineNumberFieldId: CanonicalIdSchema,
   saveMode: z.literal('sequential'),

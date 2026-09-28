@@ -30,6 +30,7 @@ const suiteDefinitions = [
       'test/unit/canonical-model/predicate-admission.test.ts',
       'test/unit/canonical-model/surface-list.test.ts',
       'test/unit/catalog-definition.test.ts',
+      'test/unit/commercial-amounts.test.ts',
       'test/unit/dev-environment.test.ts',
       'test/unit/language-conformance-ledger.test.ts',
       'test/unit/location-definition.test.ts',
@@ -125,6 +126,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/postgres/**/*.test.ts',
     expectedFiles: [
       'test/postgres/catalog-runtime.test.ts',
+      'test/postgres/commercial-totals.test.ts',
       'test/postgres/composed-application.test.ts',
       'test/postgres/current-policy.test.ts',
       'test/postgres/declared-list.test.ts',

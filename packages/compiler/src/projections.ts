@@ -833,7 +833,11 @@ function surfaceManifestPayload(
             : undefined;
         return (
           [...(editor?.headerFields ?? []), ...(editor?.lineFields ?? [])].some(
-            (field) => field.defaultFrom || field.reference?.within,
+            (field) =>
+              field.defaultFrom ||
+              field.reference?.within ||
+              (field.presentation?.kind === 'derived' &&
+                field.presentation.sourceByHeader),
           ) ||
           compositions
             .get(surface.surfaceId)

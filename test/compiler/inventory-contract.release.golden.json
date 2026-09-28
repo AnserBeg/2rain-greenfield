@@ -132,6 +132,10 @@
         "familyId": "location"
       },
       {
+        "classification": "tenantShared",
+        "familyId": "tax_code"
+      },
+      {
         "classification": "entityOwned",
         "familyId": "inventory_movement"
       },
@@ -429,7 +433,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "bd6461c58c93011abc4ed3d0d696fad95747d04e85dfa908fb29e1e68abd55d4",
+  "releaseRoot": "246e33ed7147ccee903c603d1d6f5a4e2116120cd03e74359580674272c4cd4f",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

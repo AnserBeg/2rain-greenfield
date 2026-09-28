@@ -167,6 +167,11 @@ interface RenderContext {
   readonly focus: string | null;
   /** A save-time problem with this control, shown beside it. */
   readonly error: string | null;
+  /**
+   * A header value priced lines read (the currency): the owned script sends
+   * it with each in-place selection, so a change not yet saved is known.
+   */
+  readonly lineSource?: boolean;
 }
 
 /** A non-reference field, routed through the platform's typed controls. */
@@ -180,7 +185,7 @@ export function renderValueControl(context: RenderContext): string {
     : '';
   const focused = context.focus === id && !frozen ? ' autofocus' : '';
   const error = errorFor(id, context.error);
-  const shared = ` id="${h(id)}" form="draft-editor-form"${named}${input.required ? ' required' : ''}${frozen ? ' disabled' : ''}${focused}${error.attributes}`;
+  const shared = ` id="${h(id)}" form="draft-editor-form"${named}${input.required ? ' required' : ''}${frozen ? ' disabled' : ''}${focused}${error.attributes}${context.lineSource ? ' data-line-source' : ''}`;
   const presentation = field.presentation;
   if (presentation?.kind === 'multiline')
     return `<textarea${shared} name="${h(name)}" rows="3">${h(text(value))}</textarea>${error.html}`;
@@ -191,8 +196,12 @@ export function renderValueControl(context: RenderContext): string {
   if (presentation?.kind === 'derived') {
     // Read-only: the server sets this from the selected record and never takes
     // it from the submission, so it cannot drift from the product it describes.
-    const shown = text(value);
-    return `<output id="${h(id)}" class="derived-value" data-derived-from="${h(presentation.referenceFieldId)}"${named}>${shown ? h(shown) : '<span class="derived-empty">Select a product</span>'}</output>`;
+    // A decimal (a list price) reads in canonical spelling.
+    const raw = text(value);
+    const shown = DECIMAL_KINDS.includes(input.kind)
+      ? (canonicalDecimal(raw) ?? raw)
+      : raw;
+    return `<output id="${h(id)}" class="derived-value" data-derived-from="${h(presentation.referenceFieldId)}"${named}>${shown ? h(shown) : row.values[presentation.referenceFieldId] ? '<span class="derived-empty">—</span>' : '<span class="derived-empty">Select a product</span>'}</output>`;
   }
   if (input.kind === 'dateTimeFieldType') {
     // Kept deliberately: an explicit-UTC native picker with second precision,

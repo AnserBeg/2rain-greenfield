@@ -169,6 +169,7 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'tenantShared', familyId: 'party_address' },
   { classification: 'tenantShared', familyId: 'item' },
   { classification: 'tenantShared', familyId: 'location' },
+  { classification: 'tenantShared', familyId: 'tax_code' },
   { classification: 'entityOwned', familyId: 'inventory_movement' },
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },

@@ -129,6 +129,24 @@ const distributorSalespeople = [
 ] as const;
 
 /**
+ * Sales tax codes for the distributor profile (owner ruling B): a code's rate
+ * never changes, so a new rate is a new code.
+ */
+const distributorTaxCodes = [
+  ['GST', 'GST 5%', '5'],
+  ['GST-PST-BC', 'GST 5% + BC PST 7%', '12'],
+  ['HST-ON', 'Ontario HST 13%', '13'],
+  ['EXEMPT', 'Tax exempt', '0'],
+] as const;
+const taxCodeId = (index: number) => record(8001 + index, '', {}).recordId;
+/** A customer's default tax code follows its delivery province. */
+const provinceTaxCode: Readonly<Record<string, number>> = { AB: 0, BC: 1 };
+
+/** An exact price in cents as a decimal string. */
+const price = (cents: number) =>
+  `${String(Math.floor(cents / 100))}.${String(cents % 100).padStart(2, '0')}`;
+
+/**
  * Each customer's one ship-to address, keyed by name: city, province, postal
  * code. Invented delivery addresses in the customers' own towns.
  */
@@ -492,12 +510,22 @@ export function composedApplicationSeed(
                 salespersonId(index),
               [APPLICATION_IDS.party.fieldIds.defaultShipToAddressId]:
                 addressId(index),
+              [APPLICATION_IDS.party.fieldIds.defaultTaxCodeId]: taxCodeId(
+                provinceTaxCode[customerAddresses[name]?.[1] ?? 'AB'] ?? 0,
+              ),
             }
           : {},
       ),
     ),
     ...distributorSalespeople.map(([number, name, contactSummary], index) =>
       partyRecord(7001 + index, number, name, contactSummary),
+    ),
+    ...distributorTaxCodes.map(([code, name, ratePercent], index) =>
+      record(8001 + index, APPLICATION_IDS.taxCode.createOperationId, {
+        [APPLICATION_IDS.taxCode.fieldIds.code]: code,
+        [APPLICATION_IDS.taxCode.fieldIds.name]: name,
+        [APPLICATION_IDS.taxCode.fieldIds.ratePercent]: ratePercent,
+      }),
     ),
     ...distributorItems(),
     ...distributorLocations.map(([code, name, locationType], index) =>
@@ -585,6 +613,7 @@ function distributorItems(): readonly ComposedApplicationSeedRecord[] {
           `${family.name} — ${variant}`,
           family.descriptionOf(variant),
           family.baseUnit,
+          sellingPrices(ordinal),
         ),
       );
       ordinal += 1;
@@ -614,13 +643,29 @@ function itemRecord(
   name: string,
   description: string,
   baseUnit: string,
+  prices: Readonly<Record<string, string>> = {},
 ): ComposedApplicationSeedRecord {
   return record(ordinal, APPLICATION_IDS.catalog.createOperationId, {
     [APPLICATION_IDS.catalog.fieldIds.baseUnit]: baseUnit,
     [APPLICATION_IDS.catalog.fieldIds.description]: description,
     [APPLICATION_IDS.catalog.fieldIds.name]: name,
     [APPLICATION_IDS.catalog.fieldIds.sku]: sku,
+    ...prices,
   });
+}
+
+/**
+ * A distributor item's selling price in each order currency (ruling B):
+ * a deterministic CAD list, with USD and EUR list prices beside it.
+ */
+function sellingPrices(ordinal: number): Readonly<Record<string, string>> {
+  const cad = (5 + (ordinal % 45)) * 100 + (ordinal % 2 === 0 ? 50 : 95);
+  const catalog = APPLICATION_IDS.catalog.fieldIds;
+  return {
+    [catalog.priceCad]: price(cad),
+    [catalog.priceUsd]: price(Math.round((cad * 74) / 100)),
+    [catalog.priceEur]: price(Math.round((cad * 68) / 100)),
+  };
 }
 
 function locationRecord(

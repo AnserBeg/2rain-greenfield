@@ -221,8 +221,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     flatManifest.navigation,
   );
   // Party, Catalog and Location; SALES-PARITY adds Party's ship-to address
-  // book (list, detail, form), contextual to the Party list.
-  assert.equal(flatManifest.surfaces.length, 15);
+  // book, contextual to the Party list, and Catalog's tax codes (list,
+  // detail, form each).
+  assert.equal(flatManifest.surfaces.length, 18);
   assert.equal(flatManifest.navigation, null);
   assert.equal(
     flatManifest.payloadSchemaVersion,
@@ -248,7 +249,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // fixture keeps Party, whose customer workspace (SALES-PARITY) offers a
   // salesperson Task input with declared eligibility, so it requires 11.
   assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 11);
-  assert.equal(flatCompact.navigationEntryIds.length, 4);
+  // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat.
+  assert.equal(flatCompact.navigationEntryIds.length, 5);
   assert.deepEqual(
     navigationRuleIds(
       checkSurfaceGrammarConformance(
@@ -267,8 +269,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
   // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces,
-  // + Party's three ship-to address surfaces (SALES-PARITY).
-  assert.equal(groupedManifest.surfaces.length, 73);
+  // + Party's three ship-to address and Catalog's three tax code surfaces
+  // (SALES-PARITY).
+  assert.equal(groupedManifest.surfaces.length, 76);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -290,7 +293,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 12);
+  // SALES-PARITY: Catalog's tax codes list joins the supporting masters.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 13);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),

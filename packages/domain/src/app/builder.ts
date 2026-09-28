@@ -60,7 +60,11 @@ const MODULE_REGISTRY = Object.freeze([
       partyModuleDefinition(namespace, { salesMasterData: true }),
     moduleName: 'party',
   }),
-  Object.freeze({ create: catalogModuleDefinition, moduleName: 'catalog' }),
+  Object.freeze({
+    create: (namespace: string) =>
+      catalogModuleDefinition(namespace, { sellingPrices: true }),
+    moduleName: 'catalog',
+  }),
   Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),
 ] as const);
 
@@ -76,6 +80,11 @@ const RECORD_COMPOSITIONS: Readonly<
     inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
   stock_count_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'stock_count'),
+});
+
+/** Workspaces that read their record through a read-model query. */
+const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
+  sales_order_detail: 'commercial_order_get',
 });
 
 /** The mounted module names, in composition order, for callers that assert on the set. */
@@ -178,10 +187,12 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       merged(definitions, 'surfaces').map((surface) => {
         if (!isRecord(surface))
           throw new TypeError('surface must be an object');
-        const composition = RECORD_COMPOSITIONS[
-          String(surface.surfaceId).split(':surface.')[1] ?? ''
-        ]?.(APPLICATION_NAMESPACE);
+        const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
+        const composition = RECORD_COMPOSITIONS[local]?.(APPLICATION_NAMESPACE);
         if (!composition) return surface;
+        // A workspace may read its record with a read model's figures, such as
+        // a sales order's totals; the record query stays the plain get.
+        const dataSource = RECORD_DATA_SOURCES[local];
         const slots = surface.slots as Record<string, unknown>[];
         const slot = (name: string, suffix: string, orderKey: number) => ({
           kind: 'surfaceSlot',
@@ -197,6 +208,15 @@ export function composedApplicationDefinition(): Record<string, unknown> {
         });
         return {
           ...surface,
+          ...(dataSource
+            ? {
+                dataSource: {
+                  kind: 'queryReference',
+                  schemaVersion: version,
+                  targetId: `${APPLICATION_NAMESPACE}:query.${dataSource}`,
+                },
+              }
+            : {}),
           composition,
           slots: [
             ...slots.map((slot) => ({
@@ -234,6 +254,9 @@ export const APPLICATION_IDS = Object.freeze({
       baseUnit: `${APPLICATION_NAMESPACE}:field.item_base_unit`,
       description: `${APPLICATION_NAMESPACE}:field.item_description`,
       name: `${APPLICATION_NAMESPACE}:field.item_name`,
+      priceCad: `${APPLICATION_NAMESPACE}:field.item_price_cad`,
+      priceEur: `${APPLICATION_NAMESPACE}:field.item_price_eur`,
+      priceUsd: `${APPLICATION_NAMESPACE}:field.item_price_usd`,
       sku: `${APPLICATION_NAMESPACE}:field.item_sku`,
     }),
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.item_form`,
@@ -253,6 +276,14 @@ export const APPLICATION_IDS = Object.freeze({
   }),
   namespace: APPLICATION_NAMESPACE,
   packageId,
+  taxCode: Object.freeze({
+    createOperationId: `${APPLICATION_NAMESPACE}:operation.tax_code_create`,
+    fieldIds: Object.freeze({
+      code: `${APPLICATION_NAMESPACE}:field.tax_code_code`,
+      name: `${APPLICATION_NAMESPACE}:field.tax_code_name`,
+      ratePercent: `${APPLICATION_NAMESPACE}:field.tax_code_rate_percent`,
+    }),
+  }),
   party: Object.freeze({
     address: Object.freeze({
       createOperationId: `${APPLICATION_NAMESPACE}:operation.party_address_create`,
@@ -273,6 +304,7 @@ export const APPLICATION_IDS = Object.freeze({
       defaultCurrency: `${APPLICATION_NAMESPACE}:field.party_default_currency`,
       defaultSalespersonPartyId: `${APPLICATION_NAMESPACE}:field.party_default_salesperson_party_id`,
       defaultShipToAddressId: `${APPLICATION_NAMESPACE}:field.party_default_ship_to_address_id`,
+      defaultTaxCodeId: `${APPLICATION_NAMESPACE}:field.party_default_tax_code_id`,
       name: `${APPLICATION_NAMESPACE}:field.party_name`,
       number: `${APPLICATION_NAMESPACE}:field.party_number`,
       paymentTerms: `${APPLICATION_NAMESPACE}:field.party_payment_terms`,

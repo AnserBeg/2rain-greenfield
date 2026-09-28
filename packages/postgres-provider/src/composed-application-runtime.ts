@@ -1,4 +1,6 @@
 import { FULFILLMENT_CAPABILITY_ID } from './fulfillment.js';
+import { COMMERCIAL_CAPABILITY_ID } from '../../domain/src/sales/definition.js';
+import { commercialReadModel } from './commercial-read-model.js';
 import { fulfillmentReadModel } from './fulfillment-read-model.js';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -671,7 +673,10 @@ export async function createComposedApplicationRuntime(
         options.monotonicMilliseconds,
       ),
       new PostgresSemanticQueryDenialRecorder(runtimePool, actorIssuer),
-      { [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel },
+      {
+        [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
+        [COMMERCIAL_CAPABILITY_ID]: commercialReadModel,
+      },
     );
     const capabilityExecutors = createRegisteredCapabilityExecutors(
       options.capabilityOperationExecutorFactories ?? [],

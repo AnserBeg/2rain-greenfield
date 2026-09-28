@@ -2240,6 +2240,11 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 @media print{.print-table{overflow:visible}}
 .print-block h2{margin:0 0 var(--space-1);color:var(--ink-muted);font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.08em}
 .print-block p{margin:0}
+.print-totals{display:grid;gap:var(--space-1);justify-self:end;min-width:16rem;margin:0}
+.print-totals div{display:flex;justify-content:space-between;gap:var(--space-4)}
+.print-totals dt{color:var(--ink-muted)}
+.print-totals dd{margin:0;font-variant-numeric:tabular-nums}
+.print-totals div:last-child{border-top:1px solid var(--line);padding-top:var(--space-1);font-weight:var(--weight-emphasis)}
 @media print{.print-page main{padding:0}.print-page .print-document,.print-page .print-document *{visibility:visible}.print-page .print-document{border:0;padding:0}}
 @media(max-width:800px){table.draft-lines.form-fields,.draft-lines tbody,.draft-lines tr,.draft-lines td{display:block;width:auto}.draft-lines thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.draft-line{margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}.draft-line__cell,.draft-line__cell:first-child,.draft-line__cell:last-child{padding:var(--space-1) 0;border:0;border-radius:0;background:transparent;text-align:left}.draft-line__cell::before{content:attr(data-label);display:block;margin-bottom:var(--space-1);font-weight:600;color:var(--ink-muted)}.draft-line__cell--remove::before{content:none}.editor-create__fields{grid-template-columns:minmax(0,1fr)}
 body{padding-bottom:72px}

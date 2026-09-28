@@ -176,6 +176,16 @@ export function validateSurfaceCompositions(
           !composition.fields.some((column) => column.columnId === print.note)
         )
           fail(surface.surfaceId, 'a printed note is a declared column');
+        if (print.totals) {
+          unique(print.totals, surface.surfaceId);
+          if (
+            print.totals.some(
+              (id) =>
+                !composition.fields.some((column) => column.columnId === id),
+            )
+          )
+            fail(surface.surfaceId, 'printed totals are declared columns');
+        }
       }
       // A block reads declared columns the header does not already show, each
       // in one block.

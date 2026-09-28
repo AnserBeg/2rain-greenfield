@@ -93,6 +93,7 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
           id('column', 'party_payment_terms'),
           id('column', 'party_default_salesperson'),
           id('column', 'party_default_ship_to'),
+          id('column', 'party_default_tax_code'),
         ],
       },
       context: {
@@ -133,6 +134,13 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
         70,
         field('party_default_ship_to_address_id'),
         ['party_address_get', 'party_address_label'],
+      ),
+      column(
+        'default_tax_code',
+        'Default tax code',
+        80,
+        field('party_default_tax_code_id'),
+        ['tax_code_get', 'tax_code_code'],
       ),
     ],
     children: [
@@ -340,6 +348,30 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
         steps: [
           update('salesperson_update', {
             default_salesperson_party_id: input('salesperson'),
+          }),
+        ],
+      },
+      {
+        actionId: id('action', 'party_set_tax_code'),
+        label: 'Set default tax code',
+        description:
+          'New sales orders for this customer are taxed by this code; each order and line can still change it.',
+        orderKey: 35,
+        conditions: [],
+        inputs: [
+          {
+            inputId: id('input', 'party_tax_code'),
+            label: 'Tax code',
+            orderKey: 10,
+            type: 'reference',
+            required: true,
+            query: q('tax_code_list'),
+            labelField: ref('fieldReference', field('tax_code_name')),
+          },
+        ],
+        steps: [
+          update('tax_code_update', {
+            default_tax_code_id: input('tax_code'),
           }),
         ],
       },

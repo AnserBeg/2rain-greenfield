@@ -182,6 +182,36 @@ export function orderEntrySurfaces(
         },
       },
     };
+    const taxCode = {
+      reference: {
+        queryId: id('query', 'tax_code_list'),
+        getQueryId: id('query', 'tax_code_get'),
+        labelFieldIds: [id('field', 'tax_code_code')],
+        detailFieldIds: [id('field', 'tax_code_name')],
+      },
+    };
+    // A rate is frozen from its tax code when the code is chosen (ruling B).
+    const rateOf = (taxCodeField: string) => ({
+      presentation: {
+        kind: 'derived',
+        referenceFieldId: id('field', taxCodeField),
+        sourceFieldId: id('field', 'tax_code_rate_percent'),
+      },
+    });
+    // A charge's tax code follows the order's whenever that changes.
+    const fromOrderTaxCode = {
+      defaultFrom: {
+        referenceFieldId: id('field', `${local}_tax_code_id`),
+        headerFieldId: id('field', `${local}_tax_code_id`),
+      },
+    };
+    const priceInCurrency = {
+      headerFieldId: id('field', `${local}_currency`),
+      cases: (['cad', 'usd', 'eur'] as const).map((code) => ({
+        value: code.toUpperCase(),
+        sourceFieldId: id('field', `item_price_${code}`),
+      })),
+    };
     const shipTo = {
       reference: {
         queryId: id('query', 'party_address_list'),
@@ -239,6 +269,12 @@ export function orderEntrySurfaces(
               'Payment terms',
               fromCustomer('party_payment_terms'),
             ),
+            // The order's tax code (ruling B): the customer's, then each new
+            // line and charge starts from it.
+            field(`${local}_tax_code_id`, 'Tax code', {
+              ...taxCode,
+              ...fromCustomer('party_default_tax_code_id'),
+            }),
             // The ship-to address is chosen from that customer's own book; the
             // order keeps its own copy of the lines, filled from the choice.
             field(`${local}_ship_to_address_id`, 'Ship-to address', {
@@ -269,6 +305,27 @@ export function orderEntrySurfaces(
               `${local}_ship_to_country`,
               'Country',
               fromAddress('country'),
+            ),
+            // Two charges, each taxed by its own code (ruling B).
+            field(`${local}_freight_amount`, 'Freight'),
+            field(`${local}_freight_tax_code_id`, 'Freight tax code', {
+              ...taxCode,
+              ...fromOrderTaxCode,
+            }),
+            field(
+              `${local}_freight_tax_rate_percent`,
+              'Freight tax rate %',
+              rateOf(`${local}_freight_tax_code_id`),
+            ),
+            field(`${local}_other_fee_amount`, 'Other fee'),
+            field(`${local}_other_fee_tax_code_id`, 'Other fee tax code', {
+              ...taxCode,
+              ...fromOrderTaxCode,
+            }),
+            field(
+              `${local}_other_fee_tax_rate_percent`,
+              'Other fee tax rate %',
+              rateOf(`${local}_other_fee_tax_code_id`),
             ),
             field(`${local}_notes`, 'Notes', {
               presentation: { kind: 'multiline' },
@@ -303,7 +360,40 @@ export function orderEntrySurfaces(
               }),
             ]
           : []),
-        field(`${local}_line_unit_price`, sales ? 'Unit price' : 'Unit cost'),
+        ...(sales
+          ? [
+              // The item's price in the order currency, taken when the
+              // product is chosen and kept: a unit price that differs from
+              // it reads as a manual override (ruling B).
+              field(`${local}_line_unit_price`, 'Unit price', {
+                defaultFrom: {
+                  referenceFieldId: id('field', `${local}_line_item_id`),
+                  sourceByHeader: priceInCurrency,
+                },
+              }),
+              field(`${local}_line_list_price`, 'List price', {
+                presentation: {
+                  kind: 'derived',
+                  referenceFieldId: id('field', `${local}_line_item_id`),
+                  sourceFieldId: id('field', 'item_price_cad'),
+                  sourceByHeader: priceInCurrency,
+                },
+              }),
+              field(`${local}_line_discount_percent`, 'Discount %'),
+              field(`${local}_line_tax_code_id`, 'Tax code', {
+                ...taxCode,
+                defaultFrom: {
+                  referenceFieldId: id('field', `${local}_line_item_id`),
+                  headerFieldId: id('field', `${local}_tax_code_id`),
+                },
+              }),
+              field(
+                `${local}_line_tax_rate_percent`,
+                'Tax rate %',
+                rateOf(`${local}_line_tax_code_id`),
+              ),
+            ]
+          : [field(`${local}_line_unit_price`, 'Unit cost')]),
       ],
     };
   };
