@@ -29,7 +29,7 @@ NOT OBSERVED · NOT IN REFERENCE (not built) · RAIN-ONLY.
 
 | id | reference | Rain now | status | slice |
 |---|---|---|---|---|
-| S1 numbering | SO-000001 per tenant at draft create | typed by hand | MISSING | 2 |
+| S1 numbering | SO-000001 per tenant at draft create | SO-/PO-/SHP- assigned on create, not typed, never reused (3e718be9) | MATCHED | 2 |
 | S2 create/edit/save/reopen | modal composer, one POST | draft editor, sequential save (audit, d9eca60a) | MATCHED | — |
 | S3 customer select/create | combobox, "+ New customer" | in-place combobox, eligibility, quick create (review2, d9eca60a) | MATCHED | — |
 | S4 customer defaults | currency, terms, ship-to from customer | none | MISSING | 3 |

@@ -1,7 +1,7 @@
 # SALES-PARITY — Rain's Sales workflows and shared List at PaneFlow parity through metadata
 
 Status: in progress (draft PR stacked on PR #6); sole LOCAL BUILD; slices committed and pushed one by one.
-Tier: Behavioral until a slice enters the Critical set (customer returns will; its one arm is owed then).
+Tier: Critical-touching — slice 2 adds one option at `release-verification-service.ts` (verification takes sentinel document numbers); one ONLINE arm is owed at the vertical checkpoint (prompt below).
 Base: `994a7dc969694c8077630eaa536fcd385f7e030c` (tip of `packet/RAIN-ORDER-ENTRY`, PR #6, which contains PR #5 `3830f95b` and main `fe97b63b`).
 Dependencies are building blocks, not qualifications: PR #5 owner acceptance pending (dialog layout not accepted as reference-equivalent); PR #6 fresh CI and owner acceptance pending. Nothing here closes either.
 Reference: PaneFlow `d057daff` in an own disposable copy (`/home/rvham/paneflow-sales-parity-d057daff`, 127.0.0.1:3311, distributor seed; provider settings empty). Audit data and gallery: see the Evidence section.
@@ -25,6 +25,9 @@ Reference: PaneFlow `d057daff` in an own disposable copy (`/home/rvham/paneflow-
 4. Export is one statement bounded by the list query's declared `exportMaximumResultCount`; a larger set is refused with a page (`LIST_EXPORT_OVER_LIMIT`), never truncated; cells starting `= + - @` are neutralized.
 5. The agent projection publishes each list query's export limit and each declared List's views/filters/sort/reference labels as query-argument presets; the same gateway answers them with the screen's counts.
 6. Metadata-only variation: a recompiled variant with different views, order, page size and export limit is served by the unchanged runtime; Posted stock (a balance, not a document) and Purchase orders use the same mechanism.
+7. Numbering (slice 2): an optional v6 field `numbering` (document sequence: prefix, minimum digits, start) removes the field from every writable input set and names it as a create assignment; a typed number is refused and writes nothing, an update cannot change it, and the validator refuses a non-text, optional, non-unique, too-short, duplicated-sequence, editor-offered or composition-bound number.
+8. The executor allocates inside the create transaction under a per-tenant, per-sequence transaction lock: one past the highest existing number of that prefix among all the tenant's records (archived included, so never reused; all companies share the tenant sequence); ten concurrent creates take ten distinct consecutive numbers; a replayed idempotency key keeps its number; the change document records it.
+9. Release verification's arranged records take `V-` sentinel numbers (`release-verification-service.ts` passes `documentNumbers: 'verificationSentinel'`), so an activation never consumes a tenant's sequence; before this, one activation took SO-000001…SO-000070.
 
 ## Decisions
 
@@ -33,11 +36,18 @@ Reference: PaneFlow `d057daff` in an own disposable copy (`/home/rvham/paneflow-
 - Enum labels and dates come from the compiled per-field kinds (shared with compositions); a date column shows the UTC calendar date, as the editor labels its instants.
 - Column selection and bulk actions are not in the reference for Sales orders and are not built; the existing selection bar stays.
 - The export limit is declared by each module's own list query (5,000), not by the app layer.
-- One lineage entry per increment, rebuilt from the base envelope; development compiles are discarded.
+- One lineage entry per increment, rebuilt from the previous pushed envelope; development compiles are discarded (entries 15 → 16 → 17).
+- Numbering is a declared field property, not a counter table: no migration, no RLS change; allocation is protected max+1 (transaction lock + unique key), case-insensitive, so a typed legacy `so-000005` is continued, not collided with. Gaps are possible only through archived records; a rolled-back create returns its number.
+- Sales orders `SO-`, Purchase orders `PO-` (non-Sales reuse), shipments `SHP-`; reservations and goods receipts keep their existing numbers (not in ruling A).
 
 ## Slices
 
 1. Shared List — declared List on Sales orders, Purchase orders and Posted stock; executable `4d188d1c`. [Test it yourself §1]
+2. Automatic numbering — SO-/PO-/SHP- assigned on create; executable `3e718be9`. [Test it yourself §2]
+
+## Controls
+
+- `verification-takes-sentinel-document-numbers` (removes the verification option) → claim 9; run by hand at `3e718be9` (the PR #6 demo holds a shared lock, so the exclusive `evidence:expected-red` run is left to the arm): red with "release verification must not consume real document numbers", restored by `git checkout --`, green again.
 
 ## Gates
 
@@ -58,6 +68,11 @@ Reference: PaneFlow `d057daff` in an own disposable copy (`/home/rvham/paneflow-
 9. Inventory → Posted stock: SKU, item name and location code, sortable, exportable. Purchasing → Purchase orders: the same tabs and filter (empty).
 10. With JavaScript disabled, every tab, sort, filter, page and export still works (plain links and forms).
 
+§2 Numbering. Serve the fixture without `--order-volume` (a fresh tenant).
+1. Sales → New: there is no Order number field. Pick a customer, add a line, Save draft: the order opens as **SO-000001**; a second order is SO-000002.
+2. Purchasing → New, save: **PO-000001** (its own sequence). Reserve and ship a released order: the shipment is **SHP-000001**.
+3. Edit a draft: the number cannot be changed; Archive an order and create another: the archived number is not reused.
+
 ## Filed
 
 - Global search (Ctrl K) is outside the List contract (SUP-01).
@@ -70,29 +85,44 @@ Review: not owed yet — outside the Critical set (slice 1).
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SALES-PARITY",
   "base": "994a7dc969694c8077630eaa536fcd385f7e030c",
-  "head": "4d188d1c375029935f40562e2d750af175ab9abe",
+  "head": "3e718be90049db97529b709818d3462b5f2e9908",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json", "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts", "apps/web/src/list-declaration.ts",
     "apps/web/src/message-catalog.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
-    "apps/web/test/browser/declared-list.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
-    "package.json", "packages/canonical-model/src/index.ts",
-    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
-    "packages/canonical-model/src/surface-list.ts", "packages/compiler/src/compiler.ts",
-    "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts",
-    "packages/domain/src/app/list-declarations.ts", "packages/domain/src/inventory/definition.ts",
+    "apps/web/test/browser/declared-list.spec.ts", "apps/web/test/browser/order-entry.spec.ts",
+    "apps/web/test/browser/receiving.composed-application.spec.ts",
+    "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
+    "apps/web/test/browser/sales-order.composed-application.spec.ts",
+    "apps/web/test/surface-runtime-contract.test.ts", "docs/execution/lanes.md",
+    "docs/execution/packets/SALES-PARITY-inventory.md", "docs/execution/packets/SALES-PARITY.md",
+    "package.json", "packages/canonical-model/src/field-numbering.ts",
+    "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
+    "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts",
+    "packages/compiler/src/compiler.ts", "packages/compiler/src/projections.ts",
+    "packages/domain/src/app/builder.ts", "packages/domain/src/app/list-declarations.ts",
+    "packages/domain/src/app/order-entry.ts", "packages/domain/src/inventory/definition.ts",
     "packages/domain/src/purchasing/definition.ts", "packages/domain/src/sales/definition.ts",
+    "packages/domain/src/sales/workspace.ts",
     "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/postgres-provider/src/release-verification-service.ts",
     "packages/runtime/src/list-behavior/contract.ts", "packages/runtime/src/list-behavior/cursor.ts",
     "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/request-runtime-view.ts",
+    "packages/runtime/src/semantic-operation-gateway.ts",
     "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts",
     "test/architecture/surface-grammar-conformance.baseline.ts",
     "test/architecture/surface-grammar-conformance.test.ts",
+    "test/evidence/SALES-PARITY.expected-red.json",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/helpers/order-entry-fixture.ts", "test/helpers/reachability-producers.ts",
-    "test/postgres/declared-list.test.ts", "test/unit/canonical-model/surface-list.test.ts"
+    "test/helpers/meta-sales-fixture.ts", "test/helpers/order-entry-fixture.ts",
+    "test/helpers/reachability-producers.ts", "test/integration/surface-data-binding.test.ts",
+    "test/postgres/composed-application.test.ts", "test/postgres/declared-list.test.ts",
+    "test/postgres/document-numbering.test.ts", "test/postgres/fulfillment.test.ts",
+    "test/postgres/receiving-authorization.test.ts",
+    "test/unit/canonical-model/field-numbering.test.ts",
+    "test/unit/canonical-model/surface-list.test.ts", "test/unit/purchasing-definition.test.ts"
   ],
   "symbols": [
     {"path": "packages/canonical-model/src/surface-list.ts", "name": "validateSurfaceLists"},
@@ -100,7 +130,9 @@ Review: not owed yet — outside the Critical set (slice 1).
     {"path": "packages/domain/src/app/list-declarations.ts", "name": "declareLists"},
     {"path": "apps/web/src/list-declaration.ts", "name": "declaredListArguments"},
     {"path": "apps/web/src/list-declaration.ts", "name": "declaredListCsv"},
-    {"path": "packages/runtime/src/list-behavior/index.ts", "name": "parseSharedListArguments"}
+    {"path": "packages/runtime/src/list-behavior/index.ts", "name": "parseSharedListArguments"},
+    {"path": "packages/canonical-model/src/field-numbering.ts", "name": "validateFieldNumbering"},
+    {"path": "packages/canonical-model/src/schemas.ts", "name": "FieldNumberingSchema"}
   ]
 }
 ```
