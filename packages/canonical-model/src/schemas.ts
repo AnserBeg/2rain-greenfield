@@ -759,6 +759,8 @@ const compositionTaskColumn = z.strictObject({
  * the selected row's declared column and never from the submission; both are
  * presentation policy over the input, never a domain rule.
  */
+// A choice may offer an enumeration's option ids, which are canonical ids of up
+// to 180 characters; a shorter bound refused them under a longer namespace.
 const compositionInputPresentation = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('multiline') }),
   z.strictObject({
@@ -766,13 +768,13 @@ const compositionInputPresentation = z.discriminatedUnion('kind', [
     options: z
       .array(
         z.strictObject({
-          value: z.string().min(1).max(64),
+          value: z.string().min(1).max(180),
           label: LabelSchema,
         }),
       )
       .min(1)
       .max(20),
-    defaultValue: z.string().min(1).max(64).optional(),
+    defaultValue: z.string().min(1).max(180).optional(),
     defaultFrom: z
       .strictObject({ source: z.literal('record'), field: z.string().min(1) })
       .optional(),
