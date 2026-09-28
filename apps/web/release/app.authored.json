@@ -5051,7 +5051,7 @@
       },
       "kind": "fieldDefinition",
       "label": "Default currency",
-      "orderKey": 40,
+      "orderKey": 110,
       "presence": "optional",
       "reportable": true,
       "schemaVersion": "v6",
@@ -5110,7 +5110,7 @@
       },
       "kind": "fieldDefinition",
       "label": "Payment terms",
-      "orderKey": 50,
+      "orderKey": 120,
       "presence": "optional",
       "reportable": true,
       "schemaVersion": "v6",
@@ -5133,7 +5133,7 @@
       },
       "kind": "fieldDefinition",
       "label": "Default salesperson",
-      "orderKey": 60,
+      "orderKey": 130,
       "presence": "optional",
       "reportable": true,
       "schemaVersion": "v6",
@@ -5156,7 +5156,7 @@
       },
       "kind": "fieldDefinition",
       "label": "Default ship-to address",
-      "orderKey": 70,
+      "orderKey": 140,
       "presence": "optional",
       "reportable": true,
       "schemaVersion": "v6",
@@ -25088,21 +25088,21 @@
           "print": {
             "label": "Sales order",
             "datasets": ["northstar.app:dataset.fulfillment_lines"],
-            "note": "northstar.app:column.notes",
-            "blocks": [
-              {
-                "label": "Ship to",
-                "columns": [
-                  "northstar.app:column.ship_to_name",
-                  "northstar.app:column.ship_to_street",
-                  "northstar.app:column.ship_to_city",
-                  "northstar.app:column.ship_to_region",
-                  "northstar.app:column.ship_to_postal_code",
-                  "northstar.app:column.ship_to_country"
-                ]
-              }
-            ]
-          }
+            "note": "northstar.app:column.notes"
+          },
+          "blocks": [
+            {
+              "label": "Ship to",
+              "columns": [
+                "northstar.app:column.ship_to_name",
+                "northstar.app:column.ship_to_street",
+                "northstar.app:column.ship_to_city",
+                "northstar.app:column.ship_to_region",
+                "northstar.app:column.ship_to_postal_code",
+                "northstar.app:column.ship_to_country"
+              ]
+            }
+          ]
         },
         "fields": [
           {
@@ -27733,6 +27733,19 @@
             "facts": ["northstar.app:column.packing_date"],
             "status": "northstar.app:column.packing_state"
           },
+          "blocks": [
+            {
+              "label": "Ship to",
+              "columns": [
+                "northstar.app:column.packing_ship_to_name",
+                "northstar.app:column.packing_ship_to_street",
+                "northstar.app:column.packing_ship_to_city",
+                "northstar.app:column.packing_ship_to_region",
+                "northstar.app:column.packing_ship_to_postal_code",
+                "northstar.app:column.packing_ship_to_country"
+              ]
+            }
+          ],
           "recordActions": "progressive",
           "technicalDetails": "progressive"
         },

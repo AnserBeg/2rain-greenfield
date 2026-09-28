@@ -1051,7 +1051,8 @@ async function assertRealProductDefinition(
     ).surfaces.map((surface) => surface.surfaceId);
     // Prior 51 + Sales order entry and the fulfillment document/read-model
     // surfaces. Projection carriers deliberately omit editable forms.
-    assert.equal(surfaces.length, 70);
+    // SALES-PARITY adds Party's ship-to address book (list, detail, form).
+    assert.equal(surfaces.length, 73);
     for (const local of [
       'goods_receipt',
       'goods_receipt_line',
@@ -3386,10 +3387,13 @@ async function assertBoundedFreshTenantInstallEvidence(
   // shipment (19), shipment line (14), and shipped quantity (10).
   // `assertSalesVerificationCoverage` pins every entity contribution and the
   // server-owned lifecycle-field exclusion independently of this total.
+  // SALES-PARITY adds 40 through its optional fields: shipment carrier and
+  // reference (4), order master data (10), shipment ship-to (6), Party's
+  // customer defaults (6) and its address book (14).
   assert.equal(
     servingScenarioCount,
-    348,
-    'the release includes the prior 198 scenarios, 59 for receiving, and 91 for Sales and fulfillment',
+    388,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, and 40 for Sales parity',
   );
 
   const intermediate = await pool.query<{

@@ -48,11 +48,12 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
           width,
           height,
           url: page.url(),
+          // A printable document names its release on its own shell.
           releaseId: await page
-            .locator('.app-shell')
+            .locator('.app-shell, .print-shell')
             .getAttribute('data-release-id'),
           releaseRoot: await page
-            .locator('.app-shell')
+            .locator('.app-shell, .print-shell')
             .getAttribute('data-release-content-hash'),
         });
       }
@@ -909,7 +910,10 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     await expect(page.locator('.composition-header')).toContainText(
       'Enter Glazing',
     );
-    await expect(page.locator('.composition-header')).toContainText('USD');
+    // The currency is the last chosen customer's default (ruling E).
+    await expect(page.locator('.composition-header')).toContainText(
+      expectedCurrency,
+    );
     await expect(page.locator('[data-composition-fields]')).toContainText(
       'Call ahead',
     );

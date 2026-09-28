@@ -217,9 +217,10 @@ test(
           .replace(/^\uFEFF/u, '')
           .trimEnd()
           .split('\r\n');
+        // Ruling E adds the salesperson, named like the customer.
         assert.equal(
           csv[0],
-          'Number,Customer,Order date,Requested,Status,Currency',
+          'Number,Customer,Salesperson,Order date,Requested,Status,Currency',
         );
         assert.equal(csv.length - 1, byState('draft'));
         assert.ok(csv.slice(1).every((row) => row.includes(',Draft,')));

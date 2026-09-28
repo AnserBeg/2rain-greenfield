@@ -133,7 +133,10 @@ test('a declared Sales List navigates views, search, sort, filters, pages and ex
       .replace(/^\uFEFF/u, '')
       .trimEnd()
       .split('\r\n');
-    expect(csv[0]).toBe('Number,Customer,Order date,Requested,Status,Currency');
+    // Ruling E adds the salesperson, named like the customer.
+    expect(csv[0]).toBe(
+      'Number,Customer,Salesperson,Order date,Requested,Status,Currency',
+    );
     expect(csv.length - 1).toBe(expected.draft);
 
     // Phone: one screen width, tabs scroll inside their strip, cards.

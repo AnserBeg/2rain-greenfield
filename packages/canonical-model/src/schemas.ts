@@ -936,17 +936,21 @@ export const SurfaceCompositionSchema = z.strictObject({
           label: LabelSchema,
           datasets: z.array(CanonicalIdSchema).min(1).max(4),
           note: CanonicalIdSchema.optional(),
-          /** Labelled blocks of declared columns printed as lines, such as a ship-to address. */
-          blocks: z
-            .array(
-              z.strictObject({
-                label: LabelSchema,
-                columns: z.array(CanonicalIdSchema).min(1).max(8),
-              }),
-            )
-            .max(3)
-            .optional(),
         })
+        .optional(),
+      /**
+       * Labelled blocks of declared columns read as one set of lines, such as
+       * a ship-to address: one card in the record's details, one block when
+       * printed. Optional v6 key (ADR-0047 §7).
+       */
+      blocks: z
+        .array(
+          z.strictObject({
+            label: LabelSchema,
+            columns: z.array(CanonicalIdSchema).min(1).max(8),
+          }),
+        )
+        .max(3)
         .optional(),
     })
     .optional(),

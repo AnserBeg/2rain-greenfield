@@ -223,13 +223,14 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         label: 'Sales order',
         datasets: [lines],
         note: id('column', 'notes'),
-        blocks: [
-          {
-            label: 'Ship to',
-            columns: SHIP_TO_LINES.map(([name]) => id('column', name)),
-          },
-        ],
       },
+      // The ship-to lines read as one address, on screen and when printed.
+      blocks: [
+        {
+          label: 'Ship to',
+          columns: SHIP_TO_LINES.map(([name]) => id('column', name)),
+        },
+      ],
     },
     fields: [
       column('order_number', 'Sales order', 10, field('sales_order_number')),
@@ -714,6 +715,15 @@ export function packingWorkspace(namespace: string): Record<string, unknown> {
         facts: [`${namespace}:column.packing_date`],
         status: `${namespace}:column.packing_state`,
       },
+      // The address the shipment went to, as one block.
+      blocks: [
+        {
+          label: 'Ship to',
+          columns: SHIP_TO_LINES.map(
+            ([name]) => `${namespace}:column.packing_${name}`,
+          ),
+        },
+      ],
       recordActions: 'progressive',
       technicalDetails: 'progressive',
     },

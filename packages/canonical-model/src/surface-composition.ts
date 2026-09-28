@@ -176,17 +176,24 @@ export function validateSurfaceCompositions(
           !composition.fields.some((column) => column.columnId === print.note)
         )
           fail(surface.surfaceId, 'a printed note is a declared column');
-        for (const block of print.blocks ?? []) {
-          unique(block.columns, surface.surfaceId);
-          if (
-            block.columns.some(
-              (id) =>
-                !composition.fields.some((column) => column.columnId === id),
-            )
-          )
-            fail(surface.surfaceId, 'a printed block lists declared columns');
-        }
       }
+      // A block reads declared columns the header does not already show, each
+      // in one block.
+      const blocked = (presentation.blocks ?? []).flatMap(
+        (block) => block.columns,
+      );
+      unique(blocked, surface.surfaceId);
+      if (
+        blocked.some(
+          (id) =>
+            ids.includes(id) ||
+            !composition.fields.some((column) => column.columnId === id),
+        )
+      )
+        fail(
+          surface.surfaceId,
+          'a block lists declared columns the header does not show',
+        );
     }
     for (const child of composition.children) {
       if (

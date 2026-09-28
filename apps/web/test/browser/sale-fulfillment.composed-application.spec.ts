@@ -412,6 +412,15 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     await fill('shipment', 'external_reference', `PICK-${suffix}`);
     await fill('shipment', 'reason_code', input.kind);
     await fill('shipment', 'reason_narrative', `${input.kind} walkthrough`);
+    // An initial shipment keeps the complete ship-to it goes to (ruling E).
+    if (input.kind === 'initial')
+      for (const [name, value] of [
+        ['ship_to_street', '100 Industrial Way'],
+        ['ship_to_city', 'Calgary'],
+        ['ship_to_postal_code', 'T2P 0A1'],
+        ['ship_to_country', 'Canada'],
+      ] as const)
+        await fill('shipment', name, value);
     await relate('shipment_order', input.order ?? orderId);
     if (input.supersedes) await relate('shipment_supersedes', input.supersedes);
     const shipmentId = await save();

@@ -588,7 +588,7 @@ export function renderCompositionPrintDocument(
     .join('');
   const note = print.note ? data.fields.cells[print.note] : undefined;
   // A block prints its present lines in order, such as a ship-to address.
-  const blocks = (print.blocks ?? [])
+  const blocks = (surface.composition!.presentation?.blocks ?? [])
     .map((block) => {
       const lines = block.columns
         .map((id) => data.fields.cells[id])
@@ -617,21 +617,37 @@ export function renderCompositionFields(
         ...(header.status ? [header.status] : []),
       ]
     : [];
+  const blocks = surface.composition!.presentation?.blocks ?? [];
+  const blocked = new Set(blocks.flatMap((block) => block.columns));
   const fields = surface.composition!.fields.filter(
-    (column) => !assigned.includes(column.columnId),
+    (column) =>
+      !assigned.includes(column.columnId) && !blocked.has(column.columnId),
   );
-  if (!fields.length) return '';
+  if (!fields.length && !blocks.length) return '';
+  // A block reads as one card of its present lines, such as a ship-to
+  // address, placed where its first column would be.
+  const place = (columnId: string) =>
+    surface.composition!.fields.find((column) => column.columnId === columnId)
+      ?.orderKey ?? 0;
+  const cards = [
+    ...fields.map((column) => ({
+      orderKey: column.orderKey,
+      html: `<div><dt>${h(column.label)}</dt><dd>${h(data.fields.cells[column.columnId] ?? '—')}</dd></div>`,
+    })),
+    ...blocks.map((block) => {
+      const lines = block.columns
+        .map((id) => data.fields.cells[id])
+        .filter((value): value is string => !!value && value !== '—');
+      return {
+        orderKey: place(block.columns[0]!),
+        html: `<div data-composition-block><dt>${h(block.label)}</dt><dd>${lines.length ? lines.map((line) => h(line)).join('<br>') : '—'}</dd></div>`,
+      };
+    }),
+  ].sort((left, right) => left.orderKey - right.orderKey);
   // Stored fields the header does not carry, read back as saved. Under a
   // declared header the label is already the page's identity, so it is not
   // repeated as this panel's heading.
-  return `<section class="panel" data-composition-fields><h2>${h(header ? 'Details' : surface.label)}</h2><dl class="record-fields">${ordered(
-    fields,
-  )
-    .map(
-      (column) =>
-        `<div><dt>${h(column.label)}</dt><dd>${h(data.fields.cells[column.columnId] ?? '—')}</dd></div>`,
-    )
-    .join('')}</dl></section>`;
+  return `<section class="panel" data-composition-fields><h2>${h(header ? 'Details' : surface.label)}</h2><dl class="record-fields">${cards.map((card) => card.html).join('')}</dl></section>`;
 }
 export function renderCompositionChildren(
   data: CompositionData,

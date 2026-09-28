@@ -382,6 +382,7 @@ export async function renderSurfaceRuntimeWithData(
             new Date(),
           );
           return printDocumentPage(
+            view,
             selection.selected.composition.presentation.print.label,
             printed.html,
             printed.complete ? 200 : 422,
@@ -1720,13 +1721,15 @@ function renderConfirmationTransition(
  * script, only the document and a print stylesheet. The browser's Print command
  * prints it or saves it as PDF (owner ruling G).
  */
+/** A printable document; it names the release that printed it. */
 function printDocumentPage(
+  view: RuntimeViewContract.RequestRuntimeView,
   title: string,
   body: string,
   statusCode: number,
 ): SurfaceRuntimeResponse {
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><style>${styles}</style></head><body class="standalone print-page"><main>${body}</main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><style>${styles}</style></head><body class="standalone print-page"><main class="print-shell" data-release-id="${escapeHtml(view.release.releaseId)}" data-release-content-hash="${escapeHtml(view.release.contentHash)}" data-pointer-fence="${view.pointer.fence}">${body}</main></body></html>`,
     statusCode,
   });
 }

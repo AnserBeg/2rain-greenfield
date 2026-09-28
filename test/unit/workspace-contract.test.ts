@@ -558,13 +558,19 @@ test('editor defaults, scoped pickers, Task input eligibility and print blocks a
       value.actionId.endsWith(':action.party_add_address'),
     )!.inputs[0]!.eligibility = eligibility;
   }, /only reference inputs declare lookup queries/);
-  // A printed block names declared columns.
+  // A block names declared columns the header does not already show.
   refuse((candidate) => {
-    const print = (
+    (
       surface(candidate, ':surface.sales_order_detail').composition as {
-        presentation: { print: { blocks: { columns: string[] }[] } };
+        presentation: { blocks: { columns: string[] }[] };
       }
-    ).presentation.print;
-    print.blocks[0]!.columns.push('northstar.app:column.not_declared');
-  }, /a printed block lists declared columns/);
+    ).presentation.blocks[0]!.columns.push('northstar.app:column.not_declared');
+  }, /a block lists declared columns the header does not show/);
+  refuse((candidate) => {
+    (
+      surface(candidate, ':surface.sales_order_detail').composition as {
+        presentation: { blocks: { columns: string[] }[] };
+      }
+    ).presentation.blocks[0]!.columns.push('northstar.app:column.currency');
+  }, /a block lists declared columns the header does not show/);
 });
