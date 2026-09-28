@@ -1359,6 +1359,23 @@ async function applyDdlElement(
         `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)}
            ADD COLUMN IF NOT EXISTS ${quoted(column.physicalName)} ${safeType(column.postgresqlType)}${defaultSql(column.defaultSemantics, column.defaultValue, column.postgresqlType)}`,
       );
+      // A company-scoped table grants UPDATE per column at creation, so a
+      // column added later carries the same grant or the runtime cannot write
+      // it and the catalog drifts from the expected column grants.
+      if (
+        entity.legalEntity &&
+        !entity.factStorage &&
+        !entity.periodLock &&
+        entityOwnedMutableColumnNames(target, entity).includes(
+          column.physicalName,
+        )
+      ) {
+        await client.query(
+          `GRANT UPDATE (${quoted(column.physicalName)})
+             ON north_star_module.${quoted(entity.physicalTableName)}
+             TO north_star_module_runtime`,
+        );
+      }
       return;
     }
     case 'createIndex': {

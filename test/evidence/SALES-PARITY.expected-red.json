@@ -19,6 +19,24 @@
           "expected": "release verification must not consume real document numbers"
         }
       ]
+    },
+    {
+      "name": "added-company-column-carries-its-update-grant",
+      "claim": "A column a later release adds to a company-scoped table receives the same per-column UPDATE grant the table's creation gives its other mutable columns, so the materialized catalog matches the expected grants.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "      if (\n        entity.legalEntity &&\n        !entity.factStorage &&\n        !entity.periodLock &&\n        entityOwnedMutableColumnNames(target, entity).includes(\n          column.physicalName,\n        )\n      ) {\n        await client.query(\n          `GRANT UPDATE (${quoted(column.physicalName)})\n             ON north_star_module.${quoted(entity.physicalTableName)}\n             TO north_star_module_runtime`,\n        );\n      }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/fulfillment.test.ts"],
+        "namePattern": "fulfillment serializes competing reservations"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/fulfillment.test.ts",
+          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "expected": "missing managed column grant"
+        }
+      ]
     }
   ]
 }
