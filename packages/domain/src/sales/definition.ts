@@ -187,7 +187,7 @@ export function salesModuleDefinition(
         'Order number',
         10,
         text(60),
-        { businessKey: true, searchable: true },
+        { businessKey: true, searchable: true, numberedAs: 'SO' },
       ),
       field(
         definitionIds,
@@ -567,6 +567,9 @@ function fulfillmentFields(ids: SalesIds): Array<Record<string, unknown>> {
           name,
         ),
         businessKey: name === 'number',
+        ...(local === 'shipment' && name === 'number'
+          ? { numberedAs: 'SHP' }
+          : {}),
       },
     ),
   );
@@ -811,11 +814,27 @@ function field(
     businessKey?: boolean;
     optional?: boolean;
     searchable?: boolean;
+    /** A server-assigned document number: `PREFIX-000001`, one per tenant. */
+    numberedAs?: string;
   } = {},
 ): Record<string, unknown> {
+  const local = entityId.slice(
+    entityId.indexOf(':entity.') + ':entity.'.length,
+  );
   return {
     ...(options.businessKey
       ? { businessKey: 'tenantEnvironmentCaseInsensitiveUnique' }
+      : {}),
+    ...(options.numberedAs
+      ? {
+          numbering: {
+            kind: 'documentSequence',
+            sequenceId: `${ids.namespace}:document_sequence.${local}`,
+            prefix: options.numberedAs,
+            minimumDigits: 6,
+            start: 1,
+          },
+        }
       : {}),
     classification: 'internal',
     collation: 'binary',

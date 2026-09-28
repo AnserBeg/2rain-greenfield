@@ -1624,6 +1624,27 @@ export const QueryReadModelSchema = z.strictObject({
   resultFields: z.record(z.string().min(1), CanonicalIdSchema),
 });
 export type QueryReadModel = z.infer<typeof QueryReadModelSchema>;
+/**
+ * A document number the server assigns when the record is created: the next
+ * value of one named sequence per tenant and environment, `PREFIX-000001`.
+ * The field leaves every operation's writable inputs, so a typed number is
+ * refused and an assigned one never changes; its unique business key keeps
+ * an archived record's number reserved. Optional v6 key (ADR-0047 §7).
+ */
+export const FieldNumberingSchema = z.strictObject({
+  kind: z.literal('documentSequence'),
+  sequenceId: CanonicalIdSchema,
+  prefix: z.string().regex(/^[A-Z][A-Z0-9]{0,7}$/u),
+  minimumDigits: z.int().min(1).max(12),
+  start: z.int().min(1).max(1_000_000_000),
+});
+export type FieldNumbering = z.infer<typeof FieldNumberingSchema>;
+const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
+  numbering: FieldNumberingSchema.optional(),
+});
+const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
+  numbering: FieldNumberingSchema.optional(),
+});
 // A list query may declare the most rows one export statement returns. It is a
 // query property, not a screen one, because the agent path reads the query.
 const exportMaximumResultCount = z.int().min(1).max(10_000).optional();
@@ -1644,6 +1665,7 @@ const authoredV6QueryDefinition = z.union([
 
 const v6NormalizedShape = {
   ...v5NormalizedShape,
+  fields: z.array(normalizedV6FieldDefinition),
   queries: z.array(normalizedV6QueryDefinition),
   languageVersion: v6NodeVersion,
   surfaces: z.array(normalizedV6SurfaceDefinition),
@@ -1769,6 +1791,7 @@ const v5AuthoredShape = {
 
 const v6AuthoredShape = {
   ...v5AuthoredShape,
+  fields: z.array(authoredV6FieldDefinition),
   queries: z.array(authoredV6QueryDefinition),
   languageVersion: v6NodeVersion,
   surfaces: z.array(authoredV6SurfaceDefinition),

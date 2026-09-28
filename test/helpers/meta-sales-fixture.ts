@@ -133,7 +133,6 @@ async function seed(
     false,
   );
   const order = await create('sales_order', {
-    number: `SO-META-${randomUUID().slice(0, 8)}`,
     customer_party_id: customer,
     order_date: now,
     requested_date: now,

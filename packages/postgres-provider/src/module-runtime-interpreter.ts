@@ -186,6 +186,7 @@ export class PostgresModuleRuntimeInterpreter
   readonly #pinnedStorageTargets: ValidatedPinnedStorageTargetCache;
   readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly #trust: PostgresTrustService;
+  readonly #documentNumbers: DocumentNumberMode;
 
   constructor(
     private readonly pool: Pool,
@@ -197,7 +198,9 @@ export class PostgresModuleRuntimeInterpreter
     observePinnedStorageTargetCache:
       | ((observation: PinnedStorageTargetCacheObservation) => void)
       | undefined = undefined,
+    options: { readonly documentNumbers?: DocumentNumberMode } = {},
   ) {
+    this.#documentNumbers = options.documentNumbers ?? 'sequence';
     this.#pinnedStorageTargets = new ValidatedPinnedStorageTargetCache(
       observePinnedStorageTargetCache,
     );
@@ -309,7 +312,7 @@ export class PostgresModuleRuntimeInterpreter
   async #executeOperation(
     request: SemanticOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope> {
-    const input = parseMutationInput(request.definition, request.input);
+    const parsedInput = parseMutationInput(request.definition, request.input);
     const actor = await this.actorIssuer.issue(request.context);
     const receipt = await this.#trust.executeIdempotentAcceptedMutation(
       request.context,
@@ -333,7 +336,7 @@ export class PostgresModuleRuntimeInterpreter
         assertOperationSystemInputStorageContract(
           request.definition,
           currentEntity,
-          input,
+          parsedInput,
         );
         return withModuleRuntimeRole(client, async () => {
           try {
@@ -342,7 +345,16 @@ export class PostgresModuleRuntimeInterpreter
               currentStorage,
               currentEntity,
               request.definition,
-              input,
+              parsedInput,
+            );
+            // Assigned before the change is prepared, so the change document
+            // records the number the record is created with.
+            const input = await assignDocumentNumbers(
+              client,
+              currentEntity,
+              request.definition,
+              parsedInput,
+              this.#documentNumbers,
             );
             const preparation = await prepareMutation(
               client,
@@ -742,6 +754,91 @@ async function executeMutationOnClient(
     );
   }
   return toDto(entity, record, readBackSelections);
+}
+
+/**
+ * `sequence` assigns real document numbers; `verificationSentinel` is used only
+ * by release verification, whose arranged records must not consume them.
+ */
+export type DocumentNumberMode = 'sequence' | 'verificationSentinel';
+
+/**
+ * A create's server-assigned document numbers (canonical field `numbering`):
+ * the next value of each named sequence per tenant and environment. One
+ * allocator runs at a time per sequence -- the transaction-scoped lock is held
+ * to commit, so concurrent creates serialize and a rolled-back create gives
+ * its number back. The next value follows the highest existing number of that
+ * prefix among ALL of the tenant's records, archived included, so a number is
+ * never reused; the business key's unique index remains the backstop. A replay
+ * of the same idempotency key never reaches this, so a retry keeps its number.
+ */
+async function assignDocumentNumbers(
+  client: PoolClient,
+  entity: StorageEntity,
+  definition: SemanticOperationExecutionRequest['definition'],
+  input: MutationInput,
+  mode: DocumentNumberMode,
+): Promise<MutationInput> {
+  const assigned =
+    definition.effect.kind === 'createRecordEffect'
+      ? (definition.inputContract?.assignedFields ?? [])
+      : [];
+  if (assigned.length === 0) return input;
+  const patch: Record<string, ImmutableJsonValue> = { ...input.patch };
+  for (const field of assigned) {
+    if (Object.hasOwn(patch, field.fieldId))
+      throw failure(
+        'MODULE_FIELD_UNSUPPORTED',
+        'an assigned document number is not an operation input',
+        field.fieldId,
+      );
+    const column = entity.columns.find(
+      (candidate) => candidate.canonicalFieldId === field.fieldId,
+    );
+    if (!column || column.fieldContract.fieldKind !== 'textFieldType')
+      throw failure(
+        'MODULE_FIELD_UNSUPPORTED',
+        'an assigned document number has no compiled text column',
+        field.fieldId,
+      );
+    if (mode === 'verificationSentinel') {
+      // Release verification arranges records to exercise a release; it asks
+      // no business question and must not consume a tenant's document numbers.
+      // Its number is the same `V-` sentinel it writes into every text field,
+      // unique by record id and never shaped like `PREFIX-000123`.
+      const sentinel = `V-${createHash('sha256')
+        .update(input.recordId, 'utf8')
+        .update(Uint8Array.of(0))
+        .update(field.fieldId, 'utf8')
+        .digest('hex')}`;
+      patch[field.fieldId] =
+        column.fieldContract.bounds.maximumLength === null
+          ? sentinel
+          : sentinel.slice(0, column.fieldContract.bounds.maximumLength);
+      continue;
+    }
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended(
+         north_star_internal.trusted_tenant_id()::text || ':' ||
+         north_star_internal.trusted_environment_id()::text || ':' || $1, 0))`,
+      [field.sequenceId],
+    );
+    const highest = await client.query<{ highest: string | null }>(
+      `SELECT max(((regexp_match(${quoted(column.physicalName)}, $1, 'i'))[1])::numeric)::text AS highest
+         FROM north_star_module.${quoted(entity.physicalTableName)}
+        WHERE tenant_id = north_star_internal.trusted_tenant_id()
+          AND environment_id = north_star_internal.trusted_environment_id()`,
+      [`^${field.prefix}-([0-9]{1,18})$`],
+    );
+    const observed = highest.rows[0]?.highest ?? null;
+    const next =
+      observed === null || BigInt(observed) < BigInt(field.start)
+        ? BigInt(field.start)
+        : BigInt(observed) + 1n;
+    patch[field.fieldId] =
+      `${field.prefix}-${next.toString().padStart(field.minimumDigits, '0')}`;
+  }
+  return Object.freeze({ ...input, patch: Object.freeze(patch) });
 }
 
 async function insertRecord(
@@ -4221,9 +4318,11 @@ function fieldClassification(
   contract: RegisteredOperationInputContract | undefined,
   fieldId: string,
 ): 'INTERNAL' | 'PUBLIC' {
-  const field = contract?.fields.find(
-    (candidate) => candidate.fieldId === fieldId,
-  );
+  const field =
+    contract?.fields.find((candidate) => candidate.fieldId === fieldId) ??
+    contract?.assignedFields?.find(
+      (candidate) => candidate.fieldId === fieldId,
+    );
   if (!field) {
     throw failure(
       'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',

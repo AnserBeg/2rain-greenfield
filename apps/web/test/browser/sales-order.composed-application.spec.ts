@@ -126,7 +126,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     const editor = page.locator('#draft-editor-form');
     const id = (await editor.count())
       ? (await page
-          .locator('[name^="draft:"][name$=":field.sales_order_number"]')
+          .locator('[name^="draft:"][name$=":field.sales_order_currency"]')
           .getAttribute('name'))!.split(':')[1]!
       : await page
           .locator('form#surface-record-form input[name="recordId"]')
@@ -183,9 +183,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Create complete');
 
-  const suffix = randomUUID().slice(0, 8);
   await page.goto(url('sales_order', 'form'));
-  await field('sales_order', 'number', `SO-${suffix}`);
+  // The order number is assigned by the server on first save.
   await field('sales_order', 'customer_party_id', customerPartyId);
   await field('sales_order', 'order_date', new Date().toISOString());
   await field('sales_order', 'requested_date', new Date().toISOString());
@@ -196,9 +195,10 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await field('sales_order_line', 'ordered_quantity', '10');
   await field('sales_order_line', 'unit_price', '12.5');
   const orderId = await save();
-  await expect(page.locator('.composition-header')).toContainText(
-    `SO-${suffix}`,
-  );
+  const orderNumber = (
+    await page.locator('.composition-header h1').innerText()
+  ).trim();
+  expect(orderNumber).toMatch(/^SO-\d{6}$/u);
   const parent = target.relations.find(
     (value) =>
       value.relationId === 'northstar.app:relation.sales_order_line_order',
@@ -218,9 +218,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.goto(orderFormUrl);
   await field('sales_order', 'notes', 'Edited while draft');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(page.locator('.composition-header')).toContainText(
-    `SO-${suffix}`,
-  );
+  // An edit never changes the assigned number.
+  await expect(page.locator('.composition-header h1')).toHaveText(orderNumber);
   expect(await snapshot()).toEqual(initialStock);
 
   staleUpdate.idempotencyKey = randomUUID();

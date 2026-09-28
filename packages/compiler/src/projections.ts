@@ -4,6 +4,7 @@ import {
   languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
   type SurfaceDocumentEditor,
+  type FieldNumbering,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
@@ -1253,13 +1254,37 @@ function verificationPlanPayload(
 
 function operationInputContract(
   operation: NormalizedApplicationPackage['operations'][number],
-  fields: NormalizedApplicationPackage['fields'],
+  allEntityFields: NormalizedApplicationPackage['fields'],
   relations: NormalizedApplicationPackage['relations'],
   storageEntity: StorageTargetPayloadV1['entities'][number] | undefined,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
 ): unknown {
   const effectKind = operation.effect.kind;
   const capabilityRecordScope = effectKind === 'registeredCapabilityEffect';
+  // A server-assigned document number is nobody's input: it leaves every
+  // writable set (a supplied number is refused, an assigned one never changes)
+  // and a create names it as an assignment the executor performs.
+  const numberingOf = (field: (typeof allFields)[number]) =>
+    'numbering' in field
+      ? (field.numbering as FieldNumbering | undefined)
+      : undefined;
+  const allFields = allEntityFields;
+  const fields = allFields.filter((field) => !numberingOf(field));
+  const assignedFields = allFields.flatMap((field) => {
+    const numbering = numberingOf(field);
+    return numbering
+      ? [
+          {
+            classification:
+              field.classification === 'public'
+                ? ('PUBLIC' as const)
+                : ('INTERNAL' as const),
+            fieldId: field.fieldId,
+            ...numbering,
+          },
+        ]
+      : [];
+  });
   const writesFields =
     effectKind === 'createRecordEffect' || effectKind === 'updateRecordEffect';
   const systemInput =
@@ -1369,6 +1394,9 @@ function operationInputContract(
         ? MODULE_INPUT_CONTRACT_V2_VERSION
         : MODULE_INPUT_CONTRACT_VERSION,
     ...(systemInput ? { systemInput } : {}),
+    ...(effectKind === 'createRecordEffect' && assignedFields.length > 0
+      ? { assignedFields }
+      : {}),
     writableFieldIds: writesFields
       ? fields.map((field) => field.fieldId).sort(compare)
       : [],

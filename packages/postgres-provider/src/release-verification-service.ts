@@ -353,10 +353,15 @@ export class PostgresReleaseVerificationService {
   ): Promise<DurableReleaseVerificationEvidence> {
     const snapshot = snapshotExecutionCommand(command);
     const actorIssuer = verificationActorIssuer();
+    // Verification's arranged records take sentinel document numbers, so an
+    // activation never consumes a tenant's real `SO-000123` sequence.
     const interpreter = new PostgresModuleRuntimeInterpreter(
       this.pool,
       actorIssuer,
       this.providerErrorMappings,
+      undefined,
+      undefined,
+      { documentNumbers: 'verificationSentinel' },
     );
     return this.#executeSemanticCandidateWithExecutorAndPersist(
       context,

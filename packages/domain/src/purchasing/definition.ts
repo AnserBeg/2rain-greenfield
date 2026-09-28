@@ -310,7 +310,7 @@ export function purchasingModuleDefinition(
         'Order number',
         10,
         text(60),
-        { businessKey: true, searchable: true },
+        { businessKey: true, searchable: true, numberedAs: 'PO' },
       ),
       field(
         definitionIds,
@@ -1042,11 +1042,27 @@ function field(
     businessKey?: boolean;
     optional?: boolean;
     searchable?: boolean;
+    /** A server-assigned document number: `PREFIX-000001`, one per tenant. */
+    numberedAs?: string;
   } = {},
 ): Record<string, unknown> {
+  const local = entityId.slice(
+    entityId.indexOf(':entity.') + ':entity.'.length,
+  );
   return {
     ...(options.businessKey
       ? { businessKey: 'tenantEnvironmentCaseInsensitiveUnique' }
+      : {}),
+    ...(options.numberedAs
+      ? {
+          numbering: {
+            kind: 'documentSequence',
+            sequenceId: `${ids.namespace}:document_sequence.${local}`,
+            prefix: options.numberedAs,
+            minimumDigits: 6,
+            start: 1,
+          },
+        }
       : {}),
     classification: 'internal',
     collation: 'binary',

@@ -215,7 +215,6 @@ async function seed(
     for (let index = 1; index <= count; index++) {
       const day = new Date(Date.UTC(2026, 8, 1 + (index % 27), 12));
       const order = await create('sales_order', {
-        number: `SO-LIST-${String(index).padStart(4, '0')}`,
         customer_party_id: customers[index % customers.length]!,
         order_date: day.toISOString(),
         requested_date: new Date(day.getTime() + 21 * 86_400_000).toISOString(),
@@ -291,17 +290,17 @@ async function seed(
     }
     if (phase === 'catalog_setup') {
       const now = new Date().toISOString();
-      const order = (number: string) =>
+      // Order numbers are assigned by the server on create.
+      const order = () =>
         create('sales_order', {
           customer_party_id: customer,
           order_date: now,
           requested_date: now,
           currency: 'CAD',
           notes: 'Catalog real-path fixture',
-          number,
         });
-      catalogConflict = await order('SO-CATALOG-CONFLICT');
-      const locked = await order('SO-CATALOG-LOCKED');
+      catalogConflict = await order();
+      const locked = await order();
       const released = await invoke('sales_order_release', {
         recordId: locked.recordId,
         expectedRevision: locked.revision,

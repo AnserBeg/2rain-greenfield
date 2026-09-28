@@ -161,7 +161,6 @@ test(
             currency: 'CAD',
             customer_party_id: customerPartyId,
             notes: 'Critical fulfillment race',
-            number: `SO-${randomUUID()}`,
             order_date: now,
             requested_date: now,
           });
@@ -510,7 +509,6 @@ test(
                 external_reference: randomUUID(),
                 kind: `${ns}:option.shipment_kind_${kind}`,
                 location_id: options.locationId ?? locationA,
-                number: `SHP-${randomUUID()}`,
                 reason_code: 'SHIP',
                 reason_narrative: 'Competing shipment',
                 state: `${ns}:option.shipment_state_draft`,
@@ -575,7 +573,6 @@ test(
             currency: 'CAD',
             customer_party_id: customerPartyId,
             notes: 'Resulting reservation coverage regression',
-            number: `SO-COVERAGE-${randomUUID()}`,
             order_date: now,
             requested_date: now,
           });

@@ -24,6 +24,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
       'test/unit/canonical-model/disclosure-tier.test.ts',
+      'test/unit/canonical-model/field-numbering.test.ts',
       'test/unit/canonical-model/negative-contracts.test.ts',
       'test/unit/canonical-model/normalization.test.ts',
       'test/unit/canonical-model/predicate-admission.test.ts',
@@ -127,6 +128,7 @@ const suiteDefinitions = [
       'test/postgres/composed-application.test.ts',
       'test/postgres/current-policy.test.ts',
       'test/postgres/declared-list.test.ts',
+      'test/postgres/document-numbering.test.ts',
       'test/postgres/fulfillment.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',

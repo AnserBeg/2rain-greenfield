@@ -48,6 +48,8 @@ export {
   type SurfaceWorkspace,
   SurfaceListSchema,
   type SurfaceList,
+  FieldNumberingSchema,
+  type FieldNumbering,
   SurfaceDocumentEditorSchema,
   type SurfaceDocumentEditor,
   type V6AuthoredApplicationPackage,

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "packet": "SALES-PARITY",
+  "entries": [
+    {
+      "name": "verification-takes-sentinel-document-numbers",
+      "claim": "Release verification's arranged records take V- sentinel document numbers, so a release activation never consumes a tenant's real document sequence.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      { documentNumbers: 'verificationSentinel' },\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "release verification must not consume real document numbers"
+        }
+      ]
+    }
+  ]
+}

@@ -163,7 +163,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await relate('party_role_party', customerPartyId);
   await save();
   await page.goto(url('sales_order', 'form'));
-  await page.getByLabel('Order number *').fill(`SO-FUL-${suffix}`);
+  // The order number is assigned by the server on first save.
   await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
   await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
   await page.getByLabel('Notes').fill('Partial shipment and correction');
@@ -223,7 +223,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 
   const initialShipment = await createShipment({
     kind: 'initial',
-    number: `SHP-${suffix}`,
     quantity: '5',
     reservationId,
   });
@@ -242,18 +241,16 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const committedPayload = new URLSearchParams(
     (await committedRequest).postData() ?? '',
   );
-  await expect(page.locator('.composition-header')).toContainText(
-    `SHP-${suffix}`,
-  );
+  // The shipment number is assigned on create (SHP-000001).
+  await expect(page.locator('.composition-header')).toContainText(/SHP-\d{6}/u);
   await expect(
     page.locator(
       '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
     ),
   ).toHaveCount(1);
   await page.goto(url('shipment', 'detail', initialShipment.shipmentId));
-  await expect(page.locator('.composition-header')).toContainText(
-    `SHP-${suffix}`,
-  );
+  // The shipment number is assigned on create (SHP-000001).
+  await expect(page.locator('.composition-header')).toContainText(/SHP-\d{6}/u);
   await expect(
     page.locator(
       '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
@@ -302,7 +299,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 
   const correction = await createShipment({
     kind: 'correction',
-    number: `SHP-COR-${suffix}`,
     quantity: '2',
     reservationId,
     supersedes: initialShipment.shipmentId,
@@ -321,7 +317,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 
   const reversal = await createShipment({
     kind: 'reversal',
-    number: `SHP-REV-${suffix}`,
     quantity: '3',
     reservationId,
     supersedes: initialShipment.shipmentId,
@@ -337,7 +332,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   // A second, fully shipped order demonstrates explicit closure independently
   // of the cancelled-and-reversed order above.
   await page.goto(url('sales_order', 'form'));
-  await page.getByLabel('Order number *').fill(`SO-CLOSE-${suffix}`);
   await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
   await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
   await pick('Customer', 'Alpine', 'Alpine Office Supply');
@@ -368,7 +362,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await command('Reserve');
   const closureShipment = await createShipment({
     kind: 'initial',
-    number: `SHP-CLOSE-${suffix}`,
     order: closureOrderId,
     orderLine: closureLineId,
     quantity: '2',
@@ -388,7 +381,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 
   async function createShipment(input: {
     kind: 'initial' | 'correction' | 'reversal';
-    number: string;
     order?: string;
     orderLine?: string;
     quantity: string;
@@ -397,7 +389,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     reversalOfMovementId?: string;
   }) {
     await page.goto(url('shipment', 'form'));
-    await fill('shipment', 'number', input.number);
     await choose('shipment', 'state', 'draft');
     await choose('shipment', 'kind', input.kind);
     await fill('shipment', 'effective_at', instant);

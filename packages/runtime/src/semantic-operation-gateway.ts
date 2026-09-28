@@ -191,7 +191,20 @@ export interface RegisteredOperationInputContract {
     | 'northstar.module-input-contract/v3'
     | 'northstar.module-input-contract/v4';
   readonly systemInput?: RegisteredOperationSystemInput;
+  /** Fields a create assigns on the server; none of them is an input. */
+  readonly assignedFields?: readonly RegisteredOperationAssignedField[];
   readonly writableFieldIds: readonly string[];
+}
+
+/** One server-assigned document number: `PREFIX-` plus the sequence's next value. */
+export interface RegisteredOperationAssignedField {
+  readonly classification: 'INTERNAL' | 'PUBLIC';
+  readonly fieldId: string;
+  readonly kind: 'documentSequence';
+  readonly minimumDigits: number;
+  readonly prefix: string;
+  readonly sequenceId: string;
+  readonly start: number;
 }
 
 export interface RegisteredOperationSystemInput {
@@ -1634,9 +1647,11 @@ function assertOperationInputContract(
     throw invalid('pinned operation input contract must be an object');
   }
   const hasSystemInput = Object.hasOwn(value, 'systemInput');
+  const hasAssignedFields = Object.hasOwn(value, 'assignedFields');
   assertExactKeys(
     value,
     [
+      ...(hasAssignedFields ? ['assignedFields'] : []),
       'closedArgumentKeys',
       'fields',
       'relationInputs',
@@ -1646,6 +1661,43 @@ function assertOperationInputContract(
     ],
     invalid,
   );
+  if (hasAssignedFields) {
+    const assigned = value.assignedFields;
+    if (!Array.isArray(assigned) || assigned.length === 0)
+      throw invalid('pinned assigned fields must be a non-empty array');
+    for (const entry of assigned) {
+      if (!isRecord(entry))
+        throw invalid('pinned assigned field must be an object');
+      assertExactKeys(
+        entry,
+        [
+          'classification',
+          'fieldId',
+          'kind',
+          'minimumDigits',
+          'prefix',
+          'sequenceId',
+          'start',
+        ],
+        invalid,
+      );
+      if (
+        typeof entry.fieldId !== 'string' ||
+        (entry.classification !== 'INTERNAL' &&
+          entry.classification !== 'PUBLIC') ||
+        entry.kind !== 'documentSequence' ||
+        typeof entry.sequenceId !== 'string' ||
+        typeof entry.prefix !== 'string' ||
+        !/^[A-Z][A-Z0-9]{0,7}$/u.test(entry.prefix) ||
+        !Number.isSafeInteger(entry.minimumDigits) ||
+        Number(entry.minimumDigits) < 1 ||
+        Number(entry.minimumDigits) > 12 ||
+        !Number.isSafeInteger(entry.start) ||
+        Number(entry.start) < 1
+      )
+        throw invalid('pinned assigned field has an invalid shape');
+    }
+  }
   if (
     (value.schemaVersion !== 'northstar.module-input-contract/v1' &&
       value.schemaVersion !== 'northstar.module-input-contract/v2' &&

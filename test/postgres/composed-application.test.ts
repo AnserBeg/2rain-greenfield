@@ -4179,7 +4179,6 @@ async function assertPurchaseOrderParentGuard(
       [purchasing.fieldIds.currency]: 'CAD',
       [purchasing.fieldIds.expectedDate]: '2026-09-01T00:00:00.000Z',
       [purchasing.fieldIds.notes]: 'parent guard vertical',
-      [purchasing.fieldIds.number]: 'PO-GUARD-001',
       [purchasing.fieldIds.orderDate]: '2026-08-22T00:00:00.000Z',
       [purchasing.fieldIds.supplierPartyId]: 'SUP-GUARD-001',
     },

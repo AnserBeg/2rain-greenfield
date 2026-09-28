@@ -162,8 +162,8 @@ export function orderEntrySurfaces(
       stateFieldId: id('derived_state_field', `machine.${local}_lifecycle`),
       editableStateIds: [id('state', `${local}_draft`)],
       lineNumberFieldId: id('field', `${local}_line_line_number`),
+      // The order number is assigned by the server on first save.
       headerFields: [
-        field(`${local}_number`, 'Order number'),
         field(
           `${local}_${party}_party_id`,
           sales ? 'Customer' : 'Vendor',

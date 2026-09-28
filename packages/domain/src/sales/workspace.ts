@@ -421,7 +421,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             'shipment_draft',
             'shipment',
             {
-              number: generated('uuid'),
+              // The shipment number is assigned on create (SHP-000001).
               state: literal(id('option', 'shipment_state_draft')),
               kind: literal(id('option', 'shipment_kind_initial')),
               effective_at: generated('instant'),

@@ -1130,6 +1130,13 @@
   "fields": [
     {
       "businessKey": "tenantEnvironmentCaseInsensitiveUnique",
+      "numbering": {
+        "kind": "documentSequence",
+        "sequenceId": "northstar.app:document_sequence.sales_order",
+        "prefix": "SO",
+        "minimumDigits": 6,
+        "start": 1
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "none",
@@ -1473,6 +1480,13 @@
     },
     {
       "businessKey": "tenantEnvironmentCaseInsensitiveUnique",
+      "numbering": {
+        "kind": "documentSequence",
+        "sequenceId": "northstar.app:document_sequence.shipment",
+        "prefix": "SHP",
+        "minimumDigits": 6,
+        "start": 1
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "none",
@@ -2572,6 +2586,13 @@
     },
     {
       "businessKey": "tenantEnvironmentCaseInsensitiveUnique",
+      "numbering": {
+        "kind": "documentSequence",
+        "sequenceId": "northstar.app:document_sequence.purchase_order",
+        "prefix": "PO",
+        "minimumDigits": 6,
+        "start": 1
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "none",
@@ -22872,10 +22893,6 @@
                     "value": { "source": "generated", "value": "scope" }
                   },
                   {
-                    "path": ["values", "northstar.app:field.shipment_number"],
-                    "value": { "source": "generated", "value": "uuid" }
-                  },
-                  {
                     "path": ["values", "northstar.app:field.shipment_state"],
                     "value": {
                       "source": "literal",
@@ -23204,10 +23221,6 @@
         "lineNumberFieldId": "northstar.app:field.sales_order_line_line_number",
         "headerFields": [
           {
-            "fieldId": "northstar.app:field.sales_order_number",
-            "label": "Order number"
-          },
-          {
             "fieldId": "northstar.app:field.sales_order_customer_party_id",
             "label": "Customer",
             "reference": {
@@ -23477,10 +23490,6 @@
         "editableStateIds": ["northstar.app:state.sales_order_draft"],
         "lineNumberFieldId": "northstar.app:field.sales_order_line_line_number",
         "headerFields": [
-          {
-            "fieldId": "northstar.app:field.sales_order_number",
-            "label": "Order number"
-          },
           {
             "fieldId": "northstar.app:field.sales_order_customer_party_id",
             "label": "Customer",
@@ -26306,10 +26315,6 @@
         "lineNumberFieldId": "northstar.app:field.purchase_order_line_line_number",
         "headerFields": [
           {
-            "fieldId": "northstar.app:field.purchase_order_number",
-            "label": "Order number"
-          },
-          {
             "fieldId": "northstar.app:field.purchase_order_supplier_party_id",
             "label": "Vendor",
             "reference": {
@@ -26570,10 +26575,6 @@
         "editableStateIds": ["northstar.app:state.purchase_order_draft"],
         "lineNumberFieldId": "northstar.app:field.purchase_order_line_line_number",
         "headerFields": [
-          {
-            "fieldId": "northstar.app:field.purchase_order_number",
-            "label": "Order number"
-          },
           {
             "fieldId": "northstar.app:field.purchase_order_supplier_party_id",
             "label": "Vendor",
