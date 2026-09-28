@@ -891,6 +891,10 @@ function queries(
           }
         : {}),
       maximumResultCount: queryType === 'get' ? 1 : 100,
+      // The declared List exports this whole filtered set in one statement.
+      ...(queryType === 'list' && local === 'sales_order'
+        ? { exportMaximumResultCount: 5_000 }
+        : {}),
       module: reference('moduleReference', ids.moduleId),
       permission: reference(
         'permissionReference',

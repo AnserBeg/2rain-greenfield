@@ -60,6 +60,7 @@ import {
   SHARED_LIST_RESULT_VERSION,
   SharedListContractError,
   type AuthorizedSharedListRelationLabel,
+  type AuthorizedSharedListReferenceLabel,
   type AuthorizedSharedListRequest,
   type SharedListCoverage,
 } from '../../runtime/src/list-behavior/index.js';
@@ -1130,9 +1131,19 @@ async function executeQueryOnClient(
   const entity = requiredEntity(storage, definition.sourceEntityId);
   const relationPlans =
     definition.queryType === 'list' && list
-      ? list.relationLabels.map((authorization, index) =>
-          listRelationPlan(storage, entity, authorization, index),
-        )
+      ? [
+          ...list.relationLabels.map((authorization, index) =>
+            listRelationPlan(storage, entity, authorization, index),
+          ),
+          ...(list.referenceLabels ?? []).map((reference, index) =>
+            listReferencePlan(
+              storage,
+              entity,
+              reference,
+              list.relationLabels.length + index,
+            ),
+          ),
+        ]
       : [];
   const readScope = await verifyLegalEntityReadScope(
     client,
@@ -2028,11 +2039,19 @@ async function listRecords(
 }
 
 interface ListRelationPlan {
-  readonly authorization: AuthorizedSharedListRelationLabel;
   readonly labelColumn: StorageEntity['columns'][number];
   readonly labelAlias: string;
+  /** The relation id or reference id the label is reported and sorted under. */
+  readonly labelId: string;
   readonly recordAlias: string;
-  readonly relation: StorageTargetPayloadV1['relations'][number];
+  /**
+   * The source column joined to the target's record id: a compiled relation
+   * column (uuid), or -- for a reference label -- a text field that stores a
+   * record id, compared as text so a malformed value finds no label rather
+   * than failing the whole list.
+   */
+  readonly sourceColumn: string;
+  readonly sourceIsText: boolean;
   readonly tableAlias: string;
   readonly target: StorageEntity;
 }
@@ -2306,6 +2325,7 @@ async function listSharedRecords(
     ...(relatedFilter && list.query.relatedFilter
       ? { relatedFilter: list.query.relatedFilter }
       : {}),
+    ...(list.query.outputMode ? { outputMode: list.query.outputMode } : {}),
     projectedSearchValueCount:
       list.query.search.trim() === '' ? 0 : searchExpressions.length,
     requestedPageSize: list.query.requestedPageSize,
@@ -2358,11 +2378,60 @@ function listRelationPlan(
     );
   }
   return Object.freeze({
-    authorization,
     labelAlias: `nsm_table_relation_${String(index)}_label`,
     labelColumn,
+    labelId: authorization.relationId,
     recordAlias: `nsm_table_relation_${String(index)}_record`,
-    relation,
+    sourceColumn: relation.relationColumn.physicalName,
+    sourceIsText: false,
+    tableAlias: `table_relation_${String(index)}`,
+    target,
+  });
+}
+
+/**
+ * A reference label resolves against the PINNED COMPILED storage: the source
+ * field must be a text column of the queried entity and the label a column of
+ * the authorized target entity. A request can therefore name only compiled
+ * identities; neither a column nor a table comes from caller input.
+ */
+function listReferencePlan(
+  storage: StorageTargetPayloadV1,
+  source: StorageEntity,
+  reference: AuthorizedSharedListReferenceLabel,
+  index: number,
+): ListRelationPlan {
+  const sourceColumn = source.columns.find(
+    (candidate) => candidate.canonicalFieldId === reference.sourceFieldId,
+  );
+  if (
+    !sourceColumn ||
+    sourceColumn.fieldContract.fieldKind !== 'textFieldType'
+  ) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'a reference label reads a compiled text column of the queried entity',
+      reference.sourceFieldId,
+    );
+  }
+  const target = requiredEntity(storage, reference.targetEntityId);
+  const labelColumn = target.columns.find(
+    (candidate) => candidate.canonicalFieldId === reference.fieldId,
+  );
+  if (!labelColumn) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'authorized reference label field has no compiled target column',
+      reference.fieldId,
+    );
+  }
+  return Object.freeze({
+    labelAlias: `nsm_table_relation_${String(index)}_label`,
+    labelColumn,
+    labelId: reference.referenceId,
+    recordAlias: `nsm_table_relation_${String(index)}_record`,
+    sourceColumn: sourceColumn.physicalName,
+    sourceIsText: true,
     tableAlias: `table_relation_${String(index)}`,
     target,
   });
@@ -2382,7 +2451,7 @@ function listFromSql(
         `LEFT JOIN north_star_module.${quoted(plan.target.physicalTableName)} AS ${quoted(plan.tableAlias)}
            ON ${qualified(plan.tableAlias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
           AND ${qualified(plan.tableAlias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
-          AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)} = ${qualified(sourceAlias, plan.relation.relationColumn.physicalName)}${legalEntityReadScopeJoinConjunction(
+          AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)}${plan.sourceIsText ? '::text' : ''} = ${qualified(sourceAlias, plan.sourceColumn)}${legalEntityReadScopeJoinConjunction(
             plan.target,
             readScope,
             values,
@@ -2436,7 +2505,7 @@ function listOrderBy(
     selectedColumns.map((column) => [column.canonicalFieldId, column] as const),
   );
   const relationsById = new Map(
-    relations.map((plan) => [plan.authorization.relationId, plan] as const),
+    relations.map((plan) => [plan.labelId, plan] as const),
   );
   const order = list.query.sort.map((sort) => {
     const column = selectedById.get(sort.fieldId);
@@ -2495,7 +2564,7 @@ function toListDto(
   const relationLabels = Object.freeze(
     Object.fromEntries(
       relations.map((plan) => [
-        plan.authorization.relationId,
+        plan.labelId,
         Object.freeze({
           label: nullableDisplayValue(row[plan.labelAlias]),
           recordId: nullableUuid(row[plan.recordAlias]),

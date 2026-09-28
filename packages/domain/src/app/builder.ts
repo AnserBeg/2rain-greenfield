@@ -10,6 +10,7 @@ import { partyModuleDefinition } from '../party/definition.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
 import { orderEntrySurfaces } from './order-entry.js';
+import { declareLists } from './list-declarations.js';
 import { purchasingWorkspace } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 
@@ -137,7 +138,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     collection(definition, 'capabilityRequirements').slice(1),
   );
 
-  return {
+  return withDeclaredLists({
     assertions: merged(definitions, 'assertions'),
     capabilityRequirements: [sharedCapability, ...moduleCapabilities],
     entities: merged(definitions, 'entities'),
@@ -207,6 +208,16 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       }),
       merged(definitions, 'queries') as Record<string, unknown>[],
     ),
+  });
+}
+
+/** Declared Lists apply after the workspace pass, over the final surfaces. */
+function withDeclaredLists<T extends { surfaces: Record<string, unknown>[] }>(
+  application: T,
+): T {
+  return {
+    ...application,
+    surfaces: declareLists(APPLICATION_NAMESPACE, application.surfaces),
   };
 }
 

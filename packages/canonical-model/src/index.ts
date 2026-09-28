@@ -46,6 +46,8 @@ export {
   type SurfaceComposition,
   SurfaceWorkspaceSchema,
   type SurfaceWorkspace,
+  SurfaceListSchema,
+  type SurfaceList,
   SurfaceDocumentEditorSchema,
   type SurfaceDocumentEditor,
   type V6AuthoredApplicationPackage,

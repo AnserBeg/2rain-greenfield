@@ -1073,10 +1073,93 @@ export type SurfaceEditorReference = NonNullable<
   SurfaceEditorField['reference']
 >;
 export type SurfaceEditorCreate = NonNullable<SurfaceEditorReference['create']>;
+/**
+ * Optional v6 List presentation over the surface's own list query. Every
+ * column, view, filter and sort names a field that query selects -- or a label
+ * read through another declared list query -- so each one is an argument the
+ * query gateway re-authorizes on every request, never a client computation.
+ * Absence preserves historical bytes (ADR-0047 §7).
+ */
+const listColumn = z.strictObject({
+  columnId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  field: CanonicalIdSchema,
+  role: z.enum(['title', 'value', 'status']),
+  priority: boundedOrderKey,
+  sortable: z.boolean(),
+  /** `date`: a date or instant shown as its calendar date (UTC). */
+  format: z.literal('date').optional(),
+  reference: z
+    .strictObject({
+      query: compositionReference('queryReference'),
+      labelField: compositionReference('fieldReference'),
+    })
+    .optional(),
+  statusRoles: z
+    .array(
+      z.strictObject({
+        value: z.string().min(1).max(240),
+        role: z.enum(['success', 'attention', 'blocked', 'inProgress']),
+      }),
+    )
+    .max(12)
+    .optional(),
+});
+const listFieldValue = z.strictObject({
+  field: CanonicalIdSchema,
+  value: z.string().min(1).max(240),
+});
+export const SurfaceListSchema = z.strictObject({
+  kind: z.literal('surfaceList'),
+  schemaVersion: v6NodeVersion,
+  pageSize: z.int().min(1).max(100),
+  columns: z.array(listColumn).min(1).max(12),
+  defaultSort: z
+    .array(
+      z.strictObject({
+        columnId: CanonicalIdSchema,
+        direction: z.enum(['ascending', 'descending']),
+      }),
+    )
+    .max(3),
+  views: z
+    .array(
+      z.strictObject({
+        viewId: CanonicalIdSchema,
+        label: LabelSchema,
+        orderKey: boundedOrderKey,
+        filters: z.array(listFieldValue).max(3),
+      }),
+    )
+    .max(8),
+  filters: z
+    .array(
+      z.strictObject({
+        filterId: CanonicalIdSchema,
+        label: LabelSchema,
+        orderKey: boundedOrderKey,
+        field: CanonicalIdSchema,
+        options: z
+          .array(
+            z.strictObject({
+              value: z.string().min(1).max(240),
+              label: LabelSchema,
+            }),
+          )
+          .min(1)
+          .max(20),
+      }),
+    )
+    .max(4),
+  export: z.strictObject({ format: z.literal('csv') }).optional(),
+});
+export type SurfaceList = z.infer<typeof SurfaceListSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),
   documentEditor: SurfaceDocumentEditorSchema.optional(),
+  list: SurfaceListSchema.optional(),
 });
 const authoredV6SurfaceDefinition = normalizedV6SurfaceDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
@@ -1541,15 +1624,20 @@ export const QueryReadModelSchema = z.strictObject({
   resultFields: z.record(z.string().min(1), CanonicalIdSchema),
 });
 export type QueryReadModel = z.infer<typeof QueryReadModelSchema>;
+// A list query may declare the most rows one export statement returns. It is a
+// query property, not a screen one, because the agent path reads the query.
+const exportMaximumResultCount = z.int().min(1).max(10_000).optional();
 const normalizedV6QueryDefinition = z.union([
   normalizedV4RowQueryDefinition.extend({
     readModel: QueryReadModelSchema.optional(),
+    exportMaximumResultCount,
   }),
   normalizedV4AggregateQueryDefinition,
 ]);
 const authoredV6QueryDefinition = z.union([
   authoredV4RowQueryDefinition.extend({
     readModel: QueryReadModelSchema.optional(),
+    exportMaximumResultCount,
   }),
   authoredV4AggregateQueryDefinition,
 ]);

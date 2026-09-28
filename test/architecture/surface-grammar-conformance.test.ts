@@ -281,8 +281,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
   // Draft document editing and workspace entry require reader 8; picker
-  // eligibility and typed Task inputs require 9.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 9);
+  // eligibility and typed Task inputs require 9; declared Lists require 10.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 10);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.

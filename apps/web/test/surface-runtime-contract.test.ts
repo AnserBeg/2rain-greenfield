@@ -968,7 +968,8 @@ test('the message catalog honours the vocabulary it declares', () => {
   // RAIN-META-SALES adds nine generic composition task/dataset treatments.
   // RAIN-ORDER-ENTRY adds company refusal, shared draft conflict/lock treatments,
   // and the redacted partial-commit outcome.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 47);
+  // SALES-PARITY adds the declared-List export refusal (never a partial file).
+  assert.equal(SURFACE_MESSAGE_CODES.length, 48);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];

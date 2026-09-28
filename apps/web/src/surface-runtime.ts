@@ -1,9 +1,18 @@
 import {
   loadSurfaceComposition,
   submitCompositionAction,
+  displayFieldValue,
 } from './surface-composition.js';
 import { resolveWorkspaceEntry } from './workspace-entry.js';
 import { documentEditor } from './document-editor.js';
+import {
+  declaredListArguments,
+  declaredListCsv,
+  exportFileName,
+  readDeclaredListState,
+  type DeclaredListState,
+} from './list-declaration.js';
+import type { SurfaceList } from '../../../packages/canonical-model/src/index.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -62,6 +71,12 @@ export interface SurfaceRuntimeResponse {
   readonly html: string;
   readonly statusCode: number;
   readonly location?: string;
+  /** A generated file (a declared List's export) instead of a page. */
+  readonly download?: {
+    readonly body: string;
+    readonly contentType: 'text/csv; charset=utf-8';
+    readonly fileName: string;
+  };
 }
 
 export interface SurfaceRuntimeGateways {
@@ -268,7 +283,32 @@ export async function renderSurfaceRuntimeWithData(
     legalEntitySelection,
     url,
   );
-  const queryArguments = argumentsForSurface(binding, url);
+  const declaredList =
+    selection.selected.list && binding.query.queryType === 'list'
+      ? {
+          list: selection.selected.list,
+          state: readDeclaredListState(selection.selected.list, url),
+        }
+      : null;
+  if (declaredList && url.searchParams.get('export') === 'csv') {
+    return exportDeclaredList(
+      view,
+      selection.selected,
+      binding,
+      declaredList.list,
+      declaredList.state,
+      url,
+      gateways.queryGateway,
+    );
+  }
+  const queryArguments = declaredList
+    ? declaredListArguments(declaredList.list, declaredList.state, {
+        mode: 'page',
+        pageOffset: (declaredList.state.page - 1) * declaredList.list.pageSize,
+        queryId: binding.query.queryId,
+        scopeArguments: legalEntityScopeArguments(binding, url),
+      })
+    : argumentsForSurface(binding, url);
   if (queryArguments === null) {
     const state: SurfaceDataRenderState =
       selection.selected.surfaceRole === 'form'
@@ -300,6 +340,16 @@ export async function renderSurfaceRuntimeWithData(
     if (binding.query.queryType === 'aggregate') {
       const result = await gateways.queryGateway.invokeAggregate(view, request);
       data = { aggregate: result, status: 'AGGREGATE_READY' };
+    } else if (declaredList) {
+      data = await declaredListData(
+        view,
+        binding,
+        declaredList.list,
+        declaredList.state,
+        url,
+        gateways.queryGateway,
+        await gateways.queryGateway.invoke(view, request),
+      );
     } else {
       const result = await gateways.queryGateway.invoke(view, request);
       data = dataState(result);
@@ -357,6 +407,138 @@ export async function renderSurfaceRuntimeWithData(
     binding.relationInputs,
     relationPickers,
   );
+}
+
+/**
+ * A declared List's page, plus a server count for every saved view under the
+ * same search and filters. A page number past the end is answered with the
+ * last page rather than an empty window that claims records exist. A view
+ * count that cannot be read is omitted, never guessed.
+ */
+async function declaredListData(
+  view: RuntimeViewContract.RequestRuntimeView,
+  binding: CompiledSurfaceDataBinding,
+  list: SurfaceList,
+  state: DeclaredListState,
+  url: URL,
+  queryGateway: SemanticQueryGateway,
+  first: SemanticQueryResultEnvelope,
+): Promise<SurfaceDataRenderState> {
+  const scopeArguments = legalEntityScopeArguments(binding, url);
+  const request = (argumentsValue: RuntimeViewContract.ImmutableJsonValue) =>
+    ({
+      arguments: argumentsValue,
+      queryId: binding.query.queryId,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    }) as const;
+  let result = first;
+  const coverage = result.listCoverage;
+  if (
+    coverage &&
+    coverage.returnedCount === 0 &&
+    coverage.totalCount > 0 &&
+    coverage.pageOffset > 0
+  ) {
+    const lastPage = Math.ceil(coverage.totalCount / list.pageSize);
+    state = { ...state, page: lastPage };
+    result = await queryGateway.invoke(
+      view,
+      request(
+        declaredListArguments(list, state, {
+          mode: 'page',
+          pageOffset: (lastPage - 1) * list.pageSize,
+          queryId: binding.query.queryId,
+          scopeArguments,
+        }),
+      ),
+    );
+  }
+  const counts: Record<string, number> = {};
+  for (const listView of list.views) {
+    try {
+      const counted = await queryGateway.invoke(
+        view,
+        request(
+          declaredListArguments(list, state, {
+            mode: 'count',
+            queryId: binding.query.queryId,
+            scopeArguments,
+            viewId: listView.viewId,
+          }),
+        ),
+      );
+      if (counted.listCoverage)
+        counts[listView.viewId] = counted.listCoverage.totalCount;
+    } catch {
+      // Omitted: the tab still navigates, and its own page reports its count.
+    }
+  }
+  const data = dataState(result);
+  return data.status === 'READY'
+    ? { ...data, declaredList: { counts, state } }
+    : data;
+}
+
+/**
+ * One export statement, bounded by the query's declared export limit. A set
+ * larger than the limit is refused with a page, never written as a partial
+ * file, and nothing is fetched page by page.
+ */
+async function exportDeclaredList(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  binding: CompiledSurfaceDataBinding,
+  list: SurfaceList,
+  state: DeclaredListState,
+  url: URL,
+  queryGateway: SemanticQueryGateway,
+): Promise<SurfaceRuntimeResponse> {
+  const exportMaximumResultCount =
+    'exportMaximumResultCount' in binding.query
+      ? binding.query.exportMaximumResultCount
+      : undefined;
+  if (!list.export || exportMaximumResultCount === undefined)
+    return renderApplicationDiagnostic(404, { code: 'QUERY_UNSUPPORTED' });
+  let result: SemanticQueryResultEnvelope;
+  try {
+    result = await queryGateway.invoke(view, {
+      arguments: declaredListArguments(list, state, {
+        exportMaximumResultCount,
+        mode: 'export',
+        queryId: binding.query.queryId,
+        scopeArguments: legalEntityScopeArguments(binding, url),
+      }),
+      queryId: binding.query.queryId,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    });
+  } catch (error) {
+    return renderApplicationDiagnostic(422, { code: queryMessageCode(error) });
+  }
+  const coverage = result.listCoverage;
+  if (!coverage || coverage.outputMode !== 'export')
+    return renderApplicationDiagnostic(422, { code: 'QUERY_UNAVAILABLE' });
+  if (coverage.hasMore || coverage.returnedCount !== coverage.totalCount)
+    return renderApplicationDiagnostic(422, { code: 'LIST_EXPORT_OVER_LIMIT' });
+  return Object.freeze({
+    download: Object.freeze({
+      body: declaredListCsv(list, result.records, (record, fieldId, value) => {
+        const presented = displayFieldValue(view, record, fieldId, value);
+        // Only an enumeration's label replaces its stored value in a file.
+        return typeof value === 'string' &&
+          presented !== value &&
+          !Number.isFinite(Date.parse(value)) &&
+          !/^-?\d+(\.\d+)?$/u.test(value)
+          ? presented
+          : typeof value === 'string'
+            ? value
+            : JSON.stringify(value);
+      }),
+      contentType: 'text/csv; charset=utf-8' as const,
+      fileName: exportFileName(surface.label, new Date()),
+    }),
+    html: '',
+    statusCode: 200,
+  });
 }
 
 /** Sent by the owned script only; a cross-site form cannot set a header. */
@@ -1902,7 +2084,28 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .data-table-wrap tbody tr:hover{background:var(--accent-soft)}
 .data-table-wrap td:has(.cell-numeric){text-align:right}
 .record-link{color:var(--accent-ink);font-weight:var(--weight-emphasis)}
-.list-pagination{display:flex;justify-content:flex-end;margin-top:var(--space-3)}
+.list-pagination{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:var(--space-2);margin-top:var(--space-3)}
+.list-views{grid-column:span 12}
+.list-views ul{display:flex;flex-wrap:wrap;gap:var(--space-1);padding:0;margin:0 0 var(--space-3);list-style:none;border-bottom:1px solid var(--line)}
+.list-view{display:inline-flex;align-items:center;gap:var(--space-2);min-height:44px;padding:0 var(--space-3);border-bottom:3px solid transparent;color:var(--ink-muted);font-weight:var(--weight-emphasis);text-decoration:none}
+.list-view:hover{color:var(--ink)}
+.list-view[aria-current=page]{border-bottom-color:var(--accent-ground);color:var(--ink)}
+.list-view:focus-visible,.list-sort:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
+.list-view__count{padding:0 var(--space-2);border-radius:999px;background:var(--surface-sunken);color:var(--ink-muted);font-size:var(--text-micro)}
+.list-controls{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-end;margin-bottom:var(--space-3)}
+.list-controls .form-field{margin:0}
+.list-controls__search{flex:1 1 16rem}
+.list-controls__actions{display:flex;gap:var(--space-2);align-items:center;min-height:44px}
+.list-summary{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center;justify-content:flex-end}
+.list-sort{display:inline-flex;gap:var(--space-1);align-items:center;min-height:44px;color:inherit;text-decoration:none}
+.list-page-status{color:var(--ink-muted);font-size:var(--text-body)}
+.list-page-jump{display:inline-flex;gap:var(--space-2);align-items:center}
+.list-pagination .list-page-jump input{width:5rem;min-height:44px}
+.list-export--refused{margin:0;color:var(--ink-muted);font-size:var(--text-body)}
+.list-controls .form-field>label{display:grid;gap:var(--space-1)}
+.list-controls .form-field>label[for]{font-weight:var(--weight-emphasis)}
+.data-table-wrap td[data-column-priority="0"] .record-link{white-space:nowrap}
+@media(max-width:800px){.list-views ul{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}.list-view{white-space:nowrap}.list-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}.list-controls__search{grid-column:1/-1}.list-controls__actions{align-self:end}.list-summary{justify-content:flex-start}}
 .list-page-link{display:inline-grid;place-items:center;min-height:44px;padding:var(--space-2) var(--space-4);border-radius:var(--radius-control);background:var(--accent-ground);color:var(--ink-on-accent);font-size:var(--text-body);font-weight:var(--weight-emphasis);text-decoration:none}
 .list-page-link:hover{background:var(--accent-ground-hover)}
 .list-page-link:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
@@ -1960,7 +2163,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .form-fields .form-empty-intent{padding-top:var(--space-1)}
 .form-unavailable-value{display:block;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken);color:var(--ink-muted);font-size:var(--text-body);line-height:1.45}
 .form-unavailable-value code{color:var(--ink);overflow-wrap:anywhere}
-.form-fields input,.form-fields select{width:100%;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
+.form-fields input,.form-fields select,.list-controls input,.list-controls select,.list-page-jump input{width:100%;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
 .form-fields input[type="checkbox"]{width:24px;height:24px;min-height:24px;padding:0;justify-self:start;margin:10px 0}
 input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
 button{min-height:44px;padding:var(--space-2) var(--space-4);border:0;border-radius:var(--radius-control);background:var(--accent-ground);color:var(--ink-on-accent);font:inherit;font-weight:var(--weight-emphasis);cursor:pointer}

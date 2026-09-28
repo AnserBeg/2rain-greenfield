@@ -97,6 +97,7 @@ export function sharedListBindingDigest(
     | 'fieldFilters'
     | 'relatedFilter'
     | 'relationLabels'
+    | 'referenceLabels'
     | 'search'
     | 'sort'
   >,
@@ -114,6 +115,10 @@ export function sharedListBindingDigest(
     ...(query.relatedFilter ? { relatedFilter: query.relatedFilter } : {}),
     queryId,
     relationLabels: query.relationLabels,
+    // A window sorted or searched by customer name is not a window over ids.
+    ...(query.referenceLabels
+      ? { referenceLabels: query.referenceLabels }
+      : {}),
     search: query.search,
     sort: query.sort,
   });

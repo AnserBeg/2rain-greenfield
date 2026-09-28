@@ -723,6 +723,9 @@ function surfaceManifestPayload(
           ...(compositions.get(surface.surfaceId)
             ? { composition: compositions.get(surface.surfaceId) }
             : {}),
+          ...(declared && 'list' in declared && declared.list
+            ? { list: declared.list }
+            : {}),
           archetype: surface.archetype,
           dataSourceQueryId: surface.dataSource.targetId,
           fieldIds,
@@ -807,65 +810,76 @@ function surfaceManifestPayload(
     // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
+      // 10: a declared List. A reader that dropped it would page an undeclared
+      // order and offer no views, filters or export -- the list the metadata
+      // describes would silently not be the one served.
       // 9: picker eligibility and typed Task inputs. A reader that dropped
       // either would offer every party as a customer, or ask for free text
       // where a governed value is declared -- a wrong render, not a lesser one.
-      minimumVersion: original.surfaces.some((surface) => {
-        const editor =
-          'documentEditor' in surface
-            ? (surface.documentEditor as SurfaceDocumentEditor | undefined)
-            : undefined;
-        const composition = compositions.get(surface.surfaceId);
-        return (
-          [...(editor?.headerFields ?? []), ...(editor?.lineFields ?? [])].some(
-            (field) => field.reference?.eligibility,
-          ) ||
-          composition?.actions.some((action) =>
-            action.inputs.some((input) => input.presentation),
-          ) === true
-        );
-      })
-        ? 9
-        : original.surfaces.some(
-              (surface) =>
-                'workspace' in surface || 'documentEditor' in surface,
-            )
-          ? 8
-          : [...compositions.values()].some(
-                (value) =>
-                  value?.actions.some((action) => action.presentation?.task) ||
-                  value?.children.some(
-                    (child) => child.presentation?.selectedActions,
-                  ),
+      minimumVersion: original.surfaces.some(
+        (surface) => 'list' in surface && surface.list,
+      )
+        ? 10
+        : original.surfaces.some((surface) => {
+              const editor =
+                'documentEditor' in surface
+                  ? (surface.documentEditor as
+                      SurfaceDocumentEditor | undefined)
+                  : undefined;
+              const composition = compositions.get(surface.surfaceId);
+              return (
+                [
+                  ...(editor?.headerFields ?? []),
+                  ...(editor?.lineFields ?? []),
+                ].some((field) => field.reference?.eligibility) ||
+                composition?.actions.some((action) =>
+                  action.inputs.some((input) => input.presentation),
+                ) === true
+              );
+            })
+          ? 9
+          : original.surfaces.some(
+                (surface) =>
+                  'workspace' in surface || 'documentEditor' in surface,
               )
-            ? 7
+            ? 8
             : [...compositions.values()].some(
                   (value) =>
-                    value?.presentation?.task ||
+                    value?.actions.some(
+                      (action) => action.presentation?.task,
+                    ) ||
                     value?.children.some(
-                      (child) =>
-                        child.sort?.length || child.presentation?.compact,
+                      (child) => child.presentation?.selectedActions,
                     ),
                 )
-              ? 6
+              ? 7
               : [...compositions.values()].some(
                     (value) =>
-                      value?.presentation ||
+                      value?.presentation?.task ||
                       value?.children.some(
                         (child) =>
-                          child.presentation ||
-                          child.columns.some((column) => column.presentation),
-                      ) ||
-                      value?.actions.some((action) => action.presentation),
+                          child.sort?.length || child.presentation?.compact,
+                      ),
                   )
-                ? 5
-                : composed
-                  ? 4
-                  : emitsFieldKinds
-                    ? 3
-                    : navigation
-                      ? 2
-                      : 1,
+                ? 6
+                : [...compositions.values()].some(
+                      (value) =>
+                        value?.presentation ||
+                        value?.children.some(
+                          (child) =>
+                            child.presentation ||
+                            child.columns.some((column) => column.presentation),
+                        ) ||
+                        value?.actions.some((action) => action.presentation),
+                    )
+                  ? 5
+                  : composed
+                    ? 4
+                    : emitsFieldKinds
+                      ? 3
+                      : navigation
+                        ? 2
+                        : 1,
     },
   };
 }
@@ -996,6 +1010,7 @@ function agentDiscoveryPayload(
   const declared = new Map(
     original.queries.map((query) => [String(query.queryId), query]),
   );
+  const listPresets = agentListPresets(original);
   return {
     kind: 'agentDiscoveryPayload',
     operations: packageRevision.operations.map((operation) => ({
@@ -1013,11 +1028,77 @@ function agentDiscoveryPayload(
         })(),
       ],
       queryId: query.queryId,
+      ...(() => {
+        const source = declared.get(query.queryId);
+        return source &&
+          'exportMaximumResultCount' in source &&
+          source.exportMaximumResultCount !== undefined
+          ? { exportMaximumResultCount: source.exportMaximumResultCount }
+          : {};
+      })(),
     })),
+    ...(listPresets.length > 0 ? { listPresets } : {}),
     schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.agentDiscovery],
     surfaces: packageRevision.surfaces.map((surface) => surface.surfaceId),
     toolIds: [...OPERATIONS_AGENT_TOOL_IDS],
   };
+}
+
+/**
+ * A declared List's views, filters, default order and reference labels are
+ * ordinary list-query arguments. Publishing them here lets an agent ask for
+ * "draft orders, newest first, with customer names" through the same query
+ * gateway the screen uses, so no List behaviour is UI-only.
+ */
+function agentListPresets(original: VersionedNormalizedApplicationPackage) {
+  return original.surfaces.flatMap((surface) => {
+    if (!('list' in surface) || !surface.list) return [];
+    const list = surface.list;
+    const columns = new Map<string, (typeof list.columns)[number]>(
+      list.columns.map((column) => [column.columnId, column]),
+    );
+    const sortKey = (columnId: string) => {
+      const column = columns.get(columnId);
+      return column?.reference ? columnId : (column?.field ?? columnId);
+    };
+    return [
+      {
+        defaultSort: list.defaultSort.map((sort) => ({
+          direction: sort.direction,
+          fieldId: sortKey(sort.columnId),
+        })),
+        export: list.export !== undefined,
+        filters: list.filters.map((filter) => ({
+          fieldId: filter.field,
+          filterId: filter.filterId,
+          label: filter.label,
+          values: filter.options.map((option) => option.value),
+        })),
+        queryId: surface.dataSource.targetId,
+        referenceLabels: list.columns.flatMap((column) =>
+          column.reference
+            ? [
+                {
+                  fieldId: column.reference.labelField.targetId,
+                  queryId: column.reference.query.targetId,
+                  referenceId: column.columnId,
+                  sourceFieldId: column.field,
+                },
+              ]
+            : [],
+        ),
+        surfaceId: surface.surfaceId,
+        views: list.views.map((view) => ({
+          fieldFilters: view.filters.map((filter) => ({
+            fieldId: filter.field,
+            value: filter.value,
+          })),
+          label: view.label,
+          viewId: view.viewId,
+        })),
+      },
+    ];
+  });
 }
 
 function verificationPlanPayload(

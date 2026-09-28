@@ -5,6 +5,8 @@ import {
 import {
   SurfaceWorkspaceSchema,
   SurfaceDocumentEditorSchema,
+  SurfaceListSchema,
+  type SurfaceList,
   type SurfaceWorkspace,
   type SurfaceDocumentEditor,
 } from '../../../packages/canonical-model/src/schemas.js';
@@ -272,6 +274,7 @@ export interface CompiledSurfaceSlot {
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly list?: SurfaceList;
   readonly workspace?: SurfaceWorkspace;
   readonly documentEditor?: SurfaceDocumentEditor;
   readonly composition?: SurfaceComposition;
@@ -932,6 +935,9 @@ function parseSurface(
     ...(value.workspace === undefined
       ? {}
       : { workspace: SurfaceWorkspaceSchema.parse(value.workspace) }),
+    ...(value.list === undefined
+      ? {}
+      : { list: SurfaceListSchema.parse(value.list) }),
     ...(value.documentEditor === undefined
       ? {}
       : {

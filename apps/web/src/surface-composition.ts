@@ -112,7 +112,8 @@ const presentedFields = new WeakMap<
   RequestRuntimeView,
   Map<string, CompiledSurfaceField>
 >();
-function displayFieldValue(
+/** Presents a stored value by its compiled field kind; shared with declared Lists. */
+export function displayFieldValue(
   view: RequestRuntimeView,
   record: SemanticRecordDto,
   fieldId: string,

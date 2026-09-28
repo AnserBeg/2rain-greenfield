@@ -3,6 +3,7 @@ import {
   renderCompositionActions,
   renderCompositionChildren,
   renderCompositionHeader,
+  displayFieldValue,
   type CompositionData,
 } from './surface-composition.js';
 import { randomUUID } from 'node:crypto';
@@ -32,6 +33,18 @@ import type {
   ShipmentPackingDocument,
 } from './sales-section.js';
 import { sharedListView } from './list-runtime.js';
+import {
+  declaredCellText,
+  declaredListParameters,
+  orderedColumns,
+  orderedFilters,
+  orderedViews,
+  type DeclaredListColumn,
+  type DeclaredListState,
+  type FieldPresenter,
+} from './list-declaration.js';
+import type { SurfaceList } from '../../../packages/canonical-model/src/index.js';
+import type { SharedListCoverage } from '../../../packages/runtime/src/list-behavior/index.js';
 import type { QueryDiagnosticCode } from './message-catalog.js';
 import {
   messageAttributes,
@@ -116,6 +129,11 @@ export type SurfaceDataRenderState =
       readonly salesOrder?: SalesOrderSection;
       readonly packingDocument?: ShipmentPackingDocument;
       readonly result?: SemanticQueryResultEnvelope;
+      /** Server counts per saved view and the request's declared List state. */
+      readonly declaredList?: {
+        readonly counts: Readonly<Record<string, number>>;
+        readonly state: DeclaredListState;
+      };
       readonly status: 'READY';
     }
   | { readonly status: 'EMPTY' }
@@ -196,6 +214,10 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       className: 'data-grid-slot',
       ownsDataResolution: true,
       renderer: renderDataGrid,
+    },
+    'list:savedViews': {
+      className: 'saved-views-slot',
+      renderer: renderSavedViews,
     },
     'list:title': {
       className: 'surface-title-slot',
@@ -436,10 +458,75 @@ function renderListTitle(context: SurfaceComponentContext): string {
   );
 }
 
+function declaredListBase(context: SurfaceComponentContext): URLSearchParams {
+  const parameters = new URLSearchParams({
+    surface: context.surface.surfaceId,
+  });
+  appendLegalEntitySelection(parameters, context.surface, context);
+  return parameters;
+}
+
+function renderSavedViews(context: SurfaceComponentContext): string {
+  const list = context.surface.list;
+  const declared =
+    context.data?.status === 'READY' ? context.data.declaredList : undefined;
+  return slotPanel(
+    context,
+    list && declared
+      ? renderDeclaredListViews(
+          list,
+          declared.state,
+          declaredListBase(context),
+          declared.counts,
+        )
+      : '',
+    'saved-views-slot',
+  );
+}
+
 function renderDataGrid(context: SurfaceComponentContext): string {
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'data-grid-slot');
+  }
+  if (
+    data.status === 'READY' &&
+    context.surface.list &&
+    data.declaredList &&
+    data.result?.listCoverage
+  ) {
+    const detail = relatedSurface(context, 'record');
+    const recordLabel = entityLabel(context.surface);
+    const formId = bulkSelectionFormId(context.surface);
+    const binding = readCompiledSurfaceDataBinding(
+      context.view,
+      context.surface,
+    );
+    return slotPanel(
+      context,
+      `${feedbackHtml(context.feedback)}${renderDeclaredList({
+        base: declaredListBase(context),
+        coverage: data.result.listCoverage,
+        detailHref: (record) =>
+          detail
+            ? surfaceHref(detail, record.recordId, record.archived, context)
+            : null,
+        exportLimit:
+          'exportMaximumResultCount' in binding.query
+            ? (binding.query.exportMaximumResultCount ?? null)
+            : null,
+        list: context.surface.list,
+        present: (record, fieldId, value) =>
+          displayFieldValue(context.view, record, fieldId, value),
+        recordLabel,
+        records: data.records,
+        selectionCell: hasNamedSlot(context.surface, 'bulkActions')
+          ? (record, title) => selectionCell(formId, record, recordLabel, title)
+          : null,
+        state: data.declaredList.state,
+      })}`,
+      'data-grid-slot',
+    );
   }
   if (data.status === 'DIAGNOSTIC') {
     return slotPanel(
@@ -647,6 +734,12 @@ function renderArchiveToggle(context: SurfaceComponentContext): string {
       ? context.data.result?.listCoverage
       : undefined;
   const includeArchived = coverage?.includeArchived ?? false;
+  const declared =
+    context.data?.status === 'READY' ? context.data.declaredList : undefined;
+  if (declared) {
+    const href = `/?${declaredListParameters(declared.state, declaredListBase(context), { includeArchived: !includeArchived, page: 1 }).toString()}`;
+    return `<a class="secondary-action" data-archive-view="${includeArchived ? 'shown' : 'hidden'}" href="${escapeHtml(href)}">${includeArchived ? 'Hide archived' : 'Show archived'}</a>`;
+  }
   const parameters = new URLSearchParams({
     surface: context.surface.surfaceId,
   });
@@ -2038,4 +2131,194 @@ function diagnostic(ref: SurfaceMessageRef): string {
     <div class="diagnostic__mark" aria-hidden="true">!</div>
     <div>${messageBody(ref, 'Release diagnostic', 'h2')}</div>
   </section>`;
+}
+
+// Declared List markup (canonical `surface.list`), rendered only from the
+// closed registry; list-declaration.ts holds the markup-free request state.
+function declaredStatusRole(
+  column: DeclaredListColumn,
+  record: SemanticRecordDto,
+): string | null {
+  const raw = record.values[column.field];
+  return column.statusRoles?.find((entry) => entry.value === raw)?.role ?? null;
+}
+
+interface DeclaredListRenderInput {
+  readonly base: URLSearchParams;
+  readonly coverage: SharedListCoverage;
+  readonly detailHref: (record: SemanticRecordDto) => string | null;
+  readonly exportLimit: number | null;
+  readonly list: SurfaceList;
+  readonly present: FieldPresenter;
+  readonly recordLabel: string;
+  readonly records: readonly SemanticRecordDto[];
+  readonly selectionCell:
+    ((record: SemanticRecordDto, title: string) => string) | null;
+  readonly state: DeclaredListState;
+}
+
+/** Saved-view tabs; counts are server counts of each view under the current search and filters. */
+function renderDeclaredListViews(
+  list: SurfaceList,
+  state: DeclaredListState,
+  base: URLSearchParams,
+  counts: Readonly<Record<string, number>>,
+): string {
+  const views = orderedViews(list);
+  if (views.length === 0) return '';
+  return `<nav class="list-views" aria-label="Views"><ul>${views
+    .map((view) => {
+      const current = view.viewId === state.viewId;
+      const count = counts[view.viewId];
+      const href = `/?${declaredListParameters(state, base, { page: 1, viewId: view.viewId }).toString()}`;
+      return `<li><a class="list-view" href="${escapeHtml(href)}" data-view-id="${escapeHtml(view.viewId)}"${current ? ' aria-current="page"' : ''}><span>${escapeHtml(view.label)}</span>${count === undefined ? '' : `<span class="list-view__count" data-view-count="${String(count)}">${escapeHtml(String(count))}</span>`}</a></li>`;
+    })
+    .join('')}</ul></nav>`;
+}
+
+function renderDeclaredList(input: DeclaredListRenderInput): string {
+  const { list, state, coverage, base } = input;
+  const columns = orderedColumns(input.list);
+  const pageCount = Math.max(
+    1,
+    Math.ceil(coverage.totalCount / Math.max(1, coverage.effectivePageSize)),
+  );
+  const page =
+    Math.floor(coverage.pageOffset / Math.max(1, coverage.effectivePageSize)) +
+    1;
+  const firstVisible =
+    coverage.returnedCount === 0 ? 0 : coverage.pageOffset + 1;
+  const lastVisible = coverage.pageOffset + coverage.returnedCount;
+  const narrowed =
+    state.search.length > 0 || Object.keys(state.filterValues).length > 0;
+  const formHidden = [
+    ...declaredListParameters(state, base, { page: 1 }).entries(),
+  ]
+    .filter(
+      ([name]) =>
+        name !== 'q' &&
+        name !== 'page' &&
+        name !== 'sort' &&
+        name !== 'dir' &&
+        !list.filters.some((filter) => filter.filterId === name),
+    )
+    .map(
+      ([name, value]) =>
+        `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+    )
+    .join('');
+  // A control's accessible name is its label alone: a select nested in its
+  // label would be announced with its current option ("Currency All").
+  const controlId = (suffix: string) =>
+    `list-${String(input.list.columns[0]?.columnId ?? 'list').replaceAll(/[^A-Za-z0-9_-]/gu, '-')}-${suffix}`;
+  const filterControls = orderedFilters(list)
+    .map(
+      (filter, index) =>
+        `<div class="form-field"><label for="${controlId(`filter-${String(index)}`)}">${escapeHtml(filter.label)}</label><select id="${controlId(`filter-${String(index)}`)}" name="${escapeHtml(filter.filterId)}"><option value="">All</option>${filter.options
+          .map(
+            (option) =>
+              `<option value="${escapeHtml(option.value)}"${state.filterValues[filter.filterId] === option.value ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
+          )
+          .join('')}</select></div>`,
+    )
+    .join('');
+  const sortable = orderedColumns(list).filter((column) => column.sortable);
+  const current = state.sort[0];
+  const sortControls =
+    sortable.length > 0
+      ? `<div class="form-field"><label for="${controlId('sort')}">Sort by</label><select id="${controlId('sort')}" name="sort">${sortable
+          .map(
+            (column) =>
+              `<option value="${escapeHtml(column.columnId)}"${current?.columnId === column.columnId ? ' selected' : ''}>${escapeHtml(column.label)}</option>`,
+          )
+          .join(
+            '',
+          )}</select></div><div class="form-field"><label for="${controlId('dir')}">Order</label><select id="${controlId('dir')}" name="dir"><option value="asc"${current?.direction === 'descending' ? '' : ' selected'}>Ascending</option><option value="desc"${current?.direction === 'descending' ? ' selected' : ''}>Descending</option></select></div>`
+      : '';
+  const clearHref = `/?${declaredListParameters(state, base, { filterValues: {}, page: 1, search: '' }).toString()}`;
+  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off"></label></div>${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
+  const sortState = new Map(
+    state.sort.map((sort) => [sort.columnId, sort.direction]),
+  );
+  const header = columns
+    .map((column) => {
+      const direction = sortState.get(column.columnId);
+      if (!column.sortable)
+        return `<th scope="col">${escapeHtml(column.label)}</th>`;
+      const nextDirection =
+        direction === 'ascending' ? 'descending' : 'ascending';
+      const href = `/?${declaredListParameters(state, base, {
+        page: 1,
+        sort: [{ columnId: column.columnId, direction: nextDirection }],
+        sortIsExplicit: true,
+      }).toString()}`;
+      const mark =
+        direction === 'ascending'
+          ? '↑'
+          : direction === 'descending'
+            ? '↓'
+            : '↕';
+      return `<th scope="col" aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
+    })
+    .join('');
+  const body = input.records
+    .map((record) => {
+      const cells = columns
+        .map((column) => {
+          const text = declaredCellText(column, record, input.present);
+          const label = `data-column-label="${escapeHtml(column.label)}" data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
+          if (column.role === 'title') {
+            const title = text ?? record.recordId.slice(0, 8);
+            const href = input.detailHref(record);
+            return `<td ${label}>${href ? `<a class="record-link" href="${escapeHtml(href)}" aria-label="Open ${escapeHtml(input.recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}${record.archived ? ' <span class="status-pill" data-status-role="attention">Archived</span>' : ''}</td>`;
+          }
+          if (column.role === 'status') {
+            const role = declaredStatusRole(column, record);
+            return `<td ${label}>${text === null ? '<span class="muted">—</span>' : `<span class="status-pill"${role ? ` data-status-role="${escapeHtml(role)}"` : ''}>${escapeHtml(text)}</span>`}</td>`;
+          }
+          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}</td>`;
+        })
+        .join('');
+      const title =
+        declaredCellText(
+          columns.find((column) => column.role === 'title')!,
+          record,
+          input.present,
+        ) ?? record.recordId.slice(0, 8);
+      return `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${input.selectionCell ? input.selectionCell(record, title) : ''}${cells}</tr>`;
+    })
+    .join('');
+  const empty =
+    coverage.totalCount === 0
+      ? `<div class="data-empty" data-data-state="empty" data-list-empty="${narrowed ? 'narrowed' : 'view'}"><h3>${narrowed ? `No ${escapeHtml(input.recordLabel.toLowerCase())} match` : `No ${escapeHtml(input.recordLabel.toLowerCase())} here yet`}</h3><p>${narrowed ? `Nothing in this view matches the search or filters. <a href="${escapeHtml(clearHref)}">Clear them</a> to see every record in the view.` : 'Records appear here as soon as they are saved.'}</p></div>`
+      : '';
+  const pageLink = (target: number, text: string, rel?: string) =>
+    `<a class="list-page-link" href="${escapeHtml(`/?${declaredListParameters(state, base, { page: target }).toString()}`)}"${rel ? ` rel="${rel}"` : ''}>${text}</a>`;
+  const paging =
+    pageCount > 1
+      ? `<nav class="list-pagination" aria-label="List pages">${page > 1 ? `${pageLink(1, 'First')}${pageLink(page - 1, 'Previous', 'prev')}` : ''}<span class="list-page-status" data-list-page="${String(page)}" data-list-page-count="${String(pageCount)}">Page ${String(page)} of ${String(pageCount)}</span>${page < pageCount ? `${pageLink(page + 1, 'Next', 'next')}${pageLink(pageCount, 'Last')}` : ''}<form class="list-page-jump" method="get" action="/">${[
+          ...declaredListParameters(state, base, { page: 1 }).entries(),
+        ]
+          .map(
+            ([name, value]) =>
+              `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+          )
+          .join(
+            '',
+          )}<label><span class="sr-only">Go to page</span><input type="number" name="page" min="1" max="${String(pageCount)}" value="${String(page)}" inputmode="numeric"></label><button class="secondary-action" type="submit">Go</button></form></nav>`
+      : '';
+  const exportControl =
+    list.export && input.exportLimit !== null
+      ? coverage.totalCount > input.exportLimit
+        ? `<p class="list-export list-export--refused" data-list-export="over-limit">Export is limited to ${escapeHtml(String(input.exportLimit))} records; narrow the view to export.</p>`
+        : coverage.totalCount > 0
+          ? `<a class="secondary-action list-export" data-list-export="csv" href="${escapeHtml(`/?${declaredListParameters(state, base, { page: 1 }).toString()}&export=csv`)}" download>Export CSV (${escapeHtml(String(coverage.totalCount))})</a>`
+          : ''
+      : '';
+  const count = `${String(coverage.totalCount)} matching ${coverage.totalCount === 1 ? 'record' : 'records'}`;
+  const range =
+    coverage.totalCount > 0
+      ? `Showing ${String(firstVisible)}–${String(lastVisible)}`
+      : '';
+  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
 }
