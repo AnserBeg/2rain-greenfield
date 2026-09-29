@@ -3398,11 +3398,13 @@ async function assertBoundedFreshTenantInstallEvidence(
   // credit (15). PURCHASING-PARITY adds 12 through the purchase order's
   // optional commercial fields: the order's terms, tax code and charges (9:
   // eight search exclusions and the terms' enum check) and the line's
-  // discount and tax (3).
+  // discount and tax (3). Its slices 2-3 add 4 search exclusions: the order's
+  // receive-into location, the receipt's packing slip and notes, and the
+  // amendment request's close flag.
   assert.equal(
     servingScenarioCount,
-    497,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, and 12 for priced purchase orders',
+    501,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, and 16 for purchasing parity',
   );
 
   const intermediate = await pool.query<{
@@ -5600,12 +5602,13 @@ async function assertExactPartitionEvidence(
   // SALES-PARITY's 137 scenarios all execute: every entity it adds has a
   // generic create, and a server-assigned document number is written by that
   // create, so no numbered entity derives for want of an input. 348 + 137 =
-  // 485 emitted, of which the prior 77 derive. PURCHASING-PARITY's 12 execute
-  // on the purchase order and its line, which have generic creates: 497, 420.
+  // 485 emitted, of which the prior 77 derive. PURCHASING-PARITY's 16 execute
+  // on the purchase order, its line, the goods receipt and the amendment
+  // request, each with a generic create: 501, 424.
   assert.equal(
     evidence.results.length,
-    420,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, and priced purchase orders 12',
+    424,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, and purchasing parity 16',
   );
   assert.equal(
     derivations.length,
@@ -5820,14 +5823,17 @@ function assertReceivingVerificationCoverage(
     parseCompiledApplication(compiledApplication).application.compiled,
   );
   for (const [local, count] of Object.entries({
-    goods_receipt: 19,
+    // PURCHASING-PARITY slices 2-3: the receipt's packing slip and notes, and
+    // the amendment request's close flag, each a search exclusion.
+    goods_receipt: 21,
     goods_receipt_line: 17,
-    purchase_order_amendment: 13,
+    purchase_order_amendment: 14,
     purchase_order_received: 10,
     // PUR-1's 12 each, then PURCHASING-PARITY: terms (an enum check and an
     // exclusion), tax code, freight and fee with codes and frozen rates;
-    // the line's discount, tax code and frozen rate.
-    purchase_order: 21,
+    // the line's discount, tax code and frozen rate; then its receive-into
+    // location.
+    purchase_order: 22,
     purchase_order_line: 15,
   })) {
     assert.equal(
