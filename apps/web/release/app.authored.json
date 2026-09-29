@@ -32022,7 +32022,7 @@
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
-          "orderKey": 50,
+          "orderKey": 70,
           "schemaVersion": "v6",
           "slot": "sections",
           "slotId": "northstar.app:slot.sales_order_detail_sections"
@@ -36431,7 +36431,7 @@
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
-          "orderKey": 50,
+          "orderKey": 70,
           "schemaVersion": "v6",
           "slot": "sections",
           "slotId": "northstar.app:slot.customer_invoice_detail_sections"
@@ -38311,7 +38311,7 @@
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
-          "orderKey": 50,
+          "orderKey": 70,
           "schemaVersion": "v6",
           "slot": "sections",
           "slotId": "northstar.app:slot.purchase_order_detail_sections"

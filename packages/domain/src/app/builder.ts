@@ -84,6 +84,17 @@ const RECORD_COMPOSITIONS: Readonly<
     inventoryDocumentWorkspace(namespace, 'stock_count'),
 });
 
+/**
+ * Commercial documents whose lines lead the page (ruling B): their details --
+ * ship-to, terms, charges, carrier -- follow the line tables, so the lines are
+ * on the first screen however many details a document carries.
+ */
+const LINES_LEAD: ReadonlySet<string> = new Set([
+  'sales_order_detail',
+  'purchase_order_detail',
+  'customer_invoice_detail',
+]);
+
 /** Workspaces that read their record through a read-model query. */
 const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
   sales_order_detail: 'commercial_order_get',
@@ -224,12 +235,17 @@ export function composedApplicationDefinition(): Record<string, unknown> {
             ...slots.map((slot) => ({
               ...slot,
               ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
+              ...(slot.slot === 'sections' && LINES_LEAD.has(local)
+                ? { orderKey: 70 }
+                : {}),
             })),
             // A composition renders its fields in `sections`; a read-only
             // document that never declared one gains it here.
             ...(slots.some((value) => value.slot === 'sections')
               ? []
-              : [slot('sections', 'sections', 50)]),
+              : [
+                  slot('sections', 'sections', LINES_LEAD.has(local) ? 70 : 50),
+                ]),
             slot('childTables', 'children', 60),
           ],
         };
