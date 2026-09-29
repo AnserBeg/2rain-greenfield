@@ -31,8 +31,19 @@ export type Presented = {
  * over an entered, stored, frozen or retried value.
  */
 export function declaredDefault(
-  field: Presented,
+  field: Presented & { readonly defaultDaysFromToday?: number | undefined },
+  today: Date = new Date(),
 ): ImmutableJsonValue | undefined {
+  if (field.defaultDaysFromToday !== undefined) {
+    // Midnight UTC of the day that many days out: a date shown as its UTC
+    // calendar date everywhere else in the application.
+    const day = Date.UTC(
+      today.getUTCFullYear(),
+      today.getUTCMonth(),
+      today.getUTCDate() + field.defaultDaysFromToday,
+    );
+    return new Date(day).toISOString();
+  }
   return field.presentation?.kind === 'choice'
     ? field.presentation.defaultValue
     : undefined;

@@ -13,6 +13,8 @@ import {
 } from '../../packages/canonical-model/src/index.js';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
 import { legalEntityReadScopeRequirement } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { moneyText } from '../../apps/web/src/list-declaration.js';
+import { declaredDefault } from '../../apps/web/src/control-semantics.js';
 
 test('the scaffold exposes a canonical workspace contract', () => {
   assert.deepEqual(platformContract, {
@@ -663,4 +665,122 @@ test('ruling B declarations: prices chosen by the order currency, a line tax cod
       }
     ).presentation.print.totals.push('northstar.app:column.not_declared');
   }, /printed totals are declared columns/);
+});
+
+test('money columns read exact decimals and show grouped digits with two decimals, never rounded', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Column = Loose & { columnId: string; format?: string; role?: string };
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(`:surface.${local}`),
+    ) as Loose & {
+      composition?: { fields: Column[] };
+      list?: { columns: Column[] };
+    };
+  const invoiceColumn = (candidate: Loose, local: string) =>
+    surface(candidate, 'customer_invoice_detail').composition!.fields.find(
+      (value) => value.columnId.endsWith(`:column.invoice_${local}`),
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The shipped declarations: an invoice's figures and the Invoices List.
+  assert.equal(invoiceColumn(source, 'balance').format, 'money');
+  assert.deepEqual(
+    surface(source, 'customer_invoice_list')
+      .list!.columns.filter((value) => value.format === 'money')
+      .map((value) => value.columnId.split('.').pop()),
+    ['customer_invoice_list_total', 'customer_invoice_list_balance'],
+  );
+  // A money column reads an exact decimal: not text, not a referenced label.
+  refuse((candidate) => {
+    invoiceColumn(candidate, 'number').format = 'money';
+  }, /a money column reads an exact decimal/);
+  refuse((candidate) => {
+    invoiceColumn(candidate, 'customer').format = 'money';
+  }, /a money column reads an exact decimal/);
+  refuse((candidate) => {
+    surface(candidate, 'customer_invoice_list').list!.columns.find(
+      (value) => value.role === 'title',
+    )!.format = 'money';
+  }, /a money column reads an exact decimal field/);
+  // Shown with grouped digits and at least two decimals; never rounded.
+  for (const [stored, shown] of [
+    ['1234.5', '1,234.50'],
+    ['25', '25.00'],
+    ['0.1', '0.10'],
+    ['12.345', '12.345'],
+    ['12.500', '12.50'],
+    ['-1000000', '-1,000,000.00'],
+    ['not a number', 'not a number'],
+  ] as const)
+    assert.equal(moneyText(stored), shown, stored);
+});
+
+test('a new order starts its requested date three weeks out, a default counted from today', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = Loose & {
+    fieldId: string;
+    defaultDaysFromToday?: number;
+    defaultFrom?: Loose;
+  };
+  const header = (candidate: Loose) =>
+    (
+      (candidate.surfaces as Loose[]).find((value) =>
+        String(value.surfaceId).endsWith(':surface.sales_order_form'),
+      )!.documentEditor as { headerFields: EditorField[] }
+    ).headerFields;
+  const headerField = (candidate: Loose, name: string) =>
+    header(candidate).find((field) =>
+      field.fieldId.endsWith(`:field.sales_order_${name}`),
+    )!;
+  const refuse = (change: (candidate: Loose) => void) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) =>
+          /a default counted from today is a UTC date-time field with no other default/.test(
+            JSON.stringify(value),
+          ),
+        ),
+    );
+  };
+  assert.equal(headerField(source, 'requested_date').defaultDaysFromToday, 21);
+  // Only a UTC date-time field, and never beside another default.
+  refuse((candidate) => {
+    headerField(candidate, 'freight_amount').defaultDaysFromToday = 21;
+  });
+  refuse((candidate) => {
+    headerField(candidate, 'ship_to_city').defaultDaysFromToday = 21;
+  });
+  // Midnight UTC of the day 21 days after the draft opens.
+  assert.equal(
+    declaredDefault(
+      { defaultDaysFromToday: 21 },
+      new Date('2026-09-29T23:30:00.000Z'),
+    ),
+    '2026-10-20T00:00:00.000Z',
+  );
+  assert.equal(
+    declaredDefault(
+      { defaultDaysFromToday: 0 },
+      new Date('2026-12-31T05:00:00Z'),
+    ),
+    '2026-12-31T00:00:00.000Z',
+  );
 });

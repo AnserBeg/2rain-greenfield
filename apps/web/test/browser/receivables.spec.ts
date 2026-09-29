@@ -97,7 +97,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     ).toHaveText('Open');
     await expect(
       invoices.first().locator('td[data-column-label="Total"]'),
-    ).toHaveText('25');
+    ).toHaveText('25.00');
     // Everything shipped is invoiced, so the task is no longer offered.
     await expect(invoiceTask()).toHaveCount(0);
     await capture(page, testInfo, 'order-invoiced');
@@ -111,8 +111,9 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     await expect(page.locator('.composition-header h1')).toHaveText(
       /INV-\d{6}/u,
     );
-    await expect(fact('Total')).toHaveText('25');
-    await expect(fact('Balance')).toHaveText('25');
+    // Money reads with two decimals (the stored value is 25).
+    await expect(fact('Total')).toHaveText('25.00');
+    await expect(fact('Balance')).toHaveText('25.00');
     await expect(fact('Due date')).not.toHaveText('');
     const lines = dataset('invoice_lines').locator('tbody tr');
     await expect(lines).toHaveCount(1);
@@ -121,7 +122,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     ).toHaveText('2');
     await expect(
       lines.first().locator('td[data-column-label="Amount"]'),
-    ).toHaveText('25');
+    ).toHaveText('25.00');
 
     // A payment above the balance is refused and changes nothing.
     await page
@@ -143,7 +144,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
       'RECEIVABLES_AMOUNT_EXCEEDS_BALANCE',
     );
     await page.goto(invoiceUrl);
-    await expect(fact('Balance')).toHaveText('25');
+    await expect(fact('Balance')).toHaveText('25.00');
 
     // A payment in part, then a credit.
     await page
@@ -156,7 +157,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
       .fill('CHQ-2207');
     await finish('Record payment');
     await page.goto(invoiceUrl);
-    await expect(fact('Balance')).toHaveText('15');
+    await expect(fact('Balance')).toHaveText('15.00');
     await expect(page.locator('.composition-header')).toContainText(
       'Partially paid',
     );
@@ -174,7 +175,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     await page.getByLabel('Reason', { exact: true }).fill('Two covers scuffed');
     await finish('Issue credit');
     await page.goto(invoiceUrl);
-    await expect(fact('Balance')).toHaveText('10');
+    await expect(fact('Balance')).toHaveText('10.00');
     await expect(dataset('invoice_credits').locator('tbody tr')).toContainText([
       /CM-\d{6}.*Posted.*5.*Two covers scuffed/su,
     ]);
@@ -184,10 +185,10 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     await page.getByRole('link', { name: 'Print invoice' }).click();
     const totals = page.locator('.print-totals');
     for (const [label, value] of [
-      ['Total', '25'],
-      ['Paid', '10'],
-      ['Credited', '5'],
-      ['Balance', '10'],
+      ['Total', '25.00'],
+      ['Paid', '10.00'],
+      ['Credited', '5.00'],
+      ['Balance', '10.00'],
     ] as const)
       await expect(
         totals
@@ -216,7 +217,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     await finish('Void invoice');
     await page.reload();
     await expect(page.locator('.composition-header')).toContainText('Void');
-    await expect(fact('Balance')).toHaveText('0');
+    await expect(fact('Balance')).toHaveText('0.00');
     // Its quantity can be invoiced again.
     await page.goto(orderUrl);
     await expect(invoiceTask()).toHaveCount(1);

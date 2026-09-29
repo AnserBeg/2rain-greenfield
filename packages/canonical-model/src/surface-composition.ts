@@ -120,6 +120,18 @@ export function validateSurfaceCompositions(
       for (const column of values) {
         if (!fields.has(column.field))
           fail(surface.surfaceId, 'column is not a declared query result');
+        // A read model states its figures as exact decimals; a declared field
+        // must be one to be shown as money.
+        if (
+          column.format === 'money' &&
+          (column.reference ||
+            model.fields.some(
+              (field) =>
+                field.fieldId === column.field &&
+                field.fieldType.kind !== 'exactDecimalFieldType',
+            ))
+        )
+          fail(surface.surfaceId, 'a money column reads an exact decimal');
         if (column.reference) {
           const target = queries.get(column.reference.query.targetId);
           if (

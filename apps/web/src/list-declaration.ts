@@ -248,6 +248,19 @@ export type FieldPresenter = (
   value: RuntimeViewContract.ImmutableJsonValue,
 ) => string;
 
+/**
+ * An exact decimal shown as money: grouped digits and at least two decimals.
+ * Never rounded -- a stored price of 12.345 reads 12.345 -- and anything that
+ * is not a plain decimal string is shown as it is.
+ */
+export function moneyText(value: string): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/u.exec(value);
+  if (!match) return value;
+  const [, sign, whole, fraction = ''] = match;
+  const grouped = whole!.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+  return `${sign}${grouped}.${fraction.replace(/0+$/u, '').padEnd(2, '0')}`;
+}
+
 /** The display text of one declared cell, from server-projected values only. */
 export function declaredCellText(
   column: DeclaredListColumn,
@@ -266,6 +279,8 @@ export function declaredCellText(
         timeZone: 'UTC',
       }).format(new Date(instant));
   }
+  if (column.format === 'money' && typeof value === 'string')
+    return moneyText(value);
   if (present) return present(record, column.field, value);
   const display = record.displayValues?.[column.field];
   if (typeof display === 'string') return display;

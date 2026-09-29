@@ -382,6 +382,19 @@ export function validateSurfaceWorkspaces(
           );
         if (field.presentation)
           checkPresentation(field.presentation, field.fieldId, declared);
+        const target = fields.get(field.fieldId)?.fieldType;
+        if (
+          field.defaultDaysFromToday !== undefined &&
+          (field.defaultFrom ||
+            field.presentation ||
+            field.reference ||
+            target?.kind !== 'dateTimeFieldType' ||
+            target.timezoneSemantics !== 'utcInstant')
+        )
+          fail(
+            surface.surfaceId,
+            'a default counted from today is a UTC date-time field with no other default',
+          );
         if (field.reference) {
           if (
             !selects(field.reference.queryId, [

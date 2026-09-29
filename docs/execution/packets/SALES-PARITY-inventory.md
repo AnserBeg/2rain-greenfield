@@ -23,6 +23,7 @@ NOT OBSERVED · NOT IN REFERENCE (not built) · RAIN-ONLY.
 | L10 keyboard | Ctrl-K and "/" global search; no row keys | picker only | every tab, sort, page is a link; forms submit on Enter | PARTIAL: global search (SUP-01) is outside the List |
 | L11 states | loading skeleton, "No sales order matches this filter", refresh banner | "No records yet" | view-empty vs narrowed-empty with Clear; server-rendered, so no loading state | MATCHED |
 | L12 phone | table 1,073px wide scrolls sideways inside a 364px box | cards | cards; tab strip scrolls; controls in a 2-column grid; no page scroll | MATCHED (better) |
+| L13 money | CA$ with two decimals | stored decimals (`25`, `12.5`) | Total and Balance columns read as money (grouped, two decimals, never rounded); CSV keeps stored values | MATCHED (no symbol: the currency is its own column) |
 | L-reuse | shared controls on other lists | — | Purchase orders (tabs/filter/export) and Posted stock (SKU, item, location labels) | MATCHED |
 
 ## A. Sales-order workflows
@@ -35,7 +36,7 @@ NOT OBSERVED · NOT IN REFERENCE (not built) · RAIN-ONLY.
 | S4 customer defaults | currency, terms, ship-to from customer | currency, terms, salesperson and default ship-to set in a customer workspace, filled in place on choosing the customer (bed8809a) | MATCHED | 3 |
 | S5 salesperson | required select | a Party with an active salesperson role; optional picker offering only salespeople; List column and search (bed8809a) | MATCHED (optional per ruling E) | 3 |
 | S6 ship-to / address book | block + saved addresses (Google autocomplete: provider) | per-customer address book, picker scoped to the customer, the order's own copy; Confirm and an initial shipment need a complete ship-to (bed8809a) | MATCHED (autocomplete REMAINDER) | 3 |
-| S7 requested date | today + 21 days default | optional instant | PARTIAL | 3 |
+| S7 requested date | today + 21 days default | a new draft starts 21 days out (midnight UTC), declared as an editor default counted from today | MATCHED | 8 |
 | S8 terms / due date | Net N from requested date | terms on the order, defaulted from the customer; the invoice's due date is its date plus the order's terms (ruling B) | MATCHED | 3/7 |
 | S9 currency / FX | CAD/USD/EUR, rate for non-CAD | CAD/USD/EUR choice | MATCHED under ruling B (no FX) | — |
 | S10 product lines | type-ahead with price/availability | picker with SKU/unit; choosing it prices the line in the order currency, takes the order's tax code and freezes its rate | MATCHED (availability shown in Fulfillment) | 4 |

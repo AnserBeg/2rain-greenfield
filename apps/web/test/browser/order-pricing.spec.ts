@@ -102,7 +102,7 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     const totals = page.locator('.print-totals');
     for (const [label, value] of [
       ['Subtotal', '27.00'],
-      ['Freight', '25'],
+      ['Freight', '25.00'],
       ['Tax', '2.60'],
       ['Total', '54.60'],
     ] as const)

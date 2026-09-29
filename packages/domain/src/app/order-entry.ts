@@ -259,7 +259,11 @@ export function orderEntrySurfaces(
               ...fromCustomer('party_default_salesperson_party_id'),
             }),
             field(`${local}_order_date`, 'Order date'),
-            field(`${local}_requested_date`, 'Requested date'),
+            // A new order asks for delivery three weeks out, as the reference
+            // does; the user changes it before saving.
+            field(`${local}_requested_date`, 'Requested date', {
+              defaultDaysFromToday: 21,
+            }),
             field(`${local}_currency`, 'Currency', {
               ...currency,
               ...fromCustomer('party_default_currency'),

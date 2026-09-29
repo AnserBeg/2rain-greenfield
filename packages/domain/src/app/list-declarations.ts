@@ -15,7 +15,7 @@ export interface ListColumnSpec {
   readonly field: string;
   readonly role?: Role;
   readonly sortable?: boolean;
-  readonly format?: 'date';
+  readonly format?: 'date' | 'money';
   readonly reference?: { readonly query: string; readonly labelField: string };
   readonly statusRoles?: Readonly<Record<string, StatusRole>>;
 }
@@ -177,8 +177,18 @@ function invoiceList(namespace: string): ListSpec {
           [state('paid')]: 'success',
         },
       },
-      { local: 'total', label: 'Total', field: field('total') },
-      { local: 'balance', label: 'Balance', field: field('balance') },
+      {
+        local: 'total',
+        label: 'Total',
+        field: field('total'),
+        format: 'money',
+      },
+      {
+        local: 'balance',
+        label: 'Balance',
+        field: field('balance'),
+        format: 'money',
+      },
       { local: 'currency', label: 'Currency', field: field('currency') },
     ],
     defaultSort: [{ column: 'invoice_date', direction: 'descending' }],

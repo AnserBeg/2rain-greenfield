@@ -32230,7 +32230,8 @@
             "columnId": "northstar.app:column.freight",
             "label": "Freight",
             "orderKey": 66,
-            "field": "northstar.app:field.sales_order_freight_amount"
+            "field": "northstar.app:field.sales_order_freight_amount",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.freight_tax_code",
@@ -32254,7 +32255,8 @@
             "columnId": "northstar.app:column.other_fee",
             "label": "Other fee",
             "orderKey": 68,
-            "field": "northstar.app:field.sales_order_other_fee_amount"
+            "field": "northstar.app:field.sales_order_other_fee_amount",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.other_fee_tax_code",
@@ -32278,25 +32280,29 @@
             "columnId": "northstar.app:column.order_subtotal",
             "label": "Subtotal",
             "orderKey": 70,
-            "field": "northstar.app:metric.order_subtotal"
+            "field": "northstar.app:metric.order_subtotal",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.order_charges",
             "label": "Charges",
             "orderKey": 71,
-            "field": "northstar.app:metric.order_charges"
+            "field": "northstar.app:metric.order_charges",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.order_tax",
             "label": "Tax",
             "orderKey": 72,
-            "field": "northstar.app:metric.order_tax"
+            "field": "northstar.app:metric.order_tax",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.order_total",
             "label": "Total",
             "orderKey": 73,
-            "field": "northstar.app:metric.order_total"
+            "field": "northstar.app:metric.order_total",
+            "format": "money"
           }
         ],
         "children": [
@@ -32366,6 +32372,7 @@
                 "label": "Unit price",
                 "orderKey": 40,
                 "field": "northstar.app:field.sales_order_line_unit_price",
+                "format": "money",
                 "presentation": { "role": "secondary", "priority": 40 }
               },
               {
@@ -32380,6 +32387,7 @@
                 "label": "List price",
                 "orderKey": 50,
                 "field": "northstar.app:field.sales_order_line_list_price",
+                "format": "money",
                 "presentation": { "role": "detail", "priority": 50 }
               },
               {
@@ -32413,6 +32421,7 @@
                 "label": "Tax",
                 "orderKey": 70,
                 "field": "northstar.app:metric.line_tax",
+                "format": "money",
                 "presentation": { "role": "quantity", "priority": 70 }
               },
               {
@@ -32420,6 +32429,7 @@
                 "label": "Amount",
                 "orderKey": 80,
                 "field": "northstar.app:metric.line_amount",
+                "format": "money",
                 "presentation": { "role": "quantity", "priority": 80 }
               }
             ]
@@ -32512,6 +32522,7 @@
                 "label": "Unit price",
                 "orderKey": 45,
                 "field": "northstar.app:field.sales_order_line_unit_price",
+                "format": "money",
                 "presentation": { "role": "secondary", "priority": 45 }
               },
               {
@@ -32736,13 +32747,15 @@
                 "columnId": "northstar.app:column.invoice_total",
                 "label": "Total",
                 "orderKey": 50,
-                "field": "northstar.app:field.customer_invoice_total"
+                "field": "northstar.app:field.customer_invoice_total",
+                "format": "money"
               },
               {
                 "columnId": "northstar.app:column.invoice_balance",
                 "label": "Balance",
                 "orderKey": 60,
-                "field": "northstar.app:field.customer_invoice_balance"
+                "field": "northstar.app:field.customer_invoice_balance",
+                "format": "money"
               }
             ]
           }
@@ -33707,7 +33720,8 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_requested_date",
-            "label": "Requested date"
+            "label": "Requested date",
+            "defaultDaysFromToday": 21
           },
           {
             "fieldId": "northstar.app:field.sales_order_currency",
@@ -34228,7 +34242,8 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_requested_date",
-            "label": "Requested date"
+            "label": "Requested date",
+            "defaultDaysFromToday": 21
           },
           {
             "fieldId": "northstar.app:field.sales_order_currency",
@@ -36248,7 +36263,8 @@
             "field": "northstar.app:field.customer_invoice_total",
             "role": "value",
             "priority": 5,
-            "sortable": true
+            "sortable": true,
+            "format": "money"
           },
           {
             "columnId": "northstar.app:list_column.customer_invoice_list_balance",
@@ -36257,7 +36273,8 @@
             "field": "northstar.app:field.customer_invoice_balance",
             "role": "value",
             "priority": 6,
-            "sortable": true
+            "sortable": true,
+            "format": "money"
           },
           {
             "columnId": "northstar.app:list_column.customer_invoice_list_currency",
@@ -36531,43 +36548,50 @@
             "columnId": "northstar.app:column.invoice_subtotal",
             "label": "Subtotal",
             "orderKey": 50,
-            "field": "northstar.app:field.customer_invoice_subtotal"
+            "field": "northstar.app:field.customer_invoice_subtotal",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.invoice_charges",
             "label": "Charges",
             "orderKey": 51,
-            "field": "northstar.app:field.customer_invoice_charges"
+            "field": "northstar.app:field.customer_invoice_charges",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.invoice_tax",
             "label": "Tax",
             "orderKey": 52,
-            "field": "northstar.app:field.customer_invoice_tax"
+            "field": "northstar.app:field.customer_invoice_tax",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.invoice_total",
             "label": "Total",
             "orderKey": 53,
-            "field": "northstar.app:field.customer_invoice_total"
+            "field": "northstar.app:field.customer_invoice_total",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.invoice_paid",
             "label": "Paid",
             "orderKey": 54,
-            "field": "northstar.app:field.customer_invoice_paid_amount"
+            "field": "northstar.app:field.customer_invoice_paid_amount",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.invoice_credited",
             "label": "Credited",
             "orderKey": 55,
-            "field": "northstar.app:field.customer_invoice_credited_amount"
+            "field": "northstar.app:field.customer_invoice_credited_amount",
+            "format": "money"
           },
           {
             "columnId": "northstar.app:column.invoice_balance",
             "label": "Balance",
             "orderKey": 56,
-            "field": "northstar.app:field.customer_invoice_balance"
+            "field": "northstar.app:field.customer_invoice_balance",
+            "format": "money"
           }
         ],
         "children": [
@@ -36633,7 +36657,8 @@
                 "columnId": "northstar.app:column.invoice_unit_price",
                 "label": "Unit price",
                 "orderKey": 50,
-                "field": "northstar.app:field.customer_invoice_line_unit_price"
+                "field": "northstar.app:field.customer_invoice_line_unit_price",
+                "format": "money"
               },
               {
                 "columnId": "northstar.app:column.invoice_discount",
@@ -36651,13 +36676,15 @@
                 "columnId": "northstar.app:column.invoice_amount",
                 "label": "Amount",
                 "orderKey": 80,
-                "field": "northstar.app:field.customer_invoice_line_amount"
+                "field": "northstar.app:field.customer_invoice_line_amount",
+                "format": "money"
               },
               {
                 "columnId": "northstar.app:column.invoice_line_tax",
                 "label": "Tax",
                 "orderKey": 90,
-                "field": "northstar.app:field.customer_invoice_line_tax"
+                "field": "northstar.app:field.customer_invoice_line_tax",
+                "format": "money"
               }
             ]
           },
@@ -36699,7 +36726,8 @@
                 "columnId": "northstar.app:column.invoice_payment_amount",
                 "label": "Amount",
                 "orderKey": 40,
-                "field": "northstar.app:field.customer_payment_amount"
+                "field": "northstar.app:field.customer_payment_amount",
+                "format": "money"
               },
               {
                 "columnId": "northstar.app:column.invoice_payment_method",
@@ -36753,7 +36781,8 @@
                 "columnId": "northstar.app:column.invoice_credit_amount",
                 "label": "Amount",
                 "orderKey": 40,
-                "field": "northstar.app:field.customer_credit_amount"
+                "field": "northstar.app:field.customer_credit_amount",
+                "format": "money"
               },
               {
                 "columnId": "northstar.app:column.invoice_credit_reason",
@@ -38488,7 +38517,8 @@
                 "label": "Unit cost",
                 "orderKey": 50,
                 "field": "northstar.app:field.purchase_order_line_unit_price",
-                "presentation": { "role": "secondary", "priority": 50 }
+                "presentation": { "role": "secondary", "priority": 50 },
+                "format": "money"
               }
             ]
           },

@@ -28,6 +28,7 @@ import {
   type CompiledSurfaceInputField,
 } from './surface-contract.js';
 import { escapeHtml as h } from './html.js';
+import { moneyText } from './list-declaration.js';
 import {
   DECIMAL_KINDS,
   admitsChoice,
@@ -171,12 +172,10 @@ async function present(
   for (const column of columns) {
     const value = recordValue(record, column.field);
     if (!column.reference || value === null) {
-      cells[column.columnId] = displayFieldValue(
-        view,
-        record,
-        column.field,
-        value,
-      );
+      cells[column.columnId] =
+        column.format === 'money' && typeof value === 'string'
+          ? moneyText(value)
+          : displayFieldValue(view, record, column.field, value);
       continue;
     }
     const result = await query(

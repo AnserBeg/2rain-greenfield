@@ -64,11 +64,22 @@ Serve the metadata-sales fixture instead: `node scripts/run-with-test-lock.mjs s
 
 1. Record tasks does not offer **Invoice shipped quantities** yet: nothing is shipped.
 2. Select the line → Reserve stock 3 at Calgary warehouse; select the reservation → Ship reserved stock 2 (carrier and tracking number).
-3. **Invoice shipped quantities** → review → confirm. Invoices lists one **INV-** invoice, Open, Total 25; the task is no longer offered.
-4. **Open invoice**: Total 25, Balance 25, a due date; one line of 2 EA, Amount 25.
-5. **Record payment** 30 → refused (`RECEIVABLES_AMOUNT_EXCEEDS_BALANCE`), nothing changes. Record payment 10 by Cheque, reference CHQ-2207: Balance 15, **Partially paid**, a **PAY-** row; **Void invoice** is no longer offered.
-6. **Issue credit** 5, reason "Two covers scuffed": Balance 10, a **CM-** row.
-7. **Print invoice**: the line and Subtotal, Charges, Tax, Total, Paid 10, Credited 5, Balance 10.
-8. Back on the order, ship 1 more and invoice again: a second invoice of 12.5. Open it → **Void invoice**: Void, Balance 0; the order offers Invoice shipped quantities again.
+3. **Invoice shipped quantities** → review → confirm. Invoices lists one **INV-** invoice, Open, Total 25.00; the task is no longer offered.
+4. **Open invoice**: Total 25.00, Balance 25.00, a due date; one line of 2 EA, Amount 25.00.
+5. **Record payment** 30 → refused (`RECEIVABLES_AMOUNT_EXCEEDS_BALANCE`), nothing changes. Record payment 10 by Cheque, reference CHQ-2207: Balance 15.00, **Partially paid**, a **PAY-** row; **Void invoice** is no longer offered.
+6. **Issue credit** 5, reason "Two covers scuffed": Balance 10.00, a **CM-** row.
+7. **Print invoice**: the line and Subtotal, Charges, Tax, Total, Paid 10.00, Credited 5.00, Balance 10.00.
+8. Back on the order, ship 1 more and invoice again: a second invoice of 12.50. Open it → **Void invoice**: Void, Balance 0.00; the order offers Invoice shipped quantities again.
 9. Sales → **Invoices**: tabs All 2 · Open 0 · Partially paid 1 · Paid 0 · Void 1 (after step 8, before re-invoicing), customer names, CSV export.
 10. Close the order after shipping everything: Record actions → **Reopen** is refused while an invoice counts (`RECEIVABLES_ORDER_NOT_REOPENABLE`).
+
+## §7 Money with two decimals and a requested date three weeks out (slice 8)
+
+Serve either fixture above.
+
+1. Sales → New: **Requested date** already reads the date 21 days from today (00:00 UTC); change it or keep it, then Save draft.
+2. Open a priced order (§5): Unit price, List price, Amount, Tax, Freight, Other fee and the totals read with two decimals and grouped thousands (`12.50`, `1,234.50`); a price stored with more decimals (`12.345`) is shown whole, never rounded.
+3. §6's invoice figures, payments, credits and printed totals read the same way (`25.00`, `15.00`, `10.00`, `5.00`).
+4. Sales → Invoices: Total and Balance columns read with two decimals; **Export CSV** keeps the stored values (`25`, `12.5`).
+5. Purchasing → a purchase order: the lines' **Unit cost** reads with two decimals.
+

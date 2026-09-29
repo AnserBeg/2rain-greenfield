@@ -730,6 +730,11 @@ const compositionColumn = z.strictObject({
   label: LabelSchema,
   orderKey: boundedOrderKey,
   field: z.string().min(1),
+  /**
+   * `money`: an exact decimal shown with grouped digits and at least two
+   * decimals, never rounded. Optional v6 key; absence keeps historical bytes.
+   */
+  format: z.literal('money').optional(),
   presentation: z
     .strictObject({
       role: z.enum(['primary', 'secondary', 'quantity', 'detail']),
@@ -1132,6 +1137,13 @@ const editorField = z.strictObject({
       headerFieldId: CanonicalIdSchema.optional(),
     })
     .optional(),
+  /**
+   * A never-saved document's starting value for a UTC date-time field: that
+   * many days after the day the draft opens, at midnight UTC -- a requested
+   * date three weeks out. The user may change it; a saved record keeps what it
+   * stores. Optional v6 key (ADR-0047 §7).
+   */
+  defaultDaysFromToday: z.number().int().min(0).max(366).optional(),
 });
 export const SurfaceDocumentEditorSchema = z.strictObject({
   headerLabel: LabelSchema.optional(),
@@ -1176,8 +1188,12 @@ const listColumn = z.strictObject({
   role: z.enum(['title', 'value', 'status']),
   priority: boundedOrderKey,
   sortable: z.boolean(),
-  /** `date`: a date or instant shown as its calendar date (UTC). */
-  format: z.literal('date').optional(),
+  /**
+   * `date`: a date or instant shown as its calendar date (UTC). `money`: an
+   * exact decimal shown with grouped digits and at least two decimals, never
+   * rounded (the CSV keeps the stored value).
+   */
+  format: z.enum(['date', 'money']).optional(),
   reference: z
     .strictObject({
       query: compositionReference('queryReference'),

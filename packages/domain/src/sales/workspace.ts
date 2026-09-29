@@ -137,12 +137,19 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       bind(['recordId'], stepValue(source, 'recordId')),
       bind(['expectedRevision'], stepValue(source, 'revision')),
     ]);
+  // Shown with grouped digits and two decimals, never rounded (ruling B).
+  const money = <T extends object>(value: T) => ({
+    ...value,
+    format: 'money' as const,
+  });
   const lines = id('dataset', 'fulfillment_lines');
   const pricedLines = id('dataset', 'order_lines');
   // An order total, read with the record: the detail surface reads through
   // the commercial order query, whose read model states the totals.
   const totalColumn = (name: string, label: string, orderKey: number) =>
-    column(`order_${name}`, label, orderKey, id('metric', `order_${name}`));
+    money(
+      column(`order_${name}`, label, orderKey, id('metric', `order_${name}`)),
+    );
   const reservations = id('dataset', 'line_reservations');
   const shipments = id('dataset', 'order_shipments');
   const invoices = id('dataset', 'order_invoices');
@@ -308,7 +315,9 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         'tax_code_get',
         'tax_code_code',
       ]),
-      column('freight', 'Freight', 66, field('sales_order_freight_amount')),
+      money(
+        column('freight', 'Freight', 66, field('sales_order_freight_amount')),
+      ),
       column(
         'freight_tax_code',
         'Freight tax code',
@@ -316,11 +325,13 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         field('sales_order_freight_tax_code_id'),
         ['tax_code_get', 'tax_code_code'],
       ),
-      column(
-        'other_fee',
-        'Other fee',
-        68,
-        field('sales_order_other_fee_amount'),
+      money(
+        column(
+          'other_fee',
+          'Other fee',
+          68,
+          field('sales_order_other_fee_amount'),
+        ),
       ),
       column(
         'other_fee_tax_code',
@@ -380,18 +391,22 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
               35,
               field('sales_order_line_unit_id'),
             ),
-            column(
-              'priced_unit_price',
-              'Unit price',
-              40,
-              field('sales_order_line_unit_price'),
+            money(
+              column(
+                'priced_unit_price',
+                'Unit price',
+                40,
+                field('sales_order_line_unit_price'),
+              ),
             ),
             column('priced_basis', 'Price', 45, id('metric', 'price_basis')),
-            column(
-              'priced_list_price',
-              'List price',
-              50,
-              field('sales_order_line_list_price'),
+            money(
+              column(
+                'priced_list_price',
+                'List price',
+                50,
+                field('sales_order_line_list_price'),
+              ),
             ),
             column(
               'priced_discount',
@@ -406,8 +421,15 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
               field('sales_order_line_tax_code_id'),
               ['tax_code_get', 'tax_code_code'],
             ),
-            column('priced_tax', 'Tax', 70, id('metric', 'line_tax')),
-            column('priced_amount', 'Amount', 80, id('metric', 'line_amount')),
+            money(column('priced_tax', 'Tax', 70, id('metric', 'line_tax'))),
+            money(
+              column(
+                'priced_amount',
+                'Amount',
+                80,
+                id('metric', 'line_amount'),
+              ),
+            ),
           ],
           'priced_item',
           ['priced_unit', 'priced_unit_price', 'priced_basis'],
@@ -450,11 +472,13 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
               field('sales_order_line_ordered_quantity'),
             ),
             column('unit', 'Unit', 40, field('sales_order_line_unit_id')),
-            column(
-              'unit_price',
-              'Unit price',
-              45,
-              field('sales_order_line_unit_price'),
+            money(
+              column(
+                'unit_price',
+                'Unit price',
+                45,
+                field('sales_order_line_unit_price'),
+              ),
             ),
             column('coverage', 'Reserved', 50, id('metric', 'coverage')),
             column('shipped', 'Shipped', 60, id('metric', 'shipped')),
@@ -582,12 +606,21 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             field('customer_invoice_invoice_date'),
           ),
           column('invoice_due', 'Due', 40, field('customer_invoice_due_date')),
-          column('invoice_total', 'Total', 50, field('customer_invoice_total')),
-          column(
-            'invoice_balance',
-            'Balance',
-            60,
-            field('customer_invoice_balance'),
+          money(
+            column(
+              'invoice_total',
+              'Total',
+              50,
+              field('customer_invoice_total'),
+            ),
+          ),
+          money(
+            column(
+              'invoice_balance',
+              'Balance',
+              60,
+              field('customer_invoice_balance'),
+            ),
           ),
         ],
       },
@@ -990,6 +1023,10 @@ export function invoiceWorkspace(namespace: string): Record<string, unknown> {
         }
       : {}),
   });
+  const money = <T extends object>(value: T) => ({
+    ...value,
+    format: 'money' as const,
+  });
   const record = (name: string) => ({ source: 'record', field: name });
   const literal = (value: string | null) => ({ source: 'literal', value });
   const generated = (value: string) => ({ source: 'generated', value });
@@ -1120,18 +1157,20 @@ export function invoiceWorkspace(namespace: string): Record<string, unknown> {
         40,
         field('customer_invoice_payment_terms'),
       ),
-      column('subtotal', 'Subtotal', 50, field('customer_invoice_subtotal')),
-      column('charges', 'Charges', 51, field('customer_invoice_charges')),
-      column('tax', 'Tax', 52, field('customer_invoice_tax')),
-      column('total', 'Total', 53, field('customer_invoice_total')),
-      column('paid', 'Paid', 54, field('customer_invoice_paid_amount')),
-      column(
-        'credited',
-        'Credited',
-        55,
-        field('customer_invoice_credited_amount'),
-      ),
-      column('balance', 'Balance', 56, field('customer_invoice_balance')),
+      ...[
+        column('subtotal', 'Subtotal', 50, field('customer_invoice_subtotal')),
+        column('charges', 'Charges', 51, field('customer_invoice_charges')),
+        column('tax', 'Tax', 52, field('customer_invoice_tax')),
+        column('total', 'Total', 53, field('customer_invoice_total')),
+        column('paid', 'Paid', 54, field('customer_invoice_paid_amount')),
+        column(
+          'credited',
+          'Credited',
+          55,
+          field('customer_invoice_credited_amount'),
+        ),
+        column('balance', 'Balance', 56, field('customer_invoice_balance')),
+      ].map(money),
     ],
     children: [
       {
@@ -1169,11 +1208,13 @@ export function invoiceWorkspace(namespace: string): Record<string, unknown> {
             field('customer_invoice_line_quantity'),
           ),
           column('unit', 'Unit', 40, field('customer_invoice_line_unit_id')),
-          column(
-            'unit_price',
-            'Unit price',
-            50,
-            field('customer_invoice_line_unit_price'),
+          money(
+            column(
+              'unit_price',
+              'Unit price',
+              50,
+              field('customer_invoice_line_unit_price'),
+            ),
           ),
           column(
             'discount',
@@ -1187,8 +1228,17 @@ export function invoiceWorkspace(namespace: string): Record<string, unknown> {
             70,
             field('customer_invoice_line_tax_rate_percent'),
           ),
-          column('amount', 'Amount', 80, field('customer_invoice_line_amount')),
-          column('line_tax', 'Tax', 90, field('customer_invoice_line_tax')),
+          money(
+            column(
+              'amount',
+              'Amount',
+              80,
+              field('customer_invoice_line_amount'),
+            ),
+          ),
+          money(
+            column('line_tax', 'Tax', 90, field('customer_invoice_line_tax')),
+          ),
         ],
       },
       ...(['payment', 'credit'] as const).map((kind, index) => ({
@@ -1220,11 +1270,13 @@ export function invoiceWorkspace(namespace: string): Record<string, unknown> {
                 : 'customer_credit_credit_date',
             ),
           ),
-          column(
-            `${kind}_amount`,
-            'Amount',
-            40,
-            field(`customer_${kind}_amount`),
+          money(
+            column(
+              `${kind}_amount`,
+              'Amount',
+              40,
+              field(`customer_${kind}_amount`),
+            ),
           ),
           ...(kind === 'payment'
             ? [

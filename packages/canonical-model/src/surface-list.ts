@@ -80,6 +80,11 @@ export function validateSurfaceLists(
         )
       )
         fail(column.columnId, 'a date column reads a date or date-time field');
+      if (
+        column.format === 'money' &&
+        fields.get(column.field)?.fieldType.kind !== 'exactDecimalFieldType'
+      )
+        fail(column.columnId, 'a money column reads an exact decimal field');
       if (column.format && column.reference)
         fail(column.columnId, 'a reference label is shown as its label');
       if (column.statusRoles && column.role !== 'status')
