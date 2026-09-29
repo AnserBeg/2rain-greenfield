@@ -133,19 +133,21 @@ test('a numbering the runtime could not honour is refused by name', () => {
       },
     ],
     [
-      // The first number is the start (1000), wider than its minimum digits:
-      // `SO-1000` is 7 characters in a field of 6.
+      // The first number is the start, wider than its minimum digits:
+      // `ABCDEFGH-1000000000` is 19 characters in a field of 18, which the
+      // sentinel floor alone admits.
       'shorter than its format',
       (app) => {
         Object.assign(field(app, 'sales_order_number').numbering as Json, {
+          prefix: 'ABCDEFGH',
           minimumDigits: 1,
-          start: 1000,
+          start: 1_000_000_000,
         });
         (
           field(app, 'sales_order_number').fieldType as {
             maximumLength: number;
           }
-        ).maximumLength = 6;
+        ).maximumLength = 18;
       },
     ],
     [
