@@ -83,9 +83,17 @@ export const reachabilityProducers = [
     ['test/surface-runtime-contract.test.ts'],
     'apps/web/package.json',
   ),
+  // The composed application's replay of every release runs in its own job,
+  // under the same bound, so neither job nears it.
   nodeProducer('postgres', 'postgres', 'test:postgres', [
-    'test/postgres/**/*.test.ts',
+    'test/postgres/**/!(composed-application).test.ts',
   ]),
+  nodeProducer(
+    'postgres-composed',
+    'postgres-composed',
+    'test:postgres:composed',
+    ['test/postgres/composed-application.test.ts'],
+  ),
   {
     id: 'browser',
     runner: 'playwright',
