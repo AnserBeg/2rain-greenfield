@@ -179,6 +179,31 @@
       },
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.tax_code_archive",
+        "resource": "northstar.app:entity.tax_code"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.tax_code_create",
+        "resource": "northstar.app:entity.tax_code"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.tax_code_read",
+        "resource": "northstar.app:entity.tax_code"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.tax_code_restore",
+        "resource": "northstar.app:entity.tax_code"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.tax_code_update",
+        "resource": "northstar.app:entity.tax_code"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.legal_entity_archive",
         "resource": "northstar.app:entity.legal_entity"
       },
@@ -726,31 +751,6 @@
         "action": "update",
         "permissionId": "northstar.app:permission.stock_count_update",
         "resource": "northstar.app:entity.stock_count"
-      },
-      {
-        "action": "archive",
-        "permissionId": "northstar.app:permission.tax_code_archive",
-        "resource": "northstar.app:entity.tax_code"
-      },
-      {
-        "action": "create",
-        "permissionId": "northstar.app:permission.tax_code_create",
-        "resource": "northstar.app:entity.tax_code"
-      },
-      {
-        "action": "read",
-        "permissionId": "northstar.app:permission.tax_code_read",
-        "resource": "northstar.app:entity.tax_code"
-      },
-      {
-        "action": "restore",
-        "permissionId": "northstar.app:permission.tax_code_restore",
-        "resource": "northstar.app:entity.tax_code"
-      },
-      {
-        "action": "update",
-        "permissionId": "northstar.app:permission.tax_code_update",
-        "resource": "northstar.app:entity.tax_code"
       }
     ],
     "northstar.shell:package.demo": [
