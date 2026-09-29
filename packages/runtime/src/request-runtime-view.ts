@@ -168,7 +168,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 9 adds picker eligibility and typed Task input presentation.
     // 10 adds declared Lists: columns, saved views, filters, sort and export.
     // 11 adds editor defaults and scoped pickers.
-    maximumSupportedVersion: 11,
+    // 12 adds List progress, open and before-today views and overdue dates.
+    maximumSupportedVersion: 12,
   },
 });
 

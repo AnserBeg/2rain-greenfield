@@ -129,6 +129,12 @@ export function declaredListParameters(
 interface ListArgumentOptions {
   readonly exportMaximumResultCount?: number;
   readonly mode: 'count' | 'export' | 'page';
+  /**
+   * The request's clock, read once per request and injectable -- as the
+   * editor's "N days from today" default is -- so the page, every tab count
+   * and the export compare against the same "before today".
+   */
+  readonly now: Date;
   readonly pageOffset?: number;
   readonly queryId: string;
   readonly scopeArguments: Readonly<
@@ -136,6 +142,50 @@ interface ListArgumentOptions {
   >;
   /** For a view count, the view counted instead of the selected one. */
   readonly viewId?: string | null;
+}
+
+const DAY_MILLISECONDS = 86_400_000;
+
+/**
+ * `startOfTodayUtc`: midnight UTC of the request's day, the calendar every
+ * List date is shown in. The release names only the symbol; the instant is
+ * made here, at request time, and sent to the gateway as an argument.
+ */
+export function startOfTodayUtc(now: Date): Date {
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
+/**
+ * The progress argument a declared List sends, with a view's `open`. Inferred
+ * rather than annotated, so it stays a plain JSON argument value.
+ */
+function progressArgument(list: SurfaceList, open: boolean) {
+  const progress = list.progress;
+  if (!progress) return undefined;
+  return Object.freeze({
+    done: Object.freeze({
+      fieldId: progress.done.quantity,
+      queryId: progress.done.query.targetId,
+      relationId: progress.done.relation,
+    }),
+    lines: Object.freeze({
+      fieldId: progress.lines.quantity,
+      queryId: progress.lines.query.targetId,
+      relationId: progress.lines.relation,
+    }),
+    ...(progress.openIn
+      ? {
+          openIn: Object.freeze({
+            fieldId: progress.openIn.field,
+            values: Object.freeze([...progress.openIn.values]),
+          }),
+        }
+      : {}),
+    ...(open ? { openOnly: true as const } : {}),
+    outputs: Object.freeze({ ...progress.outputs }),
+  });
 }
 
 /**
@@ -203,6 +253,20 @@ export function declaredListArguments(
       : options.mode === 'export'
         ? (options.exportMaximumResultCount ?? list.pageSize)
         : list.pageSize;
+  // Every request of the List carries its progress, so a count, a page and
+  // an export read the same figures; a view's `open` and `before` narrow all
+  // three in the statement, never over a fetched page.
+  const progress = progressArgument(list, view?.open === true);
+  const beforeFilters = Object.freeze(
+    view?.before
+      ? [
+          Object.freeze({
+            before: startOfTodayUtc(options.now).toISOString(),
+            fieldId: view.before.field,
+          }),
+        ]
+      : [],
+  );
   const digestInput: SharedListQueryRequest = {
     cursor: null,
     effectivePageSize: pageSize,
@@ -211,6 +275,8 @@ export function declaredListArguments(
     pageOffset: options.pageOffset ?? 0,
     parentScope: null,
     ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
+    ...(progress ? { progress } : {}),
+    ...(beforeFilters.length > 0 ? { beforeFilters } : {}),
     relationLabels: [],
     ...(referenceLabels.length > 0 ? { referenceLabels } : {}),
     requestedPageSize: pageSize,
@@ -228,6 +294,8 @@ export function declaredListArguments(
           ? encodeSharedListCursor(options.queryId, digestInput, offset)
           : null,
       ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
+      ...(progress ? { progress } : {}),
+      ...(beforeFilters.length > 0 ? { beforeFilters } : {}),
       matchMode: 'substring',
       ...(options.mode === 'export' ? { outputMode: 'export' } : {}),
       pageSize,
@@ -285,6 +353,50 @@ export function declaredCellText(
   const display = record.displayValues?.[column.field];
   if (typeof display === 'string') return display;
   return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+/**
+ * Whole days a row's date is late, for a column declaring `overdue`: `null`
+ * unless the row meets every condition of the named view -- its exact filters,
+ * something open when the view keeps only open rows, and the date before the
+ * request's midnight UTC -- judged from the row's server-projected values and
+ * the same anchor the view's own tab was counted with. A date on the UTC day
+ * before today is one day late.
+ */
+export function overdueDays(
+  list: SurfaceList,
+  column: DeclaredListColumn,
+  record: SemanticRecordDto,
+  now: Date,
+): number | null {
+  const view = column.overdue
+    ? list.views.find((candidate) => candidate.viewId === column.overdue?.view)
+    : undefined;
+  if (!view?.before) return null;
+  if (
+    !view.filters.every(
+      (filter) => record.values[filter.field] === filter.value,
+    )
+  )
+    return null;
+  if (view.open) {
+    const open = list.progress
+      ? record.values[list.progress.outputs.open]
+      : undefined;
+    // Above zero: an unsigned exact decimal with a digit other than zero.
+    if (
+      typeof open !== 'string' ||
+      !/^\d+(?:\.\d+)?$/u.test(open) ||
+      !/[1-9]/u.test(open)
+    )
+      return null;
+  }
+  const value = record.values[view.before.field];
+  const instant = typeof value === 'string' ? Date.parse(value) : Number.NaN;
+  const anchor = startOfTodayUtc(now).getTime();
+  if (!Number.isFinite(instant) || instant >= anchor) return null;
+  const day = startOfTodayUtc(new Date(instant)).getTime();
+  return Math.round((anchor - day) / DAY_MILLISECONDS);
 }
 
 // A leading = + - @ (or tab/CR) makes a spreadsheet evaluate the cell. The

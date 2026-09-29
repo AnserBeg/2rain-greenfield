@@ -4,6 +4,7 @@ import {
   languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
   type SurfaceDocumentEditor,
+  type SurfaceList,
   type FieldNumbering,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
@@ -816,6 +817,9 @@ function surfaceManifestPayload(
     // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
+      // 12: List progress, open and before-today views and the overdue marker.
+      // A reader that dropped them would count and page every row of an "open"
+      // or "late" tab -- the wrong rows under an exact-looking count.
       // 11: editor defaults, scoped pickers and Task input eligibility. A
       // reader that dropped them would leave a customer's terms unapplied,
       // offer every customer's addresses as this order's ship-to, or offer
@@ -827,90 +831,111 @@ function surfaceManifestPayload(
       // either would offer every party as a customer, or ask for free text
       // where a governed value is declared -- a wrong render, not a lesser one.
       minimumVersion: original.surfaces.some((surface) => {
-        const editor =
-          'documentEditor' in surface
-            ? (surface.documentEditor as SurfaceDocumentEditor | undefined)
+        const list =
+          'list' in surface
+            ? (surface.list as SurfaceList | undefined)
             : undefined;
         return (
-          [...(editor?.headerFields ?? []), ...(editor?.lineFields ?? [])].some(
-            (field) =>
-              field.defaultFrom ||
-              field.reference?.within ||
-              (field.presentation?.kind === 'derived' &&
-                field.presentation.sourceByHeader),
-          ) ||
-          compositions
-            .get(surface.surfaceId)
-            ?.actions.some((action) =>
-              action.inputs.some((input) => input.eligibility),
-            ) === true
+          list !== undefined &&
+          (list.progress !== undefined ||
+            list.views.some((view) => view.open || view.before) ||
+            list.columns.some((column) => column.overdue))
         );
       })
-        ? 11
-        : original.surfaces.some((surface) => 'list' in surface && surface.list)
-          ? 10
-          : original.surfaces.some((surface) => {
-                const editor =
-                  'documentEditor' in surface
-                    ? (surface.documentEditor as
-                        SurfaceDocumentEditor | undefined)
-                    : undefined;
-                const composition = compositions.get(surface.surfaceId);
-                return (
-                  [
-                    ...(editor?.headerFields ?? []),
-                    ...(editor?.lineFields ?? []),
-                  ].some((field) => field.reference?.eligibility) ||
-                  composition?.actions.some((action) =>
-                    action.inputs.some((input) => input.presentation),
+        ? 12
+        : original.surfaces.some((surface) => {
+              const editor =
+                'documentEditor' in surface
+                  ? (surface.documentEditor as
+                      SurfaceDocumentEditor | undefined)
+                  : undefined;
+              return (
+                [
+                  ...(editor?.headerFields ?? []),
+                  ...(editor?.lineFields ?? []),
+                ].some(
+                  (field) =>
+                    field.defaultFrom ||
+                    field.reference?.within ||
+                    (field.presentation?.kind === 'derived' &&
+                      field.presentation.sourceByHeader),
+                ) ||
+                compositions
+                  .get(surface.surfaceId)
+                  ?.actions.some((action) =>
+                    action.inputs.some((input) => input.eligibility),
                   ) === true
-                );
-              })
-            ? 9
-            : original.surfaces.some(
-                  (surface) =>
-                    'workspace' in surface || 'documentEditor' in surface,
-                )
-              ? 8
-              : [...compositions.values()].some(
-                    (value) =>
-                      value?.actions.some(
-                        (action) => action.presentation?.task,
-                      ) ||
-                      value?.children.some(
-                        (child) => child.presentation?.selectedActions,
-                      ),
+              );
+            })
+          ? 11
+          : original.surfaces.some(
+                (surface) => 'list' in surface && surface.list,
+              )
+            ? 10
+            : original.surfaces.some((surface) => {
+                  const editor =
+                    'documentEditor' in surface
+                      ? (surface.documentEditor as
+                          SurfaceDocumentEditor | undefined)
+                      : undefined;
+                  const composition = compositions.get(surface.surfaceId);
+                  return (
+                    [
+                      ...(editor?.headerFields ?? []),
+                      ...(editor?.lineFields ?? []),
+                    ].some((field) => field.reference?.eligibility) ||
+                    composition?.actions.some((action) =>
+                      action.inputs.some((input) => input.presentation),
+                    ) === true
+                  );
+                })
+              ? 9
+              : original.surfaces.some(
+                    (surface) =>
+                      'workspace' in surface || 'documentEditor' in surface,
                   )
-                ? 7
+                ? 8
                 : [...compositions.values()].some(
                       (value) =>
-                        value?.presentation?.task ||
+                        value?.actions.some(
+                          (action) => action.presentation?.task,
+                        ) ||
                         value?.children.some(
-                          (child) =>
-                            child.sort?.length || child.presentation?.compact,
+                          (child) => child.presentation?.selectedActions,
                         ),
                     )
-                  ? 6
+                  ? 7
                   : [...compositions.values()].some(
                         (value) =>
-                          value?.presentation ||
+                          value?.presentation?.task ||
                           value?.children.some(
                             (child) =>
-                              child.presentation ||
-                              child.columns.some(
-                                (column) => column.presentation,
-                              ),
-                          ) ||
-                          value?.actions.some((action) => action.presentation),
+                              child.sort?.length || child.presentation?.compact,
+                          ),
                       )
-                    ? 5
-                    : composed
-                      ? 4
-                      : emitsFieldKinds
-                        ? 3
-                        : navigation
-                          ? 2
-                          : 1,
+                    ? 6
+                    : [...compositions.values()].some(
+                          (value) =>
+                            value?.presentation ||
+                            value?.children.some(
+                              (child) =>
+                                child.presentation ||
+                                child.columns.some(
+                                  (column) => column.presentation,
+                                ),
+                            ) ||
+                            value?.actions.some(
+                              (action) => action.presentation,
+                            ),
+                        )
+                      ? 5
+                      : composed
+                        ? 4
+                        : emitsFieldKinds
+                          ? 3
+                          : navigation
+                            ? 2
+                            : 1,
     },
   };
 }
@@ -1119,6 +1144,34 @@ function agentListPresets(original: VersionedNormalizedApplicationPackage) {
             : [],
         ),
         surfaceId: surface.surfaceId,
+        // Progress is published as the list argument it is; a view's `open`
+        // adds `openOnly`, and its `before` names the field and the symbolic
+        // anchor the caller turns into an instant (midnight UTC of its day).
+        ...(list.progress
+          ? {
+              progress: {
+                done: {
+                  fieldId: list.progress.done.quantity,
+                  queryId: list.progress.done.query.targetId,
+                  relationId: list.progress.done.relation,
+                },
+                lines: {
+                  fieldId: list.progress.lines.quantity,
+                  queryId: list.progress.lines.query.targetId,
+                  relationId: list.progress.lines.relation,
+                },
+                ...(list.progress.openIn
+                  ? {
+                      openIn: {
+                        fieldId: list.progress.openIn.field,
+                        values: list.progress.openIn.values,
+                      },
+                    }
+                  : {}),
+                outputs: list.progress.outputs,
+              },
+            }
+          : {}),
         views: list.views.map((view) => ({
           fieldFilters: view.filters.map((filter) => ({
             fieldId: filter.field,
@@ -1126,6 +1179,15 @@ function agentListPresets(original: VersionedNormalizedApplicationPackage) {
           })),
           label: view.label,
           viewId: view.viewId,
+          ...(view.open ? { open: true } : {}),
+          ...(view.before
+            ? {
+                before: {
+                  anchor: view.before.anchor,
+                  fieldId: view.before.field,
+                },
+              }
+            : {}),
         })),
       },
     ];

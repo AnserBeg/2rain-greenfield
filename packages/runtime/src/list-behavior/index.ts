@@ -1,3 +1,5 @@
+import { canonicalize } from '@north-star/canonical-model';
+
 import type { ImmutableJsonValue } from '../request-runtime-view.js';
 import {
   assertExactKeys,
@@ -81,6 +83,49 @@ export interface SharedListRelatedFilter {
   }[];
 }
 
+/** A declared list query whose rows are added up, through one relation. */
+export interface SharedListProgressSource {
+  readonly fieldId: string;
+  readonly queryId: string;
+  readonly relationId: string;
+}
+
+/**
+ * Per row, what its active lines order and what their active done rows record
+ * -- for example a purchase order's ordered and received units -- summed by
+ * the list statement itself, with the open remainder between them. `lines`
+ * are the row's children; `done` rows point at those lines. `openIn` names the
+ * row states in which anything is open; in any other state open is 0.
+ * `openOnly` keeps only rows with something open, BEFORE the count and the
+ * page window, so a tab count, a page and an export are all exact. The three
+ * figures come back in each record's values under `outputs`.
+ */
+export interface SharedListProgress {
+  readonly done: SharedListProgressSource;
+  readonly lines: SharedListProgressSource;
+  readonly openIn?: {
+    readonly fieldId: string;
+    readonly values: readonly string[];
+  };
+  readonly openOnly?: true;
+  readonly outputs: {
+    readonly done: string;
+    readonly open: string;
+    readonly ordered: string;
+  };
+}
+
+/**
+ * Keeps only rows whose date is before an instant -- a view's "before today"
+ * turned into the request's own midnight UTC by the caller -- ahead of the
+ * count and the page window. The instant is part of the request, so the
+ * release stays clock-free and a cursor minted on one day cannot page another.
+ */
+export interface SharedListBeforeFilter {
+  readonly before: string;
+  readonly fieldId: string;
+}
+
 export interface SharedListQueryRequest {
   readonly cursor: string | null;
   readonly effectivePageSize: number;
@@ -93,6 +138,8 @@ export interface SharedListQueryRequest {
     readonly fieldId: string;
     readonly value: string;
   }[];
+  readonly beforeFilters?: readonly SharedListBeforeFilter[];
+  readonly progress?: SharedListProgress;
   readonly relatedFilter?: SharedListRelatedFilter;
   readonly relationLabels: readonly SharedListRelationLabelRequest[];
   readonly referenceLabels?: readonly SharedListReferenceLabelRequest[];
@@ -121,11 +168,18 @@ export interface AuthorizedSharedListReferenceLabel extends SharedListReferenceL
   readonly targetEntityId: string;
 }
 
+/** Progress whose two queries passed current policy, with their entities. */
+export interface AuthorizedSharedListProgress extends SharedListProgress {
+  readonly doneEntityId: string;
+  readonly linesEntityId: string;
+}
+
 export interface AuthorizedSharedListRequest {
   readonly query: SharedListQueryRequest;
   readonly relationLabels: readonly AuthorizedSharedListRelationLabel[];
   readonly referenceLabels?: readonly AuthorizedSharedListReferenceLabel[];
   readonly relatedFilter?: AuthorizedSharedListRelatedFilter;
+  readonly progress?: AuthorizedSharedListProgress;
 }
 
 export interface SharedListCoverage {
@@ -149,6 +203,12 @@ export interface SharedListCoverage {
   }[];
   /** Echoed like `parentScope`, so an executor that ignored it is observable. */
   readonly relatedFilter?: SharedListRelatedFilter;
+  /**
+   * Echoed, and REQUIRED to match by the gateway: an executor that ignored an
+   * open view or a before-today view would count the wrong rows silently.
+   */
+  readonly beforeFilters?: readonly SharedListBeforeFilter[];
+  readonly progress?: SharedListProgress;
   /** Echoed so an executor that paged an export instead is observable. */
   readonly outputMode?: 'export';
   readonly projectedSearchValueCount: number;
@@ -202,6 +262,8 @@ export function parseSharedListArguments(
     relatedFilter: relatedFilterValue,
     referenceLabels: referenceLabelsValue,
     outputMode: outputModeValue,
+    progress: progressValue,
+    beforeFilters: beforeFiltersValue,
     ...closedList
   } = list;
   assertExactKeys(closedList, [
@@ -248,6 +310,12 @@ export function parseSharedListArguments(
         })();
   if (parentScope && referenceScope)
     throw malformed('one exact relation scope is allowed');
+  const progress =
+    progressValue === undefined ? undefined : parseProgress(progressValue);
+  const beforeFilters =
+    beforeFiltersValue === undefined
+      ? undefined
+      : parseBeforeFilters(beforeFiltersValue);
   if (list.schemaVersion !== SHARED_LIST_QUERY_VERSION) {
     throw malformed('list schemaVersion is not supported');
   }
@@ -300,6 +368,8 @@ export function parseSharedListArguments(
     ...(referenceScope ? { referenceScope } : {}),
     ...(fieldFilters ? { fieldFilters } : {}),
     ...(relatedFilter ? { relatedFilter } : {}),
+    ...(progress ? { progress } : {}),
+    ...(beforeFilters ? { beforeFilters } : {}),
     relationLabels,
     ...(referenceLabels ? { referenceLabels } : {}),
     search: list.search,
@@ -316,6 +386,8 @@ export function parseSharedListArguments(
     ...(referenceScope ? { referenceScope } : {}),
     ...(fieldFilters ? { fieldFilters } : {}),
     ...(relatedFilter ? { relatedFilter } : {}),
+    ...(progress ? { progress } : {}),
+    ...(beforeFilters ? { beforeFilters } : {}),
     relationLabels,
     ...(referenceLabels ? { referenceLabels } : {}),
     ...(exporting ? { outputMode: 'export' as const } : {}),
@@ -357,6 +429,64 @@ export function authorizeSharedListFields(
         sort.fieldId,
       );
     }
+  }
+  // A progress state and a before-today date compare stored values the query
+  // selects; the figures come back under ids that shadow nothing it projects.
+  const compared = [
+    ...(query.progress?.openIn ? [query.progress.openIn.fieldId] : []),
+    ...(query.beforeFilters ?? []).map((filter) => filter.fieldId),
+  ];
+  for (const fieldId of compared) {
+    if (!input.selectedFieldIds.has(fieldId)) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a progress state or before filter reads a field the list query selects',
+        fieldId,
+      );
+    }
+  }
+  for (const output of Object.values(query.progress?.outputs ?? {})) {
+    if (input.selectedFieldIds.has(output) || relationIds.has(output)) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a progress output would shadow a projected field or label',
+        output,
+      );
+    }
+  }
+}
+
+/**
+ * The executor must report the progress and before filters it applied, and
+ * they must be the ones asked for: a figure missing from a row reads as an
+ * unstated value, but a count taken without the open or before filter would be
+ * a wrong number presented as exact. Checked by the gateway on every answer.
+ */
+export function requireSharedListEcho(
+  query: SharedListQueryRequest,
+  listCoverage: SharedListCoverage,
+): void {
+  const same = (
+    left: ImmutableJsonValue | undefined,
+    right: ImmutableJsonValue | undefined,
+  ) =>
+    left === undefined || right === undefined
+      ? left === right
+      : canonicalize(left) === canonicalize(right);
+  if (
+    !same(
+      query.progress as ImmutableJsonValue | undefined,
+      listCoverage.progress as ImmutableJsonValue | undefined,
+    ) ||
+    !same(
+      query.beforeFilters as ImmutableJsonValue | undefined,
+      listCoverage.beforeFilters as ImmutableJsonValue | undefined,
+    )
+  ) {
+    throw new SharedListContractError(
+      'LIST_RESULT_MALFORMED',
+      'the list result did not apply the requested progress or before filters',
+    );
   }
 }
 
@@ -449,6 +579,106 @@ function parseExactFieldFilters(
       )
         throw malformed('invalid exact field filter');
       return Object.freeze({ fieldId: entry.fieldId, value: entry.value });
+    }),
+  );
+}
+
+function parseProgressSource(
+  value: ImmutableJsonValue | undefined,
+  name: string,
+): SharedListProgressSource {
+  if (!isRecord(value))
+    throw malformed(`list progress ${name} must be an object`);
+  assertExactKeys(value, ['fieldId', 'queryId', 'relationId']);
+  assertCanonicalId(value.fieldId, `list progress ${name} fieldId`);
+  assertCanonicalId(value.queryId, `list progress ${name} queryId`);
+  assertCanonicalId(value.relationId, `list progress ${name} relationId`);
+  return Object.freeze({
+    fieldId: value.fieldId,
+    queryId: value.queryId,
+    relationId: value.relationId,
+  });
+}
+
+function parseProgress(value: ImmutableJsonValue): SharedListProgress {
+  if (!isRecord(value)) throw malformed('list progress must be an object');
+  const { openIn, openOnly, ...closed } = value;
+  assertExactKeys(closed, ['done', 'lines', 'outputs']);
+  const outputs = closed.outputs;
+  if (!isRecord(outputs))
+    throw malformed('list progress outputs must be an object');
+  assertExactKeys(outputs, ['done', 'open', 'ordered']);
+  assertCanonicalId(outputs.done, 'list progress done output');
+  assertCanonicalId(outputs.open, 'list progress open output');
+  assertCanonicalId(outputs.ordered, 'list progress ordered output');
+  if (new Set([outputs.done, outputs.open, outputs.ordered]).size !== 3)
+    throw malformed('list progress outputs must be three distinct ids');
+  if (openOnly !== undefined && openOnly !== true)
+    throw malformed('list progress openOnly is true when present');
+  const states =
+    openIn === undefined
+      ? undefined
+      : (() => {
+          if (!isRecord(openIn))
+            throw malformed('list progress openIn must be an object');
+          assertExactKeys(openIn, ['fieldId', 'values']);
+          assertCanonicalId(openIn.fieldId, 'list progress openIn fieldId');
+          const values = openIn.values;
+          if (
+            !Array.isArray(values) ||
+            values.length === 0 ||
+            values.length > 8 ||
+            values.some(
+              (entry) =>
+                typeof entry !== 'string' ||
+                entry.length === 0 ||
+                entry.length > 240,
+            ) ||
+            new Set(values).size !== values.length
+          )
+            throw malformed('list progress openIn holds one to eight values');
+          return Object.freeze({
+            fieldId: openIn.fieldId,
+            values: Object.freeze([...(values as string[])]),
+          });
+        })();
+  return Object.freeze({
+    done: parseProgressSource(closed.done, 'done'),
+    lines: parseProgressSource(closed.lines, 'lines'),
+    ...(states ? { openIn: states } : {}),
+    ...(openOnly === true ? { openOnly: true as const } : {}),
+    outputs: Object.freeze({
+      done: outputs.done,
+      open: outputs.open,
+      ordered: outputs.ordered,
+    }),
+  });
+}
+
+/** Only a canonical UTC instant, so the digest and the SQL see one spelling. */
+function parseBeforeFilters(
+  value: ImmutableJsonValue,
+): readonly SharedListBeforeFilter[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 4)
+    throw malformed('one to four before filters required');
+  const fieldIds = new Set<string>();
+  return Object.freeze(
+    value.map((entry) => {
+      if (!isRecord(entry)) throw malformed('before filter must be an object');
+      assertExactKeys(entry, ['before', 'fieldId']);
+      assertCanonicalId(entry.fieldId, 'before filter fieldId');
+      const before = entry.before;
+      if (
+        typeof before !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(before) ||
+        !Number.isFinite(Date.parse(before)) ||
+        new Date(before).toISOString() !== before
+      )
+        throw malformed('before filter must be a canonical UTC instant');
+      if (fieldIds.has(entry.fieldId))
+        throw malformed('before filter fieldIds must be unique');
+      fieldIds.add(entry.fieldId);
+      return Object.freeze({ before, fieldId: entry.fieldId });
     }),
   );
 }
