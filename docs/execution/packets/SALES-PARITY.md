@@ -1,6 +1,6 @@
 # SALES-PARITY — Rain's Sales workflows and shared List at PaneFlow parity through metadata
 
-Status: vertical checkpoint (2026-09-29) — slices 1-4, 5a, 6, 7 and three review rounds' fixes executable and pushed; returns, List row actions and exceptions not built; draft PR to open; no merge, no deployment. Sole LOCAL BUILD.
+Status: vertical checkpoint (2026-09-29) — slices 1-4, 5a, 6, 7, 8 and three review rounds' fixes executable and pushed; returns, List row actions and exceptions not built; draft PR to open; no merge, no deployment. Sole LOCAL BUILD.
 Tier: Critical-touching — `release-verification-service.ts` (claims 9, 20, 21) and materializer grant SQL (claims 10-11); the ONLINE confirm arm is owed (`SALES-PARITY-review-prompt.md`).
 Base: `994a7dc969694c8077630eaa536fcd385f7e030c` (tip of `packet/RAIN-ORDER-ENTRY`, PR #6, which contains PR #5 `3830f95b` and main `fe97b63b`).
 Dependencies are building blocks, not qualifications: PR #5 and PR #6 owner acceptance and fresh CI are pending; nothing here closes either.
@@ -40,6 +40,7 @@ Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distribut
 19. Commands are offered only where they apply: capability commands declare preconditions (Close and Cancel on a confirmed order, Reopen on a closed one, post on a draft, void on an open invoice), and "Invoice shipped quantities" is offered only while the commercial read model states uninvoiced shipped quantity and a stated total.
 20. **Critical.** Release verification reads its probe records through each entity's plain query of a type, never a read-model query of the same type, whose executor its gateway does not register (`#queryForEntity`).
 21. **Critical.** Verification counts a create's assigned numbers as written by the create, so a numbered entity executes its scenarios (125 of 485 had derived); arranged records carry their assigned values, read back from the create; a number's uniqueness-fold scenario probes what a caller can observe (two creates store fold-distinct values; a supplied case variant is refused as input, naming the field). The compiler's plan is unchanged (ADR-0047).
+22. Slice 8 (optional v6 keys): a List or record column declared `money` shows an exact decimal grouped with at least two decimals, never rounded, beside its document's currency (CSV keeps stored values); an editor UTC date-time field declared `defaultDaysFromToday` starts a never-saved draft that many days out at midnight UTC (the order's requested date: 21).
 
 ## Decisions
 
@@ -63,7 +64,7 @@ Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distribut
 ## Slices
 
 1. List `4d188d1c`. 2. Numbering `3e718be9`. 5a/6. Confirm, Reopen, carrier/tracking, print `7084b983`, `6a6bc7c1`. Grants (Critical) `c74ea33e`, `7947dba9`. 3. Master data `bed8809a`, `cb5f7e9f`, `49b2ccf7`; generator `28461658`; oracle `7a265fe1`.
-4. Pricing `f129a7a5`; fixes `1cb20847`, `51948df8` (Critical), `852ac8d6`, `8779b1a8`. 7. Receivables `d199c49a` (lineage entry 21). Review fixes `53ca49f4`, `427d4a50`, `40ca820a`, `a1a8a051` (Critical), `f98fb641`, `b829d633`.
+4. Pricing `f129a7a5`; fixes `1cb20847`, `51948df8` (Critical), `852ac8d6`, `8779b1a8`. 7. Receivables `d199c49a` (lineage entry 21). Review fixes `53ca49f4`, `427d4a50`, `40ca820a`, `a1a8a051` (Critical), `f98fb641`, `b829d633`. 8. Money and requested date `d05feab2` (lineage entry 22), coverage `efd40452`.
 
 ## Controls
 
@@ -74,22 +75,21 @@ Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distribut
 
 - `d199c49a` content (own worktree, shared lock, on battery): unit 184/184; integration 228/228; compiler 175/175; language coverage PASS (2487 obligations, 725 -> 729 observed); surface grammar 25/25; PostgreSQL `receivables` 1/1; browser `receivables` 1/1 (3.1 min); release `--check` PASS.
 - `7a265fe1` (detached worktree): PostgreSQL composed-application 16 pass, 1 failed + 3 cancelled, every one a 300 s timeout on battery (no assertion reached); browser meta-sales 2/2; order-entry failed on its own selector (fixed `1cb20847`).
-- `51948df8`: PostgreSQL commercial-totals refused the fixture's non-canonical prices (fixed `852ac8d6`); activation of entry 20 itself passed.
-- `de0e8a03`/`bed8809a` (slices 1-3): as recorded in the handoff; contracts 30/30, agent 3/3 there.
+- `51948df8`: PostgreSQL commercial-totals refused the fixture's non-canonical prices (fixed `852ac8d6`); activation of entry 20 itself passed. `de0e8a03`/`bed8809a` (slices 1-3): contracts 30/30, agent 3/3.
 - `f98fb641`/`b829d633` (detached worktree, AC): PostgreSQL document-numbering 1/1 (124 s), reading the admitted release's evidence; that release measured 408 executed and 77 derived, every derivation `VERIFICATION_NO_GENERIC_CREATE_OPERATION` (the composed pins). Unit field-numbering 4/4.
+- `d05feab2`/`efd40452` (detached worktree, AC, host paging under 1 GB free): release `--check` PASS; integration 228/228; compiler 175/175; surface grammar and hygiene 36/36; unit 184/187, the three failures `dev-environment` container-lifecycle tests whose 30 s spawn waits the paging host exceeds (13/14 on a lone rerun); coverage re-derived (2487 -> 2498), its check owes a green unit run; browser and PostgreSQL not run (host memory).
 - NOT run at the head: composed-application (and its full-replay oracle for entry 21), order-entry, order-pricing, customer-defaults, declared-list, fulfillment, document-numbering, the composed Sales specs, contracts, agent, the fourth control's `--run`. CI on the PR is the gate for them.
 
 ## Test it yourself
 
-Steps (under ten minutes each): `SALES-PARITY-test-it-yourself.md` — §1 List, §2 Numbering, §3 Confirm/Reopen/carrier/print, §4 customers, salespeople and ship-to, §5 prices and totals, §6 invoices, payments and credits.
+Steps (under ten minutes each): `SALES-PARITY-test-it-yourself.md` — §1 List, §2 Numbering, §3 Confirm/Reopen/carrier/print, §4 customers, salespeople and ship-to, §5 prices and totals, §6 invoices, payments and credits, §7 money and the requested date.
 Serve: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/order-entry-fixture.ts --serve --distributor` from `/home/rvham/2rain-greenfield-sales-parity`; Ctrl-C stops it and removes its container.
 
 ## Filed
 
-- Global search (Ctrl K) is outside the List contract (SUP-01). The List has no row actions ("Post shipment"); exceptions (shortage marker) are not built.
-- Money shows as stored exact decimals (`25`, `12.5`), no money display vocabulary. An invoice links back to its order only when opened from it ("Back to order").
+- Global search (Ctrl K) is outside the List contract (SUP-01). The List has no row actions ("Post shipment"); exceptions (shortage marker) are not built. An invoice links back to its order only when opened from it: it stores its order as a relation, which no link can read.
 - A refused post leaves its numbered draft (payment, credit, invoice), shown as Draft, as a refused shipment does.
-- `apps/web/release/app.compiled.json` is 58 MB: GitHub warns above 50 MB and refuses above 100 MB (about 3 MB per lineage entry).
+- `apps/web/release/app.compiled.json` is 65 MB (22 entries): GitHub warns above 50 MB and refuses above 100 MB (about 3 MB per lineage entry).
 - Returns (ruling D): see Decisions; its Critical arm moves with that packet. PR #6's served demo lost its database when Docker restarted (2026-09-28); that lane owns its restart.
 
 Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numbering (sentinel prefix `V`, an 18-digit scan, a start wider than its field), fixed at `53ca49f4`; none in the grants or the plain read. Round 2 (`7f3c31f1`) closed those with no regression and found two older ones (sentinels in a narrow field; a scan not using the key's case fold), fixed at `427d4a50`. Round 3 (`40ca820a`) closed those with no regression and found one older defect, verification treating an assigned number as a caller input (claim 21), fixed at `a1a8a051`; the scan cost it flagged is removed at `f98fb641`. Round 4 (confirm) is owed: `SALES-PARITY-review-prompt.md`.
@@ -98,11 +98,11 @@ Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numb
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SALES-PARITY",
   "base": "994a7dc969694c8077630eaa536fcd385f7e030c",
-  "head": "b829d633c0602419ae95c7b3201172d8930243da",
+  "head": "efd40452491f7814d51ba2adfed6b1f4f1c4c753",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
     "apps/web/release/current-policy-bindings.json", "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts",
-    "apps/web/src/document-editor.ts", "apps/web/src/editor-controls.ts", "apps/web/src/list-declaration.ts",
+    "apps/web/src/control-semantics.ts", "apps/web/src/document-editor.ts", "apps/web/src/editor-controls.ts", "apps/web/src/list-declaration.ts",
     "apps/web/src/message-catalog.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/workspace-entry.ts",
     "apps/web/test/browser/customer-defaults.spec.ts", "apps/web/test/browser/declared-list.spec.ts", "apps/web/test/browser/message-catalog.spec.ts",
