@@ -76,9 +76,8 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     await expect(line.locator('td[data-column-label="Tax"]')).toHaveText(
       '1.69',
     );
-    await expect(line.locator('td[data-column-label="Unit cost"]')).toHaveText(
-      '12.50',
-    );
+    // A secondary column reads inside the line's product cell.
+    await expect(line).toContainText('Unit cost 12.50');
     const fact = (label: string) =>
       page
         .locator('.composition-header-facts div')

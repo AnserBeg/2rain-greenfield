@@ -51,6 +51,8 @@ import {
   type InventoryTransferLineV1,
   type InventoryTransferPostingCommandV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
+import { COMMERCIAL_CAPABILITY_ID } from '../../packages/domain/src/sales/definition.js';
+import { commercialReadModel } from '../../packages/postgres-provider/src/commercial-read-model.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import {
   planStockIdentityLocks,
@@ -2706,7 +2708,17 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       issuer,
       INVENTORY_PROVIDER_ERROR_MAPPINGS,
     );
-    const queryGateway = new SemanticQueryGateway(policy, interpreter);
+    // The order page reads its totals query (PURCHASING-PARITY), a
+    // commercial read model.
+    const queryGateway = new SemanticQueryGateway(
+      policy,
+      interpreter,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { [COMMERCIAL_CAPABILITY_ID]: commercialReadModel },
+    );
     const fixture = await compiledFixture();
     const executor = RECEIVING_CAPABILITY_EXECUTOR_FACTORY.create({
       actorIssuer: issuer,
@@ -3298,7 +3310,7 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
     const orderPage = await entry.run({ headers: {} }, (view) =>
       renderSurfaceRuntimeWithData(
         view,
-        `/?${new URLSearchParams({ surface: 'northstar.app:surface.purchase_order_detail', record: orderId, 'northstar.app:parameter.purchase_order_get_legal_entity_scope': legalReject, dataset: 'northstar.app:dataset.purchasing_lines', selected: orderLineId, 'select:northstar.app:dataset.purchasing_lines': orderLineId })}`,
+        `/?${new URLSearchParams({ surface: 'northstar.app:surface.purchase_order_detail', record: orderId, 'northstar.app:parameter.commercial_purchase_order_get_legal_entity_scope': legalReject, dataset: 'northstar.app:dataset.purchasing_lines', selected: orderLineId, 'select:northstar.app:dataset.purchasing_lines': orderLineId })}`,
         {
           applicationExtension: RECEIVING_SURFACE_RUNTIME_EXTENSION,
           queryGateway,
