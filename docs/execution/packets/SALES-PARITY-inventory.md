@@ -32,25 +32,25 @@ NOT OBSERVED · NOT IN REFERENCE (not built) · RAIN-ONLY.
 | S1 numbering | SO-000001 per tenant at draft create | SO-/PO-/SHP- assigned on create, not typed, never reused (3e718be9) | MATCHED | 2 |
 | S2 create/edit/save/reopen | modal composer, one POST | draft editor, sequential save (audit, d9eca60a) | MATCHED | — |
 | S3 customer select/create | combobox, "+ New customer" | in-place combobox, eligibility, quick create (review2, d9eca60a) | MATCHED | — |
-| S4 customer defaults | currency, terms, ship-to from customer | none | MISSING | 3 |
-| S5 salesperson | required select | none | MISSING | 3 |
-| S6 ship-to / address book | block + saved addresses (Google autocomplete: provider) | none | MISSING (autocomplete REMAINDER) | 3 |
+| S4 customer defaults | currency, terms, ship-to from customer | currency, terms, salesperson and default ship-to set in a customer workspace, filled in place on choosing the customer (bed8809a) | MATCHED | 3 |
+| S5 salesperson | required select | a Party with an active salesperson role; optional picker offering only salespeople; List column and search (bed8809a) | MATCHED (optional per ruling E) | 3 |
+| S6 ship-to / address book | block + saved addresses (Google autocomplete: provider) | per-customer address book, picker scoped to the customer, the order's own copy; Confirm and an initial shipment need a complete ship-to (bed8809a) | MATCHED (autocomplete REMAINDER) | 3 |
 | S7 requested date | today + 21 days default | optional instant | PARTIAL | 3 |
-| S8 terms / due date | Net N from requested date | none | MISSING (ruled: due on invoice) | 3/7 |
+| S8 terms / due date | Net N from requested date | terms on the order, defaulted from the customer; the invoice's due date is its date plus the order's terms (ruling B) | MATCHED | 3/7 |
 | S9 currency / FX | CAD/USD/EUR, rate for non-CAD | CAD/USD/EUR choice | MATCHED under ruling B (no FX) | — |
-| S10 product lines | type-ahead with price/availability | picker with SKU/unit | PARTIAL | 4 |
-| S11 prices | contract list, then catalog | none | MISSING | 4 |
-| S12 discount/tax/charges/totals | line %, tax codes, freight/fees, server totals | unit price only | MISSING | 4 |
-| S13 confirm | Confirm (reason required though labelled optional: defect) | Release | PARTIAL (label per ruling F) | 5 |
+| S10 product lines | type-ahead with price/availability | picker with SKU/unit; choosing it prices the line in the order currency, takes the order's tax code and freezes its rate | MATCHED (availability shown in Fulfillment) | 4 |
+| S11 prices | contract list, then catalog | item price per currency (CAD/USD/EUR); the line keeps its list price and marks a manual override; a currency change re-prices untouched lines | MATCHED under ruling B (price lists deferred) | 4 |
+| S12 discount/tax/charges/totals | line %, tax codes, freight/fees, server totals | line % discount; fixed-rate tax codes frozen on each line and charge; freight and other fee with their own codes; exact half-up line amounts and order totals read by a commercial read model; printed totals | MATCHED under ruling B | 4 |
+| S13 confirm | Confirm (reason required though labelled optional: defect) | Confirm, offered only with a complete ship-to (7084b983, bed8809a) | MATCHED (state reads Released: relabel needs an ADR-0066 re-baseline) | 5 |
 | S14 cancel | draft cancel; confirmed cancel has no button | draft + released cancel | MATCHED | — |
-| S15 close/reopen | none | Close; no Reopen | PARTIAL (Reopen per ruling F) | 5 |
+| S15 close/reopen | none | Close; Reopen with confirmation, refused while an invoice counts (ruling F); Close and Cancel offered only on a confirmed order | MATCHED (exceeds) | 5/7 |
 | S16 reserve / release | one dialog per line; release/reallocate not reachable | reserve task, release remainder | MATCHED | — |
-| S17 partial shipment + carrier/tracking | carrier + tracking or BOL required | ship task, quantity only | PARTIAL | 5 |
+| S17 partial shipment + carrier/tracking | carrier + tracking or BOL required | ship task requires carrier and tracking or BOL; the shipment keeps them and its ship-to (7084b983, bed8809a) | MATCHED | 5 |
 | S18 shipment correction | not reachable in UI | correction/reversal (SALE-FULFILLMENT) | RAIN-ONLY | — |
 | S19 customer returns | RMA into usable/quarantine/damaged | none | MISSING (Critical arm owed) | 5 |
-| S20 invoice / credit / payment | internal records; Collect/Closed depend on QuickBooks (Closed tab empty with 1,216 invoices) | none | MISSING; QuickBooks/Helcim REMAINDER | 7 |
-| S21 print / PDF | server PDF for confirmed orders | packing document only | MISSING | 6 |
-| S22 related documents | Record progression panel | order detail child datasets | PARTIAL | 5 |
+| S20 invoice / credit / payment | internal records; Collect/Closed depend on QuickBooks (Closed tab empty with 1,216 invoices) | INV- invoice of the shipped, not yet invoiced quantities at the order's frozen figures (charges on the first); PAY- payment and CM- credit up to the balance; void only while unsettled; Invoices List by state; printable invoice | MATCHED under ruling C; QuickBooks/Helcim REMAINDER | 7 |
+| S21 print / PDF | server PDF for confirmed orders | printable Sales and Purchase order with a Ship to block, printed or saved as PDF by the browser (7084b983, bed8809a) | MATCHED under ruling G | 6 |
+| S22 related documents | Record progression panel | order detail lists its lines, reservations, shipments (open packing) and invoices (open invoice); an invoice lists its lines, payments and credits | PARTIAL: no link from an invoice back to its order | 5/7 |
 | S23 history | audit under Reports only | change documents, no timeline | PARTIAL (activity slot unregistered) | filed |
 | S24 exceptions | shortage banner, "!" column | quantities only | MISSING | 5 |
 | S25 restricted role | viewer sees no create | create offered only when it may start (d9eca60a) | MATCHED | — |
@@ -59,11 +59,11 @@ NOT OBSERVED · NOT IN REFERENCE (not built) · RAIN-ONLY.
 
 1. Missing List vocabulary (tabs, sort, filters, labels, export) — closed by slice 1 (general, declared).
 2. Missing document numbering capability — slice 2.
-3. Missing commercial master data (salesperson, addresses, defaults, terms) — slice 3.
-4. Missing pricing/tax/totals capabilities (Q2 families) — slice 4.
-5. Lifecycle and physical gaps (Confirm label, Reopen, carrier/tracking, returns, exceptions) — slice 5.
-6. Missing document output (printable order) — slice 6 (documents substrate, N2 family).
-7. Missing receivables (invoice, credit, payment) — slice 7; providers are REMAINDER.
+3. Missing commercial master data (salesperson, addresses, defaults, terms) — closed by slice 3.
+4. Missing pricing/tax/totals capabilities (Q2 families) — closed by slice 4 (commercial read model).
+5. Lifecycle and physical gaps (Confirm label, Reopen, carrier/tracking, returns, exceptions) — slice 5 (Confirm, Reopen, carrier/tracking closed in 5a).
+6. Missing document output (printable order) — closed by slice 6.
+7. Missing receivables (invoice, credit, payment) — closed by slice 7 (receivables capability); providers are REMAINDER.
 
 Reference defects not copied: tab counts over the first 100 records; search count omitting notes;
 "optional" confirm note that is required; Closed/Collect gated on QuickBooks sync.

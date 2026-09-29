@@ -1,138 +1,150 @@
 # SALES-PARITY — Rain's Sales workflows and shared List at PaneFlow parity through metadata
 
-Status: in progress (draft PR stacked on PR #6); sole LOCAL BUILD; slices committed and pushed one by one.
-Tier: Critical-touching — slice 2 adds one option at `release-verification-service.ts` (verification takes sentinel document numbers); one ONLINE arm is owed at the vertical checkpoint (prompt below).
+Status: vertical checkpoint (2026-09-28) — slices 1-4, 5a, 6 and 7 executable and pushed; returns, List row actions and exceptions not built; draft PR to open; no merge, no deployment. Sole LOCAL BUILD.
+Tier: Critical-touching — `release-verification-service.ts` (claims 9, 20) and materializer grant SQL (claims 10-11); one ONLINE arm is owed at the vertical checkpoint (`SALES-PARITY-review-prompt.md`).
 Base: `994a7dc969694c8077630eaa536fcd385f7e030c` (tip of `packet/RAIN-ORDER-ENTRY`, PR #6, which contains PR #5 `3830f95b` and main `fe97b63b`).
-Dependencies are building blocks, not qualifications: PR #5 owner acceptance pending (dialog layout not accepted as reference-equivalent); PR #6 fresh CI and owner acceptance pending. Nothing here closes either.
-Reference: PaneFlow `d057daff` in an own disposable copy (`/home/rvham/paneflow-sales-parity-d057daff`, 127.0.0.1:3311, distributor seed; provider settings empty). Audit data and gallery: see the Evidence section.
+Dependencies are building blocks, not qualifications: PR #5 and PR #6 owner acceptance and fresh CI are pending; nothing here closes either.
+Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distributor seed); audit and gallery in `SALES-PARITY-inventory.md`.
 
 ## Owner rulings (2026-09-28, "go with all recommended")
 
 - A numbering: server-assigned `SO-000001` per tenant at first draft save; not editable; never reused; gaps possible; `PO-` and `SHP-` the same way.
-- B commercial: item default price per currency with marked manual override, line % discount, fixed-rate tax codes added on top and frozen on the line, freight + other fee with own tax code, half-up per-line rounding, one currency per order without FX, terms Due on receipt/Net 15/30/45/60 with invoice due = invoice date + terms.
+- B commercial: item price per currency with a marked manual override, line % discount, fixed-rate tax codes on top and frozen on the line, freight + other fee each with its own tax code, half-up per-line rounding, one currency per order (no FX), terms Due on receipt/Net 15/30/45/60 (invoice due = invoice date + terms).
 - C receivables: internal invoice (INV-), credit note (CM-), recorded payment (PAY-), balance per invoice, void only while unpaid and uncredited; no ledger, no provider.
 - D returns against a shipped line into a chosen location as a posted movement; credit separate (Critical arm owed).
-- E salesperson = Party with a salesperson role, optional; customer default currency/terms/salesperson; ship-to address book with the order keeping its own copy; complete ship-to before shipping.
-- F "Release" relabelled "Confirm"; Reopen a closed order while nothing on it is invoiced.
-- G printable server-rendered order page, printed/saved as PDF by the browser.
-- Deferred: credit hold/limits, price lists, drop-ship/special order, counter sale, email/QuickBooks/Helcim/cloud storage (REMAINDER).
+- E salesperson = Party with a salesperson role, optional; customer default currency/terms/salesperson; ship-to address book with the order's own copy; complete ship-to before shipping.
+- F "Release" reads "Confirm"; Reopen a closed order while nothing on it is invoiced.
+- G printable server-rendered order page, printed or saved as PDF by the browser.
+- Deferred: credit hold/limits, price lists, drop-ship, counter sale, email/QuickBooks/Helcim/cloud storage (REMAINDER).
 
 ## Claims
 
-1. Declared List (slice 1): an optional v6 `surface.list` declares columns, one title, labels, status roles, date format, sortable columns, default sort, saved views, choice filters, page size and CSV export; the validator refuses every combination the runtime cannot honour (14 named refusals) and unknown keys fail the closed schema.
-2. Every view, filter, search, sort, page and count is a query-gateway argument re-authorized per request; tab counts are server counts under the current search and filters; a page past the end answers the last page; nothing is filtered, sorted or counted in the browser.
-3. A reference label names a field that stores another record's id through that record's declared unscoped list query; the gateway checks current read authority on the target, and PostgreSQL joins on the record id so search and sort by the label are complete facts. Without party read no customer name is disclosed.
-4. Export is one statement bounded by the list query's declared `exportMaximumResultCount`; a larger set is refused with a page (`LIST_EXPORT_OVER_LIMIT`), never truncated; cells starting `= + - @` are neutralized.
-5. The agent projection publishes each list query's export limit and each declared List's views/filters/sort/reference labels as query-argument presets; the same gateway answers them with the screen's counts.
-6. Metadata-only variation: a recompiled variant with different views, order, page size and export limit is served by the unchanged runtime; Posted stock (a balance, not a document) and Purchase orders use the same mechanism.
-7. Numbering (slice 2): an optional v6 field `numbering` (document sequence: prefix, minimum digits, start) removes the field from every writable input set and names it as a create assignment; a typed number is refused and writes nothing, an update cannot change it, and the validator refuses a non-text, optional, non-unique, too-short, duplicated-sequence, editor-offered or composition-bound number.
-8. The executor allocates inside the create transaction under a per-tenant, per-sequence transaction lock: one past the highest existing number of that prefix among all the tenant's records (archived included, so never reused; all companies share the tenant sequence); ten concurrent creates take ten distinct consecutive numbers; a replayed idempotency key keeps its number; the change document records it.
-9. Release verification's arranged records take `V-` sentinel numbers (`release-verification-service.ts` passes `documentNumbers: 'verificationSentinel'`), so an activation never consumes a tenant's sequence; before this, one activation took SO-000001…SO-000070.
+1. Declared List (slice 1): optional v6 `surface.list` (columns, one title, status roles, date format, sort, saved views, choice filters, page size, CSV export); 14 named refusals; unknown keys fail the closed schema.
+2. Every view, filter, search, sort, page and count is a query-gateway argument re-authorized per request; tab counts are server counts; a page past the end answers the last page.
+3. A reference label is read through the target's declared unscoped list under current read authority; PostgreSQL joins on the record id, so search and sort by label are complete (customer, salesperson).
+4. Export is one statement bounded by the list query's `exportMaximumResultCount`; larger sets are refused (`LIST_EXPORT_OVER_LIMIT`), never truncated; `= + - @` cells are neutralized.
+5. The agent projection publishes each export limit and each List's views/filters/sort/labels as query presets answered by the same gateway.
+6. A metadata-only List variation is served by the unchanged runtime; Posted stock and Purchase orders use the same mechanism.
+7. Numbering (slice 2): a `numbering` field leaves every writable input set; a typed number is refused and writes nothing; the validator refuses non-text, optional, non-unique, short, duplicated, editor-offered or composition-bound numbers.
+8. Allocation runs inside the create transaction under a per-tenant, per-sequence lock: one past the highest `PREFIX-digits` of the tenant (archived included); ten concurrent creates take ten consecutive numbers; a replay keeps its number.
+9. **Critical.** Release verification's arranged records take `V-` sentinel numbers (`documentNumbers: 'verificationSentinel'`), so an activation never consumes a tenant's sequence.
+10. **Critical.** A column a later release adds to a company-scoped table (not fact, not period-lock) gets the column UPDATE grant the table's creation gives its mutable columns (`case 'addColumn'`).
+11. **Critical.** Replaying a company-scoped table's creation for another tenant revokes UPDATE at table level only when a table-level grant exists, so a later release's column grants survive (`createManagedTable`).
+12. Slice 5a/6: the release command reads "Confirm"; a closed order reopens (confirmed); the ship task requires carrier and tracking or BOL, kept on the shipment; Sales and Purchase orders print as a server-rendered document.
+13. Slice 3 vocabulary (optional v6 keys; surface floor 11): editor `defaultFrom` (an editable default reset whenever a sibling picker's selection changes), scoped pickers `reference.within`, Task input `eligibility`, and record `blocks`; the validator refuses incompatible, derived-target, cyclic, unscoped or header-duplicated declarations.
+14. Defaults are planned first and applied in one synchronous step while their reference holds the planned selection; a carrier change keeps the values the same submission set; a scoped picker selects only records its relation ties to the sibling, checked on every route.
+15. Ruling E: salespeople are parties with an active salesperson role (the only ones offered); the customer workspace sets order defaults and an address book; Confirm and every initial shipment (any caller) require a complete ship-to, which the shipment keeps.
+16. Ruling B (slice 4): choosing a product prices the line in the order currency (`defaultFrom.sourceByHeader`), keeps its list price and freezes the order tax code's rate; a currency change re-prices lines still at list price; a price set by hand reads "Manual price". Line % discount; freight and other fee each with a frozen-rate code.
+17. The commercial read model states each line's amount and tax and the order's subtotal, charges, tax and total: exact decimals, half up per line, one currency; an unstated figure is null and nulls every total it feeds. The draft editor reads through the header form's plain get, never the read model.
+18. Ruling C (slice 7): the receivables capability invoices an order's shipped, not yet invoiced quantity per line at the line's frozen price, discount and rate (charges on the order's first live invoice; due = invoice date + terms), under the order's row lock; payments and credits post in whole cents up to the balance under the invoice's row lock; void only while nothing is settled; Reopen is refused while an invoice counts (ruling F). INV-/PAY-/CM- numbers; generic writes only on drafts.
+19. Commands are offered only where they apply: capability commands declare preconditions (Close and Cancel on a confirmed order, Reopen on a closed one, post on a draft, void on an open invoice), and "Invoice shipped quantities" is offered only while the commercial read model states uninvoiced shipped quantity and a stated total.
+20. **Critical.** Release verification reads its probe records through each entity's plain query of a type, never a read-model query of the same type, whose executor its gateway does not register (`#queryForEntity`).
 
 ## Decisions
 
-- ADR-0047 §7: `surface.list`, the list column `format` and `exportMaximumResultCount` are optional keys on adopted v6, never materialized; runtime capability surface-manifest 10.
-- The customer stays a text field: the posting kernel reads `customer_party_id` directly and relations are create-only while a draft's customer is editable, so a label join (no storage change) replaces a relation.
-- Enum labels and dates come from the compiled per-field kinds (shared with compositions); a date column shows the UTC calendar date, as the editor labels its instants.
-- Column selection and bulk actions are not in the reference for Sales orders and are not built; the existing selection bar stays.
-- The export limit is declared by each module's own list query (5,000), not by the app layer.
-- One lineage entry per increment, rebuilt from the previous pushed envelope; development compiles are discarded (entries 15 → 16 → 17).
-- Numbering is a declared field property, not a counter table: no migration, no RLS change; allocation is protected max+1 (transaction lock + unique key), case-insensitive, so a typed legacy `so-000005` is continued, not collided with. Gaps are possible only through archived records; a rolled-back create returns its number.
-- Sales orders `SO-`, Purchase orders `PO-` (non-Sales reuse), shipments `SHP-`; reservations and goods receipts keep their existing numbers (not in ruling A).
+- ADR-0047 §7: every new key is optional and non-materialized on adopted v6; two released bounds widen compatibly (choice values 64 → 180, editor header fields 20 → 30); no language version.
+- Party and Catalog gain Sales data behind factory options (`salesMasterData`, `sellingPrices`) that only the product application passes; the standalone harnesses compile what they always did.
+- The Party default currency is an enumeration (CAD/USD/EUR): a new searchable text column on an existing table has a deferred folded column that verification reads before it exists, and a 3-character text value is not distinguishable in search.
+- Confirm requires the complete ship-to (stricter than "before shipping"): a confirmed header is no longer editable, so a later address could never be added; street, city, postal code and country are required.
+- Choosing a customer resets currency, terms, salesperson, tax code and ship-to to its defaults (or the field default); the address list is contextual to Party, not navigation.
+- The customer is still a text field joined by label (the posting kernel reads it directly); enum labels and UTC dates come from the compiled field kinds.
+- Export limits are declared by each module's list query (5,000); column choosers and bulk actions are not in the reference and are not built.
+- Numbering is a declared field property (protected max+1 under a transaction lock and the unique key), not a counter table: no migration, no RLS change.
+- One lineage entry per pushed increment, rebuilt from the previous pushed envelope (entries 15 → 16 → 17 → 18 → 19).
+- The state label stays "Released": a relabel is a storage retype (ADR-0059); renaming it needs an ADR-0066 re-baseline the owner has not authorized.
+- Tax codes are Catalog master data (a no-Sales application still compiles the Party workspace that names a default code); rates freeze on the line and on each charge, so a later rate change leaves posted figures alone.
+- Receivables live in Sales under `northstar.sales:capability.receivables` (`recordMutation`): the existing company-scoped INSERT and column UPDATE grants suffice, so no role, migration or RLS change.
+- One invoice takes all of an order's shipped, not yet invoiced quantity; figures are frozen as stored exact decimals. States draft, open, partially paid, paid, void. Payment and credit dates are the posting instant (no back-dating).
+- Reopen moved from a generic transition to the receivables capability, the only reader of an order's invoices under its lock. `print.totals` widens 6 -> 8 (this packet's own optional key).
+- Returns (ruling D) are not built: a correction must restore into the shipment's own location and a task cannot name the movement it compensates, so a return into a chosen location needs a customer-return posting family in the Critical kernel (bounded by shipped minus returned per line, with admission-map coverage). That is its own Critical packet.
+- The full-replay schema generator runs on a 1 GB data volume (nineteen entries overflowed 256 MB); every test keeps 256 MB.
 
 ## Slices
 
-1. Shared List — declared List on Sales orders, Purchase orders and Posted stock; executable `4d188d1c`. [Test it yourself §1]
-2. Automatic numbering — SO-/PO-/SHP- assigned on create; executable `3e718be9`. [Test it yourself §2]
+1. Shared List `4d188d1c`. 2. Numbering `3e718be9`. 5a/6. Confirm, Reopen, carrier/tracking, print `7084b983`, `6a6bc7c1`.
+Grant fixes (Critical) `c74ea33e`, `7947dba9`. 3. Master data `bed8809a`, `cb5f7e9f`, `49b2ccf7`; generator on 1 GB `28461658`; oracle `7a265fe1`.
+4. Prices, discount, tax, charges, totals `f129a7a5`; fixes `1cb20847`, `51948df8` (Critical: verification's plain get), `852ac8d6`, `8779b1a8`.
+7. Receivables `d199c49a` (lineage entry 21).
 
 ## Controls
 
-- `verification-takes-sentinel-document-numbers` (removes the verification option) → claim 9; run by hand at `3e718be9` (the PR #6 demo holds a shared lock, so the exclusive `evidence:expected-red` run is left to the arm): red with "release verification must not consume real document numbers", restored by `git checkout --`, green again.
+- `verification-takes-sentinel-document-numbers` → claim 9; `added-company-column-carries-its-update-grant` → claim 10; `replayed-create-keeps-later-column-grants` → claim 11; `verification-reads-records-through-a-plain-get` → claim 20.
+- The first three reproduced at `bed8809a` by `check-expected-red.sh --run` (declared reason; restored run green). The fourth is declared and matches its text once; its `--run` is owed (the killing test, `commercial-totals`, needs the head).
 
 ## Gates
 
-- Local (shared lock; PR #6's demo holds a shared lock, so exclusive suites are left to CI): format, lint, typecheck, `check:app-release`; unit 171/171; compiler 175/175; integration 228/228; contracts 30/30; agent 3/3; container-free architecture files (131/134 then the three fixed); PostgreSQL `declared-list.test.ts` 2/2; browser `declared-list.spec.ts` 2/2 (keyboard journey and JavaScript off); `check:language-coverage` PASS; `check-records` OK. Executable `4d188d1c`.
-- Not run locally: exclusive `test:architecture`, `test:postgres`, `test:browser`, performance, locale. `repository-hygiene` "matrix lock … bounded deadline" refuses while `north-star-*` containers exist (environment, not code).
+- `d199c49a` content (own worktree, shared lock, on battery): unit 184/184; integration 228/228; compiler 175/175; language coverage PASS (2487 obligations, 725 -> 729 observed); surface grammar 25/25; PostgreSQL `receivables` 1/1; browser `receivables` 1/1 (3.1 min); release `--check` PASS.
+- `7a265fe1` (detached worktree): PostgreSQL composed-application 16 pass, 1 failed + 3 cancelled, every one a 300 s timeout on battery (no assertion reached); browser meta-sales 2/2; order-entry failed on its own selector (fixed `1cb20847`).
+- `51948df8`: PostgreSQL commercial-totals refused the fixture's non-canonical prices (fixed `852ac8d6`); activation of entry 20 itself passed.
+- `de0e8a03`/`bed8809a` (slices 1-3): as recorded in the handoff; contracts 30/30, agent 3/3 there.
+- NOT run at the head: composed-application (and its full-replay oracle for entry 21), order-entry, order-pricing, customer-defaults, declared-list, fulfillment, document-numbering, the composed Sales specs, contracts, agent, the fourth control's `--run`. CI on the PR is the gate for them.
 
 ## Test it yourself
 
-§1 Shared List (under ten minutes). Serve: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/order-entry-fixture.ts --serve --distributor --order-volume=120` from `/home/rvham/2rain-greenfield-sales-parity`; open the printed `ORDER_ENTRY_URL`; Ctrl-C stops it and removes its container.
-1. Sales orders shows tabs **All 120 · Draft 68 · Released 40 · Closed 0 · Cancelled 12**, "120 matching records", "Page 1 of 3", newest order date first, customer names (never ids).
-2. Draft: "68 matching records", every status Draft. Tab with the keyboard and press Enter on a tab: same result.
-3. Search `Chestermere` then Apply: only that customer's orders; every tab count now counts within the search.
-4. Click the Customer header: A→Z (↑); click again: Z→A (↓).
-5. All, Currency USD, Apply: "24 matching records". Clear.
-6. Next, Last, then type 9 in the page box and Go: you land on Page 3 of 3, never an empty page.
-7. Draft → Export CSV (68): the file has 68 rows plus a header; statuses read Draft, customers by name.
-8. Narrow the window to phone width: the tabs scroll sideways inside their strip, orders become cards, the page never scrolls sideways.
-9. Inventory → Posted stock: SKU, item name and location code, sortable, exportable. Purchasing → Purchase orders: the same tabs and filter (empty).
-10. With JavaScript disabled, every tab, sort, filter, page and export still works (plain links and forms).
-
-§2 Numbering. Serve the fixture without `--order-volume` (a fresh tenant).
-1. Sales → New: there is no Order number field. Pick a customer, add a line, Save draft: the order opens as **SO-000001**; a second order is SO-000002.
-2. Purchasing → New, save: **PO-000001** (its own sequence). Reserve and ship a released order: the shipment is **SHP-000001**.
-3. Edit a draft: the number cannot be changed; Archive an order and create another: the archived number is not reused.
+Steps (under ten minutes each): `SALES-PARITY-test-it-yourself.md` — §1 List, §2 Numbering, §3 Confirm/Reopen/carrier/print, §4 customers, salespeople and ship-to, §5 prices and totals, §6 invoices, payments and credits.
+Serve: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/helpers/order-entry-fixture.ts --serve --distributor` from `/home/rvham/2rain-greenfield-sales-parity`; Ctrl-C stops it and removes its container.
 
 ## Filed
 
-- Global search (Ctrl K) is outside the List contract (SUP-01).
-- Sales list row action "Post shipment" waits for slice 5.
+- Global search (Ctrl K) is outside the List contract (SUP-01). The List has no row actions ("Post shipment"); exceptions (shortage marker) are not built.
+- Money shows as stored exact decimals (`25`, `12.5`), no money display vocabulary. An invoice links back to its order only when opened from it ("Back to order").
+- A refused post leaves its numbered draft (payment, credit, invoice), shown as Draft, as a refused shipment does.
+- `apps/web/release/app.compiled.json` is 58 MB: GitHub warns above 50 MB and refuses above 100 MB (about 3 MB per lineage entry).
+- Returns (ruling D): see Decisions; its Critical arm moves with that packet. PR #6's served demo lost its database when Docker restarted (2026-09-28); that lane owns its restart.
 
-Review: not owed yet — outside the Critical set (slice 1).
-
+Review: owed at the vertical checkpoint — prompt `SALES-PARITY-review-prompt.md`.
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SALES-PARITY",
   "base": "994a7dc969694c8077630eaa536fcd385f7e030c",
-  "head": "3e718be90049db97529b709818d3462b5f2e9908",
+  "head": "d199c49a77d7b9ec2be0c7f9bd714ac9a03e1635",
   "changedPaths": [
-    "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json",
-    "apps/web/release/app.compiled.json", "apps/web/src/app-server.ts",
-    "apps/web/src/component-registry.ts", "apps/web/src/list-declaration.ts",
-    "apps/web/src/message-catalog.ts", "apps/web/src/surface-composition.ts",
-    "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
-    "apps/web/test/browser/declared-list.spec.ts", "apps/web/test/browser/order-entry.spec.ts",
-    "apps/web/test/browser/receiving.composed-application.spec.ts",
-    "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
-    "apps/web/test/browser/sales-order.composed-application.spec.ts",
-    "apps/web/test/surface-runtime-contract.test.ts", "docs/execution/lanes.md",
-    "docs/execution/packets/SALES-PARITY-inventory.md", "docs/execution/packets/SALES-PARITY.md",
-    "package.json", "packages/canonical-model/src/field-numbering.ts",
-    "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
-    "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts",
-    "packages/compiler/src/compiler.ts", "packages/compiler/src/projections.ts",
-    "packages/domain/src/app/builder.ts", "packages/domain/src/app/list-declarations.ts",
-    "packages/domain/src/app/order-entry.ts", "packages/domain/src/inventory/definition.ts",
-    "packages/domain/src/purchasing/definition.ts", "packages/domain/src/sales/definition.ts",
-    "packages/domain/src/sales/workspace.ts",
-    "packages/postgres-provider/src/module-runtime-interpreter.ts",
-    "packages/postgres-provider/src/release-verification-service.ts",
-    "packages/runtime/src/list-behavior/contract.ts", "packages/runtime/src/list-behavior/cursor.ts",
-    "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/request-runtime-view.ts",
-    "packages/runtime/src/semantic-operation-gateway.ts",
-    "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts",
-    "test/architecture/surface-grammar-conformance.baseline.ts",
-    "test/architecture/surface-grammar-conformance.test.ts",
-    "test/evidence/SALES-PARITY.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/helpers/meta-sales-fixture.ts", "test/helpers/order-entry-fixture.ts",
-    "test/helpers/reachability-producers.ts", "test/integration/surface-data-binding.test.ts",
-    "test/postgres/composed-application.test.ts", "test/postgres/declared-list.test.ts",
-    "test/postgres/document-numbering.test.ts", "test/postgres/fulfillment.test.ts",
-    "test/postgres/receiving-authorization.test.ts",
-    "test/unit/canonical-model/field-numbering.test.ts",
-    "test/unit/canonical-model/surface-list.test.ts", "test/unit/purchasing-definition.test.ts"
+    "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
+    "apps/web/release/current-policy-bindings.json", "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts",
+    "apps/web/src/document-editor.ts", "apps/web/src/editor-controls.ts", "apps/web/src/list-declaration.ts",
+    "apps/web/src/message-catalog.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts",
+    "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/workspace-entry.ts",
+    "apps/web/test/browser/customer-defaults.spec.ts", "apps/web/test/browser/declared-list.spec.ts", "apps/web/test/browser/message-catalog.spec.ts",
+    "apps/web/test/browser/meta-sales.spec.ts", "apps/web/test/browser/order-entry.spec.ts", "apps/web/test/browser/order-pricing.spec.ts",
+    "apps/web/test/browser/receivables.spec.ts", "apps/web/test/browser/receiving.composed-application.spec.ts", "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
+    "apps/web/test/browser/sales-order.composed-application.spec.ts", "apps/web/test/surface-runtime-contract.test.ts", "package.json",
+    "packages/canonical-model/src/field-numbering.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
+    "packages/canonical-model/src/picker-eligibility.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-composition.ts",
+    "packages/canonical-model/src/surface-list.ts", "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/compiler.ts",
+    "packages/compiler/src/conformance.ts", "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts",
+    "packages/domain/src/app/list-declarations.ts", "packages/domain/src/app/order-entry.ts", "packages/domain/src/app/seed.ts",
+    "packages/domain/src/catalog/definition.ts", "packages/domain/src/inventory/contracts.ts", "packages/domain/src/inventory/definition.ts",
+    "packages/domain/src/party/definition.ts", "packages/domain/src/party/workspace.ts", "packages/domain/src/purchasing/definition.ts",
+    "packages/domain/src/purchasing/workspace.ts", "packages/domain/src/sales/definition.ts", "packages/domain/src/sales/index.ts",
+    "packages/domain/src/sales/workspace.ts", "packages/postgres-provider/package.json", "packages/postgres-provider/src/commercial-amounts.ts",
+    "packages/postgres-provider/src/commercial-read-model.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/inventory-posting-error.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/receivables-capability-executor.ts",
+    "packages/postgres-provider/src/release-verification-service.ts", "packages/runtime/src/list-behavior/contract.ts", "packages/runtime/src/list-behavior/cursor.ts",
+    "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
+    "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.baseline.ts",
+    "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/g2-module-conformance.test.ts", "test/compiler/inventory-contract.release.golden.json",
+    "test/evidence/SALES-PARITY.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/generate-fresh-tenant-full-replay-schema.ts",
+    "test/helpers/meta-sales-fixture.ts", "test/helpers/order-entry-fixture.ts", "test/helpers/postgres.ts",
+    "test/helpers/reachability-producers.ts", "test/integration/surface-data-binding.test.ts", "test/postgres/commercial-totals.test.ts",
+    "test/postgres/composed-application.test.ts", "test/postgres/declared-list.test.ts", "test/postgres/document-numbering.test.ts",
+    "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/fulfillment.test.ts", "test/postgres/receivables.test.ts",
+    "test/postgres/receiving-authorization.test.ts", "test/unit/canonical-model/field-numbering.test.ts", "test/unit/canonical-model/surface-list.test.ts",
+    "test/unit/commercial-amounts.test.ts", "test/unit/purchasing-definition.test.ts", "test/unit/sales-definition.test.ts",
+    "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
     {"path": "packages/canonical-model/src/surface-list.ts", "name": "validateSurfaceLists"},
-    {"path": "packages/canonical-model/src/schemas.ts", "name": "SurfaceListSchema"},
-    {"path": "packages/domain/src/app/list-declarations.ts", "name": "declareLists"},
-    {"path": "apps/web/src/list-declaration.ts", "name": "declaredListArguments"},
-    {"path": "apps/web/src/list-declaration.ts", "name": "declaredListCsv"},
-    {"path": "packages/runtime/src/list-behavior/index.ts", "name": "parseSharedListArguments"},
     {"path": "packages/canonical-model/src/field-numbering.ts", "name": "validateFieldNumbering"},
-    {"path": "packages/canonical-model/src/schemas.ts", "name": "FieldNumberingSchema"}
+    {"path": "packages/canonical-model/src/picker-eligibility.ts", "name": "pickerEligibilityProblem"},
+    {"path": "packages/domain/src/app/list-declarations.ts", "name": "declareLists"},
+    {"path": "packages/domain/src/party/workspace.ts", "name": "partyWorkspace"},
+    {"path": "apps/web/src/list-declaration.ts", "name": "declaredListArguments"},
+    {"path": "apps/web/src/workspace-entry.ts", "name": "workspaceWithin"},
+    {"path": "packages/postgres-provider/src/commercial-amounts.ts", "name": "lineAmounts"},
+    {"path": "packages/postgres-provider/src/commercial-read-model.ts", "name": "commercialReadModel"},
+    {"path": "packages/postgres-provider/src/receivables-capability-executor.ts", "name": "RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY"},
+    {"path": "packages/domain/src/sales/workspace.ts", "name": "invoiceWorkspace"}
   ]
 }
 ```
