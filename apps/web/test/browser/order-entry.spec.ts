@@ -234,11 +234,13 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
         'northstar.app:parameter.sales_order_list_legal_entity_scope',
       ),
     ).toBe(second.companyId);
-    expect(
-      new URL(page.url()).searchParams.get(
-        'northstar.app:parameter.sales_order_get_legal_entity_scope',
-      ),
-    ).not.toBe(second.companyId);
+    // The order workspace reads through the commercial order query, so its
+    // scope is that query's operand: present, and still the first company.
+    const orderScope = new URL(page.url()).searchParams.get(
+      'northstar.app:parameter.commercial_order_get_legal_entity_scope',
+    );
+    expect(orderScope).toBeTruthy();
+    expect(orderScope).not.toBe(second.companyId);
     expect(await task().locator('[name=taskToken]').inputValue()).toBe(token);
     expect(await task().locator('[name=preparedId]').inputValue()).toBe(
       prepared,

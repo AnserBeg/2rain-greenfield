@@ -164,8 +164,10 @@ async function seed(
   const url = new URL(app.baseUrl);
   url.searchParams.set('surface', `${ns}:surface.sales_order_detail`);
   url.searchParams.set('record', order.recordId);
+  // The order workspace reads through the commercial order query (its
+  // totals), so the scope operand is that query's parameter.
   url.searchParams.set(
-    `${ns}:parameter.sales_order_get_legal_entity_scope`,
+    `${ns}:parameter.commercial_order_get_legal_entity_scope`,
     scope,
   );
   return {
