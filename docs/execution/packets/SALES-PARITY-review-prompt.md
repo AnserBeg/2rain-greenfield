@@ -1,32 +1,42 @@
-# SALES-PARITY — review round 3 prompt (ONLINE confirm arm, user-run)
+# SALES-PARITY — review round 4 prompt (ONLINE confirm arm, user-run)
 
-Repository `AnserBeg/2rain-greenfield`, branch `packet/SALES-PARITY`, frozen executable SHA `40ca820a`.
-Review the fix range `7f3c31f1..40ca820a` (`427d4a50` numbering; `40ca820a` a test case, evidence only). Read wider code as you need.
+Repository `AnserBeg/2rain-greenfield`, branch `packet/SALES-PARITY`, frozen executable SHA `b829d633`.
+Review the fix range `40ca820a..b829d633` (`a1a8a051` verification; `f98fb641` the scan and wording;
+`b829d633` controls, evidence only). Read wider code as you need.
 
-Round 2 (at `7f3c31f1`) found no regression and reported two older production defects in document
-numbering:
-1. A numbered field could be as narrow as its format (`X-1`, 3 characters), leaving release
-   verification's truncated `V-<hex>` sentinels 16 possible values, so arranged records collided.
-2. The maximum scan matched the raw value case-insensitively, while the unique business key compares
-   by full Unicode case fold, so a stored value the key equates with the next number (`ß-000001` under
-   prefix `SS`) was missed and every create chose the colliding number.
+Round 3 (at `40ca820a`) confirmed round 2's two repairs and found one older production defect: release
+verification treated a server-assigned document number as a caller input. Every entity with a
+required numbered field and a search query (sales order, purchase order, shipment, invoice, payment,
+credit) derived all of its scenarios as unconstructable, 125 of the release's 485; one without a search
+query would have failed its uniqueness-fold probe.
 
-Question: are these two closed on every admitted declaration and stored value, and did the fix
-introduce a new production defect? Try to break the fixes; do not assume they are sufficient.
+The fix is provider-only. The compiler's plan is unchanged, because changing compiler output would
+invalidate this branch's recorded lineage entries (ADR-0047). Verification now counts assigned fields as
+constructible, reads each arranged record's assigned values back from its create, lets a search probe use
+an assigned searchable field, and probes an assigned business key's uniqueness as a caller can observe
+it: two creates store values that differ under the key's fold, and a create supplying the first value in
+another case is refused as input, naming the field. Separately, the allocator's scan now reads the key's
+stored folded companion instead of folding every row again.
+
+Question: is the defect closed for every admitted declaration, is the evidence each executed probe
+records true to what it tested, and did the fix introduce a new production defect? Try to break it.
 Report production defects separately from evidence, wording and naming, which are filed, not fixed.
 
 Where to look:
-- `packages/canonical-model/src/field-numbering.ts` (`VERIFICATION_SENTINEL_MINIMUM_LENGTH`,
-  `validateFieldNumbering`) and `FieldNumberingSchema` in `packages/canonical-model/src/schemas.ts`.
-- `packages/postgres-provider/src/module-runtime-interpreter.ts` (`assignDocumentNumbers`), the fold
-  function it calls (`nsm_unicode_case_fold_v1`, installed by `module-storage-materializer.ts`) and the
-  business key's index definition.
-- Tests: `test/unit/canonical-model/field-numbering.test.ts`, `test/postgres/document-numbering.test.ts`.
-- Controls: `test/evidence/SALES-PARITY.expected-red.json` (`numbering-*` entries).
+- `packages/postgres-provider/src/release-verification-service.ts`: `verificationConstructibilityFindings`,
+  `#create`, `#uniquenessFold`, `#assignedUniqueness`, `#searchableExclusion`.
+- `packages/postgres-provider/src/module-runtime-interpreter.ts`: `assignDocumentNumbers`, `foldedColumnSql`.
+- `packages/compiler/src/projections.ts`: `operationInputContract`, `verificationPlanPayload` (unchanged).
+- ADR-0033 (derivation reasons are closed), ADR-0043 and ADR-0047 (why the plan did not change).
+- Tests: `test/postgres/document-numbering.test.ts` (reads the admitted release's evidence) and
+  `test/postgres/composed-application.test.ts` (`assertExactPartitionEvidence`,
+  `assertIndependentConstructibilityPartition`).
+- Controls: `test/evidence/SALES-PARITY.expected-red.json` (`verification-*assigned*`, `numbering-*`).
 
-Consider at least: whether the folded scan and the business key can still disagree (fold function,
-collation, the key's scope and archive predicate, the prefix fold); whether 64 bits is enough for how
-many sentinels one verification keeps live in one key scope; the scan's cost on a large table; and
-declarations that pass validation yet cannot be honoured at runtime.
+Consider at least: whether the assigned-field probe tests something the name `uniquenessFold` promises,
+or should have been a derivation; whether an assigned field can now be constructible when the create
+cannot in fact supply it; whether a read-back can silently miss a value (selections, capability creates);
+whether the companion scan and the key can disagree on any storage target, including legacy ones without
+companions; and what executing those 125 scenarios costs activation.
 
 Not the packet records. Say plainly if this prompt steers you.

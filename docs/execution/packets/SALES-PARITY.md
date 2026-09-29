@@ -1,7 +1,7 @@
 # SALES-PARITY — Rain's Sales workflows and shared List at PaneFlow parity through metadata
 
-Status: vertical checkpoint (2026-09-28) — slices 1-4, 5a, 6 and 7 executable and pushed; returns, List row actions and exceptions not built; draft PR to open; no merge, no deployment. Sole LOCAL BUILD.
-Tier: Critical-touching — `release-verification-service.ts` (claims 9, 20) and materializer grant SQL (claims 10-11); one ONLINE arm is owed at the vertical checkpoint (`SALES-PARITY-review-prompt.md`).
+Status: vertical checkpoint (2026-09-29) — slices 1-4, 5a, 6, 7 and three review rounds' fixes executable and pushed; returns, List row actions and exceptions not built; draft PR to open; no merge, no deployment. Sole LOCAL BUILD.
+Tier: Critical-touching — `release-verification-service.ts` (claims 9, 20, 21) and materializer grant SQL (claims 10-11); the ONLINE confirm arm is owed (`SALES-PARITY-review-prompt.md`).
 Base: `994a7dc969694c8077630eaa536fcd385f7e030c` (tip of `packet/RAIN-ORDER-ENTRY`, PR #6, which contains PR #5 `3830f95b` and main `fe97b63b`).
 Dependencies are building blocks, not qualifications: PR #5 and PR #6 owner acceptance and fresh CI are pending; nothing here closes either.
 Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distributor seed); audit and gallery in `SALES-PARITY-inventory.md`.
@@ -26,8 +26,8 @@ Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distribut
 5. The agent projection publishes each export limit and each List's views/filters/sort/labels as query presets answered by the same gateway.
 6. A metadata-only List variation is served by the unchanged runtime; Posted stock and Purchase orders use the same mechanism.
 7. Numbering (slice 2): a `numbering` field leaves every writable input set; a typed number is refused before any business write (stored numbers unchanged); the validator refuses non-text, optional, non-unique, duplicated, editor-offered or composition-bound numbers, a field too short for its first number (start included) or under 18 characters (room for 64-bit verification sentinels), and the prefix `V`.
-8. Allocation runs inside the create transaction under a per-tenant, per-sequence lock: one past the highest `PREFIX-digits` among every record of the tenant (archived, every company), any digit count, read through the business key's Unicode case fold; a next number that no longer fits refuses as `MODULE_DOCUMENT_SEQUENCE_EXHAUSTED`; ten concurrent creates take ten consecutive numbers; a replay keeps its number. The unique key is the backstop among live records of its scope.
-9. **Critical.** Release verification's arranged records take `V-` sentinel numbers (`documentNumbers: 'verificationSentinel'`); no sequence may use the prefix `V`, so a sentinel never reads as, advances or collides with a business number.
+8. Allocation runs inside the create transaction under a per-tenant, per-sequence lock: one past the highest `PREFIX-digits` among every record of the tenant (archived, every company), any digit count, read through the business key's stored fold (its folded companion; the fold function only on a legacy target); a next number that no longer fits refuses as `MODULE_DOCUMENT_SEQUENCE_EXHAUSTED`; ten concurrent creates take ten consecutive numbers; a replay keeps its number. The unique key is the backstop among live records of its scope.
+9. **Critical.** Release verification's arranged records take `V-` sentinel numbers (`documentNumbers: 'verificationSentinel'`); no sequence may use the prefix `V`, so a sentinel never reads as, advances or collides with a business number. A sentinel keeps at least 64 bits: arranged records collide only with negligible probability, not provably never.
 10. **Critical.** A column a later release adds to a company-scoped table (not fact, not period-lock) gets the column UPDATE grant the table's creation gives its mutable columns (`case 'addColumn'`).
 11. **Critical.** Replaying a company-scoped table's creation for another tenant revokes UPDATE at table level only when a table-level grant exists, so a later release's column grants survive (`createManagedTable`).
 12. Slice 5a/6: the release command reads "Confirm"; a closed order reopens (confirmed); the ship task requires carrier and tracking or BOL, kept on the shipment; Sales and Purchase orders print as a server-rendered document.
@@ -39,6 +39,7 @@ Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distribut
 18. Ruling C (slice 7): the receivables capability invoices an order's shipped, not yet invoiced quantity per line at the line's frozen price, discount and rate (charges on the order's first live invoice; due = invoice date + terms), under the order's row lock; payments and credits post in whole cents up to the balance under the invoice's row lock; void only while nothing is settled; Reopen is refused while an invoice counts (ruling F). INV-/PAY-/CM- numbers; generic writes only on drafts.
 19. Commands are offered only where they apply: capability commands declare preconditions (Close and Cancel on a confirmed order, Reopen on a closed one, post on a draft, void on an open invoice), and "Invoice shipped quantities" is offered only while the commercial read model states uninvoiced shipped quantity and a stated total.
 20. **Critical.** Release verification reads its probe records through each entity's plain query of a type, never a read-model query of the same type, whose executor its gateway does not register (`#queryForEntity`).
+21. **Critical.** Verification counts a create's assigned numbers as written by the create, so a numbered entity executes its scenarios (125 of 485 had derived); arranged records carry their assigned values, read back from the create; a number's uniqueness-fold scenario probes what a caller can observe (two creates store fold-distinct values; a supplied case variant is refused as input, naming the field). The compiler's plan is unchanged (ADR-0047).
 
 ## Decisions
 
@@ -61,15 +62,13 @@ Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distribut
 
 ## Slices
 
-1. Shared List `4d188d1c`. 2. Numbering `3e718be9`. 5a/6. Confirm, Reopen, carrier/tracking, print `7084b983`, `6a6bc7c1`.
-Grant fixes (Critical) `c74ea33e`, `7947dba9`. 3. Master data `bed8809a`, `cb5f7e9f`, `49b2ccf7`; generator on 1 GB `28461658`; oracle `7a265fe1`.
-4. Prices, discount, tax, charges, totals `f129a7a5`; fixes `1cb20847`, `51948df8` (Critical: verification's plain get), `852ac8d6`, `8779b1a8`.
-7. Receivables `d199c49a` (lineage entry 21).
+1. List `4d188d1c`. 2. Numbering `3e718be9`. 5a/6. Confirm, Reopen, carrier/tracking, print `7084b983`, `6a6bc7c1`. Grants (Critical) `c74ea33e`, `7947dba9`. 3. Master data `bed8809a`, `cb5f7e9f`, `49b2ccf7`; generator `28461658`; oracle `7a265fe1`.
+4. Pricing `f129a7a5`; fixes `1cb20847`, `51948df8` (Critical), `852ac8d6`, `8779b1a8`. 7. Receivables `d199c49a` (lineage entry 21). Review fixes `53ca49f4`, `427d4a50`, `40ca820a`, `a1a8a051` (Critical), `f98fb641`, `b829d633`.
 
 ## Controls
 
-- `verification-takes-sentinel-document-numbers` and `numbering-reserves-the-sentinel-prefix` → claim 9; `added-company-column-carries-its-update-grant` → 10; `replayed-create-keeps-later-column-grants` → 11; `verification-reads-records-through-a-plain-get` → 20; `numbering-first-number-fits-its-field`, `numbering-sentinels-have-room` → 7; `numbering-scan-reads-every-digit-count`, `numbering-scan-folds-like-the-business-key`, `numbering-exhaustion-refuses-by-name` → 8.
-- The first three reproduced at `bed8809a`; the others at `4e2e018a`/`7f3c31f1` and, for numbering, again at `427d4a50`/`40ca820a` (`--run`: each mutation killed with its declared reason, each restored run green).
+- `verification-takes-sentinel-document-numbers` and `numbering-reserves-the-sentinel-prefix` → claim 9; `added-company-column-carries-its-update-grant` → 10; `replayed-create-keeps-later-column-grants` → 11; `verification-reads-records-through-a-plain-get` → 20; `numbering-first-number-fits-its-field`, `numbering-sentinels-have-room` → 7; `numbering-scan-reads-every-digit-count`, `numbering-scan-folds-like-the-business-key`, `numbering-exhaustion-refuses-by-name` → 8; `verification-constructs-assigned-numbers`, `verification-probes-assigned-uniqueness`, `verification-reads-back-assigned-values`, `verification-searches-by-an-assigned-number` → 21.
+- The first three reproduced at `bed8809a`; the others at `4e2e018a`/`7f3c31f1` and, for numbering, again at `427d4a50`/`40ca820a` (`--run`: each mutation killed with its declared reason, each restored run green). At `b829d633` the two re-pointed numbering controls reproduced; `verification-constructs-assigned-numbers` killed with its declared message but its restored run timed out (host paging, under 1 GB free); the other three claim-21 controls are not yet run.
 
 ## Gates
 
@@ -77,6 +76,7 @@ Grant fixes (Critical) `c74ea33e`, `7947dba9`. 3. Master data `bed8809a`, `cb5f7
 - `7a265fe1` (detached worktree): PostgreSQL composed-application 16 pass, 1 failed + 3 cancelled, every one a 300 s timeout on battery (no assertion reached); browser meta-sales 2/2; order-entry failed on its own selector (fixed `1cb20847`).
 - `51948df8`: PostgreSQL commercial-totals refused the fixture's non-canonical prices (fixed `852ac8d6`); activation of entry 20 itself passed.
 - `de0e8a03`/`bed8809a` (slices 1-3): as recorded in the handoff; contracts 30/30, agent 3/3 there.
+- `f98fb641`/`b829d633` (detached worktree, AC): PostgreSQL document-numbering 1/1 (124 s), reading the admitted release's evidence; that release measured 408 executed and 77 derived, every derivation `VERIFICATION_NO_GENERIC_CREATE_OPERATION` (the composed pins). Unit field-numbering 4/4.
 - NOT run at the head: composed-application (and its full-replay oracle for entry 21), order-entry, order-pricing, customer-defaults, declared-list, fulfillment, document-numbering, the composed Sales specs, contracts, agent, the fourth control's `--run`. CI on the PR is the gate for them.
 
 ## Test it yourself
@@ -92,13 +92,13 @@ Serve: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/hel
 - `apps/web/release/app.compiled.json` is 58 MB: GitHub warns above 50 MB and refuses above 100 MB (about 3 MB per lineage entry).
 - Returns (ruling D): see Decisions; its Critical arm moves with that packet. PR #6's served demo lost its database when Docker restarted (2026-09-28); that lane owns its restart.
 
-Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numbering (sentinel prefix `V`, an 18-digit scan, a start wider than its field), fixed at `53ca49f4`; none in the grants or the plain read. Round 2 (`7f3c31f1`) closed those with no regression and found two older ones (sentinels in a narrow field; a scan not using the key's case fold), fixed at `427d4a50`. Round 3 (confirm) is owed: `SALES-PARITY-review-prompt.md`.
+Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numbering (sentinel prefix `V`, an 18-digit scan, a start wider than its field), fixed at `53ca49f4`; none in the grants or the plain read. Round 2 (`7f3c31f1`) closed those with no regression and found two older ones (sentinels in a narrow field; a scan not using the key's case fold), fixed at `427d4a50`. Round 3 (`40ca820a`) closed those with no regression and found one older defect, verification treating an assigned number as a caller input (claim 21), fixed at `a1a8a051`; the scan cost it flagged is removed at `f98fb641`. Round 4 (confirm) is owed: `SALES-PARITY-review-prompt.md`.
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SALES-PARITY",
   "base": "994a7dc969694c8077630eaa536fcd385f7e030c",
-  "head": "40ca820af73e645df556e1be81b83320fd61133c",
+  "head": "b829d633c0602419ae95c7b3201172d8930243da",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
     "apps/web/release/current-policy-bindings.json", "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts",
@@ -125,7 +125,7 @@ Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numb
     "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.baseline.ts",
     "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/g2-module-conformance.test.ts", "test/compiler/inventory-contract.release.golden.json",
     "test/evidence/SALES-PARITY.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/generate-fresh-tenant-full-replay-schema.ts",
-    "test/helpers/meta-sales-fixture.ts", "test/helpers/order-entry-fixture.ts", "test/helpers/postgres.ts",
+    "test/helpers/governed-storage-target.ts", "test/helpers/meta-sales-fixture.ts", "test/helpers/order-entry-fixture.ts", "test/helpers/postgres.ts",
     "test/helpers/reachability-producers.ts", "test/integration/surface-data-binding.test.ts", "test/postgres/commercial-totals.test.ts",
     "test/postgres/composed-application.test.ts", "test/postgres/declared-list.test.ts", "test/postgres/document-numbering.test.ts",
     "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/fulfillment.test.ts", "test/postgres/receivables.test.ts",
