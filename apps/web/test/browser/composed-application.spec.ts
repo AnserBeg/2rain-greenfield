@@ -948,8 +948,11 @@ async function inventoryNavigationJourney(
       ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2) > .nav-group-label',
     ),
   ).toHaveText(['Sales', 'Purchasing', 'Inventory', 'Party', 'More']);
+  // Sales lists its invoices beside its orders (ruling C) and Catalog its
+  // tax codes beside its items (ruling B), so each is a group of two.
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
-    'Sales',
+    'Invoices',
+    'Sales orders',
     'Purchasing',
     'Inventory movement',
     'Inventory period lock',
@@ -959,11 +962,12 @@ async function inventoryNavigationJourney(
     'Stock count',
     'Party',
     'Party role',
-    'Catalog',
+    'Item',
+    'Tax code',
     'Location',
   ]);
   const salesOwner = navigation.getByRole('link', {
-    name: 'Sales',
+    name: 'Sales orders',
     exact: true,
   });
   const purchasingOwner = navigation.getByRole('link', {
@@ -1012,7 +1016,7 @@ async function inventoryNavigationJourney(
     .filter({ hasText: 'More' });
   await moreNavigation.getByText('More', { exact: true }).click();
   await expect(
-    navigation.getByRole('link', { name: 'Catalog', exact: true }),
+    moreNavigation.getByText('Catalog', { exact: true }),
   ).toBeVisible();
   await expect(
     navigation.getByRole('link', { name: 'Location', exact: true }),

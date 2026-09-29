@@ -57,8 +57,11 @@ for (const javaScriptEnabled of [true, false]) {
         await expect(
           page.getByText('Alpine Office Supply', { exact: true }),
         ).toBeVisible();
+        // The priced lines name the product too; this is the fulfillment line.
         await expect(
-          page.getByText('Field notebook', { exact: true }),
+          page
+            .locator('[data-composition-dataset$="dataset.fulfillment_lines"]')
+            .getByText('Field notebook', { exact: true }),
         ).toBeVisible();
         const lines = () =>
           page.locator(

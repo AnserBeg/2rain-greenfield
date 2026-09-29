@@ -165,7 +165,11 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
   });
-  await navigation.getByRole('link', { name: 'Sales', exact: true }).click();
+  // Sales is a group of its orders and invoices; open it, then its orders.
+  await navigation.getByText('Sales', { exact: true }).click();
+  await navigation
+    .getByRole('link', { name: 'Sales orders', exact: true })
+    .click();
   await expect(
     page.getByRole('heading', { name: 'Sales orders', level: 1, exact: true }),
   ).toBeVisible();

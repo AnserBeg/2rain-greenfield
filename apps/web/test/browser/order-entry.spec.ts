@@ -91,7 +91,14 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     ).trim();
     expect(salesNumber).toMatch(/^SO-\d{6}$/u);
     const orderId = new URL(page.url()).searchParams.get('record');
-    await page.getByRole('link', { name: 'Sales', exact: true }).click();
+    // Sales is a group of its orders and invoices; open it, then its orders.
+    const navigation = page.getByRole('navigation', {
+      name: 'Release navigation',
+    });
+    await navigation.getByText('Sales', { exact: true }).click();
+    await navigation
+      .getByRole('link', { name: 'Sales orders', exact: true })
+      .click();
     await page
       .getByRole('link', {
         name: `Open Sales orders ${salesNumber}`,
@@ -163,9 +170,6 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     ).toHaveValue('3');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await measure('drafts', orderId!, purchaseId!);
-    const navigation = page.getByRole('navigation', {
-      name: 'Release navigation',
-    });
     for (const local of [
       'reservation',
       'reservation_balance',
@@ -552,7 +556,9 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       'data-selected-label',
       'Field notebook',
     );
-    await expect(page.locator('output.derived-value').first()).toHaveText('EA');
+    await expect(
+      page.getByRole('status', { name: 'Line 1 unit', exact: true }),
+    ).toHaveText('EA');
     await slowCustomer.release();
     await page.waitForTimeout(300);
     await expect(product).toHaveAttribute(
@@ -825,9 +831,9 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       'Thermal Roll',
     );
     await expect(product).toBeFocused();
-    await expect(page.locator('output.derived-value').first()).toHaveText(
-      'ROLL',
-    );
+    await expect(
+      page.getByRole('status', { name: 'Line 1 unit', exact: true }),
+    ).toHaveText('ROLL');
     await expect(
       page.getByLabel('Line 1 quantity', { exact: true }),
     ).toHaveValue('2.50');
@@ -1152,11 +1158,9 @@ async function line(
     .getByLabel(`Line ${index} quantity`, { exact: true })
     .fill(quantity);
   if (sales)
+    // A line also derives its list price and tax rate; this is its unit.
     await expect(
-      page
-        .locator('tr.draft-line')
-        .nth(index - 1)
-        .locator('output.derived-value'),
+      page.getByRole('status', { name: `Line ${index} unit`, exact: true }),
     ).toHaveText(sku === 'OFF-120' ? 'BOX' : 'EA');
   await page
     .getByLabel(`Line ${index} ${sales ? 'unit price' : 'unit cost'}`, {

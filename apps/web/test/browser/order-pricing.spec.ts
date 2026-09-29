@@ -109,7 +109,12 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
       await expect(
         totals
           .locator('div')
-          .filter({ has: page.locator('dt', { hasText: label }) })
+          .filter({
+            // Exact: a substring match reads Subtotal as Total.
+            has: page.locator('dt', {
+              hasText: new RegExp(`^${label}$`, 'u'),
+            }),
+          })
           .locator('dd'),
       ).toHaveText(value);
     await expect(page.locator('.print-document')).toContainText('Manual price');

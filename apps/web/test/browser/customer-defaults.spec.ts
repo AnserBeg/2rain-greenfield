@@ -46,6 +46,8 @@ test('a customer workspace sets order defaults and an address book that a new sa
         'Add role',
         'Set order defaults',
         'Set default salesperson',
+        // Ruling B: new lines start from the customer's tax code.
+        'Set default tax code',
         'Add ship-to address',
       ],
     );

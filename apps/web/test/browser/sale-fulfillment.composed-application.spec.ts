@@ -184,7 +184,9 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
   await fillShipTo();
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
-  await expect(page.locator('output.derived-value').first()).toHaveText('EA');
+  await expect(
+    page.getByRole('status', { name: 'Line 1 unit', exact: true }),
+  ).toHaveText('EA');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
   await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
