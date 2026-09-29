@@ -126,7 +126,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       page.getByLabel('Line 2 quantity', { exact: true }),
     ).toHaveValue('3');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-    await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
+    await openPurchaseOrders(page);
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await header(page, 'PO-ENTRY-BROWSER', 'Vendor');
     await line(page, 1, 'Field notebook · OFF-100', '10', false);
@@ -150,7 +150,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     ).trim();
     expect(purchaseNumber).toMatch(/^PO-\d{6}$/u);
     const purchaseId = new URL(page.url()).searchParams.get('record');
-    await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
+    await openPurchaseOrders(page);
     await page
       .getByRole('link', { name: new RegExp(`Open .*${purchaseNumber}$`, 'u') })
       .click();
@@ -943,7 +943,7 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
 
     // The same control on a Purchase order creates a vendor: a party with an
     // active supplier role, selected on the order that asked for it.
-    await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
+    await openPurchaseOrders(page);
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await page.getByLabel('Notes').fill('PO-PICKER');
     const vendor = page.getByRole('combobox', { name: 'Vendor', exact: true });
@@ -1273,4 +1273,19 @@ async function fixture(
     const [code] = await exited;
     expect(code, output).toBe(0);
   }
+}
+
+/**
+ * Purchasing is a group of its orders and its Expected receipts
+ * (PURCHASING-PARITY), as Sales is of its orders and invoices: open it, then
+ * its orders.
+ */
+async function openPurchaseOrders(page: Page) {
+  const navigation = page.getByRole('navigation', {
+    name: 'Release navigation',
+  });
+  await navigation.getByText('Purchasing', { exact: true }).click();
+  await navigation
+    .getByRole('link', { name: 'Purchase orders', exact: true })
+    .click();
 }

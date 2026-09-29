@@ -131,6 +131,7 @@ const suiteDefinitions = [
       'test/postgres/current-policy.test.ts',
       'test/postgres/declared-list.test.ts',
       'test/postgres/document-numbering.test.ts',
+      'test/postgres/expected-receipts.test.ts',
       'test/postgres/fulfillment.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',

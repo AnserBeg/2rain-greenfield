@@ -1,3 +1,5 @@
+import { isWorklist } from './list-declarations.js';
+
 /** Product declarations for the shared draft document renderer. */
 export function orderEntrySurfaces(
   namespace: string,
@@ -524,6 +526,10 @@ export function orderEntrySurfaces(
           ? 'sales_order'
           : (lineOwners[local] ?? null);
     const master = masterOwners[local] ?? null;
+    // A worklist beside a document's List (Expected receipts beside Purchase
+    // orders) is a business destination of its own, entered with the caller's
+    // company and authorized by its own query.
+    const worklist = role === 'list' && isWorklist(name);
     const listQueryId = String(
       (surface.dataSource as { targetId?: unknown } | undefined)?.targetId,
     );
@@ -542,6 +548,7 @@ export function orderEntrySurfaces(
         membership:
           role === 'list'
             ? editor ||
+              worklist ||
               local === 'posted_stock_balance' ||
               local === 'customer_invoice'
               ? 'operational'
@@ -554,6 +561,7 @@ export function orderEntrySurfaces(
           : {}),
         ...(editor ||
         owner ||
+        worklist ||
         local === 'posted_stock_balance' ||
         (role === 'list' && companyScoped.has(listQueryId))
           ? {

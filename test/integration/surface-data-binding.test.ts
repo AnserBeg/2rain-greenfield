@@ -50,6 +50,7 @@ import {
   SEMANTIC_QUERY_REQUEST_VERSION,
   registeredSemanticQueryFromPinnedView,
   SemanticQueryGateway,
+  SemanticQueryPolicyDeniedError,
   type SemanticQueryExecutionRequest,
   type SemanticQueryExecutor,
   type SemanticQueryResultEnvelope,
@@ -4698,11 +4699,89 @@ class OrderEntryExecutor
                 ),
             )),
       );
+      // Like the PostgreSQL statement: progress sums the row's active lines
+      // and their active done rows inside the row's own company, and an open
+      // or before filter narrows the set before paging. Both are echoed.
+      // Whole units only in this witness.
+      const progress = request.list?.progress;
+      const beforeFilters = request.list?.query.beforeFilters;
+      const figures = (row: SemanticRecordDto) => {
+        if (!progress) return null;
+        const company = this.owners.get(row.recordId);
+        const active = (candidate: SemanticRecordDto, entityId: string) =>
+          candidate.entityId === entityId &&
+          !candidate.archived &&
+          this.owners.get(candidate.recordId) === company;
+        const lines = [...this.rows.values()].filter(
+          (candidate) =>
+            active(candidate, progress.linesEntityId) &&
+            candidate.values[progress.lines.relationId] === row.recordId,
+        );
+        const ordered = lines.reduce(
+          (total, line) => total + Number(line.values[progress.lines.fieldId]),
+          0,
+        );
+        const done = [...this.rows.values()]
+          .filter(
+            (candidate) =>
+              active(candidate, progress.doneEntityId) &&
+              lines.some(
+                (line) =>
+                  candidate.values[progress.done.relationId] === line.recordId,
+              ),
+          )
+          .reduce(
+            (total, entry) =>
+              total + Number(entry.values[progress.done.fieldId]),
+            0,
+          );
+        const open =
+          !progress.openIn ||
+          progress.openIn.values.includes(
+            String(row.values[progress.openIn.fieldId]),
+          )
+            ? ordered - done
+            : 0;
+        return { ordered, done, open };
+      };
+      const narrowed = selected.filter(
+        (row) =>
+          (!progress?.openOnly || (figures(row)?.open ?? 0) > 0) &&
+          (beforeFilters ?? []).every((filter) => {
+            const value = row.values[filter.fieldId];
+            return (
+              typeof value === 'string' &&
+              Date.parse(value) < Date.parse(filter.before)
+            );
+          }),
+      );
+      const project = (row: SemanticRecordDto) => {
+        const projected = projectedListRecord(request, row);
+        const summed = figures(row);
+        return summed && progress
+          ? {
+              ...projected,
+              values: {
+                ...projected.values,
+                [progress.outputs.ordered]: String(summed.ordered),
+                [progress.outputs.done]: String(summed.done),
+                [progress.outputs.open]: String(summed.open),
+              },
+            }
+          : projected;
+      };
       const echoed = {
         ...(reference ? { referenceScope: reference } : {}),
         ...(fieldFilters ? { fieldFilters } : {}),
         ...(request.list?.query.relatedFilter
           ? { relatedFilter: request.list.query.relatedFilter }
+          : {}),
+        ...(request.list?.query.progress
+          ? { progress: request.list.query.progress }
+          : {}),
+        ...(beforeFilters ? { beforeFilters } : {}),
+        ...(request.list?.query.outputMode
+          ? { outputMode: request.list.query.outputMode }
           : {}),
       };
       if (request.list)
@@ -4714,14 +4793,14 @@ class OrderEntryExecutor
         const query = request.list.query;
         const term = query.search.trim().toLowerCase();
         const matching = term
-          ? selected.filter((row) =>
+          ? narrowed.filter((row) =>
               request.definition.selections.some(({ fieldId }) =>
                 String(row.values[fieldId] ?? '')
                   .toLowerCase()
                   .includes(term),
               ),
             )
-          : selected;
+          : narrowed;
         const page = matching.slice(
           query.pageOffset,
           query.pageOffset + query.effectivePageSize,
@@ -4732,7 +4811,7 @@ class OrderEntryExecutor
           schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
           queryId: request.definition.queryId,
           outcome: 'exact',
-          records: page.map((row) => projectedListRecord(request, row)),
+          records: page.map(project),
           unsupportedReason: null,
           listCoverage: {
             ...listCoverage(request, page.length),
@@ -4750,9 +4829,7 @@ class OrderEntryExecutor
           },
         };
       }
-      const records = request.list
-        ? selected.map((row) => projectedListRecord(request, row))
-        : selected;
+      const records = request.list ? narrowed.map(project) : selected;
       return {
         kind: 'semanticQueryResult',
         schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
@@ -5000,6 +5077,7 @@ async function orderEntryWitness(
     scopes,
     allowed,
     deniedReads,
+    policy,
     entry,
     view,
     surfaces,
@@ -8111,4 +8189,332 @@ test('P1 uncertain response redacts preview inputs after dependency revocation a
     fixture.calls[1]!.idempotencyKey,
     fixture.calls[0]!.idempotencyKey,
   );
+});
+
+test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in the statement, re-authorizing progress per request', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope, foreign] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const list = id('surface', 'expected_receipt_list');
+  const view = (local: string) =>
+    id('list_view', `expected_receipt_list_${local}`);
+  const column = (local: string) =>
+    id('list_column', `expected_receipt_list_${local}`);
+  // Orders with lines and received quantities, stored as the providers do:
+  // a line points at its order, a received row at its line.
+  const order = (
+    number: string,
+    state: string,
+    expected: string | null,
+    lines: readonly (readonly [ordered: number, received: number])[],
+    company = scope,
+    archivedLine?: number,
+  ) => {
+    const orderId = f.executor.seed(
+      'purchase_order',
+      {
+        [id('field', 'purchase_order_number')]: number,
+        [id('field', 'purchase_order_supplier_party_id')]: f.party,
+        [id('field', 'purchase_order_expected_date')]: expected,
+        [id('field', 'purchase_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.purchase_order_lifecycle')]: id(
+          'state',
+          `purchase_order_${state}`,
+        ),
+      },
+      company,
+    );
+    for (const [ordered, received] of lines) {
+      const lineId = f.executor.seed(
+        'purchase_order_line',
+        {
+          [id('field', 'purchase_order_line_ordered_quantity')]:
+            String(ordered),
+          [id('relation', 'purchase_order_line_order')]: orderId,
+        },
+        company,
+      );
+      if (received > 0)
+        f.executor.seed(
+          'purchase_order_received',
+          {
+            [id('field', 'purchase_order_received_received_quantity')]:
+              String(received),
+            [id('relation', 'purchase_order_received_order_line')]: lineId,
+          },
+          company,
+        );
+    }
+    if (archivedLine !== undefined) {
+      const lineId = f.executor.seed(
+        'purchase_order_line',
+        {
+          [id('field', 'purchase_order_line_ordered_quantity')]:
+            String(archivedLine),
+          [id('relation', 'purchase_order_line_order')]: orderId,
+        },
+        company,
+      );
+      f.executor.rows.set(lineId, {
+        ...f.executor.rows.get(lineId)!,
+        archived: true,
+      });
+    }
+    return orderId;
+  };
+  const late = order('PO-LATE', 'released', '2026-09-25T12:00:00.000Z', [
+    [10, 4],
+    [5, 0],
+  ]);
+  order('PO-FUTURE', 'released', '2026-10-09T00:00:00.000Z', [[6, 0]]);
+  order('PO-DONE', 'released', '2026-09-20T00:00:00.000Z', [[3, 3]]);
+  order('PO-DRAFT', 'draft', '2026-09-01T00:00:00.000Z', [[7, 0]]);
+  order(
+    'PO-YESTERDAY',
+    'released',
+    '2026-09-28T23:00:00.000Z',
+    [[8, 0]],
+    scope,
+    2,
+  );
+  order('PO-UNDATED', 'released', null, [[2, 0]]);
+  order(
+    'PO-FOREIGN',
+    'released',
+    '2026-09-01T00:00:00.000Z',
+    [[9, 0]],
+    foreign,
+  );
+  const parameter = `${ns}:parameter.expected_receipt_list_legal_entity_scope`;
+  const url = (parameters: Record<string, string> = {}) =>
+    `/?${new URLSearchParams({ surface: list, [parameter]: scope, ...parameters }).toString()}`;
+  const at = (instant: string) => ({
+    ...f.gateways,
+    clock: () => new Date(instant),
+  });
+  const counts = (html: string) =>
+    Object.fromEntries(
+      [
+        ...html.matchAll(
+          /data-view-id="([^"]+)"[^>]*>(?:<span>[^<]*<\/span>)<span class="list-view__count" data-view-count="(\d+)"/gu,
+        ),
+      ].map((match) => [match[1]!, Number(match[2]!)]),
+    );
+  const cell = (html: string, recordId: string, local: string) =>
+    new RegExp(
+      `data-record-id="${recordId}"[\\s\\S]*?data-column-id="${column(local)}">([\\s\\S]*?)</td>`,
+      'u',
+    ).exec(html)?.[1];
+
+  // Tabs are server counts of the open and before filters, under one clock.
+  const today = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(),
+    at('2026-09-29T15:00:00.000Z'),
+  );
+  assert.equal(today.statusCode, 200);
+  assert.deepEqual(counts(today.html), {
+    [view('to_receive')]: 4,
+    [view('late')]: 2,
+    [view('all_released')]: 5,
+  });
+  assert.match(today.html, /data-list-total="4"/u);
+  assert.match(today.html, /data-list-anchor="2026-09-29T00:00:00\.000Z"/u);
+  // Order-level units across its active lines; an archived line adds nothing.
+  assert.equal(cell(today.html, late, 'ordered'), '15');
+  assert.equal(cell(today.html, late, 'received'), '4');
+  assert.equal(cell(today.html, late, 'open'), '11');
+  assert.match(
+    cell(today.html, late, 'expected_date') ?? '',
+    /Sep 25, 2026 <span class="status-pill" data-status-role="attention" data-overdue-days="4">4 days late<\/span>/u,
+  );
+  assert.match(today.html, /data-overdue-days="1">1 day late/u);
+  assert.equal([...today.html.matchAll(/data-overdue-days=/gu)].length, 2);
+  assert.doesNotMatch(today.html, /PO-DONE|PO-DRAFT|PO-FOREIGN/u);
+  // Progress columns are shown, never offered as a sort.
+  assert.doesNotMatch(
+    today.html,
+    new RegExp(`data-sort-column="${column('open')}"`, 'u'),
+  );
+
+  // The Late tab is the before-today set; another day moves it.
+  const lateTab = await renderSurfaceRuntimeWithData(
+    f.view,
+    url({ view: view('late') }),
+    at('2026-09-29T15:00:00.000Z'),
+  );
+  assert.match(lateTab.html, /data-list-total="2"/u);
+  assert.match(lateTab.html, /PO-LATE/u);
+  assert.match(lateTab.html, /PO-YESTERDAY/u);
+  const earlier = await renderSurfaceRuntimeWithData(
+    f.view,
+    url({ view: view('late') }),
+    at('2026-09-26T10:00:00.000Z'),
+  );
+  assert.match(earlier.html, /data-list-total="1"/u);
+  assert.match(earlier.html, /data-overdue-days="1">1 day late/u);
+
+  // Every progress read passed current policy for the companies listed.
+  const progressCalls = f.policy.calls.filter(
+    (call) =>
+      (call.decisionInput as { kind?: string }).kind ===
+      'registeredSemanticListProgressPolicyInput',
+  );
+  assert.deepEqual(
+    [...new Set(progressCalls.map((call) => call.permissionId))].sort(),
+    [
+      id('permission', 'purchase_order_line_read'),
+      id('permission', 'purchase_order_received_read'),
+    ],
+  );
+  assert.ok(
+    progressCalls.every(
+      (call) =>
+        JSON.stringify(
+          (call.decisionInput as { arguments: Record<string, unknown> })
+            .arguments[parameter],
+        ) === JSON.stringify([scope]),
+    ),
+  );
+
+  // The export carries the figures as exact decimals, one statement per view.
+  const exported = await renderSurfaceRuntimeWithData(
+    f.view,
+    url({ export: 'csv' }),
+    at('2026-09-29T15:00:00.000Z'),
+  );
+  assert.equal(exported.statusCode, 200);
+  const rows = exported
+    .download!.body.replace(/^\uFEFF/u, '')
+    .trimEnd()
+    .split('\r\n');
+  assert.equal(
+    rows[0],
+    'Number,Supplier,Expected,Ordered,Received,Open,Currency',
+  );
+  assert.equal(rows.length - 1, 4);
+  assert.ok(
+    rows.some(
+      (row) => row.startsWith('PO-LATE,') && row.includes(',15,4,11,CAD'),
+    ),
+  );
+
+  // The agent reads the same List through its published preset.
+  const presets = (
+    f.view.projections.agent.payload as {
+      listPresets: Array<{
+        surfaceId: string;
+        progress?: { outputs: Record<string, string> };
+        views: Array<{ viewId: string; open?: true; before?: unknown }>;
+      }>;
+    }
+  ).listPresets;
+  const preset = presets.find((value) => value.surfaceId === list)!;
+  assert.ok(preset.progress);
+  assert.deepEqual(
+    preset.views.map((value) => [
+      value.viewId,
+      value.open === true,
+      value.before !== undefined,
+    ]),
+    [
+      [view('to_receive'), true, false],
+      [view('late'), true, true],
+      [view('all_released'), false, false],
+    ],
+  );
+
+  // Two Lists read purchase orders: the Purchase orders List keeps standing
+  // for them -- its navigation and the receipt form's order picker.
+  const orders = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
+    at('2026-09-29T15:00:00.000Z'),
+  );
+  assert.match(
+    orders.html,
+    /<strong class="topbar__context">Purchase orders<\/strong>/u,
+  );
+  assert.match(
+    today.html,
+    /<strong class="topbar__context">Expected receipts<\/strong>/u,
+  );
+  for (const [page, current] of [
+    [today.html, 'expected_receipt_list'],
+    [orders.html, 'purchase_order_list'],
+  ] as const) {
+    const marked = [
+      ...page.matchAll(
+        /<a href="\/\?surface=northstar\.app%3Asurface\.([a-z_]+)[^"]*" aria-current="page">/gu,
+      ),
+    ].map((match) => match[1]);
+    assert.deepEqual(marked, [current]);
+  }
+  const receiptForm = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'goods_receipt_form'), [`${ns}:parameter.goods_receipt_get_legal_entity_scope`]: scope }).toString()}`,
+    f.gateways,
+  );
+  assert.doesNotMatch(receiptForm.html, /RELATION_ENUMERATION_UNAVAILABLE/u);
+  assert.match(receiptForm.html, /PO-LATE/u);
+
+  // Without received-quantity read the List is refused by the progress
+  // query's name; the Purchase orders List does not read it and still serves.
+  f.deniedReads.add(id('permission', 'purchase_order_received_read'));
+  const denied = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(),
+    at('2026-09-29T15:00:00.000Z'),
+  );
+  assert.match(denied.html, /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u);
+  assert.doesNotMatch(denied.html, /PO-LATE/u);
+  const refused = await f.gateways.queryGateway
+    .invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', 'expected_receipt_list'),
+      arguments: {
+        includeArchived: false,
+        [parameter]: scope,
+        list: {
+          cursor: null,
+          matchMode: 'substring',
+          pageSize: 10,
+          relationLabels: [],
+          schemaVersion: 'northstar.shared-list-query/v1',
+          search: '',
+          sort: [],
+          progress: {
+            lines: {
+              fieldId: id('field', 'purchase_order_line_ordered_quantity'),
+              queryId: id('query', 'purchase_order_line_list'),
+              relationId: id('relation', 'purchase_order_line_order'),
+            },
+            done: {
+              fieldId: id('field', 'purchase_order_received_received_quantity'),
+              queryId: id('query', 'purchase_order_received_list'),
+              relationId: id('relation', 'purchase_order_received_order_line'),
+            },
+            outputs: {
+              done: id('list_output', 'expected_receipt_list_received'),
+              open: id('list_output', 'expected_receipt_list_open'),
+              ordered: id('list_output', 'expected_receipt_list_ordered'),
+            },
+          },
+        },
+      },
+    })
+    .then(
+      () => null,
+      (error: unknown) => error,
+    );
+  assert.ok(refused instanceof SemanticQueryPolicyDeniedError);
+  assert.equal(refused.queryId, id('query', 'purchase_order_received_list'));
+  const stillServed = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
+    f.gateways,
+  );
+  assert.doesNotMatch(stillServed.html, /QUERY_PERMISSION_DENIED/u);
+  assert.match(stillServed.html, /PO-LATE/u);
 });

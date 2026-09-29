@@ -419,6 +419,103 @@ async function seed(
       assert.ok(revoked.rows.every((row) => row.revoked_at !== null));
       return { phase, revokedCount: revoked.rows.length, observed: true };
     }
+    if (phase === 'expected_receipts') {
+      // PURCHASING-PARITY: released purchase orders with something still to
+      // arrive -- one late -- beside a fully received order and a draft, for
+      // the Expected receipts List. Dates are relative to today (UTC).
+      const today = new Date();
+      const midnight = Date.UTC(
+        today.getUTCFullYear(),
+        today.getUTCMonth(),
+        today.getUTCDate(),
+      );
+      const at = (days: number) =>
+        new Date(midnight + days * 86_400_000 + 12 * 3_600_000).toISOString();
+      const purchase = async (
+        expected: string,
+        lines: readonly (readonly [ordered: string, received: string])[],
+        release = true,
+      ) => {
+        const created = await create('purchase_order', {
+          supplier_party_id: customer,
+          order_date: at(-30),
+          expected_date: expected,
+          currency: 'CAD',
+          notes: null,
+        });
+        const made = [];
+        for (const [index, [ordered]] of lines.entries())
+          made.push(
+            await create(
+              'purchase_order_line',
+              {
+                line_number: String(index + 1),
+                item_id: item,
+                ordered_quantity: ordered,
+                unit_price: null,
+              },
+              { order: created.recordId },
+            ),
+          );
+        if (release) {
+          const released = await invoke('purchase_order_release', {
+            recordId: created.recordId,
+            expectedRevision: created.revision,
+          });
+          assert.equal(released.outcome, 'succeeded');
+          for (const [index, [, quantity]] of lines.entries()) {
+            if (quantity === '0') continue;
+            const receipt = await create(
+              'goods_receipt',
+              {
+                state: `${ns}:option.goods_receipt_state_draft`,
+                kind: `${ns}:option.goods_receipt_kind_initial`,
+                effective_at: new Date().toISOString(),
+                location_id: location,
+                reason_code: 'RECEIVE',
+                reason_narrative: 'Expected receipts delivery',
+              },
+              { order: created.recordId },
+            );
+            await create(
+              'goods_receipt_line',
+              {
+                line_number: '1',
+                item_id: item,
+                quantity,
+                unit_id: 'EA',
+                cost_status: `${ns}:option.goods_receipt_line_cost_status_absent`,
+                unit_cost: null,
+                currency: null,
+                reversal_of_movement_id: null,
+              },
+              { receipt: receipt.recordId, order_line: made[index]!.recordId },
+            );
+            const posted = await invoke('goods_receipt_post', {
+              recordId: receipt.recordId,
+              expectedRevision: receipt.revision,
+            });
+            assert.equal(posted.outcome, 'succeeded');
+          }
+        }
+        return {
+          expected,
+          number: String(created.values[`${ns}:field.purchase_order_number`]),
+          recordId: created.recordId,
+        };
+      };
+      return {
+        phase,
+        late: await purchase(at(-4), [
+          ['10', '4'],
+          ['5', '0'],
+        ]),
+        future: await purchase(at(10), [['6', '0']]),
+        complete: await purchase(at(-2), [['3', '3']]),
+        draft: await purchase(at(-3), [['7', '0']], false),
+        observed: true,
+      };
+    }
     if (phase === 'second_company') {
       const company = await create(
         'legal_entity',

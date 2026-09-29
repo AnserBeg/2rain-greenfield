@@ -18,6 +18,15 @@ export interface ListColumnSpec {
   readonly format?: 'date' | 'money';
   readonly reference?: { readonly query: string; readonly labelField: string };
   readonly statusRoles?: Readonly<Record<string, StatusRole>>;
+  /** The view (local id) whose rows this date marks "N days late". */
+  readonly overdue?: string;
+}
+
+/** A list query whose rows are added up per List row, through one relation. */
+interface ListProgressSourceSpec {
+  readonly query: string;
+  readonly relation: string;
+  readonly quantity: string;
 }
 
 export interface ListSpec {
@@ -31,6 +40,10 @@ export interface ListSpec {
     readonly local: string;
     readonly label: string;
     readonly filters: Readonly<Record<string, string>>;
+    /** Only rows the List's progress leaves something open on. */
+    readonly open?: true;
+    /** Only rows whose date in this field is before today (UTC). */
+    readonly before?: string;
   }[];
   readonly filters: readonly {
     readonly local: string;
@@ -39,6 +52,23 @@ export interface ListSpec {
     readonly options: readonly (readonly [value: string, label: string])[];
   }[];
   readonly export: boolean;
+  /**
+   * Per row, what its lines order and their done rows record, summed by the
+   * list statement; outputs are the ids the columns show them under.
+   */
+  readonly progress?: {
+    readonly lines: ListProgressSourceSpec;
+    readonly done: ListProgressSourceSpec;
+    readonly openIn?: {
+      readonly field: string;
+      readonly values: readonly string[];
+    };
+    readonly outputs: {
+      readonly ordered: string;
+      readonly done: string;
+      readonly open: string;
+    };
+  };
 }
 
 const CURRENCIES = [
@@ -219,6 +249,189 @@ function invoiceList(namespace: string): ListSpec {
   };
 }
 
+/**
+ * Expected receipts (PURCHASING-PARITY): released purchase orders with
+ * something still to arrive, one row per ORDER, as the reference's worklist
+ * is. Ordered, Received and Open add the units of the order's active lines
+ * across items; open is zero unless the order is released, so a draft, closed
+ * or cancelled order has nothing to receive. "Late" keeps those whose expected
+ * date is before today (UTC), and the same view marks the date "N days late".
+ */
+function expectedReceiptList(namespace: string): ListSpec {
+  const field = (local: string) => `${namespace}:field.${local}`;
+  const output = (local: string) =>
+    `${namespace}:list_output.${EXPECTED_RECEIPT_LIST}_${local}`;
+  const lifecycle = `${namespace}:derived_state_field.machine.purchase_order_lifecycle`;
+  const released = {
+    [lifecycle]: `${namespace}:state.purchase_order_released`,
+  };
+  return {
+    pageSize: 50,
+    columns: [
+      {
+        local: 'number',
+        label: 'Number',
+        field: field('purchase_order_number'),
+        role: 'title',
+      },
+      {
+        local: 'supplier',
+        label: 'Supplier',
+        field: field('purchase_order_supplier_party_id'),
+        reference: {
+          query: `${namespace}:query.party_list`,
+          labelField: field('party_name'),
+        },
+      },
+      {
+        local: 'expected_date',
+        label: 'Expected',
+        field: field('purchase_order_expected_date'),
+        format: 'date',
+        overdue: 'late',
+      },
+      // Summed in the list statement: shown and exported, never sorted.
+      {
+        local: 'ordered',
+        label: 'Ordered',
+        field: output('ordered'),
+        sortable: false,
+      },
+      {
+        local: 'received',
+        label: 'Received',
+        field: output('received'),
+        sortable: false,
+      },
+      { local: 'open', label: 'Open', field: output('open'), sortable: false },
+      {
+        local: 'currency',
+        label: 'Currency',
+        field: field('purchase_order_currency'),
+      },
+    ],
+    defaultSort: [{ column: 'expected_date', direction: 'ascending' }],
+    views: [
+      {
+        local: 'to_receive',
+        label: 'To receive',
+        filters: released,
+        open: true,
+      },
+      {
+        local: 'late',
+        label: 'Late',
+        filters: released,
+        open: true,
+        before: field('purchase_order_expected_date'),
+      },
+      { local: 'all_released', label: 'All released', filters: released },
+    ],
+    filters: [],
+    export: true,
+    progress: {
+      lines: {
+        query: `${namespace}:query.purchase_order_line_list`,
+        relation: `${namespace}:relation.purchase_order_line_order`,
+        quantity: field('purchase_order_line_ordered_quantity'),
+      },
+      done: {
+        query: `${namespace}:query.purchase_order_received_list`,
+        relation: `${namespace}:relation.purchase_order_received_order_line`,
+        quantity: field('purchase_order_received_received_quantity'),
+      },
+      openIn: {
+        field: lifecycle,
+        values: [`${namespace}:state.purchase_order_released`],
+      },
+      outputs: {
+        ordered: output('ordered'),
+        done: output('received'),
+        open: output('open'),
+      },
+    },
+  };
+}
+
+/** The Expected receipts List surface and the query it reads, by local id. */
+export const EXPECTED_RECEIPT_LIST = 'expected_receipt_list';
+
+/**
+ * A worklist is a second List over a document's records beside the
+ * document's own List, read through its own clone of that List's query so its
+ * company entry, its cursor and its agent preset are its own. The clone keeps
+ * the source's selections, scope, permission and export limit; nothing about
+ * the source List or the source query changes.
+ */
+const WORKLISTS: Readonly<
+  Record<string, { readonly source: string; readonly label: string }>
+> = Object.freeze({
+  [EXPECTED_RECEIPT_LIST]: {
+    source: 'purchase_order_list',
+    label: 'Expected receipts',
+  },
+});
+
+/** Clones of the worklists' source queries, when their source is composed. */
+export function worklistQueries(
+  namespace: string,
+  queries: readonly Record<string, unknown>[],
+): Record<string, unknown>[] {
+  return Object.entries(WORKLISTS).flatMap(([local, worklist]) => {
+    const source = queries.find(
+      (query) => query.queryId === `${namespace}:query.${worklist.source}`,
+    );
+    return source
+      ? [
+          renamed(source, [
+            [`:query.${worklist.source}`, `:query.${local}`],
+            [`:selection.${worklist.source}_`, `:selection.${local}_`],
+            [`:parameter.${worklist.source}_`, `:parameter.${local}_`],
+          ]),
+        ]
+      : [];
+  });
+}
+
+/** The worklists' List surfaces, cut from their source List's surface. */
+export function worklistSurfaces(
+  namespace: string,
+  surfaces: readonly Record<string, unknown>[],
+): Record<string, unknown>[] {
+  return Object.entries(WORKLISTS).flatMap(([local, worklist]) => {
+    const source = surfaces.find(
+      (surface) =>
+        surface.surfaceId === `${namespace}:surface.${worklist.source}`,
+    );
+    return source
+      ? [
+          {
+            ...renamed(source, [
+              [`:surface.${worklist.source}`, `:surface.${local}`],
+              [`:slot.${worklist.source}_`, `:slot.${local}_`],
+              [`:query.${worklist.source}`, `:query.${local}`],
+            ]),
+            label: worklist.label,
+          },
+        ]
+      : [];
+  });
+}
+
+/** The worklists by local id, for the workspace pass (navigation, entry). */
+export function isWorklist(local: string): boolean {
+  return Object.hasOwn(WORKLISTS, local);
+}
+
+function renamed(
+  value: Record<string, unknown>,
+  renames: readonly (readonly [from: string, to: string])[],
+): Record<string, unknown> {
+  let text = JSON.stringify(value);
+  for (const [from, to] of renames) text = text.replaceAll(from, to);
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
 /** The declared Lists of the composed application, by List surface local id. */
 export function composedListSpecs(
   namespace: string,
@@ -247,6 +460,8 @@ export function composedListSpecs(
         { field: 'expected_date', label: 'Expected' },
       ],
     ),
+    // What is still to arrive (PURCHASING-PARITY), beside Purchase orders.
+    [EXPECTED_RECEIPT_LIST]: expectedReceiptList(namespace),
     // Receivables (owner ruling C): each invoice with its balance; the tabs
     // are the invoice states, the customer is named through the party list.
     customer_invoice_list: invoiceList(namespace),
@@ -336,6 +551,9 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
             ),
           }
         : {}),
+      ...(column.overdue
+        ? { overdue: { view: id('list_view', column.overdue) } }
+        : {}),
     })),
     defaultSort: spec.defaultSort.map((sort) => ({
       columnId: id('list_column', sort.column),
@@ -349,6 +567,10 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
         field,
         value,
       })),
+      ...(view.open ? { open: true } : {}),
+      ...(view.before
+        ? { before: { field: view.before, anchor: 'startOfTodayUtc' } }
+        : {}),
     })),
     filters: spec.filters.map((filter, index) => ({
       filterId: id('list_filter', filter.local),
@@ -358,6 +580,35 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
       options: filter.options.map(([value, label]) => ({ value, label })),
     })),
     ...(spec.export ? { export: { format: 'csv' } } : {}),
+    ...(spec.progress
+      ? {
+          progress: {
+            lines: progressSource(spec.progress.lines),
+            done: progressSource(spec.progress.done),
+            ...(spec.progress.openIn
+              ? {
+                  openIn: {
+                    field: spec.progress.openIn.field,
+                    values: [...spec.progress.openIn.values],
+                  },
+                }
+              : {}),
+            outputs: { ...spec.progress.outputs },
+          },
+        }
+      : {}),
+  };
+}
+
+function progressSource(source: ListProgressSourceSpec) {
+  return {
+    query: {
+      kind: 'queryReference',
+      schemaVersion: version,
+      targetId: source.query,
+    },
+    relation: source.relation,
+    quantity: source.quantity,
   };
 }
 

@@ -1053,8 +1053,9 @@ async function assertRealProductDefinition(
     // surfaces. Projection carriers deliberately omit editable forms.
     // SALES-PARITY adds Party's ship-to address book and Catalog's tax codes,
     // then the invoice, its lines, payments and credits (list, detail, form
-    // each).
-    assert.equal(surfaces.length, 88);
+    // each). PURCHASING-PARITY adds the Expected receipts List.
+    assert.equal(surfaces.length, 89);
+    assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     for (const local of [
       'goods_receipt',
       'goods_receipt_line',

@@ -13,7 +13,7 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
   page.setDefaultTimeout(30_000);
   await fixture(async (url) => {
     await page.goto(url);
-    await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
+    await openPurchaseOrders(page);
     await page.getByRole('link', { name: 'New', exact: true }).click();
     // A new order expects delivery two weeks out, at midnight UTC; the
     // browser shows a whole minute without its seconds.
@@ -130,7 +130,7 @@ test('a partly received order shows what is still open, closes its remainder wit
   await fixture(async (url) => {
     const newOrder = async () => {
       await page.goto(url);
-      await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
+      await openPurchaseOrders(page);
       await page.getByRole('link', { name: 'New', exact: true }).click();
       await page.getByLabel('Order date (UTC) *').fill('2026-09-28T12:00');
       await pick(page, 'Vendor', 'Alpine', 'Alpine Office Supply');
@@ -328,4 +328,19 @@ async function fixture(run: (url: string) => Promise<void>) {
     const [code] = await exited;
     expect(code, output).toBe(0);
   }
+}
+
+/**
+ * Purchasing is a group of its orders and its Expected receipts
+ * (PURCHASING-PARITY), as Sales is of its orders and invoices: open it, then
+ * its orders.
+ */
+async function openPurchaseOrders(page: Page) {
+  const navigation = page.getByRole('navigation', {
+    name: 'Release navigation',
+  });
+  await navigation.getByText('Purchasing', { exact: true }).click();
+  await navigation
+    .getByRole('link', { name: 'Purchase orders', exact: true })
+    .click();
 }

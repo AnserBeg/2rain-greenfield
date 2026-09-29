@@ -12,7 +12,11 @@ import { partyWorkspace } from '../party/workspace.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
 import { orderEntrySurfaces } from './order-entry.js';
-import { declareLists } from './list-declarations.js';
+import {
+  declareLists,
+  worklistQueries,
+  worklistSurfaces,
+} from './list-declarations.js';
 import { purchasingWorkspace } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 
@@ -189,69 +193,90 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       version: '1.0.0',
     },
     permissions: merged(definitions, 'permissions'),
-    queries: salesWorkspaceQueries(
-      APPLICATION_NAMESPACE,
-      merged(definitions, 'queries') as Record<string, unknown>[],
-    ),
+    queries: [
+      ...salesWorkspaceQueries(
+        APPLICATION_NAMESPACE,
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
+      // A worklist reads its own clone of its source List's query.
+      ...worklistQueries(
+        APPLICATION_NAMESPACE,
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
+    ],
     relations: merged(definitions, 'relations'),
     schemaVersion: version,
     stateMachines: merged(definitions, 'stateMachines'),
     storageMappings: merged(definitions, 'storageMappings'),
     surfaces: orderEntrySurfaces(
       APPLICATION_NAMESPACE,
-      merged(definitions, 'surfaces').map((surface) => {
-        if (!isRecord(surface))
-          throw new TypeError('surface must be an object');
-        const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
-        const composition = RECORD_COMPOSITIONS[local]?.(APPLICATION_NAMESPACE);
-        if (!composition) return surface;
-        // A workspace may read its record with a read model's figures, such as
-        // a sales order's totals; the record query stays the plain get.
-        const dataSource = RECORD_DATA_SOURCES[local];
-        const slots = surface.slots as Record<string, unknown>[];
-        const slot = (name: string, suffix: string, orderKey: number) => ({
-          kind: 'surfaceSlot',
-          schemaVersion: version,
-          slot: name,
-          slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_${suffix}`,
-          orderKey,
-          content: {
-            kind: 'opaqueSurfaceContentReference',
+      merged(definitions, 'surfaces')
+        .map((surface) => {
+          if (!isRecord(surface))
+            throw new TypeError('surface must be an object');
+          const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
+          const composition = RECORD_COMPOSITIONS[local]?.(
+            APPLICATION_NAMESPACE,
+          );
+          if (!composition) return surface;
+          // A workspace may read its record with a read model's figures, such as
+          // a sales order's totals; the record query stays the plain get.
+          const dataSource = RECORD_DATA_SOURCES[local];
+          const slots = surface.slots as Record<string, unknown>[];
+          const slot = (name: string, suffix: string, orderKey: number) => ({
+            kind: 'surfaceSlot',
             schemaVersion: version,
-            targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
-          },
-        });
-        return {
-          ...surface,
-          ...(dataSource
-            ? {
-                dataSource: {
-                  kind: 'queryReference',
-                  schemaVersion: version,
-                  targetId: `${APPLICATION_NAMESPACE}:query.${dataSource}`,
-                },
-              }
-            : {}),
-          composition,
-          slots: [
-            ...slots.map((slot) => ({
-              ...slot,
-              ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
-              ...(slot.slot === 'sections' && LINES_LEAD.has(local)
-                ? { orderKey: 70 }
-                : {}),
-            })),
-            // A composition renders its fields in `sections`; a read-only
-            // document that never declared one gains it here.
-            ...(slots.some((value) => value.slot === 'sections')
-              ? []
-              : [
-                  slot('sections', 'sections', LINES_LEAD.has(local) ? 70 : 50),
-                ]),
-            slot('childTables', 'children', 60),
-          ],
-        };
-      }),
+            slot: name,
+            slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_${suffix}`,
+            orderKey,
+            content: {
+              kind: 'opaqueSurfaceContentReference',
+              schemaVersion: version,
+              targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
+            },
+          });
+          return {
+            ...surface,
+            ...(dataSource
+              ? {
+                  dataSource: {
+                    kind: 'queryReference',
+                    schemaVersion: version,
+                    targetId: `${APPLICATION_NAMESPACE}:query.${dataSource}`,
+                  },
+                }
+              : {}),
+            composition,
+            slots: [
+              ...slots.map((slot) => ({
+                ...slot,
+                ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
+                ...(slot.slot === 'sections' && LINES_LEAD.has(local)
+                  ? { orderKey: 70 }
+                  : {}),
+              })),
+              // A composition renders its fields in `sections`; a read-only
+              // document that never declared one gains it here.
+              ...(slots.some((value) => value.slot === 'sections')
+                ? []
+                : [
+                    slot(
+                      'sections',
+                      'sections',
+                      LINES_LEAD.has(local) ? 70 : 50,
+                    ),
+                  ]),
+              slot('childTables', 'children', 60),
+            ],
+          };
+        })
+        .concat(
+          // Worklists join the workspace pass as Lists of their own.
+          worklistSurfaces(
+            APPLICATION_NAMESPACE,
+            merged(definitions, 'surfaces') as Record<string, unknown>[],
+          ),
+        ),
       merged(definitions, 'queries') as Record<string, unknown>[],
     ),
   });
