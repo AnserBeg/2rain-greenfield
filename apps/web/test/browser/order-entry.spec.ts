@@ -1284,8 +1284,13 @@ async function openPurchaseOrders(page: Page) {
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
   });
-  await navigation.getByText('Purchasing', { exact: true }).click();
-  await navigation
-    .getByRole('link', { name: 'Purchase orders', exact: true })
-    .click();
+  const orders = navigation.getByRole('link', {
+    name: 'Purchase orders',
+    exact: true,
+  });
+  // A group already opened on this document stays open; clicking it again
+  // would close it.
+  if (!(await orders.isVisible()))
+    await navigation.getByText('Purchasing', { exact: true }).click();
+  await orders.click();
 }

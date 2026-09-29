@@ -44,9 +44,14 @@ test('Expected receipts lists what is still to arrive, counts its tabs, marks th
     await expect(
       page.getByRole('heading', { name: 'Expected receipts', level: 1 }),
     ).toBeVisible();
+    // Inside the collapsed group the link is found by its text; it alone is
+    // current, not Purchase orders beside it.
     await expect(
-      navigation.getByRole('link', { name: 'Expected receipts', exact: true }),
+      navigation.locator('a', { hasText: 'Expected receipts' }),
     ).toHaveAttribute('aria-current', 'page');
+    await expect(
+      navigation.locator('a', { hasText: 'Purchase orders' }),
+    ).not.toHaveAttribute('aria-current', 'page');
 
     // Tabs are server counts: two orders have something open, one of them
     // late; three are released.
@@ -133,6 +138,10 @@ test('Expected receipts lists what is still to arrive, counts its tabs, marks th
         .locator(`tr[data-record-id="${orders.complete.recordId}"]`)
         .locator(`td[data-column-id="${column('open')}"]`),
     ).toHaveText('0');
+    await capturePhone(
+      page,
+      testInfo.outputPath('expected-receipts-all-released-phone.png'),
+    );
 
     // Opening a row opens the purchase order itself.
     await page
@@ -148,13 +157,10 @@ test('Expected receipts lists what is still to arrive, counts its tabs, marks th
     await expect(page.locator('.composition-header h1')).toHaveText(
       orders.late.number,
     );
-    await capturePhone(
-      page,
-      testInfo.outputPath('expected-receipts-order.png'),
-    );
   });
 });
 
+/** One screen width at phone size: the List scrolls down, never sideways. */
 async function capturePhone(page: Page, path: string) {
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
