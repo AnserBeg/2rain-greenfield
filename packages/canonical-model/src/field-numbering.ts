@@ -2,6 +2,14 @@ import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
 
 /**
+ * Release verification writes `V-`-prefixed sentinel values, document numbers
+ * included, into the records it arranges. A document sequence may not use this
+ * prefix, so a sentinel can never read as a business number of any sequence
+ * nor collide with one.
+ */
+export const VERIFICATION_SENTINEL_PREFIX = 'V' as const;
+
+/**
  * A numbered field is assigned by the server on create and is nobody's input.
  * It must be a required text field under the tenant-wide unique business key
  * (so an archived record keeps its number reserved) and long enough for the
@@ -34,10 +42,19 @@ export function validateFieldNumbering(
       fail(id, 'a document number is required on every record');
     if (field.businessKey !== 'tenantEnvironmentCaseInsensitiveUnique')
       fail(id, 'a document number is a tenant-wide unique business key');
+    if (numbering.prefix === VERIFICATION_SENTINEL_PREFIX)
+      fail(
+        id,
+        `the prefix ${VERIFICATION_SENTINEL_PREFIX} is reserved for release verification sentinels`,
+      );
+    // The first number is the start padded to the minimum digits; a start
+    // wider than that minimum widens the first number itself.
     if (
       field.fieldType.kind === 'textFieldType' &&
       field.fieldType.maximumLength <
-        numbering.prefix.length + 1 + numbering.minimumDigits
+        numbering.prefix.length +
+          1 +
+          Math.max(numbering.minimumDigits, String(numbering.start).length)
     )
       fail(id, 'the number field is shorter than its format');
     if (sequences.has(numbering.sequenceId))

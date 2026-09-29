@@ -73,6 +73,78 @@
           "expected": "is not registered in pinned release"
         }
       ]
+    },
+    {
+      "name": "numbering-reserves-the-sentinel-prefix",
+      "claim": "A document sequence may not use release verification's sentinel prefix V, so no sentinel reads as a business number of any sequence or collides with one.",
+      "file": "packages/canonical-model/src/field-numbering.ts",
+      "original": "    if (numbering.prefix === VERIFICATION_SENTINEL_PREFIX)\n      fail(\n        id,\n        `the prefix ${VERIFICATION_SENTINEL_PREFIX} is reserved for release verification sentinels`,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/canonical-model/field-numbering.test.ts"],
+        "namePattern": "a numbering the runtime could not honour is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/field-numbering.test.ts",
+          "name": "a numbering the runtime could not honour is refused by name",
+          "expected": "the numbering was accepted"
+        }
+      ]
+    },
+    {
+      "name": "numbering-first-number-fits-its-field",
+      "claim": "A numbering whose first number (the start padded to the minimum digits) cannot fit its field is refused, not admitted to fail at insert.",
+      "file": "packages/canonical-model/src/field-numbering.ts",
+      "original": "          Math.max(numbering.minimumDigits, String(numbering.start).length)\n",
+      "replacement": "          numbering.minimumDigits\n",
+      "test": {
+        "files": ["test/unit/canonical-model/field-numbering.test.ts"],
+        "namePattern": "a numbering the runtime could not honour is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/field-numbering.test.ts",
+          "name": "a numbering the runtime could not honour is refused by name",
+          "expected": "the numbering was accepted"
+        }
+      ]
+    },
+    {
+      "name": "numbering-scan-reads-every-digit-count",
+      "claim": "The allocator's maximum scan reads a stored number of any digit count, leading zeros included, and its own output past eighteen digits, so the next number always follows the highest.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "      [`^${field.prefix}-([0-9]+)$`],\n",
+      "replacement": "      [`^${field.prefix}-([0-9]{1,18})$`],\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "SO-000043"
+        }
+      ]
+    },
+    {
+      "name": "numbering-exhaustion-refuses-by-name",
+      "claim": "A next document number that no longer fits its field is refused as MODULE_DOCUMENT_SEQUENCE_EXHAUSTED before any write, not left to fail at insert.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    const maximumLength = column.fieldContract.bounds.maximumLength;\n    if (maximumLength !== null && number.length > maximumLength)\n      throw failure(\n        'MODULE_DOCUMENT_SEQUENCE_EXHAUSTED',\n        'the next document number no longer fits its field',\n        field.fieldId,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "The validation function is expected to return \"true\""
+        }
+      ]
     }
   ]
 }

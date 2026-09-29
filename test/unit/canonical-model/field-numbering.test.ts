@@ -123,6 +123,32 @@ test('a numbering the runtime could not honour is refused by name', () => {
       },
     ],
     [
+      // Release verification's `V-` sentinels would read as this sequence's
+      // numbers, advancing it and colliding with its values.
+      'reserved for release verification sentinels',
+      (app) => {
+        (
+          field(app, 'sales_order_number').numbering as { prefix: string }
+        ).prefix = 'V';
+      },
+    ],
+    [
+      // The first number is the start (1000), wider than its minimum digits:
+      // `SO-1000` is 7 characters in a field of 6.
+      'shorter than its format',
+      (app) => {
+        Object.assign(field(app, 'sales_order_number').numbering as Json, {
+          minimumDigits: 1,
+          start: 1000,
+        });
+        (
+          field(app, 'sales_order_number').fieldType as {
+            maximumLength: number;
+          }
+        ).maximumLength = 6;
+      },
+    ],
+    [
       'each document sequence numbers one field',
       (app) => {
         field(app, 'purchase_order_number').numbering = numbering(
@@ -173,6 +199,18 @@ test('a numbering the runtime could not honour is refused by name', () => {
   ];
   for (const [reason, mutate] of cases)
     assert.match(refused(mutate), new RegExp(reason), reason);
+});
+
+test('a first number that fits its field is admitted', () => {
+  const app = application();
+  Object.assign(field(app, 'sales_order_number').numbering as Json, {
+    minimumDigits: 1,
+    start: 1000,
+  });
+  (
+    field(app, 'sales_order_number').fieldType as { maximumLength: number }
+  ).maximumLength = 7;
+  assert.doesNotThrow(() => normalizeApplicationPackage(app as never));
 });
 
 test('a malformed prefix fails the closed schema', () => {

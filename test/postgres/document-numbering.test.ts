@@ -192,10 +192,14 @@ test(
         ),
       );
 
-      // Archiving keeps the number reserved: the next is never reused.
+      // Archiving keeps the number reserved: archive the order holding the
+      // highest number, and the next still follows it.
+      const highest = concurrent.find(
+        (result) => numberOf(result) === 'SO-000013',
+      )!;
       const archived = await invoke('sales_order_archive', {
-        recordId: second.readBack!.recordId,
-        expectedRevision: second.readBack!.revision,
+        recordId: highest.readBack!.recordId,
+        expectedRevision: highest.readBack!.revision,
       });
       assert.equal(archived.outcome, 'succeeded');
       const afterArchive = await invoke('sales_order_create', orderInput());
@@ -227,6 +231,35 @@ test(
         purchase.readBack?.values[`${ns}:field.purchase_order_number`],
         'PO-000001',
       );
+
+      // The scan reads a number of any digit count. Stored numbers are set
+      // directly here, as an earlier release or an import could have left
+      // them: more than eighteen digits (leading zeros) still sets the next.
+      const renumber = (recordId: string, number: string) =>
+        fixture.pool.query(
+          `UPDATE ${fulfillmentTable(order)} SET "${numberColumn}" = $3
+            WHERE tenant_id = $1 AND record_id = $2`,
+          [fixture.app.runtime.identity.tenantId, recordId, number],
+        );
+      const created = async () =>
+        numberOf(await invoke('sales_order_create', orderInput()));
+      await renumber(otherCompany.readBack!.recordId, 'SO-0000000000000000042');
+      assert.equal(await created(), 'SO-000043');
+      // The allocator's own nineteen-digit output is read back next time.
+      await renumber(otherCompany.readBack!.recordId, 'SO-999999999999999999');
+      assert.equal(await created(), 'SO-1000000000000000000');
+      assert.equal(await created(), 'SO-1000000000000000001');
+      // A next number that no longer fits the 60-character field is refused
+      // by name, and nothing is written.
+      await renumber(otherCompany.readBack!.recordId, `SO-${'9'.repeat(57)}`);
+      const stored = (await storedNumbers()).length;
+      await assert.rejects(
+        invoke('sales_order_create', orderInput()),
+        (error: unknown) =>
+          (error as { code?: unknown }).code ===
+          'MODULE_DOCUMENT_SEQUENCE_EXHAUSTED',
+      );
+      assert.equal((await storedNumbers()).length, stored);
     });
   },
 );

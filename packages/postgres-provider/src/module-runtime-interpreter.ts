@@ -4,6 +4,7 @@ import {
   PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
+  VERIFICATION_SENTINEL_PREFIX,
   canonicalize,
   unicodeCaseFold,
   type CanonicalScalar,
@@ -768,9 +769,11 @@ export type DocumentNumberMode = 'sequence' | 'verificationSentinel';
  * allocator runs at a time per sequence -- the transaction-scoped lock is held
  * to commit, so concurrent creates serialize and a rolled-back create gives
  * its number back. The next value follows the highest existing number of that
- * prefix among ALL of the tenant's records, archived included, so a number is
- * never reused; the business key's unique index remains the backstop. A replay
- * of the same idempotency key never reaches this, so a retry keeps its number.
+ * prefix among ALL of the tenant's records, archived included, whatever its
+ * digit count (leading zeros included), so a number is never reused; the
+ * business key's unique index remains the backstop. A next number that no
+ * longer fits its field refuses by name. A replay of the same idempotency key
+ * never reaches this, so a retry keeps its number.
  */
 async function assignDocumentNumbers(
   client: PoolClient,
@@ -805,8 +808,9 @@ async function assignDocumentNumbers(
       // Release verification arranges records to exercise a release; it asks
       // no business question and must not consume a tenant's document numbers.
       // Its number is the same `V-` sentinel it writes into every text field,
-      // unique by record id and never shaped like `PREFIX-000123`.
-      const sentinel = `V-${createHash('sha256')
+      // unique by record id. No sequence may use the prefix (the numbering
+      // contract reserves it), so a sentinel is never a business number.
+      const sentinel = `${VERIFICATION_SENTINEL_PREFIX}-${createHash('sha256')
         .update(input.recordId, 'utf8')
         .update(Uint8Array.of(0))
         .update(field.fieldId, 'utf8')
@@ -828,15 +832,22 @@ async function assignDocumentNumbers(
          FROM north_star_module.${quoted(entity.physicalTableName)}
         WHERE tenant_id = north_star_internal.trusted_tenant_id()
           AND environment_id = north_star_internal.trusted_environment_id()`,
-      [`^${field.prefix}-([0-9]{1,18})$`],
+      [`^${field.prefix}-([0-9]+)$`],
     );
     const observed = highest.rows[0]?.highest ?? null;
     const next =
       observed === null || BigInt(observed) < BigInt(field.start)
         ? BigInt(field.start)
         : BigInt(observed) + 1n;
-    patch[field.fieldId] =
-      `${field.prefix}-${next.toString().padStart(field.minimumDigits, '0')}`;
+    const number = `${field.prefix}-${next.toString().padStart(field.minimumDigits, '0')}`;
+    const maximumLength = column.fieldContract.bounds.maximumLength;
+    if (maximumLength !== null && number.length > maximumLength)
+      throw failure(
+        'MODULE_DOCUMENT_SEQUENCE_EXHAUSTED',
+        'the next document number no longer fits its field',
+        field.fieldId,
+      );
+    patch[field.fieldId] = number;
   }
   return Object.freeze({ ...input, patch: Object.freeze(patch) });
 }
