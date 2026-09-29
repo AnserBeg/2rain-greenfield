@@ -1,8 +1,8 @@
 # PURCHASING-PARITY — Rain's purchase orders at PaneFlow parity through metadata
 
-Status: slice 1 (priced purchase orders) executable; slices 2-4 chartered; no merge, no deployment. Sole LOCAL BUILD, chartered by the owner on 2026-09-29 ("continue to what is left ... the other components ... without me"; recommendations accepted, decisions reported at the end).
+Status: slice 1 (priced purchase orders, RCV numbers) executable and pushed (draft PR on `packet/SALES-PARITY`); slices 2-4 chartered; no merge, no deployment. Sole LOCAL BUILD, chartered by the owner on 2026-09-29 ("continue to what is left ... the other components ... without me"; recommendations accepted, decisions reported at the end).
 Tier: outside the Critical set so far — storage columns are added through the existing `addColumn` path (SALES-PARITY claims 10-11); no posting-kernel, verification, trust, migration or grant change.
-Base: `packet/SALES-PARITY` (stacked; its draft PR is not yet opened). Reference: PaneFlow `d057daff` read from source; audit in `PURCHASING-PARITY-inventory.md`.
+Base: `packet/SALES-PARITY` at `f0a38e76` (stacked on draft PR #7). Reference: PaneFlow `d057daff` read from source; audit in `PURCHASING-PARITY-inventory.md`.
 
 ## Owner rulings (recommended, taken under the owner's standing instruction)
 
@@ -38,8 +38,10 @@ None owed: nothing in the Critical set changes.
 
 ## Gates
 
-- `3fbb78d1` (own worktree, AC, host paging under 1 GB free): release `--check` PASS (lineage entry 23); unit `purchasing-definition` 37/37, `workspace-contract` + `sales-definition` + `surface-list` 25/25; integration receiving 3/3 (the witness states null figures and seeds unset fields as the provider returns them), the whole `surface-data-binding` file stopped by my own 2-hour wrapper with no result; surface grammar and hygiene 36/36 (the flat-navigation fixture strips Purchasing as the product composes it); compiler 175/175; typecheck clean; coverage re-derived (739 -> 738 observed).
-- NOT run (host memory; a database container does not start within its 30 s bound): the regenerated full-replay schema snapshot (owed: this slice adds columns), PostgreSQL commercial-totals and document-numbering, browser `purchase-pricing`, composed-application. Not pushed until the snapshot is regenerated.
+- `3fbb78d1` (own worktree, AC, host paging under 1 GB free): release `--check` PASS (lineage entry 23); unit `purchasing-definition` 37/37, `workspace-contract` + `sales-definition` + `surface-list` 25/25; integration receiving 3/3; surface grammar and hygiene 36/36; compiler 175/175; typecheck clean; coverage re-derived (739 -> 738 observed).
+- `9500dea2`: the full-replay schema snapshot regenerated over the lineage; it differs only by eleven nullable columns, their UPDATE grants and the NOT VALID payment-terms check. PostgreSQL commercial-totals 2/2, document-numbering 1/1 (RCV-000001, every numbered entity's scenarios executed), composed-application 18 pass, 0 fail, 2 cancelled (parts 8 and 9 each stopped by their 300 s bound before any assertion, under 1 GB free).
+- `13f35063`..`3cbb2de7`: running them found test drift this slice caused, fixed there: the receiving tests typed a now-assigned receipt number; the receiving journey and the receipt posting test addressed the order page by the plain get's company parameter (the page reads its totals query) and the posting test's gateway had no commercial read model; the pricing journey expected zero seconds and a secondary column in its own cell. Then receiving-authorization 7/7, browser purchase-pricing 1/1 and the composed receiving journey 1/1 (a filtered browser run exits 1 by the reachability reporter's own rule).
+- `ba21d043` (rebased onto SALES-PARITY `f0a38e76`, whose slot order puts a document's lines first; this slice becomes lineage entry 24): release `--check` PASS; typecheck clean; unit `purchasing-definition` + `workspace-contract` 48/48; coverage unchanged (738). The PostgreSQL and browser runs above are at the pre-rebase heads; CI on the PR is the gate for the rebased head (see Filed).
 
 ## Test it yourself
 
@@ -47,6 +49,33 @@ None owed: nothing in the Critical set changes.
 
 ## Filed
 
-- `apps/web/release/app.compiled.json` keeps growing about 3 MB per lineage entry (65 MB at 22 entries): an LFS or ADR-0066 re-baseline decision is the owner's.
+- `apps/web/release/app.compiled.json` grows about 3 MB per lineage entry (72 MB at 24 entries; GitHub refuses files over 100 MB): an ADR-0066 re-baseline (recommended: nothing is in production) or LFS is the owner's decision.
+- GitHub Actions did not start on the draft PRs: the account's billing refused the jobs (2026-09-29). Until it is fixed, the gates above are the local ones.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "PURCHASING-PARITY",
+  "base": "f0a38e76ee6d265f2cfc04aa3e9520b1f04af462",
+  "head": "ba21d043379800b72ab24ec72d17d9c49b8b1a85",
+  "changedPaths": [
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
+    "apps/web/test/browser/purchase-pricing.spec.ts", "apps/web/test/browser/receiving.composed-application.spec.ts",
+    "packages/domain/src/app/builder.ts", "packages/domain/src/app/order-entry.ts",
+    "packages/domain/src/purchasing/definition.ts", "packages/domain/src/purchasing/workspace.ts",
+    "packages/domain/src/sales/workspace.ts", "packages/postgres-provider/src/commercial-read-model.ts",
+    "test/architecture/surface-grammar-conformance.test.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json",
+    "test/integration/surface-data-binding.test.ts", "test/postgres/commercial-totals.test.ts",
+    "test/postgres/composed-application.test.ts", "test/postgres/document-numbering.test.ts",
+    "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/inventory-posting.test.ts",
+    "test/postgres/receiving-authorization.test.ts", "test/unit/purchasing-definition.test.ts"
+  ],
+  "symbols": [
+    {"path": "packages/domain/src/purchasing/definition.ts", "name": "purchasingModuleDefinition"},
+    {"path": "packages/domain/src/purchasing/workspace.ts", "name": "purchasingWorkspace"},
+    {"path": "packages/postgres-provider/src/commercial-read-model.ts", "name": "commercialReadModel"}
+  ]
+}
+```
 
 Review: not owed — outside the Critical set (slice 1).
