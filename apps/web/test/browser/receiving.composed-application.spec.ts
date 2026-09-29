@@ -70,14 +70,22 @@ async function journey(
       queryId: string;
       legalEntityScope?: { operand: { parameterId: string } };
     }[];
+    surfaces: { surfaceId: string; dataSource?: { targetId: string } }[];
   };
   function url(
     local: string,
     role: 'form' | 'detail',
     recordId?: string,
   ): string {
+    // A page scopes by the query it reads: a purchase order page reads its
+    // totals query (PURCHASING-PARITY), other records their own get.
+    const source =
+      definition.surfaces.find(
+        (candidate) =>
+          candidate.surfaceId === `northstar.app:surface.${local}_${role}`,
+      )?.dataSource?.targetId ?? `northstar.app:query.${local}_get`;
     const query = definition.queries.find(
-      (candidate) => candidate.queryId === `northstar.app:query.${local}_get`,
+      (candidate) => candidate.queryId === source,
     );
     if (!query?.legalEntityScope)
       throw new Error(`Missing scoped query: ${local}`);

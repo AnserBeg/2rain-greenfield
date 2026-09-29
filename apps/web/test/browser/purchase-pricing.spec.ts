@@ -15,7 +15,8 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     await page.goto(url);
     await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
     await page.getByRole('link', { name: 'New', exact: true }).click();
-    // A new order expects delivery two weeks out, at midnight UTC.
+    // A new order expects delivery two weeks out, at midnight UTC; the
+    // browser shows a whole minute without its seconds.
     const today = new Date();
     const expected = new Date(
       Date.UTC(
@@ -25,7 +26,7 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
       ),
     )
       .toISOString()
-      .slice(0, 19);
+      .slice(0, 16);
     await expect(page.getByLabel('Expected date (UTC)')).toHaveValue(expected);
     await page.getByLabel('Order date (UTC) *').fill('2026-09-28T12:00');
     // Choosing the supplier sets its currency, terms and tax code; each
@@ -75,9 +76,9 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     await expect(line.locator('td[data-column-label="Tax"]')).toHaveText(
       '1.69',
     );
-    await expect(
-      line.locator('td[data-column-label="Unit cost"]'),
-    ).toHaveText('12.50');
+    await expect(line.locator('td[data-column-label="Unit cost"]')).toHaveText(
+      '12.50',
+    );
     const fact = (label: string) =>
       page
         .locator('.composition-header-facts div')
