@@ -82,4 +82,3 @@ Serve either fixture above.
 3. §6's invoice figures, payments, credits and printed totals read the same way (`25.00`, `15.00`, `10.00`, `5.00`).
 4. Sales → Invoices: Total and Balance columns read with two decimals; **Export CSV** keeps the stored values (`25`, `12.5`).
 5. Purchasing → a purchase order: the lines' **Unit cost** reads with two decimals.
-
