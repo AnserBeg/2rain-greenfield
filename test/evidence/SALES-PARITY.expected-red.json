@@ -150,7 +150,7 @@
       "name": "numbering-sentinels-have-room",
       "claim": "A numbered field holds at least 18 characters, so release verification's truncated V- sentinels keep 64 bits and the records one verification arranges keep distinct numbers.",
       "file": "packages/canonical-model/src/field-numbering.ts",
-      "original": "    if (\n      field.fieldType.kind === 'textFieldType' &&\n      field.fieldType.maximumLength < VERIFICATION_SENTINEL_MINIMUM_LENGTH\n    )\n      fail(\n        id,\n        `a number field holds at least ${String(VERIFICATION_SENTINEL_MINIMUM_LENGTH)} characters, so release verification sentinels stay distinct`,\n      );\n",
+      "original": "    if (\n      field.fieldType.kind === 'textFieldType' &&\n      field.fieldType.maximumLength < VERIFICATION_SENTINEL_MINIMUM_LENGTH\n    )\n      fail(\n        id,\n        `a number field holds at least ${String(VERIFICATION_SENTINEL_MINIMUM_LENGTH)} characters, so release verification sentinels keep 64 bits`,\n      );\n",
       "replacement": "",
       "test": {
         "files": ["test/unit/canonical-model/field-numbering.test.ts"],
@@ -179,6 +179,78 @@
           "file": "test/postgres/document-numbering.test.ts",
           "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
           "expected": "module uniqueness contract rejected the value"
+        }
+      ]
+    },
+    {
+      "name": "verification-constructs-assigned-numbers",
+      "claim": "Release verification counts a create's server-assigned document number as constructed by the create, so an entity with a required numbered field and a search query executes its scenarios instead of deriving them all as unconstructable.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    // its required column needs no caller input.\n    for (const assigned of operation.inputContract.assignedFields ?? []) {\n",
+      "replacement": "    // its required column needs no caller input.\n    for (const assigned of [] as { fieldId: string }[]) {\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "release verification executed every scenario of a numbered entity"
+        }
+      ]
+    },
+    {
+      "name": "verification-probes-assigned-uniqueness",
+      "claim": "A uniqueness-fold scenario whose subject is a server-assigned number runs the assigned-field probe (distinct stored values; a supplied case variant refused as input) instead of looking the number up among caller inputs and failing.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      return this.#assignedUniqueness(scenario, operation, token);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "uniqueness-fold scenario does not name a text input field"
+        }
+      ]
+    },
+    {
+      "name": "verification-reads-back-assigned-values",
+      "claim": "Each arranged record carries the numbers its create assigned, read back from the create, so probes that resolve or search by a number use the stored value.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      assignedValues[assigned.fieldId] = value;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "did not return an authoritative positive outcome for undefined"
+        }
+      ]
+    },
+    {
+      "name": "verification-searches-by-an-assigned-number",
+      "claim": "A search-exclusion probe whose entity's only searchable text is its assigned number (payment, credit) takes the number as its positive field.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      createOperation.inputContract.assignedFields?.find(\n",
+      "replacement": "      ([] as { fieldId: string }[]).find(\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "search exclusion probe has no same-entity positive searchable field"
         }
       ]
     }
