@@ -25,8 +25,8 @@ Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distribut
 4. Export is one statement bounded by the list query's `exportMaximumResultCount`; larger sets are refused (`LIST_EXPORT_OVER_LIMIT`), never truncated; `= + - @` cells are neutralized.
 5. The agent projection publishes each export limit and each List's views/filters/sort/labels as query presets answered by the same gateway.
 6. A metadata-only List variation is served by the unchanged runtime; Posted stock and Purchase orders use the same mechanism.
-7. Numbering (slice 2): a `numbering` field leaves every writable input set; a typed number is refused before any business write (stored numbers unchanged); the validator refuses non-text, optional, non-unique, duplicated, editor-offered or composition-bound numbers, a field too short for its first number (start included), and the prefix `V`.
-8. Allocation runs inside the create transaction under a per-tenant, per-sequence lock: one past the highest `PREFIX-digits` of the tenant, any digit count (leading zeros included), archived included; a next number that no longer fits its field refuses as `MODULE_DOCUMENT_SEQUENCE_EXHAUSTED`; ten concurrent creates take ten consecutive numbers; a replay keeps its number.
+7. Numbering (slice 2): a `numbering` field leaves every writable input set; a typed number is refused before any business write (stored numbers unchanged); the validator refuses non-text, optional, non-unique, duplicated, editor-offered or composition-bound numbers, a field too short for its first number (start included) or under 18 characters (room for 64-bit verification sentinels), and the prefix `V`.
+8. Allocation runs inside the create transaction under a per-tenant, per-sequence lock: one past the highest `PREFIX-digits` among every record of the tenant (archived, every company), any digit count, read through the business key's Unicode case fold; a next number that no longer fits refuses as `MODULE_DOCUMENT_SEQUENCE_EXHAUSTED`; ten concurrent creates take ten consecutive numbers; a replay keeps its number. The unique key is the backstop among live records of its scope.
 9. **Critical.** Release verification's arranged records take `V-` sentinel numbers (`documentNumbers: 'verificationSentinel'`); no sequence may use the prefix `V`, so a sentinel never reads as, advances or collides with a business number.
 10. **Critical.** A column a later release adds to a company-scoped table (not fact, not period-lock) gets the column UPDATE grant the table's creation gives its mutable columns (`case 'addColumn'`).
 11. **Critical.** Replaying a company-scoped table's creation for another tenant revokes UPDATE at table level only when a table-level grant exists, so a later release's column grants survive (`createManagedTable`).
@@ -68,8 +68,8 @@ Grant fixes (Critical) `c74ea33e`, `7947dba9`. 3. Master data `bed8809a`, `cb5f7
 
 ## Controls
 
-- `verification-takes-sentinel-document-numbers` and `numbering-reserves-the-sentinel-prefix` → claim 9; `added-company-column-carries-its-update-grant` → 10; `replayed-create-keeps-later-column-grants` → 11; `verification-reads-records-through-a-plain-get` → 20; `numbering-first-number-fits-its-field` → 7; `numbering-scan-reads-every-digit-count`, `numbering-exhaustion-refuses-by-name` → 8.
-- The first three reproduced at `bed8809a`; the other five at `4e2e018a`/`7f3c31f1` (`--run`: each mutation killed with its declared reason, each restored run green).
+- `verification-takes-sentinel-document-numbers` and `numbering-reserves-the-sentinel-prefix` → claim 9; `added-company-column-carries-its-update-grant` → 10; `replayed-create-keeps-later-column-grants` → 11; `verification-reads-records-through-a-plain-get` → 20; `numbering-first-number-fits-its-field`, `numbering-sentinels-have-room` → 7; `numbering-scan-reads-every-digit-count`, `numbering-scan-folds-like-the-business-key`, `numbering-exhaustion-refuses-by-name` → 8.
+- The first three reproduced at `bed8809a`; the others at `4e2e018a`/`7f3c31f1` and, for numbering, again at `427d4a50`/`40ca820a` (`--run`: each mutation killed with its declared reason, each restored run green).
 
 ## Gates
 
@@ -92,13 +92,13 @@ Serve: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/hel
 - `apps/web/release/app.compiled.json` is 58 MB: GitHub warns above 50 MB and refuses above 100 MB (about 3 MB per lineage entry).
 - Returns (ruling D): see Decisions; its Critical arm moves with that packet. PR #6's served demo lost its database when Docker restarted (2026-09-28); that lane owns its restart.
 
-Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numbering (sentinel prefix `V`, an 18-digit scan, a start wider than its field), fixed at `53ca49f4`; none in the grants or the plain read. Round 2 (confirm) is owed: `SALES-PARITY-review-prompt.md`.
+Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numbering (sentinel prefix `V`, an 18-digit scan, a start wider than its field), fixed at `53ca49f4`; none in the grants or the plain read. Round 2 (`7f3c31f1`) closed those with no regression and found two older ones (sentinels in a narrow field; a scan not using the key's case fold), fixed at `427d4a50`. Round 3 (confirm) is owed: `SALES-PARITY-review-prompt.md`.
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SALES-PARITY",
   "base": "994a7dc969694c8077630eaa536fcd385f7e030c",
-  "head": "7f3c31f1aa639ec58daf317c8879cb98b18d786b",
+  "head": "40ca820af73e645df556e1be81b83320fd61133c",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
     "apps/web/release/current-policy-bindings.json", "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts",
