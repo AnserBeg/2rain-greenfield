@@ -16,6 +16,12 @@ const metric = (record: SemanticRecordDto, key: string) =>
   record.values[`${ns}:metric.${key}`];
 const refusedWith = (code: string) => (error: unknown) =>
   (error as { code?: unknown }).code === code;
+// A stored quantity reads with its column's scale (`5.000000000000000000`);
+// the received and open figures are computed, canonical decimals.
+const canonical = (value: unknown) =>
+  typeof value === 'string' && value.includes('.')
+    ? value.replace(/0+$/u, '').replace(/\.$/u, '')
+    : value;
 
 test(
   'PURCHASING-PARITY: a received order is never cancelled; a line’s open remainder closes with a reason, then the order closes',
@@ -76,7 +82,9 @@ test(
             },
           })
         ).records.map((record) => [
-          record.values[`${ns}:field.purchase_order_line_ordered_quantity`],
+          canonical(
+            record.values[`${ns}:field.purchase_order_line_ordered_quantity`],
+          ),
           metric(record, 'received'),
           metric(record, 'open_to_receive'),
         ]);
