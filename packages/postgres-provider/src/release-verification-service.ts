@@ -1096,6 +1096,8 @@ interface VerificationQueryContractBase {
   };
   readonly parameters?: readonly { readonly parameterId: string }[];
   readonly queryId: string;
+  /** Present when a read model states figures on read; see `#queryForEntity`. */
+  readonly readModel?: unknown;
   readonly resolveMatchKeys: readonly {
     readonly authority: string;
     readonly fieldId: string;
@@ -2147,10 +2149,15 @@ class SemanticVerificationExecutor {
     entityId: string,
     queryType: VerificationQueryContract['queryType'],
   ): VerificationQueryContract {
+    // Verification's gateway registers no read-model executors, so it reads
+    // its records through the entity's plain query of that type. A read-model
+    // query of the same type, such as an order read with its totals, presents
+    // the same records; it sorts wherever its id falls and is never the read.
     const query = this.#queries.find(
       (candidate) =>
         candidate.sourceEntityId === entityId &&
-        candidate.queryType === queryType,
+        candidate.queryType === queryType &&
+        candidate.readModel === undefined,
     );
     if (!query) {
       throw failure(

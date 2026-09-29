@@ -55,6 +55,24 @@
           "expected": "missing managed column grant"
         }
       ]
+    },
+    {
+      "name": "verification-reads-records-through-a-plain-get",
+      "claim": "Release verification reads its probe records through the entity's plain query of each type, never a read-model query of the same type, whose executor its gateway does not register; an order read with its totals therefore cannot stop a release from activating.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "        candidate.queryType === queryType &&\n        candidate.readModel === undefined,\n",
+      "replacement": "        candidate.queryType === queryType,\n",
+      "test": {
+        "files": ["test/postgres/commercial-totals.test.ts"],
+        "namePattern": "ruling B: line amounts and order totals"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/commercial-totals.test.ts",
+          "name": "ruling B: line amounts and order totals are read exactly, half up per line, from each line and charge own frozen figures",
+          "expected": "is not registered in pinned release"
+        }
+      ]
     }
   ]
 }
