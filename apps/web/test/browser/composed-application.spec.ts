@@ -649,6 +649,20 @@ async function readFocusRingCoverage(
       label: 'declared list',
     },
     {
+      // A declared List with rows: its sort headers render only over rows.
+      go: async () => {
+        await page.goto(
+          scopedSurfaceUrl(
+            baseUrl,
+            'posted_stock_balance_list',
+            await loadSurfaceScopeParameterId('posted_stock_balance_list'),
+            browserLegalEntityId,
+          ),
+        );
+      },
+      label: 'declared list with rows',
+    },
+    {
       // A plain record page. A party's page is its customer workspace now, so
       // the generic record sections are read on a location's.
       go: async () => {
@@ -998,12 +1012,9 @@ async function inventoryNavigationJourney(
     'Tax code',
     'Location',
   ]);
-  // Inside the collapsed Sales group, so read whether shown or not.
-  const salesOwner = navigation.getByRole('link', {
-    name: 'Sales orders',
-    exact: true,
-    includeHidden: true,
-  });
+  // Inside the collapsed Sales group: hidden text names nothing, so the link
+  // is found by its text rather than its accessible name.
+  const salesOwner = navigation.locator('a', { hasText: 'Sales orders' });
   const purchasingOwner = navigation.getByRole('link', {
     name: 'Purchasing',
     exact: true,
@@ -1244,15 +1255,15 @@ async function inventoryRecordNavigationJourney(
   await expect(
     page.locator('[data-platform-slot="list:dataGrid"]'),
   ).toBeVisible();
+  // A declared List names the item and location through their own lists
+  // (SALES-PARITY) rather than showing their ids.
   await expect(
-    page.getByRole('cell', { name: demoItemId, exact: true }),
+    page.getByRole('cell', { name: 'Field notebook', exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('cell', { name: demoLocationId, exact: true }),
+    page.getByRole('cell', { name: 'CAL-WH', exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole('cell', { name: '5.000000000000000000', exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('cell', { name: /^5(?:\.0+)?$/u })).toBeVisible();
   await expect(
     page.getByRole('cell', { name: 'EA', exact: true }),
   ).toBeVisible();
@@ -2499,18 +2510,48 @@ async function partyLifecycleJourney(
   await expect(
     page.getByRole('navigation', { name: 'Breadcrumb' }),
   ).toContainText('Party list');
+  // A party's page is its customer workspace (SALES-PARITY): the number reads
+  // under the name, the contact in Details, and the record's identity,
+  // activity and revision in its technical details.
   const keyFactsSlot = page.locator('[data-platform-slot="record:keyFacts"]');
   const sectionsSlot = page.locator('[data-platform-slot="record:sections"]');
+  const technical = (label: string) =>
+    keyFactsSlot
+      .locator('div')
+      .filter({
+        has: page.locator('dt', { hasText: new RegExp(`^${label}$`, 'u') }),
+      })
+      .locator('dd');
   await expect(
-    sectionsSlot.getByText('P-BROWSER-REAL-001', { exact: true }),
-  ).toBeVisible();
+    page.locator(
+      '[data-platform-slot="record:titleStatus"] .composition-subtitle',
+    ),
+  ).toHaveText('P-BROWSER-REAL-001');
   await expect(keyFactsSlot).toContainText('Revision');
+  await expect(technical('Activity')).toHaveText('Active');
+  await expect(technical('Revision')).toHaveText('1');
   await expect(keyFactsSlot.locator('[data-field-id]')).toHaveCount(0);
   await expect(keyFactsSlot).not.toContainText(
     'browser-persisted@example.test',
   );
-  await expect(sectionsSlot.locator('[data-field-id]')).toHaveCount(3);
   await expect(sectionsSlot).toContainText('browser-persisted@example.test');
+  const partyUrl = page.url();
+
+  // The generic record page, read on a location's: its field sections with
+  // their compact disclosure, the sticky command bar and the action overflow.
+  await page.goto(surfaceUrl(baseUrl, 'location_list'));
+  const locationHref = await page
+    .locator('.record-link')
+    .first()
+    .getAttribute('href');
+  expect(locationHref).not.toBeNull();
+  await page.goto(new URL(locationHref!, baseUrl).href);
+  await expect(
+    page.locator('[data-platform-slot="record:sections"] [data-field-id]'),
+  ).toHaveCount(3);
+  await expect(
+    page.locator('[data-platform-slot="record:keyFacts"]'),
+  ).toContainText('Revision');
   await page.setViewportSize({ height: 844, width: 390 });
   const compactSections = page.locator(
     '[data-platform-slot="record:sections"] details.record-section-group',
@@ -2528,9 +2569,7 @@ async function partyLifecycleJourney(
   await compactSectionSummary.focus();
   await page.keyboard.press('Enter');
   await expect(compactSections).toHaveAttribute('open', '');
-  await expect(
-    compactSections.getByText('browser-persisted@example.test'),
-  ).toBeVisible();
+  await expect(compactSections.getByText('Calgary warehouse')).toBeVisible();
   const overflow = page.locator(
     '[data-platform-slot="record:commandBar"] details.action-overflow',
   );
@@ -2539,7 +2578,14 @@ async function partyLifecycleJourney(
   await expect(archive).toBeHidden();
   await overflow.locator('summary').click();
   await expect(archive).toBeVisible();
-  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+
+  // The party's own commands sit under its Record actions.
+  await page.goto(partyUrl);
+  const recordActions = page.locator(
+    '[data-platform-slot="record:commandBar"] details.composition-record-actions',
+  );
+  await recordActions.locator(':scope > summary').click();
+  await recordActions.getByRole('link', { name: 'Edit', exact: true }).click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Edit Party' }),
   ).toBeVisible();
@@ -2551,24 +2597,29 @@ async function partyLifecycleJourney(
 
   const detailUrl = `${surfaceUrl(baseUrl, 'party_detail')}&record=${encodeURIComponent(createdRecordId ?? '')}`;
   await page.goto(detailUrl);
-  const archiveOverflow = page.locator(
-    '[data-platform-slot="record:commandBar"] details.action-overflow',
-  );
-  await archiveOverflow.locator('summary').click();
+  await recordActions.locator(':scope > summary').click();
+  await recordActions.locator('details.action-overflow > summary').click();
   await page.getByRole('button', { name: 'Archive' }).click();
   await expect(
     page.getByRole('heading', { name: 'Confirm Archive' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Confirm Archive' }).click();
   await expect(page.getByRole('status')).toContainText('Archive complete');
-  await expect(page.getByText(/Archived · revision 3/)).toBeVisible();
+  await expect(technical('Activity')).toHaveText('Archived');
+  await expect(technical('Revision')).toHaveText('3');
 
+  // Without `archived=yes` the archived record is not found: its sections
+  // say so, its tables and technical details do not render, and the frame --
+  // breadcrumb, title and New -- still does.
   await page.goto(detailUrl);
   await expect(
     page.locator(
-      '[data-platform-slot^="record:"][data-slot-state="failed"] [data-diagnostic-code="QUERY_NOT_FOUND"]',
+      '[data-platform-slot="record:sections"][data-slot-state="failed"] [data-diagnostic-code="QUERY_NOT_FOUND"]',
     ),
-  ).toHaveCount(2);
+  ).toHaveCount(1);
+  await expect(
+    page.locator('[data-platform-slot^="record:"][data-slot-state="failed"]'),
+  ).toHaveCount(3);
   await expect(
     page.locator(
       '[data-platform-slot="record:breadcrumb"][data-slot-state="ready"]',
@@ -2611,16 +2662,16 @@ async function partyLifecycleJourney(
   await expect(archivedRow).toBeVisible();
   await archivedRow.getByRole('link').click();
   await expect(page).toHaveURL(/(?:\?|&)archived=yes(?:&|$)/);
-  await expect(page.getByText(/Archived · revision 3/)).toBeVisible();
-  const restoreOverflow = page.locator(
-    '[data-platform-slot="record:commandBar"] details.action-overflow',
-  );
-  await restoreOverflow.locator('summary').click();
+  await expect(technical('Activity')).toHaveText('Archived');
+  await expect(technical('Revision')).toHaveText('3');
+  await recordActions.locator(':scope > summary').click();
+  await recordActions.locator('details.action-overflow > summary').click();
   await page.getByRole('button', { name: 'Restore' }).click();
   await expect(page.getByRole('status')).toContainText('Restore complete');
 
   await page.goto(detailUrl);
-  await expect(page.getByText(/Active · revision 4/)).toBeVisible();
+  await expect(technical('Activity')).toHaveText('Active');
+  await expect(technical('Revision')).toHaveText('4');
   await expect(
     page.getByText('updated-after-navigation@example.test', { exact: true }),
   ).toBeVisible();
