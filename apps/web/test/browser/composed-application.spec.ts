@@ -575,11 +575,15 @@ composedTest.describe('focus ring coverage', () => {
         .map((measurement) => parseComputedColor(measurement.groundColor).hex);
       // An outline with positive offset lands outside the summary on its
       // details/rail ground. Child-link outlines in the open More flyout land
-      // on rail-raised. --b500 clears the former (3.61:1) and fails the latter
-      // (2.08:1), so this control pins both observed grounds before the exact red.
+      // on rail-raised, and so does the summary of Catalog, a group nested in
+      // that flyout since it lists tax codes too. --b500 clears the former
+      // (3.61:1) and fails the latter (2.08:1), so this control pins the
+      // observed grounds before the exact red.
       assert.ok(summaryGrounds.includes('#0b3a55'));
+      assert.ok(summaryGrounds.includes('#0f5f8c'));
       assert.ok(linkGrounds.includes('#0f5f8c'));
       assert.deepEqual(result.violations, [
+        'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -628,6 +632,34 @@ async function readFocusRingCoverage(
         if (href) await page.goto(new URL(href, baseUrl).href);
       },
       label: 'record',
+    },
+    {
+      // A declared List (SALES-PARITY): its view tabs and sort headers carry
+      // their own rings.
+      go: async () => {
+        await page.goto(
+          scopedSurfaceUrl(
+            baseUrl,
+            'sales_order_list',
+            await loadSurfaceScopeParameterId('sales_order_list'),
+            browserLegalEntityId,
+          ),
+        );
+      },
+      label: 'declared list',
+    },
+    {
+      // A plain record page. A party's page is its customer workspace now, so
+      // the generic record sections are read on a location's.
+      go: async () => {
+        await page.goto(surfaceUrl(baseUrl, 'location_list'));
+        const href = await page
+          .locator('.record-link')
+          .first()
+          .getAttribute('href');
+        if (href) await page.goto(new URL(href, baseUrl).href);
+      },
+      label: 'plain record',
     },
     {
       // The draft editor: its multiline notes, order-line inputs and reference
@@ -966,9 +998,11 @@ async function inventoryNavigationJourney(
     'Tax code',
     'Location',
   ]);
+  // Inside the collapsed Sales group, so read whether shown or not.
   const salesOwner = navigation.getByRole('link', {
     name: 'Sales orders',
     exact: true,
+    includeHidden: true,
   });
   const purchasingOwner = navigation.getByRole('link', {
     name: 'Purchasing',
@@ -1157,7 +1191,9 @@ async function inventoryRecordNavigationJourney(
     'purchase_order_list',
   );
 
-  await navigation.getByRole('link', { name: 'Catalog', exact: true }).click();
+  // Catalog is a group of its items and tax codes (ruling B).
+  await moreNavigation.getByText('Catalog', { exact: true }).click();
+  await navigation.getByRole('link', { name: 'Item', exact: true }).click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Item' }),
   ).toBeVisible();

@@ -105,15 +105,18 @@ test('a customer workspace sets order defaults and an address book that a new sa
     await page
       .getByRole('button', { name: 'Set default salesperson', exact: true })
       .click();
-    await expect(dialog.getByLabel('Salesperson').locator('option')).toHaveText(
-      [
-        'Select…',
-        'Avery Chen',
-        'Jordan Blake',
-        'Priya Natarajan',
-        'Morgan Lee',
-      ],
-    );
+    // The offered set, in no promised order: the fixture's own salesperson
+    // takes a random record id, so where it lists is incidental.
+    const salespeople = dialog.getByLabel('Salesperson').locator('option');
+    await expect(salespeople).toHaveCount(5);
+    const offered = await salespeople.allTextContents();
+    expect(offered[0]).toBe('Select…');
+    expect(offered.slice(1).toSorted()).toEqual([
+      'Avery Chen',
+      'Jordan Blake',
+      'Morgan Lee',
+      'Priya Natarajan',
+    ]);
     await dialog
       .getByLabel('Salesperson')
       .selectOption({ label: 'Priya Natarajan' });
