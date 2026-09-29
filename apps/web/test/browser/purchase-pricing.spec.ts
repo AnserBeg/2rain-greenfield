@@ -206,7 +206,11 @@ test('a partly received order shows what is still open, closes its remainder wit
     });
     await expect(cell('Ordered')).toHaveText(/^2(?:\.0+)?$/u);
     await expect(cell('Open')).toHaveText('0');
-    await row().getByRole('link', { name: 'Select', exact: true }).click();
+    // Back on the order the line is still the selection, and nothing is left
+    // to close on it.
+    await expect(
+      row().getByRole('link', { name: 'Selected', exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Close open remainder', exact: true }),
     ).toHaveCount(0);
