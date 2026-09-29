@@ -12,7 +12,10 @@ export function purchasingWorkspace(
   const f = (name: string) => id('field', name);
   const record = (field: string) => ({ source: 'record', field });
   const selected = (field: string) => ({ source: 'selected', field });
-  const literal = (value: string | null) => ({ source: 'literal', value });
+  const literal = (value: string | boolean | null) => ({
+    source: 'literal',
+    value,
+  });
   const generated = (value: string) => ({ source: 'generated', value });
   const input = (name: string) => ({
     source: 'input',
@@ -404,7 +407,9 @@ export function purchasingWorkspace(
         datasetId: lines,
         label: 'Order lines',
         orderKey: 10,
-        query: q('purchase_order_line_list'),
+        // Read with what has arrived and what is still to arrive
+        // (PURCHASING-PARITY), through the commercial purchase line query.
+        query: q('commercial_purchase_order_lines'),
         presentation: { selection: 'explicit', selectedActions: 'row' },
         parent: {
           relationId: id('relation', 'purchase_order_line_order'),
@@ -447,6 +452,22 @@ export function purchasingWorkspace(
             'Ordered',
             30,
             f('purchase_order_line_ordered_quantity'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'received',
+            'Received',
+            32,
+            metric('received'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'open',
+            'Open',
+            34,
+            metric('open_to_receive'),
             undefined,
             'quantity',
           ),
@@ -514,6 +535,66 @@ export function purchasingWorkspace(
     actions: [
       receive(true),
       receive(false),
+      {
+        // PURCHASING-PARITY: what will not arrive stops being expected. The
+        // line's ordered quantity becomes what was received, through the
+        // staged amendment request and the receiving amend, which refuses a
+        // quantity below what was received; the reason stays with the request.
+        actionId: id('action', 'close_remainder'),
+        label: 'Close open remainder',
+        description:
+          'Stops expecting what has not arrived on this line: its ordered quantity becomes the quantity received. Nothing received is changed.',
+        orderKey: 25,
+        datasetId: lines,
+        presentation: { placement: 'selection' },
+        conditions: [
+          {
+            value: record(
+              id('derived_state_field', 'machine.purchase_order_lifecycle'),
+            ),
+            operator: 'equals',
+            compare: id('state', 'purchase_order_released'),
+          },
+          {
+            value: selected(metric('open_to_receive')),
+            operator: 'positive',
+            compare: null,
+          },
+        ],
+        inputs: [
+          {
+            inputId: id('input', 'close_remainder_reason'),
+            label: 'Reason',
+            orderKey: 10,
+            type: 'text',
+            required: true,
+            presentation: { kind: 'multiline' },
+          },
+        ],
+        steps: [
+          create(
+            'close_remainder_request',
+            'purchase_order_amendment',
+            {
+              number: generated('uuid'),
+              line_revision: selected('revision'),
+              // What the operator saw received; the amend uses what is
+              // received when it runs.
+              quantity: selected(metric('received')),
+              close_remainder: literal(true),
+              reason: {
+                source: 'input',
+                inputId: id('input', 'close_remainder_reason'),
+              },
+            },
+            { order_line: selected('recordId') },
+          ),
+          step('close_remainder_amend', 'purchase_order_line_amend', [
+            bind(['recordId'], selected('recordId')),
+            bind(['expectedRevision'], selected('revision')),
+          ]),
+        ],
+      },
       {
         actionId: id('action', 'open_receipt'),
         label: 'Open receipt',

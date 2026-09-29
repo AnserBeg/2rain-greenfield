@@ -10378,7 +10378,22 @@
         "targetId": "northstar.app:query.purchase_order_get"
       },
       "schemaVersion": "v6",
-      "tier": "o1"
+      "tier": "o1",
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:state.purchase_order_released"
+        }
+      }
     },
     {
       "confirmation": "humanRequired",
@@ -10409,7 +10424,68 @@
         "targetId": "northstar.app:query.purchase_order_get"
       },
       "schemaVersion": "v6",
-      "tier": "o1"
+      "tier": "o1",
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:state.purchase_order_closed"
+        }
+      }
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "registeredCapabilityEffect",
+        "schemaVersion": "v6",
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.purchasing:capability.receiving"
+        }
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.purchase_order_cancel",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.purchase_order_cancel"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.purchase_order_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o1",
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:state.purchase_order_released"
+        }
+      }
     },
     {
       "confirmation": "humanRequired",
@@ -11148,52 +11224,6 @@
           "kind": "textValue",
           "schemaVersion": "v6",
           "value": "northstar.app:state.purchase_order_draft"
-        }
-      },
-      "readBack": {
-        "kind": "queryReference",
-        "schemaVersion": "v6",
-        "targetId": "northstar.app:query.purchase_order_get"
-      },
-      "schemaVersion": "v6",
-      "tier": "o0"
-    },
-    {
-      "confirmation": "humanRequired",
-      "effect": {
-        "kind": "transitionStateEffect",
-        "schemaVersion": "v6",
-        "transition": {
-          "kind": "transitionReference",
-          "schemaVersion": "v6",
-          "targetId": "northstar.app:transition.purchase_order_cancel"
-        }
-      },
-      "kind": "operationDefinition",
-      "module": {
-        "kind": "moduleReference",
-        "schemaVersion": "v6",
-        "targetId": "northstar.app:module.purchasing"
-      },
-      "operationId": "northstar.app:operation.purchase_order_cancel",
-      "permission": {
-        "kind": "permissionReference",
-        "schemaVersion": "v6",
-        "targetId": "northstar.app:permission.purchase_order_cancel"
-      },
-      "precondition": {
-        "field": {
-          "kind": "fieldReference",
-          "schemaVersion": "v6",
-          "targetId": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
-        },
-        "kind": "fieldComparisonPredicate",
-        "operator": "equals",
-        "schemaVersion": "v6",
-        "value": {
-          "kind": "textValue",
-          "schemaVersion": "v6",
-          "value": "northstar.app:state.purchase_order_released"
         }
       },
       "readBack": {
@@ -31278,10 +31308,18 @@
           "targetId": "northstar.sales:capability.commercial"
         },
         "binding": "northstar.sales:read_model.commercial_purchase_line",
-        "queries": {},
+        "queries": {
+          "received": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_received_get"
+          }
+        },
         "resultFields": {
           "line_amount": "northstar.app:metric.line_amount",
-          "line_tax": "northstar.app:metric.line_tax"
+          "line_tax": "northstar.app:metric.line_tax",
+          "received": "northstar.app:metric.received",
+          "open_to_receive": "northstar.app:metric.open_to_receive"
         }
       }
     },
@@ -39914,7 +39952,7 @@
             "orderKey": 10,
             "query": {
               "kind": "queryReference",
-              "targetId": "northstar.app:query.purchase_order_line_list",
+              "targetId": "northstar.app:query.commercial_purchase_order_lines",
               "schemaVersion": "v6"
             },
             "presentation": {
@@ -39984,6 +40022,20 @@
                 "orderKey": 30,
                 "field": "northstar.app:field.purchase_order_line_ordered_quantity",
                 "presentation": { "role": "quantity", "priority": 30 }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_received",
+                "label": "Received",
+                "orderKey": 32,
+                "field": "northstar.app:metric.received",
+                "presentation": { "role": "quantity", "priority": 32 }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_open",
+                "label": "Open",
+                "orderKey": 34,
+                "field": "northstar.app:metric.open_to_receive",
+                "presentation": { "role": "quantity", "priority": 34 }
               },
               {
                 "columnId": "northstar.app:column.purchasing_base_unit",
@@ -40620,6 +40672,121 @@
                       "stepId": "northstar.app:step.receipt_absent",
                       "field": "revision"
                     }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.close_remainder",
+            "label": "Close open remainder",
+            "description": "Stops expecting what has not arrived on this line: its ordered quantity becomes the quantity received. Nothing received is changed.",
+            "orderKey": 25,
+            "datasetId": "northstar.app:dataset.purchasing_lines",
+            "presentation": { "placement": "selection" },
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.purchase_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.open_to_receive"
+                },
+                "operator": "positive",
+                "compare": null
+              }
+            ],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.close_remainder_reason",
+                "label": "Reason",
+                "orderKey": 10,
+                "type": "text",
+                "required": true,
+                "presentation": { "kind": "multiline" }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.close_remainder_request",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.purchase_order_amendment_create",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.purchase_order_amendment_number"
+                    ],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.purchase_order_amendment_line_revision"
+                    ],
+                    "value": { "source": "selected", "field": "revision" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.purchase_order_amendment_quantity"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:metric.received"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.purchase_order_amendment_reason"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.close_remainder_reason"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.purchase_order_amendment_order_line"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.close_remainder_amend",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.purchase_order_line_amend",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "selected", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "selected", "field": "revision" }
                   }
                 ]
               }

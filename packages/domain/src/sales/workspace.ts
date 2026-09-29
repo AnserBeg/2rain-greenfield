@@ -20,7 +20,9 @@ export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
     'order_total',
     'order_to_invoice',
   ],
-  purchaseLine: ['line_amount', 'line_tax'],
+  // A purchase line also states what has arrived and what is still to arrive
+  // (PURCHASING-PARITY), from the receiving projection.
+  purchaseLine: ['line_amount', 'line_tax', 'received', 'open_to_receive'],
   purchaseOrder: [
     'order_subtotal',
     'order_charges',
@@ -961,7 +963,7 @@ export function salesWorkspaceQueries(
         commercial(
           'purchaseLine',
           clone('purchase_order_line_list', 'commercial_purchase_order_lines'),
-          {},
+          { received: 'purchase_order_received_get' },
         ),
         commercial(
           'purchaseOrder',

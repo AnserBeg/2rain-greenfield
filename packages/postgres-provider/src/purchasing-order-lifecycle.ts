@@ -15,6 +15,11 @@ import {
 
 /** Shared with receiving: order first, then order lines in canonical order.
  * Caller owns the gateway's trust/idempotency transaction; this never commits.
+ *
+ * A close needs nothing open on any line: a line's open remainder is closed
+ * first by amending its ordered quantity down to what was received, with a
+ * reason. A cancel of a released order is refused after any net receipt
+ * (PURCHASING-PARITY), as a sales order's is after any net shipment.
  */
 export async function changePurchaseOrderState(
   client: PoolClient,
@@ -23,7 +28,7 @@ export async function changePurchaseOrderState(
   legalEntityId: string,
   orderId: string,
   expectedRevision: number,
-  action: 'close' | 'reopen',
+  action: 'close' | 'reopen' | 'cancel',
 ) {
   const order = await receiptRow(
     client,
@@ -38,8 +43,14 @@ export async function changePurchaseOrderState(
     'derived_state_field.machine.purchase_order_lifecycle',
   );
   const namespace = binding.order.entityId.split(':')[0]!;
-  const from = `${namespace}:state.purchase_order_${action === 'close' ? 'released' : 'closed'}`;
-  const to = `${namespace}:state.purchase_order_${action === 'close' ? 'closed' : 'released'}`;
+  const [fromState, toState] =
+    action === 'close'
+      ? ['released', 'closed']
+      : action === 'reopen'
+        ? ['closed', 'released']
+        : ['released', 'cancelled'];
+  const from = `${namespace}:state.purchase_order_${fromState}`;
+  const to = `${namespace}:state.purchase_order_${toState}`;
   if (
     order.archived_at !== null ||
     Number(order.revision) !== expectedRevision ||
@@ -53,7 +64,7 @@ export async function changePurchaseOrderState(
     `SELECT * FROM ${receiptTable(binding.orderLine)} WHERE tenant_id=$1 AND environment_id=$2 AND ${q(binding.orderLine.legalEntity!.column)}=$3 AND ${q(receiptRelation(binding, binding.orderLine, 'purchase_order_line_order'))}=$4 AND archived_at IS NULL ORDER BY record_id FOR NO KEY UPDATE`,
     [context.tenantId, context.environmentId, legalEntityId, orderId],
   );
-  if (action === 'close')
+  if (action !== 'reopen')
     for (const line of lines.rows) {
       const ledger = await receivedLedger(
         client,
@@ -62,6 +73,18 @@ export async function changePurchaseOrderState(
         legalEntityId,
         String(line.record_id),
       );
+      if (action === 'cancel') {
+        if (receiptQuantity(ledger.quantity) !== 0n)
+          throw receiptError(
+            'RECEIPT_QUANTITY_OUT_OF_BOUNDS',
+            "Cancellation is refused after any net receipt; close each line's open remainder with a reason, then close the order",
+            {
+              orderLineId: String(line.record_id),
+              receivedBefore: ledger.quantity,
+            },
+          );
+        continue;
+      }
       const ordered = receiptQuantity(
         String(
           line[
@@ -76,7 +99,7 @@ export async function changePurchaseOrderState(
       if (open !== 0n)
         throw receiptError(
           'RECEIPT_QUANTITY_OUT_OF_BOUNDS',
-          'Receive or correct every active line to zero open-to-receive before closing; short-close is not supported',
+          "Receive or correct every active line to zero open-to-receive before closing, or close a line's open remainder with a reason",
           {
             orderLineId: String(line.record_id),
             orderedQuantity: receiptDecimal(ordered),
@@ -114,7 +137,11 @@ export async function changePurchaseOrderState(
   };
 }
 
-/** Quantity is intent, never a rewrite of received facts. Same lock order as posting. */
+/**
+ * Quantity is intent, never a rewrite of received facts. Same lock order as
+ * posting. `'received'` closes the line's open remainder: the new ordered
+ * quantity is what is received when this runs, read under the same locks.
+ */
 export async function amendOrderedQuantity(
   client: PoolClient,
   binding: ReceiptBinding,
@@ -122,7 +149,7 @@ export async function amendOrderedQuantity(
   legalEntityId: string,
   orderLineId: string,
   expectedRevision: number,
-  quantity: string,
+  quantity: string | 'received',
 ) {
   const initial = await receiptRow(
     client,
@@ -185,7 +212,10 @@ export async function amendOrderedQuantity(
     legalEntityId,
     orderLineId,
   );
-  const ordered = receiptQuantity(quantity);
+  const ordered =
+    quantity === 'received'
+      ? receiptQuantity(ledger.quantity)
+      : receiptQuantity(quantity);
   if (ordered < 0n || ordered < receiptQuantity(ledger.quantity))
     throw receiptError(
       'RECEIPT_QUANTITY_OUT_OF_BOUNDS',

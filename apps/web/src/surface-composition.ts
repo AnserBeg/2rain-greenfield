@@ -1397,7 +1397,7 @@ export async function submitCompositionAction(
             const key = binding.path.at(-1)!;
             if (['__proto__', 'constructor', 'prototype'].includes(key))
               throw new Error('Invalid input path');
-            target[key] = resolveValue(
+            const value = resolveValue(
               binding.value,
               current.data,
               current.inputs,
@@ -1405,6 +1405,22 @@ export async function submitCompositionAction(
               current.generated,
               `${step.stepId}:${binding.path.join('.')}`,
             );
+            // An integer field's value is its canonical decimal string; a
+            // bound record revision arrives as a number and is written as one.
+            const integerField =
+              binding.path.length === 2 &&
+              (binding.path[0] === 'values' || binding.path[0] === 'patch') &&
+              operation.inputContract?.fields.some(
+                (field) =>
+                  field.fieldId === key &&
+                  field.fieldKind === 'integerFieldType',
+              );
+            target[key] =
+              integerField &&
+              typeof value === 'number' &&
+              Number.isSafeInteger(value)
+                ? String(value)
+                : value;
           }
           input = object;
           current.stepInputs[current.next] = input;

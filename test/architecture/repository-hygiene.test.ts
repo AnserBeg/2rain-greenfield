@@ -151,6 +151,7 @@ const suiteDefinitions = [
       'test/postgres/party-runtime.test.ts',
       'test/postgres/predicate-absent-semantics.test.ts',
       'test/postgres/predicate-parity-corpus.test.ts',
+      'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
       'test/postgres/query-filter-lowering.test.ts',
       'test/postgres/receivables.test.ts',

@@ -63,13 +63,14 @@ const LIFECYCLE = {
 } as const;
 
 /**
- * The transitions `PUR-1` binds an operation to. `close` and `reopen` are
- * DECLARED EDGES ONLY -- plan section 7.17 says what closes an order is `PUR-2`'s to
- * decide, so emitting an operation for either would let a caller persist an
- * arbitrary manual close today with no receipt rule behind it.
+ * The transitions a generic transition operation drives. `close`, `reopen` and
+ * the committed `cancel` are DECLARED EDGES ONLY for the press -- plan section
+ * 7.17 says what closes an order is `PUR-2`'s to decide, and PURCHASING-PARITY
+ * refuses a cancel after any net receipt -- so each is moved by a guarded
+ * receiving operation that reads the order's receipts under its lock.
  */
-const DRIVEN = ['release', 'draft_cancel', 'cancel'] as const;
-const DECLARED_ONLY = ['close', 'reopen'] as const;
+const DRIVEN = ['release', 'draft_cancel'] as const;
+const DECLARED_ONLY = ['close', 'reopen', 'cancel'] as const;
 
 /**
  * Five transitions, four permissions: both cancels authorize on one
@@ -815,10 +816,12 @@ test('each transition is offered only where it can move the record', () => {
   const operations = operationCatalog(compile());
   const expected: Record<string, readonly string[]> = {
     cancel: ['released'],
+    close: ['released'],
     draft_cancel: ['draft'],
     release: ['draft'],
+    reopen: ['closed'],
   };
-  for (const action of DRIVEN) {
+  for (const action of [...DRIVEN, ...DECLARED_ONLY]) {
     const guard = precondition(
       operations,
       `${namespace}:operation.purchase_order_${action}`,
@@ -841,7 +844,7 @@ test('each transition is offered only where it can move the record', () => {
   }
 });
 
-test('close and reopen use the guarded receiving capability, never generic state transitions', () => {
+test('close, reopen and the committed cancel use the guarded receiving capability, never generic state transitions', () => {
   // THE FINDING THIS EXISTS FOR. An earlier version of this module emitted an
   // operation for every transition in the table, which made `released -> closed`
   // and `closed -> released` executable through the semantic operation gateway
@@ -880,16 +883,17 @@ test('close and reopen use the guarded receiving capability, never generic state
       `${action} is invocable, so a caller can persist that move today`,
     );
     assert.equal(
-      operations.some(
+      operations.find(
         (operation) =>
           operation.operationId ===
           `${namespace}:operation.purchase_order_${action}`,
-      ),
-      true,
+      )?.effect.kind,
+      'registeredCapabilityEffect',
+      `${action} must run through receiving, which reads the order's receipts`,
     );
   }
 
-  // The check is not passing over an empty catalog: the three driven
+  // The check is not passing over an empty catalog: the two driven
   // transitions ARE invocable, by the same reader.
   assert.deepEqual(
     operations
@@ -1771,6 +1775,145 @@ test('PURCHASING-PARITY: the product application prices a purchase order like a 
       'purchasing_charges',
       'purchasing_tax',
       'purchasing_total',
+    ],
+  );
+});
+
+test('PURCHASING-PARITY: an order line shows what is still to arrive, and its open remainder closes with a reason', () => {
+  type Loose = Record<string, unknown>;
+  const app = composedApplicationDefinition() as unknown as {
+    queries: Array<Loose & { queryId: string; readModel?: Loose }>;
+    surfaces: Array<Loose & { surfaceId: string }>;
+  };
+  const local = (value: string) => value.split('.').pop()!;
+  // The purchase line read model states received and open-to-receive from the
+  // receiving projection, read through its own get under current policy.
+  const lines = app.queries.find(
+    (value) => local(value.queryId) === 'commercial_purchase_order_lines',
+  )!.readModel as {
+    queries: Record<string, { targetId: string }>;
+    resultFields: Record<string, string>;
+  };
+  assert.deepEqual(Object.keys(lines.resultFields).toSorted(), [
+    'line_amount',
+    'line_tax',
+    'open_to_receive',
+    'received',
+  ]);
+  assert.equal(
+    lines.queries.received?.targetId,
+    'northstar.app:query.purchase_order_received_get',
+  );
+  const composition = (
+    app.surfaces.find(
+      (value) => local(value.surfaceId) === 'purchase_order_detail',
+    )! as unknown as {
+      composition: {
+        children: Array<{
+          datasetId: string;
+          query: { targetId: string };
+          columns: Array<{ columnId: string; field: string }>;
+        }>;
+        actions: Array<
+          Loose & {
+            actionId: string;
+            conditions: Loose[];
+            inputs: Array<Loose & { inputId: string }>;
+            steps: Array<{
+              operation: { targetId: string };
+              bindings: Array<{ path: string[]; value: Loose }>;
+            }>;
+          }
+        >;
+      };
+    }
+  ).composition;
+  const orderLines = composition.children.find(
+    (value) => local(value.datasetId) === 'purchasing_lines',
+  )!;
+  assert.equal(
+    local(orderLines.query.targetId),
+    'commercial_purchase_order_lines',
+  );
+  assert.deepEqual(
+    orderLines.columns
+      .filter((value) => value.field.includes(':metric.'))
+      .map((value) => [local(value.columnId), local(value.field)]),
+    [
+      ['purchasing_received', 'received'],
+      ['purchasing_open', 'open_to_receive'],
+    ],
+  );
+  // Offered on a released order's line with something still open; the new
+  // ordered quantity is the line's received quantity, staged with the reason
+  // and applied by the receiving amend, which refuses less than received.
+  const close = composition.actions.find(
+    (value) => local(value.actionId) === 'close_remainder',
+  )!;
+  assert.equal(local(String(close.datasetId)), 'purchasing_lines');
+  assert.deepEqual(close.conditions, [
+    {
+      value: {
+        source: 'record',
+        field:
+          'northstar.app:derived_state_field.machine.purchase_order_lifecycle',
+      },
+      operator: 'equals',
+      compare: 'northstar.app:state.purchase_order_released',
+    },
+    {
+      value: {
+        source: 'selected',
+        field: 'northstar.app:metric.open_to_receive',
+      },
+      operator: 'positive',
+      compare: null,
+    },
+  ]);
+  assert.deepEqual(
+    close.inputs.map((value) => [
+      local(value.inputId),
+      value.required,
+      (value.presentation as Loose | undefined)?.kind,
+    ]),
+    [['close_remainder_reason', true, 'multiline']],
+  );
+  assert.deepEqual(
+    close.steps.map((value) => local(value.operation.targetId)),
+    ['purchase_order_amendment_create', 'purchase_order_line_amend'],
+  );
+  const staged = Object.fromEntries(
+    close.steps[0]!.bindings.map((value) => [
+      local(value.path.at(-1)!),
+      value.value,
+    ]),
+  );
+  assert.deepEqual(staged.purchase_order_amendment_quantity, {
+    source: 'selected',
+    field: 'northstar.app:metric.received',
+  });
+  assert.deepEqual(staged.purchase_order_amendment_line_revision, {
+    source: 'selected',
+    field: 'revision',
+  });
+  // A close request: the amend closes to what is received when it runs.
+  assert.deepEqual(staged.purchase_order_amendment_close_remainder, {
+    source: 'literal',
+    value: true,
+  });
+  assert.deepEqual(staged.purchase_order_amendment_reason, {
+    source: 'input',
+    inputId: 'northstar.app:input.close_remainder_reason',
+  });
+  assert.deepEqual(staged.purchase_order_amendment_order_line, {
+    source: 'selected',
+    field: 'recordId',
+  });
+  assert.deepEqual(
+    close.steps[1]!.bindings.map((value) => [value.path, value.value]),
+    [
+      [['recordId'], { source: 'selected', field: 'recordId' }],
+      [['expectedRevision'], { source: 'selected', field: 'revision' }],
     ],
   );
 });

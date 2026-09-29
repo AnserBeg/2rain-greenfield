@@ -71,9 +71,9 @@ type StateLocalId = (typeof STATES)[number][0];
  * |---|---|---|
  * | `draft -> released` | the release | **yes** |
  * | `draft -> cancelled` | the cancel of an uncommitted order | **yes** |
- * | `released -> cancelled` | the cancel of a committed order | **yes** |
- * | `released -> closed` | the close | **NO -- `PUR-2`'s** |
- * | `closed -> released` | the reopen | **NO -- `PUR-2`'s** |
+ * | `released -> cancelled` | the cancel of a committed order | **yes**; through receiving since PURCHASING-PARITY |
+ * | `released -> closed` | the close | **NO -- `PUR-2`'s**, through receiving |
+ * | `closed -> released` | the reopen | **NO -- `PUR-2`'s**, through receiving |
  * | `released -> draft` | **refused** -- `draft` asserts no commitments exist, and once released, receipts may |  |
  * | `closed -> cancelled` | **refused** -- reopen first |  |
  * | `cancelled -> anything` | **refused** -- terminal; reissue instead |  |
@@ -99,16 +99,25 @@ type StateLocalId = (typeof STATES)[number][0];
  * STATE, and deferring these two operations to the packet that can give them
  * semantics is cheap. Plan section 7.17 says what closes an order is `PUR-2`'s to
  * decide, and this file now says the same thing.
+ *
+ * PURCHASING-PARITY moves the committed cancel the same way: a released order
+ * is cancelled through receiving, which reads its receipts under the order's
+ * lock and refuses once anything is received, as a sales order's cancel is
+ * refused through fulfillment once anything shipped. The draft cancel stays a
+ * plain transition: a draft has no receipts.
  */
 const TRANSITIONS = [
   ['release', 'Release order', 10, 'draft', 'released', 'release', true],
   ['draft_cancel', 'Cancel order', 20, 'draft', 'cancelled', 'cancel', true],
   ['close', 'Close order', 30, 'released', 'closed', 'close', false],
   ['reopen', 'Reopen order', 40, 'closed', 'released', 'reopen', false],
-  ['cancel', 'Cancel order', 50, 'released', 'cancelled', 'cancel', true],
+  ['cancel', 'Cancel order', 50, 'released', 'cancelled', 'cancel', false],
 ] as const;
 
-/** The transitions `PUR-1` binds an operation to. The rest are declared only. */
+/**
+ * The transitions a generic transition operation drives. The rest are
+ * declared edges that only the receiving operations move.
+ */
 const DRIVEN_TRANSITIONS = TRANSITIONS.filter(([, , , , , , driven]) => driven);
 
 type TransitionLocalId = (typeof TRANSITIONS)[number][0];
@@ -504,9 +513,19 @@ export function purchasingModuleDefinition(
       ...(['post'] as const).map((action) =>
         receivingOperation(definitionIds, 'goods_receipt', action),
       ),
-      ...(['close', 'reopen'] as const).map((action) =>
-        receivingOperation(definitionIds, 'purchase_order', action),
-      ),
+      // Close, reopen and the committed cancel run through receiving, which
+      // reads the order's receipts under its lock; the declared guard keeps
+      // each out of the other states' commands, as on a sales order.
+      ...(
+        [
+          ['close', 'released'],
+          ['reopen', 'closed'],
+          ['cancel', 'released'],
+        ] as const
+      ).map(([action, state]) => ({
+        ...receivingOperation(definitionIds, 'purchase_order', action),
+        precondition: inState(stateFieldId, definitionIds.stateIds[state]),
+      })),
       receivingOperation(definitionIds, 'purchase_order_line', 'amend'),
       ...operations(
         definitionIds,
@@ -524,9 +543,9 @@ export function purchasingModuleDefinition(
         'purchase_order_line',
         entityIds.purchaseOrderLine,
       ),
-      // DRIVEN_TRANSITIONS, not TRANSITIONS. `close` and `reopen` are declared
-      // edges with no operation, so nothing can invoke them until `PUR-2` binds
-      // one. See the table above the transition list.
+      // DRIVEN_TRANSITIONS, not TRANSITIONS. `close`, `reopen` and the
+      // committed `cancel` are declared edges that only the receiving
+      // operations above move. See the table above the transition list.
       ...DRIVEN_TRANSITIONS.map(([local, , , fromState, , permission]) =>
         transitionOperation(
           definitionIds,
@@ -877,6 +896,17 @@ function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
       decimal(),
     ],
     ['purchase_order_received', 'unit_id', 'Base unit', text(32)],
+    // A request to close a line's open remainder (PURCHASING-PARITY): the
+    // amend sets the ordered quantity to what is received when it runs, not
+    // to a quantity read earlier, and consumes every such request staged
+    // for the line's revision together.
+    [
+      'purchase_order_amendment',
+      'close_remainder',
+      'Close the open remainder',
+      boolean(),
+      true,
+    ],
   ];
   return specs.map(([local, name, label, type, optional], index) =>
     field(
@@ -1250,6 +1280,10 @@ function field(
 const text = (maximumLength: number): FieldType => ({
   kind: 'textFieldType',
   maximumLength,
+  schemaVersion: version,
+});
+const boolean = (): FieldType => ({
+  kind: 'booleanFieldType',
   schemaVersion: version,
 });
 const integer = (): FieldType => ({

@@ -8,9 +8,11 @@ import {
   type LineAmounts,
 } from './commercial-amounts.js';
 import { fulfillmentProjectionIdentity } from './fulfillment.js';
+import { receivedIdentity } from './goods-receipt.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
   type SemanticQueryReadModelExecutor,
   type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
@@ -160,6 +162,38 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
     return `${value < 0n ? '-' : ''}${String(magnitude / scale)}${fraction ? `.${fraction}` : ''}`;
   };
   /**
+   * What has arrived against a purchase line (PURCHASING-PARITY): the
+   * receiving projection's received quantity, read under current policy.
+   * Nothing received yet has no projection row and reads as zero; a withheld
+   * or unanswered read states nothing, rather than a guessed zero. One denial
+   * answers for every line of the call: the same principal, scope and
+   * permission would be refused again.
+   */
+  let receivedWithheld = false;
+  const receivedOf = async (
+    line: SemanticRecordDto,
+  ): Promise<bigint | null> => {
+    if (receivedWithheld) return null;
+    try {
+      const read = await invoke('received', {
+        recordId: receivedIdentity(view, scopeId, line.recordId),
+        includeArchived: false,
+      });
+      const [record] = read.records;
+      if (read.outcome === 'exact' && record)
+        return units(
+          record.values[field('purchase_order_received_received_quantity')],
+        );
+      return read.outcome === 'not-found' || read.outcome === 'exact'
+        ? 0n
+        : null;
+    } catch (error) {
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+      receivedWithheld = true;
+      return null;
+    }
+  };
+  /**
    * Shipped quantity not yet on an invoice that counts (ruling C): what the
    * receivables capability would invoice now, so a task can be offered only
    * when there is something to invoice. The capability recomputes it per
@@ -235,6 +269,21 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       const amounts = priced(row);
       emit('line_amount', money(amounts?.amountCents ?? null));
       emit('line_tax', money(amounts?.taxCents ?? null));
+      // What is still to arrive: ordered less received, when both are known.
+      // A release whose purchase lines declare no progress states none.
+      if (purchase && model.resultFields.received) {
+        const received = await receivedOf(row);
+        const ordered = units(
+          row.values[field('purchase_order_line_ordered_quantity')],
+        );
+        emit('received', received === null ? null : quantityText(received));
+        emit(
+          'open_to_receive',
+          received === null || ordered === null
+            ? null
+            : quantityText(ordered - received),
+        );
+      }
       // A unit price that differs from the list price it started from was
       // set by hand (ruling B); without a list price there is nothing to mark.
       // A purchase line has no list price: its cost is always typed.

@@ -119,6 +119,128 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
   });
 });
 
+// PURCHASING-PARITY slice 2: each order line states what has arrived and what
+// is still open; a line's open remainder is closed with a reason; an order with
+// receipts is never cancelled, and one with none still is.
+test('a partly received order shows what is still open, closes its remainder with a reason, and is never cancelled', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(300_000);
+  page.setDefaultTimeout(30_000);
+  await fixture(async (url) => {
+    const newOrder = async () => {
+      await page.goto(url);
+      await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
+      await page.getByRole('link', { name: 'New', exact: true }).click();
+      await page.getByLabel('Order date (UTC) *').fill('2026-09-28T12:00');
+      await pick(page, 'Vendor', 'Alpine', 'Alpine Office Supply');
+      await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
+      await page.getByLabel('Line 1 quantity', { exact: true }).fill('5');
+      await page
+        .getByRole('button', { name: 'Save draft', exact: true })
+        .click();
+      await expect(page).toHaveURL(/purchase_order_detail/u);
+      await command(page, 'Release', false);
+      await expect(page.getByRole('status')).toContainText('Release complete');
+      return page.url();
+    };
+    const row = () =>
+      page
+        .locator(
+          '[data-composition-dataset$="dataset.purchasing_lines"] tbody tr',
+        )
+        .filter({ hasText: 'Field notebook' });
+    const cell = (label: string) =>
+      row().locator(`td[data-column-label="${label}"]`);
+    const task = () => page.locator('[data-composition-task]');
+    const runTask = async (
+      label: string,
+      fill: () => Promise<void>,
+    ): Promise<void> => {
+      await row().getByRole('link', { name: 'Select', exact: true }).click();
+      await page.getByRole('button', { name: label, exact: true }).click();
+      await fill();
+      await page
+        .getByRole('button', { name: `Review ${label}`, exact: true })
+        .click();
+      await page
+        .getByRole('button', { name: `Confirm ${label}`, exact: true })
+        .click();
+      await expect(task().locator('[data-task-result]')).toContainText(
+        `${label}: done`,
+      );
+      await page
+        .getByRole('link', { name: 'Back to order', exact: true })
+        .click();
+    };
+
+    const orderUrl = await newOrder();
+    await expect(cell('Ordered')).toHaveText(/^5(?:\.0+)?$/u);
+    await expect(cell('Received')).toHaveText('0');
+    await expect(cell('Open')).toHaveText('5');
+    // Two of five arrive.
+    await runTask('Receive with cost explicitly absent', async () => {
+      await page.getByLabel('Quantity to receive', { exact: true }).fill('2');
+      await page
+        .getByRole('combobox', { name: 'Receiving location', exact: true })
+        .selectOption({ label: 'Calgary warehouse' });
+    });
+    await expect(cell('Received')).toHaveText('2');
+    await expect(cell('Open')).toHaveText('3');
+    await capture(page, testInfo, 'purchase-partly-received');
+
+    // Received goods are never cancelled away; the order stays released.
+    await command(page, 'Cancel');
+    await expect(page.locator('[data-diagnostic-code]')).toContainText(
+      'RECEIPT_QUANTITY_OUT_OF_BOUNDS',
+    );
+    await page.goto(orderUrl);
+    await expect(page.locator('.composition-business-status')).toHaveText(
+      'Released',
+    );
+    // The three still open are closed with a reason; ordered becomes received.
+    await runTask('Close open remainder', async () => {
+      await page
+        .getByLabel('Reason', { exact: true })
+        .fill('Supplier discontinued the rest');
+    });
+    await expect(cell('Ordered')).toHaveText(/^2(?:\.0+)?$/u);
+    await expect(cell('Open')).toHaveText('0');
+    await row().getByRole('link', { name: 'Select', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Close open remainder', exact: true }),
+    ).toHaveCount(0);
+    await capture(page, testInfo, 'purchase-remainder-closed');
+    // Nothing is open, so the order closes.
+    await page.goto(orderUrl);
+    await command(page, 'Close');
+    await expect(page.getByRole('status')).toContainText('Close complete');
+    await expect(page.locator('.composition-business-status')).toHaveText(
+      'Closed',
+    );
+
+    // An order with nothing received still cancels.
+    await newOrder();
+    await command(page, 'Cancel');
+    await expect(page.getByRole('status')).toContainText('Cancel complete');
+    await expect(page.locator('.composition-business-status')).toHaveText(
+      'Cancelled',
+    );
+  });
+});
+
+/** A record command; those that end or reverse an order ask to be confirmed. */
+async function command(page: Page, label: string, confirmed = true) {
+  const secondary = page.locator(
+    '.composition-record-actions:not([open]) > summary',
+  );
+  if (await secondary.count()) await secondary.click();
+  await page.getByRole('button', { name: label, exact: true }).click();
+  if (confirmed)
+    await page
+      .getByRole('button', { name: `Confirm ${label}`, exact: true })
+      .click();
+}
 function combo(page: Page, name: string) {
   return page.getByRole('combobox', { name, exact: true });
 }
