@@ -202,6 +202,7 @@ echo "PERFORMANCE_GATE_PASS_SHA=$SHA" | tee -a "$LOG"
   corepack pnpm test:architecture &&
   corepack pnpm test:contracts &&
   corepack pnpm test:postgres &&
+  corepack pnpm test:postgres:composed &&
   corepack pnpm test:locale &&
   corepack pnpm test:browser
 } 2>&1 | tee -a "$LOG"

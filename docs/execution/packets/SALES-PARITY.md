@@ -1,6 +1,6 @@
 # SALES-PARITY — Rain's Sales workflows and shared List at PaneFlow parity through metadata
 
-Status: vertical checkpoint (2026-09-29) — slices 1-4, 5a, 6, 7, 8 and three review rounds' fixes executable and pushed; returns, List row actions and exceptions not built; draft PR to open; no merge, no deployment. Sole LOCAL BUILD.
+Status: vertical checkpoint (2026-09-29) — slices 1-4, 5a, 6, 7, 8 and three review rounds' fixes executable and pushed; returns, List row actions and exceptions not built; draft PR #7 open, CI running on it (Gates); no merge, no deployment. Sole LOCAL BUILD.
 Tier: Critical-touching — `release-verification-service.ts` (claims 9, 20, 21) and materializer grant SQL (claims 10-11); the ONLINE confirm arm is owed (`SALES-PARITY-review-prompt.md`).
 Base: `994a7dc969694c8077630eaa536fcd385f7e030c` (tip of `packet/RAIN-ORDER-ENTRY`, PR #6, which contains PR #5 `3830f95b` and main `fe97b63b`).
 Dependencies are building blocks, not qualifications: PR #5 and PR #6 owner acceptance and fresh CI are pending; nothing here closes either.
@@ -60,11 +60,12 @@ Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distribut
 - Reopen moved from a generic transition to the receivables capability, the only reader of an order's invoices under its lock. `print.totals` widens 6 -> 8 (this packet's own optional key).
 - Returns (ruling D) are not built: a correction must restore into the shipment's own location and a task cannot name the movement it compensates, so a return into a chosen location needs a customer-return posting family in the Critical kernel (bounded by shipped minus returned per line, with admission-map coverage). That is its own Critical packet.
 - The full-replay schema generator runs on a 1 GB data volume (nineteen entries overflowed 256 MB); every test keeps 256 MB.
+- CI's PostgreSQL work is split by file into two jobs, the composed application (it replays every lineage entry, 11-14 minutes) and the rest, each with the unchanged 30-minute bound, assertions and unfiltered evidence (`--test-shard` stays refused).
 
 ## Slices
 
 1. List `4d188d1c`. 2. Numbering `3e718be9`. 5a/6. Confirm, Reopen, carrier/tracking, print `7084b983`, `6a6bc7c1`. Grants (Critical) `c74ea33e`, `7947dba9`. 3. Master data `bed8809a`, `cb5f7e9f`, `49b2ccf7`; generator `28461658`; oracle `7a265fe1`.
-4. Pricing `f129a7a5`; fixes `1cb20847`, `51948df8` (Critical), `852ac8d6`, `8779b1a8`. 7. Receivables `d199c49a` (lineage entry 21). Review fixes `53ca49f4`, `427d4a50`, `40ca820a`, `a1a8a051` (Critical), `f98fb641`, `b829d633`. 8. Money and requested date `d05feab2` (lineage entry 22), coverage `efd40452`.
+4. Pricing `f129a7a5`; fixes `1cb20847`, `51948df8` (Critical), `852ac8d6`, `8779b1a8`. 7. Receivables `d199c49a` (lineage entry 21). Review fixes `53ca49f4`, `427d4a50`, `40ca820a`, `a1a8a051` (Critical), `f98fb641`, `b829d633`. 8. Money and requested date `d05feab2` (lineage entry 22), coverage `efd40452`. CI drift `e13d7b59`..`1a3e1c55`, `728e05ff`; product fixes `98e8f32e`, `450d4be3` (entry 23); CI split `d00f8bba`.
 
 ## Controls
 
@@ -74,11 +75,10 @@ Reference: PaneFlow `d057daff`, own disposable copy on 127.0.0.1:3311 (distribut
 ## Gates
 
 - `d199c49a` content (own worktree, shared lock, on battery): unit 184/184; integration 228/228; compiler 175/175; language coverage PASS (2487 obligations, 725 -> 729 observed); surface grammar 25/25; PostgreSQL `receivables` 1/1; browser `receivables` 1/1 (3.1 min); release `--check` PASS.
-- `7a265fe1` (detached worktree): PostgreSQL composed-application 16 pass, 1 failed + 3 cancelled, every one a 300 s timeout on battery (no assertion reached); browser meta-sales 2/2; order-entry failed on its own selector (fixed `1cb20847`).
-- `51948df8`: PostgreSQL commercial-totals refused the fixture's non-canonical prices (fixed `852ac8d6`); activation of entry 20 itself passed. `de0e8a03`/`bed8809a` (slices 1-3): contracts 30/30, agent 3/3.
-- `f98fb641`/`b829d633` (detached worktree, AC): PostgreSQL document-numbering 1/1 (124 s), reading the admitted release's evidence; that release measured 408 executed and 77 derived, every derivation `VERIFICATION_NO_GENERIC_CREATE_OPERATION` (the composed pins). Unit field-numbering 4/4.
-- `d05feab2`/`efd40452` (detached worktree, AC, host paging under 1 GB free): release `--check` PASS; integration 228/228; compiler 175/175; surface grammar and hygiene 36/36; unit 184/187, the three failures `dev-environment` container-lifecycle tests whose 30 s spawn waits the paging host exceeds (13/14 on a lone rerun); coverage re-derived (2487 -> 2498), its check owes a green unit run; browser and PostgreSQL not run (host memory).
-- NOT run at the head: composed-application (and its full-replay oracle for entry 21), order-entry, order-pricing, customer-defaults, declared-list, fulfillment, document-numbering, the composed Sales specs, contracts, agent, the fourth control's `--run`. CI on the PR is the gate for them.
+- `7a265fe1` (detached worktree): PostgreSQL composed-application 16 pass, 1 failed + 3 cancelled, every one a 300 s timeout on battery (no assertion reached); browser meta-sales 2/2; order-entry failed on its own selector (fixed `1cb20847`). `51948df8`: PostgreSQL commercial-totals refused the fixture's non-canonical prices (fixed `852ac8d6`); activation of entry 20 itself passed. `de0e8a03`/`bed8809a` (slices 1-3): contracts 30/30, agent 3/3.
+- `f98fb641`/`b829d633` (detached worktree, AC): PostgreSQL document-numbering 1/1 (124 s), reading the admitted release's evidence; that release measured 408 executed and 77 derived, every derivation `VERIFICATION_NO_GENERIC_CREATE_OPERATION` (the composed pins). Unit field-numbering 4/4. `d05feab2`/`efd40452` (detached worktree, AC, host paging under 1 GB free): release `--check` PASS; integration 228/228; compiler 175/175; surface grammar and hygiene 36/36; unit 184/187, the three failures `dev-environment` container-lifecycle tests whose 30 s spawn waits the paging host exceeds (13/14 on a lone rerun); coverage re-derived (2487 -> 2498), its check owes a green unit run; browser and PostgreSQL not run (host memory).
+- `e13d7b59`..`1a3e1c55` (own worktree, one container at a time): running what the head had not run found test drift from the later slices (declared Lists and nav groups in the composed checks, the party page's composition, focus-ring states, an unordered salesperson set, the press-law and predicate-tripwire pins) and two product defects, fixed: a quick create reloads the order only when it re-prices a line (`98e8f32e`); a document's lines lead its page (`450d4be3`, lineage entry 23). Architecture 195/195; composed browser checks 5/5, party journey 1/1.
+- CI (GitHub Actions) at `1a3e1c55`: quality (unit, compiler, integration, agent, architecture, release, contracts, whitespace), browser, performance and scans passed; PostgreSQL 247/254, seven stale expectations (surface floor 9 -> 11; Party's harness counting the Sales-only address book; a packing test seeding a shipment without ruling E's ship-to), fixed at `728e05ff` (locally packing 1/1, Party 2/2, runtime view 15/15). That job used 27.5 of its 30 minutes: `d00f8bba` runs the composed application's file in its own job under the same bound (Decisions). The fourth control's `--run` is still owed.
 
 ## Test it yourself
 
@@ -89,7 +89,7 @@ Serve: `node scripts/run-with-test-lock.mjs shared -- node --import tsx test/hel
 
 - Global search (Ctrl K) is outside the List contract (SUP-01). The List has no row actions ("Post shipment"); exceptions (shortage marker) are not built. An invoice links back to its order only when opened from it: it stores its order as a relation, which no link can read.
 - A refused post leaves its numbered draft (payment, credit, invoice), shown as Draft, as a refused shipment does.
-- `apps/web/release/app.compiled.json` is 65 MB (22 entries): GitHub warns above 50 MB and refuses above 100 MB (about 3 MB per lineage entry).
+- `apps/web/release/app.compiled.json` is 69 MB (23 entries): GitHub warns above 50 MB and refuses above 100 MB (about 3 MB per lineage entry); each entry also lengthens the composed PostgreSQL job. An ADR-0066 re-baseline (nothing is in production) is recommended; it is the owner's decision.
 - Returns (ruling D): see Decisions; its Critical arm moves with that packet. PR #6's served demo lost its database when Docker restarted (2026-09-28); that lane owns its restart.
 
 Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numbering (sentinel prefix `V`, an 18-digit scan, a start wider than its field), fixed at `53ca49f4`; none in the grants or the plain read. Round 2 (`7f3c31f1`) closed those with no regression and found two older ones (sentinels in a narrow field; a scan not using the key's case fold), fixed at `427d4a50`. Round 3 (`40ca820a`) closed those with no regression and found one older defect, verification treating an assigned number as a caller input (claim 21), fixed at `a1a8a051`; the scan cost it flagged is removed at `f98fb641`. Round 4 (confirm) is owed: `SALES-PARITY-review-prompt.md`.
@@ -98,18 +98,18 @@ Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numb
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SALES-PARITY",
   "base": "994a7dc969694c8077630eaa536fcd385f7e030c",
-  "head": "efd40452491f7814d51ba2adfed6b1f4f1c4c753",
+  "head": "d00f8bba14e6c364d436dc3255ca8022fc208bcf",
   "changedPaths": [
-    "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
+    ".github/workflows/ci.yml", "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
     "apps/web/release/current-policy-bindings.json", "apps/web/src/app-server.ts", "apps/web/src/component-registry.ts",
     "apps/web/src/control-semantics.ts", "apps/web/src/document-editor.ts", "apps/web/src/editor-controls.ts", "apps/web/src/list-declaration.ts",
     "apps/web/src/message-catalog.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/workspace-entry.ts",
-    "apps/web/test/browser/customer-defaults.spec.ts", "apps/web/test/browser/declared-list.spec.ts", "apps/web/test/browser/message-catalog.spec.ts",
+    "apps/web/test/browser/composed-application.spec.ts", "apps/web/test/browser/customer-defaults.spec.ts", "apps/web/test/browser/declared-list.spec.ts", "apps/web/test/browser/message-catalog.spec.ts",
     "apps/web/test/browser/meta-sales.spec.ts", "apps/web/test/browser/order-entry.spec.ts", "apps/web/test/browser/order-pricing.spec.ts",
     "apps/web/test/browser/receivables.spec.ts", "apps/web/test/browser/receiving.composed-application.spec.ts", "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
     "apps/web/test/browser/sales-order.composed-application.spec.ts", "apps/web/test/surface-runtime-contract.test.ts", "package.json",
-    "packages/canonical-model/src/field-numbering.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
+    "packages/canonical-model/src/field-numbering.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts", "packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts",
     "packages/canonical-model/src/picker-eligibility.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-composition.ts",
     "packages/canonical-model/src/surface-list.ts", "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/compiler.ts",
     "packages/compiler/src/conformance.ts", "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts",
@@ -122,14 +122,14 @@ Review: round 1 (ONLINE, `974ae755`) found three production defects, all in numb
     "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/module-storage-materializer.ts", "packages/postgres-provider/src/receivables-capability-executor.ts",
     "packages/postgres-provider/src/release-verification-service.ts", "packages/runtime/src/list-behavior/contract.ts", "packages/runtime/src/list-behavior/cursor.ts",
     "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
-    "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.baseline.ts",
+    "packages/runtime/src/semantic-query-gateway.ts", "scripts/run-matrix.sh", "test/architecture/module-press-law.test.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.baseline.ts",
     "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/g2-module-conformance.test.ts", "test/compiler/inventory-contract.release.golden.json",
-    "test/evidence/SALES-PARITY.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/generate-fresh-tenant-full-replay-schema.ts",
+    "test/evidence/SALES-PARITY.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/assert-composed-inventory.ts", "test/helpers/generate-fresh-tenant-full-replay-schema.ts",
     "test/helpers/governed-storage-target.ts", "test/helpers/meta-sales-fixture.ts", "test/helpers/order-entry-fixture.ts", "test/helpers/postgres.ts",
     "test/helpers/reachability-producers.ts", "test/integration/surface-data-binding.test.ts", "test/postgres/commercial-totals.test.ts",
     "test/postgres/composed-application.test.ts", "test/postgres/declared-list.test.ts", "test/postgres/document-numbering.test.ts",
-    "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/fulfillment.test.ts", "test/postgres/receivables.test.ts",
-    "test/postgres/receiving-authorization.test.ts", "test/unit/canonical-model/field-numbering.test.ts", "test/unit/canonical-model/surface-list.test.ts",
+    "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/fulfillment.test.ts", "test/postgres/packing-retrieval.test.ts", "test/postgres/party-runtime.test.ts", "test/postgres/receivables.test.ts",
+    "test/postgres/receiving-authorization.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/canonical-model/field-numbering.test.ts", "test/unit/canonical-model/surface-list.test.ts",
     "test/unit/commercial-amounts.test.ts", "test/unit/purchasing-definition.test.ts", "test/unit/sales-definition.test.ts",
     "test/unit/workspace-contract.test.ts"
   ],
