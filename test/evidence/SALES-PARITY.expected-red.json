@@ -115,7 +115,7 @@
       "claim": "The allocator's maximum scan reads a stored number of any digit count, leading zeros included, and its own output past eighteen digits, so the next number always follows the highest.",
       "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
       "original": "      [`^${field.prefix}-([0-9]+)$`],\n",
-      "replacement": "      [`^${field.prefix}-([0-9]{1,18})$`],\n",
+      "replacement": "      [`^$${field.prefix}-([0-9]{1,18})$$`],\n",
       "test": {
         "files": ["test/postgres/document-numbering.test.ts"],
         "namePattern": "document numbers are assigned by the server"
