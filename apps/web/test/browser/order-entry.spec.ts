@@ -262,9 +262,9 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page.getByLabel('Quantity to ship', { exact: true }).fill('5');
     // The carrier and its tracking number are required on a shipment.
     await page.getByLabel('Carrier', { exact: true }).fill('Purolator');
-    await expect(
-      page.getByLabel('Reference type', { exact: true }),
-    ).toHaveValue(
+    // A choice renders as a select inside its label, so its accessible name
+    // also carries the selected option ("Reference type Tracking number").
+    await expect(page.getByLabel('Reference type')).toHaveValue(
       'northstar.app:option.shipment_shipping_reference_kind_tracking',
     );
     await page
