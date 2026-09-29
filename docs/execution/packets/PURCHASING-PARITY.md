@@ -1,8 +1,8 @@
 # PURCHASING-PARITY — Rain's purchase orders at PaneFlow parity through metadata
 
-Status: slice 1 (priced purchase orders, RCV numbers) executable and pushed (draft PR on `packet/SALES-PARITY`); slices 2-4 chartered; no merge, no deployment. Sole LOCAL BUILD, chartered by the owner on 2026-09-29 ("continue to what is left ... the other components ... without me"; recommendations accepted, decisions reported at the end).
-Tier: outside the Critical set so far — storage columns are added through the existing `addColumn` path (SALES-PARITY claims 10-11); no posting-kernel, verification, trust, migration or grant change.
-Base: `packet/SALES-PARITY` at `f0a38e76` (stacked on draft PR #7). Reference: PaneFlow `d057daff` read from source; audit in `PURCHASING-PARITY-inventory.md`.
+Status: slices 1-3 (priced purchase orders and RCV numbers; ending an order; receiving paperwork without the received-on date) executable and pushed (draft PR #8 on `packet/SALES-PARITY`); slice 4 chartered; no merge, no deployment. Sole LOCAL BUILD, chartered by the owner on 2026-09-29 ("continue to what is left ... the other components ... without me"; recommendations accepted, decisions reported at the end).
+Tier: outside the Critical set — storage columns are added through the existing `addColumn` path (SALES-PARITY claims 10-11); slice 2 changes receiving's order lifecycle and amend path (`purchasing-order-lifecycle.ts`, `receiving-order-capability.ts`), not the posting kernel; no verification, trust, migration or grant change.
+Base: `packet/SALES-PARITY` at `b1aefa05`, merged in (stacked on draft PR #7; slice 1 was cut at `f0a38e76`). Reference: PaneFlow `d057daff` read from source; audit in `PURCHASING-PARITY-inventory.md`.
 
 ## Owner rulings (recommended, taken under the owner's standing instruction)
 
@@ -13,9 +13,9 @@ Base: `packet/SALES-PARITY` at `f0a38e76` (stacked on draft PR #7). Reference: P
 ## Slices
 
 1. Priced purchase orders (P3, P4, P23) and RCV receipt numbers (P1): terms, tax, discount, charges, totals, printed totals.
-2. Receiving paperwork (P13, P14): received-on date within the kernel's backdate bound, packing slip, notes, a default receiving location.
-3. What is still to arrive (P10, P11, P26): received/open quantities and a total on the PO List, an Expected receipts List of open lines, late marking — a read model, no kernel change.
-4. Short-close and a cancel guard (P8, P9): close the open remainder with a reason; Cancel refused once anything is received. Check the Critical set first (the received projection is kernel-verified).
+2. Ending an order (P8, P9) and what is still open per line (P10 in part): Cancel refused once anything is received; a line's open remainder closed with a reason; Received and Open on each order line.
+3. Receiving paperwork (P13 in part, P14): packing slip and notes on a receipt; a purchase order's "Receive into" location that receiving starts from. The received-on date waits for its kernel rule (Filed).
+4. What is still to arrive (P10, P11, P26): received/open quantities and a total on the PO List, an Expected receipts List of open lines, late marking.
 Deferred to their own packets: approvals and "place order" (P5-P7), vendor bills (P21), vendor returns and drop ship (P19-P20), inventory (transfers, count and opening posting routes, availability, reorder rules, lot/serial, valuation, units).
 
 ## Claims
@@ -25,12 +25,20 @@ Deferred to their own packets: approvals and "place order" (P5-P7), vendor bills
 3. The commercial read model states a purchase order's line amounts and tax, subtotal, charges, tax and total exactly as a sales order's (half up per line, one currency; an unstated figure is null and nulls every total it feeds), under two purchase bindings of the same capability; a purchase line states no price basis. Totals re-enter current authority over the lines.
 4. The purchase order page reads its record through `commercial_purchase_order_get`: facts show terms and the total; Priced lines show unit cost, discount, tax code, tax and amount; money reads with two decimals; the printed order carries the priced lines and totals (Subtotal, Freight, Other fee, Tax, Total). Receiving is unchanged.
 5. A goods receipt takes a server-assigned `RCV-000001` number on its first save, through the numbering SALES-PARITY built (claims 7-9, 21 there); the receive task no longer binds a generated id, and the receiving kernel reads the stored number as before.
+6. The committed cancel runs through receiving, under the order's and its lines' locks, and is refused after any net receipt on any active line (`RECEIPT_QUANTITY_OUT_OF_BOUNDS`), as a sales order's is after any net shipment; the draft cancel stays a plain transition. Close, reopen and cancel each carry their state guard, so none is offered in another state.
+7. Each order line states Received and Open, read from the receiving projection through its own get under current policy: a denied read states neither (and answers for every line of the call), an unanswered one is not a zero, and a release whose purchase lines declare no progress states none.
+8. "Close open remainder" stages an amendment request marked `close_remainder` with a required reason and applies it through the receiving amend, which sets the ordered quantity to what is received when it runs, under the line's lock, and consumes every close request staged for that line revision together; a plain quantity request beside a close request is refused as two intents. The order then closes. A task binding a record revision into an integer field writes the field's canonical string.
+9. A goods receipt carries an optional packing slip and notes, entered in both receive tasks and shown among the order's connected receipts; an empty optional task input reaches its operation as `null`.
+10. A purchase order may name a "Receive into" location (a picker in the editor, a detail on the page); both receive tasks start their location from it. A reference task input may declare `defaultFrom` a record field (optional v6 key; refused on other inputs and on a field the record query does not select).
 
 ## Decisions
 
 - The purchase bindings live on Sales' `commercial` capability (one executor, parameterized by document), and the purchase commercial queries are added by `salesWorkspaceQueries` only when purchasing is composed.
 - A separate "Priced lines" section, as on the sales order: the existing "Order lines" section keeps driving receiving selection unchanged.
-- P8 is not a quick fix: Cancel after receipts is today the only way to end a partly received order, because Close requires nothing open. Slice 4 adds short-close first, then refuses Cancel after receipts.
+- P8 is not a quick fix: Cancel after receipts was the only way to end a partly received order, because Close requires nothing open. Slice 2 therefore adds closing a line's open remainder with the refusal, and comes before the paperwork: it closes an integrity gap.
+- A remainder is closed per line, as PaneFlow closes open units, through the existing amendment request (ADR-0038's staged intent) rather than a new order-level input. A close request is resolved when it applies, not when it is staged, after an in-lane check (a subagent reading the diff, not a review arm; none is owed outside the Critical set) showed a receipt posted in between could strand the line with requests that no retry could apply.
+- Received and Open ride the commercial purchase-line read model rather than a new receiving read model: one executor, parameterized by document.
+- The received-on date is split out: the posting kernel accepts a future effective date today, so choosing a date needs a Critical kernel rule first (Filed).
 
 ## Controls
 
@@ -43,39 +51,50 @@ None owed: nothing in the Critical set changes.
 - `13f35063`..`3cbb2de7`: running them found test drift this slice caused, fixed there: the receiving tests typed a now-assigned receipt number; the receiving journey and the receipt posting test addressed the order page by the plain get's company parameter (the page reads its totals query) and the posting test's gateway had no commercial read model; the pricing journey expected zero seconds and a secondary column in its own cell. Then receiving-authorization 7/7, browser purchase-pricing 1/1 and the composed receiving journey 1/1 (a filtered browser run exits 1 by the reachability reporter's own rule).
 - `ba21d043` (rebased onto SALES-PARITY `f0a38e76`, whose slot order puts a document's lines first; this slice becomes lineage entry 24): release `--check` PASS; typecheck clean; unit `purchasing-definition` + `workspace-contract` 48/48; coverage unchanged (738). The PostgreSQL and browser runs above are at the pre-rebase heads; CI on the PR is the gate for the rebased head (see Filed).
 
+- `4a68c916` (slices 2-3, lineage entry 25, merged with SALES-PARITY `b1aefa05`; one container at a time): release `--check` PASS; typecheck clean; unit `purchasing-definition`, `workspace-contract`, `sales-definition`, `surface-list`, `field-numbering` 69/69; integration `surface-data-binding` 112/112; reachability and hygiene 21/21; language coverage PASS (2498 -> 2501 obligations, 738 -> 742 observed); the full-replay snapshot differs only by four nullable columns and their UPDATE grants; PostgreSQL `purchase-order-ending` 1/1 after one stale expectation (a stored quantity reads at its column's scale). CI at `a2492db2` (slice 1): quality, browser and scans passed; PostgreSQL was cancelled at its 30-minute bound (hence SALES-PARITY `d00f8bba`) and the compile budget was indeterminate (CPU idle 73%, below the 90% it requires). CI on PR #8 is the gate for this head.
 ## Test it yourself
 
-`PURCHASING-PARITY-test-it-yourself.md` §1 priced purchase order.
+`PURCHASING-PARITY-test-it-yourself.md` §1 priced purchase order, §2 ending an order, §3 receiving paperwork.
 
 ## Filed
 
 - `apps/web/release/app.compiled.json` grows about 3 MB per lineage entry (72 MB at 24 entries; GitHub refuses files over 100 MB): an ADR-0066 re-baseline (recommended: nothing is in production) or LFS is the owner's decision.
-- GitHub Actions did not start on the draft PRs: the account's billing refused the jobs (2026-09-29). Until it is fixed, the gates above are the local ones.
+- The posting kernel accepts a future effective date (only the backdate window and period locks are enforced); PaneFlow refuses a posting dated after today. Owed before a receipt date can be chosen, in the Critical set (`inventory-posting-service.ts`).
+- Both line sections of the order page read the commercial purchase-line model, so received quantities are read twice per line per page; one section could carry both.
+- A committed cancel's event now uses the purchasing order-event schema while a draft cancel's keeps the generic one (the event type is unchanged).
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "PURCHASING-PARITY",
-  "base": "f0a38e76ee6d265f2cfc04aa3e9520b1f04af462",
-  "head": "ba21d043379800b72ab24ec72d17d9c49b8b1a85",
+  "base": "b1aefa054af33b2734e8816eaca4897d1713b1b7",
+  "head": "4a68c9164c7a84ec3454cfdef0c120cb1c0c676f",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
-    "apps/web/test/browser/purchase-pricing.spec.ts", "apps/web/test/browser/receiving.composed-application.spec.ts",
-    "packages/domain/src/app/builder.ts", "packages/domain/src/app/order-entry.ts",
-    "packages/domain/src/purchasing/definition.ts", "packages/domain/src/purchasing/workspace.ts",
-    "packages/domain/src/sales/workspace.ts", "packages/postgres-provider/src/commercial-read-model.ts",
-    "test/architecture/surface-grammar-conformance.test.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/integration/surface-data-binding.test.ts", "test/postgres/commercial-totals.test.ts",
-    "test/postgres/composed-application.test.ts", "test/postgres/document-numbering.test.ts",
-    "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/inventory-posting.test.ts",
-    "test/postgres/receiving-authorization.test.ts", "test/unit/purchasing-definition.test.ts"
+    "apps/web/src/surface-composition.ts", "apps/web/test/browser/purchase-pricing.spec.ts",
+    "apps/web/test/browser/receiving.composed-application.spec.ts", "packages/canonical-model/src/schemas.ts",
+    "packages/canonical-model/src/surface-composition.ts", "packages/domain/src/app/builder.ts",
+    "packages/domain/src/app/order-entry.ts", "packages/domain/src/purchasing/definition.ts",
+    "packages/domain/src/purchasing/workspace.ts", "packages/domain/src/sales/workspace.ts",
+    "packages/postgres-provider/src/commercial-read-model.ts", "packages/postgres-provider/src/purchasing-order-lifecycle.ts",
+    "packages/postgres-provider/src/receiving-capability-executor.ts", "packages/postgres-provider/src/receiving-order-capability.ts",
+    "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.test.ts",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/surface-data-binding.test.ts",
+    "test/postgres/commercial-totals.test.ts", "test/postgres/composed-application.test.ts",
+    "test/postgres/document-numbering.test.ts", "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
+    "test/postgres/inventory-posting.test.ts", "test/postgres/purchase-order-ending.test.ts",
+    "test/postgres/receiving-authorization.test.ts", "test/unit/canonical-model/field-numbering.test.ts",
+    "test/unit/purchasing-definition.test.ts", "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
     {"path": "packages/domain/src/purchasing/definition.ts", "name": "purchasingModuleDefinition"},
     {"path": "packages/domain/src/purchasing/workspace.ts", "name": "purchasingWorkspace"},
-    {"path": "packages/postgres-provider/src/commercial-read-model.ts", "name": "commercialReadModel"}
+    {"path": "packages/postgres-provider/src/commercial-read-model.ts", "name": "commercialReadModel"},
+    {"path": "packages/postgres-provider/src/purchasing-order-lifecycle.ts", "name": "changePurchaseOrderState"},
+    {"path": "packages/postgres-provider/src/purchasing-order-lifecycle.ts", "name": "amendOrderedQuantity"},
+    {"path": "packages/postgres-provider/src/receiving-order-capability.ts", "name": "executeReceivingOrderState"}
   ]
 }
 ```
 
-Review: not owed — outside the Critical set (slice 1).
+Review: not owed — outside the Critical set (slices 1-3).

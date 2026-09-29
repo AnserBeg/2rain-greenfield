@@ -20,3 +20,29 @@ The fixture's Alpine Office Supply is also a supplier; it defaults to CAD, Net 3
 7. Release, then receive the line as before: the receipt still asks for the actual received cost, which is
    not the order's price. **Connected receipts** lists it as **RCV-000001** (the next receipt takes
    RCV-000002), instead of a generated id.
+
+## §2 Ending an order properly (slice 2)
+
+1. Purchasing → Purchase orders → New: vendor **Alpine**, line 1 **OFF-100 Field notebook**, quantity 5.
+   Save draft, then Record actions → **Release**.
+2. **Order lines** now read Ordered 5, **Received 0**, **Open 5**.
+3. Select the line → **Receive with cost explicitly absent**: quantity 2, Calgary warehouse → Review →
+   Confirm → Back to order. The line reads Received 2, Open 3.
+4. Record actions → **Cancel** → Confirm: refused with RECEIPT_QUANTITY_OUT_OF_BOUNDS ("Cancellation is
+   refused after any net receipt…"). The order is still Released.
+5. Record actions → **Close** → Confirm: refused the same way (three are still open).
+6. Select the line → **Close open remainder**: Reason "Supplier discontinued the rest" → Review → Confirm →
+   Back to order. The line reads Ordered 2, Received 2, Open 0, and the action is no longer offered on it.
+7. Record actions → **Close** → Confirm: the order is **Closed**. Reopen returns it to Released; Cancel is
+   still refused, because something was received.
+8. A second order with nothing received: Release, then Record actions → **Cancel** → Confirm: **Cancelled**.
+
+## §3 Receiving paperwork (slice 3)
+
+1. Purchasing → Purchase orders → New: vendor **Alpine**, **Receive into** Calgary warehouse, line 1 **OFF-100**,
+   quantity 4. Save draft; the page's details show Receive into: Calgary warehouse. Record actions → **Release**.
+2. Select the line → **Receive with cost explicitly absent**: **Receiving location** already reads Calgary
+   warehouse. Quantity 4, **Packing slip / delivery note** `PS-1042`, **Notes** "Two boxes, one dented" → Review →
+   Confirm → Back to order.
+3. **Connected receipts** lists the new RCV- number with Packing slip PS-1042; open it to read the slip and notes.
+4. Receive again leaving the slip and notes empty: the receipt saves with neither (empty, not blank text).

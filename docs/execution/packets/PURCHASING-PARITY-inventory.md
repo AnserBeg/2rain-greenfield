@@ -17,13 +17,13 @@ PROVIDER. Audit of 2026-09-29 (read-only, code evidence only); a status moves on
 | P5 approval | submit → approve/reject, approval queue | Release only | MISSING | own packet (approval request; no new PO state) |
 | P6 place order | "Mark as ordered" + supplier reference; receiving locked until then | Release opens receiving | MISSING | with P5 |
 | P7 amend | revision + re-approval | amendment request (quantity, floor = received) | PARTIAL | with P5 |
-| P8 cancel | refused once receipts exist; reason | allowed after receipts: it is the only way to end a partly received order | PARTIAL | slice 4 (with P9) |
-| P9 short-close / reopen | close N open units with a reason | close only with nothing open; order-level reopen | PARTIAL | slice 4 |
-| P10 list | stage tabs, received/open/total/late columns | views by state, currency filter, CSV | PARTIAL | slice 3 |
-| P11 expected receipts | open-to-receive worklist, late filter | receiving section per order only | MISSING | slice 3 |
+| P8 cancel | refused once receipts exist; reason | refused after any net receipt, through receiving (a draft cancels as before) | MATCHED | 2 |
+| P9 short-close / reopen | close N open units with a reason | a line's open remainder closed with a reason (to what is received when it applies), then Close; order-level reopen | MATCHED | 2 |
+| P10 list | stage tabs, received/open/total/late columns | views by state, currency filter, CSV; received and open per line on the order page | PARTIAL | 4 (List columns) |
+| P11 expected receipts | open-to-receive worklist, late filter | receiving section per order only | MISSING | 4 |
 | P12 receipt entry | multi-line truck receipt | one line per task, or the manual receipt form | PARTIAL | later (UI vocabulary) |
-| P13 receipt paperwork | received-on date, packing slip, notes | posted "now", fixed reason | MISSING | slice 2 |
-| P14 default location | preferred bin / receiving location | required input, no default | MISSING | slice 2 |
+| P13 receipt paperwork | received-on date, packing slip, notes | packing slip and notes on each receipt; posted "now" | PARTIAL (date: kernel rule owed) | 3 |
+| P14 default location | preferred bin / receiving location | the order's "Receive into" location starts every receipt | MATCHED | 3 |
 | P15-P16 quarantine split, over-receipt tolerance | yes | none; over-receipt refused | MISSING / PARTIAL (stricter) | later |
 | P17 receipt cost | PO cost becomes inventory value | actual cost or explicit absence per receipt line | RAIN-ONLY | — |
 | P18 reversal | one-click reverse latest receipt | correction/reversal receipts entered manually | PARTIAL | later |
@@ -32,7 +32,7 @@ PROVIDER. Audit of 2026-09-29 (read-only, code evidence only); a status moves on
 | P22 progress panel | record progression + next action | lines, receipts, receiving section | PARTIAL | later |
 | P23 print | server PDF | browser print with priced lines and totals | MATCHED under ruling G | 1 |
 | P24-P25 merge drafts, PDF import | yes | none | MISSING (low) | — |
-| P26 exceptions & alerts | late "!" column, bell | none | MISSING | slice 3 (late) |
+| P26 exceptions & alerts | late "!" column, bell | none | MISSING | 4 (late) |
 | P27 permissions | per role | per operation | MATCHED (mechanism) | — |
 | P28 email, QBO, R2 | yes | — | PROVIDER | out of scope |
 
