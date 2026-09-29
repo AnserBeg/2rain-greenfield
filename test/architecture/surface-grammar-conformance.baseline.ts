@@ -98,6 +98,12 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // remain reachable from that owner or by deep link.
     // SALES-PARITY declares the sales-order List with saved views, closing
     // that List's missing savedViews slot (SG003 + SG009): 61 - 2 = 59.
-    violationCount: 59,
+    // SALES-PARITY (ruling C) then adds the invoice, its lines, payments and
+    // credits through the module's standard surfaces, each with the same
+    // known slot gaps: invoice detail (SG003 + SG009, 2) and form (4), and the
+    // three contextual documents' list (2), detail (4) and form (4) each. The
+    // invoice List declares saved views, so it adds none: 59 + 36 = 95. No new
+    // violation kind.
+    violationCount: 95,
   }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);

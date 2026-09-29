@@ -45,6 +45,22 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
       })
       .sort(),
     [
+      // Ruling C: the credit, invoice and payment numbers.
+      [
+        `${ns}:field.customer_credit_number`,
+        'CM',
+        `${ns}:document_sequence.customer_credit`,
+      ],
+      [
+        `${ns}:field.customer_invoice_number`,
+        'INV',
+        `${ns}:document_sequence.customer_invoice`,
+      ],
+      [
+        `${ns}:field.customer_payment_number`,
+        'PAY',
+        `${ns}:document_sequence.customer_payment`,
+      ],
       [
         `${ns}:field.purchase_order_number`,
         'PO',

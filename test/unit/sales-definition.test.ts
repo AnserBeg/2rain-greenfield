@@ -17,6 +17,7 @@ import {
 import {
   SALES_IDS,
   salesModuleDefinition,
+  RECEIVABLES_CAPABILITY_ID,
 } from '../../packages/domain/src/sales/index.js';
 import { evaluateRegisteredOperationPrecondition } from '../../packages/runtime/src/semantic-operation-gateway.js';
 
@@ -71,18 +72,21 @@ test('sales fulfillment metadata is a complete order, reservation and shipment d
     authored.normalizationProfileVersion,
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
-  assert.equal(authored.entities.length, 7);
+  // Ruling C adds the invoice, its lines, the payment and the credit.
+  assert.equal(authored.entities.length, 11);
   // SALES-PARITY adds the shipment's carrier, reference type and reference,
   // then (ruling E) the order's salesperson, terms, ship-to address and six
   // ship-to lines, and the same six lines on the shipment; then (ruling B)
   // the order's tax code and two charges with codes and frozen rates, and the
-  // line's list price, discount, tax code and frozen rate.
-  assert.equal(authored.fields.length, 64);
-  // SALES-PARITY adds sales_order_reopen (ruling F).
-  assert.equal(authored.operations.length, 28);
-  assert.equal(authored.permissions.length, 33);
-  assert.equal(authored.queries.length, 28);
-  assert.equal(authored.surfaces.length, 19);
+  // line's list price, discount, tax code and frozen rate; then (ruling C)
+  // 14 invoice, 9 invoice-line, 6 payment and 5 credit fields.
+  assert.equal(authored.fields.length, 98);
+  // SALES-PARITY adds sales_order_reopen (ruling F), then the four
+  // receivables documents' CRUD and their post and void commands.
+  assert.equal(authored.operations.length, 48);
+  assert.equal(authored.permissions.length, 57);
+  assert.equal(authored.queries.length, 44);
+  assert.equal(authored.surfaces.length, 31);
   for (const local of [
     'sales_order',
     'sales_order_line',
@@ -124,8 +128,8 @@ test('the state machine releases and cancels only through compiled targets', () 
     [
       'northstar.sales:operation.sales_order_release',
       'northstar.sales:operation.sales_order_draft_cancel',
-      // Ruling F (SALES-PARITY): a closed order reopens to released.
-      'northstar.sales:operation.sales_order_reopen',
+      // Ruling F (SALES-PARITY) reopens a closed order through the
+      // receivables capability, which reads the order's invoices.
     ],
   );
   const stateField = (
@@ -188,7 +192,7 @@ test('draft editing is admitted and every released/cancelled edit is refused by 
 
 test('line mutations inherit their parent guards and fulfillment references are explicit', () => {
   const authored = definition();
-  assert.equal(authored.relations.length, 9);
+  assert.equal(authored.relations.length, 14);
   assert.deepEqual(
     authored.relations.map((relation) => relation.relationId),
     Object.values(SALES_IDS.relationIds),
@@ -262,6 +266,19 @@ test('all sales permissions are exact current-policy contracts', () => {
         'northstar.sales:permission.sales_order_shipped_read',
         'northstar.sales:entity.sales_order_shipped',
       ],
+      // Ruling C: the receivables documents.
+      ...[
+        'customer_invoice',
+        'customer_invoice_line',
+        'customer_payment',
+        'customer_credit',
+      ].flatMap((local) =>
+        ['create', 'read', 'update', 'archive', 'restore'].map((action) => [
+          action,
+          `northstar.sales:permission.${local}_${action}`,
+          `northstar.sales:entity.${local}`,
+        ]),
+      ),
       [
         'transition',
         'northstar.sales:permission.sales_order_release',
@@ -292,6 +309,18 @@ test('all sales permissions are exact current-policy contracts', () => {
         'northstar.sales:permission.shipment_post',
         'northstar.sales:entity.shipment',
       ],
+      ...(
+        [
+          ['customer_invoice', 'post'],
+          ['customer_invoice', 'void'],
+          ['customer_payment', 'post'],
+          ['customer_credit', 'post'],
+        ] as const
+      ).map(([local, action]) => [
+        'transition',
+        `northstar.sales:permission.${local}_${action}`,
+        `northstar.sales:entity.${local}`,
+      ]),
     ],
   );
 });
@@ -349,11 +378,12 @@ test('sales leads compiled business navigation and fulfillment is registered beh
   const salesOperations = composed.operations.filter((operation) =>
     operation.operationId.includes(':operation.sales_order'),
   );
+  // Close and cancel (fulfillment), and reopen (receivables, ruling F).
   assert.equal(
     salesOperations.filter(
       (operation) => operation.effect.kind === 'registeredCapabilityEffect',
     ).length,
-    2,
+    3,
   );
   assert.match(JSON.stringify(salesModuleDefinition()), /reservation/gu);
   assert.match(JSON.stringify(salesModuleDefinition()), /shipment/gu);
@@ -472,4 +502,70 @@ test('ruling E: Confirm and an initial shipment require a complete ship-to; a co
   }
   // Archiving a draft shipment keeps its original guard: state only.
   assert.equal(outcome('shipment_archive', shipment('initial')), 'holds');
+});
+
+test('ruling C: receivables documents change only as drafts, post once through the receivables capability, and are numbered', () => {
+  const authored = definition() as unknown as {
+    fields: Array<{
+      fieldId: string;
+      numbering?: { prefix: string };
+    }>;
+    operations: Array<{
+      operationId: string;
+      effect: { kind: string; capability?: { targetId: string } };
+      precondition?: unknown;
+    }>;
+  };
+  const ns = 'northstar.sales';
+  for (const [local, prefix] of [
+    ['customer_invoice', 'INV'],
+    ['customer_payment', 'PAY'],
+    ['customer_credit', 'CM'],
+  ] as const) {
+    assert.equal(
+      authored.fields.find(
+        (field) => field.fieldId === `${ns}:field.${local}_number`,
+      )?.numbering?.prefix,
+      prefix,
+    );
+    const state = `${ns}:field.${local}_state`;
+    for (const action of ['create', 'update', 'archive', 'restore']) {
+      const operation = authored.operations.find(
+        (candidate) =>
+          candidate.operationId === `${ns}:operation.${local}_${action}`,
+      )!;
+      const evaluate = (value: string) =>
+        evaluateRegisteredOperationPrecondition(
+          operation.precondition as Parameters<
+            typeof evaluateRegisteredOperationPrecondition
+          >[0],
+          { [state]: value } as Parameters<
+            typeof evaluateRegisteredOperationPrecondition
+          >[1],
+        ).outcome;
+      assert.equal(evaluate(`${ns}:option.${local}_state_draft`), 'holds');
+      assert.equal(
+        evaluate(
+          `${ns}:option.${local}_state_${local === 'customer_invoice' ? 'open' : 'posted'}`,
+        ),
+        'refused',
+        `${local}_${action} must refuse a posted document`,
+      );
+    }
+  }
+  assert.deepEqual(
+    authored.operations
+      .filter(
+        (operation) =>
+          operation.effect.capability?.targetId === RECEIVABLES_CAPABILITY_ID,
+      )
+      .map((operation) => operation.operationId),
+    [
+      `${ns}:operation.customer_invoice_post`,
+      `${ns}:operation.customer_invoice_void`,
+      `${ns}:operation.customer_payment_post`,
+      `${ns}:operation.customer_credit_post`,
+      `${ns}:operation.sales_order_reopen`,
+    ],
+  );
 });

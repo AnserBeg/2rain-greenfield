@@ -1051,9 +1051,10 @@ async function assertRealProductDefinition(
     ).surfaces.map((surface) => surface.surfaceId);
     // Prior 51 + Sales order entry and the fulfillment document/read-model
     // surfaces. Projection carriers deliberately omit editable forms.
-    // SALES-PARITY adds Party's ship-to address book and Catalog's tax codes
-    // (list, detail, form each).
-    assert.equal(surfaces.length, 76);
+    // SALES-PARITY adds Party's ship-to address book and Catalog's tax codes,
+    // then the invoice, its lines, payments and credits (list, detail, form
+    // each).
+    assert.equal(surfaces.length, 88);
     for (const local of [
       'goods_receipt',
       'goods_receipt_line',
@@ -3392,11 +3393,13 @@ async function assertBoundedFreshTenantInstallEvidence(
   // reference (4), order master data (10), shipment ship-to (6), Party's
   // customer defaults (6) and its address book (14); then 25 for ruling B:
   // the order's tax code and charges (7), line pricing (4), a customer
-  // default tax code (1), item prices (3) and the tax code master (10).
+  // default tax code (1), item prices (3) and the tax code master (10); then
+  // 72 for ruling C: invoice (23), invoice line (17), payment (17) and
+  // credit (15).
   assert.equal(
     servingScenarioCount,
-    413,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, and 65 for Sales parity',
+    485,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, and 137 for Sales parity',
   );
 
   const intermediate = await pool.query<{
@@ -5848,6 +5851,11 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
     // SALES-PARITY: carrier, reference type and reference, then six ship-to lines.
     shipment: 29,
     shipment_line: 14,
+    // SALES-PARITY (ruling C): the receivables documents.
+    customer_invoice: 23,
+    customer_invoice_line: 17,
+    customer_payment: 17,
+    customer_credit: 15,
   })) {
     assert.equal(
       plan.scenarios.filter(

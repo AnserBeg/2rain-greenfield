@@ -559,6 +559,126 @@
       },
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.customer_credit_archive",
+        "resource": "northstar.app:entity.customer_credit"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.customer_credit_create",
+        "resource": "northstar.app:entity.customer_credit"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.customer_credit_post",
+        "resource": "northstar.app:entity.customer_credit"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.customer_credit_read",
+        "resource": "northstar.app:entity.customer_credit"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.customer_credit_restore",
+        "resource": "northstar.app:entity.customer_credit"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.customer_credit_update",
+        "resource": "northstar.app:entity.customer_credit"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.customer_invoice_archive",
+        "resource": "northstar.app:entity.customer_invoice"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.customer_invoice_create",
+        "resource": "northstar.app:entity.customer_invoice"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.customer_invoice_line_archive",
+        "resource": "northstar.app:entity.customer_invoice_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.customer_invoice_line_create",
+        "resource": "northstar.app:entity.customer_invoice_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.customer_invoice_line_read",
+        "resource": "northstar.app:entity.customer_invoice_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.customer_invoice_line_restore",
+        "resource": "northstar.app:entity.customer_invoice_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.customer_invoice_line_update",
+        "resource": "northstar.app:entity.customer_invoice_line"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.customer_invoice_post",
+        "resource": "northstar.app:entity.customer_invoice"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.customer_invoice_read",
+        "resource": "northstar.app:entity.customer_invoice"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.customer_invoice_restore",
+        "resource": "northstar.app:entity.customer_invoice"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.customer_invoice_update",
+        "resource": "northstar.app:entity.customer_invoice"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.customer_invoice_void",
+        "resource": "northstar.app:entity.customer_invoice"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.customer_payment_archive",
+        "resource": "northstar.app:entity.customer_payment"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.customer_payment_create",
+        "resource": "northstar.app:entity.customer_payment"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.customer_payment_post",
+        "resource": "northstar.app:entity.customer_payment"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.customer_payment_read",
+        "resource": "northstar.app:entity.customer_payment"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.customer_payment_restore",
+        "resource": "northstar.app:entity.customer_payment"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.customer_payment_update",
+        "resource": "northstar.app:entity.customer_payment"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.stock_count_archive",
         "resource": "northstar.app:entity.stock_count"
       },

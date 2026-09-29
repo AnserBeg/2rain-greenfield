@@ -51,6 +51,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     (surface) => 'list' in surface && surface.list,
   );
   assert.deepEqual(declared.map((surface) => surface.surfaceId).sort(), [
+    // Ruling C: the Invoices List.
+    `${ns}:surface.customer_invoice_list`,
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,
@@ -225,6 +227,8 @@ test('a printable document is declared over the record composition and refused w
     return print ? [[surface.surfaceId, print.label]] : [];
   });
   assert.deepEqual(printed.sort(), [
+    // Ruling C: the printable invoice.
+    [`${ns}:surface.customer_invoice_detail`, 'Invoice'],
     [`${ns}:surface.purchase_order_detail`, 'Purchase order'],
     [`${ns}:surface.sales_order_detail`, 'Sales order'],
   ]);

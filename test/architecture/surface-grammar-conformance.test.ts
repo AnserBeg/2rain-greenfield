@@ -270,8 +270,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
   // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces,
   // + Party's three ship-to address and Catalog's three tax code surfaces
-  // (SALES-PARITY).
-  assert.equal(groupedManifest.surfaces.length, 76);
+  // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve).
+  assert.equal(groupedManifest.surfaces.length, 88);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -293,8 +293,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
-  // SALES-PARITY: Catalog's tax codes list joins the supporting masters.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 13);
+  // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
+  // the Invoices list joins Sales beside its orders.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 14);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),

@@ -423,6 +423,10 @@ export function orderEntrySurfaces(
   const lineOwners: Readonly<Record<string, string>> = {
     inventory_transaction_line: 'inventory_transaction',
     stock_count_line: 'stock_count',
+    // An invoice's lines, payments and credits belong to its workspace.
+    customer_invoice_line: 'customer_invoice',
+    customer_payment: 'customer_invoice',
+    customer_credit: 'customer_invoice',
   };
   // A tenant-level child belongs to its master's workspace, such as a
   // customer's ship-to addresses; it has no company entry to resolve.
@@ -464,7 +468,9 @@ export function orderEntrySurfaces(
       workspace: {
         membership:
           role === 'list'
-            ? editor || local === 'posted_stock_balance'
+            ? editor ||
+              local === 'posted_stock_balance' ||
+              local === 'customer_invoice'
               ? 'operational'
               : owner || master
                 ? 'contextual'
@@ -489,6 +495,9 @@ export function orderEntrySurfaces(
         ? {
             label: local === 'sales_order' ? 'Sales orders' : 'Purchase orders',
           }
+        : {}),
+      ...(local === 'customer_invoice' && role === 'list'
+        ? { label: 'Invoices' }
         : {}),
     };
   });

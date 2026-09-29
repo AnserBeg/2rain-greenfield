@@ -936,8 +936,11 @@ export const SurfaceCompositionSchema = z.strictObject({
           label: LabelSchema,
           datasets: z.array(CanonicalIdSchema).min(1).max(4),
           note: CanonicalIdSchema.optional(),
-          /** Declared columns printed as labelled totals, such as subtotal, tax and total. */
-          totals: z.array(CanonicalIdSchema).min(1).max(6).optional(),
+          /**
+           * Declared columns printed as labelled totals, such as subtotal, tax
+           * and total; an invoice adds what is paid, credited and owed.
+           */
+          totals: z.array(CanonicalIdSchema).min(1).max(8).optional(),
         })
         .optional(),
       /**

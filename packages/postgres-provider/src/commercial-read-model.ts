@@ -3,9 +3,11 @@ import {
   chargeAmounts,
   formatCents,
   lineAmounts,
+  parseExact,
   sameExact,
   type LineAmounts,
 } from './commercial-amounts.js';
+import { fulfillmentProjectionIdentity } from './fulfillment.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -87,18 +89,24 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
         line.values[field('sales_order_line_tax_rate_percent')],
       ),
     });
-  const linesOf = async (orderId: string) => {
+  /**
+   * Every record a dependency lists under one exact scope: a parent scope for
+   * an owned child relation, a reference scope for a reference relation.
+   */
+  const listAll = async (
+    key: string,
+    relationId: string,
+    recordId: string,
+    kind: 'parentScope' | 'referenceScope' = 'parentScope',
+  ) => {
     const records: SemanticRecordDto[] = [];
-    const parentScope = {
-      relationId: `${ns}:relation.sales_order_line_order`,
-      recordId: orderId,
-    };
+    const scope = { relationId, recordId };
     let cursor: string | null = null;
     do {
       const page: ReturnType<
         typeof requireSharedListResult<SemanticRecordDto>
       > = requireSharedListResult(
-        await invoke('lines', {
+        await invoke(key, {
           includeArchived: false,
           list: {
             schemaVersion: SHARED_LIST_QUERY_VERSION,
@@ -108,15 +116,13 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
             search: '',
             sort: [],
             relationLabels: [],
-            parentScope,
+            [kind]: scope,
           },
         }),
       );
-      if (
-        page.listCoverage.parentScope?.recordId !== orderId ||
-        page.listCoverage.parentScope.relationId !== parentScope.relationId
-      )
-        throw new Error('Unapplied exact parent scope');
+      const applied = page.listCoverage[kind];
+      if (applied?.recordId !== recordId || applied.relationId !== relationId)
+        throw new Error('Unapplied exact list scope');
       records.push(...page.records);
       if (
         page.listCoverage.hasMore &&
@@ -128,6 +134,83 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       cursor = page.listCoverage.nextCursor;
     } while (cursor !== null);
     return records;
+  };
+  const linesOf = (orderId: string) =>
+    listAll('lines', `${ns}:relation.sales_order_line_order`, orderId);
+  /** An exact quantity as units at scale 18, or `null`. */
+  const units = (value: ImmutableJsonValue | undefined): bigint | null => {
+    const parsed = parseExact(value);
+    return parsed && parsed.scale <= 18
+      ? parsed.units * 10n ** BigInt(18 - parsed.scale)
+      : null;
+  };
+  const quantityText = (value: bigint) => {
+    const scale = 10n ** 18n;
+    const magnitude = value < 0n ? -value : value;
+    const fraction = (magnitude % scale)
+      .toString()
+      .padStart(18, '0')
+      .replace(/0+$/u, '');
+    return `${value < 0n ? '-' : ''}${String(magnitude / scale)}${fraction ? `.${fraction}` : ''}`;
+  };
+  /**
+   * Shipped quantity not yet on an invoice that counts (ruling C): what the
+   * receivables capability would invoice now, so a task can be offered only
+   * when there is something to invoice. The capability recomputes it per
+   * line under the order's lock; this is the offer, not the rule.
+   */
+  const toInvoice = async (
+    orderId: string,
+    lines: readonly SemanticRecordDto[],
+  ): Promise<string | null> => {
+    let shipped = 0n;
+    for (const line of lines) {
+      const read = await invoke('shipped', {
+        recordId: fulfillmentProjectionIdentity(
+          view,
+          scopeId,
+          'shipped',
+          line.recordId,
+        ),
+        includeArchived: false,
+      });
+      const quantity = read.records[0]
+        ? units(
+            read.records[0].values[
+              field('sales_order_shipped_shipped_quantity')
+            ],
+          )
+        : 0n;
+      if (quantity === null) return null;
+      shipped += quantity;
+    }
+    const live = new Set(
+      ['open', 'partially_paid', 'paid'].map(
+        (state) => `${ns}:option.customer_invoice_state_${state}`,
+      ),
+    );
+    let invoiced = 0n;
+    for (const invoice of await listAll(
+      'invoices',
+      `${ns}:relation.customer_invoice_order`,
+      orderId,
+      'referenceScope',
+    )) {
+      if (!live.has(String(invoice.values[field('customer_invoice_state')])))
+        continue;
+      for (const line of await listAll(
+        'invoiceLines',
+        `${ns}:relation.customer_invoice_line_invoice`,
+        invoice.recordId,
+      )) {
+        const quantity = units(
+          line.values[field('customer_invoice_line_quantity')],
+        );
+        if (quantity === null) return null;
+        invoiced += quantity;
+      }
+    }
+    return quantityText(shipped - invoiced);
   };
   const money = (cents: bigint | null) =>
     cents === null ? null : formatCents(cents);
@@ -159,7 +242,8 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       let complete = true;
       let subtotal = 0n;
       let tax = 0n;
-      for (const line of await linesOf(row.recordId)) {
+      const lines = await linesOf(row.recordId);
+      for (const line of lines) {
         const amounts = priced(line);
         if (!amounts) complete = false;
         else {
@@ -186,6 +270,8 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       emit('order_charges', complete ? money(charges) : null);
       emit('order_tax', complete ? money(tax) : null);
       emit('order_total', complete ? money(subtotal + charges + tax) : null);
+      if (model.resultFields.order_to_invoice)
+        emit('order_to_invoice', await toInvoice(row.recordId, lines));
     } else throw new Error('Unknown commercial read-model binding');
     rows.push({ ...row, values });
   }

@@ -10,7 +10,13 @@ export const COMMERCIAL_READ_MODEL_BINDINGS = Object.freeze({
 /** The commercial outputs, by read-model binding. */
 export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
   line: ['line_amount', 'line_tax', 'price_basis'],
-  order: ['order_subtotal', 'order_charges', 'order_tax', 'order_total'],
+  order: [
+    'order_subtotal',
+    'order_charges',
+    'order_tax',
+    'order_total',
+    'order_to_invoice',
+  ],
 } as const);
 /** The order's ship-to lines, as the workspace shows and prints them. */
 const SHIP_TO_LINES = [
@@ -139,6 +145,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     column(`order_${name}`, label, orderKey, id('metric', `order_${name}`));
   const reservations = id('dataset', 'line_reservations');
   const shipments = id('dataset', 'order_shipments');
+  const invoices = id('dataset', 'order_invoices');
   const taskColumn = (datasetId: string, name: string) => ({
     datasetId,
     columnId: id('column', name),
@@ -547,6 +554,43 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           ),
         ],
       },
+      {
+        // Receivables (owner ruling C): the order's invoices and balances.
+        datasetId: invoices,
+        presentation: { selection: 'none', compact: 'scrollTable' },
+        label: 'Invoices',
+        orderKey: 40,
+        query: q('customer_invoice_list'),
+        parent: {
+          relationId: id('relation', 'customer_invoice_order'),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        sort: [
+          {
+            fieldId: field('customer_invoice_invoice_date'),
+            direction: 'ascending',
+          },
+        ],
+        columns: [
+          column('invoice', 'Invoice', 10, field('customer_invoice_number')),
+          column('invoice_state', 'State', 20, field('customer_invoice_state')),
+          column(
+            'invoice_date',
+            'Invoice date',
+            30,
+            field('customer_invoice_invoice_date'),
+          ),
+          column('invoice_due', 'Due', 40, field('customer_invoice_due_date')),
+          column('invoice_total', 'Total', 50, field('customer_invoice_total')),
+          column(
+            'invoice_balance',
+            'Balance',
+            60,
+            field('customer_invoice_balance'),
+          ),
+        ],
+      },
     ],
     actions: [
       {
@@ -707,6 +751,62 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         ],
       },
       {
+        // Every shipped quantity not yet invoiced, at the order's own prices,
+        // discounts and frozen rates; the first invoice carries the charges.
+        actionId: id('action', 'invoice_shipped'),
+        label: 'Invoice shipped quantities',
+        description:
+          'Invoices every shipped quantity not yet invoiced at this order’s prices and tax rates. The first invoice also carries the freight and other fee.',
+        orderKey: 35,
+        // Offered while shipped quantity is not yet invoiced and the order's
+        // figures can be stated; the capability decides per line.
+        conditions: [
+          {
+            value: record(id('metric', 'order_to_invoice')),
+            operator: 'positive',
+            compare: null,
+          },
+          {
+            value: record(id('metric', 'order_total')),
+            operator: 'positive',
+            compare: null,
+          },
+        ],
+        inputs: [],
+        steps: [
+          create(
+            'invoice_draft',
+            'customer_invoice',
+            {
+              // The invoice number is assigned on create (INV-000001).
+              state: literal(id('option', 'customer_invoice_state_draft')),
+              invoice_date: generated('instant'),
+            },
+            { order: record('recordId') },
+          ),
+          command('invoice_commit', 'customer_invoice_post', 'invoice_draft'),
+        ],
+      },
+      {
+        actionId: id('action', 'open_invoice'),
+        presentation: { placement: 'row' },
+        label: 'Open invoice',
+        description: 'Open the invoice with its lines, payments and credits.',
+        orderKey: 45,
+        datasetId: invoices,
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref(
+            'surfaceReference',
+            id('surface', 'customer_invoice_detail'),
+          ),
+          query: q('customer_invoice_get'),
+          record: selected('recordId'),
+        },
+      },
+      {
         actionId: id('action', 'open_packing'),
         presentation: { placement: 'row' },
         label: 'Open packing',
@@ -800,7 +900,12 @@ export function salesWorkspaceQueries(
   const orderTotals = commercial(
     'order',
     clone('sales_order_get', 'commercial_order_get'),
-    { lines: 'commercial_lines' },
+    {
+      lines: 'commercial_lines',
+      shipped: 'sales_order_shipped_get',
+      invoices: 'customer_invoice_list',
+      invoiceLines: 'customer_invoice_line_list',
+    },
   );
   const dependencies = {
     reservations: 'workspace_reservations',
@@ -849,6 +954,397 @@ export function salesWorkspaceQueries(
     pricedLines,
     orderTotals,
   ];
+}
+
+/**
+ * An invoice (owner ruling C): its frozen figures and balance, its lines, and
+ * the payments and credits against it. A payment or a credit posts only up to
+ * the balance; Void is offered only while nothing is settled.
+ */
+export function invoiceWorkspace(namespace: string): Record<string, unknown> {
+  const id = (type: string, name: string) => `${namespace}:${type}.${name}`;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const q = (name: string) => ref('queryReference', id('query', name));
+  const field = (name: string) => id('field', name);
+  const column = (
+    name: string,
+    label: string,
+    orderKey: number,
+    value: string,
+    lookup?: readonly [string, string],
+  ) => ({
+    columnId: id('column', `invoice_${name}`),
+    label,
+    orderKey,
+    field: value,
+    ...(lookup
+      ? {
+          reference: {
+            query: q(lookup[0]),
+            labelField: ref('fieldReference', field(lookup[1])),
+          },
+        }
+      : {}),
+  });
+  const record = (name: string) => ({ source: 'record', field: name });
+  const literal = (value: string | null) => ({ source: 'literal', value });
+  const generated = (value: string) => ({ source: 'generated', value });
+  const input = (name: string) => ({
+    source: 'input',
+    inputId: id('input', `invoice_${name}`),
+  });
+  const bind = (path: string[], value: unknown) => ({ path, value });
+  const step = (name: string, operation: string, bindings: unknown[]) => ({
+    stepId: id('step', `invoice_${name}`),
+    operation: ref('operationReference', id('operation', operation)),
+    bindings,
+  });
+  const settle = (
+    kind: 'payment' | 'credit',
+    values: Record<string, unknown>,
+  ) => [
+    step(`${kind}_draft`, `customer_${kind}_create`, [
+      bind(['recordId'], generated('uuid')),
+      bind(['legalEntityId'], generated('scope')),
+      ...Object.entries(values).map(([key, value]) =>
+        bind(['values', field(`customer_${kind}_${key}`)], value),
+      ),
+      bind(
+        ['relations', id('relation', `customer_${kind}_invoice`)],
+        record('recordId'),
+      ),
+    ]),
+    step(`${kind}_commit`, `customer_${kind}_post`, [
+      bind(['recordId'], {
+        source: 'step',
+        stepId: id('step', `invoice_${kind}_draft`),
+        field: 'recordId',
+      }),
+      bind(['expectedRevision'], {
+        source: 'step',
+        stepId: id('step', `invoice_${kind}_draft`),
+        field: 'revision',
+      }),
+    ]),
+  ];
+  const state = field('customer_invoice_state');
+  const inState = (...states: string[]) =>
+    states.length === 1
+      ? [
+          {
+            value: record(state),
+            operator: 'equals',
+            compare: id('option', `customer_invoice_state_${states[0]!}`),
+          },
+        ]
+      : // Neither of the states the task does not apply to.
+        (['draft', 'open', 'partially_paid', 'paid', 'void'] as const)
+          .filter((value) => !states.includes(value))
+          .map((value) => ({
+            value: record(state),
+            operator: 'notEquals',
+            compare: id('option', `customer_invoice_state_${value}`),
+          }));
+  const amount = (label: string) => ({
+    inputId: id('input', 'invoice_amount'),
+    label,
+    orderKey: 10,
+    type: 'quantity',
+    required: true,
+  });
+  const lines = id('dataset', 'invoice_lines');
+  return {
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: id('column', 'invoice_number'),
+        subtitle: [id('column', 'invoice_customer')],
+        status: id('column', 'invoice_state'),
+        facts: [
+          id('column', 'invoice_date'),
+          id('column', 'invoice_due'),
+          id('column', 'invoice_currency'),
+          id('column', 'invoice_total'),
+          id('column', 'invoice_balance'),
+        ],
+      },
+      context: {
+        label: 'Balance',
+        description:
+          'Record a payment or a credit against this invoice’s balance.',
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+      task: { mode: 'nativeDialog', fallback: 'page' },
+      // Owner ruling G: the printable invoice, saved as PDF by the browser.
+      print: {
+        label: 'Invoice',
+        datasets: [lines],
+        totals: [
+          id('column', 'invoice_subtotal'),
+          id('column', 'invoice_charges'),
+          id('column', 'invoice_tax'),
+          id('column', 'invoice_total'),
+          id('column', 'invoice_paid'),
+          id('column', 'invoice_credited'),
+          id('column', 'invoice_balance'),
+        ],
+      },
+    },
+    fields: [
+      column('number', 'Invoice', 10, field('customer_invoice_number')),
+      column('state', 'Invoice state', 15, state),
+      column(
+        'customer',
+        'Customer',
+        20,
+        field('customer_invoice_customer_party_id'),
+        ['party_get', 'party_name'],
+      ),
+      column(
+        'date',
+        'Invoice date',
+        25,
+        field('customer_invoice_invoice_date'),
+      ),
+      column('due', 'Due date', 30, field('customer_invoice_due_date')),
+      column('currency', 'Currency', 35, field('customer_invoice_currency')),
+      column(
+        'terms',
+        'Payment terms',
+        40,
+        field('customer_invoice_payment_terms'),
+      ),
+      column('subtotal', 'Subtotal', 50, field('customer_invoice_subtotal')),
+      column('charges', 'Charges', 51, field('customer_invoice_charges')),
+      column('tax', 'Tax', 52, field('customer_invoice_tax')),
+      column('total', 'Total', 53, field('customer_invoice_total')),
+      column('paid', 'Paid', 54, field('customer_invoice_paid_amount')),
+      column(
+        'credited',
+        'Credited',
+        55,
+        field('customer_invoice_credited_amount'),
+      ),
+      column('balance', 'Balance', 56, field('customer_invoice_balance')),
+    ],
+    children: [
+      {
+        datasetId: lines,
+        presentation: { selection: 'none' },
+        label: 'Invoice lines',
+        orderKey: 10,
+        query: q('customer_invoice_line_list'),
+        sort: [
+          {
+            fieldId: field('customer_invoice_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        parent: {
+          relationId: id('relation', 'customer_invoice_line_invoice'),
+          value: record('recordId'),
+          ownership: 'parentScopedChild',
+        },
+        columns: [
+          column(
+            'line',
+            'Line',
+            10,
+            field('customer_invoice_line_line_number'),
+          ),
+          column('item', 'Item', 20, field('customer_invoice_line_item_id'), [
+            'item_get',
+            'item_name',
+          ]),
+          column(
+            'quantity',
+            'Quantity',
+            30,
+            field('customer_invoice_line_quantity'),
+          ),
+          column('unit', 'Unit', 40, field('customer_invoice_line_unit_id')),
+          column(
+            'unit_price',
+            'Unit price',
+            50,
+            field('customer_invoice_line_unit_price'),
+          ),
+          column(
+            'discount',
+            'Discount %',
+            60,
+            field('customer_invoice_line_discount_percent'),
+          ),
+          column(
+            'tax_rate',
+            'Tax rate %',
+            70,
+            field('customer_invoice_line_tax_rate_percent'),
+          ),
+          column('amount', 'Amount', 80, field('customer_invoice_line_amount')),
+          column('line_tax', 'Tax', 90, field('customer_invoice_line_tax')),
+        ],
+      },
+      ...(['payment', 'credit'] as const).map((kind, index) => ({
+        datasetId: id('dataset', `invoice_${kind}s`),
+        presentation: { selection: 'none', compact: 'scrollTable' },
+        label: kind === 'payment' ? 'Payments' : 'Credits',
+        orderKey: 20 + index * 10,
+        query: q(`customer_${kind}_list`),
+        parent: {
+          relationId: id('relation', `customer_${kind}_invoice`),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        columns: [
+          column(
+            `${kind}_number`,
+            kind === 'payment' ? 'Payment' : 'Credit',
+            10,
+            field(`customer_${kind}_number`),
+          ),
+          column(`${kind}_state`, 'State', 20, field(`customer_${kind}_state`)),
+          column(
+            `${kind}_date`,
+            'Date',
+            30,
+            field(
+              kind === 'payment'
+                ? 'customer_payment_payment_date'
+                : 'customer_credit_credit_date',
+            ),
+          ),
+          column(
+            `${kind}_amount`,
+            'Amount',
+            40,
+            field(`customer_${kind}_amount`),
+          ),
+          ...(kind === 'payment'
+            ? [
+                column(
+                  'payment_method',
+                  'Method',
+                  50,
+                  field('customer_payment_method'),
+                ),
+                column(
+                  'payment_reference',
+                  'Reference',
+                  60,
+                  field('customer_payment_reference'),
+                ),
+              ]
+            : [
+                column(
+                  'credit_reason',
+                  'Reason',
+                  50,
+                  field('customer_credit_reason'),
+                ),
+              ]),
+        ],
+      })),
+    ],
+    actions: [
+      {
+        actionId: id('action', 'invoice_record_payment'),
+        label: 'Record payment',
+        description:
+          'Records a payment received against this invoice. It may not exceed the balance.',
+        orderKey: 10,
+        conditions: inState('open', 'partially_paid'),
+        inputs: [
+          amount('Amount received'),
+          {
+            inputId: id('input', 'invoice_method'),
+            label: 'Method',
+            orderKey: 20,
+            type: 'text',
+            required: true,
+            presentation: {
+              kind: 'choice',
+              options: (
+                [
+                  ['cash', 'Cash'],
+                  ['cheque', 'Cheque'],
+                  ['eft', 'EFT'],
+                  ['card', 'Card'],
+                  ['other', 'Other'],
+                ] as const
+              ).map(([value, label]) => ({
+                value: id('option', `customer_payment_method_${value}`),
+                label,
+              })),
+              defaultValue: id('option', 'customer_payment_method_eft'),
+            },
+          },
+          {
+            inputId: id('input', 'invoice_reference'),
+            label: 'Reference (cheque or transaction number)',
+            orderKey: 30,
+            type: 'text',
+            required: true,
+          },
+        ],
+        steps: settle('payment', {
+          // The payment number is assigned on create (PAY-000001).
+          state: literal(id('option', 'customer_payment_state_draft')),
+          payment_date: generated('instant'),
+          amount: input('amount'),
+          method: input('method'),
+          reference: input('reference'),
+        }),
+      },
+      {
+        actionId: id('action', 'invoice_issue_credit'),
+        label: 'Issue credit',
+        description:
+          'Credits part or all of this invoice’s balance, such as for a return or a price correction.',
+        orderKey: 20,
+        conditions: inState('open', 'partially_paid'),
+        inputs: [
+          amount('Amount credited'),
+          {
+            inputId: id('input', 'invoice_reason'),
+            label: 'Reason',
+            orderKey: 20,
+            type: 'text',
+            required: true,
+            presentation: { kind: 'multiline' },
+          },
+        ],
+        steps: settle('credit', {
+          // The credit number is assigned on create (CM-000001).
+          state: literal(id('option', 'customer_credit_state_draft')),
+          credit_date: generated('instant'),
+          amount: input('amount'),
+          reason: input('reason'),
+        }),
+      },
+      {
+        actionId: id('action', 'invoice_void'),
+        label: 'Void invoice',
+        description:
+          'Voids this invoice while nothing is paid or credited on it; its quantities can be invoiced again.',
+        orderKey: 30,
+        conditions: inState('open'),
+        inputs: [],
+        steps: [
+          step('void', 'customer_invoice_void', [
+            bind(['recordId'], record('recordId')),
+            bind(['expectedRevision'], record('revision')),
+          ]),
+        ],
+      },
+    ],
+  };
 }
 
 export function packingWorkspace(namespace: string): Record<string, unknown> {

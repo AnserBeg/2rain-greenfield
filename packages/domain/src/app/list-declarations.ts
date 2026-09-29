@@ -131,6 +131,84 @@ function documentList(
   };
 }
 
+function invoiceList(namespace: string): ListSpec {
+  const field = (local: string) =>
+    `${namespace}:field.customer_invoice_${local}`;
+  const state = (local: string) =>
+    `${namespace}:option.customer_invoice_state_${local}`;
+  return {
+    pageSize: 50,
+    columns: [
+      {
+        local: 'number',
+        label: 'Number',
+        field: field('number'),
+        role: 'title',
+      },
+      {
+        local: 'customer',
+        label: 'Customer',
+        field: field('customer_party_id'),
+        reference: {
+          query: `${namespace}:query.party_list`,
+          labelField: `${namespace}:field.party_name`,
+        },
+      },
+      {
+        local: 'invoice_date',
+        label: 'Invoice date',
+        field: field('invoice_date'),
+        format: 'date',
+      },
+      {
+        local: 'due_date',
+        label: 'Due',
+        field: field('due_date'),
+        format: 'date',
+      },
+      {
+        local: 'status',
+        label: 'Status',
+        field: field('state'),
+        role: 'status',
+        statusRoles: {
+          [state('open')]: 'inProgress',
+          [state('partially_paid')]: 'attention',
+          [state('paid')]: 'success',
+        },
+      },
+      { local: 'total', label: 'Total', field: field('total') },
+      { local: 'balance', label: 'Balance', field: field('balance') },
+      { local: 'currency', label: 'Currency', field: field('currency') },
+    ],
+    defaultSort: [{ column: 'invoice_date', direction: 'descending' }],
+    views: [
+      { local: 'all', label: 'All', filters: {} },
+      ...(
+        [
+          ['open', 'Open'],
+          ['partially_paid', 'Partially paid'],
+          ['paid', 'Paid'],
+          ['void', 'Void'],
+        ] as const
+      ).map(([local, label]) => ({
+        local,
+        label,
+        filters: { [field('state')]: state(local) },
+      })),
+    ],
+    filters: [
+      {
+        local: 'currency',
+        label: 'Currency',
+        field: field('currency'),
+        options: CURRENCIES,
+      },
+    ],
+    export: true,
+  };
+}
+
 /** The declared Lists of the composed application, by List surface local id. */
 export function composedListSpecs(
   namespace: string,
@@ -159,6 +237,9 @@ export function composedListSpecs(
         { field: 'expected_date', label: 'Expected' },
       ],
     ),
+    // Receivables (owner ruling C): each invoice with its balance; the tabs
+    // are the invoice states, the customer is named through the party list.
+    customer_invoice_list: invoiceList(namespace),
     // A balance, not a document: no lifecycle, so no saved views; item and
     // location are named through their own lists rather than shown as ids.
     posted_stock_balance_list: {
