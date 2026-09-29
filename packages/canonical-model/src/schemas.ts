@@ -816,6 +816,14 @@ const compositionInput = z.strictObject({
   presentation: compositionInputPresentation.optional(),
   /** A reference input's eligibility, as a draft editor picker declares it. Optional v6 key. */
   eligibility: pickerEligibility.optional(),
+  /**
+   * A reference input's starting choice: the record's stored value of a field
+   * its query selects, preselected only when that record is offered -- an
+   * order's receiving location. Optional v6 key (ADR-0047 §7).
+   */
+  defaultFrom: z
+    .strictObject({ source: z.literal('record'), field: z.string().min(1) })
+    .optional(),
 });
 const compositionStep = z.strictObject({
   stepId: CanonicalIdSchema,

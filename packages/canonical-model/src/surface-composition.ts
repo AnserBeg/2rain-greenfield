@@ -413,6 +413,19 @@ export function validateSurfaceCompositions(
             surface.surfaceId,
             'only reference inputs declare lookup queries',
           );
+        // A reference input may start from a value the record itself stores,
+        // read from a field the surface's record query selects.
+        if (
+          input.defaultFrom &&
+          (input.type !== 'reference' ||
+            !fieldsFor(surface.dataSource.targetId).has(
+              input.defaultFrom.field,
+            ))
+        )
+          fail(
+            surface.surfaceId,
+            'only reference inputs default from a declared record field',
+          );
         const presented = input.presentation;
         if (!presented) continue;
         if (input.type !== 'text')

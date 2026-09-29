@@ -6819,6 +6819,12 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
   const f = await orderEntryWitness(true);
   const ns = f.ns;
   const scope = f.scopes[0]!;
+  const location = f.executor.seed('location', {
+    [`${ns}:field.location_name`]: 'Calgary warehouse',
+  });
+  const otherLocation = f.executor.seed('location', {
+    [`${ns}:field.location_name`]: 'Edmonton yard',
+  });
   const order = f.executor.seed(
     'purchase_order',
     {
@@ -6829,6 +6835,8 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
       // Selected but unset, as the provider returns them.
       [`${ns}:field.purchase_order_expected_date`]: null,
       [`${ns}:field.purchase_order_notes`]: null,
+      // Where the order says its goods are received.
+      [`${ns}:field.purchase_order_receiving_location_id`]: location,
       // PURCHASING-PARITY's commercial terms, unset.
       ...Object.fromEntries(
         [
@@ -6860,9 +6868,6 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
     },
     scope,
   );
-  const location = f.executor.seed('location', {
-    [`${ns}:field.location_name`]: 'Calgary warehouse',
-  });
   const lines = `${ns}:dataset.purchasing_lines`;
   const params = new URLSearchParams({
     surface: `${ns}:surface.purchase_order_detail`,
@@ -6902,15 +6907,42 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
     entry.html,
     new RegExp(`<input name="${input('cost')}"[^>]*inputmode="decimal"`),
   );
+  // The location starts from where the order is received, among the offered
+  // locations; the receipt's paperwork is asked for, and neither is required.
+  assert.match(
+    entry.html,
+    new RegExp(
+      `<select name="${input('location')}" required><option value="">Select…</option><option value="${location}" selected>Calgary warehouse</option><option value="${otherLocation}" >Edmonton yard</option></select>`,
+    ),
+  );
+  assert.match(
+    entry.html,
+    new RegExp(
+      `<label class="field">Packing slip / delivery note<input name="${input('packing_slip')}" value=""></label>`,
+    ),
+  );
+  assert.match(
+    entry.html,
+    new RegExp(
+      `<label class="field">Notes<textarea name="${input('notes')}" rows="3"></textarea></label>`,
+    ),
+  );
   const forged = await submit({
     taskToken,
     taskStage: 'prepare',
     [input('quantity')]: '2',
     [input('unit')]: 'BOX',
-    [input('location')]: location,
+    [input('location')]: otherLocation,
     [input('cost')]: '2.4.5',
     [input('currency')]: 'GBP',
   });
+  // A submitted location is kept over the order's.
+  assert.match(
+    forged.html,
+    new RegExp(
+      `<option value="${location}" >Calgary warehouse</option><option value="${otherLocation}" selected>Edmonton yard</option>`,
+    ),
+  );
   assert.match(forged.html, /COMPOSITION_INPUT_INVALID/);
   assert.match(forged.html, /Choose one of the offered values\./);
   assert.match(forged.html, /Enter a plain number, such as 12\.5\./);
@@ -6936,16 +6968,31 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
     [input('location')]: location,
     [input('cost')]: '2.450',
     [input('currency')]: 'CAD',
+    [input('packing_slip')]: ' PS-4471 ',
+    [input('notes')]: '',
   });
   assert.match(review.html, /<dt>Base unit<\/dt><dd>EA<\/dd>/);
   assert.match(review.html, /<dd>2\.45<\/dd>/);
   assert.match(review.html, /<dd>CAD · Canadian dollar<\/dd>/);
+  assert.match(
+    review.html,
+    /<dt>Packing slip \/ delivery note<\/dt><dd>PS-4471<\/dd>/,
+  );
   assert.equal(f.executor.calls.length, 0);
   await submit({
     taskToken,
     taskStage: 'confirm',
     preparedId: hiddenValue(review.html, 'preparedId'),
   });
+  // The receipt keeps its paperwork; the notes left empty are no value.
+  const receipt = f.executor.calls.find((call) =>
+    call.definition.operationId.endsWith(':operation.goods_receipt_create'),
+  );
+  assert.ok(receipt, 'the receipt create ran');
+  const header = asRecord(asRecord(receipt.input).values);
+  assert.equal(header[`${ns}:field.goods_receipt_location_id`], location);
+  assert.equal(header[`${ns}:field.goods_receipt_packing_slip`], 'PS-4471');
+  assert.equal(header[`${ns}:field.goods_receipt_notes`], null);
   const receiptLine = f.executor.calls.find((call) =>
     call.definition.operationId.endsWith(
       ':operation.goods_receipt_line_create',

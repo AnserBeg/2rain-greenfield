@@ -137,6 +137,9 @@ export function purchasingWorkspace(
           required: true,
           query: q('location_list'),
           labelField: ref('fieldReference', f('location_name')),
+          // Starts from where the order says its goods are received; the
+          // operator may choose another.
+          defaultFrom: record(f('purchase_order_receiving_location_id')),
         },
         ...(known
           ? [
@@ -170,6 +173,22 @@ export function purchasingWorkspace(
               },
             ]
           : []),
+        // The receipt's paperwork, kept on the receipt; both may stay empty.
+        {
+          inputId: id('input', 'receive_packing_slip'),
+          label: 'Packing slip / delivery note',
+          orderKey: 60,
+          type: 'text',
+          required: false,
+        },
+        {
+          inputId: id('input', 'receive_notes'),
+          label: 'Notes',
+          orderKey: 70,
+          type: 'text',
+          required: false,
+          presentation: { kind: 'multiline' },
+        },
       ],
       steps: [
         create(
@@ -183,6 +202,8 @@ export function purchasingWorkspace(
             location_id: input('location'),
             reason_code: literal('RECEIVE'),
             reason_narrative: literal('Receive from purchase order'),
+            packing_slip: input('packing_slip'),
+            notes: input('notes'),
           },
           { order: record('recordId') },
         ),
@@ -268,6 +289,14 @@ export function purchasingWorkspace(
         'Expected date',
         40,
         f('purchase_order_expected_date'),
+      ),
+      // Where the goods are received; shown in the document's details.
+      column(
+        'receive_into',
+        'Receive into',
+        42,
+        f('purchase_order_receiving_location_id'),
+        ['location_get', 'location_name'],
       ),
       column('currency', 'Currency', 45, f('purchase_order_currency')),
       column(
@@ -526,6 +555,14 @@ export function purchasingWorkspace(
             'Received at',
             30,
             f('goods_receipt_effective_at'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'packing_slip',
+            'Packing slip',
+            40,
+            f('goods_receipt_packing_slip'),
             undefined,
             'secondary',
           ),

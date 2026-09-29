@@ -174,6 +174,7 @@ function ids(namespace: string) {
         notes: field('purchase_order', 'notes'),
         number: field('purchase_order', 'number'),
         orderDate: field('purchase_order', 'order_date'),
+        receivingLocationId: field('purchase_order', 'receiving_location_id'),
         supplierPartyId: field('purchase_order', 'supplier_party_id'),
       },
       purchaseOrderLine: {
@@ -423,6 +424,18 @@ export function purchasingModuleDefinition(
         'Notes',
         60,
         text(1000),
+        { optional: true },
+      ),
+      // Where the order's goods are received (PURCHASING-PARITY): a location
+      // id, as a receipt's own location is, which each receipt starts from.
+      // 150, after the commercial terms' 70-140.
+      field(
+        definitionIds,
+        entityIds.purchaseOrder,
+        fieldIds.purchaseOrder.receivingLocationId,
+        'Receive into',
+        150,
+        text(80),
         { optional: true },
       ),
 
@@ -907,6 +920,16 @@ function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
       boolean(),
       true,
     ],
+    // A receipt's paperwork (PURCHASING-PARITY), appended so every earlier
+    // field keeps its orderKey.
+    [
+      'goods_receipt',
+      'packing_slip',
+      'Packing slip / delivery note',
+      text(80),
+      true,
+    ],
+    ['goods_receipt', 'notes', 'Notes', text(1000), true],
   ];
   return specs.map(([local, name, label, type, optional], index) =>
     field(

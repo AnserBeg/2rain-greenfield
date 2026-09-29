@@ -199,6 +199,15 @@ export function orderEntrySurfaces(
         detailFieldIds: [id('field', 'tax_code_name')],
       },
     };
+    // Where a purchase order's goods are received; receipts start from it.
+    const location = {
+      reference: {
+        queryId: id('query', 'location_list'),
+        getQueryId: id('query', 'location_get'),
+        labelFieldIds: [id('field', 'location_name')],
+        detailFieldIds: [id('field', 'location_code')],
+      },
+    };
     // A rate is frozen from its tax code when the code is chosen (ruling B).
     const rateOf = (taxCodeField: string) => ({
       presentation: {
@@ -355,6 +364,7 @@ export function orderEntrySurfaces(
             field(`${local}_${date}`, 'Expected date', {
               defaultDaysFromToday: 14,
             }),
+            field(`${local}_receiving_location_id`, 'Receive into', location),
             field(`${local}_currency`, 'Currency', {
               ...currency,
               ...fromVendor('party_default_currency'),
