@@ -96,7 +96,6 @@ async function journey(
       'Line number': 'line_number',
       'Item id': 'item_id',
       'Ordered quantity': 'ordered_quantity',
-      'Receipt number': 'number',
       'Received at': 'effective_at',
       'Receiving location': 'location_id',
       'Reason code': 'reason_code',
@@ -199,8 +198,11 @@ async function journey(
   await page.getByRole('button', { name: 'Release', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Release complete');
   await expectOrderProgress('5', '0', '5');
+  // The receipt number is assigned by the server on first save.
   await page.goto(url('goods_receipt', 'form'));
-  await fill('Receipt number', `RECEIPT-GR-${suffix}`);
+  await expect(page.getByLabel('Receipt number', { exact: false })).toHaveCount(
+    0,
+  );
   await page
     .getByRole('combobox', { name: 'State', exact: true })
     .selectOption({ label: 'draft' });
@@ -214,6 +216,8 @@ async function journey(
   await relation('goods_receipt_order', orderId);
   const receiptId = await save();
   await page.goto(url('goods_receipt', 'detail', receiptId));
+  const receiptNumber = (await page.locator('h1').first().innerText()).trim();
+  expect(receiptNumber).toMatch(/^RCV-\d{6}$/u);
   await page
     .getByRole('link', { name: 'Add receipt line', exact: true })
     .click();
@@ -280,7 +284,7 @@ async function journey(
     await expectOrderProgress('5', '0', '5');
     await expect(
       page.locator('[data-composition-dataset$="dataset.purchasing_receipts"]'),
-    ).toContainText(`RECEIPT-GR-${suffix}`);
+    ).toContainText(receiptNumber);
   } finally {
     await pool.query(
       `UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE ${grantWhere}`,
@@ -464,7 +468,6 @@ async function journey(
     movement: string,
   ) {
     await page.goto(url('goods_receipt', 'form'));
-    await fill('Receipt number', `RECEIPT-${kind}-${suffix}`);
     await page
       .getByRole('combobox', { name: 'State', exact: true })
       .selectOption({ label: 'draft' });
