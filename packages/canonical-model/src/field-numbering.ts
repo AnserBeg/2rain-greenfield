@@ -8,13 +8,24 @@ import { CanonicalModelError, diagnostic } from './diagnostics.js';
  * nor collide with one.
  */
 export const VERIFICATION_SENTINEL_PREFIX = 'V' as const;
+/**
+ * A verification sentinel is its prefix, a hyphen and hexadecimal digest
+ * digits, cut to the field's length. A numbered field keeps at least sixteen
+ * of those digits (64 bits), so the records one verification arranges keep
+ * distinct numbers in a key that refuses duplicates.
+ */
+export const VERIFICATION_SENTINEL_MINIMUM_LENGTH =
+  VERIFICATION_SENTINEL_PREFIX.length + 1 + 16;
 
 /**
  * A numbered field is assigned by the server on create and is nobody's input.
- * It must be a required text field under the tenant-wide unique business key
- * (so an archived record keeps its number reserved) and long enough for the
- * format, and nothing may offer it for entry: no editor field, no composition
- * binding. A declaration the runtime could not honour is refused here.
+ * It must be a required text field under a case-insensitive unique business
+ * key -- the backstop among live records of its key scope; the allocator's
+ * scan of every record of the tenant, archived and in every company, is what
+ * keeps a number from being reused -- and long enough for its first number
+ * and for release verification's sentinels. Nothing may offer it for entry:
+ * no editor field, no composition binding. A declaration the runtime could not
+ * honour is refused here.
  */
 export function validateFieldNumbering(
   model: VersionedNormalizedApplicationPackage,
@@ -57,6 +68,14 @@ export function validateFieldNumbering(
           Math.max(numbering.minimumDigits, String(numbering.start).length)
     )
       fail(id, 'the number field is shorter than its format');
+    if (
+      field.fieldType.kind === 'textFieldType' &&
+      field.fieldType.maximumLength < VERIFICATION_SENTINEL_MINIMUM_LENGTH
+    )
+      fail(
+        id,
+        `a number field holds at least ${String(VERIFICATION_SENTINEL_MINIMUM_LENGTH)} characters, so release verification sentinels stay distinct`,
+      );
     if (sequences.has(numbering.sequenceId))
       fail(id, 'each document sequence numbers one field');
     sequences.add(numbering.sequenceId);

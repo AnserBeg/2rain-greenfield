@@ -769,11 +769,14 @@ export type DocumentNumberMode = 'sequence' | 'verificationSentinel';
  * allocator runs at a time per sequence -- the transaction-scoped lock is held
  * to commit, so concurrent creates serialize and a rolled-back create gives
  * its number back. The next value follows the highest existing number of that
- * prefix among ALL of the tenant's records, archived included, whatever its
- * digit count (leading zeros included), so a number is never reused; the
- * business key's unique index remains the backstop. A next number that no
- * longer fits its field refuses by name. A replay of the same idempotency key
- * never reaches this, so a retry keeps its number.
+ * prefix among ALL of the tenant's records, archived and in every company,
+ * whatever its digit count (leading zeros included), so a number is never
+ * reused. Stored values are read through the same Unicode case fold as the
+ * business key, so a value the key equates with the next number (`ſO-000016`
+ * and `SO-000016`) is counted; the key's unique index, over live records of
+ * its scope, remains the backstop. A next number that no longer fits its field
+ * refuses by name. A replay of the same idempotency key never reaches this, so
+ * a retry keeps its number.
  */
 async function assignDocumentNumbers(
   client: PoolClient,
@@ -828,11 +831,11 @@ async function assignDocumentNumbers(
       [field.sequenceId],
     );
     const highest = await client.query<{ highest: string | null }>(
-      `SELECT max(((regexp_match(${quoted(column.physicalName)}, $1, 'i'))[1])::numeric)::text AS highest
+      `SELECT max(((regexp_match(north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text), $1))[1])::numeric)::text AS highest
          FROM north_star_module.${quoted(entity.physicalTableName)}
         WHERE tenant_id = north_star_internal.trusted_tenant_id()
           AND environment_id = north_star_internal.trusted_environment_id()`,
-      [`^${field.prefix}-([0-9]+)$`],
+      [`^${unicodeCaseFold(field.prefix)}-([0-9]+)$`],
     );
     const observed = highest.rows[0]?.highest ?? null;
     const next =

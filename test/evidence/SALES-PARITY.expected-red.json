@@ -114,8 +114,8 @@
       "name": "numbering-scan-reads-every-digit-count",
       "claim": "The allocator's maximum scan reads a stored number of any digit count, leading zeros included, and its own output past eighteen digits, so the next number always follows the highest.",
       "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "      [`^${field.prefix}-([0-9]+)$`],\n",
-      "replacement": "      [`^$${field.prefix}-([0-9]{1,18})$$`],\n",
+      "original": "      [`^${unicodeCaseFold(field.prefix)}-([0-9]+)$`],\n",
+      "replacement": "      [`^$${unicodeCaseFold(field.prefix)}-([0-9]{1,18})$$`],\n",
       "test": {
         "files": ["test/postgres/document-numbering.test.ts"],
         "namePattern": "document numbers are assigned by the server"
@@ -143,6 +143,42 @@
           "file": "test/postgres/document-numbering.test.ts",
           "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
           "expected": "The validation function is expected to return \"true\""
+        }
+      ]
+    },
+    {
+      "name": "numbering-sentinels-have-room",
+      "claim": "A numbered field holds at least 18 characters, so release verification's truncated V- sentinels keep 64 bits and the records one verification arranges keep distinct numbers.",
+      "file": "packages/canonical-model/src/field-numbering.ts",
+      "original": "    if (\n      field.fieldType.kind === 'textFieldType' &&\n      field.fieldType.maximumLength < VERIFICATION_SENTINEL_MINIMUM_LENGTH\n    )\n      fail(\n        id,\n        `a number field holds at least ${String(VERIFICATION_SENTINEL_MINIMUM_LENGTH)} characters, so release verification sentinels stay distinct`,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/canonical-model/field-numbering.test.ts"],
+        "namePattern": "a numbering the runtime could not honour is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/field-numbering.test.ts",
+          "name": "a numbering the runtime could not honour is refused by name",
+          "expected": "the numbering was accepted"
+        }
+      ]
+    },
+    {
+      "name": "numbering-scan-folds-like-the-business-key",
+      "claim": "The allocator reads stored numbers through the business key's Unicode case fold, so a stored value the key equates with the next number (\u017fO-000016 and SO-000016) is counted instead of colliding.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "regexp_match(north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text), $1)",
+      "replacement": "regexp_match($${quoted(column.physicalName)}, $$1, 'i')",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "module uniqueness contract rejected the value"
         }
       ]
     }

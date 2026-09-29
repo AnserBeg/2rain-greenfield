@@ -243,6 +243,11 @@ test(
         );
       const created = async () =>
         numberOf(await invoke('sales_order_create', orderInput()));
+      // Stored values are read the way the unique business key compares them,
+      // by full Unicode case fold: `ſO-000016` (long s) folds to `so-000016`,
+      // the key's spelling of SO-000016, so the next number is SO-000017.
+      await renumber(afterArchive.readBack!.recordId, 'ſO-000016');
+      assert.equal(await created(), 'SO-000017');
       await renumber(otherCompany.readBack!.recordId, 'SO-0000000000000000042');
       assert.equal(await created(), 'SO-000043');
       // The allocator's own nineteen-digit output is read back next time.

@@ -149,6 +149,22 @@ test('a numbering the runtime could not honour is refused by name', () => {
       },
     ],
     [
+      // A 3-character field would leave release verification 16 possible
+      // sentinels (`V-0`..`V-f`); 17 characters leave fewer than 64 bits.
+      'release verification sentinels stay distinct',
+      (app) => {
+        Object.assign(field(app, 'sales_order_number').numbering as Json, {
+          minimumDigits: 1,
+          start: 1,
+        });
+        (
+          field(app, 'sales_order_number').fieldType as {
+            maximumLength: number;
+          }
+        ).maximumLength = 17;
+      },
+    ],
+    [
       'each document sequence numbers one field',
       (app) => {
         field(app, 'purchase_order_number').numbering = numbering(
@@ -201,15 +217,16 @@ test('a numbering the runtime could not honour is refused by name', () => {
     assert.match(refused(mutate), new RegExp(reason), reason);
 });
 
-test('a first number that fits its field is admitted', () => {
+test('a field wide enough for its first number and for verification sentinels is admitted', () => {
   const app = application();
+  // `SO-1000` needs 7 characters; verification's sentinels need 18.
   Object.assign(field(app, 'sales_order_number').numbering as Json, {
     minimumDigits: 1,
     start: 1000,
   });
   (
     field(app, 'sales_order_number').fieldType as { maximumLength: number }
-  ).maximumLength = 7;
+  ).maximumLength = 18;
   assert.doesNotThrow(() => normalizeApplicationPackage(app as never));
 });
 
