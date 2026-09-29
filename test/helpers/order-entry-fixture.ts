@@ -187,9 +187,10 @@ async function seed(
     recordId: item,
     expectedRevision: 1,
     patch: {
-      [`${ns}:field.item_price_cad`]: '12.50',
+      // Exact decimals are canonical: no trailing zeros.
+      [`${ns}:field.item_price_cad`]: '12.5',
       [`${ns}:field.item_price_usd`]: '9.25',
-      [`${ns}:field.item_price_eur`]: '8.50',
+      [`${ns}:field.item_price_eur`]: '8.5',
     },
   });
   assert.equal(priced.outcome, 'succeeded');

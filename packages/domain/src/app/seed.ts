@@ -142,9 +142,17 @@ const taxCodeId = (index: number) => record(8001 + index, '', {}).recordId;
 /** A customer's default tax code follows its delivery province. */
 const provinceTaxCode: Readonly<Record<string, number>> = { AB: 0, BC: 1 };
 
-/** An exact price in cents as a decimal string. */
-const price = (cents: number) =>
-  `${String(Math.floor(cents / 100))}.${String(cents % 100).padStart(2, '0')}`;
+/**
+ * An exact price in cents as a canonical decimal string (no trailing zeros,
+ * as exact-decimal fields require): 550 -> `5.5`, 595 -> `5.95`, 500 -> `5`.
+ */
+const price = (cents: number) => {
+  const whole = String(Math.floor(cents / 100));
+  const fraction = String(cents % 100)
+    .padStart(2, '0')
+    .replace(/0+$/u, '');
+  return fraction ? `${whole}.${fraction}` : whole;
+};
 
 /**
  * Each customer's one ship-to address, keyed by name: city, province, postal
