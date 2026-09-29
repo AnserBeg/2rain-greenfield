@@ -153,6 +153,15 @@ export function orderEntrySurfaces(
         sourceFieldId: id('field', source),
       },
     });
+    // A purchase order's supplier sets its currency, terms and tax code the
+    // same way (ruling B extended to purchasing): a Party's defaults serve
+    // whichever role it plays.
+    const fromVendor = (source: string) => ({
+      defaultFrom: {
+        referenceFieldId: id('field', `${local}_supplier_party_id`),
+        sourceFieldId: id('field', source),
+      },
+    });
     const fromAddress = (source: string) => ({
       defaultFrom: {
         referenceFieldId: id('field', `${local}_ship_to_address_id`),
@@ -342,8 +351,43 @@ export function orderEntrySurfaces(
               counterparty('supplier'),
             ),
             field(`${local}_order_date`, 'Order date'),
-            field(`${local}_${date}`, 'Expected date'),
-            field(`${local}_currency`, 'Currency', currency),
+            // Two weeks out, as the reference defaults it.
+            field(`${local}_${date}`, 'Expected date', {
+              defaultDaysFromToday: 14,
+            }),
+            field(`${local}_currency`, 'Currency', {
+              ...currency,
+              ...fromVendor('party_default_currency'),
+            }),
+            field(
+              `${local}_payment_terms`,
+              'Payment terms',
+              fromVendor('party_payment_terms'),
+            ),
+            field(`${local}_tax_code_id`, 'Tax code', {
+              ...taxCode,
+              ...fromVendor('party_default_tax_code_id'),
+            }),
+            field(`${local}_freight_amount`, 'Freight'),
+            field(`${local}_freight_tax_code_id`, 'Freight tax code', {
+              ...taxCode,
+              ...fromOrderTaxCode,
+            }),
+            field(
+              `${local}_freight_tax_rate_percent`,
+              'Freight tax rate %',
+              rateOf(`${local}_freight_tax_code_id`),
+            ),
+            field(`${local}_other_fee_amount`, 'Other fee'),
+            field(`${local}_other_fee_tax_code_id`, 'Other fee tax code', {
+              ...taxCode,
+              ...fromOrderTaxCode,
+            }),
+            field(
+              `${local}_other_fee_tax_rate_percent`,
+              'Other fee tax rate %',
+              rateOf(`${local}_other_fee_tax_code_id`),
+            ),
             field(`${local}_notes`, 'Notes', {
               presentation: { kind: 'multiline' },
             }),
@@ -397,7 +441,22 @@ export function orderEntrySurfaces(
                 rateOf(`${local}_line_tax_code_id`),
               ),
             ]
-          : [field(`${local}_line_unit_price`, 'Unit cost')]),
+          : [
+              field(`${local}_line_unit_price`, 'Unit cost'),
+              field(`${local}_line_discount_percent`, 'Discount %'),
+              field(`${local}_line_tax_code_id`, 'Tax code', {
+                ...taxCode,
+                defaultFrom: {
+                  referenceFieldId: id('field', `${local}_line_item_id`),
+                  headerFieldId: id('field', `${local}_tax_code_id`),
+                },
+              }),
+              field(
+                `${local}_line_tax_rate_percent`,
+                'Tax rate %',
+                rateOf(`${local}_line_tax_code_id`),
+              ),
+            ]),
       ],
     };
   };

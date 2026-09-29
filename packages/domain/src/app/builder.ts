@@ -52,7 +52,8 @@ type CollectionName =
 const MODULE_REGISTRY = Object.freeze([
   Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
   Object.freeze({
-    create: purchasingModuleDefinition,
+    create: (namespace: string) =>
+      purchasingModuleDefinition(namespace, { commercialTerms: true }),
     moduleName: 'purchasing',
   }),
   Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
@@ -98,6 +99,7 @@ const LINES_LEAD: ReadonlySet<string> = new Set([
 /** Workspaces that read their record through a read-model query. */
 const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
   sales_order_detail: 'commercial_order_get',
+  purchase_order_detail: 'commercial_purchase_order_get',
 });
 
 /** The mounted module names, in composition order, for callers that assert on the set. */

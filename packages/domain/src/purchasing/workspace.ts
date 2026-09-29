@@ -67,7 +67,16 @@ export function purchasingWorkspace(
       : {}),
     ...(role ? { presentation: { role, priority: orderKey } } : {}),
   });
+  // Shown with grouped digits and two decimals, never rounded.
+  const money = <T extends object>(value: T) => ({
+    ...value,
+    format: 'money' as const,
+  });
   const lines = id('dataset', 'purchasing_lines');
+  // What each line costs and the order's totals (ruling B extended to
+  // purchasing), read through the commercial purchase order queries.
+  const pricedLines = id('dataset', 'purchasing_priced_lines');
+  const metric = (name: string) => id('metric', name);
   const receipts = id('dataset', 'purchasing_receipts');
   const receive = (known: boolean) => {
     const suffix = known ? 'known' : 'absent';
@@ -164,7 +173,7 @@ export function purchasingWorkspace(
           header,
           'goods_receipt',
           {
-            number: generated('uuid'),
+            // The receipt number is assigned by the server (RCV-000001).
             state: literal(id('option', 'goods_receipt_state_draft')),
             kind: literal(id('option', 'goods_receipt_kind_initial')),
             effective_at: generated('instant'),
@@ -213,6 +222,8 @@ export function purchasingWorkspace(
           id('column', 'purchasing_ordered'),
           id('column', 'purchasing_expected'),
           id('column', 'purchasing_currency'),
+          id('column', 'purchasing_payment_terms'),
+          id('column', 'purchasing_total'),
         ],
       },
       context: {
@@ -225,7 +236,14 @@ export function purchasingWorkspace(
       task: { mode: 'nativeDialog', fallback: 'page' },
       print: {
         label: 'Purchase order',
-        datasets: [lines],
+        datasets: [pricedLines],
+        totals: [
+          id('column', 'purchasing_subtotal'),
+          id('column', 'purchasing_freight'),
+          id('column', 'purchasing_other_fee'),
+          id('column', 'purchasing_tax'),
+          id('column', 'purchasing_total'),
+        ],
         note: id('column', 'purchasing_notes'),
       },
     },
@@ -249,10 +267,139 @@ export function purchasingWorkspace(
         f('purchase_order_expected_date'),
       ),
       column('currency', 'Currency', 45, f('purchase_order_currency')),
+      column(
+        'payment_terms',
+        'Payment terms',
+        46,
+        f('purchase_order_payment_terms'),
+      ),
       // Read back as stored; shown in the document's sections.
       column('notes', 'Notes', 50, f('purchase_order_notes')),
+      column('tax_code', 'Tax code', 60, f('purchase_order_tax_code_id'), [
+        'tax_code_get',
+        'tax_code_code',
+      ]),
+      money(
+        column('freight', 'Freight', 61, f('purchase_order_freight_amount')),
+      ),
+      column(
+        'freight_tax_code',
+        'Freight tax code',
+        62,
+        f('purchase_order_freight_tax_code_id'),
+        ['tax_code_get', 'tax_code_code'],
+      ),
+      money(
+        column(
+          'other_fee',
+          'Other fee',
+          63,
+          f('purchase_order_other_fee_amount'),
+        ),
+      ),
+      column(
+        'other_fee_tax_code',
+        'Other fee tax code',
+        64,
+        f('purchase_order_other_fee_tax_code_id'),
+        ['tax_code_get', 'tax_code_code'],
+      ),
+      money(column('subtotal', 'Subtotal', 70, metric('order_subtotal'))),
+      money(column('charges', 'Charges', 71, metric('order_charges'))),
+      money(column('tax', 'Tax', 72, metric('order_tax'))),
+      money(column('total', 'Total', 73, metric('order_total'))),
     ],
     children: [
+      {
+        datasetId: pricedLines,
+        label: 'Priced lines',
+        orderKey: 5,
+        query: q('commercial_purchase_order_lines'),
+        presentation: { selection: 'none' },
+        parent: {
+          relationId: id('relation', 'purchase_order_line_order'),
+          value: record('recordId'),
+          ownership: 'parentScopedChild',
+        },
+        sort: [
+          {
+            fieldId: f('purchase_order_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        columns: [
+          column(
+            'priced_line',
+            'Line',
+            10,
+            f('purchase_order_line_line_number'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'priced_item',
+            'Product',
+            20,
+            f('purchase_order_line_item_id'),
+            ['item_get', 'item_name'],
+            'primary',
+          ),
+          column(
+            'priced_quantity',
+            'Quantity',
+            30,
+            f('purchase_order_line_ordered_quantity'),
+            undefined,
+            'quantity',
+          ),
+          money(
+            column(
+              'priced_unit_cost',
+              'Unit cost',
+              40,
+              f('purchase_order_line_unit_price'),
+              undefined,
+              'secondary',
+            ),
+          ),
+          column(
+            'priced_discount',
+            'Discount %',
+            50,
+            f('purchase_order_line_discount_percent'),
+            undefined,
+            'detail',
+          ),
+          column(
+            'priced_tax_code',
+            'Tax code',
+            60,
+            f('purchase_order_line_tax_code_id'),
+            ['tax_code_get', 'tax_code_code'],
+            'detail',
+          ),
+          money(
+            column(
+              'priced_tax',
+              'Tax',
+              70,
+              metric('line_tax'),
+              undefined,
+              'quantity',
+            ),
+          ),
+          money(
+            column(
+              'priced_amount',
+              'Amount',
+              80,
+              metric('line_amount'),
+              undefined,
+              'quantity',
+            ),
+          ),
+        ],
+      },
       {
         datasetId: lines,
         label: 'Order lines',

@@ -3395,11 +3395,14 @@ async function assertBoundedFreshTenantInstallEvidence(
   // the order's tax code and charges (7), line pricing (4), a customer
   // default tax code (1), item prices (3) and the tax code master (10); then
   // 72 for ruling C: invoice (23), invoice line (17), payment (17) and
-  // credit (15).
+  // credit (15). PURCHASING-PARITY adds 12 through the purchase order's
+  // optional commercial fields: the order's terms, tax code and charges (9:
+  // eight search exclusions and the terms' enum check) and the line's
+  // discount and tax (3).
   assert.equal(
     servingScenarioCount,
-    485,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, and 137 for Sales parity',
+    497,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, and 12 for priced purchase orders',
   );
 
   const intermediate = await pool.query<{
@@ -5597,11 +5600,12 @@ async function assertExactPartitionEvidence(
   // SALES-PARITY's 137 scenarios all execute: every entity it adds has a
   // generic create, and a server-assigned document number is written by that
   // create, so no numbered entity derives for want of an input. 348 + 137 =
-  // 485 emitted, of which the prior 77 derive.
+  // 485 emitted, of which the prior 77 derive. PURCHASING-PARITY's 12 execute
+  // on the purchase order and its line, which have generic creates: 497, 420.
   assert.equal(
     evidence.results.length,
-    408,
-    'fulfillment adds 47 executed scenarios to the prior 224, and Sales parity 137',
+    420,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, and priced purchase orders 12',
   );
   assert.equal(
     derivations.length,
@@ -5820,6 +5824,11 @@ function assertReceivingVerificationCoverage(
     goods_receipt_line: 17,
     purchase_order_amendment: 13,
     purchase_order_received: 10,
+    // PUR-1's 12 each, then PURCHASING-PARITY: terms (an enum check and an
+    // exclusion), tax code, freight and fee with codes and frozen rates;
+    // the line's discount, tax code and frozen rate.
+    purchase_order: 21,
+    purchase_order_line: 15,
   })) {
     assert.equal(
       plan.scenarios.filter(

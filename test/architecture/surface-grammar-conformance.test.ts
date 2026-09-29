@@ -928,7 +928,8 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   );
   composed = withoutModule(
     composed,
-    purchasingModuleDefinition('northstar.app'),
+    // As the product composes it: with its commercial terms (PURCHASING-PARITY).
+    purchasingModuleDefinition('northstar.app', { commercialTerms: true }),
     'purchasing',
   );
   composed = withoutModule(

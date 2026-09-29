@@ -1618,6 +1618,163 @@ function mutated(vary: (definition: AuthoredShape) => void): AuthoredShape {
  * platform and kernel only. There is no purchasing migration because the
  * projection below is the authority for physical shape.
  */
+test('PURCHASING-PARITY: the product application prices a purchase order like a sales order', () => {
+  type Loose = Record<string, unknown>;
+  const app = composedApplicationDefinition() as unknown as {
+    fields: Array<Loose & { fieldId: string; fieldType: Loose }>;
+    queries: Array<Loose & { queryId: string; readModel?: Loose }>;
+    surfaces: Array<Loose & { surfaceId: string }>;
+  };
+  const local = (value: string) => value.split('.').pop()!;
+  const commercial = [
+    'purchase_order_payment_terms',
+    'purchase_order_tax_code_id',
+    'purchase_order_freight_amount',
+    'purchase_order_freight_tax_code_id',
+    'purchase_order_other_fee_amount',
+    'purchase_order_other_fee_tax_code_id',
+    'purchase_order_freight_tax_rate_percent',
+    'purchase_order_other_fee_tax_rate_percent',
+    'purchase_order_line_discount_percent',
+    'purchase_order_line_tax_code_id',
+    'purchase_order_line_tax_rate_percent',
+  ];
+  const declared = new Set(app.fields.map((value) => local(value.fieldId)));
+  assert.deepEqual(
+    commercial.filter((name) => !declared.has(name)),
+    [],
+    'every commercial field is declared in the product application',
+  );
+  // A purchasing-only compile carries none of them: they read Catalog tax
+  // codes, which it does not compose.
+  const standalone = new Set(
+    (
+      purchasingModuleDefinition() as unknown as {
+        fields: Array<{ fieldId: string }>;
+      }
+    ).fields.map((value) => local(value.fieldId)),
+  );
+  assert.deepEqual(
+    commercial.filter((name) => standalone.has(name)),
+    [],
+  );
+  // A goods receipt is numbered by the server, like the order: RCV-000001.
+  assert.deepEqual(
+    app.fields.find((value) => local(value.fieldId) === 'goods_receipt_number')!
+      .numbering,
+    {
+      kind: 'documentSequence',
+      sequenceId: 'northstar.app:document_sequence.goods_receipt',
+      prefix: 'RCV',
+      minimumDigits: 6,
+      start: 1,
+    },
+  );
+  // Terms are labelled as a Party's, so the supplier's default fills them.
+  const terms = app.fields.find(
+    (value) => local(value.fieldId) === 'purchase_order_payment_terms',
+  )!.fieldType as { options: Array<{ label: string }> };
+  assert.deepEqual(
+    terms.options.map((option) => option.label),
+    ['Due on receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60'],
+  );
+  // The editor: supplier defaults, two weeks out, a line tax code from the
+  // order, rates frozen from the codes.
+  const editor = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_form',
+  )!.documentEditor as {
+    headerFields: Array<Loose & { fieldId: string }>;
+    lineFields: Array<Loose & { fieldId: string }>;
+  };
+  const header = (name: string) =>
+    editor.headerFields.find(
+      (value) => local(value.fieldId) === `purchase_order_${name}`,
+    )!;
+  const line = (name: string) =>
+    editor.lineFields.find(
+      (value) => local(value.fieldId) === `purchase_order_line_${name}`,
+    )!;
+  assert.equal(header('expected_date').defaultDaysFromToday, 14);
+  for (const [name, source] of [
+    ['currency', 'party_default_currency'],
+    ['payment_terms', 'party_payment_terms'],
+    ['tax_code_id', 'party_default_tax_code_id'],
+  ] as const)
+    assert.deepEqual(
+      header(name).defaultFrom,
+      {
+        referenceFieldId:
+          'northstar.app:field.purchase_order_supplier_party_id',
+        sourceFieldId: `northstar.app:field.${source}`,
+      },
+      name,
+    );
+  assert.equal(
+    (line('tax_code_id').defaultFrom as Loose).headerFieldId,
+    'northstar.app:field.purchase_order_tax_code_id',
+  );
+  assert.deepEqual(
+    ['freight_tax_rate_percent', 'other_fee_tax_rate_percent'].map(
+      (name) => (header(name).presentation as Loose).kind,
+    ),
+    ['derived', 'derived'],
+  );
+  assert.equal(
+    (line('tax_rate_percent').presentation as Loose).kind,
+    'derived',
+  );
+  // Priced lines and totals are read through the commercial read model.
+  const bindings = Object.fromEntries(
+    app.queries
+      .filter((value) => value.readModel)
+      .map((value) => [
+        local(value.queryId),
+        (value.readModel as { binding: string }).binding,
+      ]),
+  );
+  assert.equal(
+    bindings.commercial_purchase_order_lines,
+    'northstar.sales:read_model.commercial_purchase_line',
+  );
+  assert.equal(
+    bindings.commercial_purchase_order_get,
+    'northstar.sales:read_model.commercial_purchase_order',
+  );
+  const detail = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_detail',
+  )! as unknown as {
+    dataSource: { targetId: string };
+    composition: {
+      fields: Array<{ columnId: string; format?: string }>;
+      presentation: { print: { totals: string[] } };
+    };
+  };
+  assert.equal(
+    local(detail.dataSource.targetId),
+    'commercial_purchase_order_get',
+  );
+  assert.deepEqual(detail.composition.presentation.print.totals.map(local), [
+    'purchasing_subtotal',
+    'purchasing_freight',
+    'purchasing_other_fee',
+    'purchasing_tax',
+    'purchasing_total',
+  ]);
+  assert.deepEqual(
+    detail.composition.fields
+      .filter((value) => value.format === 'money')
+      .map((value) => local(value.columnId)),
+    [
+      'purchasing_freight',
+      'purchasing_other_fee',
+      'purchasing_subtotal',
+      'purchasing_charges',
+      'purchasing_tax',
+      'purchasing_total',
+    ],
+  );
+});
+
 function compile(
   definition: unknown = purchasingModuleDefinition(),
 ): CompileSuccess {

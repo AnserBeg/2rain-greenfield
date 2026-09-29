@@ -4926,6 +4926,26 @@ async function orderEntryWitness(
       undefined,
       {
         'northstar.sales:capability.fulfillment': async ({ result }) => result,
+        // The purchase order page reads its record with its totals
+        // (PURCHASING-PARITY); this witness states none of them, as the read
+        // model does for a figure it cannot state.
+        'northstar.sales:capability.commercial': async ({
+          definition,
+          result,
+        }) => ({
+          ...result,
+          records: result.records.map((record) => ({
+            ...record,
+            values: {
+              ...record.values,
+              ...Object.fromEntries(
+                Object.values(definition.readModel!.resultFields).map(
+                  (fieldId) => [fieldId, null],
+                ),
+              ),
+            },
+          })),
+        }),
       },
     ),
   };
@@ -6809,6 +6829,19 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
       // Selected but unset, as the provider returns them.
       [`${ns}:field.purchase_order_expected_date`]: null,
       [`${ns}:field.purchase_order_notes`]: null,
+      // PURCHASING-PARITY's commercial terms, unset.
+      ...Object.fromEntries(
+        [
+          'payment_terms',
+          'tax_code_id',
+          'freight_amount',
+          'freight_tax_code_id',
+          'freight_tax_rate_percent',
+          'other_fee_amount',
+          'other_fee_tax_code_id',
+          'other_fee_tax_rate_percent',
+        ].map((name) => [`${ns}:field.purchase_order_${name}`, null]),
+      ),
       [`${ns}:derived_state_field.machine.purchase_order_lifecycle`]: `${ns}:state.purchase_order_released`,
     },
     scope,
@@ -6820,6 +6853,9 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
       [`${ns}:field.purchase_order_line_item_id`]: f.item,
       [`${ns}:field.purchase_order_line_ordered_quantity`]: '10',
       [`${ns}:field.purchase_order_line_unit_price`]: '2.4',
+      [`${ns}:field.purchase_order_line_discount_percent`]: null,
+      [`${ns}:field.purchase_order_line_tax_code_id`]: null,
+      [`${ns}:field.purchase_order_line_tax_rate_percent`]: null,
       [`${ns}:relation.purchase_order_line_order`]: order,
     },
     scope,
@@ -6831,7 +6867,8 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
   const params = new URLSearchParams({
     surface: `${ns}:surface.purchase_order_detail`,
     record: order,
-    [`${ns}:parameter.purchase_order_get_legal_entity_scope`]: scope,
+    // The page reads through the order's totals query (PURCHASING-PARITY).
+    [`${ns}:parameter.commercial_purchase_order_get_legal_entity_scope`]: scope,
     dataset: lines,
     selected: line,
     [`select:${lines}`]: line,

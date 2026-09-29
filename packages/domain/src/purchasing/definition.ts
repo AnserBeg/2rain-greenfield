@@ -174,6 +174,33 @@ function ids(namespace: string) {
         unitPrice: field('purchase_order_line', 'unit_price'),
       },
     },
+    /**
+     * Commercial terms (PURCHASING-PARITY, owner ruling B extended to purchase
+     * orders), declared only when the product application asks for them.
+     */
+    commercialFieldIds: {
+      purchaseOrder: {
+        paymentTerms: field('purchase_order', 'payment_terms'),
+        taxCodeId: field('purchase_order', 'tax_code_id'),
+        freightAmount: field('purchase_order', 'freight_amount'),
+        freightTaxCodeId: field('purchase_order', 'freight_tax_code_id'),
+        otherFeeAmount: field('purchase_order', 'other_fee_amount'),
+        otherFeeTaxCodeId: field('purchase_order', 'other_fee_tax_code_id'),
+        freightTaxRatePercent: field(
+          'purchase_order',
+          'freight_tax_rate_percent',
+        ),
+        otherFeeTaxRatePercent: field(
+          'purchase_order',
+          'other_fee_tax_rate_percent',
+        ),
+      },
+      purchaseOrderLine: {
+        discountPercent: field('purchase_order_line', 'discount_percent'),
+        taxCodeId: field('purchase_order_line', 'tax_code_id'),
+        taxRatePercent: field('purchase_order_line', 'tax_rate_percent'),
+      },
+    },
     machineId,
     moduleId: `${namespace}:module.purchasing`,
     namespace,
@@ -228,8 +255,17 @@ export const PURCHASING_IDS = Object.freeze(defaultIds);
  */
 export function purchasingModuleDefinition(
   namespace: string = PURCHASING_NAMESPACE,
+  options: {
+    /**
+     * Payment terms, a tax code, charges and line discounts and tax on the
+     * purchase order. Only the product application passes it: the terms read
+     * Catalog tax codes, which a purchasing-only harness does not compile.
+     */
+    readonly commercialTerms?: boolean;
+  } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
+  const commercialTerms = options.commercialTerms === true;
   const { entityIds, fieldIds, moduleId, packageId, stateFieldId } =
     definitionIds;
   const standardEntities = [
@@ -424,6 +460,7 @@ export function purchasingModuleDefinition(
         decimal(),
         { optional: true },
       ),
+      ...(commercialTerms ? commercialFields(definitionIds) : []),
     ],
     hashAlgorithm: 'sha256',
     impactAnalyses: [],
@@ -551,7 +588,7 @@ export function purchasingModuleDefinition(
         definitionIds,
         local,
         entityId,
-        selectedFieldsForEntity(definitionIds, local),
+        selectedFieldsForEntity(definitionIds, local, commercialTerms),
         resolveFieldForEntity(fieldIds, local) ||
           `${namespace}:field.${local}_${local === 'goods_receipt' || local === 'purchase_order_amendment' ? 'number' : local === 'goods_receipt_line' ? 'item_id' : 'unit_id'}`,
       ),
@@ -645,6 +682,119 @@ export function purchasingModuleDefinition(
 function derivedStateFieldId(machineId: string): string {
   const separator = machineId.indexOf(':');
   return `${machineId.slice(0, separator)}:derived_state_field.${machineId.slice(separator + 1)}`;
+}
+
+/** Payment terms a purchase order may carry, labelled as a party's terms are. */
+const PAYMENT_TERMS = [
+  ['due_on_receipt', 'Due on receipt'],
+  ['net_15', 'Net 15'],
+  ['net_30', 'Net 30'],
+  ['net_45', 'Net 45'],
+  ['net_60', 'Net 60'],
+] as const;
+
+/**
+ * A purchase order's commercial terms (owner ruling B extended to purchase
+ * orders): payment terms, the order's tax code, which new lines start from,
+ * two charges each taxed by its own code with the rate frozen beside it, and
+ * each line's discount and frozen tax. All optional; no accounting, payable or
+ * ledger posting follows from them.
+ */
+function commercialFields(ids: PurchasingIds): Array<Record<string, unknown>> {
+  const header = ids.commercialFieldIds.purchaseOrder;
+  const line = ids.commercialFieldIds.purchaseOrderLine;
+  const order = ids.entityIds.purchaseOrder;
+  const orderLine = ids.entityIds.purchaseOrderLine;
+  const paymentTerms: FieldType = {
+    kind: 'enumFieldType',
+    schemaVersion: version,
+    options: PAYMENT_TERMS.map(([value, label], index) => ({
+      kind: 'enumOption',
+      schemaVersion: version,
+      optionId: `${ids.namespace}:option.purchase_order_payment_terms_${value}`,
+      label,
+      orderKey: (index + 1) * 10,
+    })),
+  };
+  const optional = { optional: true };
+  return [
+    field(
+      ids,
+      order,
+      header.paymentTerms,
+      'Payment terms',
+      70,
+      paymentTerms,
+      optional,
+    ),
+    field(ids, order, header.taxCodeId, 'Tax code', 80, text(80), optional),
+    field(ids, order, header.freightAmount, 'Freight', 90, decimal(), optional),
+    field(
+      ids,
+      order,
+      header.freightTaxCodeId,
+      'Freight tax code',
+      100,
+      text(80),
+      optional,
+    ),
+    field(
+      ids,
+      order,
+      header.otherFeeAmount,
+      'Other fee',
+      110,
+      decimal(),
+      optional,
+    ),
+    field(
+      ids,
+      order,
+      header.otherFeeTaxCodeId,
+      'Other fee tax code',
+      120,
+      text(80),
+      optional,
+    ),
+    // Each charge's rate, frozen from its tax code when chosen.
+    field(
+      ids,
+      order,
+      header.freightTaxRatePercent,
+      'Freight tax rate %',
+      130,
+      decimal(),
+      optional,
+    ),
+    field(
+      ids,
+      order,
+      header.otherFeeTaxRatePercent,
+      'Other fee tax rate %',
+      140,
+      decimal(),
+      optional,
+    ),
+    field(
+      ids,
+      orderLine,
+      line.discountPercent,
+      'Discount %',
+      50,
+      decimal(),
+      optional,
+    ),
+    field(ids, orderLine, line.taxCodeId, 'Tax code', 60, text(80), optional),
+    field(
+      ids,
+      orderLine,
+      line.taxRatePercent,
+      'Tax rate %',
+      70,
+      decimal(),
+      optional,
+    ),
+  ];
 }
 
 function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
@@ -745,6 +895,11 @@ function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
           name === 'item_id' ||
           (local === 'purchase_order_received' && name === 'unit_id'),
         businessKey: name === 'number',
+        // A goods receipt takes a server-assigned number on its first save
+        // (PURCHASING-PARITY), as a purchase order does: RCV-000001.
+        ...(local === 'goods_receipt' && name === 'number'
+          ? { numberedAs: 'RCV' }
+          : {}),
       },
     ),
   );
@@ -973,12 +1128,24 @@ function editableStates(ids: PurchasingIds): Record<string, unknown> {
 function selectedFieldsForEntity(
   ids: PurchasingIds,
   local: string,
+  commercialTerms: boolean,
 ): readonly string[] {
   switch (local) {
     case 'purchase_order':
-      return [ids.stateFieldId, ...Object.values(ids.fieldIds.purchaseOrder)];
+      return [
+        ids.stateFieldId,
+        ...Object.values(ids.fieldIds.purchaseOrder),
+        ...(commercialTerms
+          ? Object.values(ids.commercialFieldIds.purchaseOrder)
+          : []),
+      ];
     case 'purchase_order_line':
-      return Object.values(ids.fieldIds.purchaseOrderLine);
+      return [
+        ...Object.values(ids.fieldIds.purchaseOrderLine),
+        ...(commercialTerms
+          ? Object.values(ids.commercialFieldIds.purchaseOrderLine)
+          : []),
+      ];
     default:
       return receiptFields(ids)
         .filter(

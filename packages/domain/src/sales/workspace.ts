@@ -6,6 +6,9 @@ export const FULFILLMENT_READ_MODEL_BINDINGS = Object.freeze({
 export const COMMERCIAL_READ_MODEL_BINDINGS = Object.freeze({
   line: 'northstar.sales:read_model.commercial_line',
   order: 'northstar.sales:read_model.commercial_order',
+  // The same figures for a purchase order (ruling B extended to purchasing).
+  purchaseLine: 'northstar.sales:read_model.commercial_purchase_line',
+  purchaseOrder: 'northstar.sales:read_model.commercial_purchase_order',
 });
 /** The commercial outputs, by read-model binding. */
 export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
@@ -16,6 +19,13 @@ export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
     'order_tax',
     'order_total',
     'order_to_invoice',
+  ],
+  purchaseLine: ['line_amount', 'line_tax'],
+  purchaseOrder: [
+    'order_subtotal',
+    'order_charges',
+    'order_tax',
+    'order_total',
   ],
 } as const);
 /** The order's ship-to lines, as the workspace shows and prints them. */
@@ -940,6 +950,26 @@ export function salesWorkspaceQueries(
       invoiceLines: 'customer_invoice_line_list',
     },
   );
+  // A purchase order's priced lines and totals, the same figures read the
+  // same way, when the application composes purchasing with its terms.
+  const purchasing = queries.some(
+    (query) => query.queryId === `${namespace}:query.purchase_order_get`,
+  );
+  const purchaseCommercial = purchasing
+    ? [
+        clone('purchase_order_line_list', 'commercial_purchase_lines'),
+        commercial(
+          'purchaseLine',
+          clone('purchase_order_line_list', 'commercial_purchase_order_lines'),
+          {},
+        ),
+        commercial(
+          'purchaseOrder',
+          clone('purchase_order_get', 'commercial_purchase_order_get'),
+          { lines: 'commercial_purchase_lines' },
+        ),
+      ]
+    : [];
   const dependencies = {
     reservations: 'workspace_reservations',
     balances: 'reservation_balance_get',
@@ -986,6 +1016,7 @@ export function salesWorkspaceQueries(
     commercialLines,
     pricedLines,
     orderTotals,
+    ...purchaseCommercial,
   ];
 }
 

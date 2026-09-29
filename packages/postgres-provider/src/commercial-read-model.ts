@@ -21,8 +21,8 @@ import {
 import type { ImmutableJsonValue } from '../../runtime/src/request-runtime-view.js';
 
 /**
- * Line amounts and order totals (owner ruling B), from each line's and
- * charge's own frozen figures; the order's lines are read through the declared
+ * Line amounts and order totals (owner ruling B, for sales and purchase
+ * orders), from each line's and charge's own frozen figures; the order's lines are read through the declared
  * dependency query, re-entering current policy and scope. A figure that cannot
  * be stated -- an unpriced line, a discount outside 0-100%, a tax code without
  * a frozen rate -- is `null`, and so is every total it would feed: nothing is
@@ -46,6 +46,12 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
   if (typeof scopeId !== 'string')
     throw new Error('Commercial scope is not exact');
   const field = (name: string) => `${ns}:field.${name}`;
+  // A purchase order states the same figures from its own fields (ruling B
+  // extended to purchasing); a sales order also has list prices and invoices.
+  const purchase =
+    model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseLine ||
+    model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseOrder;
+  const doc = purchase ? 'purchase_order' : 'sales_order';
   const invoke = async (
     key: string,
     arguments_: Record<string, ImmutableJsonValue>,
@@ -81,12 +87,12 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
         : null;
   const priced = (line: SemanticRecordDto): LineAmounts | null =>
     lineAmounts({
-      quantity: line.values[field('sales_order_line_ordered_quantity')],
-      unitPrice: line.values[field('sales_order_line_unit_price')],
-      discountPercent: line.values[field('sales_order_line_discount_percent')],
+      quantity: line.values[field(`${doc}_line_ordered_quantity`)],
+      unitPrice: line.values[field(`${doc}_line_unit_price`)],
+      discountPercent: line.values[field(`${doc}_line_discount_percent`)],
       taxRatePercent: frozenRate(
-        line.values[field('sales_order_line_tax_code_id')],
-        line.values[field('sales_order_line_tax_rate_percent')],
+        line.values[field(`${doc}_line_tax_code_id`)],
+        line.values[field(`${doc}_line_tax_rate_percent`)],
       ),
     });
   /**
@@ -136,7 +142,7 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
     return records;
   };
   const linesOf = (orderId: string) =>
-    listAll('lines', `${ns}:relation.sales_order_line_order`, orderId);
+    listAll('lines', `${ns}:relation.${doc}_line_order`, orderId);
   /** An exact quantity as units at scale 18, or `null`. */
   const units = (value: ImmutableJsonValue | undefined): bigint | null => {
     const parsed = parseExact(value);
@@ -222,23 +228,32 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       if (!target) throw new Error('Read-model output is undeclared');
       values[target] = value;
     };
-    if (model.binding === COMMERCIAL_READ_MODEL_BINDINGS.line) {
+    if (
+      model.binding === COMMERCIAL_READ_MODEL_BINDINGS.line ||
+      model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseLine
+    ) {
       const amounts = priced(row);
       emit('line_amount', money(amounts?.amountCents ?? null));
       emit('line_tax', money(amounts?.taxCents ?? null));
       // A unit price that differs from the list price it started from was
       // set by hand (ruling B); without a list price there is nothing to mark.
-      const list = row.values[field('sales_order_line_list_price')];
-      const unit = row.values[field('sales_order_line_unit_price')];
-      emit(
-        'price_basis',
-        list === null || list === undefined || list === ''
-          ? null
-          : sameExact(list, unit)
-            ? 'List price'
-            : 'Manual price',
-      );
-    } else if (model.binding === COMMERCIAL_READ_MODEL_BINDINGS.order) {
+      // A purchase line has no list price: its cost is always typed.
+      if (!purchase) {
+        const list = row.values[field('sales_order_line_list_price')];
+        const unit = row.values[field('sales_order_line_unit_price')];
+        emit(
+          'price_basis',
+          list === null || list === undefined || list === ''
+            ? null
+            : sameExact(list, unit)
+              ? 'List price'
+              : 'Manual price',
+        );
+      }
+    } else if (
+      model.binding === COMMERCIAL_READ_MODEL_BINDINGS.order ||
+      model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseOrder
+    ) {
       let complete = true;
       let subtotal = 0n;
       let tax = 0n;
@@ -254,10 +269,10 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       let charges = 0n;
       for (const charge of ['freight', 'other_fee'] as const) {
         const amounts = chargeAmounts(
-          row.values[field(`sales_order_${charge}_amount`)],
+          row.values[field(`${doc}_${charge}_amount`)],
           frozenRate(
-            row.values[field(`sales_order_${charge}_tax_code_id`)],
-            row.values[field(`sales_order_${charge}_tax_rate_percent`)],
+            row.values[field(`${doc}_${charge}_tax_code_id`)],
+            row.values[field(`${doc}_${charge}_tax_rate_percent`)],
           ),
         );
         if (!amounts) complete = false;
