@@ -166,9 +166,9 @@
     },
     {
       "name": "numbering-scan-folds-like-the-business-key",
-      "claim": "The allocator reads stored numbers through the business key's Unicode case fold, so a stored value the key equates with the next number (\u017fO-000016 and SO-000016) is counted instead of colliding.",
+      "claim": "The allocator reads stored numbers through the business key's own fold (its stored folded companion), so a stored value the key equates with the next number (\u017fO-000016 and SO-000016) is counted instead of colliding.",
       "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "regexp_match(north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text), $1)",
+      "original": "regexp_match(${foldedColumnSql(entity, column)}, $1)",
       "replacement": "regexp_match($${quoted(column.physicalName)}, $$1, 'i')",
       "test": {
         "files": ["test/postgres/document-numbering.test.ts"],

@@ -153,7 +153,7 @@ test('a numbering the runtime could not honour is refused by name', () => {
     [
       // A 3-character field would leave release verification 16 possible
       // sentinels (`V-0`..`V-f`); 17 characters leave fewer than 64 bits.
-      'release verification sentinels stay distinct',
+      'release verification sentinels keep 64 bits',
       (app) => {
         Object.assign(field(app, 'sales_order_number').numbering as Json, {
           minimumDigits: 1,

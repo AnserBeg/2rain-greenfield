@@ -7,6 +7,7 @@ import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
+import { unicodeCaseFold } from '../../packages/canonical-model/src/index.js';
 import {
   fulfillmentColumn,
   fulfillmentTable,
@@ -343,6 +344,15 @@ test(
       // the key's spelling of SO-000016, so the next number is SO-000017.
       await renumber(afterArchive.readBack!.recordId, 'ſO-000016');
       assert.equal(await created(), 'SO-000017');
+      // An expanding fold reads the same way. No prefix here contains one, so
+      // the installed fold -- the function the stored companion is generated
+      // by -- is asked directly: `ß-000001` is `ss-000001`, which the scan's
+      // pattern for a prefix `SS` reads as number 1.
+      const expanding = await fixture.pool.query<{ digits: string | null }>(
+        `SELECT (regexp_match(north_star_module.nsm_unicode_case_fold_v1($1), $2))[1] AS digits`,
+        ['ß-000001', `^${unicodeCaseFold('SS')}-([0-9]+)$`],
+      );
+      assert.equal(expanding.rows[0]?.digits, '000001');
       await renumber(otherCompany.readBack!.recordId, 'SO-0000000000000000042');
       assert.equal(await created(), 'SO-000043');
       // The allocator's own nineteen-digit output is read back next time.

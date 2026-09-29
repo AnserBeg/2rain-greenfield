@@ -771,12 +771,13 @@ export type DocumentNumberMode = 'sequence' | 'verificationSentinel';
  * its number back. The next value follows the highest existing number of that
  * prefix among ALL of the tenant's records, archived and in every company,
  * whatever its digit count (leading zeros included), so a number is never
- * reused. Stored values are read through the same Unicode case fold as the
- * business key, so a value the key equates with the next number (`ſO-000016`
- * and `SO-000016`) is counted; the key's unique index, over live records of
- * its scope, remains the backstop. A next number that no longer fits its field
- * refuses by name. A replay of the same idempotency key never reaches this, so
- * a retry keeps its number.
+ * reused. Stored values are read through the business key's own fold -- its
+ * stored folded companion, the column its unique index covers -- so a value
+ * the key equates with the next number (`ſO-000016` and `SO-000016`) is
+ * counted without folding every row again; the key's unique index, over live
+ * records of its scope, remains the backstop. A next number that no longer fits
+ * its field refuses by name. A replay of the same idempotency key never reaches
+ * this, so a retry keeps its number.
  */
 async function assignDocumentNumbers(
   client: PoolClient,
@@ -810,9 +811,11 @@ async function assignDocumentNumbers(
     if (mode === 'verificationSentinel') {
       // Release verification arranges records to exercise a release; it asks
       // no business question and must not consume a tenant's document numbers.
-      // Its number is the same `V-` sentinel it writes into every text field,
-      // unique by record id. No sequence may use the prefix (the numbering
-      // contract reserves it), so a sentinel is never a business number.
+      // Its number is a `V-` sentinel hashed from the record id and field, at
+      // least 64 bits of it (the numbering contract's width floor), so
+      // arranged records collide only with negligible probability. No sequence
+      // may use the prefix (the contract reserves it), so a sentinel is never a
+      // business number.
       const sentinel = `${VERIFICATION_SENTINEL_PREFIX}-${createHash('sha256')
         .update(input.recordId, 'utf8')
         .update(Uint8Array.of(0))
@@ -831,7 +834,7 @@ async function assignDocumentNumbers(
       [field.sequenceId],
     );
     const highest = await client.query<{ highest: string | null }>(
-      `SELECT max(((regexp_match(north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text), $1))[1])::numeric)::text AS highest
+      `SELECT max(((regexp_match(${foldedColumnSql(entity, column)}, $1))[1])::numeric)::text AS highest
          FROM north_star_module.${quoted(entity.physicalTableName)}
         WHERE tenant_id = north_star_internal.trusted_tenant_id()
           AND environment_id = north_star_internal.trusted_environment_id()`,

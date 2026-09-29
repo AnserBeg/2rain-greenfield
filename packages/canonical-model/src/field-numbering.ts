@@ -74,7 +74,7 @@ export function validateFieldNumbering(
     )
       fail(
         id,
-        `a number field holds at least ${String(VERIFICATION_SENTINEL_MINIMUM_LENGTH)} characters, so release verification sentinels stay distinct`,
+        `a number field holds at least ${String(VERIFICATION_SENTINEL_MINIMUM_LENGTH)} characters, so release verification sentinels keep 64 bits`,
       );
     if (sequences.has(numbering.sequenceId))
       fail(id, 'each document sequence numbers one field');
