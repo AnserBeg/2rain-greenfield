@@ -696,7 +696,11 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       (await measure('masters', undefined, undefined, 'Blank Glazing')).parties,
     ).toBe(0);
 
-    // Create and use: governed Party + active customer role, selected in place.
+    // Create and use: governed Party + active customer role, then selected.
+    // The new customer has no currency of its own, so the order's returns to
+    // its default CAD from USD and the chosen line must be re-priced (ruling
+    // B): this one create is answered by the page, and nothing typed is lost.
+    const beforeCreateUse = documents;
     await customer.fill('Enter Glazing');
     await field(page, 'Customer')
       .getByRole('option', { name: '+ New customer' })
@@ -716,6 +720,9 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       'Field notebook',
     );
     await kept();
+    expect(documents, 'a create that re-prices a chosen line is one page').toBe(
+      beforeCreateUse + 1,
+    );
     await shot('create-returned');
     expect(
       await measure('masters', undefined, undefined, 'Enter Glazing'),
@@ -842,7 +849,11 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     ).toBe(1);
     await kept();
     await shot('line-product-created');
-    expect(documents, 'create and return reloaded nothing').toBe(afterFallback);
+    // Cancels, refusals, a withheld selection and a line's product create
+    // answer in place; only the create that re-priced the line was a page.
+    expect(documents, 'create and return reloaded nothing else').toBe(
+      afterFallback + 1,
+    );
 
     // A quick create names existing records with the same name first: a
     // supplier-only party is not offered as a customer, so creating here would

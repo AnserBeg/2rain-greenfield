@@ -741,27 +741,6 @@ async function editorResponse(
         }),
     );
   };
-  /** Whether a change of this header field could reach a chosen line. */
-  const linesFollow = (fieldId: string) => {
-    if (!definition.headerFields.some((value) => value.fieldId === fieldId))
-      return false;
-    const reach = new Set([
-      fieldId,
-      ...dependentsOf(fieldId).map((value) => value.fieldId),
-    ]);
-    const dependent = definition.lineFields.filter((field) =>
-      lineDependsOn(field).some((id) => reach.has(id)),
-    );
-    return buffer.lines.some(
-      (line) =>
-        !line.removed &&
-        dependent.some((field) => {
-          const trigger = triggerOf(field);
-          const value = trigger ? line.values[trigger] : null;
-          return typeof value === 'string' && value !== '';
-        }),
-    );
-  };
   /**
    * Line values a header value chooses or copies -- a price in the order's
    * currency, a tax code from the order's -- follow a change of that header
@@ -1285,7 +1264,13 @@ async function editorResponse(
    * writes nothing further, a partial create is named as partial and not
    * selected, and a record that cannot be read back is not selected either.
    */
-  const runCreate = async () => {
+  /**
+   * Runs the open create. Answering in place, it stops before selecting a
+   * created record whose defaults would move a value priced lines read, and
+   * says so: the page then answers, finishing this same task (its done steps
+   * are not run again), so those lines are re-rendered with it.
+   */
+  const runCreate = async (inPlace = false): Promise<'page' | void> => {
     const task = buffer.create;
     if (!task || task.id !== submission?.draftCreateTask) {
       invalidTarget();
@@ -1433,6 +1418,13 @@ async function editorResponse(
     } catch {
       record = null;
     }
+    if (
+      inPlace &&
+      record &&
+      (draft.values[task.fieldId] ?? null) === task.openedValue &&
+      (await reachesLines(draft, task.fieldId, record))
+    )
+      return 'page';
     buffer.create = null;
     buffer.focus = controlId(task.rowId, task.fieldId);
     if (!record) {
@@ -1784,17 +1776,21 @@ async function editorResponse(
         );
       if (task.busy)
         return answer([], note('Still creating. Wait for the result.'), 409);
-      // Its defaults would reach priced lines, which an in-place answer does
-      // not replace, or the page shows a line source not yet seen: the page
-      // answers instead.
-      if (linesFollow(task.fieldId) || lineSourceMoved(submission))
+      // The page shows a line source not yet seen: the page answers instead.
+      // A created record whose defaults would re-price chosen lines is found
+      // after the create, and the page finishes it; a cancel, a refusal or a
+      // create that moves no priced value answers in place.
+      if (lineSourceMoved(submission))
         return { html: '', statusCode: 409, fallback: true };
       task.busy = true;
+      let outcome: 'page' | void;
       try {
-        await runCreate();
+        outcome = await runCreate(true);
       } finally {
         task.busy = false;
       }
+      if (outcome === 'page')
+        return { html: '', statusCode: 409, fallback: true };
       buffer.touched = performance.now();
       if (buffer.create)
         return answer(
