@@ -51,12 +51,16 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     recordId?: string,
   ) => {
     const type = role === 'list' ? 'list' : 'get';
+    // The order page reads its totals query (ruling B), so its company is
+    // that query's parameter.
+    const query =
+      local === 'sales_order' && role === 'detail' ? 'commercial_order' : local;
     const parameters = new URLSearchParams({
       surface: `${namespace}:surface.${local}_${role}`,
     });
     if (!['party', 'party_role', 'item', 'location'].includes(local))
       parameters.set(
-        `${namespace}:parameter.${local}_${type}_legal_entity_scope`,
+        `${namespace}:parameter.${query}_${type}_legal_entity_scope`,
         legalEntityId,
       );
     if (recordId) parameters.set('record', recordId);

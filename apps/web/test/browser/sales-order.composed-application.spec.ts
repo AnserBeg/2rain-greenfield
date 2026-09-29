@@ -95,9 +95,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     selectedEntity = legalEntityId,
   ) => {
     const queryRole = role === 'list' ? 'list' : 'get';
+    // The order page reads its totals query (ruling B), so its company is
+    // that query's parameter.
+    const query =
+      local === 'sales_order' && role === 'detail' ? 'commercial_order' : local;
     const parameters = new URLSearchParams({
       surface: `northstar.app:surface.${local}_${role}`,
-      [`northstar.app:parameter.${local}_${queryRole}_legal_entity_scope`]:
+      [`northstar.app:parameter.${query}_${queryRole}_legal_entity_scope`]:
         selectedEntity,
     });
     if (recordId) parameters.set('record', recordId);
