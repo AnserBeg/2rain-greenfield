@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { canonicalize } from '@north-star/canonical-model';
+import { canonicalize, unicodeCaseFold } from '@north-star/canonical-model';
 import {
   PROJECTION_FAMILY_IDS,
   executeVerificationPlan,
@@ -784,6 +784,14 @@ export function verificationConstructibilityFindings(
         constructibleColumns.add(relation.relationColumn.physicalName);
       }
     }
+    // A server-assigned document number is written by the create itself, so
+    // its required column needs no caller input.
+    for (const assigned of operation.inputContract.assignedFields ?? []) {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === assigned.fieldId,
+      );
+      if (column) constructibleColumns.add(column.physicalName);
+    }
     const systemInput = operation.inputContract.systemInput;
     if (
       systemInput &&
@@ -1065,6 +1073,8 @@ interface VerificationOperationContract {
           | 'updateRecordEffect';
       };
   readonly inputContract: {
+    /** A create's server-assigned document numbers: never a caller's input. */
+    readonly assignedFields?: readonly { readonly fieldId: string }[];
     readonly fields: readonly VerificationFieldContract[];
     readonly relationInputs: readonly {
       readonly relationId: string;
@@ -1583,18 +1593,25 @@ class SemanticVerificationExecutor {
     const selectedFieldIds = new Set(
       search.selections.map((selection) => selection.fieldId),
     );
-    const positiveField = this.#createOperation(
+    const excludedFieldIds = this.#excludedFieldsByEntity.get(
       scenario.entityId,
-    ).inputContract.fields.find(
-      (field) =>
-        selectedFieldIds.has(field.fieldId) &&
-        (field.fieldKind === 'textFieldType' ||
-          field.fieldKind === 'enumFieldType') &&
-        !this.#excludedFieldsByEntity
-          .get(scenario.entityId)
-          ?.has(field.fieldId),
     );
-    if (!positiveField) {
+    const createOperation = this.#createOperation(scenario.entityId);
+    const positiveFieldId =
+      createOperation.inputContract.fields.find(
+        (field) =>
+          selectedFieldIds.has(field.fieldId) &&
+          (field.fieldKind === 'textFieldType' ||
+            field.fieldKind === 'enumFieldType') &&
+          !excludedFieldIds?.has(field.fieldId),
+      )?.fieldId ??
+      // A server-assigned number is text the create stored and read back.
+      createOperation.inputContract.assignedFields?.find(
+        (assigned) =>
+          selectedFieldIds.has(assigned.fieldId) &&
+          !excludedFieldIds?.has(assigned.fieldId),
+      )?.fieldId;
+    if (!positiveFieldId) {
       throw failure(
         'VERIFICATION_SEARCHABLE_FIELD_MISSING',
         'search exclusion probe has no same-entity positive searchable field',
@@ -1603,14 +1620,14 @@ class SemanticVerificationExecutor {
     const included = await this.#invokeQuery(
       search,
       {
-        text: String(record.values[positiveField.fieldId]),
+        text: String(record.values[positiveFieldId]),
       },
       record,
     );
     if (!hasRecord(included, record.recordId)) {
       throw failure(
         'VERIFICATION_SEARCH_POSITIVE_FAILED',
-        `searchable field ${positiveField.fieldId} did not return record ${record.recordId}: ${canonicalize(included)}`,
+        `searchable field ${positiveFieldId} did not return record ${record.recordId}: ${canonicalize(included)}`,
       );
     }
     return {
@@ -1619,7 +1636,7 @@ class SemanticVerificationExecutor {
         constructibilityFindings: this.constructibilityFindings,
         searchWitness: {
           entityId: scenario.entityId,
-          fieldId: positiveField.fieldId,
+          fieldId: positiveFieldId,
           recordObserved: true,
         },
       },
@@ -1654,9 +1671,15 @@ class SemanticVerificationExecutor {
   }
 
   async #uniquenessFold(scenario: VerificationScenario, token: string) {
-    const field = this.#createOperation(
-      scenario.entityId,
-    ).inputContract.fields.find(
+    const operation = this.#createOperation(scenario.entityId);
+    if (
+      operation.inputContract.assignedFields?.some(
+        (assigned) => assigned.fieldId === scenario.subjectId,
+      )
+    ) {
+      return this.#assignedUniqueness(scenario, operation, token);
+    }
+    const field = operation.inputContract.fields.find(
       (candidate) => candidate.fieldId === scenario.subjectId,
     );
     if (!field || field.fieldKind !== 'textFieldType') {
@@ -1682,6 +1705,75 @@ class SemanticVerificationExecutor {
       ['MODULE_UNIQUE_VIOLATION'],
     );
     return { negativeProbe: rejected, positiveProbe: accepted };
+  }
+
+  /**
+   * A server-assigned business key (a document number) has no caller-written
+   * value, so no caller can offer its key two values that fold together. The
+   * probe shows the uniqueness a caller can observe: two creates store values
+   * that differ under the key's case fold, and a create supplying the first
+   * value in another case is refused as input, naming the field, before it
+   * can reach the key. How the key folds stored numbers, and the allocator's
+   * agreement with it, are exercised by the document-numbering suite.
+   */
+  async #assignedUniqueness(
+    scenario: VerificationScenario,
+    operation: VerificationOperationContract,
+    token: string,
+  ) {
+    const first = await this.#create(scenario.entityId, `${token}-first`);
+    const second = await this.#create(scenario.entityId, `${token}-second`);
+    const firstValue = String(first.values[scenario.subjectId]);
+    const secondValue = String(second.values[scenario.subjectId]);
+    if (unicodeCaseFold(firstValue) === unicodeCaseFold(secondValue)) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_VALUES_COLLIDED',
+        `two creates were assigned the same ${scenario.subjectId}: ${firstValue}`,
+      );
+    }
+    const variant =
+      firstValue.toLowerCase() === firstValue
+        ? firstValue.toUpperCase()
+        : firstValue.toLowerCase();
+    if (
+      variant === firstValue ||
+      unicodeCaseFold(variant) !== unicodeCaseFold(firstValue)
+    ) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_VARIANT_INVALID',
+        `assigned ${scenario.subjectId} has no case variant: ${firstValue}`,
+      );
+    }
+    const input = await this.#createInput(
+      scenario.entityId,
+      `${token}-supplied`,
+    );
+    const rejected = await this.#captureRejection(
+      this.#invokeOperation(operation, {
+        ...input,
+        values: {
+          ...(input.values as Record<string, unknown>),
+          [scenario.subjectId]: variant,
+        },
+      }),
+      ['MODULE_FIELD_UNSUPPORTED'],
+    );
+    if (rejected.subjectId !== scenario.subjectId) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_INPUT_REFUSAL_INVALID',
+        `a supplied ${scenario.subjectId} was refused for ${String(rejected.subjectId)}`,
+      );
+    }
+    return {
+      negativeProbe: rejected,
+      positiveProbe: {
+        assignedFieldId: scenario.subjectId,
+        records: [
+          { recordId: first.recordId, value: firstValue },
+          { recordId: second.recordId, value: secondValue },
+        ],
+      },
+    };
   }
 
   async #archiveRestrict(scenario: VerificationScenario, token: string) {
@@ -1733,7 +1825,7 @@ class SemanticVerificationExecutor {
       arrangementPath,
     );
     const operation = this.#createOperation(entityId);
-    await this.#invokeOperation(operation, input);
+    const created = await this.#invokeOperation(operation, input);
     const systemInput = operation.inputContract.systemInput;
     const legalEntityId = systemInput ? input[systemInput.argumentKey] : null;
     if (legalEntityId !== null && typeof legalEntityId !== 'string') {
@@ -1742,12 +1834,28 @@ class SemanticVerificationExecutor {
         'verification arranged a record with an invalid system input value',
       );
     }
+    // A server-assigned number is not in the input; the probes that search,
+    // resolve or compare it read the value the create stored.
+    const assignedValues: Record<string, string> = {};
+    for (const assigned of operation.inputContract.assignedFields ?? []) {
+      const value = created.readBack?.values[assigned.fieldId];
+      if (typeof value !== 'string' || value.length === 0) {
+        throw failure(
+          'VERIFICATION_ASSIGNED_VALUE_MISSING',
+          `create ${operation.operationId} did not read back its assigned ${assigned.fieldId}`,
+        );
+      }
+      assignedValues[assigned.fieldId] = value;
+    }
     const record = Object.freeze({
       entityId,
       legalEntityId,
       recordId: String(input.recordId),
       relations: input.relations as Readonly<Record<string, string>>,
-      values: input.values as Readonly<Record<string, unknown>>,
+      values: Object.freeze({
+        ...(input.values as Readonly<Record<string, unknown>>),
+        ...assignedValues,
+      }),
     });
     this.#createdRecords.push(record);
     return record;

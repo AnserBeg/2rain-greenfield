@@ -11,7 +11,11 @@ import {
   fulfillmentColumn,
   fulfillmentTable,
 } from '../../packages/postgres-provider/src/fulfillment.js';
-import { governedStorageTarget } from '../helpers/governed-storage-target.js';
+import {
+  governedProjection,
+  governedReleaseRoot,
+  governedStorageTarget,
+} from '../helpers/governed-storage-target.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
 const ns = 'northstar.app';
@@ -130,6 +134,97 @@ test(
       )!.inputContract!;
       assert.ok(
         !update.writableFieldIds.includes(`${ns}:field.sales_order_number`),
+      );
+
+      // Release verification EXECUTED every scenario of every numbered entity
+      // when it admitted this release: the create writes an assigned number,
+      // so the number needs no caller input; the probes that search, resolve
+      // or compare it read the stored value back; and the number's uniqueness
+      // probe is an assigned field's. None was derived for want of a number.
+      const numbered = contract.flatMap(({ effect, inputContract }) => {
+        if (effect.kind !== 'createRecordEffect') return [];
+        const entityId = effect.entity.targetId;
+        return (inputContract?.assignedFields ?? []).map((field) => ({
+          entityId,
+          fieldId: field.fieldId,
+        }));
+      });
+      assert.deepEqual(
+        numbered.map((entry) => entry.fieldId).toSorted(),
+        [
+          'customer_credit_number',
+          'customer_invoice_number',
+          'customer_payment_number',
+          'purchase_order_number',
+          'sales_order_number',
+          'shipment_number',
+        ].map((local) => `${ns}:field.${local}`),
+      );
+      const plan = (
+        await governedProjection<{
+          scenarios: {
+            entityId: string;
+            kind: string;
+            scenarioId: string;
+            subjectId: string;
+          }[];
+        }>('northstar.compiler:projection-family.verification-plan')
+      ).payload;
+      const numberedEntityIds = new Set(
+        numbered.map((entry) => entry.entityId),
+      );
+      const numberedScenarioIds = plan.scenarios
+        .filter((scenario) => numberedEntityIds.has(scenario.entityId))
+        .map((scenario) => scenario.scenarioId);
+      const releaseRoot = await governedReleaseRoot();
+      const executed = new Set(
+        (
+          await fixture.pool.query<{ scenario_id: string }>(
+            `SELECT result.scenario_id
+               FROM platform.release_verification_results AS result
+               JOIN platform.release_verification_evidence AS evidence
+                 ON evidence.tenant_id = result.tenant_id
+                AND evidence.environment_id = result.environment_id
+                AND evidence.verification_evidence_id = result.verification_evidence_id
+              WHERE evidence.release_root = $1`,
+            [releaseRoot],
+          )
+        ).rows.map((row) => row.scenario_id),
+      );
+      assert.ok(executed.size > 0, 'the admitted release has executed results');
+      assert.deepEqual(
+        numberedScenarioIds.filter((scenarioId) => !executed.has(scenarioId)),
+        [],
+        'release verification executed every scenario of a numbered entity',
+      );
+      assert.deepEqual(
+        plan.scenarios
+          .filter(
+            (scenario) =>
+              scenario.kind === 'uniquenessFold' &&
+              numbered.some((entry) => entry.fieldId === scenario.subjectId),
+          )
+          .map((scenario) => executed.has(scenario.scenarioId)),
+        [true, true, true, true, true, true],
+        'each number’s uniqueness probe executed',
+      );
+      const derivationCodes = (
+        await fixture.pool.query<{ code: string }>(
+          `SELECT derivation -> 'reason' ->> 'code' AS code
+             FROM platform.release_verification_evidence AS evidence,
+                  jsonb_array_elements(
+                    coalesce(evidence.impact_analysis_derivation -> 'derivations', '[]'::jsonb)
+                  ) AS derivation
+            WHERE evidence.release_root = $1`,
+          [releaseRoot],
+        )
+      ).rows.map((row) => row.code);
+      assert.equal(
+        derivationCodes.includes(
+          'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE',
+        ),
+        false,
+        'no scenario was derived for want of a caller-supplied input',
       );
 
       // Sequential from SO-000001.
