@@ -12,6 +12,7 @@
 |---|---|---|
 | **BUILD** | `RAIN-ORDER-ENTRY` | workspace interaction completion at `d9eca60a` (Inventory destinations, eligible pickers, in-place references, shared Task controls); sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; ONLINE review complete (D1-D5 closed); [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / owner acceptance; stopped without integration; retained databases preserved |
 | **BUILD** | `SALES-PARITY` | Sales + shared List parity with PaneFlow through metadata, stacked on PR #6 `994a7dc9`; sole local author on `packet/SALES-PARITY`; vertical checkpoint 2026-09-28 at `d199c49a` (slices 1-4, 5a, 6, 7 pushed; returns not built); review rounds 1-3 fixed through `b829d633`, round 4 (confirm) owed; draft PR to open; [record](packets/SALES-PARITY.md); no merge/deployment |
+| **BUILD** | `PURCHASING-PARITY` | Purchasing parity with PaneFlow through metadata, stacked on `packet/SALES-PARITY`; sole local author on `packet/PURCHASING-PARITY`; slice 1 (priced purchase orders) in progress 2026-09-29; outside the Critical set so far; [record](packets/PURCHASING-PARITY.md); no merge/deployment |
 | **SUPPORT** | — | idle |
 
 
