@@ -186,6 +186,7 @@ test(
           'purchase_order_number',
           'sales_order_number',
           'shipment_number',
+          // PAYABLES: bills, vendor payments and vendor credits.
           'vendor_bill_number',
           'vendor_credit_number',
           'vendor_payment_number',
