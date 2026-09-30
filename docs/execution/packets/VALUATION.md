@@ -1,8 +1,8 @@
 # VALUATION — derived moving average, shipment cost and landed cost
 
-Status: unfinished — stopped by the owner. Slice 1 implemented; selected local checks passed, latest lint red. No push, PR, merge or deploy.
+Status: active — resumed by the owner. Slice 1 implemented; checks refreshed after merging the PAYABLES dependency. Slices 2–3 await slice 1 CI. Draft PR pending; no integration or deployment.
 Critical paths touched: none. Review: not owed — outside the Critical set.
-Base: `fe32bc04` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
+Base: `a3b104db` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
 ## Claims
 
@@ -32,7 +32,7 @@ None owed: no Critical-set path changes.
 
 - Focused moving-average unit cases 5/5; scoped/paged/current-policy integration 1/1; release freshness `--check` PASS.
 - Compiled from the PAYABLES base envelope: one added lineage entry (6 total), 102 surfaces, 17 navigation destinations, 573 verification scenarios; coverage re-derived: 2654 obligations / 811 observed, unchanged.
-- Typecheck and formatting PASS; latest lint fails on two unused destructured variables in `test/helpers/without-inventory-valuation.ts` (not fixed before the stop); broader unit/compiler/integration/web contracts 257/257; PostgreSQL stored-row oracle 1/1; operations browser 1/1 (one worker, ~2 min); architecture 71 checks with one fixture drift corrected, surface grammar recheck 25/25. Hosted CI was never started.
+- Lint, typecheck and formatting PASS after the dependency merge; focused unit/workspace/surface grammar 44/44; broader unit/compiler/integration/web contracts 257/257; PostgreSQL stored-row oracle 1/1; operations browser 1/1 (one worker, ~2 min); architecture 71 checks with one fixture drift corrected, surface grammar recheck 25/25. Hosted CI pending draft PR; it supplies the full matrix and executed-file evidence.
 - Small bridges: fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
 
 ## Test it yourself
@@ -42,3 +42,54 @@ None owed: no Critical-set path changes.
 ## Filed
 
 - Each dependency is a separately authorized read; a concurrent history change can cause a refused/incomplete read. This is an operational derived view, not a posting snapshot or financial ledger.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "VALUATION",
+  "base": "a3b104db44b58382db48ad67687ec159d8c31bba",
+  "head": "f026da595a308094e563279de824253f5187685c",
+  "changedPaths": [
+    "apps/web/release/app.authored.json",
+    "apps/web/release/app.compiled.json",
+    "apps/web/test/browser/inventory-valuation.spec.ts",
+    "apps/web/test/surface-runtime-contract.test.ts",
+    "package.json",
+    "packages/compiler/src/conformance.ts",
+    "packages/domain/src/app/builder.ts",
+    "packages/domain/src/app/list-declarations.ts",
+    "packages/domain/src/app/order-entry.ts",
+    "packages/domain/src/inventory/contracts.ts",
+    "packages/domain/src/inventory/valuation.ts",
+    "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/inventory-valuation-read-model.ts",
+    "packages/postgres-provider/src/inventory-valuation.ts",
+    "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/surface-grammar-conformance.test.ts",
+    "test/compiler/inventory-contract.release.golden.json",
+    "test/helpers/inventory-valuation-fixture.ts",
+    "test/helpers/order-entry-fixture.ts",
+    "test/helpers/reachability-producers.ts",
+    "test/helpers/without-inventory-valuation.ts",
+    "test/integration/surface-data-binding.test.ts",
+    "test/postgres/composed-application.test.ts",
+    "test/postgres/inventory-valuation.test.ts",
+    "test/postgres/module-storage-transition.test.ts",
+    "test/unit/inventory-valuation.test.ts"
+  ],
+  "symbols": [
+    {
+      "path": "packages/postgres-provider/src/inventory-valuation.ts",
+      "name": "replayInventoryValue"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-valuation-read-model.ts",
+      "name": "inventoryValuationReadModel"
+    },
+    {
+      "path": "packages/domain/src/inventory/valuation.ts",
+      "name": "valuationQueries"
+    }
+  ]
+}
+```
