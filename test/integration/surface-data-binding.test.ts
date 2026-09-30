@@ -34,6 +34,7 @@ import {
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { commercialReadModel } from '../../packages/postgres-provider/src/commercial-read-model.js';
 import { encodeSharedListCursor } from '../../packages/runtime/src/list-behavior/index.js';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
@@ -8426,10 +8427,11 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
   );
 
   // Two Lists read purchase orders: the Purchase orders List keeps standing
-  // for them -- its navigation and the receipt form's order picker.
+  // for them -- its navigation and the receipt form's order picker. It reads
+  // its orders with their totals (ORDER-PARITY), under its own parameter.
   const orders = await renderSurfaceRuntimeWithData(
     f.view,
-    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
+    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.commercial_purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
     at('2026-09-29T15:00:00.000Z'),
   );
   assert.match(
@@ -8460,7 +8462,8 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
   assert.match(receiptForm.html, /PO-LATE/u);
 
   // Without received-quantity read the List is refused by the progress
-  // query's name; the Purchase orders List does not read it and still serves.
+  // query's name; the Purchase orders List reads it as supplementary figures
+  // (ORDER-PARITY) and still serves without them.
   f.deniedReads.add(id('permission', 'purchase_order_received_read'));
   const denied = await renderSurfaceRuntimeWithData(
     f.view,
@@ -8512,7 +8515,7 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
   assert.equal(refused.queryId, id('query', 'purchase_order_received_list'));
   const stillServed = await renderSurfaceRuntimeWithData(
     f.view,
-    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
+    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.commercial_purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
     f.gateways,
   );
   assert.doesNotMatch(stillServed.html, /QUERY_PERMISSION_DENIED/u);
@@ -8634,4 +8637,538 @@ test('PURCHASING-PARITY: a line with nothing left to arrive offers no receipt; a
   );
   assert.match(stale.html, /COMPOSITION_TASK_UNAVAILABLE/u);
   assert.equal(f.executor.calls.length, 0);
+});
+
+test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and serve without figures current policy withholds', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope, foreign] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  // The real commercial read model states each paged order's total from its
+  // lines, read through the gateway as the List's own request is.
+  const gateways: SurfaceRuntimeGateways = {
+    ...f.gateways,
+    clock: () => new Date('2026-09-29T15:00:00.000Z'),
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      f.executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': async ({ result }) => result,
+        'northstar.sales:capability.commercial': commercialReadModel,
+      },
+    ),
+  };
+  const counts = (html: string) =>
+    Object.fromEntries(
+      [
+        ...html.matchAll(
+          /data-view-id="([^"]+)"[^>]*>(?:<span>[^<]*<\/span>)(?:<span class="list-view__count" data-view-count="(\d+)")?/gu,
+        ),
+      ].map((match) => [
+        match[1]!,
+        match[2] === undefined ? null : Number(match[2]),
+      ]),
+    );
+  const row = (html: string, recordId: string) =>
+    new RegExp(
+      `<tr data-compact-card="true" data-record-id="${recordId}">([\\s\\S]*?)</tr>`,
+      'u',
+    ).exec(html)?.[1] ?? '';
+  const cell = (html: string, recordId: string, column: string) =>
+    new RegExp(`data-column-id="${column}">([\\s\\S]*?)</td>`, 'u').exec(
+      row(html, recordId),
+    )?.[1];
+  const action = (html: string, recordId: string) => {
+    const match =
+      /<a class="secondary-action" href="([^"]+)" data-row-action="([^"]+)" aria-label="([^"]+)">([^<]+)<\/a>/u.exec(
+        row(html, recordId),
+      );
+    return match
+      ? {
+          href: match[1]!.replaceAll('&amp;', '&'),
+          actionId: match[2]!,
+          name: match[3]!,
+          label: match[4]!,
+        }
+      : null;
+  };
+  const withheldMark = '<span class="muted">—</span>';
+
+  // Sales: orders with lines and shipped quantities, stored as the providers
+  // do -- a line points at its order, a shipped row at its line.
+  const salesOrder = (
+    number: string,
+    state: string,
+    lines: readonly (readonly [ordered: number, shipped: number])[],
+    company = scope,
+  ) => {
+    const orderId = f.executor.seed(
+      'sales_order',
+      {
+        [id('field', 'sales_order_number')]: number,
+        [id('field', 'sales_order_customer_party_id')]: f.party,
+        [id('field', 'sales_order_order_date')]: '2026-09-20T12:00:00.000Z',
+        [id('field', 'sales_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+          'state',
+          `sales_order_${state}`,
+        ),
+      },
+      company,
+    );
+    for (const [ordered, shipped] of lines) {
+      const lineId = f.executor.seed(
+        'sales_order_line',
+        {
+          [id('field', 'sales_order_line_ordered_quantity')]: String(ordered),
+          [id('relation', 'sales_order_line_order')]: orderId,
+        },
+        company,
+      );
+      if (shipped > 0)
+        f.executor.seed(
+          'sales_order_shipped',
+          {
+            [id('field', 'sales_order_shipped_shipped_quantity')]:
+              String(shipped),
+            [id('relation', 'sales_order_shipped_order_line')]: lineId,
+          },
+          company,
+        );
+    }
+    return orderId;
+  };
+  const open = salesOrder('SO-OPEN', 'released', [
+    [10, 4],
+    [5, 0],
+  ]);
+  const shipped = salesOrder('SO-SHIPPED', 'released', [[3, 3]]);
+  const draft = salesOrder('SO-DRAFT', 'draft', [[7, 0]]);
+  salesOrder('SO-FOREIGN', 'released', [[9, 0]], foreign);
+  const salesView = (local: string) =>
+    id('list_view', `sales_order_list_${local}`);
+  const salesColumn = (local: string) =>
+    id('list_column', `sales_order_list_${local}`);
+  const salesUrl = (parameters: Record<string, string> = {}) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'sales_order_list'),
+      [id('parameter', 'sales_order_list_legal_entity_scope')]: scope,
+      ...parameters,
+    }).toString()}`;
+
+  const sales = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl(),
+    gateways,
+  );
+  assert.equal(sales.statusCode, 200);
+  // Tabs are server counts; To ship is released with something open.
+  assert.deepEqual(counts(sales.html), {
+    [salesView('all')]: 3,
+    [salesView('to_ship')]: 1,
+    [salesView('draft')]: 1,
+    [salesView('released')]: 2,
+    [salesView('closed')]: 0,
+    [salesView('cancelled')]: 0,
+  });
+  assert.equal(cell(sales.html, open, salesColumn('ordered')), '15');
+  assert.equal(cell(sales.html, open, salesColumn('shipped')), '4');
+  assert.equal(cell(sales.html, open, salesColumn('open')), '11');
+  // Open reads 0 outside the released state, and once all has shipped.
+  assert.equal(cell(sales.html, draft, salesColumn('open')), '0');
+  assert.equal(cell(sales.html, shipped, salesColumn('open')), '0');
+  assert.doesNotMatch(sales.html, /SO-FOREIGN/u);
+  assert.match(sales.html, /<th scope="col">Actions<\/th>/u);
+  // The row's one action: Fulfill while something is open on a released
+  // order, at its fulfillment section; otherwise View, at the page itself.
+  const fulfill = action(sales.html, open)!;
+  assert.deepEqual(
+    [fulfill.label, fulfill.name, fulfill.actionId],
+    [
+      'Fulfill',
+      'Fulfill SO-OPEN',
+      id('list_row_action', 'sales_order_list_fulfill'),
+    ],
+  );
+  const target = new URL(fulfill.href, 'http://fixture.local');
+  assert.equal(
+    target.searchParams.get('surface'),
+    id('surface', 'sales_order_detail'),
+  );
+  assert.equal(target.searchParams.get('record'), open);
+  assert.equal(
+    target.searchParams.get(
+      id('parameter', 'commercial_order_get_legal_entity_scope'),
+    ),
+    scope,
+  );
+  assert.equal(target.hash, `#${id('dataset', 'fulfillment_lines')}`);
+  for (const other of [shipped, draft]) {
+    const view = action(sales.html, other)!;
+    assert.equal(view.label, 'View');
+    assert.equal(new URL(view.href, 'http://fixture.local').hash, '');
+  }
+  // Progress re-enters current policy for the companies listed, every request.
+  const progressCalls = f.policy.calls.filter(
+    (call) =>
+      (call.decisionInput as { kind?: string }).kind ===
+      'registeredSemanticListProgressPolicyInput',
+  );
+  assert.deepEqual(
+    [...new Set(progressCalls.map((call) => call.permissionId))].sort(),
+    [
+      id('permission', 'sales_order_line_read'),
+      id('permission', 'sales_order_shipped_read'),
+    ],
+  );
+  // One page, six tab counts: each passed both reads.
+  assert.equal(progressCalls.length, 2 * 7);
+  const toShip = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ view: salesView('to_ship') }),
+    gateways,
+  );
+  assert.match(toShip.html, /data-list-total="1"/u);
+  assert.match(toShip.html, /SO-OPEN/u);
+  assert.doesNotMatch(toShip.html, /SO-SHIPPED|SO-DRAFT/u);
+
+  // Without shipped-quantity read the figures are supplementary: the List
+  // serves its other views with "—", saying which figures it reads without;
+  // To ship, which only they can judge, is refused by name and not counted.
+  f.deniedReads.add(id('permission', 'sales_order_shipped_read'));
+  const withheld = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl(),
+    gateways,
+  );
+  assert.equal(withheld.statusCode, 200);
+  assert.doesNotMatch(withheld.html, /data-diagnostic-code=/u);
+  assert.deepEqual(counts(withheld.html), {
+    [salesView('all')]: 3,
+    [salesView('to_ship')]: null,
+    [salesView('draft')]: 1,
+    [salesView('released')]: 2,
+    [salesView('closed')]: 0,
+    [salesView('cancelled')]: 0,
+  });
+  for (const local of ['ordered', 'shipped', 'open'])
+    assert.equal(cell(withheld.html, open, salesColumn(local)), withheldMark);
+  assert.match(
+    withheld.html,
+    new RegExp(
+      `data-list-progress-withheld="${id('query', 'sales_order_shipped_list')}">Ordered, Shipped and Open are withheld by current policy; To ship needs them and is unavailable.<`,
+      'u',
+    ),
+  );
+  // Nothing open can be stated, so no row promises the work.
+  assert.equal(action(withheld.html, open)?.label, 'View');
+  const refusedView = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ view: salesView('to_ship') }),
+    gateways,
+  );
+  assert.match(
+    refusedView.html,
+    /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u,
+  );
+  assert.doesNotMatch(refusedView.html, /SO-OPEN/u);
+  assert.equal(counts(refusedView.html)[salesView('all')], 3);
+  assert.match(refusedView.html, /aria-current="page"><span>To ship<\/span>/u);
+  // The export follows the page: the figures' columns are empty; an open
+  // view refuses rather than writing every row.
+  const exported = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ export: 'csv' }),
+    gateways,
+  );
+  assert.equal(exported.statusCode, 200);
+  const csv = exported
+    .download!.body.replace(/^\uFEFF/u, '')
+    .trimEnd()
+    .split('\r\n');
+  assert.equal(
+    csv[0],
+    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency',
+  );
+  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,CAD$/u.test(line)));
+  const refusedExport = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ view: salesView('to_ship'), export: 'csv' }),
+    gateways,
+  );
+  assert.equal(refusedExport.statusCode, 422);
+  assert.match(refusedExport.html, /QUERY_PERMISSION_DENIED/u);
+  // The gateway itself still refuses a request carrying the progress, by
+  // the progress query's name: the fallback is the runtime's, per request.
+  const refused = await gateways.queryGateway
+    .invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', 'sales_order_list'),
+      arguments: {
+        includeArchived: false,
+        [id('parameter', 'sales_order_list_legal_entity_scope')]: scope,
+        list: {
+          cursor: null,
+          matchMode: 'substring',
+          pageSize: 10,
+          relationLabels: [],
+          schemaVersion: 'northstar.shared-list-query/v1',
+          search: '',
+          sort: [],
+          progress: {
+            lines: {
+              fieldId: id('field', 'sales_order_line_ordered_quantity'),
+              queryId: id('query', 'commercial_lines'),
+              relationId: id('relation', 'sales_order_line_order'),
+            },
+            done: {
+              fieldId: id('field', 'sales_order_shipped_shipped_quantity'),
+              queryId: id('query', 'sales_order_shipped_list'),
+              relationId: id('relation', 'sales_order_shipped_order_line'),
+            },
+            outputs: {
+              done: id('list_output', 'sales_order_list_shipped'),
+              open: id('list_output', 'sales_order_list_open'),
+              ordered: id('list_output', 'sales_order_list_ordered'),
+            },
+          },
+        },
+      },
+    })
+    .then(
+      () => null,
+      (error: unknown) => error,
+    );
+  assert.ok(refused instanceof SemanticQueryPolicyDeniedError);
+  assert.equal(refused.queryId, id('query', 'sales_order_shipped_list'));
+  f.deniedReads.clear();
+
+  // Purchasing: the List reads its commercial clone, so each order states its
+  // total from its own lines, beside its received and open units.
+  const purchase = (
+    number: string,
+    state: string,
+    expected: string | null,
+    lines: readonly (readonly [
+      ordered: number,
+      received: number,
+      price: string | null,
+    ])[],
+  ) => {
+    const orderId = f.executor.seed(
+      'purchase_order',
+      {
+        [id('field', 'purchase_order_number')]: number,
+        [id('field', 'purchase_order_supplier_party_id')]: f.party,
+        [id('field', 'purchase_order_order_date')]: '2026-09-01T12:00:00.000Z',
+        [id('field', 'purchase_order_expected_date')]: expected,
+        [id('field', 'purchase_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.purchase_order_lifecycle')]: id(
+          'state',
+          `purchase_order_${state}`,
+        ),
+      },
+      scope,
+    );
+    for (const [index, [ordered, received, price]] of lines.entries()) {
+      const lineId = f.executor.seed(
+        'purchase_order_line',
+        {
+          [id('field', 'purchase_order_line_line_number')]: String(index + 1),
+          [id('field', 'purchase_order_line_ordered_quantity')]:
+            String(ordered),
+          [id('field', 'purchase_order_line_unit_price')]: price,
+          [id('relation', 'purchase_order_line_order')]: orderId,
+        },
+        scope,
+      );
+      if (received > 0)
+        f.executor.seed(
+          'purchase_order_received',
+          {
+            [id('field', 'purchase_order_received_received_quantity')]:
+              String(received),
+            [id('relation', 'purchase_order_received_order_line')]: lineId,
+          },
+          scope,
+        );
+    }
+    return orderId;
+  };
+  const late = purchase('PO-LATE', 'released', '2026-09-25T12:00:00.000Z', [
+    [10, 4, '2.5'],
+    [5, 0, '1.2'],
+  ]);
+  const received = purchase('PO-RECEIVED', 'released', null, [[3, 3, '4']]);
+  const unpriced = purchase('PO-UNPRICED', 'draft', null, [[2, 0, null]]);
+  const purchaseView = (local: string) =>
+    id('list_view', `purchase_order_list_${local}`);
+  const purchaseColumn = (local: string) =>
+    id('list_column', `purchase_order_list_${local}`);
+  // The clone renames the company parameter; the List reads by its own.
+  const purchaseUrl = (parameters: Record<string, string> = {}) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'purchase_order_list'),
+      [id('parameter', 'commercial_purchase_order_list_legal_entity_scope')]:
+        scope,
+      ...parameters,
+    }).toString()}`;
+  const orders = await renderSurfaceRuntimeWithData(
+    f.view,
+    purchaseUrl(),
+    gateways,
+  );
+  assert.equal(orders.statusCode, 200);
+  assert.deepEqual(counts(orders.html), {
+    [purchaseView('all')]: 3,
+    [purchaseView('to_receive')]: 1,
+    [purchaseView('late')]: 1,
+    [purchaseView('draft')]: 1,
+    [purchaseView('released')]: 2,
+    [purchaseView('closed')]: 0,
+    [purchaseView('cancelled')]: 0,
+  });
+  assert.equal(cell(orders.html, late, purchaseColumn('ordered')), '15');
+  assert.equal(cell(orders.html, late, purchaseColumn('received')), '4');
+  assert.equal(cell(orders.html, late, purchaseColumn('open')), '11');
+  // 10 × 2.50 + 5 × 1.20, untaxed: the figure the order page states.
+  assert.equal(cell(orders.html, late, purchaseColumn('total')), '31.00');
+  assert.equal(cell(orders.html, received, purchaseColumn('total')), '12.00');
+  // An unpriced line states no total, never a guessed one.
+  assert.equal(
+    cell(orders.html, unpriced, purchaseColumn('total')),
+    withheldMark,
+  );
+  // The Total is shown, never offered as a sort; the Expected date of the
+  // row the Late tab counts reads how late it is.
+  assert.doesNotMatch(
+    orders.html,
+    new RegExp(`data-sort-column="${purchaseColumn('total')}"`, 'u'),
+  );
+  assert.match(
+    cell(orders.html, late, purchaseColumn('expected_date')) ?? '',
+    /data-overdue-days="4">4 days late/u,
+  );
+  const receive = action(orders.html, late)!;
+  assert.deepEqual(
+    [receive.label, receive.name],
+    ['Receive', 'Receive PO-LATE'],
+  );
+  const receiving = new URL(receive.href, 'http://fixture.local');
+  assert.equal(
+    receiving.searchParams.get('surface'),
+    id('surface', 'purchase_order_detail'),
+  );
+  assert.equal(
+    receiving.searchParams.get(
+      id('parameter', 'commercial_purchase_order_get_legal_entity_scope'),
+    ),
+    scope,
+  );
+  assert.equal(receiving.hash, `#${id('dataset', 'purchasing_lines')}`);
+  assert.equal(action(orders.html, received)?.label, 'View');
+  assert.equal(action(orders.html, unpriced)?.label, 'View');
+  // The page read its query and each paged order's lines, nothing else.
+  const binding = readCompiledSurfaceDataBinding(
+    f.view,
+    f.surfaces.find(
+      (value) => value.surfaceId === id('surface', 'purchase_order_list'),
+    )!,
+  );
+  assert.equal(
+    binding.query.queryId,
+    id('query', 'commercial_purchase_order_list'),
+  );
+
+  // Without line read neither the figures nor the totals can be stated: the
+  // List still serves every view that is not open, with "—" for both.
+  f.deniedReads.add(id('permission', 'purchase_order_line_read'));
+  const linesWithheld = await renderSurfaceRuntimeWithData(
+    f.view,
+    purchaseUrl(),
+    gateways,
+  );
+  assert.equal(linesWithheld.statusCode, 200);
+  assert.doesNotMatch(linesWithheld.html, /data-diagnostic-code=/u);
+  for (const local of ['ordered', 'received', 'open', 'total'])
+    assert.equal(
+      cell(linesWithheld.html, late, purchaseColumn(local)),
+      withheldMark,
+      local,
+    );
+  assert.match(
+    linesWithheld.html,
+    new RegExp(
+      `data-list-progress-withheld="${id('query', 'purchase_order_line_list')}">Ordered, Received and Open are withheld by current policy; To receive and Late need them and are unavailable.<`,
+      'u',
+    ),
+  );
+  assert.doesNotMatch(linesWithheld.html, /data-overdue-days=/u);
+  assert.equal(action(linesWithheld.html, late)?.label, 'View');
+  const lateRefused = await renderSurfaceRuntimeWithData(
+    f.view,
+    purchaseUrl({ view: purchaseView('late') }),
+    gateways,
+  );
+  assert.match(
+    lateRefused.html,
+    /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u,
+  );
+  assert.deepEqual(counts(lateRefused.html), {
+    [purchaseView('all')]: 3,
+    [purchaseView('to_receive')]: null,
+    [purchaseView('late')]: null,
+    [purchaseView('draft')]: 1,
+    [purchaseView('released')]: 2,
+    [purchaseView('closed')]: 0,
+    [purchaseView('cancelled')]: 0,
+  });
+  // A single order's read keeps refusing: its page is its lines.
+  await assert.rejects(
+    gateways.queryGateway.invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', 'commercial_purchase_order_get'),
+      arguments: {
+        recordId: late,
+        includeArchived: false,
+        [id('parameter', 'commercial_purchase_order_get_legal_entity_scope')]:
+          scope,
+      },
+    }),
+    SemanticQueryPolicyDeniedError,
+  );
+  // Expected receipts keeps its refusal: its progress is its purpose.
+  f.deniedReads.clear();
+  f.deniedReads.add(id('permission', 'purchase_order_received_read'));
+  const expected = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({
+      surface: id('surface', 'expected_receipt_list'),
+      [id('parameter', 'expected_receipt_list_legal_entity_scope')]: scope,
+    }).toString()}`,
+    gateways,
+  );
+  assert.match(
+    expected.html,
+    /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u,
+  );
+  assert.doesNotMatch(expected.html, /data-view-id=/u);
+  // With received read withheld the totals still stand: they read lines.
+  const receivedWithheld = await renderSurfaceRuntimeWithData(
+    f.view,
+    purchaseUrl(),
+    gateways,
+  );
+  assert.equal(
+    cell(receivedWithheld.html, late, purchaseColumn('total')),
+    '31.00',
+  );
+  assert.equal(
+    cell(receivedWithheld.html, late, purchaseColumn('received')),
+    withheldMark,
+  );
 });
