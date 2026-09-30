@@ -34,6 +34,41 @@ import {
 } from '../../packages/domain/src/purchasing/index.js';
 import { evaluateRegisteredOperationPrecondition } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
+import { purchaseOrderRevisionDigest, currentPurchaseOrderApproval } from '../../packages/postgres-provider/src/purchase-order-approval.js';
+import { purchaseOrderApprovalInput } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
+import { localDemoActor } from '../../packages/runtime/src/local-demo-actor.js';
+
+test('approval revision identity changes for a header edit, line edit, addition or removal, never for query order', () => {
+  const lines = [{ recordId: 'b', revision: 1 }, { recordId: 'a', revision: 2 }];
+  const digest = purchaseOrderRevisionDigest(1, lines);
+  assert.equal(purchaseOrderRevisionDigest(1, [...lines].reverse()), digest);
+  for (const changed of [purchaseOrderRevisionDigest(2, lines), purchaseOrderRevisionDigest(1, [{ recordId: 'a', revision: 3 }, lines[0]!]), purchaseOrderRevisionDigest(1, lines.slice(1)), purchaseOrderRevisionDigest(1, [...lines, { recordId: 'c', revision: 1 }])]) assert.notEqual(changed, digest);
+  assert.equal(currentPurchaseOrderApproval(digest, [{ digest, state: 'approved', kind: 'order' }]), 'Approved');
+  assert.equal(currentPurchaseOrderApproval(digest, [{ digest: 'prior', state: 'approved', kind: 'order' }]), 'Not requested');
+  assert.equal(currentPurchaseOrderApproval(digest, [{ digest, state: 'approved', kind: 'amendment' }]), 'Not requested');
+  assert.equal(currentPurchaseOrderApproval(digest, [{ digest, state: 'consumed', kind: 'order' }]), 'Not requested');
+});
+
+test('approval inputs refuse forged actors, unknown arguments, missing decision reasons and inexact quantities', () => {
+  const base = { recordId: 'record', expectedRevision: 1 };
+  assert.equal(purchaseOrderApprovalInput({ ...base, arguments: { reason: 'Checked supplier terms' } }, 'approve').reason, 'Checked supplier terms');
+  assert.equal(purchaseOrderApprovalInput({ ...base, arguments: { supplierReference: null } }, 'release').supplierReference, null);
+  for (const input of [{ ...base, principalId: 'manager' }, { ...base, arguments: { decidedBy: 'manager', reason: 'x' } }, { ...base, arguments: { reason: '  ' } }, { ...base, expectedRevision: 1.5 }, { ...base, arguments: { reason: 'x'.repeat(1001) } }]) assert.throws(() => purchaseOrderApprovalInput(input, 'approve'));
+  for (const quantity of ['-1', '1e3', '1.0000000000000000001', 1]) assert.throws(() => purchaseOrderApprovalInput({ ...base, arguments: { quantity, reason: 'Changed demand' } }, 'amend'));
+  assert.equal(localDemoActor(undefined), 'buyer');
+  assert.equal(localDemoActor('irrelevant=yes; northstar-demo-actor=manager'), 'manager');
+  assert.equal(localDemoActor('northstar-demo-actor=administrator'), 'buyer');
+});
+
+test('the approval inbox is a declared List and requests have no generic write path or new PO state', () => {
+  const model = normalizeApplicationPackage(composedApplicationDefinition());
+  const request = 'northstar.app:entity.purchase_order_approval';
+  assert.ok(model.surfaces.find((surface) => surface.surfaceId === 'northstar.app:surface.purchase_order_approval_list')?.list);
+  assert.equal(model.operations.some((operation) => 'entity' in operation.effect && operation.effect.entity.targetId === request), false);
+  assert.equal(model.stateMachines.find((machine) => machine.machineId === 'northstar.app:machine.purchase_order_lifecycle')?.states.length, 4);
+  assert.equal(model.operations.find((operation) => operation.operationId === 'northstar.app:operation.purchase_order_release')?.label, 'Place order');
+  for (const local of ['approve', 'reject']) assert.equal(model.operations.find((operation) => operation.operationId === `northstar.app:operation.purchase_order_approval_${local}`)?.permission.targetId, 'northstar.app:permission.purchase_order_approve');
+});
 
 const namespace = PURCHASING_IDS.namespace;
 const stateFieldId = PURCHASING_IDS.stateFieldId;

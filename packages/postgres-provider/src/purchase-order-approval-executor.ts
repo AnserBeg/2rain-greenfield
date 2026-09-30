@@ -441,8 +441,9 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
           p.expectedRevision,
         ],
       );
+      const closesOnly = proposals.rows.length > 0 && proposals.rows.every((row) => row[pf('close_remainder')] === true);
       if (
-        proposals.rows.length > 1 ||
+        (proposals.rows.length > 1 && !closesOnly) ||
         ('quantity' in input && proposals.rows.length)
       )
         conflict('Archive competing staged amendment requests first');
@@ -480,7 +481,7 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
         );
         approvalId = String(after.record_id);
       } else {
-        await this.#amend(client, request, p, staged);
+        after = await this.#amend(client, request, p, staged);
       }
     } else {
       if (target[af('state')] !== this.#state('pending'))
@@ -521,20 +522,9 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
     }
     return {
       approvalId,
-      before: String(
-        target[
-          this.#field(
-            p.entity,
-            p.entity === b.orderLine
-              ? 'ordered_quantity'
-              : p.entity === a
-                ? 'state'
-                : 'number',
-          )
-        ] ?? '',
-      ),
+      entity: after.record_id === target.record_id ? p.entity : a,
+      before: after.record_id === target.record_id ? target : null,
       after,
-      target,
     };
   }
   async #request(
@@ -549,6 +539,13 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
   ) {
     const a = this.#approval,
       f = (name: string) => this.#field(a, name);
+    let currentQuantity: string | null = null, proposedQuantity: string | null = null;
+    if (amendmentId) {
+      const staged = await receiptRow(client, this.#amendment, request.context, p.legalEntityId, amendmentId);
+      const line = await receiptRow(client, this.#binding.orderLine, request.context, p.legalEntityId, p.recordId);
+      currentQuantity = String(line[this.#field(this.#binding.orderLine, 'ordered_quantity')]);
+      proposedQuantity = staged[this.#field(this.#amendment, 'close_remainder')] === true ? 'Received quantity when approved' : String(staged[this.#field(this.#amendment, 'quantity')]);
+    }
     return this.#insert(client, request, a, p.legalEntityId, {
       [f('number')]: randomUUID(),
       [f('order_number')]: order[this.#field(this.#binding.order, 'number')],
@@ -560,6 +557,8 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
       [f('reason')]: reason,
       [f('decision_reason')]: null,
       [f('amendment_id')]: amendmentId,
+      [f('current_quantity')]: currentQuantity,
+      [f('proposed_quantity')]: proposedQuantity,
       [receiptRelation(this.#binding, a, 'purchase_order_approval_order')]:
         p.orderId,
     });
@@ -594,6 +593,12 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
     await this.#update(client, request, this.#amendment, staged, {
       archived_at: this.context.currentInstant(),
     });
+    if (staged[f('close_remainder')] === true) {
+      const others = await client.query<Row>(`SELECT * FROM ${receiptTable(this.#amendment)} WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3 AND ${q(receiptRelation(this.#binding, this.#amendment, 'purchase_order_amendment_order_line'))}=$4 AND ${q(f('line_revision'))}=$5 AND archived_at IS NULL ORDER BY record_id FOR NO KEY UPDATE`, [request.context.tenantId, request.context.environmentId, p.legalEntityId, lineId, staged[f('line_revision')]]);
+      if (others.rows.some((row) => row[f('close_remainder')] !== true)) conflict('Competing amendment requests cannot be consumed together');
+      for (const other of others.rows) await this.#update(client, request, this.#amendment, other, { archived_at: this.context.currentInstant() });
+    }
+    return receiptRow(client, this.#binding.orderLine, request.context, p.legalEntityId, lineId);
   }
   async execute(
     request: ExecutionRequest,
@@ -656,22 +661,17 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
               },
               change: {
                 changeDocumentId: randomUUID(),
-                recordId: p.recordId,
-                recordType: p.entity.entityId,
+                recordId: String(changed.after.record_id),
+                recordType: changed.entity.entityId,
                 revision: Number(changed.after.revision),
-                changes: [
-                  {
+                changes: changed.entity.columns.filter((column) =>
+                  String(changed.before?.[column.physicalName] ?? null) !== String(changed.after[column.physicalName] ?? null),
+                ).map((column) => ({
                     classification: 'INTERNAL' as const,
-                    fieldId: auditFieldId(
-                      `${p.entity.entityId}:approval_action`,
-                    ),
-                    oldState: {
-                      state: 'VALUE' as const,
-                      value: changed.before,
-                    },
-                    newState: { state: 'VALUE' as const, value: p.action },
-                  },
-                ],
+                    fieldId: auditFieldId(column.canonicalFieldId),
+                    oldState: changed.before?.[column.physicalName] == null ? { state: 'ABSENT' as const } : { state: 'VALUE' as const, value: changed.before[column.physicalName] as string | boolean },
+                    newState: changed.after[column.physicalName] == null ? { state: 'ABSENT' as const } : { state: 'VALUE' as const, value: changed.after[column.physicalName] as string | boolean },
+                })),
               },
               event: {
                 eventId: randomUUID(),

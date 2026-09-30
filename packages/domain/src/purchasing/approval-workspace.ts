@@ -81,6 +81,8 @@ export function approvalWorkspace(namespace: string): Record<string, unknown> {
       column('reason', 'Request reason', 50),
       column('decided_by', 'Decided by', 60),
       column('decision_reason', 'Decision reason', 70),
+      column('current_quantity', 'Current ordered quantity', 80),
+      column('proposed_quantity', 'Proposed ordered quantity', 90),
     ],
     children: [],
     actions: ['approve', 'reject'].map((decision) => ({

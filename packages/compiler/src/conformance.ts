@@ -2402,6 +2402,15 @@ export function validateModuleConformance(
     const operationEffects = new Set(
       entityOperations.map((operation) => operation.effect.kind),
     );
+    // A declared record-mutation capability may own an entity's complete
+    // write path. Its commands identify the entity through their declared
+    // read-back; granting generic CRUD as well would allow callers to forge
+    // capability-produced records. Partly generic entities still owe all CRUD.
+    const capabilityOwned = entityOperations.length === 0 && packageRevision.operations.some((operation) =>
+      operation.lifecycle === 'active' && operation.effect.kind === 'registeredCapabilityEffect' &&
+      queryById.get(operation.readBack.targetId)?.sourceEntity.targetId === entity.entityId &&
+      packageRevision.capabilityRequirements.some((requirement) => requirement.capabilityId === operation.effect.capability.targetId && requirement.supportStatus === 'supported' && requirement.declaredEffects.includes('recordMutation')),
+    );
     const authoredEntityOperations = providerWrittenReadModelRule
       ? packageRevision.operations.filter((operation) =>
           operationTargetsEntity(packageRevision, operation, entity.entityId),
@@ -2432,6 +2441,7 @@ export function validateModuleConformance(
         factStorage?.mutability !== 'appendOnly' &&
         !periodLockStorage &&
         !providerWrittenReadModel &&
+        !capabilityOwned &&
         !operationEffects.has(effect)
       ) {
         missing(
@@ -2505,6 +2515,7 @@ export function validateModuleConformance(
         !(
           (factStorage?.mutability === 'appendOnly' ||
             periodLockStorage ||
+            capabilityOwned ||
             providerWrittenReadModel) &&
           role === 'form'
         ) &&

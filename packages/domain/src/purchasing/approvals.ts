@@ -52,6 +52,8 @@ export function withPurchaseOrderApprovals(
       ['reason', 'Request reason', text(1000), true],
       ['decision_reason', 'Decision reason', text(1000), true],
       ['amendment_id', 'Staged amendment', text(80), true],
+      ['current_quantity', 'Current ordered quantity', text(80), true],
+      ['proposed_quantity', 'Proposed ordered quantity', text(80), true],
     ],
     purchasing_settings: [
       ['key', 'Setting', text(60), false],
@@ -267,6 +269,12 @@ export function withPurchaseOrderApprovals(
   );
   return {
     ...definition,
+    assertions: [...collection('assertions'), ...Object.keys(specs).map((local) => ({
+      kind: 'assertionDefinition', schemaVersion: version, assertionId: id('assertion', `${local}_walking_slice`),
+      evidenceKinds: ['structure', 'provider', 'userInterface', 'agent', 'migration', 'recovery'],
+      expectedDiagnosticCode: null, expectedOutcome: 'succeeds',
+      invocation: { kind: 'queryInvocation', schemaVersion: version, query: ref('queryReference', id('query', `${local}_get`)) },
+    }))],
     capabilityRequirements: [
       ...collection('capabilityRequirements'),
       {
