@@ -32,8 +32,8 @@ None owed: no Critical-set path changes.
 
 - Focused moving-average unit cases 6/6; scoped/paged/current-policy integration 1/1; release freshness `--check` PASS.
 - Compiled from the PAYABLES base envelope: one added lineage entry (6 total), 102 surfaces, 17 navigation destinations, 573 verification scenarios; coverage re-derived: 2654 obligations / 811 observed, unchanged.
-- Lint, typecheck and formatting PASS after the dependency merge; focused unit/workspace/surface grammar 44/44; broader unit/compiler/integration/web contracts 257/257; PostgreSQL stored-row oracle 1/1; operations browser 1/1 (one worker, ~2 min); architecture 71 checks with one fixture drift corrected, surface grammar recheck 25/25. CI run [36783423844](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36783423844) reported one stale List inventory (208/209 unit cases); corrected locally, List 6/6. Refreshed compiler/integration/web contracts 237/237. Full green matrix remains pending.
-- Small bridges: fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
+- Lint, typecheck and formatting PASS after the dependency merge; focused unit/workspace/surface grammar 44/44; broader unit/compiler/integration/web contracts 257/257; PostgreSQL stored-row oracle 1/1; operations browser 1/1 (one worker, ~2 min); architecture 71 checks with one fixture drift corrected, surface grammar recheck 25/25. First CI [36783423844](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36783423844): quality 208/209, PostgreSQL 224/225, operations browser 30/31; three stale inventories corrected (Lists, PAYABLES numbering, navigation). New stored-row oracle and valuation browser passed; composed replay, commercial PostgreSQL, standard browser, performance and security green. Local List 6/6, numbering 2/2, refreshed compiler/integration/web contracts 237/237; navigation browser queued under the exclusive lock. Full green matrix remains pending.
+- Small bridges: PAYABLES numbering and composed navigation inventories measured from compilation; fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
 
 ## Test it yourself
 
@@ -48,10 +48,11 @@ None owed: no Critical-set path changes.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "VALUATION",
   "base": "a3b104db44b58382db48ad67687ec159d8c31bba",
-  "head": "3e682b1d88bb95cd1de4b91bb59fc8d2fc6bd04f",
+  "head": "75cb4a9da46988294eb39fc91e178fe1694e54ae",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
+    "apps/web/test/browser/composed-application.spec.ts",
     "apps/web/test/browser/inventory-valuation.spec.ts",
     "apps/web/test/surface-runtime-contract.test.ts",
     "package.json",
@@ -73,6 +74,7 @@ None owed: no Critical-set path changes.
     "test/helpers/without-inventory-valuation.ts",
     "test/integration/surface-data-binding.test.ts",
     "test/postgres/composed-application.test.ts",
+    "test/postgres/document-numbering.test.ts",
     "test/postgres/inventory-valuation.test.ts",
     "test/postgres/module-storage-transition.test.ts",
     "test/unit/canonical-model/surface-list.test.ts",
