@@ -1040,16 +1040,19 @@ const editorPresentation = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('multiline') }),
   z.strictObject({
     kind: z.literal('choice'),
+    // As long as a canonical id: a choice over an enumeration offers option
+    // ids. The workspace validator still holds each value to its field -- text
+    // that fits it, or an option it declares.
     options: z
       .array(
         z.strictObject({
-          value: z.string().min(1).max(64),
+          value: z.string().min(1).max(180),
           label: LabelSchema,
         }),
       )
       .min(1)
       .max(20),
-    defaultValue: z.string().min(1).max(64).optional(),
+    defaultValue: z.string().min(1).max(180).optional(),
   }),
   z.strictObject({
     kind: z.literal('derived'),
@@ -1188,6 +1191,32 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
   lineFields: z.array(editorField).min(1).max(15),
   lineNumberFieldId: CanonicalIdSchema,
   saveMode: z.literal('sequential'),
+  /**
+   * Values a never-saved document's first create also writes, in header
+   * fields the editor does not offer: a literal (a draft state, a source
+   * type) or the document's own record id (a stock document naming itself as
+   * its posting source). An update never sends them. Optional v6 key
+   * (ADR-0047 §7).
+   */
+  createValues: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        value: z.discriminatedUnion('source', [
+          z.strictObject({
+            source: z.literal('literal'),
+            value: z.string().min(1).max(200),
+          }),
+          z.strictObject({
+            source: z.literal('record'),
+            field: z.literal('recordId'),
+          }),
+        ]),
+      }),
+    )
+    .min(1)
+    .max(4)
+    .optional(),
 });
 export type SurfaceDocumentEditor = z.infer<typeof SurfaceDocumentEditorSchema>;
 export type SurfaceEditorField = SurfaceDocumentEditor['headerFields'][number];

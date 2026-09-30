@@ -9799,3 +9799,205 @@ test('INVENTORY-PARITY: the item page lists the stock and movements of one compa
   }
   assert.doesNotMatch(broad.html, /OTHER-ITEM|>99</u);
 });
+
+test('INVENTORY-PARITY: a stock document is entered in the shared editor; its first save writes the draft state and names the document as its own posting source, and nothing later rewrites them', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const location = (code: string, name: string) =>
+    f.executor.seed('location', {
+      [field('location_code')]: code,
+      [field('location_name')]: name,
+      [field('location_type')]: id('option', 'warehouse'),
+    });
+  const main = location('CAL-WH', 'Calgary warehouse');
+  location('VAN-WH', 'Vancouver warehouse');
+  const form = f.surfaces.find(
+    (value) => value.surfaceId === id('surface', 'inventory_transaction_form'),
+  )!;
+  assert.ok(form.documentEditor, 'the stock document form is the editor');
+  const url = new URL(
+    `http://fixture.local/?surface=${encodeURIComponent(form.surfaceId)}&${encodeURIComponent(id('parameter', 'inventory_transaction_get_legal_entity_scope'))}=${scope}`,
+  );
+  const open = () =>
+    documentEditor(f.view, form, f.surfaces, url, scope, f.gateways);
+  type Rendered = NonNullable<Awaited<ReturnType<typeof open>>>;
+  const post = (
+    rendered: Rendered,
+    action: string,
+    values: Record<string, string> = {},
+  ) =>
+    documentEditor(f.view, form, f.surfaces, url, scope, f.gateways, {
+      draftSession: hiddenValue(rendered.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(rendered.slots!.keyFacts!, 'draftVersion'),
+      draftAction: action,
+      ...values,
+    });
+  const page = (rendered: Rendered) => Object.values(rendered.slots!).join('');
+  // Every offered control, as an operator fills a damaged-stock adjustment:
+  // two units taken from the Calgary warehouse.
+  const entered: Record<string, string> = {
+    inventory_transaction_type: id(
+      'option',
+      'inventory_transaction_type_adjustment',
+    ),
+    inventory_transaction_reason_code: 'DAMAGED',
+    inventory_transaction_reason_narrative: 'Forklift damage',
+    inventory_transaction_effective_at: '2026-09-30T00:00',
+    inventory_transaction_line_item_id: f.item,
+    inventory_transaction_line_from_location_id: main,
+    inventory_transaction_line_to_location_id: '',
+    inventory_transaction_line_quantity: '-2',
+  };
+  const fill = (
+    rendered: Rendered,
+    changed: Record<string, string> = {},
+  ): Record<string, string> => {
+    const result: Record<string, string> = {};
+    for (const match of page(rendered).matchAll(/name="(draft:[^"]+)"/g)) {
+      const local = match[1]!.split(':field.')[1]!;
+      result[match[1]!] = changed[local] ?? entered[local] ?? '';
+    }
+    return result;
+  };
+
+  const editor = (await open())!;
+  const html = page(editor);
+  assert.match(html, /<legend>Stock document<\/legend>/u);
+  assert.match(
+    html,
+    /A draft does not change stock; Post is a separate, confirmed action\./u,
+  );
+  // Of the stored types only an adjustment or a transfer is offered, the
+  // adjustment first; the reasons include opening stock.
+  const type = new RegExp(
+    `<select[^>]*name="draft:[^"]+:${field('inventory_transaction_type').replaceAll('.', '\\.')}"[^>]*>([\\s\\S]*?)</select>`,
+    'u',
+  ).exec(html)?.[1];
+  assert.deepEqual(
+    [...(type ?? '').matchAll(/<option value="([^"]*)"( selected)?>/gu)].map(
+      (option) => [option[1], option[2] === ' selected'],
+    ),
+    [
+      [id('option', 'inventory_transaction_type_adjustment'), true],
+      [id('option', 'inventory_transaction_type_transfer'), false],
+    ],
+  );
+  assert.match(html, /<option value="OPENING">Opening stock<\/option>/u);
+  // The number is the server's, and the state and source are the editor's
+  // own: none of them is a control.
+  for (const local of [
+    'inventory_transaction_number',
+    'inventory_transaction_state',
+    'inventory_transaction_source_type',
+    'inventory_transaction_source_id',
+    'inventory_transaction_recorded_at',
+    'inventory_transaction_actor_id',
+  ])
+    assert.doesNotMatch(html, new RegExp(`name="draft:[^"]+:${field(local)}"`));
+  const headerId = new RegExp(
+    `name="draft:([^:"]+):${field('inventory_transaction_type').replaceAll('.', '\\.')}"`,
+    'u',
+  ).exec(html)![1]!;
+
+  // A forged number, state or source rides along and is ignored.
+  const saved = (await post(editor, 'save', {
+    ...fill(editor),
+    [`draft:${headerId}:${field('inventory_transaction_number')}`]:
+      'STK-FORGED',
+    [`draft:${headerId}:${field('inventory_transaction_state')}`]: id(
+      'option',
+      'inventory_transaction_state_posted',
+    ),
+    [`draft:${headerId}:${field('inventory_transaction_source_id')}`]: 'forged',
+  }))!;
+  assert.equal(saved.statusCode, 303);
+  const recordId = new URL(
+    saved.location!,
+    'http://fixture.local',
+  ).searchParams.get('record')!;
+  assert.equal(recordId, headerId);
+  const [create, line] = f.executor.calls;
+  assert.equal(
+    create!.definition.operationId,
+    id('operation', 'inventory_transaction_create'),
+  );
+  const created = asRecord(create!.input);
+  assert.equal(created.recordId, recordId);
+  assert.equal(created.legalEntityId, scope);
+  assert.deepEqual(asRecord(created.values), {
+    [field('inventory_transaction_type')]: id(
+      'option',
+      'inventory_transaction_type_adjustment',
+    ),
+    [field('inventory_transaction_reason_code')]: 'DAMAGED',
+    [field('inventory_transaction_reason_narrative')]: 'Forklift damage',
+    [field('inventory_transaction_effective_at')]: '2026-09-30T00:00:00.000Z',
+    [field('inventory_transaction_state')]: id(
+      'option',
+      'inventory_transaction_state_draft',
+    ),
+    [field('inventory_transaction_source_type')]: 'inventoryTransaction',
+    [field('inventory_transaction_source_id')]: recordId,
+  });
+  // The line: the product, where the stock comes from, the signed quantity,
+  // the product's own unit and the next line number, under this document.
+  const lineInput = asRecord(line!.input);
+  assert.deepEqual(asRecord(lineInput.values), {
+    [field('inventory_transaction_line_item_id')]: f.item,
+    [field('inventory_transaction_line_from_location_id')]: main,
+    [field('inventory_transaction_line_to_location_id')]: null,
+    [field('inventory_transaction_line_quantity')]: '-2',
+    [field('inventory_transaction_line_unit_id')]: 'EA',
+    [field('inventory_transaction_line_line_number')]: '1',
+  });
+  assert.deepEqual(lineInput.relations, {
+    [id('relation', 'inventory_transaction_line_transaction')]: recordId,
+  });
+  assert.equal(f.executor.calls.length, 2);
+
+  // Reopened, the draft updates only what changed: the create values are
+  // never sent again, so the document stays its own posting source.
+  url.searchParams.set('record', recordId);
+  const reopened = (await open())!;
+  const updated = (await post(
+    reopened,
+    'save',
+    fill(reopened, {
+      inventory_transaction_reason_narrative: 'Forklift damage, bay 4',
+    }),
+  ))!;
+  assert.equal(updated.statusCode, 303);
+  assert.equal(f.executor.calls.length, 3);
+  assert.deepEqual(asRecord(asRecord(f.executor.calls[2]!.input).patch), {
+    [field('inventory_transaction_type')]: id(
+      'option',
+      'inventory_transaction_type_adjustment',
+    ),
+    [field('inventory_transaction_reason_code')]: 'DAMAGED',
+    [field('inventory_transaction_reason_narrative')]: 'Forklift damage, bay 4',
+    [field('inventory_transaction_effective_at')]: '2026-09-30T00:00:00.000Z',
+  });
+  const stored = f.executor.rows.get(recordId)!;
+  assert.equal(
+    stored.values[field('inventory_transaction_source_id')],
+    recordId,
+  );
+
+  // Once posted, the document is no longer editable here.
+  f.executor.rows.set(recordId, {
+    ...stored,
+    values: {
+      ...stored.values,
+      [field('inventory_transaction_state')]: id(
+        'option',
+        'inventory_transaction_state_posted',
+      ),
+    },
+  });
+  const locked = (await open())!;
+  assert.equal(locked.statusCode, 422);
+  assert.match(locked.html, /DRAFT_EDITOR_LOCKED/u);
+});

@@ -2548,6 +2548,29 @@ function snapshot(
         values.set(referenceKey(line.id, fieldId), line.values[fieldId]);
   return values;
 }
+/**
+ * The declared create values a row's save also writes: only the header's
+ * first create, never an update, a removal or a line. A literal is sent as
+ * declared; the record id is the header row's own, the id its create sends.
+ */
+export function createValuesFor(
+  definition: SurfaceDocumentEditor,
+  row: {
+    readonly id: string;
+    readonly record: unknown;
+    readonly removed: boolean;
+  },
+  header: boolean,
+): Readonly<Record<string, string>> {
+  if (!header || row.record || row.removed) return {};
+  return Object.fromEntries(
+    (definition.createValues ?? []).map((entry) => [
+      entry.fieldId,
+      entry.value.source === 'record' ? row.id : entry.value.value,
+    ]),
+  );
+}
+
 function plan(
   view: RequestRuntimeView,
   surfaces: readonly CompiledSurfaceDefinition[],
@@ -2592,6 +2615,12 @@ function plan(
       }
       values[field.fieldId] = value;
     }
+    for (const [fieldId, value] of Object.entries(
+      createValuesFor(definition, row, row === buffer.header),
+    )) {
+      if (!allowed.has(fieldId)) throw new Error('Editor field unavailable');
+      values[fieldId] = value;
+    }
     const input: Values = row.record
       ? {
           recordId: row.id,
@@ -2634,7 +2663,7 @@ function plan(
     buffer.header,
     definition.headerFormSurfaceId,
     definition.headerFields,
-    'Order details',
+    definition.headerLabel ?? 'Order details',
   );
   let number = Math.max(
     0,

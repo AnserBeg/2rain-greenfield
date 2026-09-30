@@ -344,7 +344,6 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
             recordId: admittedTransactionId,
             relations: {},
             values: requiredOperationValues(transaction, {
-              [fieldId('inventory_transaction_number')]: 'DRAFT-CANDIDATE',
               [fieldId('inventory_transaction_state')]: optionId(
                 'inventory_transaction_state_draft',
               ),
@@ -369,8 +368,6 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
                 recordId: randomUUID(),
                 relations: {},
                 values: requiredOperationValues(transaction, {
-                  [fieldId('inventory_transaction_number')]:
-                    `FORGED-${terminalState.toUpperCase()}`,
                   [fieldId('inventory_transaction_state')]: optionId(
                     `inventory_transaction_state_${terminalState}`,
                   ),
@@ -390,8 +387,11 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
           'inventory_transaction_update',
           {
             expectedRevision: 1,
+            // The number is the server's (INVENTORY-PARITY), so the ordinary
+            // edit is the narrative.
             patch: {
-              [fieldId('inventory_transaction_number')]: 'DRAFT-REWRITE',
+              [fieldId('inventory_transaction_reason_narrative')]:
+                'DRAFT-REWRITE',
             },
             recordId: transactionId,
           },
@@ -934,7 +934,10 @@ async function invokeOperation(
 
 function inventoryApplicationDefinition(): Record<string, unknown> {
   const application = composedApplicationDefinition();
-  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE, {
+    documentEntry: true,
+  });
   for (const collection of [
     'assertions',
     'entities',
@@ -1036,7 +1039,13 @@ function requiredOperationValues(
 ): Record<string, ImmutableJsonValue> {
   return Object.fromEntries(
     entity.columns
-      .filter((column) => column.fieldContract.required)
+      .filter(
+        (column) =>
+          column.fieldContract.required &&
+          // The server assigns a transaction's number (INVENTORY-PARITY); no
+          // request supplies it.
+          column.canonicalFieldId !== fieldId('inventory_transaction_number'),
+      )
       .map((column) => [
         column.canonicalFieldId,
         Object.hasOwn(overrides, column.canonicalFieldId)

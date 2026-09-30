@@ -94,6 +94,9 @@ export function validateFieldNumbering(
           String(field.fieldId),
           'an assigned number is not an editor field',
         );
+    for (const value of editor?.createValues ?? [])
+      if (numbered.has(String(value.fieldId)))
+        fail(String(value.fieldId), 'an assigned number is not a create value');
     const composition =
       'composition' in surface ? surface.composition : undefined;
     for (const action of composition?.actions ?? [])

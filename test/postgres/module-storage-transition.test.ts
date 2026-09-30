@@ -5599,7 +5599,10 @@ function emptyModuleDefinition(): Record<string, unknown> {
 
 function inventoryOwnedModuleDefinition(): Record<string, unknown> {
   const application = composedApplicationDefinition();
-  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE, {
+    documentEntry: true,
+  });
   for (const collection of [
     'assertions',
     'entities',
@@ -5751,7 +5754,7 @@ function composedApplicationWithoutInventoryForTransition(): Record<
   );
   return withoutModuleForTransition(
     application,
-    inventoryModuleDefinition(APPLICATION_NAMESPACE),
+    inventoryModuleDefinition(APPLICATION_NAMESPACE, { documentEntry: true }),
     'inventory',
   );
 }

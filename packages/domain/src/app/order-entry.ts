@@ -1,5 +1,12 @@
 import { isWorklist } from './list-declarations.js';
 
+/** Each document List's own name; any other editor's List keeps its label. */
+const DOCUMENT_LIST_LABELS: Readonly<Record<string, string>> = {
+  sales_order: 'Sales orders',
+  purchase_order: 'Purchase orders',
+  inventory_transaction: 'Inventory transactions',
+};
+
 /** Product declarations for the shared draft document renderer. */
 export function orderEntrySurfaces(
   namespace: string,
@@ -472,7 +479,145 @@ export function orderEntrySurfaces(
       ],
     };
   };
-  const documents = new Map([
+  /**
+   * A stock document (INVENTORY-PARITY): an adjustment or a transfer, entered
+   * like an order. The server numbers it STK-000001 on its first save, which
+   * also writes its draft state and names the document itself as its posting
+   * source; Post stays the existing confirmed command on the saved record.
+   */
+  const stockDocument = () => {
+    const field = (
+      name: string,
+      label: string,
+      declared: Record<string, unknown> = {},
+    ) => ({ fieldId: id('field', name), label, ...declared });
+    const option = (name: string) =>
+      id('option', `inventory_transaction_${name}`);
+    const choice = (
+      options: readonly (readonly [value: string, label: string])[],
+      defaultValue?: string,
+    ) => ({
+      presentation: {
+        kind: 'choice',
+        options: options.map(([value, label]) => ({ value, label })),
+        ...(defaultValue ? { defaultValue } : {}),
+      },
+    });
+    const location = {
+      reference: {
+        queryId: id('query', 'location_list'),
+        getQueryId: id('query', 'location_get'),
+        labelFieldIds: [id('field', 'location_name')],
+        detailFieldIds: [id('field', 'location_code')],
+      },
+    };
+    return {
+      kind: 'draftDocumentEditor',
+      headerLabel: 'Stock document',
+      linesLabel: 'Lines',
+      saveDescription:
+        'Save commits the header and each line. A draft does not change stock; Post is a separate, confirmed action.',
+      saveMode: 'sequential',
+      headerFormSurfaceId: id('surface', 'inventory_transaction_form'),
+      recordSurfaceId: id('surface', 'inventory_transaction_detail'),
+      lineFormSurfaceId: id('surface', 'inventory_transaction_line_form'),
+      lineQueryId: id('query', 'inventory_transaction_line_list'),
+      parentRelationId: id(
+        'relation',
+        'inventory_transaction_line_transaction',
+      ),
+      stateFieldId: id('field', 'inventory_transaction_state'),
+      editableStateIds: [option('state_draft')],
+      lineNumberFieldId: id('field', 'inventory_transaction_line_line_number'),
+      headerFields: [
+        // Of the stored types, only these two post through this document.
+        field(
+          'inventory_transaction_type',
+          'Type',
+          choice(
+            [
+              [option('type_adjustment'), 'Adjustment'],
+              [option('type_transfer'), 'Transfer'],
+            ],
+            option('type_adjustment'),
+          ),
+        ),
+        // Opening stock is an adjustment with the reason OPENING (ruling R3).
+        field(
+          'inventory_transaction_reason_code',
+          'Reason',
+          choice([
+            ['DAMAGED', 'Damaged'],
+            ['FOUND', 'Found'],
+            ['LOST', 'Lost'],
+            ['COUNT_ERROR', 'Count error'],
+            ['SCRAP', 'Scrap'],
+            ['OPENING', 'Opening stock'],
+            ['RELOCATION', 'Relocation'],
+          ]),
+        ),
+        field('inventory_transaction_reason_narrative', 'Narrative', {
+          presentation: { kind: 'multiline' },
+        }),
+        // Today, midnight UTC: the posting window admits no earlier day.
+        field('inventory_transaction_effective_at', 'Effective date', {
+          defaultDaysFromToday: 0,
+        }),
+      ],
+      createValues: [
+        {
+          fieldId: id('field', 'inventory_transaction_state'),
+          value: { source: 'literal', value: option('state_draft') },
+        },
+        {
+          fieldId: id('field', 'inventory_transaction_source_type'),
+          value: { source: 'literal', value: 'inventoryTransaction' },
+        },
+        {
+          fieldId: id('field', 'inventory_transaction_source_id'),
+          value: { source: 'record', field: 'recordId' },
+        },
+      ],
+      lineFields: [
+        // Products are chosen, never created here: a stock document does not
+        // mint masters.
+        field('inventory_transaction_line_item_id', 'Product', {
+          reference: {
+            queryId: id('query', 'item_list'),
+            getQueryId: id('query', 'item_get'),
+            labelFieldIds: [id('field', 'item_name')],
+            detailFieldIds: [
+              id('field', 'item_sku'),
+              id('field', 'item_base_unit'),
+            ],
+          },
+        }),
+        // A negative adjustment takes stock from its From location, a
+        // positive one adds it at its To location; a transfer names both.
+        field(
+          'inventory_transaction_line_from_location_id',
+          'From location',
+          location,
+        ),
+        field(
+          'inventory_transaction_line_to_location_id',
+          'To location',
+          location,
+        ),
+        field('inventory_transaction_line_quantity', 'Quantity'),
+        // The posting kernel takes the product's base unit and no other.
+        field('inventory_transaction_line_unit_id', 'Unit', {
+          presentation: {
+            kind: 'derived',
+            referenceFieldId: id('field', 'inventory_transaction_line_item_id'),
+            sourceFieldId: id('field', 'item_base_unit'),
+          },
+        }),
+      ],
+    };
+  };
+  const documents = new Map<string, Record<string, unknown>>([
+    ['inventory_transaction', stockDocument()],
     [
       'sales_order',
       document('sales_order', 'customer', 'requested_date', true),
@@ -582,10 +727,8 @@ export function orderEntrySurfaces(
             }
           : {}),
       },
-      ...(editor && role === 'list'
-        ? {
-            label: local === 'sales_order' ? 'Sales orders' : 'Purchase orders',
-          }
+      ...(editor && role === 'list' && DOCUMENT_LIST_LABELS[local]
+        ? { label: DOCUMENT_LIST_LABELS[local] }
         : {}),
       ...(local === 'customer_invoice' && role === 'list'
         ? { label: 'Invoices' }

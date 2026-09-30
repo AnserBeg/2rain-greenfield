@@ -172,9 +172,22 @@ const ENTITY_OWNED_QUERY_FAMILIES = new Set([
  */
 export function inventoryModuleDefinition(
   namespace: string = INVENTORY_NAMESPACE,
+  options: {
+    /**
+     * Stock documents recorded like any other document (INVENTORY-PARITY):
+     * a transaction takes a server-assigned `STK-000001` number on its first
+     * save, and its source, recorded time and actor stop being authored --
+     * the editor stores the document as its own posting source, and the
+     * movements carry the recorded time and actor. The product application
+     * mounts Inventory with this; the standalone kernel harness keeps the
+     * module it has always compiled.
+     */
+    readonly documentEntry?: boolean;
+  } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const { entityIds, fieldIds, moduleId, packageId } = definitionIds;
+  const documentEntry = options.documentEntry === true;
   const standardEntities = [
     ['legal_entity', 'Legal entity', entityIds.legalEntity],
     ['inventory_transaction', 'Inventory transaction', entityIds.transaction],
@@ -304,6 +317,9 @@ export function inventoryModuleDefinition(
         {
           businessKey: true,
           searchable: true,
+          // The prefix differs from the kernel's companion numbers (GR-, SH-,
+          // SC- followed by a uuid), which the allocator's scan never matches.
+          ...(documentEntry ? { numberedAs: 'STK' } : {}),
         },
       ),
       field(
@@ -359,6 +375,7 @@ export function inventoryModuleDefinition(
         'Source type',
         60,
         text(80),
+        { optional: documentEntry },
       ),
       field(
         definitionIds,
@@ -367,6 +384,7 @@ export function inventoryModuleDefinition(
         'Source id',
         70,
         text(80),
+        { optional: documentEntry },
       ),
       field(
         definitionIds,
@@ -383,6 +401,7 @@ export function inventoryModuleDefinition(
         'Recorded at',
         90,
         instant(),
+        { optional: documentEntry },
       ),
       field(
         definitionIds,
@@ -391,6 +410,7 @@ export function inventoryModuleDefinition(
         'Actor id',
         100,
         text(80),
+        { optional: documentEntry },
       ),
 
       field(
@@ -1197,11 +1217,27 @@ function field(
     businessKey?: boolean;
     optional?: boolean;
     searchable?: boolean;
+    /** A server-assigned document number: `PREFIX-000001`, one per tenant. */
+    numberedAs?: string;
   } = {},
 ): Record<string, unknown> {
+  const local = entityId.slice(
+    entityId.indexOf(':entity.') + ':entity.'.length,
+  );
   return {
     ...(options.businessKey
       ? { businessKey: 'tenantEnvironmentCaseInsensitiveUnique' }
+      : {}),
+    ...(options.numberedAs
+      ? {
+          numbering: {
+            kind: 'documentSequence',
+            sequenceId: `${ids.namespace}:document_sequence.${local}`,
+            prefix: options.numberedAs,
+            minimumDigits: 6,
+            start: 1,
+          },
+        }
       : {}),
     classification: 'internal',
     collation: 'binary',

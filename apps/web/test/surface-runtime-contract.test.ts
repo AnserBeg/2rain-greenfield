@@ -14,6 +14,7 @@ import {
 import {
   STATUS_ROLES,
   SurfaceCompositionSchema,
+  SurfaceDocumentEditorSchema,
   SurfaceListSchema,
 } from '@north-star/canonical-model';
 import {
@@ -80,6 +81,7 @@ import {
   type CompositionData,
 } from '../src/surface-composition.js';
 import { entryCompanyChoice } from '../src/workspace-entry.js';
+import { createValuesFor } from '../src/document-editor.js';
 import {
   INTENT_RENDERED_ARITY,
   readCompiledSurfaceManifest,
@@ -2140,4 +2142,62 @@ test('a field-scoped section renders its rows, asks for a company it lacks and r
     /<div role="alert" data-message="COMPOSITION_CHILD_FAILED"/u,
   );
   assert.doesNotMatch(failed, /<table/u);
+});
+
+test('a document editor writes its declared create values on the header first create only', () => {
+  const ns = 'northstar.fixture';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const definition = SurfaceDocumentEditorSchema.parse({
+    kind: 'draftDocumentEditor',
+    headerFormSurfaceId: id('surface', 'slip_form'),
+    recordSurfaceId: id('surface', 'slip_detail'),
+    lineFormSurfaceId: id('surface', 'slip_line_form'),
+    lineQueryId: id('query', 'slip_line_list'),
+    parentRelationId: id('relation', 'slip_line_slip'),
+    stateFieldId: id('field', 'slip_state'),
+    editableStateIds: [id('option', 'slip_state_draft')],
+    headerFields: [{ fieldId: id('field', 'slip_reason'), label: 'Reason' }],
+    lineFields: [{ fieldId: id('field', 'slip_line_item'), label: 'Item' }],
+    lineNumberFieldId: id('field', 'slip_line_number'),
+    saveMode: 'sequential',
+    createValues: [
+      {
+        fieldId: id('field', 'slip_state'),
+        value: { source: 'literal', value: id('option', 'slip_state_draft') },
+      },
+      {
+        fieldId: id('field', 'slip_source_id'),
+        value: { source: 'record', field: 'recordId' },
+      },
+    ],
+  });
+  const header = {
+    id: '00000000-0000-4000-8000-0000000000a1',
+    record: null,
+    removed: false,
+  };
+  // The header's first create: the literal as declared, and its own id --
+  // the id the create itself sends.
+  assert.deepEqual(createValuesFor(definition, header, true), {
+    [id('field', 'slip_state')]: id('option', 'slip_state_draft'),
+    [id('field', 'slip_source_id')]: header.id,
+  });
+  // Never an update of a saved header, a removal or a line.
+  assert.deepEqual(
+    createValuesFor(
+      definition,
+      { ...header, record: { recordId: header.id } },
+      true,
+    ),
+    {},
+  );
+  assert.deepEqual(
+    createValuesFor(definition, { ...header, removed: true }, true),
+    {},
+  );
+  assert.deepEqual(createValuesFor(definition, header, false), {});
+  // An editor that declares none writes none.
+  const { createValues: _declared, ...plain } = definition;
+  void _declared;
+  assert.deepEqual(createValuesFor(plain, header, true), {});
 });

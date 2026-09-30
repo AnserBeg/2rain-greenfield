@@ -61,7 +61,12 @@ const MODULE_REGISTRY = Object.freeze([
       purchasingModuleDefinition(namespace, { commercialTerms: true }),
     moduleName: 'purchasing',
   }),
-  Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
+  Object.freeze({
+    // Stock documents recorded like the other documents (INVENTORY-PARITY).
+    create: (namespace: string) =>
+      inventoryModuleDefinition(namespace, { documentEntry: true }),
+    moduleName: 'inventory',
+  }),
   Object.freeze({
     create: (namespace: string) =>
       partyModuleDefinition(namespace, { salesMasterData: true }),

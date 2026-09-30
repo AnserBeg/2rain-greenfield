@@ -74,9 +74,10 @@ async function seed(
     values: Record<string, ImmutableJsonValue>,
     relations: Record<string, string> = {},
     scoped = true,
+    recordId: string = randomUUID(),
   ) => {
     const result = await invoke(`${local}_create`, {
-      recordId: randomUUID(),
+      recordId,
       ...(scoped ? { legalEntityId: scope } : {}),
       values: Object.fromEntries(
         Object.entries(values).map(([name, value]) => [
@@ -95,18 +96,24 @@ async function seed(
     return result.readBack;
   };
   const now = new Date().toISOString();
-  const stock = await create('inventory_transaction', {
-    actor_id: 'meta-sales-fixture',
-    effective_at: now,
-    number: `ADJ-${randomUUID()}`,
-    reason_code: 'SETUP',
-    reason_narrative: 'Isolated metadata workspace fixture',
-    recorded_at: now,
-    source_id: randomUUID(),
-    source_type: 'test',
-    state: `${ns}:option.inventory_transaction_state_draft`,
-    type: `${ns}:option.inventory_transaction_type_adjustment`,
-  });
+  // A stock document as the editor saves one (INVENTORY-PARITY): numbered by
+  // the server, a draft naming itself as its posting source.
+  const stockId = randomUUID();
+  const stock = await create(
+    'inventory_transaction',
+    {
+      effective_at: now,
+      reason_code: 'SETUP',
+      reason_narrative: 'Isolated metadata workspace fixture',
+      source_id: stockId,
+      source_type: 'inventoryTransaction',
+      state: `${ns}:option.inventory_transaction_state_draft`,
+      type: `${ns}:option.inventory_transaction_type_adjustment`,
+    },
+    {},
+    true,
+    stockId,
+  );
   await create(
     'inventory_transaction_line',
     {

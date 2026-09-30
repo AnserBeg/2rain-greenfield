@@ -276,8 +276,8 @@ test(
         [
           ['shipment', 'CAL-WH', '-2', 'shipment'],
           ['receipt', 'CAL-WH', '5', 'goodsReceipt'],
-          ['adjustment', 'VAN-WH', '6', 'test'],
-          ['adjustment', 'CAL-WH', '10', 'test'],
+          ['adjustment', 'VAN-WH', '6', 'inventoryTransaction'],
+          ['adjustment', 'CAL-WH', '10', 'inventoryTransaction'],
         ],
       );
 
@@ -306,9 +306,10 @@ test(
         local: string,
         values: Record<string, ImmutableJsonValue>,
         relations: Record<string, string> = {},
+        recordId: string = randomUUID(),
       ) => {
         const created = await fixture.invoke(`${local}_create`, {
-          recordId: randomUUID(),
+          recordId,
           legalEntityId: second,
           values: Object.fromEntries(
             Object.entries(values).map(([name, value]) => [
@@ -327,18 +328,23 @@ test(
         return created.readBack!;
       };
       const now = new Date().toISOString();
-      const opening = await createIn('inventory_transaction', {
-        actor_id: 'item-stock-test',
-        effective_at: now,
-        recorded_at: now,
-        number: `ADJ-B-${randomUUID()}`,
-        reason_code: 'SETUP-B',
-        reason_narrative: 'Second company stock',
-        source_id: randomUUID(),
-        source_type: 'test',
-        state: `${ns}:option.inventory_transaction_state_draft`,
-        type: `${ns}:option.inventory_transaction_type_adjustment`,
-      });
+      // A stock document as the editor saves one: numbered by the server, a
+      // draft naming itself as its posting source.
+      const openingId = randomUUID();
+      const opening = await createIn(
+        'inventory_transaction',
+        {
+          effective_at: now,
+          reason_code: 'SETUP-B',
+          reason_narrative: 'Second company stock',
+          source_id: openingId,
+          source_type: 'inventoryTransaction',
+          state: `${ns}:option.inventory_transaction_state_draft`,
+          type: `${ns}:option.inventory_transaction_type_adjustment`,
+        },
+        {},
+        openingId,
+      );
       await createIn(
         'inventory_transaction_line',
         {

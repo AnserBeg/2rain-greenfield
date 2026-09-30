@@ -397,6 +397,71 @@ function invoiceList(namespace: string): ListSpec {
 }
 
 /**
+ * Stock documents (INVENTORY-PARITY): every inventory transaction, newest
+ * first. Receipts, shipments and counts write companion transactions too, so
+ * the tabs keep drafts and the two documents a person records -- adjustments
+ * and transfers -- one click away.
+ */
+function inventoryTransactionList(namespace: string): ListSpec {
+  const field = (local: string) =>
+    `${namespace}:field.inventory_transaction_${local}`;
+  const option = (local: string) =>
+    `${namespace}:option.inventory_transaction_${local}`;
+  return {
+    pageSize: 50,
+    columns: [
+      {
+        local: 'number',
+        label: 'Number',
+        field: field('number'),
+        role: 'title',
+      },
+      { local: 'type', label: 'Type', field: field('type') },
+      { local: 'reason', label: 'Reason', field: field('reason_code') },
+      {
+        local: 'effective',
+        label: 'Effective',
+        field: field('effective_at'),
+        format: 'date',
+      },
+      {
+        local: 'state',
+        label: 'State',
+        field: field('state'),
+        role: 'status',
+        statusRoles: {
+          [option('state_draft')]: 'inProgress',
+          [option('state_posted')]: 'success',
+          [option('state_reversed')]: 'attention',
+        },
+      },
+    ],
+    defaultSort: [{ column: 'effective', direction: 'descending' }],
+    // The type is chosen by its tab: a List filters a field its views do not.
+    views: [
+      { local: 'all', label: 'All', filters: {} },
+      {
+        local: 'drafts',
+        label: 'Drafts',
+        filters: { [field('state')]: option('state_draft') },
+      },
+      {
+        local: 'adjustments',
+        label: 'Adjustments',
+        filters: { [field('type')]: option('type_adjustment') },
+      },
+      {
+        local: 'transfers',
+        label: 'Transfers',
+        filters: { [field('type')]: option('type_transfer') },
+      },
+    ],
+    filters: [],
+    export: false,
+  };
+}
+
+/**
  * Expected receipts (PURCHASING-PARITY): released purchase orders with
  * something still to arrive, one row per ORDER, as the reference's worklist
  * is. Ordered, Received and Open add the units of the order's active lines
@@ -655,6 +720,8 @@ export function composedListSpecs(
     // Receivables (owner ruling C): each invoice with its balance; the tabs
     // are the invoice states, the customer is named through the party list.
     customer_invoice_list: invoiceList(namespace),
+    // Stock documents, recorded in the draft editor (INVENTORY-PARITY).
+    inventory_transaction_list: inventoryTransactionList(namespace),
     // A balance, not a document: no lifecycle, so no saved views; item and
     // location are named through their own lists rather than shown as ids.
     posted_stock_balance_list: {

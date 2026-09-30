@@ -3505,8 +3505,10 @@ class RecordingForwardingOperationExecutor implements SemanticOperationExecutor 
 function inventoryTransactionCreateInput(
   legalEntityId: string,
   recordId: string,
-  number: string,
+  label: string,
 ): Readonly<Record<string, ImmutableJsonValue>> {
+  // The server assigns the number (INVENTORY-PARITY); the label names the
+  // source instead.
   return Object.freeze({
     legalEntityId,
     recordId,
@@ -3516,12 +3518,10 @@ function inventoryTransactionCreateInput(
         'direct-operand-control',
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.effectiveAt)]:
         '2026-08-18T12:00:00.000Z',
-      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.number)]:
-        number,
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.recordedAt)]:
         '2026-08-18T12:00:00.000Z',
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.sourceId)]:
-        number.toLowerCase(),
+        label.toLowerCase(),
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.sourceType)]:
         'test',
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.state)]:
@@ -4803,7 +4803,10 @@ function emptyDefinition(
 
 function inventoryApplicationDefinition(): Record<string, unknown> {
   const application = composedApplicationDefinition();
-  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE, {
+    documentEntry: true,
+  });
   for (const collection of [
     'assertions',
     'entities',

@@ -67,6 +67,12 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
         'RCV',
         `${ns}:document_sequence.goods_receipt`,
       ],
+      // INVENTORY-PARITY: a stock document's number, STK-000001.
+      [
+        `${ns}:field.inventory_transaction_number`,
+        'STK',
+        `${ns}:document_sequence.inventory_transaction`,
+      ],
       [
         `${ns}:field.purchase_order_number`,
         'PO',
@@ -190,6 +196,21 @@ test('a numbering the runtime could not honour is refused by name', () => {
         (form.documentEditor as { headerFields: Json[] }).headerFields.unshift({
           fieldId: `${ns}:field.sales_order_number`,
           label: 'Number',
+        });
+      },
+    ],
+    [
+      // A stock document's first create writes its declared values; never
+      // its number, which the server assigns.
+      'an assigned number is not a create value',
+      (app) => {
+        const form = app.surfaces.find(
+          (value) =>
+            value.surfaceId === `${ns}:surface.inventory_transaction_form`,
+        )!;
+        (form.documentEditor as { createValues: Json[] }).createValues.push({
+          fieldId: `${ns}:field.inventory_transaction_number`,
+          value: { source: 'literal', value: 'STK-TYPED' },
         });
       },
     ],

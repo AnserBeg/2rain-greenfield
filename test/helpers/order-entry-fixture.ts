@@ -105,9 +105,10 @@ async function seed(
     values: Record<string, ImmutableJsonValue>,
     relations: Record<string, string> = {},
     scoped = true,
+    recordId: string = randomUUID(),
   ) => {
     const result = await invoke(`${local}_create`, {
-      recordId: randomUUID(),
+      recordId,
       ...(scoped ? { legalEntityId: scope } : {}),
       values: Object.fromEntries(
         Object.entries(values).map(([name, value]) => [
@@ -216,16 +217,30 @@ async function seed(
     ship_to_country: 'Canada',
   };
   const now = new Date().toISOString();
-  const stock = await create('inventory_transaction', {
-    actor_id: 'order-entry-fixture',
+  /**
+   * A stock document as the editor saves one (INVENTORY-PARITY): the server
+   * numbers it, and it is a draft naming itself as its posting source.
+   */
+  const stockDocument = (
+    values: Record<string, ImmutableJsonValue>,
+    recordId: string = randomUUID(),
+  ) =>
+    create(
+      'inventory_transaction',
+      {
+        ...values,
+        source_id: recordId,
+        source_type: 'inventoryTransaction',
+        state: `${ns}:option.inventory_transaction_state_draft`,
+      },
+      {},
+      true,
+      recordId,
+    );
+  const stock = await stockDocument({
     effective_at: now,
-    recorded_at: now,
-    number: `ADJ-${randomUUID()}`,
     reason_code: 'SETUP',
     reason_narrative: 'Isolated opening stock',
-    source_id: randomUUID(),
-    source_type: 'test',
-    state: `${ns}:option.inventory_transaction_state_draft`,
     type: `${ns}:option.inventory_transaction_type_adjustment`,
   });
   await create(
@@ -732,16 +747,10 @@ async function seed(
             .outcome,
           'succeeded',
         );
-      const adjustment = await create('inventory_transaction', {
-        actor_id: 'order-entry-fixture',
+      const adjustment = await stockDocument({
         effective_at: at(),
-        recorded_at: at(),
-        number: `ADJ-${randomUUID()}`,
         reason_code: 'SETUP',
         reason_narrative: 'Item page overflow stock',
-        source_id: randomUUID(),
-        source_type: 'test',
-        state: `${ns}:option.inventory_transaction_state_draft`,
         type: `${ns}:option.inventory_transaction_type_adjustment`,
       });
       await create(

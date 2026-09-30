@@ -100,8 +100,8 @@ test('the item page shows stock by location and the recent movements, in the com
     ).toEqual([
       ['shipment', 'CAL-WH', '-2', 'shipment'],
       ['receipt', 'CAL-WH', '5', 'goodsReceipt'],
-      ['adjustment', 'VAN-WH', '6', 'test'],
-      ['adjustment', 'CAL-WH', '10', 'test'],
+      ['adjustment', 'VAN-WH', '6', 'inventoryTransaction'],
+      ['adjustment', 'CAL-WH', '10', 'inventoryTransaction'],
     ]);
     await expect(
       movements.locator('tr[data-record-id]').first().locator('td').first(),

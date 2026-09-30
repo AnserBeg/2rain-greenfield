@@ -292,8 +292,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // editor defaults, scoped pickers and Task input eligibility require 11;
   // List progress, open and before-today views and overdue dates require 12;
   // List row actions and supplementary progress (ORDER-PARITY) require 13;
-  // the item page's field-scoped stock and movements require 14.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 14);
+  // the item page's field-scoped stock and movements require 14; a stock
+  // document's create values require 15.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 15);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
@@ -858,7 +859,10 @@ function compileDefinition(
 
 function composedApplicationWithInventory(): Record<string, unknown> {
   const composed = structuredClone(composedApplicationDefinition());
-  const inventory = inventoryModuleDefinition('northstar.app');
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  const inventory = inventoryModuleDefinition('northstar.app', {
+    documentEntry: true,
+  });
   for (const collectionName of [
     'assertions',
     'entities',
@@ -928,7 +932,7 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   let composed = composedApplicationWithInventory();
   composed = withoutModule(
     composed,
-    inventoryModuleDefinition('northstar.app'),
+    inventoryModuleDefinition('northstar.app', { documentEntry: true }),
     'inventory',
   );
   composed = withoutModule(

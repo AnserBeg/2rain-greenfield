@@ -1007,3 +1007,147 @@ test('INVENTORY-PARITY: the item page lists its stock and movements by a field o
     delete surface(candidate, 'item_detail').workspace!.entry;
   }, /a company's dataset on a record every company shares requires a workspace entry/);
 });
+
+test('INVENTORY-PARITY: a stock document is entered like an order, with a choice over its type and values its first create writes', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Editor = Loose & {
+    headerFields: (Loose & {
+      fieldId: string;
+      presentation?: { options: { value: string }[]; defaultValue?: string };
+    })[];
+    createValues: (Loose & { fieldId: string; value: Loose })[];
+  };
+  const ns = 'northstar.app';
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === `${ns}:surface.${local}`,
+    ) as Loose & {
+      documentEditor?: Editor;
+      label: string;
+      workspace: Loose & { membership: string; entry?: Loose };
+    };
+  const editor = (candidate: Loose) =>
+    surface(candidate, 'inventory_transaction_form').documentEditor!;
+  const header = (candidate: Loose, name: string) =>
+    editor(candidate).headerFields.find(
+      (value) => value.fieldId === `${ns}:field.inventory_transaction_${name}`,
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The shipped declaration: the form and the record page carry the editor,
+  // the List is an operational destination of its own, named for documents.
+  assert.deepEqual(
+    surface(source, 'inventory_transaction_detail').documentEditor,
+    editor(source),
+  );
+  assert.equal(
+    surface(source, 'inventory_transaction_list').label,
+    'Inventory transactions',
+  );
+  assert.equal(
+    surface(source, 'inventory_transaction_list').workspace.membership,
+    'operational',
+  );
+  assert.equal(
+    surface(source, 'inventory_transaction_list').workspace.entry
+      ?.authorizationQueryId,
+    `${ns}:query.inventory_transaction_list`,
+  );
+  // G1: the Type choice offers two options of its enumeration.
+  assert.deepEqual(
+    header(source, 'type').presentation!.options.map((option) => option.value),
+    [
+      `${ns}:option.inventory_transaction_type_adjustment`,
+      `${ns}:option.inventory_transaction_type_transfer`,
+    ],
+  );
+  // G2: the draft state and the document itself as its source, first create only.
+  assert.deepEqual(editor(source).createValues, [
+    {
+      fieldId: `${ns}:field.inventory_transaction_state`,
+      value: {
+        source: 'literal',
+        value: `${ns}:option.inventory_transaction_state_draft`,
+      },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_source_type`,
+      value: { source: 'literal', value: 'inventoryTransaction' },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_source_id`,
+      value: { source: 'record', field: 'recordId' },
+    },
+  ]);
+
+  // A choice over an enumeration offers only its options.
+  refuse((candidate) => {
+    header(candidate, 'type').presentation!.options[1]!.value =
+      `${ns}:option.inventory_transaction_type_not_a_type`;
+  }, /choice presentation requires a text or enumeration field/);
+  refuse((candidate) => {
+    header(candidate, 'type').presentation!.defaultValue =
+      `${ns}:option.inventory_transaction_type_shipment`;
+  }, /choice presentation requires a text or enumeration field/);
+  // A create value is a header field no editor field offers, with a value it
+  // admits: text that fits, an option of its enumeration, or the record id
+  // into text long enough to hold one.
+  const createValueRefusal =
+    /a create value is a header field no editor field offers, holding a value it admits/;
+  refuse((candidate) => {
+    editor(candidate).createValues[0]!.fieldId =
+      `${ns}:field.inventory_transaction_line_unit_id`;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[1]!.fieldId =
+      `${ns}:field.inventory_transaction_reason_code`;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[1]!.value = {
+      source: 'literal',
+      value: 'x'.repeat(81),
+    };
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[0]!.value = {
+      source: 'literal',
+      value: `${ns}:option.inventory_transaction_state_not_a_state`,
+    };
+  }, createValueRefusal);
+  refuse((candidate) => {
+    (
+      (candidate.fields as Loose[]).find(
+        (value) =>
+          value.fieldId === `${ns}:field.inventory_transaction_source_id`,
+      )!.fieldType as { maximumLength: number }
+    ).maximumLength = 35;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues.push(
+      structuredClone(editor(candidate).createValues[0]!),
+    );
+  }, /a create value names each field once/);
+  // A closed declaration: a literal or the record's own id, nothing else.
+  refuse((candidate) => {
+    editor(candidate).createValues[2]!.value = {
+      source: 'selected',
+      field: 'recordId',
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    editor(candidate).createValues[2]!.fallback = 'none';
+  }, /CANON_SCHEMA_INVALID/);
+});

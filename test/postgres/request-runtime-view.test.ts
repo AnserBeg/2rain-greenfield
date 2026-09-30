@@ -209,7 +209,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: 14,
+    maximumSupportedVersion: 15,
   });
 });
 
@@ -782,7 +782,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               loaded.projections.surface.requiredRuntimeCapability,
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                minimumVersion: 14,
+                minimumVersion: 15,
               },
             );
             // All FIVE loaded families carry their requirement, not just the
@@ -810,7 +810,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: 14,
+                maximumSupportedVersion: 15,
               },
             );
           },
@@ -834,7 +834,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 14/,
+              /requires version 999 and this runtime supports 15/,
             );
           },
         );
@@ -863,7 +863,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 14/,
+              /requires version 999 and this runtime supports 15/,
             );
           },
         );
@@ -1607,7 +1607,10 @@ function mustCompile(bytes: Uint8Array): CompileSuccess {
 
 function groupedNavigationDefinitionBytes(): Uint8Array {
   const definition = structuredClone(composedApplicationDefinition());
-  const inventory = inventoryModuleDefinition('northstar.app');
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  const inventory = inventoryModuleDefinition('northstar.app', {
+    documentEntry: true,
+  });
   for (const collectionName of [
     'assertions',
     'entities',
