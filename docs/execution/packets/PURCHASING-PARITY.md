@@ -15,7 +15,7 @@ Base: `packet/SALES-PARITY` at `b1aefa05`, merged in (stacked on draft PR #7; sl
 1. Priced purchase orders (P3, P4, P23) and RCV receipt numbers (P1): terms, tax, discount, charges, totals, printed totals.
 2. Ending an order (P8, P9) and what is still open per line (P10 in part): Cancel refused once anything is received; a line's open remainder closed with a reason; Received and Open on each order line.
 3. Receiving paperwork (P13 in part, P14): packing slip and notes on a receipt; a purchase order's "Receive into" location that receiving starts from. The received-on date waits for its kernel rule (Filed).
-4. What is still to arrive (P10, P11, P26): received/open quantities and a total on the PO List, an Expected receipts List of open lines, late marking.
+4. What is still to arrive (P11, P26; P10 in part): an Expected receipts List of released orders with Ordered, Received and Open summed in the list statement, To receive / Late / All released views and a days-late marker; Receive is no longer offered on a line with nothing open. The Purchase orders List's figures and Total move to ORDER-PARITY.
 Deferred to their own packets: approvals and "place order" (P5-P7), vendor bills (P21), vendor returns and drop ship (P19-P20), inventory (transfers, count and opening posting routes, availability, reorder rules, lot/serial, valuation, units).
 
 ## Claims
@@ -30,6 +30,10 @@ Deferred to their own packets: approvals and "place order" (P5-P7), vendor bills
 8. "Close open remainder" stages an amendment request marked `close_remainder` with a required reason and applies it through the receiving amend, which sets the ordered quantity to what is received when it runs, under the line's lock, and consumes every close request staged for that line revision together; a plain quantity request beside a close request is refused as two intents. The order then closes. A task binding a record revision into an integer field writes the field's canonical string.
 9. A goods receipt carries an optional packing slip and notes, entered in both receive tasks and shown among the order's connected receipts; an empty optional task input reaches its operation as `null`.
 10. A purchase order may name a "Receive into" location (a picker in the editor, a detail on the page); both receive tasks start their location from it. A reference task input may declare `defaultFrom` a record field (optional v6 key; refused on other inputs and on a field the record query does not select).
+11. List progress (optional v6 `surface.list.progress`): a List may sum per row, in the PostgreSQL list statement, its document's active lines and the active done rows of those lines, before the count, the page and the export, pinned to the row's tenant, environment and company and the issued read scope; open = ordered − done, zero outside the declared states. The gateway authorizes both progress queries under current policy on every request (a denial refuses by name) and requires the executor to echo them; the figures are non-sortable values.
+12. A view may keep rows with open quantity (`open`) or before today (`before`, anchor `startOfTodayUtc`): the release holds no date; the web runtime resolves the anchor per request from an injectable clock, the cursor binds it and SQL applies it before count and page; a date column's `overdue` marks "N days late" from the same anchor. Surface floor 11 -> 12; agent presets publish progress, open and before.
+13. Purchasing -> Expected receipts lists released orders with open quantity: To receive (default), Late, All released, CSV; a user without receipt read has it refused by name while Purchase orders still serves.
+14. A line with nothing open (`open_to_receive` exactly 0) offers no Receive action; a withheld Open keeps it offered, and the receiving kernel refuses over-receipt anyway.
 
 ## Decisions
 
@@ -38,7 +42,9 @@ Deferred to their own packets: approvals and "place order" (P5-P7), vendor bills
 - P8 is not a quick fix: Cancel after receipts was the only way to end a partly received order, because Close requires nothing open. Slice 2 therefore adds closing a line's open remainder with the refusal, and comes before the paperwork: it closes an integrity gap.
 - A remainder is closed per line, as PaneFlow closes open units, through the existing amendment request (ADR-0038's staged intent) rather than a new order-level input. A close request is resolved when it applies, not when it is staged, after an in-lane check (a subagent reading the diff, not a review arm; none is owed outside the Critical set) showed a receipt posted in between could strand the line with requests that no retry could apply.
 - Received and Open ride the commercial purchase-line read model rather than a new receiving read model: one executor, parameterized by document.
-- The received-on date is split out: the posting kernel accepts a future effective date today, so choosing a date needs a Critical kernel rule first (Filed).
+- The received-on date is split out: with the kernel's 0-day backdate window the only valid receipt date is today, which is already stamped; it follows POSTING-FORWARD-DATE (a 7-day window and one forward-date rule for every posting family).
+- Expected receipts lists ORDERS, as PaneFlow does (a line List would need filters on the parent's state and more than one label per relation); its figures sum units across items, as PaneFlow's do. "Today" is the UTC day every List date is shown in; the release holds no date.
+- The Purchase orders List is untouched here, so nobody without receipt read loses a screen; its figures and Total come with ORDER-PARITY's supplementary progress. Progress policy decisions name the listed companies; where two Lists read one entity, the List owning its record workspace stays the picker, breadcrumb and navigation authority.
 
 ## Controls
 
@@ -59,7 +65,7 @@ None owed: nothing in the Critical set changes.
 ## Filed
 
 - `apps/web/release/app.compiled.json` grows about 3 MB per lineage entry (72 MB at 24 entries; GitHub refuses files over 100 MB): an ADR-0066 re-baseline (recommended: nothing is in production) or LFS is the owner's decision.
-- The posting kernel accepts a future effective date (only the backdate window and period locks are enforced); PaneFlow refuses a posting dated after today. Owed before a receipt date can be chosen, in the Critical set (`inventory-posting-service.ts`).
+- Receipts and shipments already refuse a date after the tenant's today (`inventory-posting-service.ts`), but adjustments do not, and the backdate window is 0 days: POSTING-FORWARD-DATE (Critical, its own packet) adds one forward rule for every family and a 7-day window, after which a receipt date can be offered.
 - Both line sections of the order page read the commercial purchase-line model, so received quantities are read twice per line per page; one section could carry both.
 - A committed cancel's event now uses the purchasing order-event schema while a draft cancel's keeps the generic one (the event type is unchanged).
 
