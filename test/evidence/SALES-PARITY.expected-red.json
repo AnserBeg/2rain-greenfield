@@ -271,6 +271,42 @@
           "expected": "did not read back its assigned northstar\\.party:field\\.party_account_number \\(read-back\\)"
         }
       ]
+    },
+    {
+      "name": "verification-witness-reads-through-executed-gets",
+      "claim": "Release verification reads an assigned number the create's read-back omits only through a plain get the query gateway executes (active, Q0, a filter the gateway's execution fence accepts), else uses the record's sentinel unread, so a compiler-admitted get the gateway answers unsupported cannot make a stored number read as missing.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "          gatewayExecutesQ0(candidate) &&\n",
+      "replacement": "          candidate.lifecycle === 'active' &&\n          candidate.tier === 'q0' &&\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "only through gets the gateway executes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification reads numbers and archives records only through gets the gateway executes, and refuses a probe record it cannot read",
+          "expected": "did not read back its assigned northstar\\.party:field\\.party_account_number \\(query northstar\\.party:query\\.party_account_get answered unsupported: query-filter-unsupported\\)"
+        }
+      ]
+    },
+    {
+      "name": "verification-refuses-unreadable-probe-records",
+      "claim": "Release verification's cleanup archives every probe record it can read and refuses by name (VERIFICATION_PROBE_RECORD_UNREADABLE) each one it cannot, instead of skipping it as already archived and leaving it live.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    if (unreadable.length > 0) {\n      throw failure(\n        'VERIFICATION_PROBE_RECORD_UNREADABLE',\n        `verification could not read its probe records to archive them: ${unreadable.join('; ')}`,\n      );\n    }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "only through gets the gateway executes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification reads numbers and archives records only through gets the gateway executes, and refuses a probe record it cannot read",
+          "expected": "Missing expected rejection"
+        }
+      ]
     }
   ]
 }
