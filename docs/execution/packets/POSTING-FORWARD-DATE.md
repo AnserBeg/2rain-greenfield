@@ -1,6 +1,6 @@
 # POSTING-FORWARD-DATE — no inventory posting is dated after the tenant's today
 
-Status: executable candidate `aeef2b65f3183387d7f0c9f135ee385d53091e4d` frozen on `packet/POSTING-FORWARD-DATE`; not pushed, no PR, no merge, no deployment.
+Status: executable candidate `aeef2b65f3183387d7f0c9f135ee385d53091e4d` frozen on `packet/POSTING-FORWARD-DATE`; draft PR #9 against main, CI green at `edaebdf2`; the round-1 review arm is owed (user-run); no merge, no deployment.
 Tier: Critical — `packages/postgres-provider/src/inventory-posting-service.ts` and its error union `inventory-posting-error.ts`. One fresh-naive online arm is owed (`POSTING-FORWARD-DATE-review-prompt.md`). Stops: 0.
 Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6` (origin/main). Charter: section A of the orchestrator's four-packet inventory design (2026-09-30, read-only), which found that receipts and shipments already refused a date after today while adjustments, transfers and counts did not.
 
@@ -39,6 +39,8 @@ Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6` (origin/main). Charter: section
 - `tsc -p tsconfig.json --noEmit` exit 0, `prettier --check` and `eslint` clean on every touched file — run on the pre-commit tree, which differs from `aeef2b65` only by prettier's one line-wrap in the test.
 - PostgreSQL `inventory-backdate-policy.test.ts`: eight runs under the machine lock (00:47–04:12 MDT), every one refused before any test body ran — `ephemeral PostgreSQL was not ready within 30000ms` — at load average 4–35 with five agents testing at once, and Windows free memory 0.5–1.1 GB of 16 GB (the last run: load 4.5, 0.7 GB free). A bare container on the same Docker took 27 s to return from `docker run` and 307 s to accept connections. This is host paging, not a code result; the file and the three controls are owed.
 - Not run, by the lead's instruction to run only the files this change touches under this load: `inventory-posting`, `inventory-stock-count`, `fulfillment`. `receiving-authorization` (touched) is owed with the backdate file. CI covers all four on push.
+
+- CI on PR #9 at `edaebdf2` (the candidate plus SALES-PARITY's harness race fix `277d34c8` and advisory pin `edaebdf2`, carried so this main-based branch's CI can pass; both outside the declared range): every job green, including PostgreSQL schema and isolation (the flipped backdate-policy step, the new tenant-calendar test, receiving-authorization) and the executed-file reachability check. The three controls' `--run` is still owed locally (container starts time out on this host).
 
 ## Test it yourself (about ten minutes)
 
