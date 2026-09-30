@@ -189,7 +189,7 @@ test(
           'purchase_order_number',
           'sales_order_number',
           'shipment_number',
-          // PAYABLES: the vendor bill, its payments and credits.
+          // PAYABLES: bills, vendor payments and vendor credits.
           'vendor_bill_number',
           'vendor_credit_number',
           'vendor_payment_number',
@@ -240,7 +240,9 @@ test(
               numbered.some((entry) => entry.fieldId === scenario.subjectId),
           )
           .map((scenario) => executed.has(scenario.scenarioId)),
-        Array.from({ length: 11 }, () => true),
+        // Eleven, as the compile states: PAYABLES' ten and the stock
+        // document's (INVENTORY-PARITY).
+        [true, true, true, true, true, true, true, true, true, true, true],
         'each number’s uniqueness probe executed',
       );
       const derivationCodes = (
