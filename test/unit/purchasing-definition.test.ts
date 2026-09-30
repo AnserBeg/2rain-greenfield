@@ -36,6 +36,7 @@ import { evaluateRegisteredOperationPrecondition } from '../../packages/runtime/
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import {
   purchaseOrderRevisionDigest,
+  purchaseOrderAmendmentRevisionDigest,
   currentPurchaseOrderApproval,
 } from '../../packages/postgres-provider/src/purchase-order-approval.js';
 import { purchaseOrderApprovalInput } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
@@ -78,6 +79,36 @@ test('approval revision identity changes for a header edit, line edit, addition 
       { digest, state: 'consumed', kind: 'order' },
     ]),
     'Not requested',
+  );
+});
+
+test('amendment approval binds the proposal identity and revision as well as the order image', () => {
+  const order = purchaseOrderRevisionDigest(1, [
+    { recordId: 'line', revision: 1 },
+  ]);
+  const proposal = { recordId: 'proposal', revision: 1 };
+  const digest = purchaseOrderAmendmentRevisionDigest(order, proposal);
+  assert.equal(
+    purchaseOrderAmendmentRevisionDigest(order, { ...proposal }),
+    digest,
+  );
+  assert.notEqual(
+    purchaseOrderAmendmentRevisionDigest(order, { ...proposal, revision: 2 }),
+    digest,
+  );
+  assert.notEqual(
+    purchaseOrderAmendmentRevisionDigest(order, {
+      ...proposal,
+      recordId: 'another',
+    }),
+    digest,
+  );
+  assert.notEqual(
+    purchaseOrderAmendmentRevisionDigest(
+      purchaseOrderRevisionDigest(2, []),
+      proposal,
+    ),
+    digest,
   );
 });
 

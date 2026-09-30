@@ -255,6 +255,37 @@ test(
           'purchase_order_line_amend',
           'purchase_order_line',
           line.recordId,
+          { quantity: '9', reason: 'Review this exact proposal' },
+        );
+        const tamperedRequest = await pending();
+        const proposalId = String(
+          tamperedRequest.values[
+            field('purchase_order_approval', 'amendment_id')
+          ],
+        );
+        const proposal = await get('purchase_order_amendment', proposalId);
+        await f.invoke('purchase_order_amendment_update', {
+          recordId: proposalId,
+          expectedRevision: proposal.revision,
+          patch: { [field('purchase_order_amendment', 'quantity')]: '11' },
+        });
+        await assert.rejects(
+          decide('approve', 'The displayed nine is not the edited eleven'),
+          /staged amendment changed/u,
+        );
+        assert.equal(
+          quantity(
+            (await get('purchase_order_line', line.recordId)).values[
+              field('purchase_order_line', 'ordered_quantity')
+            ],
+          ),
+          '6',
+        );
+        await decide('reject', 'Request a new proposal');
+        await operate(
+          'purchase_order_line_amend',
+          'purchase_order_line',
+          line.recordId,
           { quantity: '8', reason: 'More stock needed' },
         );
         assert.equal(

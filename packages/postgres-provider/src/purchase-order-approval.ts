@@ -11,6 +11,23 @@ export function purchaseOrderRevisionDigest(
     .digest('hex');
 }
 
+/** A reviewed amendment binds its entire immutable proposal image by revision. */
+export function purchaseOrderAmendmentRevisionDigest(
+  orderDigest: string,
+  proposal: { readonly recordId: string; readonly revision: number },
+): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        'purchase-order-amendment/v1',
+        orderDigest,
+        proposal.recordId,
+        proposal.revision,
+      ]),
+    )
+    .digest('hex');
+}
+
 export function currentPurchaseOrderApproval(
   digest: string,
   requests: readonly { digest: string; state: string; kind: string }[],

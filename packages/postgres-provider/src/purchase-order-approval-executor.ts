@@ -39,7 +39,10 @@ import {
 } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
-import { purchaseOrderRevisionDigest } from './purchase-order-approval.js';
+import {
+  purchaseOrderRevisionDigest,
+  purchaseOrderAmendmentRevisionDigest,
+} from './purchase-order-approval.js';
 
 type Entity = StorageTargetPayloadV1['entities'][number];
 type Row = Record<string, unknown>;
@@ -488,10 +491,14 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
     } else {
       if (target[af('state')] !== this.#state('pending'))
         conflict('An approval request is decided only once');
-      if (p.action === 'approve' && target[af('revision_digest')] !== digest)
+      const amendmentId = target[af('amendment_id')];
+      if (
+        p.action === 'approve' &&
+        typeof amendmentId !== 'string' &&
+        target[af('revision_digest')] !== digest
+      )
         conflict('The purchase order changed; submit its current revision');
       approvalId = p.recordId;
-      const amendmentId = target[af('amendment_id')];
       if (typeof amendmentId === 'string') {
         const staged = await receiptRow(
           client,
@@ -503,9 +510,19 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
         );
         if (staged.archived_at !== null)
           conflict('The staged amendment was already consumed');
-        if (p.action === 'approve')
+        if (p.action === 'approve') {
+          if (
+            target[af('revision_digest')] !==
+            purchaseOrderAmendmentRevisionDigest(digest, {
+              recordId: String(staged.record_id),
+              revision: Number(staged.revision),
+            })
+          )
+            conflict(
+              'The purchase order or staged amendment changed; request its current revision',
+            );
           await this.#amend(client, request, p, staged);
-        else
+        } else
           await this.#update(client, request, this.#amendment, staged, {
             archived_at: this.context.currentInstant(),
           });
@@ -565,6 +582,10 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
         staged[this.#field(this.#amendment, 'close_remainder')] === true
           ? 'Received quantity when approved'
           : String(staged[this.#field(this.#amendment, 'quantity')]);
+      digest = purchaseOrderAmendmentRevisionDigest(digest, {
+        recordId: String(staged.record_id),
+        revision: Number(staged.revision),
+      });
     }
     return this.#insert(client, request, a, p.legalEntityId, {
       [f('number')]: randomUUID(),
