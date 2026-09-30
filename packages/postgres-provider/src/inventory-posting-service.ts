@@ -1416,16 +1416,6 @@ export class PostgresInventoryPostingService {
           context,
           posting.command,
         );
-        if (dateOrdinal(businessPeriod) > dateOrdinal(recordedPeriod))
-          throw postingError(
-            'RECEIPT_FORWARD_DATE_REFUSED',
-            'Receipts cannot be posted after the current tenant business day',
-            {
-              effectivePeriod: businessPeriod,
-              recordedPeriod,
-              maximumForwardDateDays: '0',
-            },
-          );
       }
       if (posting.postingRole === 'shipment') {
         await assertShipmentBounds(
@@ -1441,11 +1431,6 @@ export class PostgresInventoryPostingService {
           context,
           posting.command,
         );
-        if (dateOrdinal(businessPeriod) > dateOrdinal(recordedPeriod))
-          throw postingError(
-            'FULFILLMENT_SHIPMENT_INVALID',
-            'Shipments cannot be posted after the current tenant business day',
-          );
       }
       if (isStockCountPosting(posting)) {
         await assertStockCountCompensationAvailable(
@@ -1455,6 +1440,11 @@ export class PostgresInventoryPostingService {
           posting,
         );
       }
+      // POSTING-FORWARD-DATE. One rule for every family, at the point the
+      // receipt and shipment checks it replaces used to run, so those two
+      // families refuse in the same order as before. Both stored replays have
+      // already returned above, and nothing has been written yet.
+      enforceForwardDate(posting.postingRole, businessPeriod, recordedPeriod);
       await assertPostingMasters(
         client,
         this.#binding,
@@ -3809,6 +3799,44 @@ function enforceBackdate(
       { effectivePeriod, recordedPeriod },
     );
   }
+}
+
+/**
+ * POSTING-FORWARD-DATE (ADR-0018, amendment 2026-09-30). No family commits an
+ * effective tenant business day after the recorded one: zero days of slack,
+ * compared by day and never by instant, so a later instant of the recorded day
+ * is admitted. Both periods are `inventory_business_period` values -- the
+ * tenant's declared zone and boundary -- never the UTC date of either instant.
+ * Receipts and shipments keep the codes, messages and details their own checks
+ * refused with before the rule was shared; every other family refuses by the
+ * one inventory code.
+ */
+function enforceForwardDate(
+  postingRole: ParsedPosting['postingRole'],
+  effectivePeriod: string,
+  recordedPeriod: string,
+): void {
+  const effective = dateOrdinal(effectivePeriod);
+  const recorded = dateOrdinal(recordedPeriod);
+  if (effective <= recorded) return;
+  if (postingRole === 'receipt') {
+    throw postingError(
+      'RECEIPT_FORWARD_DATE_REFUSED',
+      'Receipts cannot be posted after the current tenant business day',
+      { effectivePeriod, recordedPeriod, maximumForwardDateDays: '0' },
+    );
+  }
+  if (postingRole === 'shipment') {
+    throw postingError(
+      'FULFILLMENT_SHIPMENT_INVALID',
+      'Shipments cannot be posted after the current tenant business day',
+    );
+  }
+  throw postingError(
+    'INVENTORY_FORWARD_DATE_REFUSED',
+    `effective period ${effectivePeriod} is after the recorded business day ${recordedPeriod}`,
+    { effectivePeriod, recordedPeriod, maximumForwardDateDays: '0' },
+  );
 }
 
 async function enforcePeriodLock(
