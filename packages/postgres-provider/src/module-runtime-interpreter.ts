@@ -764,6 +764,26 @@ async function executeMutationOnClient(
 export type DocumentNumberMode = 'sequence' | 'verificationSentinel';
 
 /**
+ * The number a numbered field takes in `verificationSentinel` mode: the
+ * sentinel prefix, a hyphen and the hexadecimal SHA-256 of the record id and
+ * the field, cut to the column's length. It depends on nothing the create
+ * decides, so release verification knows the number of a record it arranged
+ * even when no read of that record selects the field.
+ */
+export function verificationSentinelNumber(
+  recordId: string,
+  fieldId: string,
+  maximumLength: number | null,
+): string {
+  const sentinel = `${VERIFICATION_SENTINEL_PREFIX}-${createHash('sha256')
+    .update(recordId, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(fieldId, 'utf8')
+    .digest('hex')}`;
+  return maximumLength === null ? sentinel : sentinel.slice(0, maximumLength);
+}
+
+/**
  * A create's server-assigned document numbers (canonical field `numbering`):
  * the next value of each named sequence per tenant and environment. One
  * allocator runs at a time per sequence -- the transaction-scoped lock is held
@@ -816,15 +836,11 @@ async function assignDocumentNumbers(
       // arranged records collide only with negligible probability. No sequence
       // may use the prefix (the contract reserves it), so a sentinel is never a
       // business number.
-      const sentinel = `${VERIFICATION_SENTINEL_PREFIX}-${createHash('sha256')
-        .update(input.recordId, 'utf8')
-        .update(Uint8Array.of(0))
-        .update(field.fieldId, 'utf8')
-        .digest('hex')}`;
-      patch[field.fieldId] =
-        column.fieldContract.bounds.maximumLength === null
-          ? sentinel
-          : sentinel.slice(0, column.fieldContract.bounds.maximumLength);
+      patch[field.fieldId] = verificationSentinelNumber(
+        input.recordId,
+        field.fieldId,
+        column.fieldContract.bounds.maximumLength,
+      );
       continue;
     }
     await client.query(
