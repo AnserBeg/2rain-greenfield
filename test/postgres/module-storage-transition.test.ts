@@ -10,6 +10,7 @@ import {
   APPLICATION_NAMESPACE,
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
+import { catalogModuleDefinition } from '../../packages/domain/src/catalog/definition.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/definition.js';
 import { salesModuleDefinition } from '../../packages/domain/src/sales/definition.js';
@@ -5754,11 +5755,27 @@ function composedApplicationWithoutInventoryForTransition(): Record<
     salesModuleDefinition(APPLICATION_NAMESPACE),
     'sales',
   );
-  return withoutModuleForTransition(
+  const withoutInventory = withoutModuleForTransition(
     application,
     inventoryModuleDefinition(APPLICATION_NAMESPACE, { documentEntry: true }),
     'inventory',
   );
+  // INVENTORY-PARITY: the item page shows Inventory's stock and movements;
+  // without Inventory it is Catalog's plain record page, as it was before.
+  const itemPage = `${APPLICATION_NAMESPACE}:surface.item_detail`;
+  const plainItemPage = (
+    catalogModuleDefinition(APPLICATION_NAMESPACE, { sellingPrices: true })
+      .surfaces as Array<Record<string, unknown>>
+  ).find((surface) => surface.surfaceId === itemPage);
+  assert.ok(plainItemPage);
+  withoutInventory.surfaces = (
+    withoutInventory.surfaces as Array<Record<string, unknown>>
+  ).map((surface) =>
+    surface.surfaceId === itemPage
+      ? { ...plainItemPage, workspace: { membership: 'contextual' } }
+      : surface,
+  );
+  return withoutInventory;
 }
 
 function collectPlanRelationNames(value: unknown): string[] {

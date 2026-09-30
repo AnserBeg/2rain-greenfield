@@ -189,6 +189,10 @@ test(
           'purchase_order_number',
           'sales_order_number',
           'shipment_number',
+          // PAYABLES: the vendor bill, its payments and credits.
+          'vendor_bill_number',
+          'vendor_credit_number',
+          'vendor_payment_number',
         ].map((local) => `${ns}:field.${local}`),
       );
       const plan = (
@@ -236,7 +240,7 @@ test(
               numbered.some((entry) => entry.fieldId === scenario.subjectId),
           )
           .map((scenario) => executed.has(scenario.scenarioId)),
-        [true, true, true, true, true, true, true, true],
+        Array.from({ length: 11 }, () => true),
         'each number’s uniqueness probe executed',
       );
       const derivationCodes = (
