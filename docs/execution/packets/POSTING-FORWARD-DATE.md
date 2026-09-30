@@ -1,6 +1,6 @@
 # POSTING-FORWARD-DATE — no inventory posting is dated after the tenant's today
 
-Status: executable candidate `aeef2b65f3183387d7f0c9f135ee385d53091e4d` frozen on `packet/POSTING-FORWARD-DATE`; draft PR #9 against main, CI green at `edaebdf2`; the round-1 review arm is owed (user-run); no merge, no deployment.
+Status: executable candidate `aeef2b65f3183387d7f0c9f135ee385d53091e4d` on `packet/POSTING-FORWARD-DATE`; draft PR #9 against main, CI green; round-1 review found no production defect; controls reproduced; ready for the owner's merge decision (no merge, no deployment by this lane).
 Tier: Critical — `packages/postgres-provider/src/inventory-posting-service.ts` and its error union `inventory-posting-error.ts`. One fresh-naive online arm is owed (`POSTING-FORWARD-DATE-review-prompt.md`). Stops: 0.
 Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6` (origin/main). Charter: section A of the orchestrator's four-packet inventory design (2026-09-30, read-only), which found that receipts and shipments already refused a date after today while adjustments, transfers and counts did not.
 
@@ -42,6 +42,8 @@ Base: `fe97b63baedf8bdd42146318bb89d4be1aa948f6` (origin/main). Charter: section
 
 - CI on PR #9 at `edaebdf2` (the candidate plus SALES-PARITY's harness race fix `277d34c8` and advisory pin `edaebdf2`, carried so this main-based branch's CI can pass; both outside the declared range): every job green, including PostgreSQL schema and isolation (the flipped backdate-policy step, the new tenant-calendar test, receiving-authorization) and the executed-file reachability check. The three controls' `--run` is still owed locally (container starts time out on this host).
 
+- Controls (2026-10-01, host Docker healthy again): `forward-rule-call-removed`, `forward-rule-one-day-slack`, `forward-rule-utc-days` each killed with its declared reason and restored green (`--run`, 56 s) at `9936b106`.
+
 ## Test it yourself (about ten minutes)
 
 ```sh
@@ -60,12 +62,13 @@ Ctrl-C stops the server and its container (`pnpm --filter @north-star/api dev:st
 
 ## Filed
 
+- Round 1, filed (not production): the new regression cases exercise adjustment and transfer at the database; count and correction, receipt, shipment, non-midnight boundaries and daylight-saving days are covered by the reviewer's model and the shared call site, not by database tests. `forward-rule-call-removed`'s description says families "other than receipts and shipments", but deleting the common call removes their enforcement too; `forward-rule-one-day-slack` claims every other case keeps its verdict, which the `afterMidnight` case does not (its first expected failure still occurs as declared).
 - No test posts a count or a shipment dated tomorrow: the call sits on the path every family shares, and the adjustment, transfer and receipt refusals are tested. The shipment refusal keeps its message but is still untested, as before this packet.
 - Receipt-specific backdate-window cases (yesterday admitted, eight days back refused under the seven-day window) need the purchasing fixture in the backdate harness.
 - The form's "Effective at" is a canonical UTC instant, while the business day is now Calgary's: between 18:00 and midnight in Calgary the form shows tomorrow's UTC date for a posting that is still today.
 - Load, not code, kept the PostgreSQL evidence from running: the backdate-policy file, `receiving-authorization` and the three `--run` controls are owed on a quiet host, and the branch is unpushed, so CI has not run either.
 
-Review: owed — one fresh-naive online Critical arm on `aeef2b65f3183387d7f0c9f135ee385d53091e4d`, prompt in `POSTING-FORWARD-DATE-review-prompt.md`. No verdict yet.
+Review: round 1 (ONLINE, owner-run, 2026-10-01, on `aeef2b65`) found no production defect under A1-A3 (72 isolated checks across the six roles; calendar cases against a model of `inventory_business_period`); its evidence and wording notes are filed above. No further round is owed.
 
 ```record-claim
 {
