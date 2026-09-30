@@ -1,7 +1,21 @@
 export const FULFILLMENT_READ_MODEL_BINDINGS = Object.freeze({
   line: 'northstar.sales:read_model.line',
   reservation: 'northstar.sales:read_model.reservation',
+  // RETURNS: a return's lines with what each can still take back.
+  returnLine: 'northstar.sales:read_model.return_line',
 });
+/**
+ * RETURNS (ruling D): what an order line has had returned (net of
+ * corrections) and what may still come back, beside what it shipped.
+ */
+export const RETURN_LINE_OUTPUTS = Object.freeze(['returned', 'returnable']);
+/** What each line of a posted return still adds, and how to reverse it. */
+export const RETURN_REVERSAL_OUTPUTS = Object.freeze([
+  'return_movement',
+  'return_reversible',
+  'return_reversal_quantity',
+  'return_order_line',
+]);
 /** Line amounts and order totals, computed on read (owner ruling B). */
 export const COMMERCIAL_READ_MODEL_BINDINGS = Object.freeze({
   line: 'northstar.sales:read_model.commercial_line',
@@ -40,6 +54,14 @@ export const PAYABLES_READ_MODEL_OUTPUTS = Object.freeze({
   purchaseLine: ['billed', 'to_bill', 'match_status'],
   purchaseOrder: ['order_to_bill'],
 } as const);
+/** Why goods came back (ruling D); stored as the return's reason code. */
+const RETURN_REASONS = [
+  ['DAMAGED', 'Damaged'],
+  ['DEFECTIVE', 'Defective'],
+  ['WRONG_ITEM', 'Wrong item'],
+  ['NOT_NEEDED', 'No longer needed'],
+  ['OTHER', 'Other'],
+] as const;
 /** The order's ship-to lines, as the workspace shows and prints them. */
 const SHIP_TO_LINES = [
   ['ship_to_name', 'Ship-to recipient'],
@@ -175,6 +197,9 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
   const reservations = id('dataset', 'line_reservations');
   const shipments = id('dataset', 'order_shipments');
   const invoices = id('dataset', 'order_invoices');
+  // RETURNS (ruling D): the order's returns and a selected return's lines.
+  const returns = id('dataset', 'order_returns');
+  const returnLines = id('dataset', 'order_return_lines');
   const taskColumn = (datasetId: string, name: string) => ({
     datasetId,
     columnId: id('column', name),
@@ -579,6 +604,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             ),
             column('coverage', 'Reserved', 50, id('metric', 'coverage')),
             column('shipped', 'Shipped', 60, id('metric', 'shipped')),
+            // Ruling D: returned stays apart from shipped.
+            column('returned', 'Returned', 65, id('metric', 'returned')),
             column('open', 'Open to ship', 70, id('metric', 'open_to_ship')),
             // Advisory (owner ruling of 2026-09-30): open quantity neither
             // this line's reservations nor free stock now cover.
@@ -592,7 +619,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           ],
           'item',
           ['sku', 'unit', 'unit_price'],
-          ['ordered', 'coverage', 'shipped', 'open', 'short'],
+          ['ordered', 'coverage', 'shipped', 'returned', 'open', 'short'],
           ['available_now'],
         ),
       },
@@ -682,6 +709,104 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             'Tracking or BOL',
             50,
             field('shipment_shipping_reference'),
+          ),
+        ],
+      },
+      {
+        // RETURNS (ruling D): what came back against this order's shipped
+        // lines; a selected return shows its lines and what they still add.
+        datasetId: returns,
+        presentation: {
+          selection: 'explicit',
+          selectedActions: 'row',
+          compact: 'scrollTable',
+        },
+        label: 'Returns',
+        orderKey: 35,
+        query: q('customer_return_list'),
+        parent: {
+          relationId: id('relation', 'customer_return_order'),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        columns: [
+          column('return', 'Return', 10, field('customer_return_number')),
+          column('return_state', 'State', 20, field('customer_return_state')),
+          column('return_kind', 'Kind', 25, field('customer_return_kind')),
+          column(
+            'returned_at',
+            'Returned at',
+            30,
+            field('customer_return_effective_at'),
+          ),
+          column(
+            'return_location',
+            'Returned into',
+            40,
+            field('customer_return_location_id'),
+            ['location_get', 'location_name'],
+          ),
+          column(
+            'return_reason',
+            'Reason',
+            50,
+            field('customer_return_reason_code'),
+          ),
+        ],
+      },
+      {
+        datasetId: returnLines,
+        label: 'Return lines',
+        orderKey: 36,
+        query: q('fulfillment_return_lines'),
+        presentation: {
+          selection: 'none',
+          compact: 'scrollTable',
+          description:
+            'Still returned is what each line adds to stock after earlier corrections. Missing or unavailable data is not zero.',
+        },
+        parent: {
+          relationId: id('relation', 'customer_return_line_return'),
+          value: { ...selected('recordId'), datasetId: returns },
+          ownership: 'parentScopedChild',
+        },
+        sort: [
+          {
+            fieldId: field('customer_return_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        columns: [
+          column(
+            'return_line',
+            'Line',
+            10,
+            field('customer_return_line_line_number'),
+          ),
+          column(
+            'return_item',
+            'Item',
+            20,
+            field('customer_return_line_item_id'),
+            ['item_get', 'item_name'],
+          ),
+          column(
+            'return_quantity',
+            'Quantity',
+            30,
+            field('customer_return_line_quantity'),
+          ),
+          column(
+            'return_unit',
+            'Unit',
+            40,
+            field('customer_return_line_unit_id'),
+          ),
+          column(
+            'return_still',
+            'Still returned',
+            50,
+            id('metric', 'return_reversible'),
           ),
         ],
       },
@@ -888,6 +1013,191 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             bind(['recordId'], selected('recordId')),
             bind(['expectedRevision'], selected('revision')),
           ]),
+        ],
+      },
+      {
+        // RETURNS (ruling D): goods back from the customer against this
+        // shipped line, into any active location (ruling R-C). Shipped stays
+        // shipped and invoicing is unchanged; a credit is a separate step.
+        actionId: id('action', 'receive_return'),
+        presentation: { placement: 'selection' },
+        label: 'Receive return',
+        description:
+          'Returned goods go back on hand at the location you choose. Shipped and invoiced quantities are unchanged.',
+        orderKey: 32,
+        datasetId: lines,
+        // A confirmed or closed order, while the line has something shipped
+        // that has not come back; the posting kernel bounds it under lock.
+        conditions: [
+          notInState('draft'),
+          notInState('cancelled'),
+          {
+            value: selected(id('metric', 'returnable')),
+            operator: 'positive',
+            compare: null,
+          },
+        ],
+        inputs: [
+          {
+            inputId: id('input', 'return_quantity'),
+            label: 'Quantity returned',
+            orderKey: 10,
+            type: 'quantity',
+            required: true,
+          },
+          {
+            inputId: id('input', 'return_location'),
+            label: 'Return into location',
+            orderKey: 20,
+            type: 'reference',
+            required: true,
+            query: q('location_list'),
+            labelField: ref('fieldReference', field('location_name')),
+          },
+          {
+            inputId: id('input', 'return_reason'),
+            label: 'Reason',
+            orderKey: 30,
+            type: 'text',
+            required: true,
+            presentation: {
+              kind: 'choice',
+              options: RETURN_REASONS.map(([value, label]) => ({
+                value,
+                label,
+              })),
+              defaultValue: RETURN_REASONS[0][0],
+            },
+          },
+          {
+            inputId: id('input', 'return_notes'),
+            label: 'Notes',
+            orderKey: 40,
+            type: 'text',
+            required: false,
+            presentation: { kind: 'multiline' },
+          },
+        ],
+        steps: [
+          create(
+            'return_draft',
+            'customer_return',
+            {
+              // The return number is assigned on create (RMA-000001).
+              state: literal(id('option', 'customer_return_state_draft')),
+              kind: literal(id('option', 'customer_return_kind_initial')),
+              effective_at: generated('instant'),
+              location_id: input('return_location'),
+              reason_code: input('return_reason'),
+              reason_narrative: input('return_notes'),
+            },
+            { order: record('recordId') },
+          ),
+          create(
+            'return_line',
+            'customer_return_line',
+            {
+              line_number: selected(field('sales_order_line_line_number')),
+              item_id: selected(field('sales_order_line_item_id')),
+              quantity: input('return_quantity'),
+              unit_id: selected(field('sales_order_line_unit_id')),
+              reversal_of_movement_id: literal(null),
+            },
+            {
+              return: stepValue('return_draft', 'recordId'),
+              order_line: selected('recordId'),
+            },
+          ),
+          command('return_commit', 'customer_return_post', 'return_draft'),
+        ],
+      },
+      {
+        // A posted return taken back (ruling D): a draft return of kind
+        // reversal naming the original, one line for every line of it that
+        // still adds to stock -- each at exactly that quantity, naming its own
+        // movement -- then posted. The posting kernel admits only that.
+        actionId: id('action', 'reverse_return'),
+        presentation: { placement: 'selection' },
+        label: 'Reverse return',
+        description:
+          'Takes back every line of this return that still adds to stock, at exactly that quantity, with a posted reversal. Refused if the stock has already left.',
+        orderKey: 37,
+        datasetId: returns,
+        conditions: [
+          {
+            value: selected(field('customer_return_state')),
+            operator: 'equals',
+            compare: id('option', 'customer_return_state_posted'),
+          },
+          {
+            value: selected(field('customer_return_kind')),
+            operator: 'equals',
+            compare: id('option', 'customer_return_kind_initial'),
+          },
+        ],
+        rows: {
+          datasetId: returnLines,
+          conditions: [
+            {
+              value: selected(id('metric', 'return_reversible')),
+              operator: 'positive',
+              compare: null,
+            },
+          ],
+        },
+        inputs: [
+          {
+            inputId: id('input', 'reverse_return_reason'),
+            label: 'Reason',
+            orderKey: 10,
+            type: 'text',
+            required: true,
+            presentation: { kind: 'multiline' },
+          },
+        ],
+        steps: [
+          create(
+            'return_reversal',
+            'customer_return',
+            {
+              state: literal(id('option', 'customer_return_state_draft')),
+              kind: literal(id('option', 'customer_return_kind_reversal')),
+              effective_at: generated('instant'),
+              // The original's location: a reversal takes back from where the
+              // return put the goods.
+              location_id: selected(field('customer_return_location_id')),
+              reason_code: literal('REVERSE'),
+              reason_narrative: input('reverse_return_reason'),
+            },
+            { order: record('recordId'), supersedes: selected('recordId') },
+          ),
+          {
+            ...create(
+              'return_reversal_line',
+              'customer_return_line',
+              {
+                line_number: selected(
+                  field('customer_return_line_line_number'),
+                ),
+                item_id: selected(field('customer_return_line_item_id')),
+                quantity: selected(id('metric', 'return_reversal_quantity')),
+                unit_id: selected(field('customer_return_line_unit_id')),
+                reversal_of_movement_id: selected(
+                  id('metric', 'return_movement'),
+                ),
+              },
+              {
+                return: stepValue('return_reversal', 'recordId'),
+                order_line: selected(id('metric', 'return_order_line')),
+              },
+            ),
+            each: true,
+          },
+          command(
+            'return_reversal_commit',
+            'customer_return_post',
+            'return_reversal',
+          ),
         ],
       },
       {
@@ -1138,18 +1448,56 @@ export function salesWorkspaceQueries(
   // The order page's Fulfillment lines: the same line figures, and what each
   // line is short, allocated over the order's lines (ORDER-PARITY). Its own
   // query, so no other reader of the lines pays for the stock reads.
+  // RETURNS (ruling D): what each line has had returned, and a return's
+  // lines with what each still adds, read from the posted movements under
+  // current policy -- declared only where the application composes returns
+  // with the movement ledger.
+  const returns =
+    queries.some(
+      (query) =>
+        query.queryId === `${namespace}:query.customer_return_line_list`,
+    ) &&
+    queries.some(
+      (query) => query.queryId === `${namespace}:query.inventory_movement_list`,
+    );
+  const returnDependencies = returns
+    ? {
+        returnLines: 'customer_return_line_list',
+        movements: 'inventory_movement_list',
+      }
+    : {};
   const fulfillmentLines = {
     ...clone('sales_order_line_list', 'fulfillment_order_lines'),
     readModel: fulfillment(
       'line',
-      ['coverage', 'shipped', 'open_to_ship', 'available_now', 'short'],
+      [
+        'coverage',
+        'shipped',
+        'open_to_ship',
+        'available_now',
+        'short',
+        ...(returns ? RETURN_LINE_OUTPUTS : []),
+      ],
       {
         ...dependencies,
+        ...returnDependencies,
         orderLines: 'commercial_lines',
         order: 'sales_order_get',
       },
     ),
   };
+  const returnLines = returns
+    ? [
+        {
+          ...clone('customer_return_line_list', 'fulfillment_return_lines'),
+          readModel: fulfillment(
+            'returnLine',
+            RETURN_REVERSAL_OUTPUTS,
+            returnDependencies,
+          ),
+        },
+      ]
+    : [];
   return [
     ...queries.map((query) => {
       const name =
@@ -1176,6 +1524,7 @@ export function salesWorkspaceQueries(
     orderTotals,
     ...purchaseCommercial,
     fulfillmentLines,
+    ...returnLines,
   ];
 }
 
@@ -1724,6 +2073,121 @@ export function packingWorkspace(namespace: string): Record<string, unknown> {
               value.columnId === `${namespace}:column.packing_item`
                 ? 'primary'
                 : value.columnId === `${namespace}:column.packing_quantity`
+                  ? 'quantity'
+                  : 'secondary',
+            priority: value.orderKey,
+          },
+        })),
+      },
+    ],
+    actions: [],
+  };
+}
+
+/**
+ * A customer return (ruling D), as its own document: the order it came back
+ * against, where it went, why, and its lines. Reversal is offered on the
+ * order's page, where the return's lines state what they still add.
+ */
+export function returnWorkspace(namespace: string): Record<string, unknown> {
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const column = (
+    name: string,
+    label: string,
+    orderKey: number,
+    field: string,
+    lookup?: readonly [string, string],
+  ) => ({
+    columnId: `${namespace}:column.customer_return_${name}`,
+    label,
+    orderKey,
+    field: `${namespace}:field.${field}`,
+    ...(lookup
+      ? {
+          reference: {
+            query: ref('queryReference', `${namespace}:query.${lookup[0]}`),
+            labelField: ref(
+              'fieldReference',
+              `${namespace}:field.${lookup[1]}`,
+            ),
+          },
+        }
+      : {}),
+  });
+  return {
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: `${namespace}:column.customer_return_number`,
+        subtitle: [`${namespace}:column.customer_return_location`],
+        facts: [
+          `${namespace}:column.customer_return_order`,
+          `${namespace}:column.customer_return_date`,
+          `${namespace}:column.customer_return_kind`,
+          `${namespace}:column.customer_return_reason`,
+        ],
+        status: `${namespace}:column.customer_return_state`,
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+    },
+    fields: [
+      column('number', 'Return', 10, 'customer_return_number'),
+      column('location', 'Returned into', 20, 'customer_return_location_id', [
+        'location_get',
+        'location_name',
+      ]),
+      // The order this return came back against: the relation stated by the
+      // return's get, labelled through the order's own get.
+      {
+        ...column('order', 'Sales order', 25, 'customer_return_order', [
+          'sales_order_get',
+          'sales_order_number',
+        ]),
+        field: `${namespace}:relation.customer_return_order`,
+      },
+      column('date', 'Returned at', 30, 'customer_return_effective_at'),
+      column('kind', 'Kind', 35, 'customer_return_kind'),
+      column('state', 'Return state', 40, 'customer_return_state'),
+      column('reason', 'Reason', 50, 'customer_return_reason_code'),
+      column('notes', 'Notes', 60, 'customer_return_reason_narrative'),
+    ],
+    children: [
+      {
+        datasetId: `${namespace}:dataset.customer_return_lines`,
+        label: 'Returned lines',
+        presentation: { selection: 'none', compact: 'scrollTable' },
+        orderKey: 10,
+        query: ref(
+          'queryReference',
+          `${namespace}:query.customer_return_line_list`,
+        ),
+        parent: {
+          relationId: `${namespace}:relation.customer_return_line_return`,
+          ownership: 'parentScopedChild',
+          value: { source: 'record', field: 'recordId' },
+        },
+        columns: [
+          column('line', 'Line', 10, 'customer_return_line_line_number'),
+          column('item', 'Item', 20, 'customer_return_line_item_id', [
+            'item_get',
+            'item_name',
+          ]),
+          column('quantity', 'Quantity', 30, 'customer_return_line_quantity'),
+          column('unit', 'Unit', 40, 'customer_return_line_unit_id'),
+        ].map((value) => ({
+          ...value,
+          presentation: {
+            role:
+              value.columnId === `${namespace}:column.customer_return_item`
+                ? 'primary'
+                : value.columnId ===
+                    `${namespace}:column.customer_return_quantity`
                   ? 'quantity'
                   : 'secondary',
             priority: value.orderKey,

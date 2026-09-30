@@ -320,6 +320,8 @@ export function inventoryModuleDefinition(
           'transfer',
           'countCorrection',
           'reBaseline',
+          // RETURNS: appended, so every released option keeps its order.
+          'customerReturn',
         ]),
       ),
       field(
@@ -704,6 +706,8 @@ export function inventoryModuleDefinition(
           'count',
           'correction',
           'reBaseline',
+          // RETURNS: appended, so every released option keeps its order.
+          'customerReturn',
         ]),
       ),
       field(

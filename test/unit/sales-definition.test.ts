@@ -72,27 +72,32 @@ test('sales fulfillment metadata is a complete order, reservation and shipment d
     authored.normalizationProfileVersion,
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
-  // Ruling C adds the invoice, its lines, the payment and the credit.
-  assert.equal(authored.entities.length, 11);
+  // Ruling C adds the invoice, its lines, the payment and the credit;
+  // RETURNS (ruling D) the customer return and its lines.
+  assert.equal(authored.entities.length, 13);
   // SALES-PARITY adds the shipment's carrier, reference type and reference,
   // then (ruling E) the order's salesperson, terms, ship-to address and six
   // ship-to lines, and the same six lines on the shipment; then (ruling B)
   // the order's tax code and two charges with codes and frozen rates, and the
   // line's list price, discount, tax code and frozen rate; then (ruling C)
-  // 14 invoice, 9 invoice-line, 6 payment and 5 credit fields.
-  assert.equal(authored.fields.length, 98);
+  // 14 invoice, 9 invoice-line, 6 payment and 5 credit fields; then
+  // (RETURNS) 7 return and 5 return-line fields.
+  assert.equal(authored.fields.length, 110);
   // SALES-PARITY adds sales_order_reopen (ruling F), then the four
-  // receivables documents' CRUD and their post and void commands.
-  assert.equal(authored.operations.length, 48);
-  assert.equal(authored.permissions.length, 57);
-  assert.equal(authored.queries.length, 44);
-  assert.equal(authored.surfaces.length, 31);
+  // receivables documents' CRUD and their post and void commands; RETURNS
+  // the return's and its lines' CRUD and its post.
+  assert.equal(authored.operations.length, 57);
+  assert.equal(authored.permissions.length, 68);
+  assert.equal(authored.queries.length, 52);
+  assert.equal(authored.surfaces.length, 37);
   for (const local of [
     'sales_order',
     'sales_order_line',
     'reservation',
     'shipment',
     'shipment_line',
+    'customer_return',
+    'customer_return_line',
   ]) {
     for (const role of ['list', 'detail', 'form']) {
       const surface = authored.surfaces.find((candidate) =>
@@ -192,7 +197,7 @@ test('draft editing is admitted and every released/cancelled edit is refused by 
 
 test('line mutations inherit their parent guards and fulfillment references are explicit', () => {
   const authored = definition();
-  assert.equal(authored.relations.length, 14);
+  assert.equal(authored.relations.length, 18);
   assert.deepEqual(
     authored.relations.map((relation) => relation.relationId),
     Object.values(SALES_IDS.relationIds),
@@ -272,6 +277,9 @@ test('all sales permissions are exact current-policy contracts', () => {
         'customer_invoice_line',
         'customer_payment',
         'customer_credit',
+        // RETURNS (ruling D): the return and its lines.
+        'customer_return',
+        'customer_return_line',
       ].flatMap((local) =>
         ['create', 'read', 'update', 'archive', 'restore'].map((action) => [
           action,
@@ -308,6 +316,11 @@ test('all sales permissions are exact current-policy contracts', () => {
         'transition',
         'northstar.sales:permission.shipment_post',
         'northstar.sales:entity.shipment',
+      ],
+      [
+        'transition',
+        'northstar.sales:permission.customer_return_post',
+        'northstar.sales:entity.customer_return',
       ],
       ...(
         [
@@ -568,4 +581,75 @@ test('ruling C: receivables documents change only as drafts, post once through t
       `${ns}:operation.sales_order_reopen`,
     ],
   );
+});
+
+test('ruling D: a customer return takes an RMA number, changes only while a draft and posts through fulfillment', () => {
+  const authored = definition();
+  const number = authored.fields.find(
+    (field) => field.fieldId === 'northstar.sales:field.customer_return_number',
+  ) as unknown as { numbering?: { prefix: string } } | undefined;
+  assert.equal(number?.numbering?.prefix, 'RMA');
+  const draft = {
+    'northstar.sales:field.customer_return_state':
+      'northstar.sales:option.customer_return_state_draft',
+  } as Parameters<typeof evaluateRegisteredOperationPrecondition>[1];
+  const posted = {
+    'northstar.sales:field.customer_return_state':
+      'northstar.sales:option.customer_return_state_posted',
+  } as Parameters<typeof evaluateRegisteredOperationPrecondition>[1];
+  for (const local of [
+    'customer_return_create',
+    'customer_return_update',
+    'customer_return_archive',
+    'customer_return_post',
+  ]) {
+    const operation = authored.operations.find(
+      (candidate) =>
+        candidate.operationId === `northstar.sales:operation.${local}`,
+    );
+    assert.ok(operation?.precondition, local);
+    const outcome = (image: typeof draft) =>
+      evaluateRegisteredOperationPrecondition(
+        operation.precondition! as Parameters<
+          typeof evaluateRegisteredOperationPrecondition
+        >[0],
+        image,
+      ).outcome;
+    assert.equal(outcome(draft), 'holds', local);
+    assert.equal(outcome(posted), 'refused', local);
+  }
+  const post = authored.operations.find(
+    (operation) =>
+      operation.operationId ===
+      'northstar.sales:operation.customer_return_post',
+  ) as unknown as {
+    effect: { kind: string; capability: { targetId: string } };
+    tier: string;
+  };
+  assert.equal(post.effect.kind, 'registeredCapabilityEffect');
+  assert.equal(
+    post.effect.capability.targetId,
+    'northstar.sales:capability.fulfillment',
+  );
+  assert.equal(post.tier, 'o1');
+  const relation = (local: string) =>
+    authored.relations.find(
+      (candidate) =>
+        candidate.relationId === `northstar.sales:relation.${local}`,
+    ) as unknown as { ownership: string; required: boolean } | undefined;
+  assert.equal(relation('customer_return_order')?.ownership, 'reference');
+  assert.equal(relation('customer_return_supersedes')?.required, false);
+  assert.equal(
+    relation('customer_return_line_return')?.ownership,
+    'parentScopedChild',
+  );
+  assert.equal(
+    relation('customer_return_line_order_line')?.ownership,
+    'reference',
+  );
+  for (const familyId of ['customer_return', 'customer_return_line'])
+    assert.deepEqual(
+      LEGAL_ENTITY_FAMILY_MAP_V1.find((rule) => rule.familyId === familyId),
+      { classification: 'entityOwned', familyId },
+    );
 });

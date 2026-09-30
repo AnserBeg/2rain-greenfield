@@ -272,8 +272,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // + Party's three ship-to address and Catalog's three tax code surfaces
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
-  // its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 101);
+  // its lines, payments and credits (twelve), + RETURNS' customer return and
+  // its lines (six).
+  assert.equal(groupedManifest.surfaces.length, 107);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -302,8 +303,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
   // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
-  // the Bills list.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 16);
+  // the Bills list; RETURNS: the Returns list joins Sales.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 17);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),

@@ -70,6 +70,8 @@ import {
   fulfillmentRelation,
   fulfillmentTable,
   quoteFulfillmentIdentifier,
+  type CustomerReturnCommand,
+  type DerivedCustomerReturnCommand,
   type DerivedShipmentCommand,
   type FulfillmentBinding,
   type ShipmentCommand,
@@ -148,6 +150,29 @@ interface PostingFamilyDeclarationV1 {
 }
 
 const INVENTORY_POSTING_FAMILIES_V1 = Object.freeze([
+  // RETURNS (ruling D): goods back from a customer against a shipped order
+  // line. A companion family of the fulfillment capability, as shipment is;
+  // skipped where the release declares no customer return.
+  Object.freeze({
+    capabilityId: FULFILLMENT_CAPABILITY_ID,
+    companion: {
+      companionEntitySuffix: 'inventory_transaction',
+      companionLineEntitySuffix: 'inventory_transaction_line',
+      numberPrefix: 'RT',
+      sourceLineEntitySuffix: 'customer_return_line',
+    },
+    familyId: 'customer_return',
+    origin: 'companion',
+    roles: [
+      {
+        movementOption: 'customer_return',
+        postingRole: 'customerReturn' as const,
+        transactionTypeOption: 'customer_return',
+      },
+    ],
+    sourceEntitySuffix: 'customer_return',
+    sourceType: 'customerReturn',
+  }),
   Object.freeze({
     capabilityId: FULFILLMENT_CAPABILITY_ID,
     companion: {
@@ -461,6 +486,7 @@ interface DerivedStockCountCommand extends Omit<
 export type InventoryPostingCommandV1 =
   | GoodsReceiptCommand
   | ShipmentCommand
+  | CustomerReturnCommand
   | InventoryAdjustmentPostingCommandV1
   | InventoryStockCountPostingCommandV2
   | InventoryTransferPostingCommandV1;
@@ -474,12 +500,19 @@ export type InventoryPostingCommandV1 =
 type DerivedPostingCommand =
   | DerivedGoodsReceiptCommand
   | DerivedShipmentCommand
+  | DerivedCustomerReturnCommand
   | InventoryAdjustmentPostingCommandV1
   | DerivedStockCountCommand
   | InventoryTransferPostingCommandV1;
 
 export type InventoryPostingRoleV1 =
-  'adjustment' | 'correction' | 'count' | 'transfer' | 'receipt' | 'shipment';
+  | 'adjustment'
+  | 'correction'
+  | 'count'
+  | 'transfer'
+  | 'receipt'
+  | 'shipment'
+  | 'customerReturn';
 
 export interface InventoryMovementOrderEntryV1 {
   readonly effectiveAt: string;
@@ -878,7 +911,8 @@ interface VersionedInputDigest {
     | typeof standardInventoryPostingInputDigestVersion
     | typeof companionDerivedInventoryPostingInputDigestVersion
     | 5
-    | 6;
+    | 6
+    | 7;
 }
 
 interface EvidenceIds {
@@ -899,6 +933,11 @@ type ParsedPosting =
       readonly command: DerivedShipmentCommand;
       readonly family: ResolvedPostingFamily;
       readonly postingRole: 'shipment';
+    }
+  | {
+      readonly command: DerivedCustomerReturnCommand;
+      readonly family: ResolvedPostingFamily;
+      readonly postingRole: 'customerReturn';
     }
   | {
       readonly command: DerivedGoodsReceiptCommand;
@@ -1197,6 +1236,115 @@ export class PostgresInventoryPostingService {
     });
   }
 
+  /**
+   * RETURNS (ruling D). Goods back from a customer against shipped order
+   * lines, into the one location the return names. An initial return adds
+   * positive quantities and compensates nothing; a correction or reversal
+   * takes back negative quantities, each naming a movement of the posted
+   * return it supersedes. The companion transaction and its lines are
+   * derived from the return, never supplied. What may be returned is decided
+   * inside `#post`, under the order's row locks, against the ledger.
+   */
+  async postCustomerReturn(
+    context: TrustedRequestContext,
+    actorEnvelope: TrustedActorEnvelope,
+    command: CustomerReturnCommand,
+  ): Promise<InventoryPostingResultV1> {
+    const family = this.#familyFor('customer_return');
+    validateCommandEnvelope(
+      command,
+      ['kind', 'returnNumber', 'orderId', 'locationId', 'supersedesReturnId'],
+      family,
+    );
+    requiredUuid(command.orderId, 'orderId');
+    requiredUuid(command.locationId, 'locationId');
+    requiredUuid(command.sourceId, 'sourceId');
+    requiredText(command.returnNumber, 'returnNumber', 60);
+    if (
+      command.sourceType !== 'customerReturn' ||
+      !['initial', 'correction', 'reversal'].includes(command.kind) ||
+      command.lines.length === 0 ||
+      (command.kind === 'initial') !== (command.supersedesReturnId === null)
+    )
+      throw inputError('Invalid customer return source or correction link');
+    if (command.supersedesReturnId !== null)
+      requiredUuid(command.supersedesReturnId, 'supersedesReturnId');
+    for (const line of command.lines)
+      exactKeys(line, [
+        'returnLineId',
+        'orderLineId',
+        'sourceLine',
+        'itemId',
+        'unitId',
+        'quantityDelta',
+        'reversalOfMovementId',
+      ]);
+    const normalized = {
+      ...normalizeCommandEnvelope(structuredClone(command)),
+      sourceId: command.sourceId.toLowerCase(),
+      orderId: command.orderId.toLowerCase(),
+      locationId: command.locationId.toLowerCase(),
+      supersedesReturnId: command.supersedesReturnId?.toLowerCase() ?? null,
+      lines: command.lines.map((line) => ({
+        ...line,
+        returnLineId: line.returnLineId.toLowerCase(),
+        orderLineId: line.orderLineId.toLowerCase(),
+        itemId: line.itemId.toLowerCase(),
+        reversalOfMovementId: line.reversalOfMovementId?.toLowerCase() ?? null,
+      })),
+    };
+    const ids = new Set<string>();
+    const derived: DerivedCustomerReturnCommand = {
+      ...normalized,
+      transactionId: deriveInventoryPostingCompanionId({
+        capabilityId: FULFILLMENT_CAPABILITY_ID,
+        familyId: 'customer_return',
+        companionFamilyId: family.companion!.companionEntityId,
+        sourceRecordId: normalized.sourceId,
+      }),
+      lines: normalized.lines.map((line) => {
+        for (const [value, label] of [
+          [line.returnLineId, 'returnLineId'],
+          [line.orderLineId, 'orderLineId'],
+          [line.itemId, 'itemId'],
+        ] as const)
+          requiredUuid(value, label);
+        requiredText(line.sourceLine, 'sourceLine', 80);
+        requiredText(line.unitId, 'unitId', 32);
+        if (line.reversalOfMovementId !== null)
+          requiredUuid(line.reversalOfMovementId, 'reversalOfMovementId');
+        if (ids.has(line.returnLineId))
+          throw inputError('Duplicate customer return line');
+        ids.add(line.returnLineId);
+        const quantity = fulfillmentQuantity(line.quantityDelta);
+        if (
+          quantity === 0n ||
+          (normalized.kind === 'initial'
+            ? quantity < 0n || line.reversalOfMovementId !== null
+            : quantity > 0n || line.reversalOfMovementId === null)
+        )
+          throw inputError(
+            'Return positive quantities; corrections take back a named return movement',
+          );
+        return {
+          ...line,
+          quantityDelta: fulfillmentDecimal(quantity),
+          transactionLineId: deriveInventoryPostingCompanionId({
+            capabilityId: FULFILLMENT_CAPABILITY_ID,
+            familyId: 'customer_return',
+            companionFamilyId: family.companion!.companionLineEntityId,
+            sourceRecordId: line.returnLineId,
+          }),
+        };
+      }),
+    };
+    return this.#post(context, actorEnvelope, {
+      command: derived,
+      family,
+      postingRole: 'customerReturn',
+    });
+  }
+
   #familyFor(familyId: string): ResolvedPostingFamily {
     return requiredPostingFamily(
       this.#binding,
@@ -1337,6 +1485,18 @@ export class PostgresInventoryPostingService {
               posting.command,
             )
           : null;
+      // RETURNS. The order row, then its lines ascending, then the return and
+      // its lines -- `lockShipment`'s order -- so a return and a shipment
+      // correction of one order serialize on the order row.
+      const customerReturnEvidence =
+        posting.postingRole === 'customerReturn'
+          ? await lockCustomerReturn(
+              client,
+              this.#binding.fulfillment!,
+              context,
+              posting.command,
+            )
+          : null;
       // PUR-2a. Execution is selected by the compiled family binding the entry
       // point resolved by `(capabilityId, familyId)`, not by a source-type
       // literal and not by a second lookup keyed on the role. An
@@ -1441,10 +1601,36 @@ export class PostgresInventoryPostingService {
           context,
           posting.command,
         );
+        await assertShipmentKeepsReturnedUnits(
+          client,
+          this.#binding.fulfillment!,
+          context,
+          posting.command,
+        );
         if (dateOrdinal(businessPeriod) > dateOrdinal(recordedPeriod))
           throw postingError(
             'FULFILLMENT_SHIPMENT_INVALID',
             'Shipments cannot be posted after the current tenant business day',
+          );
+      }
+      if (posting.postingRole === 'customerReturn') {
+        await assertCustomerReturnBounds(
+          client,
+          this.#binding.fulfillment!,
+          context,
+          posting.command,
+          customerReturnEvidence!,
+        );
+        await assertCustomerReturnCompensation(
+          client,
+          this.#binding.fulfillment!,
+          context,
+          posting.command,
+        );
+        if (dateOrdinal(businessPeriod) > dateOrdinal(recordedPeriod))
+          throw postingError(
+            'FULFILLMENT_RETURN_INVALID',
+            'Returns cannot be posted after the current tenant business day',
           );
       }
       if (isStockCountPosting(posting)) {
@@ -1510,7 +1696,8 @@ export class PostgresInventoryPostingService {
           companionOrigin &&
           (isStockCountPosting(posting) ||
             posting.postingRole === 'receipt' ||
-            posting.postingRole === 'shipment')
+            posting.postingRole === 'shipment' ||
+            posting.postingRole === 'customerReturn')
         ) {
           transactionRevision = await writeCompanionTransaction(
             client,
@@ -1574,6 +1761,18 @@ export class PostgresInventoryPostingService {
             context,
             posting,
             shipmentEvidence!,
+            actorEnvelope.actor.executionPrincipal.principalId,
+            recordedAt,
+            coverage,
+          );
+        }
+        if (posting.postingRole === 'customerReturn') {
+          stockCountRevision = await writeCustomerReturnConsequences(
+            client,
+            this.#binding,
+            context,
+            posting,
+            customerReturnEvidence!,
             actorEnvelope.actor.executionPrincipal.principalId,
             recordedAt,
             coverage,
@@ -2024,7 +2223,8 @@ function resolvePostingStorage(
           entity.entityId.endsWith(':entity.shipment') ||
           entity.entityId.endsWith(':entity.reservation') ||
           entity.entityId.endsWith(':entity.reservation_balance') ||
-          entity.entityId.endsWith(':entity.sales_order_shipped'),
+          entity.entityId.endsWith(':entity.sales_order_shipped') ||
+          entity.entityId.endsWith(':entity.customer_return'),
       )
       .map((entity) => entity.entityId),
     movementEntity.entityId,
@@ -2065,6 +2265,12 @@ function resolvePostingStorage(
           relation: entity.physicalTableName,
           verifiedBy: [verifyShipmentPosting],
         })),
+      ...target.entities
+        .filter((entity) => entity.entityId.endsWith(':entity.customer_return'))
+        .map((entity) => ({
+          relation: entity.physicalTableName,
+          verifiedBy: [verifyCustomerReturnPosting],
+        })),
       { relation: movement.tableName, verifiedBy: [readBackMovements] },
       // A routed row is observed by reading the PARTITIONED PARENT, which is the
       // only correct way to read one: reading a partition directly would mean
@@ -2095,6 +2301,7 @@ function resolvePostingStorage(
           assertAuthoredTransactionPersisted,
           verifyGoodsReceiptPosting,
           verifyShipmentPosting,
+          verifyCustomerReturnPosting,
         ],
       },
       {
@@ -2103,6 +2310,7 @@ function resolvePostingStorage(
           assertCompanionIdentitiesPersisted,
           verifyGoodsReceiptPosting,
           verifyShipmentPosting,
+          verifyCustomerReturnPosting,
         ],
       },
       ...(postedStockBalanceEntity
@@ -2595,6 +2803,13 @@ function resolvePostingFamilies(
       declaration.familyId === 'shipment' &&
       !target.entities.some((entry) =>
         entry.entityId.endsWith(':entity.shipment'),
+      )
+    )
+      continue;
+    if (
+      declaration.familyId === 'customer_return' &&
+      !target.entities.some((entry) =>
+        entry.entityId.endsWith(':entity.customer_return'),
       )
     )
       continue;
@@ -3284,6 +3499,20 @@ function plannedMovements(
         line.reversalOfMovementId,
       ),
     );
+  // RETURNS: every line into (or, correcting, out of) the return's location.
+  if (posting.postingRole === 'customerReturn')
+    return posting.command.lines.map((line) =>
+      plannedMovement(
+        posting.command,
+        line,
+        posting.command.locationId,
+        line.quantityDelta,
+        line.returnLineId,
+        'customerReturn',
+        mintUuid,
+        line.reversalOfMovementId,
+      ),
+    );
   if (posting.postingRole === 'adjustment') {
     return posting.command.lines.map((line) =>
       plannedMovement(
@@ -3340,7 +3569,8 @@ function plannedMovement(
     | DerivedStockCountLine
     | InventoryTransferLineV1
     | DerivedGoodsReceiptCommand['lines'][number]
-    | DerivedShipmentCommand['lines'][number],
+    | DerivedShipmentCommand['lines'][number]
+    | DerivedCustomerReturnCommand['lines'][number],
   locationId: string,
   quantityDelta: string,
   sourceLine: string,
@@ -3737,7 +3967,9 @@ function enforceReasonAndApproval(
 ): void {
   const { command } = posting;
   const postingRole =
-    posting.postingRole === 'receipt' || posting.postingRole === 'shipment'
+    posting.postingRole === 'receipt' ||
+    posting.postingRole === 'shipment' ||
+    posting.postingRole === 'customerReturn'
       ? posting.command.kind === 'initial'
         ? 'adjustment'
         : 'correction'
@@ -3763,7 +3995,8 @@ function enforceReasonAndApproval(
   const exceeds =
     posting.postingRole === 'adjustment' ||
     posting.postingRole === 'receipt' ||
-    posting.postingRole === 'shipment'
+    posting.postingRole === 'shipment' ||
+    posting.postingRole === 'customerReturn'
       ? posting.command.lines.some(
           (line) =>
             absolute(decimalToScaled(line.quantityDelta, 'quantity')) >
@@ -5684,6 +5917,705 @@ async function verifyShipmentPosting(
   }
 }
 
+/**
+ * RETURNS (ruling D). What a sales order line has taken back: the sum of the
+ * posted customer-return movements attributed to it through their return
+ * lines -- initial returns positive, corrections and reversals negative --
+ * read under the order's row lock. Shipped stays shipped: this ledger is
+ * apart from `shippedLedger`, and neither reads the other's movements.
+ */
+async function returnedLedger(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  orderLineId: string,
+): Promise<{ quantity: bigint; unit: string | null; count: number }> {
+  const line = binding.customerReturnLine;
+  if (!line) return { quantity: 0n, unit: null, count: 0 };
+  const qf = quoteFulfillmentIdentifier;
+  const m = binding.movement;
+  const result = await client.query<{
+    quantity: string;
+    unit: string | null;
+    count: string;
+    units: string;
+  }>(
+    `SELECT coalesce(sum(m.${qf(fulfillmentColumn(m, 'inventory_movement_quantity_delta'))}),0)::text AS quantity,
+            min(m.${qf(fulfillmentColumn(m, 'inventory_movement_unit_id'))}) AS unit,
+            count(*)::text AS count,
+            count(DISTINCT m.${qf(fulfillmentColumn(m, 'inventory_movement_unit_id'))})::text AS units
+       FROM ${fulfillmentTable(m)} m
+       JOIN ${fulfillmentTable(line)} rl
+         ON rl.tenant_id=m.tenant_id AND rl.environment_id=m.environment_id
+        AND rl.${qf(line.legalEntity!.column)}=m.${qf(m.legalEntity!.column)}
+        AND rl.record_id::text=m.${qf(fulfillmentColumn(m, 'inventory_movement_source_line'))}
+        AND rl.${qf(fulfillmentRelation(binding, line, 'customer_return_line_return'))}::text=m.${qf(fulfillmentColumn(m, 'inventory_movement_source_id'))}
+      WHERE m.tenant_id=$1 AND m.environment_id=$2
+        AND m.${qf(m.legalEntity!.column)}=$3
+        AND rl.${qf(fulfillmentRelation(binding, line, 'customer_return_line_order_line'))}=$4
+        AND m.${qf(fulfillmentColumn(m, 'inventory_movement_source_type'))}='customerReturn'
+        AND m.archived_at IS NULL`,
+    [context.tenantId, context.environmentId, legalEntityId, orderLineId],
+  );
+  if (Number(result.rows[0]!.units) > 1)
+    throw postingError(
+      'FULFILLMENT_RETURN_INVALID',
+      'Order-line return ledger contains multiple base units',
+    );
+  return {
+    quantity: fulfillmentQuantity(result.rows[0]!.quantity),
+    unit: result.rows[0]!.unit,
+    count: Number(result.rows[0]!.count),
+  };
+}
+
+interface LockedCustomerReturn {
+  readonly header: Record<string, unknown>;
+  readonly lines: readonly Record<string, unknown>[];
+  readonly order: Record<string, unknown>;
+  readonly orderLines: ReadonlyMap<string, Record<string, unknown>>;
+}
+
+/** Ruling D, owner ruling of 2026-09-30: a confirmed or a closed order. */
+function assertReturnableSalesOrder(
+  binding: FulfillmentBinding,
+  order: Record<string, unknown>,
+): void {
+  const state = String(
+    order[
+      fulfillmentColumn(
+        binding.order,
+        'derived_state_field.machine.sales_order_lifecycle',
+      )
+    ],
+  );
+  if (
+    order.archived_at !== null ||
+    !(
+      state.endsWith(':state.sales_order_released') ||
+      state.endsWith(':state.sales_order_closed')
+    )
+  )
+    throw postingError(
+      'FULFILLMENT_ORDER_NOT_RELEASED',
+      'Returns require a confirmed or closed sales order',
+    );
+}
+
+async function lockCustomerReturn(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedCustomerReturnCommand,
+): Promise<LockedCustomerReturn> {
+  const entity = binding.customerReturn;
+  const lineEntity = binding.customerReturnLine;
+  if (!entity || !lineEntity)
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      'Customer return storage is absent from the active release',
+    );
+  const qf = quoteFulfillmentIdentifier;
+  // Claim B4. What serializes the returns and the shipment corrections of an
+  // order: its row, then its lines ascending, FOR NO KEY UPDATE, taken before
+  // either ledger is read. Stock locks cannot serialize two returns into two
+  // different locations, and the period lock comes after the bound.
+  const serializeOrder = true;
+  const header = await fulfillmentRowForEntity(
+    client,
+    entity,
+    context,
+    command.legalEntityId,
+    command.sourceId,
+    false,
+  );
+  const candidateLines = await client.query<Record<string, unknown>>(
+    `SELECT record_id FROM ${fulfillmentTable(lineEntity)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${qf(lineEntity.legalEntity!.column)}=$3
+        AND ${qf(fulfillmentRelation(binding, lineEntity, 'customer_return_line_return'))}=$4
+        AND archived_at IS NULL ORDER BY record_id`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+    ],
+  );
+  const order = await fulfillmentRowForEntity(
+    client,
+    binding.order,
+    context,
+    command.legalEntityId,
+    command.orderId,
+    serializeOrder,
+  );
+  assertReturnableSalesOrder(binding, order);
+  const orderLines = new Map<string, Record<string, unknown>>();
+  for (const id of [
+    ...new Set(command.lines.map((line) => line.orderLineId)),
+  ].sort())
+    orderLines.set(
+      id,
+      await fulfillmentRowForEntity(
+        client,
+        binding.orderLine,
+        context,
+        command.legalEntityId,
+        id,
+        serializeOrder,
+      ),
+    );
+  const lockedHeader = await fulfillmentRowForEntity(
+    client,
+    entity,
+    context,
+    command.legalEntityId,
+    command.sourceId,
+    true,
+  );
+  const linesResult = await client.query<Record<string, unknown>>(
+    `SELECT line.*, (SELECT relname FROM pg_class WHERE oid=line.tableoid) AS "__relation"
+       FROM ${fulfillmentTable(lineEntity)} line
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${qf(lineEntity.legalEntity!.column)}=$3
+        AND ${qf(fulfillmentRelation(binding, lineEntity, 'customer_return_line_return'))}=$4
+        AND archived_at IS NULL ORDER BY record_id FOR NO KEY UPDATE OF line`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+    ],
+  );
+  if (
+    candidateLines.rows.length !== linesResult.rows.length ||
+    linesResult.rows.length !== command.lines.length ||
+    header.revision !== lockedHeader.revision
+  )
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Customer return line set changed while posting locks were acquired',
+    );
+  return {
+    header: lockedHeader,
+    lines: linesResult.rows,
+    order,
+    orderLines,
+  };
+}
+
+async function assertCustomerReturnBounds(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedCustomerReturnCommand,
+  locked: LockedCustomerReturn,
+): Promise<void> {
+  const entity = binding.customerReturn!;
+  const lineEntity = binding.customerReturnLine!;
+  const column = (name: string) =>
+    fulfillmentColumn(entity, `customer_return_${name}`);
+  const lineColumn = (name: string) =>
+    fulfillmentColumn(lineEntity, `customer_return_line_${name}`);
+  if (
+    locked.header.archived_at !== null ||
+    Number(locked.header.revision) !== command.sourceRevision ||
+    locked.header[column('state')] !==
+      fulfillmentOption(entity, 'customer_return_state', 'draft')
+  )
+    throw postingError(
+      'FULFILLMENT_RETURN_INVALID',
+      'Only a current draft customer return can be posted',
+    );
+  for (const [name, value] of [
+    ['number', command.returnNumber],
+    ['kind', fulfillmentOption(entity, 'customer_return_kind', command.kind)],
+    ['location_id', command.locationId],
+    ['reason_code', command.reason.code],
+    ['reason_narrative', command.reason.narrative],
+  ] as const)
+    if (locked.header[column(name)] !== value)
+      throw postingError(
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+        `Customer return ${name} changed`,
+      );
+  const effectiveAt = locked.header[column('effective_at')];
+  if (
+    (effectiveAt instanceof Date
+      ? effectiveAt.toISOString()
+      : new Date(String(effectiveAt)).toISOString()) !== command.effectiveAt ||
+    locked.header[
+      fulfillmentRelation(binding, entity, 'customer_return_order')
+    ] !== command.orderId ||
+    locked.header[
+      fulfillmentRelation(binding, entity, 'customer_return_supersedes')
+    ] !== command.supersedesReturnId
+  )
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Customer return attribution or effective instant changed',
+    );
+  const attemptedByOrderLine = new Map<string, bigint>();
+  for (const line of command.lines) {
+    const stored = locked.lines.find(
+      (row) => row.record_id === line.returnLineId,
+    );
+    const orderLine = locked.orderLines.get(line.orderLineId);
+    if (!stored || !orderLine)
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'Customer return attribution is missing',
+      );
+    const storedQuantity = fulfillmentQuantity(
+      String(stored[lineColumn('quantity')]),
+    );
+    if (
+      storedQuantity !== fulfillmentQuantity(line.quantityDelta) ||
+      String(stored[lineColumn('line_number')]) !== line.sourceLine ||
+      stored[
+        fulfillmentRelation(
+          binding,
+          lineEntity,
+          'customer_return_line_order_line',
+        )
+      ] !== line.orderLineId ||
+      orderLine[
+        fulfillmentRelation(
+          binding,
+          binding.orderLine,
+          'sales_order_line_order',
+        )
+      ] !== command.orderId ||
+      stored[lineColumn('item_id')] !== line.itemId ||
+      stored[lineColumn('unit_id')] !== line.unitId ||
+      stored[lineColumn('reversal_of_movement_id')] !==
+        line.reversalOfMovementId ||
+      orderLine[
+        fulfillmentColumn(binding.orderLine, 'sales_order_line_item_id')
+      ] !== line.itemId ||
+      orderLine[
+        fulfillmentColumn(binding.orderLine, 'sales_order_line_unit_id')
+      ] !== line.unitId
+    )
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'A return must preserve its order line, item, unit, quantity and correction attribution',
+      );
+    attemptedByOrderLine.set(
+      line.orderLineId,
+      (attemptedByOrderLine.get(line.orderLineId) ?? 0n) + storedQuantity,
+    );
+  }
+  // Claims B1 and B2. Per order line, what has been returned (net of
+  // corrections) plus what this return attempts stays between zero and what
+  // has been shipped (net of shipment corrections) -- both ledgers read under
+  // the order's row locks. A return never reduces what was shipped.
+  for (const [orderLineId, attempted] of attemptedByOrderLine) {
+    const shipped = await shippedLedger(
+      client,
+      binding,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const returned = await returnedLedger(
+      client,
+      binding,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const after = returned.quantity + attempted;
+    if (after < 0n || after > shipped.quantity)
+      throw postingError(
+        'FULFILLMENT_RETURN_QUANTITY_OUT_OF_BOUNDS',
+        'A return must keep what is returned between zero and what was shipped',
+        {
+          orderLineId,
+          shippedQuantity: fulfillmentDecimal(shipped.quantity),
+          returnedBefore: fulfillmentDecimal(returned.quantity),
+          attemptedQuantity: fulfillmentDecimal(attempted),
+        },
+      );
+  }
+}
+
+/**
+ * Claim B5. A correction or reversal names a posted return of the same order
+ * and takes back only that return's own movements, each once, from the
+ * location it put them in, never more than a movement still adds; a
+ * reversal takes back everything the return still adds.
+ */
+async function assertCustomerReturnCompensation(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedCustomerReturnCommand,
+): Promise<void> {
+  if (command.kind === 'initial') return;
+  const entity = binding.customerReturn!;
+  const lineEntity = binding.customerReturnLine!;
+  const qf = quoteFulfillmentIdentifier;
+  const m = binding.movement;
+  const original = await fulfillmentRowForEntity(
+    client,
+    entity,
+    context,
+    command.legalEntityId,
+    command.supersedesReturnId!,
+    false,
+  );
+  if (
+    original[fulfillmentColumn(entity, 'customer_return_state')] !==
+      fulfillmentOption(entity, 'customer_return_state', 'posted') ||
+    original[fulfillmentRelation(binding, entity, 'customer_return_order')] !==
+      command.orderId
+  )
+    throw postingError(
+      'FULFILLMENT_RETURN_INVALID',
+      'A correction must name a posted return of the same order',
+    );
+  const movements = await client.query<Record<string, unknown>>(
+    `SELECT * FROM ${fulfillmentTable(m)} movement
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${qf(m.legalEntity!.column)}=$3
+        AND ${qf(fulfillmentColumn(m, 'inventory_movement_source_type'))}='customerReturn'
+        AND movement.${qf(fulfillmentColumn(m, 'inventory_movement_source_id'))}=$4
+        AND archived_at IS NULL ORDER BY record_id`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.supersedesReturnId,
+    ],
+  );
+  const remaining = new Map<string, bigint>();
+  for (const movement of movements.rows) {
+    const compensated = await client.query<{ quantity: string }>(
+      `SELECT coalesce(sum(${qf(fulfillmentColumn(m, 'inventory_movement_quantity_delta'))}),0)::text AS quantity
+         FROM ${fulfillmentTable(m)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${qf(m.legalEntity!.column)}=$3
+          AND ${qf(fulfillmentColumn(m, 'inventory_movement_reversal_of_movement_id'))}=$4
+          AND archived_at IS NULL`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        movement.record_id,
+      ],
+    );
+    remaining.set(
+      String(movement.record_id),
+      fulfillmentQuantity(
+        String(
+          movement[fulfillmentColumn(m, 'inventory_movement_quantity_delta')],
+        ),
+      ) + fulfillmentQuantity(compensated.rows[0]!.quantity),
+    );
+  }
+  const used = new Set<string>();
+  for (const line of command.lines) {
+    if (used.has(line.reversalOfMovementId!))
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'A correction can take back an original movement only once',
+      );
+    used.add(line.reversalOfMovementId!);
+    const movement = movements.rows.find(
+      (row) => row.record_id === line.reversalOfMovementId,
+    );
+    if (!movement)
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'The compensated movement is not part of the linked return',
+      );
+    const originalLine = await fulfillmentRowForEntity(
+      client,
+      lineEntity,
+      context,
+      command.legalEntityId,
+      String(movement[fulfillmentColumn(m, 'inventory_movement_source_line')]),
+      false,
+    );
+    if (
+      originalLine[
+        fulfillmentRelation(
+          binding,
+          lineEntity,
+          'customer_return_line_order_line',
+        )
+      ] !== line.orderLineId ||
+      movement[fulfillmentColumn(m, 'inventory_movement_item_id')] !==
+        line.itemId ||
+      movement[fulfillmentColumn(m, 'inventory_movement_location_id')] !==
+        command.locationId ||
+      movement[fulfillmentColumn(m, 'inventory_movement_unit_id')] !==
+        line.unitId
+    )
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'A correction must keep the original order line, item, location and unit',
+      );
+    const available = remaining.get(String(movement.record_id))!;
+    const attempted = -fulfillmentQuantity(line.quantityDelta);
+    if (
+      attempted <= 0n ||
+      attempted > available ||
+      (command.kind === 'reversal' && attempted !== available)
+    )
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'A correction cannot take back more than the linked return still adds',
+      );
+  }
+  if (
+    command.kind === 'reversal' &&
+    movements.rows.some(
+      (row) =>
+        remaining.get(String(row.record_id))! > 0n &&
+        !used.has(String(row.record_id)),
+    )
+  )
+    throw postingError(
+      'FULFILLMENT_RETURN_INVALID',
+      'A reversal must take back every movement the linked return still adds',
+    );
+}
+
+/**
+ * Claim B3. A shipment correction or reversal restores stock and lowers what
+ * a line has shipped; it may not lower it below what the line has had
+ * returned, or the return would stand against units no longer shipped. Read
+ * under the order's row lock, which every return also takes first.
+ */
+async function assertShipmentKeepsReturnedUnits(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedShipmentCommand,
+): Promise<void> {
+  if (command.kind === 'initial' || !binding.customerReturnLine) return;
+  const restoredByOrderLine = new Map<string, bigint>();
+  for (const line of command.lines)
+    restoredByOrderLine.set(
+      line.orderLineId,
+      (restoredByOrderLine.get(line.orderLineId) ?? 0n) +
+        fulfillmentQuantity(line.quantityDelta),
+    );
+  for (const [orderLineId, restored] of restoredByOrderLine) {
+    const shipped = await shippedLedger(
+      client,
+      binding,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const returned = await returnedLedger(
+      client,
+      binding,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const shippedAfter = shipped.quantity - restored;
+    if (shippedAfter < returned.quantity)
+      throw postingError(
+        'FULFILLMENT_SHIPMENT_BELOW_RETURNED',
+        'A shipment correction cannot take back units the customer has already returned',
+        {
+          orderLineId,
+          shippedAfter: fulfillmentDecimal(shippedAfter),
+          returned: fulfillmentDecimal(returned.quantity),
+        },
+      );
+  }
+}
+
+async function writeCustomerReturnConsequences(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'customerReturn' }>,
+  locked: LockedCustomerReturn,
+  actorId: string,
+  recordedAt: string,
+  coverage: ExecutedVerifierCoverage,
+): Promise<number> {
+  const entity = binding.fulfillment!.customerReturn!;
+  const command = posting.command;
+  const changed = await client.query<{ revision: number }>(
+    `UPDATE ${fulfillmentTable(entity)}
+        SET ${quoteFulfillmentIdentifier(fulfillmentColumn(entity, 'customer_return_state'))}=$5,
+            revision=revision+1
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoteFulfillmentIdentifier(entity.legalEntity!.column)}=$3
+        AND record_id=$4 AND revision=$6 RETURNING revision`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+      fulfillmentOption(entity, 'customer_return_state', 'posted'),
+      command.sourceRevision,
+    ],
+  );
+  if (changed.rows.length !== 1)
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Customer return changed while it was posted',
+    );
+  await verifyCustomerReturnPosting(
+    client,
+    binding,
+    context,
+    posting,
+    locked,
+    actorId,
+    recordedAt,
+    coverage,
+  );
+  return Number(changed.rows[0]!.revision);
+}
+
+/**
+ * Claim B6. Every relation a return writes -- the return itself and its
+ * companion transaction and lines -- read back column for column before
+ * commit; each read mints a coverage token from the row PostgreSQL returned.
+ */
+async function verifyCustomerReturnPosting(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'customerReturn' }>,
+  locked: LockedCustomerReturn,
+  actorId: string,
+  recordedAt: string,
+  coverage: ExecutedVerifierCoverage,
+): Promise<void> {
+  const command = posting.command;
+  const entity = binding.fulfillment!.customerReturn!;
+  const verify = async (
+    target: EntityBinding,
+    id: string,
+    expected: Record<string, unknown>,
+  ) => {
+    const result = await client.query<Record<string, unknown>>(
+      `SELECT row.*, (SELECT relname FROM pg_class WHERE oid=row.tableoid) AS "__relation"
+         FROM ${table(binding, target)} row
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(target.legalEntityColumn!)}=$3
+          AND ${quoted(target.recordIdColumn)}=$4`,
+      [context.tenantId, context.environmentId, command.legalEntityId, id],
+    );
+    if (result.rows.length !== 1)
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        'Customer return posting read-back row is missing',
+        { recordId: id },
+      );
+    const { __relation, ...actual } = result.rows[0]!;
+    const equals = (value: unknown, wanted: unknown): boolean =>
+      value instanceof Date
+        ? value.toISOString() ===
+          (wanted instanceof Date ? wanted.toISOString() : wanted)
+        : value === wanted;
+    assertPersistedRowVerified(
+      `customer return posting ${id}`,
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      target,
+      actual,
+      { recordId: id },
+      Object.entries(expected)
+        .filter(
+          ([column]) =>
+            column !== '__relation' &&
+            !target.foldedColumns.some((folded) => folded.name === column),
+        )
+        .map(([column, value]) =>
+          verified(
+            column,
+            equals(actual[column], value),
+            'differs from the committed customer return fact',
+          ),
+        ),
+    );
+    coverage.observed(verifyCustomerReturnPosting, __relation);
+  };
+  const base = (id: string) => ({
+    tenant_id: context.tenantId,
+    environment_id: context.environmentId,
+    legal_entity_id: command.legalEntityId,
+    record_id: id,
+    revision: '1',
+    archived_at: null,
+  });
+  const numeric = (value: string) => {
+    const scaled = fulfillmentQuantity(value);
+    const abs = scaled < 0n ? -scaled : scaled;
+    return `${scaled < 0n ? '-' : ''}${abs / 10n ** 18n}.${(abs % 10n ** 18n).toString().padStart(18, '0')}`;
+  };
+  await verify(bindEntity(entity), command.sourceId, {
+    ...locked.header,
+    revision: String(command.sourceRevision + 1),
+    [fulfillmentColumn(entity, 'customer_return_state')]: fulfillmentOption(
+      entity,
+      'customer_return_state',
+      'posted',
+    ),
+  });
+  const transaction: Record<string, unknown> = base(command.transactionId);
+  for (const [name, value] of [
+    [
+      'number',
+      companionTransactionNumber(posting.family, command.transactionId),
+    ],
+    ['type', transactionType(posting.family, 'customerReturn')],
+    ['state', binding.transactionPostedState],
+    ['reason_code', command.reason.code],
+    ['reason_narrative', command.reason.narrative],
+    ['source_type', 'customerReturn'],
+    ['source_id', command.sourceId],
+    ['effective_at', command.effectiveAt],
+    ['recorded_at', recordedAt],
+    ['actor_id', actorId],
+  ] as const)
+    transaction[
+      requiredField(binding.transaction, `inventory_transaction_${name}`).name
+    ] = value;
+  await verify(binding.transaction, command.transactionId, transaction);
+  for (const line of command.lines) {
+    const expected: Record<string, unknown> = {
+      ...base(line.transactionLineId),
+      [binding.transactionLineRelationToTransactionColumn]:
+        command.transactionId,
+    };
+    for (const [name, value] of [
+      ['line_number', line.sourceLine],
+      ['item_id', line.itemId],
+      [
+        'from_location_id',
+        line.quantityDelta.startsWith('-') ? command.locationId : null,
+      ],
+      [
+        'to_location_id',
+        line.quantityDelta.startsWith('-') ? null : command.locationId,
+      ],
+      ['quantity', numeric(line.quantityDelta)],
+      ['unit_id', line.unitId],
+    ] as const)
+      expected[
+        requiredField(
+          binding.transactionLine,
+          `inventory_transaction_line_${name}`,
+        ).name
+      ] = value;
+    await verify(binding.transactionLine, line.transactionLineId, expected);
+  }
+}
+
 async function verifyGoodsReceiptPosting(
   client: PoolClient,
   binding: PostingStorageBinding,
@@ -5845,7 +6777,10 @@ async function writeCompanionTransaction(
   family: ResolvedPostingFamily,
   posting: Extract<
     ParsedPosting,
-    { postingRole: 'correction' | 'count' | 'receipt' | 'shipment' }
+    {
+      postingRole:
+        'correction' | 'count' | 'receipt' | 'shipment' | 'customerReturn';
+    }
   >,
   recordedAt: string,
 ): Promise<number> {
@@ -6738,7 +7673,8 @@ async function assertInventoryLineSet(
     }
   } else if (
     posting.postingRole !== 'receipt' &&
-    posting.postingRole !== 'shipment'
+    posting.postingRole !== 'shipment' &&
+    posting.postingRole !== 'customerReturn'
   ) {
     for (const line of posting.command.lines) {
       assertInventoryLineMatches(
@@ -8849,7 +9785,7 @@ async function persistAcceptedEvidence(
   const namespace = capabilityNamespace(registration.capabilityId);
   const eventType = `${namespace}:event.${postingRole}_posted`;
   const eventVersion = `${namespace}-${postingRole}-posted/v1`;
-  const recordType = `${namespace}:record.${postingRole === 'receipt' ? 'goods_receipt' : isStockCountPosting(posting) ? 'stock_count' : postingRole}`;
+  const recordType = `${namespace}:record.${postingRole === 'receipt' ? 'goods_receipt' : postingRole === 'customerReturn' ? 'customer_return' : isStockCountPosting(posting) ? 'stock_count' : postingRole}`;
   const metadata = redactEvidenceMetadata({
     capabilityVersion: classified('INTERNAL', registration.capabilityVersion),
     configurationReleaseRoot: classified(
@@ -9047,7 +9983,9 @@ async function persistAcceptedEvidence(
       recordType,
       isStockCountPosting(posting)
         ? posting.command.stockCountId
-        : postingRole === 'receipt' || postingRole === 'shipment'
+        : postingRole === 'receipt' ||
+            postingRole === 'shipment' ||
+            postingRole === 'customerReturn'
           ? command.sourceId
           : command.transactionId,
       transactionRevision,
@@ -9213,6 +10151,10 @@ function naturalEffects(
     return posting.command.lines.map((line) => ({
       sourceLine: line.shipmentLineId,
     }));
+  if (posting.postingRole === 'customerReturn')
+    return posting.command.lines.map((line) => ({
+      sourceLine: line.returnLineId,
+    }));
   if (posting.postingRole === 'receipt')
     return posting.command.lines.map((line) => ({
       sourceLine: line.receiptLineId,
@@ -9235,13 +10177,15 @@ function naturalEffects(
 
 function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
   const version =
-    posting.postingRole === 'receipt' || posting.postingRole === 'shipment'
-      ? posting.postingRole === 'receipt'
-        ? 5
-        : 6
-      : isStockCountPosting(posting)
-        ? companionDerivedInventoryPostingInputDigestVersion
-        : standardInventoryPostingInputDigestVersion;
+    posting.postingRole === 'customerReturn'
+      ? 7
+      : posting.postingRole === 'receipt' || posting.postingRole === 'shipment'
+        ? posting.postingRole === 'receipt'
+          ? 5
+          : 6
+        : isStockCountPosting(posting)
+          ? companionDerivedInventoryPostingInputDigestVersion
+          : standardInventoryPostingInputDigestVersion;
   return Object.freeze({
     value: digestCommand(posting, version),
     version,
@@ -9249,6 +10193,25 @@ function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
 }
 
 function digestCommand(posting: ParsedPosting, version: number): string {
+  // RETURNS, version 7: the caller's customer-return input -- every header
+  // field and every line -- without the key and the kernel-derived companion
+  // identities, exactly as versions 5 and 6 cover a receipt and a shipment.
+  if (version === 7 && posting.postingRole === 'customerReturn') {
+    const { idempotencyKey, transactionId, lines, ...input } = posting.command;
+    void idempotencyKey;
+    void transactionId;
+    return createHash('sha256')
+      .update(
+        canonicalize({
+          ...input,
+          lines: lines.map(({ transactionLineId, ...line }) => {
+            void transactionLineId;
+            return line;
+          }),
+        }),
+      )
+      .digest('hex');
+  }
   if (version === 6 && posting.postingRole === 'shipment') {
     const { idempotencyKey, transactionId, lines, ...input } = posting.command;
     void idempotencyKey;
@@ -9316,7 +10279,8 @@ function recordedResultForReplay(
     version !== stockCountInventoryPostingInputDigestVersion &&
     version !== companionDerivedInventoryPostingInputDigestVersion &&
     version !== 5 &&
-    version !== 6
+    version !== 6 &&
+    version !== 7
   ) {
     return unsupportedReceiptVersion(version);
   }
@@ -9353,6 +10317,7 @@ function requiredRecordedPostingRole(
 ): InventoryPostingRoleV1 {
   if (version === 5 && postingRole === 'receipt') return postingRole;
   if (version === 6 && postingRole === 'shipment') return postingRole;
+  if (version === 7 && postingRole === 'customerReturn') return postingRole;
   if (
     version === standardInventoryPostingInputDigestVersion &&
     (postingRole === 'adjustment' || postingRole === 'transfer')

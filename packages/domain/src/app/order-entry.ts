@@ -506,6 +506,8 @@ export function orderEntrySurfaces(
     vendor_bill_line: 'vendor_bill',
     vendor_payment: 'vendor_bill',
     vendor_credit: 'vendor_bill',
+    // A customer return's lines belong to its document (RETURNS).
+    customer_return_line: 'customer_return',
   };
   // A tenant-level child belongs to its master's workspace, such as a
   // customer's ship-to addresses; it has no company entry to resolve.
@@ -555,7 +557,8 @@ export function orderEntrySurfaces(
               worklist ||
               local === 'posted_stock_balance' ||
               local === 'customer_invoice' ||
-              local === 'vendor_bill'
+              local === 'vendor_bill' ||
+              local === 'customer_return'
               ? 'operational'
               : owner || master
                 ? 'contextual'
@@ -586,6 +589,9 @@ export function orderEntrySurfaces(
         ? { label: 'Invoices' }
         : {}),
       ...(local === 'vendor_bill' && role === 'list' ? { label: 'Bills' } : {}),
+      ...(local === 'customer_return' && role === 'list'
+        ? { label: 'Returns' }
+        : {}),
     };
   });
 }

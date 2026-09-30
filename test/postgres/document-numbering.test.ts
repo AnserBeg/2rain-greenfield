@@ -182,6 +182,8 @@ test(
           'customer_credit_number',
           'customer_invoice_number',
           'customer_payment_number',
+          // RETURNS (ruling D): a customer return's RMA number.
+          'customer_return_number',
           'goods_receipt_number',
           'purchase_order_number',
           'sales_order_number',
@@ -237,7 +239,7 @@ test(
               numbered.some((entry) => entry.fieldId === scenario.subjectId),
           )
           .map((scenario) => executed.has(scenario.scenarioId)),
-        [true, true, true, true, true, true, true, true, true, true],
+        [true, true, true, true, true, true, true, true, true, true, true],
         'each number’s uniqueness probe executed',
       );
       const derivationCodes = (
