@@ -286,6 +286,128 @@ function payablesKit(fixture: Fixture) {
     assert.equal(movement.rows.length, 1);
     return movement.rows[0]!.record_id;
   };
+  /**
+   * Each order line's three-way match as the purchase-line read model states
+   * it on the order page (PY-G).
+   */
+  const matchOf = async (orderId: string) =>
+    Object.fromEntries(
+      (
+        await query('commercial_purchase_order_lines', {
+          includeArchived: false,
+          list: {
+            schemaVersion: SHARED_LIST_QUERY_VERSION,
+            cursor: null,
+            matchMode: 'substring',
+            pageSize: 100,
+            search: '',
+            sort: [],
+            relationLabels: [],
+            parentScope: {
+              relationId: `${ns}:relation.purchase_order_line_order`,
+              recordId: orderId,
+            },
+          },
+        })
+      ).records.map((line) => [
+        line.recordId,
+        {
+          received: quantity(line.values[`${ns}:metric.received`]),
+          billed: quantity(line.values[`${ns}:metric.billed`]),
+          toBill: quantity(line.values[`${ns}:metric.to_bill`]),
+          match: line.values[`${ns}:metric.match_status`] ?? null,
+        },
+      ]),
+    );
+  /**
+   * The same match computed independently, straight from storage: what each
+   * line's receiving projection holds, and its lines on bills that count
+   * (open, partially paid, paid), compared by this test's own reading of
+   * ruling PY-G.
+   */
+  const independentMatch = async (orderLineIds: readonly string[]) => {
+    const target = await governedStorageTarget();
+    const entity = (local: string) =>
+      target.entities.find(
+        (value) => value.entityId === `${ns}:entity.${local}`,
+      )!;
+    const col = (local: string, field: string) =>
+      q(
+        entity(local).columns.find(
+          (column) => column.canonicalFieldId === `${ns}:field.${field}`,
+        )!.physicalName,
+      );
+    const rel = (relationId: string) =>
+      q(
+        target.relations.find(
+          (value) => value.relationId === `${ns}:relation.${relationId}`,
+        )!.relationColumn.physicalName,
+      );
+    const table = (local: string) => fulfillmentTable(entity(local));
+    const scope = [
+      fixture.app.runtime.identity.tenantId,
+      fixture.app.runtime.identity.environmentId,
+      fixture.scope,
+    ];
+    const received = await fixture.pool.query<{ line: string; q: string }>(
+      `SELECT ${rel('purchase_order_received_order_line')}::text AS line,
+              sum(${col('purchase_order_received', 'purchase_order_received_received_quantity')})::text AS q
+         FROM ${table('purchase_order_received')}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${q(entity('purchase_order_received').legalEntity!.column)}=$3
+          AND archived_at IS NULL
+          AND ${rel('purchase_order_received_order_line')} = ANY($4::uuid[])
+        GROUP BY 1`,
+      [...scope, orderLineIds],
+    );
+    const billed = await fixture.pool.query<{ line: string; q: string }>(
+      `SELECT line.${rel('vendor_bill_line_order_line')}::text AS line,
+              sum(line.${col('vendor_bill_line', 'vendor_bill_line_quantity')})::text AS q
+         FROM ${table('vendor_bill_line')} line
+         JOIN ${table('vendor_bill')} bill
+           ON bill.tenant_id=line.tenant_id
+          AND bill.environment_id=line.environment_id
+          AND bill.record_id=line.${rel('vendor_bill_line_bill')}
+        WHERE line.tenant_id=$1 AND line.environment_id=$2
+          AND line.${q(entity('vendor_bill_line').legalEntity!.column)}=$3
+          AND line.archived_at IS NULL
+          AND bill.archived_at IS NULL
+          AND bill.${col('vendor_bill', 'vendor_bill_state')} = ANY($5::text[])
+          AND line.${rel('vendor_bill_line_order_line')} = ANY($4::uuid[])
+        GROUP BY 1`,
+      [
+        ...scope,
+        orderLineIds,
+        ['open', 'partially_paid', 'paid'].map(
+          (state) => `${ns}:option.vendor_bill_state_${state}`,
+        ),
+      ],
+    );
+    const exact = (value: string | undefined) =>
+      Number(quantity(value ?? '0') ?? '0');
+    return Object.fromEntries(
+      orderLineIds.map((line) => {
+        const r = exact(received.rows.find((row) => row.line === line)?.q);
+        const b = exact(billed.rows.find((row) => row.line === line)?.q);
+        return [
+          line,
+          {
+            received: String(r),
+            billed: String(b),
+            toBill: String(Math.max(0, r - b)),
+            match:
+              b > r
+                ? 'Billed above received'
+                : r > b
+                  ? 'Received, not billed'
+                  : r === 0
+                    ? 'Not received'
+                    : 'Matched',
+          },
+        ];
+      }),
+    );
+  };
   return {
     value,
     operate,
@@ -301,6 +423,8 @@ function payablesKit(fixture: Fixture) {
     figures,
     state,
     movementOf,
+    matchOf,
+    independentMatch,
   };
 }
 
@@ -567,7 +691,7 @@ test(
 );
 
 test(
-  "payables under concurrency and per line: two bills of one order take its quantity once; a receipt and a bill post serialize; a correction on one line hides no other line's unbilled quantity; posting reads only its order's received rows",
+  "payables under concurrency and per line: two bills of one order take its quantity once; a receipt and a bill post serialize; a correction on one line hides no other line's unbilled quantity; posting reads only its order's received rows; each line's three-way match reads as storage says; a billed order is not cancelled until its bill is void",
   { timeout: 300_000 },
   async () => {
     await withOrderEntryFixture(async (fixture) => {
@@ -582,6 +706,10 @@ test(
         billLines,
         figures,
         movementOf,
+        matchOf,
+        independentMatch,
+        reread,
+        state,
       } = payablesKit(fixture);
 
       // Two bills racing for one order: the order row serializes them, so
@@ -719,6 +847,89 @@ test(
         value(second!, 'purchase_order_line', 'item_id'),
       );
       assert.equal(await toBill(d.header.recordId), '0');
+
+      // The three-way match (PY-G), as the order page reads it, equals an
+      // independent computation from storage: the first line billed above
+      // what was received (2 over 1), the second matched (2 and 2). It is
+      // shown, never enforced: the correction above was not refused.
+      const lineIds = [first!.recordId, second!.recordId];
+      const stated = await matchOf(d.header.recordId);
+      const expected = await independentMatch(lineIds);
+      assert.deepEqual(stated, expected);
+      assert.deepEqual(
+        lineIds.map((line) => [stated[line]!.match, stated[line]!.toBill]),
+        [
+          ['Billed above received', '0'],
+          ['Matched', '0'],
+        ],
+      );
+      // A line received and not yet billed, and one not received at all.
+      const e = await purchase([
+        { quantity: '3', cost: '2' },
+        { quantity: '1', cost: '2' },
+      ]);
+      await receive(e.header.recordId, e.lines[0]!.recordId, '2');
+      const partly = await matchOf(e.header.recordId);
+      assert.deepEqual(
+        partly,
+        await independentMatch(e.lines.map((line) => line.recordId)),
+      );
+      assert.deepEqual(
+        e.lines.map((line) => [
+          partly[line.recordId]!.match,
+          partly[line.recordId]!.toBill,
+        ]),
+        [
+          ['Received, not billed', '2'],
+          ['Not received', '0'],
+        ],
+      );
+
+      // PY-H: a purchase order with a live bill is not cancelled, even once
+      // its receipts are taken back; voiding the bill lets it cancel.
+      const f = await purchase([{ quantity: '2', cost: '5' }]);
+      const receivedF = await receive(
+        f.header.recordId,
+        f.lines[0]!.recordId,
+        '2',
+      );
+      const billedF = await bill(f.header.recordId);
+      await receive(f.header.recordId, f.lines[0]!.recordId, '-2', {
+        receiptId: receivedF.recordId,
+        movementId: await movementOf(receivedF.recordId),
+      });
+      await assert.rejects(
+        operate(
+          'purchase_order_cancel',
+          await reread('purchase_order', f.header.recordId),
+        ),
+        refusedWith('PAYABLES_ORDER_BILLED'),
+      );
+      // Refused before anything changed: the order is still released.
+      assert.match(
+        String(
+          (await reread('purchase_order', f.header.recordId)).values[
+            `${ns}:derived_state_field.machine.purchase_order_lifecycle`
+          ],
+        ),
+        /:state\.purchase_order_released$/u,
+      );
+      assert.equal(
+        state(await operate('vendor_bill_void', billedF), 'vendor_bill'),
+        'void',
+      );
+      const cancelled = await operate(
+        'purchase_order_cancel',
+        await reread('purchase_order', f.header.recordId),
+      );
+      assert.match(
+        String(
+          cancelled.values[
+            `${ns}:derived_state_field.machine.purchase_order_lifecycle`
+          ],
+        ),
+        /:state\.purchase_order_cancelled$/u,
+      );
     });
   },
 );

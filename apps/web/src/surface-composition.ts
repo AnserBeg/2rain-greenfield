@@ -1944,20 +1944,27 @@ export async function submitCompositionAction(
             );
             // An integer field's value is its canonical decimal string; a
             // bound record revision arrives as a number and is written as one.
-            const integerField =
+            const boundKind =
               binding.path.length === 2 &&
-              (binding.path[0] === 'values' || binding.path[0] === 'patch') &&
-              operation.inputContract?.fields.some(
-                (field) =>
-                  field.fieldId === key &&
-                  field.fieldKind === 'integerFieldType',
-              );
+              (binding.path[0] === 'values' || binding.path[0] === 'patch')
+                ? operation.inputContract?.fields.find(
+                    (field) => field.fieldId === key,
+                  )?.fieldKind
+                : undefined;
+            // A decimal field takes its canonical form, as a typed one does:
+            // a stored decimal read back from a record -- a receipt line's
+            // cost -- arrives at its column's scale ("2.500000000000000000"),
+            // which the provider refuses as input.
             target[key] =
-              integerField &&
+              boundKind === 'integerFieldType' &&
               typeof value === 'number' &&
               Number.isSafeInteger(value)
                 ? String(value)
-                : value;
+                : boundKind &&
+                    DECIMAL_KINDS.includes(boundKind) &&
+                    typeof value === 'string'
+                  ? (canonicalDecimal(value) ?? value)
+                  : value;
           }
           input = object;
           current.stepInputs[current.next] = input;

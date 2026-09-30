@@ -36193,13 +36193,31 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.purchase_order_received_get"
+          },
+          "billLines": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "bills": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_get"
           }
         },
         "resultFields": {
           "line_amount": "northstar.app:metric.line_amount",
           "line_tax": "northstar.app:metric.line_tax",
           "received": "northstar.app:metric.received",
-          "open_to_receive": "northstar.app:metric.open_to_receive"
+          "open_to_receive": "northstar.app:metric.open_to_receive",
+          "billed": "northstar.app:metric.billed",
+          "to_bill": "northstar.app:metric.to_bill",
+          "match_status": "northstar.app:metric.match_status"
         }
       }
     },
@@ -46603,6 +46621,27 @@
                 "presentation": { "role": "quantity", "priority": 34 }
               },
               {
+                "columnId": "northstar.app:column.purchasing_billed",
+                "label": "Billed",
+                "orderKey": 35,
+                "field": "northstar.app:metric.billed",
+                "presentation": { "role": "quantity", "priority": 35 }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_to_bill",
+                "label": "To bill",
+                "orderKey": 36,
+                "field": "northstar.app:metric.to_bill",
+                "presentation": { "role": "quantity", "priority": 36 }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_match",
+                "label": "Match",
+                "orderKey": 37,
+                "field": "northstar.app:metric.match_status",
+                "presentation": { "role": "secondary", "priority": 37 }
+              },
+              {
                 "columnId": "northstar.app:column.purchasing_base_unit",
                 "label": "Product base unit",
                 "orderKey": 40,
@@ -51014,9 +51053,9 @@
             "subtitle": ["northstar.app:column.bill_vendor"],
             "status": "northstar.app:column.bill_state",
             "facts": [
+              "northstar.app:column.bill_order",
               "northstar.app:column.bill_date",
               "northstar.app:column.bill_due",
-              "northstar.app:column.bill_currency",
               "northstar.app:column.bill_total",
               "northstar.app:column.bill_balance",
               "northstar.app:column.bill_supplier_invoice"
@@ -51085,6 +51124,24 @@
             "label": "Due date",
             "orderKey": 30,
             "field": "northstar.app:field.vendor_bill_due_date"
+          },
+          {
+            "columnId": "northstar.app:column.bill_order",
+            "label": "Purchase order",
+            "orderKey": 32,
+            "field": "northstar.app:relation.vendor_bill_order",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.purchase_order_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.purchase_order_number"
+              }
+            }
           },
           {
             "columnId": "northstar.app:column.bill_currency",
@@ -51710,6 +51767,31 @@
                 ]
               }
             ]
+          },
+          {
+            "actionId": "northstar.app:action.bill_open_order",
+            "label": "Open purchase order",
+            "description": "Open the purchase order this bill bills.",
+            "orderKey": 40,
+            "conditions": [],
+            "inputs": [],
+            "steps": [],
+            "navigate": {
+              "surface": {
+                "kind": "surfaceReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:surface.purchase_order_detail"
+              },
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.commercial_purchase_order_get"
+              },
+              "record": {
+                "source": "record",
+                "field": "northstar.app:relation.vendor_bill_order"
+              }
+            }
           }
         ]
       },

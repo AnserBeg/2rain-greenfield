@@ -35,6 +35,9 @@ export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
  * (PAYABLES), stated only when the application composes payables.
  */
 export const PAYABLES_READ_MODEL_OUTPUTS = Object.freeze({
+  // Each line's three-way match (PY-G): billed, left to bill, and how billing
+  // compares with what was received.
+  purchaseLine: ['billed', 'to_bill', 'match_status'],
   purchaseOrder: ['order_to_bill'],
 } as const);
 /** The order's ship-to lines, as the workspace shows and prints them. */
@@ -1059,7 +1062,22 @@ export function salesWorkspaceQueries(
         commercial(
           'purchaseLine',
           clone('purchase_order_line_list', 'commercial_purchase_order_lines'),
-          { received: 'purchase_order_received_get' },
+          {
+            received: 'purchase_order_received_get',
+            ...(payables
+              ? {
+                  billLines: 'vendor_bill_line_list',
+                  bills: 'vendor_bill_list',
+                  bill: 'vendor_bill_get',
+                }
+              : {}),
+          },
+          payables
+            ? [
+                ...COMMERCIAL_READ_MODEL_OUTPUTS.purchaseLine,
+                ...PAYABLES_READ_MODEL_OUTPUTS.purchaseLine,
+              ]
+            : COMMERCIAL_READ_MODEL_OUTPUTS.purchaseLine,
         ),
         commercial(
           'purchaseOrder',
