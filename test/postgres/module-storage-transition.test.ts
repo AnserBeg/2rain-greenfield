@@ -5739,10 +5739,12 @@ function composedApplicationWithoutInventoryForTransition(): Record<
   const application = withoutModuleForTransition(
     withoutModuleForTransition(
       structuredClone(inventoryOwnedModuleDefinition()),
-      // As the product application composes it, commercial terms included,
-      // so none of its purchase order fields outlives the removal.
+      // As the product application composes it, commercial terms and
+      // payables included, so none of its purchase order fields or bill
+      // documents outlives the removal.
       purchasingModuleDefinition(APPLICATION_NAMESPACE, {
         commercialTerms: true,
+        payables: true,
       }),
       'purchasing',
     ),

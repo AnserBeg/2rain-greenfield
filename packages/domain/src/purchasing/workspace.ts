@@ -154,6 +154,8 @@ export function purchasingWorkspace(
   const pricedLines = id('dataset', 'purchasing_priced_lines');
   const metric = (name: string) => id('metric', name);
   const receipts = id('dataset', 'purchasing_receipts');
+  // PAYABLES: the order's vendor bills and their balances.
+  const bills = id('dataset', 'purchasing_bills');
   const receive = (known: boolean) => {
     const suffix = known ? 'known' : 'absent';
     const header = `receipt_${suffix}`;
@@ -669,14 +671,31 @@ export function purchasingWorkspace(
             documents: receipts,
           },
           {
+            // PAYABLES: received quantity is waiting to be billed -- a closed
+            // order too, since it is still billed.
+            label: 'Billing',
+            current: [state('equals', 'released')],
+            complete: [state('equals', 'closed')],
+            attention: [
+              {
+                value: record(metric('order_to_bill')),
+                operator: 'positive',
+                compare: null,
+              },
+            ],
+            stopped: [state('equals', 'cancelled')],
+            documents: bills,
+          },
+          {
             label: 'Closed',
             current: [],
             complete: [state('equals', 'closed')],
             stopped: [state('equals', 'cancelled')],
           },
         ],
-        // Release, then receive what is still to arrive, then close: Close
-        // is next only once nothing is left to receive.
+        // Release, then receive what is still to arrive, bill what arrived,
+        // then close: Close is next only once nothing is left to receive or
+        // to bill.
         next: [
           {
             operation: ref(
@@ -685,6 +704,8 @@ export function purchasingWorkspace(
             ),
           },
           { action: id('action', 'receive_lines_known') },
+          // Then bill what was received and is not yet billed (PAYABLES).
+          { action: id('action', 'bill_received') },
           {
             operation: ref(
               'operationReference',
@@ -923,6 +944,34 @@ export function purchasingWorkspace(
             undefined,
             'quantity',
           ),
+          // The three-way match (PAYABLES, PY-G): what is billed and left to
+          // bill beside ordered and received, and how billing compares with
+          // what arrived. Shown, never enforced.
+          column(
+            'billed',
+            'Billed',
+            35,
+            metric('billed'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'to_bill',
+            'To bill',
+            36,
+            metric('to_bill'),
+            undefined,
+            'quantity',
+          ),
+          // Beside the product, where it is read without opening details.
+          column(
+            'match',
+            'Match',
+            37,
+            metric('match_status'),
+            undefined,
+            'secondary',
+          ),
           column(
             'base_unit',
             'Product base unit',
@@ -1071,6 +1120,36 @@ export function purchasingWorkspace(
           ),
         ],
       },
+      {
+        // PAYABLES: the order's vendor bills and what each still owes.
+        datasetId: bills,
+        label: 'Bills',
+        orderKey: 40,
+        query: q('vendor_bill_list'),
+        presentation: { selection: 'none', compact: 'scrollTable' },
+        parent: {
+          relationId: id('relation', 'vendor_bill_order'),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        sort: [{ fieldId: f('vendor_bill_bill_date'), direction: 'ascending' }],
+        columns: [
+          column('bill', 'Bill', 10, f('vendor_bill_number')),
+          column('bill_state', 'State', 20, f('vendor_bill_state')),
+          column('bill_date', 'Bill date', 30, f('vendor_bill_bill_date')),
+          column('bill_due', 'Due', 40, f('vendor_bill_due_date')),
+          column(
+            'bill_supplier_invoice',
+            'Supplier invoice',
+            45,
+            f('vendor_bill_supplier_invoice_number'),
+          ),
+          money(column('bill_total', 'Total', 50, f('vendor_bill_total'))),
+          money(
+            column('bill_balance', 'Balance', 60, f('vendor_bill_balance')),
+          ),
+        ],
+      },
     ],
     actions: [
       receiveLines(true),
@@ -1139,6 +1218,76 @@ export function purchasingWorkspace(
         ],
       },
       {
+        // PAYABLES (PY-B, PY-C): every received quantity not yet billed, at
+        // the order's own costs, discounts and frozen rates; the first live
+        // bill carries the freight and other fee.
+        actionId: id('action', 'bill_received'),
+        label: 'Bill received quantities',
+        description:
+          'Bills every received quantity not yet billed at this order’s costs and tax rates. The first bill also carries the freight and other fee.',
+        orderKey: 27,
+        // Offered while received quantity is not yet billed and the order's
+        // figures can be stated; the capability decides per line.
+        conditions: [
+          {
+            value: record(metric('order_to_bill')),
+            operator: 'positive',
+            compare: null,
+          },
+          {
+            value: record(metric('order_total')),
+            operator: 'positive',
+            compare: null,
+          },
+        ],
+        inputs: [
+          {
+            inputId: id('input', 'bill_supplier_invoice'),
+            label: 'Supplier invoice number',
+            orderKey: 10,
+            type: 'text',
+            required: false,
+          },
+        ],
+        steps: [
+          create(
+            'bill_draft',
+            'vendor_bill',
+            {
+              // The bill number is assigned on create (BILL-000001); the
+              // bill is dated when it posts (PY-D).
+              state: literal(id('option', 'vendor_bill_state_draft')),
+              bill_date: generated('instant'),
+              supplier_invoice_number: {
+                source: 'input',
+                inputId: id('input', 'bill_supplier_invoice'),
+              },
+            },
+            { order: record('recordId') },
+          ),
+          step('bill_commit', 'vendor_bill_post', [
+            bind(['recordId'], stepValue('bill_draft', 'recordId')),
+            bind(['expectedRevision'], stepValue('bill_draft', 'revision')),
+          ]),
+        ],
+      },
+      {
+        actionId: id('action', 'open_bill'),
+        label: 'Open bill',
+        description: 'Open the bill with its lines, payments and credits.',
+        orderKey: 35,
+        datasetId: bills,
+        presentation: { placement: 'row' },
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref('surfaceReference', id('surface', 'vendor_bill_detail')),
+          query: q('vendor_bill_get'),
+          record: selected('recordId'),
+        },
+      },
+      {
         actionId: id('action', 'open_receipt'),
         label: 'Open receipt',
         description:
@@ -1156,6 +1305,430 @@ export function purchasingWorkspace(
           ),
           query: q('goods_receipt_get'),
           record: selected('recordId'),
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * A vendor bill (PAYABLES): its frozen figures and balance, its lines, and the
+ * payments and vendor credits against it. A payment or a credit posts only up
+ * to the balance; Void is offered only while nothing is settled. Commands the
+ * bill's own state admits -- Post on a draft whose post was refused -- come
+ * from their declared preconditions.
+ */
+export function billWorkspace(namespace: string): Record<string, unknown> {
+  const id = (type: string, name: string) => `${namespace}:${type}.${name}`;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const q = (name: string) => ref('queryReference', id('query', name));
+  const field = (name: string) => id('field', name);
+  const column = (
+    name: string,
+    label: string,
+    orderKey: number,
+    value: string,
+    lookup?: readonly [string, string],
+  ) => ({
+    columnId: id('column', `bill_${name}`),
+    label,
+    orderKey,
+    field: value,
+    ...(lookup
+      ? {
+          reference: {
+            query: q(lookup[0]),
+            labelField: ref('fieldReference', field(lookup[1])),
+          },
+        }
+      : {}),
+  });
+  const money = <T extends object>(value: T) => ({
+    ...value,
+    format: 'money' as const,
+  });
+  const record = (name: string) => ({ source: 'record', field: name });
+  const literal = (value: string | null) => ({ source: 'literal', value });
+  const generated = (value: string) => ({ source: 'generated', value });
+  const input = (name: string) => ({
+    source: 'input',
+    inputId: id('input', `bill_${name}`),
+  });
+  const bind = (path: string[], value: unknown) => ({ path, value });
+  const step = (name: string, operation: string, bindings: unknown[]) => ({
+    stepId: id('step', `bill_${name}`),
+    operation: ref('operationReference', id('operation', operation)),
+    bindings,
+  });
+  const settle = (
+    kind: 'payment' | 'credit',
+    values: Record<string, unknown>,
+  ) => [
+    step(`${kind}_draft`, `vendor_${kind}_create`, [
+      bind(['recordId'], generated('uuid')),
+      bind(['legalEntityId'], generated('scope')),
+      ...Object.entries(values).map(([key, value]) =>
+        bind(['values', field(`vendor_${kind}_${key}`)], value),
+      ),
+      bind(
+        ['relations', id('relation', `vendor_${kind}_bill`)],
+        record('recordId'),
+      ),
+    ]),
+    step(`${kind}_commit`, `vendor_${kind}_post`, [
+      bind(['recordId'], {
+        source: 'step',
+        stepId: id('step', `bill_${kind}_draft`),
+        field: 'recordId',
+      }),
+      bind(['expectedRevision'], {
+        source: 'step',
+        stepId: id('step', `bill_${kind}_draft`),
+        field: 'revision',
+      }),
+    ]),
+  ];
+  const state = field('vendor_bill_state');
+  const inState = (...states: string[]) =>
+    states.length === 1
+      ? [
+          {
+            value: record(state),
+            operator: 'equals',
+            compare: id('option', `vendor_bill_state_${states[0]!}`),
+          },
+        ]
+      : // Neither of the states the task does not apply to.
+        (['draft', 'open', 'partially_paid', 'paid', 'void'] as const)
+          .filter((value) => !states.includes(value))
+          .map((value) => ({
+            value: record(state),
+            operator: 'notEquals',
+            compare: id('option', `vendor_bill_state_${value}`),
+          }));
+  const amount = (label: string) => ({
+    inputId: id('input', 'bill_amount'),
+    label,
+    orderKey: 10,
+    type: 'quantity',
+    required: true,
+  });
+  const lines = id('dataset', 'bill_lines');
+  return {
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: id('column', 'bill_number'),
+        subtitle: [id('column', 'bill_vendor')],
+        status: id('column', 'bill_state'),
+        // Six at most: the currency reads among the bill's details.
+        facts: [
+          id('column', 'bill_order'),
+          id('column', 'bill_date'),
+          id('column', 'bill_due'),
+          id('column', 'bill_total'),
+          id('column', 'bill_balance'),
+          id('column', 'bill_supplier_invoice'),
+        ],
+      },
+      context: {
+        label: 'Balance',
+        description:
+          'Record a payment or a vendor credit against this bill’s balance.',
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+      task: { mode: 'nativeDialog', fallback: 'page' },
+      // The printable bill, saved as PDF by the browser.
+      print: {
+        label: 'Vendor bill',
+        datasets: [lines],
+        totals: [
+          id('column', 'bill_subtotal'),
+          id('column', 'bill_charges'),
+          id('column', 'bill_tax'),
+          id('column', 'bill_total'),
+          id('column', 'bill_paid'),
+          id('column', 'bill_credited'),
+          id('column', 'bill_balance'),
+        ],
+      },
+    },
+    fields: [
+      column('number', 'Bill', 10, field('vendor_bill_number')),
+      column('state', 'Bill state', 15, state),
+      column('vendor', 'Vendor', 20, field('vendor_bill_supplier_party_id'), [
+        'party_get',
+        'party_name',
+      ]),
+      column('date', 'Bill date', 25, field('vendor_bill_bill_date')),
+      column('due', 'Due date', 30, field('vendor_bill_due_date')),
+      // The order this bill bills: the bill stores it as a relation, stated
+      // by its get and labelled through the order's own get under current
+      // policy -- "—" when that read is withheld (as an invoice names its
+      // order).
+      column(
+        'order',
+        'Purchase order',
+        32,
+        id('relation', 'vendor_bill_order'),
+        ['purchase_order_get', 'purchase_order_number'],
+      ),
+      column('currency', 'Currency', 35, field('vendor_bill_currency')),
+      column('terms', 'Payment terms', 40, field('vendor_bill_payment_terms')),
+      column(
+        'supplier_invoice',
+        'Supplier invoice number',
+        45,
+        field('vendor_bill_supplier_invoice_number'),
+      ),
+      ...[
+        column('subtotal', 'Subtotal', 50, field('vendor_bill_subtotal')),
+        column('charges', 'Charges', 51, field('vendor_bill_charges')),
+        column('tax', 'Tax', 52, field('vendor_bill_tax')),
+        column('total', 'Total', 53, field('vendor_bill_total')),
+        column('paid', 'Paid', 54, field('vendor_bill_paid_amount')),
+        column(
+          'credited',
+          'Credited',
+          55,
+          field('vendor_bill_credited_amount'),
+        ),
+        column('balance', 'Balance', 56, field('vendor_bill_balance')),
+      ].map(money),
+    ],
+    children: [
+      {
+        datasetId: lines,
+        presentation: { selection: 'none' },
+        label: 'Bill lines',
+        orderKey: 10,
+        query: q('vendor_bill_line_list'),
+        sort: [
+          {
+            fieldId: field('vendor_bill_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        parent: {
+          relationId: id('relation', 'vendor_bill_line_bill'),
+          value: record('recordId'),
+          ownership: 'parentScopedChild',
+        },
+        columns: [
+          column('line', 'Line', 10, field('vendor_bill_line_line_number')),
+          column('item', 'Item', 20, field('vendor_bill_line_item_id'), [
+            'item_get',
+            'item_name',
+          ]),
+          column(
+            'quantity',
+            'Quantity',
+            30,
+            field('vendor_bill_line_quantity'),
+          ),
+          column('unit', 'Unit', 40, field('vendor_bill_line_unit_id')),
+          money(
+            column(
+              'unit_cost',
+              'Unit cost',
+              50,
+              field('vendor_bill_line_unit_price'),
+            ),
+          ),
+          column(
+            'discount',
+            'Discount %',
+            60,
+            field('vendor_bill_line_discount_percent'),
+          ),
+          column(
+            'tax_rate',
+            'Tax rate %',
+            70,
+            field('vendor_bill_line_tax_rate_percent'),
+          ),
+          money(
+            column('amount', 'Amount', 80, field('vendor_bill_line_amount')),
+          ),
+          money(column('line_tax', 'Tax', 90, field('vendor_bill_line_tax'))),
+        ],
+      },
+      ...(['payment', 'credit'] as const).map((kind, index) => ({
+        datasetId: id('dataset', `bill_${kind}s`),
+        presentation: { selection: 'none', compact: 'scrollTable' },
+        label: kind === 'payment' ? 'Payments' : 'Vendor credits',
+        orderKey: 20 + index * 10,
+        query: q(`vendor_${kind}_list`),
+        parent: {
+          relationId: id('relation', `vendor_${kind}_bill`),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        columns: [
+          column(
+            `${kind}_number`,
+            kind === 'payment' ? 'Payment' : 'Credit',
+            10,
+            field(`vendor_${kind}_number`),
+          ),
+          column(`${kind}_state`, 'State', 20, field(`vendor_${kind}_state`)),
+          column(
+            `${kind}_date`,
+            'Date',
+            30,
+            field(
+              kind === 'payment'
+                ? 'vendor_payment_payment_date'
+                : 'vendor_credit_credit_date',
+            ),
+          ),
+          money(
+            column(
+              `${kind}_amount`,
+              'Amount',
+              40,
+              field(`vendor_${kind}_amount`),
+            ),
+          ),
+          ...(kind === 'payment'
+            ? [
+                column(
+                  'payment_method',
+                  'Method',
+                  50,
+                  field('vendor_payment_method'),
+                ),
+                column(
+                  'payment_reference',
+                  'Reference',
+                  60,
+                  field('vendor_payment_reference'),
+                ),
+              ]
+            : [
+                column(
+                  'credit_reason',
+                  'Reason',
+                  50,
+                  field('vendor_credit_reason'),
+                ),
+              ]),
+        ],
+      })),
+    ],
+    actions: [
+      {
+        actionId: id('action', 'bill_record_payment'),
+        label: 'Record payment',
+        description:
+          'Records a payment made to the vendor against this bill. It may not exceed the balance.',
+        orderKey: 10,
+        conditions: inState('open', 'partially_paid'),
+        inputs: [
+          amount('Amount paid'),
+          {
+            inputId: id('input', 'bill_method'),
+            label: 'Method',
+            orderKey: 20,
+            type: 'text',
+            required: true,
+            presentation: {
+              kind: 'choice',
+              options: (
+                [
+                  ['cash', 'Cash'],
+                  ['cheque', 'Cheque'],
+                  ['eft', 'EFT'],
+                  ['card', 'Card'],
+                  ['other', 'Other'],
+                ] as const
+              ).map(([value, label]) => ({
+                value: id('option', `vendor_payment_method_${value}`),
+                label,
+              })),
+              defaultValue: id('option', 'vendor_payment_method_eft'),
+            },
+          },
+          {
+            inputId: id('input', 'bill_reference'),
+            label: 'Reference (cheque or transaction number)',
+            orderKey: 30,
+            type: 'text',
+            required: true,
+          },
+        ],
+        steps: settle('payment', {
+          // The payment number is assigned on create (VPAY-000001).
+          state: literal(id('option', 'vendor_payment_state_draft')),
+          payment_date: generated('instant'),
+          amount: input('amount'),
+          method: input('method'),
+          reference: input('reference'),
+        }),
+      },
+      {
+        actionId: id('action', 'bill_record_credit'),
+        label: 'Record vendor credit',
+        description:
+          'Records a credit the vendor issued against this bill’s balance, such as for a return or a price correction.',
+        orderKey: 20,
+        conditions: inState('open', 'partially_paid'),
+        inputs: [
+          amount('Amount credited'),
+          {
+            inputId: id('input', 'bill_reason'),
+            label: 'Reason',
+            orderKey: 20,
+            type: 'text',
+            required: true,
+            presentation: { kind: 'multiline' },
+          },
+        ],
+        steps: settle('credit', {
+          // The credit number is assigned on create (VCM-000001).
+          state: literal(id('option', 'vendor_credit_state_draft')),
+          credit_date: generated('instant'),
+          amount: input('amount'),
+          reason: input('reason'),
+        }),
+      },
+      {
+        actionId: id('action', 'bill_void'),
+        label: 'Void bill',
+        description:
+          'Voids this bill while nothing is paid or credited on it; its quantities can be billed again.',
+        orderKey: 30,
+        conditions: inState('open'),
+        inputs: [],
+        steps: [
+          step('void', 'vendor_bill_void', [
+            bind(['recordId'], record('recordId')),
+            bind(['expectedRevision'], record('revision')),
+          ]),
+        ],
+      },
+      {
+        // The way back to the order from wherever the bill was opened.
+        actionId: id('action', 'bill_open_order'),
+        label: 'Open purchase order',
+        description: 'Open the purchase order this bill bills.',
+        orderKey: 40,
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref(
+            'surfaceReference',
+            id('surface', 'purchase_order_detail'),
+          ),
+          query: q('commercial_purchase_order_get'),
+          record: record(id('relation', 'vendor_bill_order')),
         },
       },
     ],

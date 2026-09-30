@@ -62,6 +62,7 @@ import {
   surfaceSupportsRuntimeIntent,
 } from '../src/component-registry.js';
 import { readDemoCompiledFixture } from '../src/demo-runtime.js';
+import { composedApplicationDefinition } from '../../../packages/domain/src/app/builder.js';
 import {
   declaredCellText,
   declaredListArguments,
@@ -1159,6 +1160,91 @@ test('a declared List sends before-today as the injected day, keeps each tab ope
   assert.equal(
     csv,
     '\uFEFFNumber,Expected,ordered,received,open\r\nPO-1,2026-09-25T12:00:00.000Z,15,4,10.5\r\n',
+  );
+});
+
+/**
+ * PAYABLES: the Bills List the product declares runs on the same List runtime
+ * as every other: each state tab is one exact filter, the newest bill comes
+ * first, the vendor is named through its label, and the export keeps exact
+ * figures while a supplier invoice number a spreadsheet would run as a
+ * formula leaves inert.
+ */
+test('the declared Bills List filters each state tab exactly, orders the newest bill first and exports a supplier invoice number inert', () => {
+  const ns = 'northstar.app';
+  const surface = (
+    composedApplicationDefinition().surfaces as Array<Record<string, unknown>>
+  ).find((value) => value.surfaceId === `${ns}:surface.vendor_bill_list`)!;
+  const list = SurfaceListSchema.parse(surface.list);
+  const view = (local: string) => `${ns}:list_view.vendor_bill_list_${local}`;
+  const queryId = `${ns}:query.vendor_bill_list`;
+  const now = new Date('2026-09-30T12:00:00.000Z');
+  type Sent = {
+    list: {
+      fieldFilters?: unknown;
+      referenceLabels?: { referenceId: string; sourceFieldId: string }[];
+      sort: unknown;
+    };
+  };
+  const sent = (local: string, mode: 'page' | 'count' = 'page') =>
+    declaredListArguments(
+      list,
+      readDeclaredListState(
+        list,
+        new URL(`http://list.local/?view=${encodeURIComponent(view(local))}`),
+      ),
+      { mode, now, queryId, scopeArguments: {} },
+    ) as unknown as Sent;
+  const partial = sent('partially_paid');
+  assert.deepEqual(partial.list.fieldFilters, [
+    {
+      fieldId: `${ns}:field.vendor_bill_state`,
+      value: `${ns}:option.vendor_bill_state_partially_paid`,
+    },
+  ]);
+  assert.deepEqual(partial.list.sort, [
+    { direction: 'descending', fieldId: `${ns}:field.vendor_bill_bill_date` },
+  ]);
+  assert.deepEqual(
+    partial.list.referenceLabels?.map((label) => label.sourceFieldId),
+    [`${ns}:field.vendor_bill_supplier_party_id`],
+  );
+  // All is unfiltered; a tab count sends no order.
+  assert.equal(sent('all').list.fieldFilters, undefined);
+  assert.deepEqual(sent('void', 'count').list.sort, []);
+
+  const bill = {
+    archived: false,
+    entityId: `${ns}:entity.vendor_bill`,
+    recordId: '00000000-0000-4000-8000-000000000001',
+    revision: 2,
+    relationLabels: {
+      [`${ns}:list_column.vendor_bill_list_vendor`]: {
+        label: 'Alpine Office Supply',
+        recordId: '00000000-0000-4000-8000-000000000002',
+      },
+    },
+    values: {
+      [`${ns}:field.vendor_bill_number`]: 'BILL-000001',
+      [`${ns}:field.vendor_bill_supplier_invoice_number`]:
+        '=HYPERLINK("http://x")',
+      [`${ns}:field.vendor_bill_bill_date`]: '2026-09-30T10:00:00.000Z',
+      [`${ns}:field.vendor_bill_due_date`]: '2026-10-30T10:00:00.000Z',
+      [`${ns}:field.vendor_bill_state`]: `${ns}:option.vendor_bill_state_partially_paid`,
+      [`${ns}:field.vendor_bill_total`]: '59.880000000000000000',
+      [`${ns}:field.vendor_bill_balance`]: '39.880000000000000000',
+      [`${ns}:field.vendor_bill_currency`]: 'CAD',
+    },
+  };
+  const csv = declaredListCsv(list, [bill], (_record, _fieldId, value) =>
+    String(value).endsWith('_partially_paid')
+      ? 'Partially paid'
+      : String(value),
+  );
+  assert.equal(
+    csv,
+    '\uFEFFNumber,Vendor,Supplier invoice,Bill date,Due,Status,Total,Balance,Currency\r\n' +
+      'BILL-000001,Alpine Office Supply,"\'=HYPERLINK(""http://x"")",2026-09-30T10:00:00.000Z,2026-10-30T10:00:00.000Z,Partially paid,59.880000000000000000,39.880000000000000000,CAD\r\n',
   );
 });
 

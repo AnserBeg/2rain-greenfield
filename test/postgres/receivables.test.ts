@@ -7,13 +7,25 @@ import {
   parseExact,
   toCents,
 } from '../../packages/postgres-provider/src/commercial-amounts.js';
+import {
+  fulfillmentBinding,
+  fulfillmentColumn,
+  fulfillmentTable,
+  quoteFulfillmentIdentifier as q,
+} from '../../packages/postgres-provider/src/fulfillment.js';
 import { InventoryPostingError } from '../../packages/postgres-provider/src/inventory-posting-error.js';
+import { RECEIVABLES_SETTLEMENT_SPEC } from '../../packages/postgres-provider/src/receivables-capability-executor.js';
+import {
+  progressByOrderLine,
+  settlementBinding,
+} from '../../packages/postgres-provider/src/settlement-capability-executor.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticRecordDto,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
+import { governedStorageTarget } from '../helpers/governed-storage-target.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
 const ns = 'northstar.app';
@@ -37,209 +49,239 @@ function refusedWith(code: string) {
     error instanceof InventoryPostingError && error.code === code;
 }
 
+type Fixture = Parameters<Parameters<typeof withOrderEntryFixture>[0]>[0];
+
+/** The receivables documents and the order flow they settle, over one fixture. */
+function receivablesKit(fixture: Fixture) {
+  const now = new Date().toISOString();
+  const value = (record: SemanticRecordDto, local: string, name: string) =>
+    record.values[`${ns}:field.${local}_${name}`];
+  const operate = async (
+    operation: string,
+    record: { recordId: string; revision: number },
+  ) => {
+    const result = await fixture.invoke(operation, {
+      recordId: record.recordId,
+      expectedRevision: record.revision,
+    });
+    assert.equal(result.outcome, 'succeeded', operation);
+    return result.readBack!;
+  };
+  const order = async (
+    lines: readonly { quantity: string; price: string }[],
+  ) => {
+    const header = await fixture.create('sales_order', {
+      customer_party_id: fixture.customer,
+      order_date: now,
+      requested_date: null,
+      currency: 'CAD',
+      notes: null,
+      payment_terms: `${ns}:option.sales_order_payment_terms_net_30`,
+      // Freight taxed at its frozen 5%; an untaxed other fee.
+      freight_amount: '25',
+      freight_tax_code_id: fixture.taxCode,
+      freight_tax_rate_percent: '5',
+      other_fee_amount: '10',
+      other_fee_tax_code_id: null,
+      other_fee_tax_rate_percent: null,
+      ...shipTo,
+    });
+    const created = [];
+    for (const [index, line] of lines.entries())
+      created.push(
+        await fixture.create(
+          'sales_order_line',
+          {
+            item_id: fixture.item,
+            unit_id: 'EA',
+            line_number: String(index + 1),
+            ordered_quantity: line.quantity,
+            unit_price: line.price,
+            list_price: line.price,
+            discount_percent: '10',
+            tax_code_id: fixture.taxCode,
+            tax_rate_percent: '5',
+          },
+          { order: header.recordId },
+        ),
+      );
+    const released = await operate('sales_order_release', header);
+    return { header: released, lines: created };
+  };
+  const reserve = async (orderLineId: string, quantity: string) => {
+    const draft = await fixture.create(
+      'reservation',
+      {
+        number: randomUUID(),
+        state: `${ns}:option.reservation_state_draft`,
+        item_id: fixture.item,
+        location_id: fixture.location,
+        quantity,
+        unit_id: 'EA',
+        reason: 'Receivables proof',
+      },
+      { order_line: orderLineId },
+    );
+    return operate('reservation_reserve', draft);
+  };
+  const ship = async (
+    orderId: string,
+    orderLineId: string,
+    reservationId: string,
+    quantity: string,
+  ) => {
+    const header = await fixture.create(
+      'shipment',
+      {
+        state: `${ns}:option.shipment_state_draft`,
+        kind: `${ns}:option.shipment_kind_initial`,
+        effective_at: new Date().toISOString(),
+        location_id: fixture.location,
+        external_reference: null,
+        reason_code: 'SHIP',
+        reason_narrative: 'Receivables proof',
+        carrier: 'Purolator',
+        shipping_reference_kind: `${ns}:option.shipment_shipping_reference_kind_tracking`,
+        shipping_reference: randomUUID(),
+        ...shipTo,
+      },
+      { order: orderId },
+    );
+    await fixture.create(
+      'shipment_line',
+      {
+        line_number: '1',
+        item_id: fixture.item,
+        quantity,
+        unit_id: 'EA',
+        reversal_of_movement_id: null,
+      },
+      {
+        shipment: header.recordId,
+        order_line: orderLineId,
+        reservation: reservationId,
+      },
+    );
+    return operate('shipment_post', header);
+  };
+  const draftInvoice = (orderId: string) =>
+    fixture.create(
+      'customer_invoice',
+      {
+        state: `${ns}:option.customer_invoice_state_draft`,
+        invoice_date: new Date().toISOString(),
+      },
+      { order: orderId },
+    );
+  const invoice = async (orderId: string) =>
+    operate('customer_invoice_post', await draftInvoice(orderId));
+  const settle = async (
+    kind: 'payment' | 'credit',
+    invoiceId: string,
+    amount: string,
+  ) =>
+    fixture.invoke(
+      `customer_${kind}_post`,
+      await (async () => {
+        const draft = await fixture.create(
+          `customer_${kind}`,
+          kind === 'payment'
+            ? {
+                state: `${ns}:option.customer_payment_state_draft`,
+                payment_date: new Date().toISOString(),
+                amount,
+                method: `${ns}:option.customer_payment_method_eft`,
+                reference: `EFT-${randomUUID().slice(0, 8)}`,
+              }
+            : {
+                state: `${ns}:option.customer_credit_state_draft`,
+                credit_date: new Date().toISOString(),
+                amount,
+                reason: 'Damaged in transit',
+              },
+          { invoice: invoiceId },
+        );
+        return {
+          recordId: draft.recordId,
+          expectedRevision: draft.revision,
+        };
+      })(),
+    );
+  const reread = async (local: string, recordId: string) => {
+    const result = await fixture.app.runtime.entry.run(
+      { headers: {} },
+      (view) => {
+        const definition = registeredSemanticQueryFromPinnedView(
+          view,
+          `${ns}:query.${local}_get`,
+        )!;
+        return fixture.app.runtime.queryGateway.invoke(view, {
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          queryId: definition.queryId,
+          arguments: {
+            recordId,
+            includeArchived: false,
+            [definition.legalEntityScope!.operand.parameterId]: fixture.scope,
+          },
+        });
+      },
+    );
+    return result.records[0]!;
+  };
+  // What the order offers to invoice (the commercial read model).
+  const toInvoice = async (orderId: string) =>
+    (await reread('commercial_order', orderId)).values[
+      `${ns}:metric.order_to_invoice`
+    ];
+  const figures = (record: SemanticRecordDto) =>
+    Object.fromEntries(
+      [
+        'subtotal',
+        'charges',
+        'tax',
+        'total',
+        'paid_amount',
+        'credited_amount',
+        'balance',
+      ].map((name) => [name, money(value(record, 'customer_invoice', name))]),
+    );
+  const state = (record: SemanticRecordDto, local: string) =>
+    String(value(record, local, 'state')).split(`${local}_state_`)[1];
+  return {
+    now,
+    value,
+    operate,
+    order,
+    reserve,
+    ship,
+    draftInvoice,
+    invoice,
+    settle,
+    reread,
+    toInvoice,
+    figures,
+    state,
+  };
+}
+
 test(
   'ruling C: invoices take shipped, not yet invoiced quantities at frozen figures; payments and credits never exceed the balance; void only while unsettled; an invoiced order is not reopened',
   { timeout: 300_000 },
   async () => {
     await withOrderEntryFixture(async (fixture) => {
-      const now = new Date().toISOString();
-      const value = (record: SemanticRecordDto, local: string, name: string) =>
-        record.values[`${ns}:field.${local}_${name}`];
-      const operate = async (
-        operation: string,
-        record: { recordId: string; revision: number },
-      ) => {
-        const result = await fixture.invoke(operation, {
-          recordId: record.recordId,
-          expectedRevision: record.revision,
-        });
-        assert.equal(result.outcome, 'succeeded', operation);
-        return result.readBack!;
-      };
-      const order = async (
-        lines: readonly { quantity: string; price: string }[],
-      ) => {
-        const header = await fixture.create('sales_order', {
-          customer_party_id: fixture.customer,
-          order_date: now,
-          requested_date: null,
-          currency: 'CAD',
-          notes: null,
-          payment_terms: `${ns}:option.sales_order_payment_terms_net_30`,
-          // Freight taxed at its frozen 5%; an untaxed other fee.
-          freight_amount: '25',
-          freight_tax_code_id: fixture.taxCode,
-          freight_tax_rate_percent: '5',
-          other_fee_amount: '10',
-          other_fee_tax_code_id: null,
-          other_fee_tax_rate_percent: null,
-          ...shipTo,
-        });
-        const created = [];
-        for (const [index, line] of lines.entries())
-          created.push(
-            await fixture.create(
-              'sales_order_line',
-              {
-                item_id: fixture.item,
-                unit_id: 'EA',
-                line_number: String(index + 1),
-                ordered_quantity: line.quantity,
-                unit_price: line.price,
-                list_price: line.price,
-                discount_percent: '10',
-                tax_code_id: fixture.taxCode,
-                tax_rate_percent: '5',
-              },
-              { order: header.recordId },
-            ),
-          );
-        const released = await operate('sales_order_release', header);
-        return { header: released, lines: created };
-      };
-      const reserve = async (orderLineId: string, quantity: string) => {
-        const draft = await fixture.create(
-          'reservation',
-          {
-            number: randomUUID(),
-            state: `${ns}:option.reservation_state_draft`,
-            item_id: fixture.item,
-            location_id: fixture.location,
-            quantity,
-            unit_id: 'EA',
-            reason: 'Receivables proof',
-          },
-          { order_line: orderLineId },
-        );
-        return operate('reservation_reserve', draft);
-      };
-      const ship = async (
-        orderId: string,
-        orderLineId: string,
-        reservationId: string,
-        quantity: string,
-      ) => {
-        const header = await fixture.create(
-          'shipment',
-          {
-            state: `${ns}:option.shipment_state_draft`,
-            kind: `${ns}:option.shipment_kind_initial`,
-            effective_at: new Date().toISOString(),
-            location_id: fixture.location,
-            external_reference: null,
-            reason_code: 'SHIP',
-            reason_narrative: 'Receivables proof',
-            carrier: 'Purolator',
-            shipping_reference_kind: `${ns}:option.shipment_shipping_reference_kind_tracking`,
-            shipping_reference: randomUUID(),
-            ...shipTo,
-          },
-          { order: orderId },
-        );
-        await fixture.create(
-          'shipment_line',
-          {
-            line_number: '1',
-            item_id: fixture.item,
-            quantity,
-            unit_id: 'EA',
-            reversal_of_movement_id: null,
-          },
-          {
-            shipment: header.recordId,
-            order_line: orderLineId,
-            reservation: reservationId,
-          },
-        );
-        return operate('shipment_post', header);
-      };
-      const draftInvoice = (orderId: string) =>
-        fixture.create(
-          'customer_invoice',
-          {
-            state: `${ns}:option.customer_invoice_state_draft`,
-            invoice_date: new Date().toISOString(),
-          },
-          { order: orderId },
-        );
-      const invoice = async (orderId: string) =>
-        operate('customer_invoice_post', await draftInvoice(orderId));
-      const settle = async (
-        kind: 'payment' | 'credit',
-        invoiceId: string,
-        amount: string,
-      ) =>
-        fixture.invoke(
-          `customer_${kind}_post`,
-          await (async () => {
-            const draft = await fixture.create(
-              `customer_${kind}`,
-              kind === 'payment'
-                ? {
-                    state: `${ns}:option.customer_payment_state_draft`,
-                    payment_date: new Date().toISOString(),
-                    amount,
-                    method: `${ns}:option.customer_payment_method_eft`,
-                    reference: `EFT-${randomUUID().slice(0, 8)}`,
-                  }
-                : {
-                    state: `${ns}:option.customer_credit_state_draft`,
-                    credit_date: new Date().toISOString(),
-                    amount,
-                    reason: 'Damaged in transit',
-                  },
-              { invoice: invoiceId },
-            );
-            return {
-              recordId: draft.recordId,
-              expectedRevision: draft.revision,
-            };
-          })(),
-        );
-      const reread = async (local: string, recordId: string) => {
-        const result = await fixture.app.runtime.entry.run(
-          { headers: {} },
-          (view) => {
-            const definition = registeredSemanticQueryFromPinnedView(
-              view,
-              `${ns}:query.${local}_get`,
-            )!;
-            return fixture.app.runtime.queryGateway.invoke(view, {
-              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-              queryId: definition.queryId,
-              arguments: {
-                recordId,
-                includeArchived: false,
-                [definition.legalEntityScope!.operand.parameterId]:
-                  fixture.scope,
-              },
-            });
-          },
-        );
-        return result.records[0]!;
-      };
-      // What the order offers to invoice (the commercial read model).
-      const toInvoice = async (orderId: string) =>
-        (await reread('commercial_order', orderId)).values[
-          `${ns}:metric.order_to_invoice`
-        ];
-      const figures = (record: SemanticRecordDto) =>
-        Object.fromEntries(
-          [
-            'subtotal',
-            'charges',
-            'tax',
-            'total',
-            'paid_amount',
-            'credited_amount',
-            'balance',
-          ].map((name) => [
-            name,
-            money(value(record, 'customer_invoice', name)),
-          ]),
-        );
-      const state = (record: SemanticRecordDto, local: string) =>
-        String(value(record, local, 'state')).split(`${local}_state_`)[1];
+      const {
+        value,
+        operate,
+        order,
+        reserve,
+        ship,
+        invoice,
+        settle,
+        reread,
+        toInvoice,
+        figures,
+        state,
+      } = receivablesKit(fixture);
 
       const a = await order([{ quantity: '3', price: '12.5' }]);
       const [lineA] = a.lines;
@@ -430,6 +472,170 @@ test(
         'sales_order_reopen',
         await reread('sales_order', b.header.recordId),
       );
+    });
+  },
+);
+
+test(
+  "the offer and the post settle each line on its own: a correction on one line hides no other line's uninvoiced quantity, and posting reads only its order's shipped rows",
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const { operate, order, reserve, ship, invoice, toInvoice, figures } =
+        receivablesKit(fixture);
+      // Another order of the same company ships first, so the company holds
+      // shipped rows that are not the order under test's.
+      const other = await order([{ quantity: '1', price: '3' }]);
+      const otherReservation = await reserve(other.lines[0]!.recordId, '1');
+      await ship(
+        other.header.recordId,
+        other.lines[0]!.recordId,
+        otherReservation.recordId,
+        '1',
+      );
+
+      const c = await order([
+        { quantity: '2', price: '10' },
+        { quantity: '2', price: '4' },
+      ]);
+      const [first, second] = c.lines;
+      const firstReservation = await reserve(first!.recordId, '2');
+      const secondReservation = await reserve(second!.recordId, '2');
+      const shippedFirst = await ship(
+        c.header.recordId,
+        first!.recordId,
+        firstReservation.recordId,
+        '2',
+      );
+      await ship(
+        c.header.recordId,
+        second!.recordId,
+        secondReservation.recordId,
+        '1',
+      );
+      // Invoiced: the first line's 2 and the second line's 1.
+      await invoice(c.header.recordId);
+      assert.equal(await toInvoice(c.header.recordId), '0');
+
+      // A correction takes one unit back from the first line's shipment, so
+      // that line is now invoiced above what shipped (2 over 1).
+      const target = await governedStorageTarget();
+      const binding = fulfillmentBinding(target)!;
+      const movement = await fixture.pool.query<{ record_id: string }>(
+        `SELECT record_id::text FROM ${fulfillmentTable(binding.movement)}
+          WHERE tenant_id=$1 AND environment_id=$2
+            AND ${q(binding.movement.legalEntity!.column)}=$3
+            AND ${q(fulfillmentColumn(binding.movement, 'inventory_movement_source_type'))}='shipment'
+            AND ${q(fulfillmentColumn(binding.movement, 'inventory_movement_source_id'))}=$4`,
+        [
+          fixture.app.runtime.identity.tenantId,
+          fixture.app.runtime.identity.environmentId,
+          fixture.scope,
+          shippedFirst.recordId,
+        ],
+      );
+      assert.equal(movement.rows.length, 1);
+      const correction = await fixture.create(
+        'shipment',
+        {
+          state: `${ns}:option.shipment_state_draft`,
+          kind: `${ns}:option.shipment_kind_correction`,
+          effective_at: new Date().toISOString(),
+          location_id: fixture.location,
+          external_reference: null,
+          reason_code: 'CORRECT',
+          reason_narrative: 'One unit was not shipped',
+          carrier: null,
+          shipping_reference_kind: null,
+          shipping_reference: null,
+          ...shipTo,
+        },
+        { order: c.header.recordId, supersedes: shippedFirst.recordId },
+      );
+      await fixture.create(
+        'shipment_line',
+        {
+          line_number: '1',
+          item_id: fixture.item,
+          quantity: '1',
+          unit_id: 'EA',
+          reversal_of_movement_id: movement.rows[0]!.record_id,
+        },
+        {
+          shipment: correction.recordId,
+          order_line: first!.recordId,
+          reservation: firstReservation.recordId,
+        },
+      );
+      await operate('shipment_post', correction);
+      // The second line ships its last unit, not yet invoiced. Across the
+      // order shipped (1 + 2) equals invoiced (2 + 1), so a netted offer read
+      // zero; per line, the second line still has 1 to invoice.
+      await ship(
+        c.header.recordId,
+        second!.recordId,
+        secondReservation.recordId,
+        '1',
+      );
+      assert.equal(await toInvoice(c.header.recordId), '1');
+
+      // Posting reads this order's shipped rows and no other's: the progress
+      // read returns exactly its two lines, although the company holds the
+      // other order's shipped row too.
+      const client = await fixture.pool.connect();
+      try {
+        const progressed = await progressByOrderLine(
+          client,
+          RECEIVABLES_SETTLEMENT_SPEC,
+          settlementBinding(RECEIVABLES_SETTLEMENT_SPEC, target),
+          {
+            tenantId: fixture.app.runtime.identity.tenantId,
+            environmentId: fixture.app.runtime.identity.environmentId,
+            legalEntityId: fixture.scope,
+          },
+          [first!.recordId, second!.recordId],
+        );
+        assert.deepEqual(
+          [...progressed.entries()]
+            .map(([line, { quantity }]) => [line, quantity])
+            .sort(([left], [right]) =>
+              String(left).localeCompare(String(right)),
+            ),
+          [
+            [first!.recordId, 10n ** 18n],
+            [second!.recordId, 2n * 10n ** 18n],
+          ].sort(([left], [right]) =>
+            String(left).localeCompare(String(right)),
+          ),
+        );
+        const companyShipped = await client.query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM ${fulfillmentTable(binding.shipped)}
+            WHERE tenant_id=$1 AND environment_id=$2
+              AND ${q(binding.shipped.legalEntity!.column)}=$3`,
+          [
+            fixture.app.runtime.identity.tenantId,
+            fixture.app.runtime.identity.environmentId,
+            fixture.scope,
+          ],
+        );
+        assert.ok(Number(companyShipped.rows[0]!.count) > 2);
+      } finally {
+        client.release();
+      }
+
+      // The post takes the second line's unit alone, without the charges the
+      // first invoice carried: 1 × 4 less 10% = 3.60, tax 0.18.
+      const corrected = await invoice(c.header.recordId);
+      assert.deepEqual(figures(corrected), {
+        subtotal: '3.60',
+        charges: '0.00',
+        tax: '0.18',
+        total: '3.78',
+        paid_amount: '0.00',
+        credited_amount: '0.00',
+        balance: '3.78',
+      });
+      assert.equal(await toInvoice(c.header.recordId), '0');
     });
   },
 );

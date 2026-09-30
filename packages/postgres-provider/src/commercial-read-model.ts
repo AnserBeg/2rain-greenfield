@@ -5,6 +5,7 @@ import {
   lineAmounts,
   parseExact,
   sameExact,
+  threeWayMatch,
   type LineAmounts,
 } from './commercial-amounts.js';
 import { fulfillmentProjectionIdentity } from './fulfillment.js';
@@ -99,13 +100,19 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
     });
   /**
    * Every record a dependency lists under one exact scope: a parent scope for
-   * an owned child relation, a reference scope for a reference relation.
+   * an owned child relation, a reference scope for a reference relation. A
+   * relation label names, for each record, the record a relation points at.
    */
   const listAll = async (
     key: string,
     relationId: string,
     recordId: string,
     kind: 'parentScope' | 'referenceScope' = 'parentScope',
+    relationLabels: readonly {
+      readonly relationId: string;
+      readonly queryId: string;
+      readonly fieldId: string;
+    }[] = [],
   ) => {
     const records: SemanticRecordDto[] = [];
     const scope = { relationId, recordId };
@@ -123,7 +130,7 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
             pageSize: 100,
             search: '',
             sort: [],
-            relationLabels: [],
+            relationLabels: relationLabels.map((label) => ({ ...label })),
             [kind]: scope,
           },
         }),
@@ -218,63 +225,208 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
     }
   };
   /**
-   * Shipped quantity not yet on an invoice that counts (ruling C): what the
-   * receivables capability would invoice now, so a task can be offered only
-   * when there is something to invoice. The capability recomputes it per
-   * line under the order's lock; this is the offer, not the rule.
+   * Progressed quantity not yet on a document that counts: what was shipped
+   * and is not on a live invoice (ruling C), or what was received and is not
+   * on a live bill. Each line counts only its own positive part, exactly as
+   * the settlement capability posts it, so a task is offered only when a post
+   * would settle something: a line settled above what it progressed (after a
+   * correction) never hides another line's unsettled quantity. The capability
+   * recomputes it per line under the order's lock; this is the offer, not the
+   * rule.
    */
-  const toInvoice = async (
+  const toSettle = async (
     orderId: string,
     lines: readonly SemanticRecordDto[],
+    family: {
+      /** What one order line progressed, or `null` when it cannot be stated. */
+      readonly progressOf: (line: SemanticRecordDto) => Promise<bigint | null>;
+      /** Dependency keys of the documents and of their lines. */
+      readonly documents: string;
+      readonly documentLines: string;
+      /** The document entity's local id. */
+      readonly document: string;
+      readonly relations: {
+        readonly order: string;
+        readonly lineDocument: string;
+        readonly lineOrderLine: string;
+      };
+    },
   ): Promise<string | null> => {
-    let shipped = 0n;
+    const progressed = new Map<string, bigint>();
     for (const line of lines) {
-      const read = await invoke('shipped', {
-        recordId: fulfillmentProjectionIdentity(
-          view,
-          scopeId,
-          'shipped',
-          line.recordId,
-        ),
-        includeArchived: false,
-      });
-      const quantity = read.records[0]
-        ? units(
-            read.records[0].values[
-              field('sales_order_shipped_shipped_quantity')
-            ],
-          )
-        : 0n;
+      const quantity = await family.progressOf(line);
       if (quantity === null) return null;
-      shipped += quantity;
+      progressed.set(line.recordId, quantity);
     }
     const live = new Set(
       ['open', 'partially_paid', 'paid'].map(
-        (state) => `${ns}:option.customer_invoice_state_${state}`,
+        (state) => `${ns}:option.${family.document}_state_${state}`,
       ),
     );
-    let invoiced = 0n;
-    for (const invoice of await listAll(
-      'invoices',
-      `${ns}:relation.customer_invoice_order`,
+    const lineQuery = model.queries.lines?.targetId;
+    if (!lineQuery) throw new Error('Invalid commercial read-model dependency');
+    const lineOrderLine = `${ns}:relation.${family.relations.lineOrderLine}`;
+    const settled = new Map<string, bigint>();
+    for (const document of await listAll(
+      family.documents,
+      `${ns}:relation.${family.relations.order}`,
       orderId,
       'referenceScope',
     )) {
-      if (!live.has(String(invoice.values[field('customer_invoice_state')])))
+      if (!live.has(String(document.values[field(`${family.document}_state`)])))
         continue;
       for (const line of await listAll(
-        'invoiceLines',
-        `${ns}:relation.customer_invoice_line_invoice`,
-        invoice.recordId,
+        family.documentLines,
+        `${ns}:relation.${family.relations.lineDocument}`,
+        document.recordId,
+        'parentScope',
+        // Each document line names the order line it settles.
+        [
+          {
+            relationId: lineOrderLine,
+            queryId: lineQuery,
+            fieldId: field(`${doc}_line_line_number`),
+          },
+        ],
       )) {
         const quantity = units(
-          line.values[field('customer_invoice_line_quantity')],
+          line.values[field(`${family.document}_line_quantity`)],
         );
-        if (quantity === null) return null;
-        invoiced += quantity;
+        const orderLineId = line.relationLabels?.[lineOrderLine]?.recordId;
+        if (quantity === null || !orderLineId) return null;
+        settled.set(orderLineId, (settled.get(orderLineId) ?? 0n) + quantity);
       }
     }
-    return quantityText(shipped - invoiced);
+    let open = 0n;
+    for (const line of lines) {
+      const remaining =
+        (progressed.get(line.recordId) ?? 0n) -
+        (settled.get(line.recordId) ?? 0n);
+      if (remaining > 0n) open += remaining;
+    }
+    return quantityText(open);
+  };
+  /** Shipped quantity not yet on an invoice that counts (ruling C). */
+  const toInvoice = (orderId: string, lines: readonly SemanticRecordDto[]) =>
+    toSettle(orderId, lines, {
+      progressOf: async (line) => {
+        const read = await invoke('shipped', {
+          recordId: fulfillmentProjectionIdentity(
+            view,
+            scopeId,
+            'shipped',
+            line.recordId,
+          ),
+          includeArchived: false,
+        });
+        return read.records[0]
+          ? units(
+              read.records[0].values[
+                field('sales_order_shipped_shipped_quantity')
+              ],
+            )
+          : 0n;
+      },
+      documents: 'invoices',
+      documentLines: 'invoiceLines',
+      document: 'customer_invoice',
+      relations: {
+        order: 'customer_invoice_order',
+        lineDocument: 'customer_invoice_line_invoice',
+        lineOrderLine: 'customer_invoice_line_order_line',
+      },
+    });
+  /**
+   * Received quantity not yet on a live vendor bill (PAYABLES), from the
+   * receiving projection. A withheld read of what was received or billed
+   * states nothing -- the order itself still reads -- rather than a guessed
+   * zero.
+   */
+  const toBill = async (
+    orderId: string,
+    lines: readonly SemanticRecordDto[],
+  ): Promise<string | null> => {
+    try {
+      return await toSettle(orderId, lines, {
+        progressOf: receivedOf,
+        documents: 'bills',
+        documentLines: 'billLines',
+        document: 'vendor_bill',
+        relations: {
+          order: 'vendor_bill_order',
+          lineDocument: 'vendor_bill_line_bill',
+          lineOrderLine: 'vendor_bill_line_order_line',
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+      return null;
+    }
+  };
+  /**
+   * What is billed against one purchase order line (PAYABLES, PY-G): its
+   * lines on the order's live bills -- open, partially paid or paid; drafts
+   * and void bills do not count -- found through the line's own reference,
+   * each bill's state read once per call. A withheld bill read states nothing
+   * for every line of the call, as a withheld received read does.
+   */
+  let billsWithheld = false;
+  const billStates = new Map<string, Promise<string | null>>();
+  const billStateOf = (billId: string) => {
+    let state = billStates.get(billId);
+    if (!state) {
+      state = invoke('bill', { recordId: billId, includeArchived: false }).then(
+        (read) =>
+          read.outcome === 'exact' && read.records[0]
+            ? String(read.records[0].values[field('vendor_bill_state')])
+            : null,
+      );
+      billStates.set(billId, state);
+    }
+    return state;
+  };
+  const billedOf = async (line: SemanticRecordDto): Promise<bigint | null> => {
+    if (billsWithheld) return null;
+    const billsQuery = model.queries.bills?.targetId;
+    if (!billsQuery)
+      throw new Error('Invalid commercial read-model dependency');
+    const lineBill = `${ns}:relation.vendor_bill_line_bill`;
+    const live = new Set(
+      ['open', 'partially_paid', 'paid'].map(
+        (state) => `${ns}:option.vendor_bill_state_${state}`,
+      ),
+    );
+    try {
+      let billed = 0n;
+      for (const billLine of await listAll(
+        'billLines',
+        `${ns}:relation.vendor_bill_line_order_line`,
+        line.recordId,
+        'referenceScope',
+        // Each bill line names its bill.
+        [
+          {
+            relationId: lineBill,
+            queryId: billsQuery,
+            fieldId: field('vendor_bill_number'),
+          },
+        ],
+      )) {
+        const billId = billLine.relationLabels?.[lineBill]?.recordId;
+        const quantity = units(
+          billLine.values[field('vendor_bill_line_quantity')],
+        );
+        if (!billId || quantity === null) return null;
+        const state = await billStateOf(billId);
+        if (state === null) return null;
+        if (live.has(state)) billed += quantity;
+      }
+      return billed;
+    } catch (error) {
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+      billsWithheld = true;
+      return null;
+    }
   };
   const money = (cents: bigint | null) =>
     cents === null ? null : formatCents(cents);
@@ -295,8 +447,9 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       emit('line_tax', money(amounts?.taxCents ?? null));
       // What is still to arrive: ordered less received, when both are known.
       // A release whose purchase lines declare no progress states none.
+      const received =
+        purchase && model.resultFields.received ? await receivedOf(row) : null;
       if (purchase && model.resultFields.received) {
-        const received = await receivedOf(row);
         const ordered = units(
           row.values[field('purchase_order_line_ordered_quantity')],
         );
@@ -307,6 +460,19 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
             ? null
             : quantityText(ordered - received),
         );
+      }
+      // The three-way match (PAYABLES, PY-G): ordered and received beside
+      // what is billed, what is left to bill and how the two compare. Shown,
+      // never enforced; declared only where payables are composed.
+      if (purchase && model.resultFields.match_status) {
+        const billed = await billedOf(row);
+        const match = threeWayMatch(received, billed);
+        emit('billed', billed === null ? null : quantityText(billed));
+        emit(
+          'to_bill',
+          match.toBill === null ? null : quantityText(match.toBill),
+        );
+        emit('match_status', match.status);
       }
       // A unit price that differs from the list price it started from was
       // set by hand (ruling B); without a list price there is nothing to mark.
@@ -363,6 +529,11 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
         emit(
           'order_to_invoice',
           lines === null ? null : await toInvoice(row.recordId, lines),
+        );
+      if (model.resultFields.order_to_bill)
+        emit(
+          'order_to_bill',
+          lines === null ? null : await toBill(row.recordId, lines),
         );
     } else throw new Error('Unknown commercial read-model binding');
     rows.push({ ...row, values });
