@@ -80,6 +80,7 @@ import {
 } from '../../apps/web/src/surface-runtime.js';
 import {
   SurfaceProjectionError,
+  pickerEnumerationQuery,
   readCompiledSurfaceDataBinding,
   readCompiledSurfaceManifest,
   type CompiledSurfaceDataBinding,
@@ -9171,4 +9172,101 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     cell(receivedWithheld.html, late, purchaseColumn('received')),
     withheldMark,
   );
+});
+
+test('ORDER-PARITY: a picker over purchase orders enumerates their plain list query, never the read-model clone the List reads', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  f.executor.seed(
+    'purchase_order',
+    {
+      [id('field', 'purchase_order_number')]: 'PO-PICKED',
+      [id('field', 'purchase_order_supplier_party_id')]: f.party,
+      [id('field', 'purchase_order_currency')]: 'CAD',
+      [id('derived_state_field', 'machine.purchase_order_lifecycle')]: id(
+        'state',
+        'purchase_order_released',
+      ),
+    },
+    scope,
+  );
+  // Every query the commercial read model is run for, as the gateway runs it.
+  const computed: string[] = [];
+  const gateways: SurfaceRuntimeGateways = {
+    ...f.gateways,
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      f.executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': async ({ result }) => result,
+        'northstar.sales:capability.commercial': async ({
+          definition,
+          result,
+        }) => {
+          computed.push(definition.queryId);
+          return result;
+        },
+      },
+    ),
+  };
+  const clone = id('query', 'commercial_purchase_order_list');
+  const plain = id('query', 'purchase_order_list');
+  const reads = (queryId: string) => f.executor.listReads.get(queryId) ?? 0;
+  const before = { clone: reads(clone), plain: reads(plain) };
+
+  // The receipt form's order picker: its options are the orders' labels.
+  const form = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'goods_receipt_form'), [id('parameter', 'goods_receipt_get_legal_entity_scope')]: scope }).toString()}`,
+    gateways,
+  );
+  assert.doesNotMatch(form.html, /RELATION_ENUMERATION_UNAVAILABLE/u);
+  assert.match(form.html, /PO-PICKED/u);
+  // Through the plain query, never the clone and never its read model.
+  assert.equal(reads(clone), before.clone);
+  assert.ok(reads(plain) > before.plain);
+  // A copy: an assertion on `computed` itself would narrow it to never[].
+  assert.deepEqual([...computed], []);
+
+  // Which List stands for purchase orders is unchanged: Purchase orders, whose
+  // query is the clone; the picker chooses the query, not the List. Its entry
+  // authorization query is preferred over an equivalent plain clone (the
+  // Expected receipts worklist's), and a List without a read model keeps its
+  // own query.
+  const surface = (local: string) =>
+    f.surfaces.find((value) => value.surfaceId === id('surface', local))!;
+  const listQuery = (local: string) => {
+    const bound = readCompiledSurfaceDataBinding(f.view, surface(local)).query;
+    assert.notEqual(bound.queryType, 'aggregate');
+    return bound as Exclude<typeof bound, { queryType: 'aggregate' }>;
+  };
+  assert.equal(listQuery('purchase_order_list').queryId, clone);
+  assert.equal(
+    pickerEnumerationQuery(
+      f.view,
+      surface('purchase_order_list'),
+      listQuery('purchase_order_list'),
+    ).queryId,
+    plain,
+  );
+  for (const local of ['expected_receipt_list', 'sales_order_list'])
+    assert.equal(
+      pickerEnumerationQuery(f.view, surface(local), listQuery(local)).queryId,
+      id('query', local),
+    );
+
+  // The List itself still reads its orders with their totals.
+  await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [id('parameter', 'commercial_purchase_order_list_legal_entity_scope')]: scope }).toString()}`,
+    gateways,
+  );
+  assert.ok(reads(clone) > before.clone);
+  assert.ok(computed.includes(clone));
 });

@@ -59,6 +59,7 @@ import {
   type SurfaceMessageRef,
 } from './message-render.js';
 import {
+  pickerEnumerationQuery,
   readCompiledSurfaceManifest,
   readCompiledSurfaceDataBinding,
   SurfaceProjectionError,
@@ -1317,7 +1318,15 @@ async function recordPickerOptions(
   queryGateway: SemanticQueryGateway,
   legalEntitySelection: readonly string[],
 ): Promise<RecordPickerEnumeration | null> {
-  const scope = target.binding.query.legalEntityScope;
+  if (target.binding.query.queryType === 'aggregate') return null;
+  // Labels only: a List read with per-row figures is enumerated through the
+  // entity's plain list query, under that query's own company operand.
+  const query = pickerEnumerationQuery(
+    view,
+    target.surface,
+    target.binding.query,
+  );
+  const scope = query.legalEntityScope;
   if (scope && legalEntitySelection.length !== 1) return null;
   try {
     const result = await queryGateway.invoke(view, {
@@ -1326,7 +1335,7 @@ async function recordPickerOptions(
         list: {
           cursor: null,
           matchMode: 'substring',
-          pageSize: target.binding.query.maximumResultCount,
+          pageSize: query.maximumResultCount,
           relationLabels: [],
           schemaVersion: SHARED_LIST_QUERY_VERSION,
           search: '',
@@ -1336,7 +1345,7 @@ async function recordPickerOptions(
           ? { [scope.operand.parameterId]: legalEntitySelection[0]! }
           : {}),
       },
-      queryId: target.binding.query.queryId,
+      queryId: query.queryId,
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     });
     if (result.outcome !== 'exact') return null;
