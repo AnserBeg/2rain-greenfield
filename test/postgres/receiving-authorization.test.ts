@@ -335,9 +335,17 @@ test(
             key,
           );
         try {
+          // The calendar belongs to the tenant, not the legal entity, so a
+          // second entity must declare the calendar the composed tenant has.
           await pool.query(
-            `SELECT platform.provision_inventory_scope($1,$2,$3,'AUTH-B','AUTH B','UTC','00:00:00',$4,1::smallint,'reject',0,'codeAndNarrative','codeOnly','codeAndNarrative','codeAndNarrative','codeAndNarrative',NULL,NULL,NULL,NULL,NULL)`,
-            [...identity, entityB, runtime.releaseRoot],
+            `SELECT platform.provision_inventory_scope($1,$2,$3,'AUTH-B','AUTH B',$5,$6,$4,1::smallint,'reject',0,'codeAndNarrative','codeOnly','codeAndNarrative','codeAndNarrative','codeAndNarrative',NULL,NULL,NULL,NULL,NULL)`,
+            [
+              ...identity,
+              entityB,
+              runtime.releaseRoot,
+              COMPOSED_APPLICATION_INVENTORY_SCOPE.timeZone,
+              COMPOSED_APPLICATION_INVENTORY_SCOPE.businessDayBoundary,
+            ],
           );
           // The platform scope and its business master are separate persisted facts.
           await invoke('legal_entity_create', {

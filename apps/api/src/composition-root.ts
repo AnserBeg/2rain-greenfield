@@ -52,6 +52,12 @@ export interface ComposedApplicationSeedReceipt {
   };
 }
 
+/**
+ * The office's inventory policy (POSTING-FORWARD-DATE owner rulings,
+ * 2026-09-30): the business day is Calgary's, and a posting may be dated up to
+ * seven business days back. Provisioning asserts these against the stored
+ * values, so a changed value needs a fresh database (pre-tenant, ADR-0066).
+ */
 export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
   adjustmentApprovalThreshold: null,
   adjustmentReasonRequirement: 'codeAndNarrative',
@@ -64,11 +70,11 @@ export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
   entityCode: 'DEFAULT',
   entityName: 'Default legal entity',
   legalEntityId: '74000000-0000-4000-8000-000000000001',
-  maximumBackdateDays: 0,
+  maximumBackdateDays: 7,
   negativeStock: 'reject',
   rebaselineApprovalThreshold: null,
   rebaselineReasonRequirement: 'codeAndNarrative',
-  timeZone: 'UTC',
+  timeZone: 'America/Edmonton',
   transferApprovalThreshold: null,
   transferReasonRequirement: 'codeOnly',
 } as const satisfies InventoryScopeProvisioning);
