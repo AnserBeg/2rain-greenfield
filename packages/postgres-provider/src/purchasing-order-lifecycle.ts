@@ -13,6 +13,52 @@ import {
   type ReceiptBinding,
 } from './goods-receipt.js';
 
+/**
+ * A purchase order with a live bill -- open, partially paid or paid; a draft or
+ * a void bill does not count -- is not cancelled (PAYABLES, owner ruling
+ * PY-H), as an invoiced sales order is not reopened: its bills are voided
+ * first. Read under the order's row lock, which every bill post takes before
+ * it bills the order, so no bill becomes live meanwhile. A release that
+ * composes no payables has no bill to read.
+ */
+async function refuseCancelWhileBilled(
+  client: PoolClient,
+  binding: ReceiptBinding,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  orderId: string,
+): Promise<void> {
+  const bill = binding.target.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.vendor_bill'),
+  );
+  if (!bill) return;
+  const stateColumn = receiptColumn(bill, 'vendor_bill_state');
+  const options = bill.columns.find(
+    (column) => column.physicalName === stateColumn,
+  )!.fieldContract.enumOptionIds;
+  const live = ['open', 'partially_paid', 'paid'].map((state) => {
+    const option = options.find((value) =>
+      value.endsWith(`:option.vendor_bill_state_${state}`),
+    );
+    if (!option)
+      throw receiptError(
+        'INVENTORY_POSTING_STORAGE_INVALID',
+        `Missing option vendor_bill_state/${state}`,
+      );
+    return option;
+  });
+  const billed = await client.query<{ count: number }>(
+    `SELECT count(*)::int AS count FROM ${receiptTable(bill)} WHERE tenant_id=$1 AND environment_id=$2 AND ${q(bill.legalEntity!.column)}=$3 AND ${q(receiptRelation(binding, bill, 'vendor_bill_order'))}=$4 AND archived_at IS NULL AND ${q(stateColumn)} = ANY($5::text[])`,
+    [context.tenantId, context.environmentId, legalEntityId, orderId, live],
+  );
+  if (Number(billed.rows[0]?.count ?? 0) > 0)
+    throw receiptError(
+      'PAYABLES_ORDER_BILLED',
+      'A purchase order with a live bill is not cancelled; void its bills first',
+      { orderId },
+    );
+}
+
 /** Shared with receiving: order first, then order lines in canonical order.
  * Caller owns the gateway's trust/idempotency transaction; this never commits.
  *
@@ -59,6 +105,14 @@ export async function changePurchaseOrderState(
     throw receiptError(
       'INVENTORY_TRANSACTION_STATE_CONFLICT',
       'Order state or revision changed',
+    );
+  if (action === 'cancel')
+    await refuseCancelWhileBilled(
+      client,
+      binding,
+      context,
+      legalEntityId,
+      orderId,
     );
   const lines = await client.query(
     `SELECT * FROM ${receiptTable(binding.orderLine)} WHERE tenant_id=$1 AND environment_id=$2 AND ${q(binding.orderLine.legalEntity!.column)}=$3 AND ${q(receiptRelation(binding, binding.orderLine, 'purchase_order_line_order'))}=$4 AND archived_at IS NULL ORDER BY record_id FOR NO KEY UPDATE`,

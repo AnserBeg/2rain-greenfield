@@ -63,6 +63,7 @@ import {
   surfaceSupportsRuntimeIntent,
 } from '../src/component-registry.js';
 import { readDemoCompiledFixture } from '../src/demo-runtime.js';
+import { composedApplicationDefinition } from '../../../packages/domain/src/app/builder.js';
 import {
   declaredCellText,
   declaredListArguments,
@@ -76,17 +77,20 @@ import {
 } from '../src/list-declaration.js';
 import { renderSurfaceRuntime } from '../src/surface-runtime.js';
 import {
-  renderCompositionChildren,
-  renderCompositionHeader,
-  type CompositionData,
-} from '../src/surface-composition.js';
-import { entryCompanyChoice } from '../src/workspace-entry.js';
-import { createValuesFor } from '../src/document-editor.js';
-import {
   INTENT_RENDERED_ARITY,
   readCompiledSurfaceManifest,
   type CompiledSurfaceDefinition,
 } from '../src/surface-contract.js';
+import {
+  compositionProgressionStates,
+  renderCompositionAlerts,
+  renderCompositionChildren,
+  renderCompositionHeader,
+  renderCompositionProgression,
+  type CompositionData,
+} from '../src/surface-composition.js';
+import { entryCompanyChoice } from '../src/workspace-entry.js';
+import { createValuesFor } from '../src/document-editor.js';
 import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
 
 const APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT =
@@ -1165,6 +1169,91 @@ test('a declared List sends before-today as the injected day, keeps each tab ope
 });
 
 /**
+ * PAYABLES: the Bills List the product declares runs on the same List runtime
+ * as every other: each state tab is one exact filter, the newest bill comes
+ * first, the vendor is named through its label, and the export keeps exact
+ * figures while a supplier invoice number a spreadsheet would run as a
+ * formula leaves inert.
+ */
+test('the declared Bills List filters each state tab exactly, orders the newest bill first and exports a supplier invoice number inert', () => {
+  const ns = 'northstar.app';
+  const surface = (
+    composedApplicationDefinition().surfaces as Array<Record<string, unknown>>
+  ).find((value) => value.surfaceId === `${ns}:surface.vendor_bill_list`)!;
+  const list = SurfaceListSchema.parse(surface.list);
+  const view = (local: string) => `${ns}:list_view.vendor_bill_list_${local}`;
+  const queryId = `${ns}:query.vendor_bill_list`;
+  const now = new Date('2026-09-30T12:00:00.000Z');
+  type Sent = {
+    list: {
+      fieldFilters?: unknown;
+      referenceLabels?: { referenceId: string; sourceFieldId: string }[];
+      sort: unknown;
+    };
+  };
+  const sent = (local: string, mode: 'page' | 'count' = 'page') =>
+    declaredListArguments(
+      list,
+      readDeclaredListState(
+        list,
+        new URL(`http://list.local/?view=${encodeURIComponent(view(local))}`),
+      ),
+      { mode, now, queryId, scopeArguments: {} },
+    ) as unknown as Sent;
+  const partial = sent('partially_paid');
+  assert.deepEqual(partial.list.fieldFilters, [
+    {
+      fieldId: `${ns}:field.vendor_bill_state`,
+      value: `${ns}:option.vendor_bill_state_partially_paid`,
+    },
+  ]);
+  assert.deepEqual(partial.list.sort, [
+    { direction: 'descending', fieldId: `${ns}:field.vendor_bill_bill_date` },
+  ]);
+  assert.deepEqual(
+    partial.list.referenceLabels?.map((label) => label.sourceFieldId),
+    [`${ns}:field.vendor_bill_supplier_party_id`],
+  );
+  // All is unfiltered; a tab count sends no order.
+  assert.equal(sent('all').list.fieldFilters, undefined);
+  assert.deepEqual(sent('void', 'count').list.sort, []);
+
+  const bill = {
+    archived: false,
+    entityId: `${ns}:entity.vendor_bill`,
+    recordId: '00000000-0000-4000-8000-000000000001',
+    revision: 2,
+    relationLabels: {
+      [`${ns}:list_column.vendor_bill_list_vendor`]: {
+        label: 'Alpine Office Supply',
+        recordId: '00000000-0000-4000-8000-000000000002',
+      },
+    },
+    values: {
+      [`${ns}:field.vendor_bill_number`]: 'BILL-000001',
+      [`${ns}:field.vendor_bill_supplier_invoice_number`]:
+        '=HYPERLINK("http://x")',
+      [`${ns}:field.vendor_bill_bill_date`]: '2026-09-30T10:00:00.000Z',
+      [`${ns}:field.vendor_bill_due_date`]: '2026-10-30T10:00:00.000Z',
+      [`${ns}:field.vendor_bill_state`]: `${ns}:option.vendor_bill_state_partially_paid`,
+      [`${ns}:field.vendor_bill_total`]: '59.880000000000000000',
+      [`${ns}:field.vendor_bill_balance`]: '39.880000000000000000',
+      [`${ns}:field.vendor_bill_currency`]: 'CAD',
+    },
+  };
+  const csv = declaredListCsv(list, [bill], (_record, _fieldId, value) =>
+    String(value).endsWith('_partially_paid')
+      ? 'Partially paid'
+      : String(value),
+  );
+  assert.equal(
+    csv,
+    '\uFEFFNumber,Vendor,Supplier invoice,Bill date,Due,Status,Total,Balance,Currency\r\n' +
+      'BILL-000001,Alpine Office Supply,"\'=HYPERLINK(""http://x"")",2026-09-30T10:00:00.000Z,2026-10-30T10:00:00.000Z,Partially paid,59.880000000000000000,39.880000000000000000,CAD\r\n',
+  );
+});
+
+/**
  * ORDER-PARITY: a row's action is the first declared one whose condition holds
  * on the row's own server-projected values; supplementary progress (`omit`)
  * is re-requested without, only for views that do not keep open rows. The
@@ -1393,6 +1482,352 @@ test('a declared List links a row to its first applicable action and reads witho
     ),
     '\uFEFFNumber,ordered,shipped,open,Total\r\nSO-1,,,,\r\n',
   );
+});
+
+test('a record names its short rows and its progress, and offers only the first next step, as a plain form under its own name', () => {
+  const ns = 'northstar.fixture';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const state = id('field', 'order_state');
+  const inState = (value: string, operator = 'equals') => ({
+    value: { source: 'record', field: state },
+    operator,
+    compare: id('state', `order_${value}`),
+  });
+  const column = (
+    local: string,
+    label: string,
+    orderKey: number,
+    field: string,
+    role?: string,
+  ) => ({
+    columnId: id('column', local),
+    label,
+    orderKey,
+    field,
+    ...(role ? { presentation: { role, priority: orderKey } } : {}),
+  });
+  const composition = SurfaceCompositionSchema.parse({
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: id('column', 'number'),
+        subtitle: [],
+        facts: [],
+        status: id('column', 'state'),
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+      alerts: [
+        {
+          label: 'Fulfillment exception',
+          description: 'Open quantity free stock does not cover.',
+          datasetId: id('dataset', 'lines'),
+          columnId: id('column', 'short'),
+        },
+      ],
+      progression: {
+        title: 'Order to cash',
+        steps: [
+          {
+            label: 'Order',
+            current: [inState('draft')],
+            complete: [inState('draft', 'notEquals')],
+            stopped: [inState('cancelled')],
+          },
+          {
+            label: 'Fulfillment',
+            current: [inState('released')],
+            complete: [inState('closed')],
+            attention: [
+              {
+                value: { source: 'record', field: id('metric', 'to_invoice') },
+                operator: 'positive',
+                compare: null,
+              },
+            ],
+            stopped: [inState('cancelled')],
+            documents: id('dataset', 'shipments'),
+          },
+        ],
+        next: [
+          { operation: ref('operationReference', id('operation', 'release')) },
+          { action: id('action', 'close') },
+        ],
+      },
+    },
+    fields: [
+      column('number', 'Order', 10, id('field', 'order_number')),
+      column('state', 'State', 20, state),
+    ],
+    children: ['lines', 'shipments'].map((local, index) => ({
+      datasetId: id('dataset', local),
+      label: local === 'lines' ? 'Lines' : 'Shipments',
+      orderKey: 10 + index * 10,
+      query: ref('queryReference', id('query', `${local}_list`)),
+      presentation: { selection: 'none' },
+      parent: {
+        relationId: id('relation', `${local}_order`),
+        value: { source: 'record', field: 'recordId' },
+        ownership: 'reference',
+      },
+      columns:
+        local === 'lines'
+          ? [
+              column('item', 'Item', 10, id('field', 'line_item'), 'primary'),
+              column('short', 'Short', 20, id('metric', 'short'), 'quantity'),
+            ]
+          : [column('shipment', 'Shipment', 10, id('field', 'number'))],
+    })),
+    actions: [
+      {
+        actionId: id('action', 'close'),
+        label: 'Close order',
+        description: 'Closes the order.',
+        orderKey: 10,
+        conditions: [inState('released')],
+        inputs: [],
+        steps: [
+          {
+            stepId: id('step', 'close'),
+            operation: ref('operationReference', id('operation', 'close')),
+            bindings: [
+              {
+                path: ['recordId'],
+                value: { source: 'record', field: 'recordId' },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const surface = {
+    surfaceId: id('surface', 'order_detail'),
+    label: 'Order',
+    composition,
+    dataSourceQueryId: id('query', 'order_get'),
+  } as unknown as CompiledSurfaceDefinition;
+  const dto = (
+    recordId: string,
+    values: Record<string, string | null>,
+  ): CompositionData['record'] => ({
+    archived: false,
+    entityId: id('entity', 'order'),
+    recordId,
+    revision: 1,
+    values,
+  });
+  const data = (
+    order: Record<string, string | null>,
+    shortages: readonly (string | null)[],
+    shipments = 0,
+    status: 'ready' | 'failed' = 'ready',
+  ): CompositionData => {
+    const record = dto('00000000-0000-4000-8000-000000000001', {
+      [id('field', 'order_number')]: 'SO-1',
+      [id('metric', 'to_invoice')]: null,
+      ...order,
+    });
+    return {
+      record,
+      fields: { record, cells: {} },
+      fieldsFailed: false,
+      children: [
+        {
+          definition: composition.children[0]!,
+          status,
+          rows: shortages.map((short, index) => {
+            const line = dto(`00000000-0000-4000-8000-00000000010${index}`, {
+              [id('metric', 'short')]: short,
+            });
+            return {
+              record: line,
+              cells: {
+                [id('column', 'item')]: `Item ${String(index + 1)}`,
+                [id('column', 'short')]: short ?? '—',
+              },
+            };
+          }),
+        },
+        {
+          definition: composition.children[1]!,
+          status: shipments ? 'ready' : 'empty',
+          rows: Array.from({ length: shipments }, (_, index) => ({
+            record: dto(`00000000-0000-4000-8000-00000000020${index}`, {}),
+            cells: { [id('column', 'shipment')]: `SHP-${String(index + 1)}` },
+          })),
+        },
+      ],
+      selections: {},
+      selected: null,
+      selectedDatasetId: null,
+      url: '/?surface=order&record=00000000-0000-4000-8000-000000000001',
+      scope: null,
+    };
+  };
+  const draft = { [state]: id('state', 'order_draft') };
+  const released = { [state]: id('state', 'order_released') };
+
+  // Only rows stating a positive figure are named, by their primary cell; a
+  // zero, an unstated figure or a failed dataset states nothing.
+  const banner = renderCompositionAlerts(
+    surface,
+    data(draft, ['2', '0', null, '0.5']),
+  );
+  assert.deepEqual(
+    [
+      ...banner.matchAll(
+        /<li data-record-id="[^"]+"><strong>([^<]+)<\/strong> <span>([^<]+)<\/span>/gu,
+      ),
+    ].map((match) => [match[1], match[2]]),
+    [
+      ['Item 1', 'Short 2'],
+      ['Item 4', 'Short 0.5'],
+    ],
+  );
+  assert.match(
+    banner,
+    /<h2 id="composition-alert-0">Fulfillment exception<\/h2>/u,
+  );
+  // Never a live region: an outcome's status stays the page's only one.
+  assert.doesNotMatch(banner, /role=|aria-live/u);
+  assert.equal(renderCompositionAlerts(surface, data(draft, ['0', null])), '');
+  assert.equal(
+    renderCompositionAlerts(surface, data(draft, ['3'], 0, 'failed')),
+    '',
+  );
+
+  // States: stopped, then attention, then complete, then current.
+  assert.deepEqual(compositionProgressionStates(surface, data(draft, [])), [
+    'current',
+    'upcoming',
+  ]);
+  assert.deepEqual(compositionProgressionStates(surface, data(released, [])), [
+    'complete',
+    'current',
+  ]);
+  assert.deepEqual(
+    compositionProgressionStates(
+      surface,
+      data({ ...released, [id('metric', 'to_invoice')]: '1' }, []),
+    ),
+    ['complete', 'attention'],
+  );
+  assert.deepEqual(
+    compositionProgressionStates(
+      surface,
+      data({ [state]: id('state', 'order_cancelled') }, []),
+    ),
+    ['stopped', 'stopped'],
+  );
+
+  // The first next entry offered now: the operation the page offers, else
+  // the record task whose conditions hold -- a plain form, no script needed,
+  // named apart from the command bar's own control.
+  const offered: string[] = [];
+  const operationControl =
+    (available: boolean) => (operationId: string, prefix: string) => {
+      offered.push(operationId);
+      return available
+        ? `<form method="post" data-offered="${operationId}"><button type="submit" aria-label="${prefix}: Release">Release</button></form>`
+        : null;
+    };
+  const view = {} as never;
+  const first = renderCompositionProgression(
+    surface,
+    data(draft, [], 8),
+    view,
+    operationControl(true),
+  );
+  assert.match(
+    first,
+    new RegExp(`data-next-operation="${id('operation', 'release')}"`, 'u'),
+  );
+  assert.match(first, /aria-label="Next action: Release"/u);
+  assert.deepEqual(offered, [id('operation', 'release')]);
+  // Current and attention steps carry aria-current; markers are not read.
+  assert.match(
+    first,
+    /<li data-step-state="current" aria-current="step"><span class="composition-progression-marker" aria-hidden="true">1<\/span>/u,
+  );
+  // Documents: the first six by their primary cell, then how many more.
+  assert.equal((first.match(/<li><span>SHP-/gu) ?? []).length, 6);
+  assert.match(
+    first,
+    new RegExp(
+      `<a href="#${id('dataset', 'shipments')}">2 more in Shipments</a>`,
+      'u',
+    ),
+  );
+  const next = renderCompositionProgression(
+    surface,
+    data(released, []),
+    view,
+    operationControl(false),
+  );
+  assert.match(
+    next,
+    new RegExp(
+      `<form method="post" action="[^"]+"><input type="hidden" name="compositionAction" value="${id('action', 'close')}"><button type="submit" aria-label="Next action: Close order">Close order</button></form>`,
+      'u',
+    ),
+  );
+  // Nothing next while a Task is open, once stopped, or with nothing offered.
+  for (const [order, offerNext] of [
+    [released, false],
+    [{ [state]: id('state', 'order_cancelled') }, true],
+    [{ [state]: id('state', 'order_closed') }, true],
+  ] as const)
+    assert.doesNotMatch(
+      renderCompositionProgression(
+        surface,
+        data(order, []),
+        view,
+        operationControl(false),
+        offerNext,
+      ),
+      /data-next-(?:action|operation)=/u,
+    );
+  // A record whose own fields failed states no progress at all.
+  assert.equal(
+    renderCompositionProgression(
+      surface,
+      { ...data(draft, []), fieldsFailed: true },
+      view,
+      operationControl(true),
+    ),
+    '',
+  );
+});
+
+test('the task rows, alert and progression lay out at phone width without a sideways scroll', () => {
+  const source = readFileSync(`${webRoot}/src/surface-runtime.ts`, 'utf8');
+  // Steps wrap into as many columns as fit; the banner and every panel span
+  // the page; a task row becomes a labelled card through the shared rule.
+  for (const rule of [
+    '.composition-progression-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))',
+    '.composition-alert{grid-column:1/-1;',
+    '.composition-progression{grid-column:1/-1;',
+    '.composition-progression-next>div{flex:1 1 16rem;min-width:0}',
+    '.data-table-wrap tr[data-compact-card=true] td{display:grid;',
+  ])
+    assert.ok(source.includes(rule), rule);
+  const composition = readFileSync(
+    `${webRoot}/src/surface-composition.ts`,
+    'utf8',
+  );
+  // Each task row is a compact card whose cells carry their labels.
+  assert.match(
+    composition,
+    /<tr data-compact-card="true" data-task-row="\$\{h\(rowId\)\}">/u,
+  );
+  assert.match(composition, /data-column-label="\$\{h\(input\.label\)\}"/u);
 });
 
 test('unknown surface and malformed projection fail as rendered diagnostics', async () => {

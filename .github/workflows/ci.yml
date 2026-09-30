@@ -192,6 +192,36 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The commercial document workflows (orders, receipts, invoices, bills)
+  # install the composed release in most tests, so they run beside the other
+  # PostgreSQL tests, under the same bound.
+  postgres-commercial:
+    name: PostgreSQL commercial workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
+      - name: Run commercial workflow PostgreSQL tests
+        run: corepack pnpm test:postgres:commercial
+      - name: Retain commercial PostgreSQL executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reachability-postgres-commercial-${{ github.sha }}
+          path: test-results/reachability/postgres-commercial.json
+          if-no-files-found: error
+          retention-days: 7
+
   browser:
     name: Browser runner
     runs-on: ubuntu-24.04
@@ -334,6 +364,7 @@ jobs:
       - performance
       - postgres
       - postgres-composed
+      - postgres-commercial
       - browser
       - browser-operations
       - observability

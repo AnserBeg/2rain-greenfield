@@ -1,3 +1,76 @@
+/**
+ * What each line of a posted receipt can still give back (ORDER-PARITY): its
+ * movement, what that movement still adds to stock after the compensations
+ * already posted against it, and its order line -- read by the receiving read
+ * model, so a reversal names exactly what the posting kernel will admit.
+ */
+export const RECEIVING_READ_MODEL_BINDINGS = Object.freeze({
+  receiptLine: 'northstar.purchasing:read_model.receipt_line',
+});
+/** The receiving outputs, by read-model binding. */
+export const RECEIVING_READ_MODEL_OUTPUTS = Object.freeze({
+  receiptLine: ['movement', 'reversible', 'reversal_quantity', 'order_line'],
+} as const);
+
+/**
+ * The receiving read model's query: a receipt's lines with what each can
+ * still reverse, cut from the receipt line list when the application composes
+ * purchasing with inventory. The movements and the lines it reads are the
+ * plain declared lists, under current policy and scope.
+ */
+export function receivingWorkspaceQueries(
+  namespace: string,
+  queries: readonly Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const named = (local: string) =>
+    queries.find((query) => query.queryId === `${namespace}:query.${local}`);
+  const source = named('goods_receipt_line_list');
+  if (!source || !named('inventory_movement_list')) return [];
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const name = 'receiving_receipt_lines';
+  const clone = JSON.parse(
+    JSON.stringify(source)
+      .replaceAll(
+        `${namespace}:query.goods_receipt_line_list`,
+        `${namespace}:query.${name}`,
+      )
+      .replaceAll('selection.goods_receipt_line_list_', `selection.${name}_`)
+      .replaceAll('parameter.goods_receipt_line_list_', `parameter.${name}_`),
+  ) as Record<string, unknown>;
+  return [
+    {
+      ...clone,
+      readModel: {
+        capability: ref(
+          'capabilityReference',
+          'northstar.purchasing:capability.receiving',
+        ),
+        binding: RECEIVING_READ_MODEL_BINDINGS.receiptLine,
+        queries: {
+          lines: ref(
+            'queryReference',
+            `${namespace}:query.goods_receipt_line_list`,
+          ),
+          movements: ref(
+            'queryReference',
+            `${namespace}:query.inventory_movement_list`,
+          ),
+        },
+        resultFields: Object.fromEntries(
+          RECEIVING_READ_MODEL_OUTPUTS.receiptLine.map((key) => [
+            key,
+            `${namespace}:metric.${key}`,
+          ]),
+        ),
+      },
+    },
+  ];
+}
+
 /** Purchasing declarations interpreted by the shared Record/Task renderer. */
 export function purchasingWorkspace(
   namespace: string,
@@ -81,6 +154,8 @@ export function purchasingWorkspace(
   const pricedLines = id('dataset', 'purchasing_priced_lines');
   const metric = (name: string) => id('metric', name);
   const receipts = id('dataset', 'purchasing_receipts');
+  // PAYABLES: the order's vendor bills and their balances.
+  const bills = id('dataset', 'purchasing_bills');
   const receive = (known: boolean) => {
     const suffix = known ? 'known' : 'absent';
     const header = `receipt_${suffix}`;
@@ -243,6 +318,293 @@ export function purchasingWorkspace(
       ],
     };
   };
+  const released = {
+    value: record(
+      id('derived_state_field', 'machine.purchase_order_lifecycle'),
+    ),
+    operator: 'equals',
+    compare: id('state', 'purchase_order_released'),
+  };
+  const receiptLines = id('dataset', 'purchasing_receipt_lines');
+  /**
+   * A truck's delivery against this order (ORDER-PARITY, PaneFlow's
+   * multi-line receipt): one receipt into one location, with a quantity typed
+   * on each line that arrived. Rows start empty; "Fill open quantities" fills
+   * each from what is still to arrive, and a line left empty is not received.
+   * The receipt is created, each entered line added, then posted -- atomic in
+   * the posting kernel, which refuses an over-receipt of any line.
+   */
+  const receiveLines = (known: boolean) => {
+    const suffix = known ? 'known' : 'absent';
+    const header = `receipt_lines_${suffix}`;
+    const input = (name: string) => ({
+      source: 'input',
+      inputId: id('input', `receive_lines_${name}`),
+    });
+    return {
+      actionId: id('action', `receive_lines_${suffix}`),
+      label: known
+        ? 'Receive lines with actual cost'
+        : 'Receive lines with cost explicitly absent',
+      description: known
+        ? 'Posts one receipt for every line given a quantity, at the actual unit cost and currency you enter. A line left empty is not received.'
+        : 'Posts one receipt for every line given a quantity, with actual cost explicitly recorded as absent. A line left empty is not received.',
+      orderKey: known ? 5 : 6,
+      conditions: [released],
+      // A withheld open quantity keeps its line offered, left empty by Fill.
+      rows: {
+        datasetId: lines,
+        conditions: [
+          {
+            value: selected(metric('open_to_receive')),
+            operator: 'notEquals',
+            compare: '0',
+          },
+        ],
+        fillLabel: 'Fill open quantities',
+      },
+      inputs: [
+        {
+          inputId: id('input', 'receive_lines_quantity'),
+          label: 'Quantity to receive',
+          orderKey: 10,
+          type: 'quantity',
+          required: true,
+          perRow: {
+            fillFrom: {
+              datasetId: lines,
+              columnId: id('column', 'purchasing_open'),
+            },
+          },
+        },
+        {
+          inputId: id('input', 'receive_lines_unit'),
+          label: 'Base unit',
+          orderKey: 20,
+          type: 'text',
+          required: true,
+          perRow: {},
+          // Each line's product base unit, read on the server.
+          presentation: {
+            kind: 'derived',
+            column: {
+              datasetId: lines,
+              columnId: id('column', 'purchasing_base_unit'),
+            },
+          },
+        },
+        ...(known
+          ? [
+              {
+                inputId: id('input', 'receive_lines_cost'),
+                label: 'Actual received unit cost',
+                orderKey: 30,
+                type: 'text',
+                required: true,
+                perRow: {},
+              },
+            ]
+          : []),
+        {
+          inputId: id('input', 'receive_lines_location'),
+          label: 'Receiving location',
+          orderKey: 40,
+          type: 'reference',
+          required: true,
+          query: q('location_list'),
+          labelField: ref('fieldReference', f('location_name')),
+          defaultFrom: record(f('purchase_order_receiving_location_id')),
+        },
+        ...(known
+          ? [
+              {
+                inputId: id('input', 'receive_lines_currency'),
+                label: 'Actual cost currency',
+                orderKey: 50,
+                type: 'text',
+                required: true,
+                presentation: {
+                  kind: 'choice',
+                  options: [
+                    { value: 'CAD', label: 'CAD · Canadian dollar' },
+                    { value: 'USD', label: 'USD · US dollar' },
+                    { value: 'EUR', label: 'EUR · Euro' },
+                  ],
+                  defaultFrom: {
+                    source: 'record',
+                    field: f('purchase_order_currency'),
+                  },
+                },
+              },
+            ]
+          : []),
+        {
+          inputId: id('input', 'receive_lines_packing_slip'),
+          label: 'Packing slip / delivery note',
+          orderKey: 60,
+          type: 'text',
+          required: false,
+        },
+        {
+          inputId: id('input', 'receive_lines_notes'),
+          label: 'Notes',
+          orderKey: 70,
+          type: 'text',
+          required: false,
+          presentation: { kind: 'multiline' },
+        },
+      ],
+      steps: [
+        create(
+          header,
+          'goods_receipt',
+          {
+            state: literal(id('option', 'goods_receipt_state_draft')),
+            kind: literal(id('option', 'goods_receipt_kind_initial')),
+            effective_at: generated('instant'),
+            location_id: input('location'),
+            reason_code: literal('RECEIVE'),
+            reason_narrative: literal('Receive from purchase order'),
+            packing_slip: input('packing_slip'),
+            notes: input('notes'),
+          },
+          { order: record('recordId') },
+        ),
+        {
+          ...create(
+            `receipt_lines_line_${suffix}`,
+            'goods_receipt_line',
+            {
+              // The order line's own number, so the receipt reads as the order.
+              line_number: selected(f('purchase_order_line_line_number')),
+              item_id: selected(f('purchase_order_line_item_id')),
+              quantity: input('quantity'),
+              unit_id: input('unit'),
+              cost_status: literal(
+                id('option', `goods_receipt_line_cost_status_${suffix}`),
+              ),
+              unit_cost: known ? input('cost') : literal(null),
+              currency: known ? input('currency') : literal(null),
+              reversal_of_movement_id: literal(null),
+            },
+            {
+              receipt: stepValue(header, 'recordId'),
+              order_line: selected('recordId'),
+            },
+          ),
+          each: true,
+        },
+        step(`receipt_lines_post_${suffix}`, 'goods_receipt_post', [
+          bind(['recordId'], stepValue(header, 'recordId')),
+          bind(['expectedRevision'], stepValue(header, 'revision')),
+        ]),
+      ],
+    };
+  };
+  /**
+   * A posted receipt reversed through the receiving routes (ORDER-PARITY): a
+   * draft receipt of kind reversal naming the original, one line for every
+   * line of it that still adds to stock -- each at exactly that quantity,
+   * compensating its own movement -- then posted. The posting kernel admits
+   * only that (every uncompensated movement, each at its remainder, order
+   * line, item, location and unit kept) and refuses it once the stock has
+   * left; the read model offers only what it would admit.
+   */
+  const reverseReceipt = {
+    actionId: id('action', 'reverse_receipt'),
+    label: 'Reverse receipt',
+    description:
+      'Reverses every line of this receipt that still adds to stock, at exactly that quantity, with a posted reversal receipt. Refused if the stock has already left.',
+    orderKey: 32,
+    datasetId: receipts,
+    presentation: { placement: 'selection' },
+    conditions: [
+      released,
+      {
+        value: selected(f('goods_receipt_state')),
+        operator: 'equals',
+        compare: id('option', 'goods_receipt_state_posted'),
+      },
+      {
+        value: selected(f('goods_receipt_kind')),
+        operator: 'equals',
+        compare: id('option', 'goods_receipt_kind_initial'),
+      },
+    ],
+    rows: {
+      datasetId: receiptLines,
+      conditions: [
+        {
+          value: selected(metric('reversible')),
+          operator: 'positive',
+          compare: null,
+        },
+      ],
+    },
+    inputs: [
+      {
+        inputId: id('input', 'reverse_receipt_reason'),
+        label: 'Reason',
+        orderKey: 10,
+        type: 'text',
+        required: true,
+        presentation: { kind: 'multiline' },
+      },
+    ],
+    steps: [
+      create(
+        'reversal',
+        'goods_receipt',
+        {
+          state: literal(id('option', 'goods_receipt_state_draft')),
+          kind: literal(id('option', 'goods_receipt_kind_reversal')),
+          effective_at: generated('instant'),
+          // The original's location: a reversal gives back where it received.
+          location_id: selected(f('goods_receipt_location_id')),
+          reason_code: literal('REVERSE'),
+          reason_narrative: {
+            source: 'input',
+            inputId: id('input', 'reverse_receipt_reason'),
+          },
+          packing_slip: literal(null),
+          notes: literal(null),
+        },
+        { order: record('recordId'), supersedes: selected('recordId') },
+      ),
+      {
+        ...create(
+          'reversal_line',
+          'goods_receipt_line',
+          {
+            line_number: selected(f('goods_receipt_line_line_number')),
+            item_id: selected(f('goods_receipt_line_item_id')),
+            quantity: selected(metric('reversal_quantity')),
+            unit_id: selected(f('goods_receipt_line_unit_id')),
+            cost_status: selected(f('goods_receipt_line_cost_status')),
+            unit_cost: selected(f('goods_receipt_line_unit_cost')),
+            currency: selected(f('goods_receipt_line_currency')),
+            reversal_of_movement_id: selected(metric('movement')),
+          },
+          {
+            receipt: stepValue('reversal', 'recordId'),
+            order_line: selected(metric('order_line')),
+          },
+        ),
+        each: true,
+      },
+      step('reversal_post', 'goods_receipt_post', [
+        bind(['recordId'], stepValue('reversal', 'recordId')),
+        bind(['expectedRevision'], stepValue('reversal', 'revision')),
+      ]),
+    ],
+  };
+  const state = (operator: 'equals' | 'notEquals', local: string) => ({
+    value: record(
+      id('derived_state_field', 'machine.purchase_order_lifecycle'),
+    ),
+    operator,
+    compare: id('state', `purchase_order_${local}`),
+  });
   return {
     kind: 'surfaceComposition',
     schemaVersion: 'v6',
@@ -278,6 +640,79 @@ export function purchasingWorkspace(
           id('column', 'purchasing_total'),
         ],
         note: id('column', 'purchasing_notes'),
+      },
+      // Purchase to receipt: where this order stands and what to do next.
+      progression: {
+        title: 'Purchase to receipt',
+        steps: [
+          {
+            label: 'Draft',
+            current: [state('equals', 'draft')],
+            complete: [
+              state('notEquals', 'draft'),
+              state('notEquals', 'cancelled'),
+            ],
+            stopped: [state('equals', 'cancelled')],
+          },
+          {
+            label: 'Released',
+            current: [],
+            complete: [
+              state('notEquals', 'draft'),
+              state('notEquals', 'cancelled'),
+            ],
+            stopped: [state('equals', 'cancelled')],
+          },
+          {
+            label: 'Receiving',
+            current: [state('equals', 'released')],
+            complete: [state('equals', 'closed')],
+            stopped: [state('equals', 'cancelled')],
+            documents: receipts,
+          },
+          {
+            // PAYABLES: received quantity is waiting to be billed -- a closed
+            // order too, since it is still billed.
+            label: 'Billing',
+            current: [state('equals', 'released')],
+            complete: [state('equals', 'closed')],
+            attention: [
+              {
+                value: record(metric('order_to_bill')),
+                operator: 'positive',
+                compare: null,
+              },
+            ],
+            stopped: [state('equals', 'cancelled')],
+            documents: bills,
+          },
+          {
+            label: 'Closed',
+            current: [],
+            complete: [state('equals', 'closed')],
+            stopped: [state('equals', 'cancelled')],
+          },
+        ],
+        // Release, then receive what is still to arrive, bill what arrived,
+        // then close: Close is next only once nothing is left to receive or
+        // to bill.
+        next: [
+          {
+            operation: ref(
+              'operationReference',
+              id('operation', 'purchase_order_release'),
+            ),
+          },
+          { action: id('action', 'receive_lines_known') },
+          // Then bill what was received and is not yet billed (PAYABLES).
+          { action: id('action', 'bill_received') },
+          {
+            operation: ref(
+              'operationReference',
+              id('operation', 'purchase_order_close'),
+            ),
+          },
+        ],
       },
     },
     fields: [
@@ -509,6 +944,34 @@ export function purchasingWorkspace(
             undefined,
             'quantity',
           ),
+          // The three-way match (PAYABLES, PY-G): what is billed and left to
+          // bill beside ordered and received, and how billing compares with
+          // what arrived. Shown, never enforced.
+          column(
+            'billed',
+            'Billed',
+            35,
+            metric('billed'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'to_bill',
+            'To bill',
+            36,
+            metric('to_bill'),
+            undefined,
+            'quantity',
+          ),
+          // Beside the product, where it is read without opening details.
+          column(
+            'match',
+            'Match',
+            37,
+            metric('match_status'),
+            undefined,
+            'secondary',
+          ),
           column(
             'base_unit',
             'Product base unit',
@@ -536,7 +999,13 @@ export function purchasingWorkspace(
         label: 'Connected receipts',
         orderKey: 20,
         query: q('goods_receipt_list'),
-        presentation: { selection: 'none', compact: 'scrollTable' },
+        // Selectable (ORDER-PARITY): a selected receipt shows its lines and
+        // what can still be reversed.
+        presentation: {
+          selection: 'explicit',
+          selectedActions: 'row',
+          compact: 'scrollTable',
+        },
         parent: {
           relationId: id('relation', 'goods_receipt_order'),
           value: record('recordId'),
@@ -560,6 +1029,14 @@ export function purchasingWorkspace(
             'secondary',
           ),
           column(
+            'receipt_kind',
+            'Kind',
+            25,
+            f('goods_receipt_kind'),
+            undefined,
+            'secondary',
+          ),
+          column(
             'received_at',
             'Received at',
             30,
@@ -577,8 +1054,107 @@ export function purchasingWorkspace(
           ),
         ],
       },
+      {
+        // The selected receipt's lines and what each still adds to stock.
+        datasetId: receiptLines,
+        label: 'Receipt lines',
+        orderKey: 30,
+        query: q('receiving_receipt_lines'),
+        presentation: {
+          selection: 'none',
+          compact: 'scrollTable',
+          description:
+            'Reversible is what each line still adds to stock after earlier corrections. Missing or unavailable data is not zero.',
+        },
+        parent: {
+          relationId: id('relation', 'goods_receipt_line_receipt'),
+          value: { ...selected('recordId'), datasetId: receipts },
+          ownership: 'parentScopedChild',
+        },
+        sort: [
+          {
+            fieldId: f('goods_receipt_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        columns: [
+          column(
+            'receipt_line',
+            'Line',
+            10,
+            f('goods_receipt_line_line_number'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'receipt_item',
+            'Product',
+            20,
+            f('goods_receipt_line_item_id'),
+            ['item_get', 'item_name'],
+            'primary',
+          ),
+          column(
+            'receipt_quantity',
+            'Quantity',
+            30,
+            f('goods_receipt_line_quantity'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'receipt_unit',
+            'Unit',
+            40,
+            f('goods_receipt_line_unit_id'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'receipt_reversible',
+            'Reversible',
+            50,
+            metric('reversible'),
+            undefined,
+            'quantity',
+          ),
+        ],
+      },
+      {
+        // PAYABLES: the order's vendor bills and what each still owes.
+        datasetId: bills,
+        label: 'Bills',
+        orderKey: 40,
+        query: q('vendor_bill_list'),
+        presentation: { selection: 'none', compact: 'scrollTable' },
+        parent: {
+          relationId: id('relation', 'vendor_bill_order'),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        sort: [{ fieldId: f('vendor_bill_bill_date'), direction: 'ascending' }],
+        columns: [
+          column('bill', 'Bill', 10, f('vendor_bill_number')),
+          column('bill_state', 'State', 20, f('vendor_bill_state')),
+          column('bill_date', 'Bill date', 30, f('vendor_bill_bill_date')),
+          column('bill_due', 'Due', 40, f('vendor_bill_due_date')),
+          column(
+            'bill_supplier_invoice',
+            'Supplier invoice',
+            45,
+            f('vendor_bill_supplier_invoice_number'),
+          ),
+          money(column('bill_total', 'Total', 50, f('vendor_bill_total'))),
+          money(
+            column('bill_balance', 'Balance', 60, f('vendor_bill_balance')),
+          ),
+        ],
+      },
     ],
     actions: [
+      receiveLines(true),
+      receiveLines(false),
+      reverseReceipt,
       receive(true),
       receive(false),
       {
@@ -642,6 +1218,76 @@ export function purchasingWorkspace(
         ],
       },
       {
+        // PAYABLES (PY-B, PY-C): every received quantity not yet billed, at
+        // the order's own costs, discounts and frozen rates; the first live
+        // bill carries the freight and other fee.
+        actionId: id('action', 'bill_received'),
+        label: 'Bill received quantities',
+        description:
+          'Bills every received quantity not yet billed at this order’s costs and tax rates. The first bill also carries the freight and other fee.',
+        orderKey: 27,
+        // Offered while received quantity is not yet billed and the order's
+        // figures can be stated; the capability decides per line.
+        conditions: [
+          {
+            value: record(metric('order_to_bill')),
+            operator: 'positive',
+            compare: null,
+          },
+          {
+            value: record(metric('order_total')),
+            operator: 'positive',
+            compare: null,
+          },
+        ],
+        inputs: [
+          {
+            inputId: id('input', 'bill_supplier_invoice'),
+            label: 'Supplier invoice number',
+            orderKey: 10,
+            type: 'text',
+            required: false,
+          },
+        ],
+        steps: [
+          create(
+            'bill_draft',
+            'vendor_bill',
+            {
+              // The bill number is assigned on create (BILL-000001); the
+              // bill is dated when it posts (PY-D).
+              state: literal(id('option', 'vendor_bill_state_draft')),
+              bill_date: generated('instant'),
+              supplier_invoice_number: {
+                source: 'input',
+                inputId: id('input', 'bill_supplier_invoice'),
+              },
+            },
+            { order: record('recordId') },
+          ),
+          step('bill_commit', 'vendor_bill_post', [
+            bind(['recordId'], stepValue('bill_draft', 'recordId')),
+            bind(['expectedRevision'], stepValue('bill_draft', 'revision')),
+          ]),
+        ],
+      },
+      {
+        actionId: id('action', 'open_bill'),
+        label: 'Open bill',
+        description: 'Open the bill with its lines, payments and credits.',
+        orderKey: 35,
+        datasetId: bills,
+        presentation: { placement: 'row' },
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref('surfaceReference', id('surface', 'vendor_bill_detail')),
+          query: q('vendor_bill_get'),
+          record: selected('recordId'),
+        },
+      },
+      {
         actionId: id('action', 'open_receipt'),
         label: 'Open receipt',
         description:
@@ -659,6 +1305,430 @@ export function purchasingWorkspace(
           ),
           query: q('goods_receipt_get'),
           record: selected('recordId'),
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * A vendor bill (PAYABLES): its frozen figures and balance, its lines, and the
+ * payments and vendor credits against it. A payment or a credit posts only up
+ * to the balance; Void is offered only while nothing is settled. Commands the
+ * bill's own state admits -- Post on a draft whose post was refused -- come
+ * from their declared preconditions.
+ */
+export function billWorkspace(namespace: string): Record<string, unknown> {
+  const id = (type: string, name: string) => `${namespace}:${type}.${name}`;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const q = (name: string) => ref('queryReference', id('query', name));
+  const field = (name: string) => id('field', name);
+  const column = (
+    name: string,
+    label: string,
+    orderKey: number,
+    value: string,
+    lookup?: readonly [string, string],
+  ) => ({
+    columnId: id('column', `bill_${name}`),
+    label,
+    orderKey,
+    field: value,
+    ...(lookup
+      ? {
+          reference: {
+            query: q(lookup[0]),
+            labelField: ref('fieldReference', field(lookup[1])),
+          },
+        }
+      : {}),
+  });
+  const money = <T extends object>(value: T) => ({
+    ...value,
+    format: 'money' as const,
+  });
+  const record = (name: string) => ({ source: 'record', field: name });
+  const literal = (value: string | null) => ({ source: 'literal', value });
+  const generated = (value: string) => ({ source: 'generated', value });
+  const input = (name: string) => ({
+    source: 'input',
+    inputId: id('input', `bill_${name}`),
+  });
+  const bind = (path: string[], value: unknown) => ({ path, value });
+  const step = (name: string, operation: string, bindings: unknown[]) => ({
+    stepId: id('step', `bill_${name}`),
+    operation: ref('operationReference', id('operation', operation)),
+    bindings,
+  });
+  const settle = (
+    kind: 'payment' | 'credit',
+    values: Record<string, unknown>,
+  ) => [
+    step(`${kind}_draft`, `vendor_${kind}_create`, [
+      bind(['recordId'], generated('uuid')),
+      bind(['legalEntityId'], generated('scope')),
+      ...Object.entries(values).map(([key, value]) =>
+        bind(['values', field(`vendor_${kind}_${key}`)], value),
+      ),
+      bind(
+        ['relations', id('relation', `vendor_${kind}_bill`)],
+        record('recordId'),
+      ),
+    ]),
+    step(`${kind}_commit`, `vendor_${kind}_post`, [
+      bind(['recordId'], {
+        source: 'step',
+        stepId: id('step', `bill_${kind}_draft`),
+        field: 'recordId',
+      }),
+      bind(['expectedRevision'], {
+        source: 'step',
+        stepId: id('step', `bill_${kind}_draft`),
+        field: 'revision',
+      }),
+    ]),
+  ];
+  const state = field('vendor_bill_state');
+  const inState = (...states: string[]) =>
+    states.length === 1
+      ? [
+          {
+            value: record(state),
+            operator: 'equals',
+            compare: id('option', `vendor_bill_state_${states[0]!}`),
+          },
+        ]
+      : // Neither of the states the task does not apply to.
+        (['draft', 'open', 'partially_paid', 'paid', 'void'] as const)
+          .filter((value) => !states.includes(value))
+          .map((value) => ({
+            value: record(state),
+            operator: 'notEquals',
+            compare: id('option', `vendor_bill_state_${value}`),
+          }));
+  const amount = (label: string) => ({
+    inputId: id('input', 'bill_amount'),
+    label,
+    orderKey: 10,
+    type: 'quantity',
+    required: true,
+  });
+  const lines = id('dataset', 'bill_lines');
+  return {
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: id('column', 'bill_number'),
+        subtitle: [id('column', 'bill_vendor')],
+        status: id('column', 'bill_state'),
+        // Six at most: the currency reads among the bill's details.
+        facts: [
+          id('column', 'bill_order'),
+          id('column', 'bill_date'),
+          id('column', 'bill_due'),
+          id('column', 'bill_total'),
+          id('column', 'bill_balance'),
+          id('column', 'bill_supplier_invoice'),
+        ],
+      },
+      context: {
+        label: 'Balance',
+        description:
+          'Record a payment or a vendor credit against this bill’s balance.',
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+      task: { mode: 'nativeDialog', fallback: 'page' },
+      // The printable bill, saved as PDF by the browser.
+      print: {
+        label: 'Vendor bill',
+        datasets: [lines],
+        totals: [
+          id('column', 'bill_subtotal'),
+          id('column', 'bill_charges'),
+          id('column', 'bill_tax'),
+          id('column', 'bill_total'),
+          id('column', 'bill_paid'),
+          id('column', 'bill_credited'),
+          id('column', 'bill_balance'),
+        ],
+      },
+    },
+    fields: [
+      column('number', 'Bill', 10, field('vendor_bill_number')),
+      column('state', 'Bill state', 15, state),
+      column('vendor', 'Vendor', 20, field('vendor_bill_supplier_party_id'), [
+        'party_get',
+        'party_name',
+      ]),
+      column('date', 'Bill date', 25, field('vendor_bill_bill_date')),
+      column('due', 'Due date', 30, field('vendor_bill_due_date')),
+      // The order this bill bills: the bill stores it as a relation, stated
+      // by its get and labelled through the order's own get under current
+      // policy -- "—" when that read is withheld (as an invoice names its
+      // order).
+      column(
+        'order',
+        'Purchase order',
+        32,
+        id('relation', 'vendor_bill_order'),
+        ['purchase_order_get', 'purchase_order_number'],
+      ),
+      column('currency', 'Currency', 35, field('vendor_bill_currency')),
+      column('terms', 'Payment terms', 40, field('vendor_bill_payment_terms')),
+      column(
+        'supplier_invoice',
+        'Supplier invoice number',
+        45,
+        field('vendor_bill_supplier_invoice_number'),
+      ),
+      ...[
+        column('subtotal', 'Subtotal', 50, field('vendor_bill_subtotal')),
+        column('charges', 'Charges', 51, field('vendor_bill_charges')),
+        column('tax', 'Tax', 52, field('vendor_bill_tax')),
+        column('total', 'Total', 53, field('vendor_bill_total')),
+        column('paid', 'Paid', 54, field('vendor_bill_paid_amount')),
+        column(
+          'credited',
+          'Credited',
+          55,
+          field('vendor_bill_credited_amount'),
+        ),
+        column('balance', 'Balance', 56, field('vendor_bill_balance')),
+      ].map(money),
+    ],
+    children: [
+      {
+        datasetId: lines,
+        presentation: { selection: 'none' },
+        label: 'Bill lines',
+        orderKey: 10,
+        query: q('vendor_bill_line_list'),
+        sort: [
+          {
+            fieldId: field('vendor_bill_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        parent: {
+          relationId: id('relation', 'vendor_bill_line_bill'),
+          value: record('recordId'),
+          ownership: 'parentScopedChild',
+        },
+        columns: [
+          column('line', 'Line', 10, field('vendor_bill_line_line_number')),
+          column('item', 'Item', 20, field('vendor_bill_line_item_id'), [
+            'item_get',
+            'item_name',
+          ]),
+          column(
+            'quantity',
+            'Quantity',
+            30,
+            field('vendor_bill_line_quantity'),
+          ),
+          column('unit', 'Unit', 40, field('vendor_bill_line_unit_id')),
+          money(
+            column(
+              'unit_cost',
+              'Unit cost',
+              50,
+              field('vendor_bill_line_unit_price'),
+            ),
+          ),
+          column(
+            'discount',
+            'Discount %',
+            60,
+            field('vendor_bill_line_discount_percent'),
+          ),
+          column(
+            'tax_rate',
+            'Tax rate %',
+            70,
+            field('vendor_bill_line_tax_rate_percent'),
+          ),
+          money(
+            column('amount', 'Amount', 80, field('vendor_bill_line_amount')),
+          ),
+          money(column('line_tax', 'Tax', 90, field('vendor_bill_line_tax'))),
+        ],
+      },
+      ...(['payment', 'credit'] as const).map((kind, index) => ({
+        datasetId: id('dataset', `bill_${kind}s`),
+        presentation: { selection: 'none', compact: 'scrollTable' },
+        label: kind === 'payment' ? 'Payments' : 'Vendor credits',
+        orderKey: 20 + index * 10,
+        query: q(`vendor_${kind}_list`),
+        parent: {
+          relationId: id('relation', `vendor_${kind}_bill`),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        columns: [
+          column(
+            `${kind}_number`,
+            kind === 'payment' ? 'Payment' : 'Credit',
+            10,
+            field(`vendor_${kind}_number`),
+          ),
+          column(`${kind}_state`, 'State', 20, field(`vendor_${kind}_state`)),
+          column(
+            `${kind}_date`,
+            'Date',
+            30,
+            field(
+              kind === 'payment'
+                ? 'vendor_payment_payment_date'
+                : 'vendor_credit_credit_date',
+            ),
+          ),
+          money(
+            column(
+              `${kind}_amount`,
+              'Amount',
+              40,
+              field(`vendor_${kind}_amount`),
+            ),
+          ),
+          ...(kind === 'payment'
+            ? [
+                column(
+                  'payment_method',
+                  'Method',
+                  50,
+                  field('vendor_payment_method'),
+                ),
+                column(
+                  'payment_reference',
+                  'Reference',
+                  60,
+                  field('vendor_payment_reference'),
+                ),
+              ]
+            : [
+                column(
+                  'credit_reason',
+                  'Reason',
+                  50,
+                  field('vendor_credit_reason'),
+                ),
+              ]),
+        ],
+      })),
+    ],
+    actions: [
+      {
+        actionId: id('action', 'bill_record_payment'),
+        label: 'Record payment',
+        description:
+          'Records a payment made to the vendor against this bill. It may not exceed the balance.',
+        orderKey: 10,
+        conditions: inState('open', 'partially_paid'),
+        inputs: [
+          amount('Amount paid'),
+          {
+            inputId: id('input', 'bill_method'),
+            label: 'Method',
+            orderKey: 20,
+            type: 'text',
+            required: true,
+            presentation: {
+              kind: 'choice',
+              options: (
+                [
+                  ['cash', 'Cash'],
+                  ['cheque', 'Cheque'],
+                  ['eft', 'EFT'],
+                  ['card', 'Card'],
+                  ['other', 'Other'],
+                ] as const
+              ).map(([value, label]) => ({
+                value: id('option', `vendor_payment_method_${value}`),
+                label,
+              })),
+              defaultValue: id('option', 'vendor_payment_method_eft'),
+            },
+          },
+          {
+            inputId: id('input', 'bill_reference'),
+            label: 'Reference (cheque or transaction number)',
+            orderKey: 30,
+            type: 'text',
+            required: true,
+          },
+        ],
+        steps: settle('payment', {
+          // The payment number is assigned on create (VPAY-000001).
+          state: literal(id('option', 'vendor_payment_state_draft')),
+          payment_date: generated('instant'),
+          amount: input('amount'),
+          method: input('method'),
+          reference: input('reference'),
+        }),
+      },
+      {
+        actionId: id('action', 'bill_record_credit'),
+        label: 'Record vendor credit',
+        description:
+          'Records a credit the vendor issued against this bill’s balance, such as for a return or a price correction.',
+        orderKey: 20,
+        conditions: inState('open', 'partially_paid'),
+        inputs: [
+          amount('Amount credited'),
+          {
+            inputId: id('input', 'bill_reason'),
+            label: 'Reason',
+            orderKey: 20,
+            type: 'text',
+            required: true,
+            presentation: { kind: 'multiline' },
+          },
+        ],
+        steps: settle('credit', {
+          // The credit number is assigned on create (VCM-000001).
+          state: literal(id('option', 'vendor_credit_state_draft')),
+          credit_date: generated('instant'),
+          amount: input('amount'),
+          reason: input('reason'),
+        }),
+      },
+      {
+        actionId: id('action', 'bill_void'),
+        label: 'Void bill',
+        description:
+          'Voids this bill while nothing is paid or credited on it; its quantities can be billed again.',
+        orderKey: 30,
+        conditions: inState('open'),
+        inputs: [],
+        steps: [
+          step('void', 'vendor_bill_void', [
+            bind(['recordId'], record('recordId')),
+            bind(['expectedRevision'], record('revision')),
+          ]),
+        ],
+      },
+      {
+        // The way back to the order from wherever the bill was opened.
+        actionId: id('action', 'bill_open_order'),
+        label: 'Open purchase order',
+        description: 'Open the purchase order this bill bills.',
+        orderKey: 40,
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref(
+            'surfaceReference',
+            id('surface', 'purchase_order_detail'),
+          ),
+          query: q('commercial_purchase_order_get'),
+          record: record(id('relation', 'vendor_bill_order')),
         },
       },
     ],

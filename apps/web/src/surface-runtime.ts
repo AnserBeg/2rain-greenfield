@@ -1,4 +1,5 @@
 import {
+  compositionRelationTargets,
   loadSurfaceComposition,
   submitCompositionAction,
   displayFieldValue,
@@ -336,7 +337,11 @@ export async function renderSurfaceRuntimeWithData(
         queryId: binding.query.queryId,
         scopeArguments: legalEntityScopeArguments(binding, url),
       })
-    : argumentsForSurface(binding, url);
+    : withCompositionRelations(
+        view,
+        selection.selected,
+        argumentsForSurface(binding, url),
+      );
   if (queryArguments === null) {
     const state: SurfaceDataRenderState =
       selection.selected.surfaceRole === 'form'
@@ -1104,6 +1109,23 @@ function selectSurface(
     });
   }
   return { navigation, selected, surfaces };
+}
+
+/**
+ * A composed record page's get also states the relations its composition
+ * names -- an invoice's sales order -- so a column can label it and a link
+ * open it (`relationTargets`); a page naming none asks for none.
+ */
+function withCompositionRelations(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  args: RuntimeViewContract.ImmutableJsonValue | null,
+): RuntimeViewContract.ImmutableJsonValue | null {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return args;
+  const relationTargets = compositionRelationTargets(view, surface);
+  return relationTargets.length
+    ? { ...args, relationTargets: [...relationTargets] }
+    : args;
 }
 
 function argumentsForSurface(
@@ -2542,6 +2564,39 @@ body{padding-bottom:72px}
 .composition-reviewed-inputs dd{margin:var(--space-1) 0;font-weight:var(--weight-emphasis)}
 .composition-task-footer{position:sticky;bottom:0;z-index:1;display:flex;justify-content:flex-end;gap:var(--space-2);padding:var(--space-3) 0;background:var(--surface-panel);flex-wrap:wrap}
 .composition-task-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--text-micro)}
+/* A record's exception banner and its progression (ORDER-PARITY). */
+.composition-alert{grid-column:1/-1;display:flex;gap:var(--space-3);align-items:flex-start;padding:var(--space-3) var(--space-4);border:1px solid var(--line);border-left:4px solid var(--status-attention-ink);border-radius:var(--radius-container);background:var(--status-attention-ground);color:var(--ink)}
+.composition-alert h2{margin:0;font-size:var(--text-section)}
+.composition-alert p{margin:var(--space-1) 0}
+.composition-alert ul{margin:var(--space-2) 0 0;padding-left:var(--space-5)}
+.composition-alert li{overflow-wrap:anywhere}
+.composition-alert-marker,.composition-progression-marker{flex:none;display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;font-weight:var(--weight-emphasis)}
+.composition-alert-marker{background:var(--status-attention-ink);color:var(--surface-panel)}
+.composition-progression{grid-column:1/-1;padding:var(--space-4)}
+.composition-progression h2{margin:0;font-size:var(--text-section)}
+.composition-progression .eyebrow{margin:0}
+.composition-progression-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:var(--space-2);margin:var(--space-3) 0 0;padding:0;list-style:none}
+.composition-progression-steps>li{display:flex;gap:var(--space-2);align-items:flex-start;min-width:0;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control)}
+.composition-progression-steps>li[data-step-state=current]{border-color:var(--accent-edge);background:var(--accent-soft)}
+.composition-progression-steps>li[data-step-state=attention]{border-color:var(--status-attention-ink);background:var(--status-attention-ground)}
+.composition-progression-steps>li[data-step-state=stopped],.composition-progression-steps>li[data-step-state=upcoming]{color:var(--ink-muted)}
+.composition-progression-marker{border:1px solid var(--line-strong)}
+.composition-progression-steps>li[data-step-state=complete] .composition-progression-marker{border-color:var(--status-success-ink);background:var(--status-success-ground);color:var(--status-success-ink)}
+.composition-progression-steps>li[data-step-state=attention] .composition-progression-marker{border-color:var(--status-attention-ink);color:var(--status-attention-ink)}
+.composition-progression-state{display:block;font-size:var(--text-micro);color:var(--ink-muted)}
+.composition-progression-steps strong{display:block;overflow-wrap:anywhere}
+.composition-progression-documents{display:flex;flex-wrap:wrap;gap:0 var(--space-2);margin:var(--space-1) 0 0;padding:0;list-style:none}
+.composition-progression-documents a{display:inline-flex;align-items:center;min-height:44px}
+.composition-progression-next{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:var(--space-3);margin-top:var(--space-3);padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--surface-sunken)}
+.composition-progression-next>div{flex:1 1 16rem;min-width:0}
+.composition-progression-next p{margin:var(--space-1) 0}
+.composition-progression-next form{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
+.composition-progression-next button{min-height:44px}
+.composition-task-rows{min-width:0;margin:0;padding:0;border:0}
+.composition-task-rows legend{padding:0;font-weight:var(--weight-emphasis)}
+.composition-task-rows>button{margin-top:var(--space-2)}
+.composition-task-rows td input{min-width:6rem}
+.composition-task-rows-review caption{padding:var(--space-2) 0;text-align:left;font-weight:var(--weight-emphasis)}
 @media(max-width:800px){
 .composition-heading{gap:var(--space-2)}
 .composition-heading h1{font-size:var(--text-title)}

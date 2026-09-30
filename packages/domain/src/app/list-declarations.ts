@@ -308,11 +308,40 @@ function documentList(
   };
 }
 
-function invoiceList(namespace: string): ListSpec {
+/**
+ * A settlement document's List (receivables' invoices, payables' bills): each
+ * document with its balance, the tabs its states, the counterparty named
+ * through the party list.
+ */
+interface SettlementListSpec {
+  /** The document entity's local id. */
+  readonly document: string;
+  readonly counterparty: {
+    readonly local: string;
+    readonly label: string;
+    readonly field: string;
+  };
+  /** A further text column, such as the supplier's own invoice number. */
+  readonly reference?: {
+    readonly local: string;
+    readonly label: string;
+    readonly field: string;
+  };
+  readonly date: {
+    readonly local: string;
+    readonly label: string;
+    readonly field: string;
+  };
+}
+
+function settlementList(
+  namespace: string,
+  settlement: SettlementListSpec,
+): ListSpec {
   const field = (local: string) =>
-    `${namespace}:field.customer_invoice_${local}`;
+    `${namespace}:field.${settlement.document}_${local}`;
   const state = (local: string) =>
-    `${namespace}:option.customer_invoice_state_${local}`;
+    `${namespace}:option.${settlement.document}_state_${local}`;
   return {
     pageSize: 50,
     columns: [
@@ -323,18 +352,27 @@ function invoiceList(namespace: string): ListSpec {
         role: 'title',
       },
       {
-        local: 'customer',
-        label: 'Customer',
-        field: field('customer_party_id'),
+        local: settlement.counterparty.local,
+        label: settlement.counterparty.label,
+        field: field(settlement.counterparty.field),
         reference: {
           query: `${namespace}:query.party_list`,
           labelField: `${namespace}:field.party_name`,
         },
       },
+      ...(settlement.reference
+        ? [
+            {
+              local: settlement.reference.local,
+              label: settlement.reference.label,
+              field: field(settlement.reference.field),
+            },
+          ]
+        : []),
       {
-        local: 'invoice_date',
-        label: 'Invoice date',
-        field: field('invoice_date'),
+        local: settlement.date.local,
+        label: settlement.date.label,
+        field: field(settlement.date.field),
         format: 'date',
       },
       {
@@ -368,7 +406,7 @@ function invoiceList(namespace: string): ListSpec {
       },
       { local: 'currency', label: 'Currency', field: field('currency') },
     ],
-    defaultSort: [{ column: 'invoice_date', direction: 'descending' }],
+    defaultSort: [{ column: settlement.date.local, direction: 'descending' }],
     views: [
       { local: 'all', label: 'All', filters: {} },
       ...(
@@ -395,6 +433,33 @@ function invoiceList(namespace: string): ListSpec {
     export: true,
   };
 }
+
+/** Receivables' Invoices List (owner ruling C). */
+export const INVOICE_LIST: SettlementListSpec = Object.freeze({
+  document: 'customer_invoice',
+  counterparty: {
+    local: 'customer',
+    label: 'Customer',
+    field: 'customer_party_id',
+  },
+  date: { local: 'invoice_date', label: 'Invoice date', field: 'invoice_date' },
+});
+
+/** Payables' Bills List (PAYABLES), with the supplier's own invoice number. */
+export const BILL_LIST: SettlementListSpec = Object.freeze({
+  document: 'vendor_bill',
+  counterparty: {
+    local: 'vendor',
+    label: 'Vendor',
+    field: 'supplier_party_id',
+  },
+  reference: {
+    local: 'supplier_invoice',
+    label: 'Supplier invoice',
+    field: 'supplier_invoice_number',
+  },
+  date: { local: 'bill_date', label: 'Bill date', field: 'bill_date' },
+});
 
 /**
  * Stock documents (INVENTORY-PARITY): every inventory transaction, newest
@@ -719,7 +784,10 @@ export function composedListSpecs(
     [EXPECTED_RECEIPT_LIST]: expectedReceiptList(namespace),
     // Receivables (owner ruling C): each invoice with its balance; the tabs
     // are the invoice states, the customer is named through the party list.
-    customer_invoice_list: invoiceList(namespace),
+    customer_invoice_list: settlementList(namespace, INVOICE_LIST),
+    // Payables (PAYABLES): each vendor bill the same way, with the supplier's
+    // own invoice number.
+    vendor_bill_list: settlementList(namespace, BILL_LIST),
     // Stock documents, recorded in the draft editor (INVENTORY-PARITY).
     inventory_transaction_list: inventoryTransactionList(namespace),
     // A balance, not a document: no lifecycle, so no saved views; item and

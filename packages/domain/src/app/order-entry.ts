@@ -660,6 +660,10 @@ export function orderEntrySurfaces(
     customer_invoice_line: 'customer_invoice',
     customer_payment: 'customer_invoice',
     customer_credit: 'customer_invoice',
+    // A vendor bill's the same way (PAYABLES).
+    vendor_bill_line: 'vendor_bill',
+    vendor_payment: 'vendor_bill',
+    vendor_credit: 'vendor_bill',
   };
   // A tenant-level child belongs to its master's workspace, such as a
   // customer's ship-to addresses; it has no company entry to resolve.
@@ -712,7 +716,8 @@ export function orderEntrySurfaces(
             ? editor ||
               worklist ||
               local === 'posted_stock_balance' ||
-              local === 'customer_invoice'
+              local === 'customer_invoice' ||
+              local === 'vendor_bill'
               ? 'operational'
               : owner || master
                 ? 'contextual'
@@ -746,6 +751,7 @@ export function orderEntrySurfaces(
       ...(local === 'customer_invoice' && role === 'list'
         ? { label: 'Invoices' }
         : {}),
+      ...(local === 'vendor_bill' && role === 'list' ? { label: 'Bills' } : {}),
     };
   });
 }

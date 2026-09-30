@@ -2,6 +2,8 @@ import { FULFILLMENT_CAPABILITY_ID } from './fulfillment.js';
 import { COMMERCIAL_CAPABILITY_ID } from '../../domain/src/sales/definition.js';
 import { commercialReadModel } from './commercial-read-model.js';
 import { fulfillmentReadModel } from './fulfillment-read-model.js';
+import { receivingReadModel } from './receiving-read-model.js';
+import { RECEIVING_CAPABILITY_ID } from './goods-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
@@ -676,6 +678,8 @@ export async function createComposedApplicationRuntime(
       {
         [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
         [COMMERCIAL_CAPABILITY_ID]: commercialReadModel,
+        // A receipt's lines with what each can still reverse (ORDER-PARITY).
+        [RECEIVING_CAPABILITY_ID]: receivingReadModel,
       },
     );
     const capabilityExecutors = createRegisteredCapabilityExecutors(

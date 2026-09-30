@@ -111,14 +111,43 @@ export function validateSurfaceCompositions(
     const children = new Map(
       composition.children.map((child) => [String(child.datasetId), child]),
     );
-    const columns = (values: SurfaceComposition['fields'], queryId: string) => {
+    // A record's own reference to another record (an invoice's sales order)
+    // is stated by its record query when the page names the relation: the
+    // stored target id, never a label. Only the record's get states one.
+    const recordQuery = queries.get(surface.dataSource.targetId);
+    const recordRelation = (field: string) =>
+      recordQuery?.queryType === 'get'
+        ? model.relations.find(
+            (relation) =>
+              relation.relationId === field &&
+              relation.sourceEntity.targetId ===
+                recordQuery.sourceEntity.targetId,
+          )
+        : undefined;
+    const columns = (
+      values: SurfaceComposition['fields'],
+      queryId: string,
+      relations = false,
+    ) => {
       unique(
         values.map((value) => value.columnId),
         surface.surfaceId,
       );
       const fields = fieldsFor(queryId);
       for (const column of values) {
-        if (!fields.has(column.field))
+        const related = relations ? recordRelation(column.field) : undefined;
+        if (related) {
+          // Read through the related record's own get, under its own policy.
+          if (
+            !column.reference ||
+            queries.get(column.reference.query.targetId)?.sourceEntity
+              .targetId !== related.targetEntity.targetId
+          )
+            fail(
+              surface.surfaceId,
+              'a related record column reads its label through the related get',
+            );
+        } else if (!fields.has(column.field))
           fail(surface.surfaceId, 'column is not a declared query result');
         // A read model states its figures as exact decimals; a declared field
         // must be one to be shown as money.
@@ -146,7 +175,21 @@ export function validateSurfaceCompositions(
         }
       }
     };
-    columns(composition.fields, surface.dataSource.targetId);
+    columns(composition.fields, surface.dataSource.targetId, true);
+    // The record's get states at most four related records per read.
+    if (
+      new Set(
+        [
+          ...composition.fields.map((column) => column.field),
+          ...composition.actions.flatMap((action) =>
+            action.navigate?.record.source === 'record'
+              ? [action.navigate.record.field]
+              : [],
+          ),
+        ].filter((field) => recordRelation(field)),
+      ).size > 4
+    )
+      fail(surface.surfaceId, 'a record names at most four related records');
     if (composition.fields.some((column) => column.presentation))
       fail(
         surface.surfaceId,
@@ -216,6 +259,103 @@ export function validateSurfaceCompositions(
           surface.surfaceId,
           'a block lists declared columns the header does not show',
         );
+      // An alert names its rows by their primary cell and states a stored
+      // figure of each, never a label.
+      const named = (datasetId: string) =>
+        children
+          .get(datasetId)
+          ?.columns.some(
+            (column) => column.presentation?.role === 'primary',
+          ) === true;
+      const alerts = presentation.alerts ?? [];
+      unique(
+        alerts.map((alert) => `${alert.datasetId} ${alert.columnId}`),
+        surface.surfaceId,
+      );
+      for (const alert of alerts) {
+        const column = children
+          .get(alert.datasetId)
+          ?.columns.find((value) => value.columnId === alert.columnId);
+        if (!column || column.reference)
+          fail(
+            surface.surfaceId,
+            'an alert reads a stated column of a declared dataset',
+          );
+        if (!named(alert.datasetId))
+          fail(
+            surface.surfaceId,
+            'an alert names its rows by a primary column',
+          );
+      }
+      const progression = presentation.progression;
+      if (progression) {
+        unique(
+          progression.steps.map((step) => step.label),
+          surface.surfaceId,
+        );
+        const recordFields = fieldsFor(surface.dataSource.targetId);
+        for (const step of progression.steps) {
+          if (!step.current.length && !step.complete.length)
+            fail(
+              surface.surfaceId,
+              'a progression step declares when it is current or complete',
+            );
+          if (
+            [
+              ...step.current,
+              ...step.complete,
+              ...(step.attention ?? []),
+              ...(step.stopped ?? []),
+            ].some(
+              (condition) =>
+                condition.value.source !== 'record' ||
+                !recordFields.has(condition.value.field),
+            )
+          )
+            fail(
+              surface.surfaceId,
+              'progression conditions read record values',
+            );
+          // Documents are named by their primary cell, else their first.
+          if (step.documents && !children.has(step.documents))
+            fail(
+              surface.surfaceId,
+              'progression documents are a declared dataset',
+            );
+        }
+        unique(
+          progression.next.map((entry) =>
+            'action' in entry
+              ? `action ${entry.action}`
+              : `operation ${entry.operation.targetId}`,
+          ),
+          surface.surfaceId,
+        );
+        for (const entry of progression.next) {
+          if ('action' in entry) {
+            const action = composition.actions.find(
+              (value) => value.actionId === entry.action,
+            );
+            if (!action || action.datasetId)
+              fail(
+                surface.surfaceId,
+                'a next action is a record task of this composition',
+              );
+          } else {
+            const operation = operations.get(entry.operation.targetId);
+            if (
+              entry.operation.kind !== 'operationReference' ||
+              !operation ||
+              queries.get(operation.readBack.targetId)?.sourceEntity
+                .targetId !== recordQuery?.sourceEntity.targetId
+            )
+              fail(
+                surface.surfaceId,
+                'a next operation acts on the record this page shows',
+              );
+          }
+        }
+      }
     }
     for (const child of composition.children) {
       if (
@@ -307,7 +447,6 @@ export function validateSurfaceCompositions(
       );
     };
     const previousChildren = new Set<string>();
-    const recordQuery = queries.get(surface.dataSource.targetId);
     // A record every company shares (an item) has no company of its own; a
     // dataset of one company's rows reads the company its entry names.
     const recordCompany = Boolean(
@@ -431,7 +570,114 @@ export function validateSurfaceCompositions(
             surface.surfaceId,
             'navigation must use its target surface query',
           );
-        contextValue(action.navigate.record, action.datasetId);
+        // A record may open the record it refers to -- an invoice its sales
+        // order -- on a page that reads that record's own entity.
+        const record = action.navigate.record;
+        const related =
+          record.source === 'record' ? recordRelation(record.field) : undefined;
+        if (related) {
+          if (
+            action.datasetId ||
+            queries.get(action.navigate.query.targetId)?.sourceEntity
+              .targetId !== related.targetEntity.targetId
+          )
+            fail(
+              surface.surfaceId,
+              'navigation to a related record opens a page of that record',
+            );
+        } else contextValue(record, action.datasetId);
+      }
+      // A multi-row Task: the rows it works through, the inputs asked once
+      // per row and the steps run once per row.
+      const rows = action.rows;
+      const perRow = action.inputs.filter((input) => input.perRow);
+      const eachSteps = action.steps.filter((step) => step.each);
+      if (!rows && perRow.length)
+        fail(surface.surfaceId, 'per-row inputs require declared task rows');
+      if (!rows && eachSteps.length)
+        fail(surface.surfaceId, 'per-row steps require declared task rows');
+      const selectedContext = new Set<string>();
+      for (
+        let dataset = action.datasetId;
+        dataset && !selectedContext.has(dataset);
+      ) {
+        selectedContext.add(dataset);
+        const parent = children.get(dataset)?.parent?.value;
+        dataset = parent?.source === 'selected' ? parent.datasetId : undefined;
+      }
+      if (rows) {
+        const target = children.get(rows.datasetId);
+        const parent = target?.parent?.value;
+        // The rows belong to the record, or to the row the Task was started
+        // from -- never to a selection the Task does not carry.
+        if (
+          !target ||
+          rows.datasetId === action.datasetId ||
+          !(
+            parent?.source === 'record' ||
+            (parent?.source === 'selected' &&
+              selectedContext.has(parent.datasetId ?? ''))
+          )
+        )
+          fail(
+            surface.surfaceId,
+            'task rows are a dataset of the record or of the selected row',
+          );
+        if (!eachSteps.length)
+          fail(surface.surfaceId, 'task rows require a per-row step');
+        if (action.presentation?.task)
+          fail(surface.surfaceId, 'a multi-row task has no single-row summary');
+        const rowFields = fieldsFor(target!.query.targetId);
+        for (const condition of rows.conditions) {
+          const value = condition.value;
+          if (
+            !(
+              value.source === 'selected' &&
+              (value.datasetId ?? rows.datasetId) === rows.datasetId &&
+              rowFields.has(value.field)
+            ) &&
+            !(
+              value.source === 'record' &&
+              fieldsFor(surface.dataSource.targetId).has(value.field)
+            )
+          )
+            fail(
+              surface.surfaceId,
+              'row conditions read the row or the record',
+            );
+        }
+        for (const input of perRow) {
+          const fill = input.perRow!.fillFrom;
+          if (
+            !['quantity', 'text'].includes(input.type) ||
+            input.defaultFrom ||
+            (input.presentation && input.presentation.kind !== 'derived') ||
+            (input.presentation && fill)
+          )
+            fail(
+              surface.surfaceId,
+              'per-row inputs are typed quantities or text, or derived from their row',
+            );
+          if (
+            fill &&
+            (fill.datasetId !== rows.datasetId ||
+              !target!.columns.some(
+                (column) => column.columnId === fill.columnId,
+              ))
+          )
+            fail(
+              surface.surfaceId,
+              'a per-row input fills from a column of its row',
+            );
+        }
+        if (
+          Boolean(rows.fillLabel) !==
+          perRow.some((input) => input.perRow!.fillFrom)
+        )
+          fail(
+            surface.surfaceId,
+            'a fill control is labelled exactly when a per-row input fills',
+          );
       }
       for (const input of action.inputs) {
         const query = input.query
@@ -496,15 +742,11 @@ export function validateSurfaceCompositions(
         }
         if (presented.kind === 'derived') {
           // Derived from the row the action selected (or its parent context),
-          // so the value can never come from somewhere the user did not pick.
-          const ancestry = new Set<string>();
-          let dataset = action.datasetId;
-          while (dataset && !ancestry.has(dataset)) {
-            ancestry.add(dataset);
-            const parent = children.get(dataset)?.parent?.value;
-            dataset =
-              parent?.source === 'selected' ? parent.datasetId : undefined;
-          }
+          // so the value can never come from somewhere the user did not pick;
+          // a per-row input, from its own row.
+          const ancestry = input.perRow
+            ? new Set([action.rows?.datasetId ?? ''])
+            : selectedContext;
           if (
             !ancestry.has(presented.column.datasetId) ||
             !children
@@ -681,11 +923,18 @@ export function validateSurfaceCompositions(
               );
           }
           const value = binding.value;
-          if (
-            value.source === 'input' &&
-            !action.inputs.some((input) => input.inputId === value.inputId)
-          )
+          const bound =
+            value.source === 'input'
+              ? action.inputs.find((input) => input.inputId === value.inputId)
+              : undefined;
+          if (value.source === 'input' && !bound)
             fail(surface.surfaceId, 'step input must be declared');
+          // A per-row value exists only in the run for its row.
+          if (bound?.perRow && !step.each)
+            fail(
+              surface.surfaceId,
+              'a per-row input is bound only in a per-row step',
+            );
           if (value.source === 'step') {
             const sourceStep = action.steps.find(
               (candidate) => candidate.stepId === value.stepId,
@@ -702,6 +951,11 @@ export function validateSurfaceCompositions(
                 surface.surfaceId,
                 'step mapping must select an earlier operation read-back',
               );
+            if (sourceStep?.each)
+              fail(
+                surface.surfaceId,
+                'no step reads the read-back of a per-row step',
+              );
           }
           if (
             value.source === 'record' &&
@@ -709,13 +963,22 @@ export function validateSurfaceCompositions(
           )
             fail(surface.surfaceId, 'record mapping requires a selected field');
           if (value.source === 'selected') {
-            const child = children.get(
-              value.datasetId ?? action.datasetId ?? '',
-            );
+            // In a per-row step an unnamed selection is that step's row.
+            const datasetId =
+              value.datasetId ??
+              (step.each ? rows?.datasetId : undefined) ??
+              action.datasetId ??
+              '';
+            const child = children.get(datasetId);
             if (!child || !fieldsFor(child.query.targetId).has(value.field))
               fail(
                 surface.surfaceId,
                 'selected mapping requires a declared dataset result',
+              );
+            if (rows && datasetId === rows.datasetId && !step.each)
+              fail(
+                surface.surfaceId,
+                'a task row is read only in a per-row step',
               );
           }
         }

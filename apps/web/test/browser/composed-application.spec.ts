@@ -995,13 +995,14 @@ async function inventoryNavigationJourney(
     ),
   ).toHaveText(['Sales', 'Purchasing', 'Inventory', 'Party', 'More']);
   // Sales lists its invoices beside its orders (ruling C), Purchasing its
-  // expected receipts beside its orders (PURCHASING-PARITY) and Catalog its
-  // tax codes beside its items (ruling B), so each is a group of two.
+  // expected receipts (PURCHASING-PARITY) and its bills (PAYABLES) beside its
+  // orders and Catalog its tax codes beside its items (ruling B).
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
     'Invoices',
     'Sales orders',
     'Expected receipts',
     'Purchase orders',
+    'Bills',
     'Inventory movement',
     'Inventory period lock',
     'Inventory transactions',

@@ -1178,8 +1178,9 @@ async function assertRealProductDefinition(
     // surfaces. Projection carriers deliberately omit editable forms.
     // SALES-PARITY adds Party's ship-to address book and Catalog's tax codes,
     // then the invoice, its lines, payments and credits (list, detail, form
-    // each). PURCHASING-PARITY adds the Expected receipts List.
-    assert.equal(surfaces.length, 89);
+    // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
+    // vendor bill, its lines, payments and credits (list, detail, form each).
+    assert.equal(surfaces.length, 101);
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     for (const local of [
       'goods_receipt',
@@ -3486,6 +3487,7 @@ async function assertBoundedFreshTenantInstallEvidence(
   ).plan.scenarios.length;
   assertReceivingVerificationCoverage(compiledApplication);
   assertSalesVerificationCoverage(compiledApplication);
+  assertPayablesVerificationCoverage(compiledApplication);
   // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
   // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
   // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
@@ -3516,11 +3518,14 @@ async function assertBoundedFreshTenantInstallEvidence(
   // eight search exclusions and the terms' enum check) and the line's
   // discount and tax (3). Its slices 2-3 add 4 search exclusions: the order's
   // receive-into location, the receipt's packing slip and notes, and the
-  // amendment request's close flag.
+  // amendment request's close flag. PAYABLES adds 72, measured from the
+  // compiled plan: vendor bill (23), bill line (17), vendor payment (17) and
+  // vendor credit (15) -- the receivables documents' shapes; the supplier's
+  // invoice number is searchable, so it adds no search exclusion.
   assert.equal(
     servingScenarioCount,
-    501,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, and 16 for purchasing parity',
+    573,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, and 72 for payables',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5840,11 +5845,13 @@ async function assertExactPartitionEvidence(
   // create, so no numbered entity derives for want of an input. 348 + 137 =
   // 485 emitted, of which the prior 77 derive. PURCHASING-PARITY's 16 execute
   // on the purchase order, its line, the goods receipt and the amendment
-  // request, each with a generic create: 501, 424.
+  // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
+  // (each vendor document has a generic create, replayed by this oracle over
+  // the compiled head): 573, 496.
   assert.equal(
     evidence.results.length,
-    424,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, and purchasing parity 16',
+    496,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, and payables 72',
   );
   assert.equal(
     derivations.length,
@@ -6128,6 +6135,29 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
     false,
     'the Sales server-owned lifecycle field is not probed through generic writes',
   );
+}
+
+function assertPayablesVerificationCoverage(
+  compiledApplication: unknown,
+): void {
+  const { plan } = releaseVerificationBinding(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  for (const [local, count] of Object.entries({
+    // PAYABLES: the vendor bill documents, shaped as the receivables ones.
+    vendor_bill: 23,
+    vendor_bill_line: 17,
+    vendor_payment: 17,
+    vendor_credit: 15,
+  })) {
+    assert.equal(
+      plan.scenarios.filter(
+        (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
+      ).length,
+      count,
+      `the payables entity ${local} contributes its measured verifier scenarios`,
+    );
+  }
 }
 
 type IndependentUnconstructibleReason =

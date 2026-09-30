@@ -17,7 +17,11 @@ import {
   worklistQueries,
   worklistSurfaces,
 } from './list-declarations.js';
-import { purchasingWorkspace } from '../purchasing/workspace.js';
+import {
+  billWorkspace,
+  purchasingWorkspace,
+  receivingWorkspaceQueries,
+} from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
 
@@ -58,7 +62,10 @@ const MODULE_REGISTRY = Object.freeze([
   Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
   Object.freeze({
     create: (namespace: string) =>
-      purchasingModuleDefinition(namespace, { commercialTerms: true }),
+      purchasingModuleDefinition(namespace, {
+        commercialTerms: true,
+        payables: true,
+      }),
     moduleName: 'purchasing',
   }),
   Object.freeze({
@@ -89,6 +96,7 @@ const RECORD_COMPOSITIONS: Readonly<
   purchase_order_detail: purchasingWorkspace,
   shipment_detail: packingWorkspace,
   customer_invoice_detail: invoiceWorkspace,
+  vendor_bill_detail: billWorkspace,
   inventory_transaction_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
   stock_count_detail: (namespace: string) =>
@@ -106,6 +114,7 @@ const LINES_LEAD: ReadonlySet<string> = new Set([
   'sales_order_detail',
   'purchase_order_detail',
   'customer_invoice_detail',
+  'vendor_bill_detail',
 ]);
 
 /** Workspaces that read their record through a read-model query. */
@@ -217,6 +226,11 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       ),
       // A worklist reads its own clone of its source List's query.
       ...worklistQueries(
+        APPLICATION_NAMESPACE,
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
+      // A receipt's lines with what each can still reverse (ORDER-PARITY).
+      ...receivingWorkspaceQueries(
         APPLICATION_NAMESPACE,
         merged(definitions, 'queries') as Record<string, unknown>[],
       ),

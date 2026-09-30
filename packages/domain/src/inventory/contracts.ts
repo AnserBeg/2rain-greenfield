@@ -192,6 +192,10 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'customer_invoice_line' },
   { classification: 'entityOwned', familyId: 'customer_payment' },
   { classification: 'entityOwned', familyId: 'customer_credit' },
+  { classification: 'entityOwned', familyId: 'vendor_bill' },
+  { classification: 'entityOwned', familyId: 'vendor_bill_line' },
+  { classification: 'entityOwned', familyId: 'vendor_payment' },
+  { classification: 'entityOwned', familyId: 'vendor_credit' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const satisfies readonly LegalEntityFamilyRuleV1[]);
@@ -331,6 +335,31 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'customer_credit',
     targetFamilyId: 'customer_invoice',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_bill',
+    targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_bill_line',
+    targetFamilyId: 'vendor_bill',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_bill_line',
+    targetFamilyId: 'purchase_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_payment',
+    targetFamilyId: 'vendor_bill',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_credit',
+    targetFamilyId: 'vendor_bill',
   },
   {
     semantics: 'sameEntity',

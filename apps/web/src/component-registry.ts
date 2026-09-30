@@ -1,8 +1,10 @@
 import {
+  renderCompositionAlerts,
   renderCompositionFields,
   renderCompositionActions,
   renderCompositionChildren,
   renderCompositionHeader,
+  renderCompositionProgression,
   displayFieldValue,
   type CompositionData,
 } from './surface-composition.js';
@@ -742,13 +744,43 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
     context.data?.status === 'READY' &&
     context.data.composition &&
     context.surface.composition?.presentation
-  )
+  ) {
+    const composition = context.data.composition;
+    const record = composition.record;
+    // The progression's next operation is a command this page offers now,
+    // rendered as the command bar renders it, under its own name.
+    const operationControl = (operationId: string, prefix: string) => {
+      const operation = (context.operations ?? []).find(
+        (candidate) =>
+          candidate.operationId === operationId &&
+          candidate.intent === 'command' &&
+          evaluateRegisteredOperationPrecondition(
+            candidate.precondition,
+            record.values,
+          ).outcome === 'holds',
+      );
+      return operation
+        ? renderCapabilityCommand(context, record, operation, {
+            name: `${prefix}: ${operation.label}`,
+          })
+        : null;
+    };
     return slotPanel(
       context,
-      renderCompositionHeader(context.surface, context.data.composition) +
-        feedbackHtml(context.feedback),
+      renderCompositionHeader(context.surface, composition) +
+        feedbackHtml(context.feedback) +
+        renderCompositionAlerts(context.surface, composition) +
+        renderCompositionProgression(
+          context.surface,
+          composition,
+          context.view,
+          operationControl,
+          // Nothing else is started while a Task is open.
+          !context.data.compositionTask,
+        ),
       'title-status-slot',
     );
+  }
   const record = recordFrom(context.data);
   const form = context.surface.surfaceRole === 'form';
   const title = form
@@ -927,6 +959,12 @@ function renderCapabilityCommand(
   context: SurfaceComponentContext,
   record: SemanticRecordDto,
   operation: CompiledSurfaceOperationBinding,
+  /**
+   * A record progression's next step renders the same command under its own
+   * accessible name (its label kept within it), without the standing
+   * explanation, so it never doubles the command bar's control.
+   */
+  next?: { readonly name: string },
 ): string {
   // Both sides of the merge are load-bearing and they compose exactly.
   // `5g3-sm` distinguishes the standing explanation by effect kind; this
@@ -935,10 +973,12 @@ function renderCapabilityCommand(
   // would have been two identical forms differing only in their button label
   // and posting the same `intent` -- the collision this packet fixes, arriving
   // for the first time on a tree where transitions actually bind.
-  const explanation = operation.capabilityId
-    ? '<span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span>'
-    : '<span><strong>Ready.</strong> This moves the record to its next state.</span>';
-  return `<form class="capability-command" method="post" action="${escapeHtml(surfaceHref(context.surface, record.recordId, record.archived, context))}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">${explanation}<button type="submit">${escapeHtml(operation.label)}</button></form>`;
+  const explanation = next
+    ? ''
+    : operation.capabilityId
+      ? '<span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span>'
+      : '<span><strong>Ready.</strong> This moves the record to its next state.</span>';
+  return `<form class="capability-command" method="post" action="${escapeHtml(surfaceHref(context.surface, record.recordId, record.archived, context))}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">${explanation}<button type="submit"${next ? ` aria-label="${escapeHtml(next.name)}"` : ''}>${escapeHtml(operation.label)}</button></form>`;
 }
 
 function renderKeyFacts(context: SurfaceComponentContext): string {

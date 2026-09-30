@@ -170,9 +170,11 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 11 adds editor defaults and scoped pickers.
     // 12 adds List progress, open and before-today views and overdue dates.
     // 13 adds List row actions and supplementary (omitted-when-denied) progress.
-    // 14 adds composition datasets scoped by a field of their own entity.
-    // 15 adds a draft editor's create values.
-    maximumSupportedVersion: 15,
+    // 14 adds record alerts and progression, multi-row Tasks and record
+    // columns and links that name a relation of their record.
+    // 15 adds composition datasets scoped by a field of their own entity.
+    // 16 adds a draft editor's create values.
+    maximumSupportedVersion: 16,
   },
 });
 

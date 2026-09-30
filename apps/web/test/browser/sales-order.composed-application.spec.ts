@@ -119,10 +119,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
       await control.evaluate((element, id) => {
         (element as HTMLInputElement).value = id;
       }, value);
+    // A datetime-local input normalizes ":00" seconds away, so a value typed
+    // to the second at the top of a minute reads back as malformed; the
+    // journey needs the minute, not the second.
     else
       await control.fill(
         (await control.getAttribute('type')) === 'datetime-local'
-          ? value.slice(0, 19)
+          ? value.slice(0, 16)
           : value,
       );
   };
@@ -283,9 +286,9 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     'Field notebook',
   );
   await expect(lineRow.locator('td[data-column-label="Line"]')).toHaveText('1');
-  await expect(lineRow.locator('.composition-cell-secondary')).toContainText(
-    'Unit EA',
-  );
+  await expect(
+    lineRow.locator('[data-cell-role="primary"] .composition-cell-secondary'),
+  ).toContainText('Unit EA');
   await page.locator('.composition-record-actions > summary').click();
   await page.getByRole('button', { name: 'Confirm', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Confirm complete');

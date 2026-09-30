@@ -700,6 +700,9 @@ function surfaceManifestPayload(
       'composition' in surface ? surface.composition : undefined,
     ]),
   );
+  const relationIds = new Set<string>(
+    original.relations.map((relation) => String(relation.relationId)),
+  );
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -817,14 +820,19 @@ function surfaceManifestPayload(
     // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
-      // 15: a draft editor's create values, written by a never-saved
+      // 16: a draft editor's create values, written by a never-saved
       // document's first create -- a stock document's draft state and its own
       // posting source. A reader that dropped them would create no draft, or a
       // draft its posting refuses.
-      // 14: a composition dataset scoped by a field of its own entity, such as
+      // 15: a composition dataset scoped by a field of its own entity, such as
       // an item's stock and movements. A reader that dropped the scope would
       // read every item's rows as this item's -- the wrong rows under the
       // record's name.
+      // 14: record alerts and progression, multi-row Tasks (`rows`, `perRow`,
+      // `each`) and a record column or link naming a relation of its record.
+      // A reader that dropped them would hide an order's shortage, run a
+      // truck receipt as one line, or fail a whole invoice page over the order
+      // it names -- a wrong render, not a lesser one.
       // 13: List row actions and supplementary progress (`whenDenied`). A
       // reader that dropped them would refuse a whole List to a principal the
       // release lets read its rows, and offer no way from a row to the work
@@ -848,23 +856,31 @@ function surfaceManifestPayload(
           (surface.documentEditor as SurfaceDocumentEditor | undefined)
             ?.createValues !== undefined,
       )
-        ? 15
+        ? 16
         : [...compositions.values()].some((value) =>
               value?.children.some((child) => child.fieldScope),
             )
-          ? 14
-          : original.surfaces.some((surface) => {
-                const list =
-                  'list' in surface
-                    ? (surface.list as SurfaceList | undefined)
-                    : undefined;
-                return (
-                  list !== undefined &&
-                  (list.rowActions !== undefined ||
-                    list.progress?.whenDenied !== undefined)
-                );
-              })
-            ? 13
+          ? 15
+          : [...compositions.values()].some(
+                (value) =>
+                  value !== undefined &&
+                  (value.presentation?.alerts !== undefined ||
+                    value.presentation?.progression !== undefined ||
+                    value.actions.some(
+                      (action) =>
+                        action.rows !== undefined ||
+                        action.inputs.some(
+                          (input) => input.perRow !== undefined,
+                        ) ||
+                        action.steps.some((step) => step.each !== undefined) ||
+                        (action.navigate?.record.source === 'record' &&
+                          relationIds.has(action.navigate.record.field)),
+                    ) ||
+                    value.fields.some((column) =>
+                      relationIds.has(column.field),
+                    )),
+              )
+            ? 14
             : original.surfaces.some((surface) => {
                   const list =
                     'list' in surface
@@ -872,107 +888,122 @@ function surfaceManifestPayload(
                       : undefined;
                   return (
                     list !== undefined &&
-                    (list.progress !== undefined ||
-                      list.views.some((view) => view.open || view.before) ||
-                      list.columns.some((column) => column.overdue))
+                    (list.rowActions !== undefined ||
+                      list.progress?.whenDenied !== undefined)
                   );
                 })
-              ? 12
+              ? 13
               : original.surfaces.some((surface) => {
-                    const editor =
-                      'documentEditor' in surface
-                        ? (surface.documentEditor as
-                            SurfaceDocumentEditor | undefined)
+                    const list =
+                      'list' in surface
+                        ? (surface.list as SurfaceList | undefined)
                         : undefined;
                     return (
-                      [
-                        ...(editor?.headerFields ?? []),
-                        ...(editor?.lineFields ?? []),
-                      ].some(
-                        (field) =>
-                          field.defaultFrom ||
-                          field.reference?.within ||
-                          (field.presentation?.kind === 'derived' &&
-                            field.presentation.sourceByHeader),
-                      ) ||
-                      compositions
-                        .get(surface.surfaceId)
-                        ?.actions.some((action) =>
-                          action.inputs.some((input) => input.eligibility),
-                        ) === true
+                      list !== undefined &&
+                      (list.progress !== undefined ||
+                        list.views.some((view) => view.open || view.before) ||
+                        list.columns.some((column) => column.overdue))
                     );
                   })
-                ? 11
-                : original.surfaces.some(
-                      (surface) => 'list' in surface && surface.list,
-                    )
-                  ? 10
-                  : original.surfaces.some((surface) => {
-                        const editor =
-                          'documentEditor' in surface
-                            ? (surface.documentEditor as
-                                SurfaceDocumentEditor | undefined)
-                            : undefined;
-                        const composition = compositions.get(surface.surfaceId);
-                        return (
-                          [
-                            ...(editor?.headerFields ?? []),
-                            ...(editor?.lineFields ?? []),
-                          ].some((field) => field.reference?.eligibility) ||
-                          composition?.actions.some((action) =>
-                            action.inputs.some((input) => input.presentation),
+                ? 12
+                : original.surfaces.some((surface) => {
+                      const editor =
+                        'documentEditor' in surface
+                          ? (surface.documentEditor as
+                              SurfaceDocumentEditor | undefined)
+                          : undefined;
+                      return (
+                        [
+                          ...(editor?.headerFields ?? []),
+                          ...(editor?.lineFields ?? []),
+                        ].some(
+                          (field) =>
+                            field.defaultFrom ||
+                            field.reference?.within ||
+                            (field.presentation?.kind === 'derived' &&
+                              field.presentation.sourceByHeader),
+                        ) ||
+                        compositions
+                          .get(surface.surfaceId)
+                          ?.actions.some((action) =>
+                            action.inputs.some((input) => input.eligibility),
                           ) === true
-                        );
-                      })
-                    ? 9
-                    : original.surfaces.some(
-                          (surface) =>
-                            'workspace' in surface ||
-                            'documentEditor' in surface,
-                        )
-                      ? 8
-                      : [...compositions.values()].some(
-                            (value) =>
-                              value?.actions.some(
-                                (action) => action.presentation?.task,
-                              ) ||
-                              value?.children.some(
-                                (child) => child.presentation?.selectedActions,
-                              ),
+                      );
+                    })
+                  ? 11
+                  : original.surfaces.some(
+                        (surface) => 'list' in surface && surface.list,
+                      )
+                    ? 10
+                    : original.surfaces.some((surface) => {
+                          const editor =
+                            'documentEditor' in surface
+                              ? (surface.documentEditor as
+                                  SurfaceDocumentEditor | undefined)
+                              : undefined;
+                          const composition = compositions.get(
+                            surface.surfaceId,
+                          );
+                          return (
+                            [
+                              ...(editor?.headerFields ?? []),
+                              ...(editor?.lineFields ?? []),
+                            ].some((field) => field.reference?.eligibility) ||
+                            composition?.actions.some((action) =>
+                              action.inputs.some((input) => input.presentation),
+                            ) === true
+                          );
+                        })
+                      ? 9
+                      : original.surfaces.some(
+                            (surface) =>
+                              'workspace' in surface ||
+                              'documentEditor' in surface,
                           )
-                        ? 7
+                        ? 8
                         : [...compositions.values()].some(
                               (value) =>
-                                value?.presentation?.task ||
+                                value?.actions.some(
+                                  (action) => action.presentation?.task,
+                                ) ||
                                 value?.children.some(
                                   (child) =>
-                                    child.sort?.length ||
-                                    child.presentation?.compact,
+                                    child.presentation?.selectedActions,
                                 ),
                             )
-                          ? 6
+                          ? 7
                           : [...compositions.values()].some(
                                 (value) =>
-                                  value?.presentation ||
+                                  value?.presentation?.task ||
                                   value?.children.some(
                                     (child) =>
-                                      child.presentation ||
-                                      child.columns.some(
-                                        (column) => column.presentation,
-                                      ),
-                                  ) ||
-                                  value?.actions.some(
-                                    (action) => action.presentation,
+                                      child.sort?.length ||
+                                      child.presentation?.compact,
                                   ),
                               )
-                            ? 5
-                            : composed
-                              ? 4
-                              : emitsFieldKinds
-                                ? 3
-                                : navigation
-                                  ? 2
-                                  : 1,
+                            ? 6
+                            : [...compositions.values()].some(
+                                  (value) =>
+                                    value?.presentation ||
+                                    value?.children.some(
+                                      (child) =>
+                                        child.presentation ||
+                                        child.columns.some(
+                                          (column) => column.presentation,
+                                        ),
+                                    ) ||
+                                    value?.actions.some(
+                                      (action) => action.presentation,
+                                    ),
+                                )
+                              ? 5
+                              : composed
+                                ? 4
+                                : emitsFieldKinds
+                                  ? 3
+                                  : navigation
+                                    ? 2
+                                    : 1,
     },
   };
 }

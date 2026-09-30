@@ -108,6 +108,8 @@ interface MutationPreparation {
 interface RawRecord {
   archivedAt: Date | string | null;
   recordId: string;
+  /** The target record ids of the relations a get was asked to state. */
+  relationTargets?: Readonly<Record<string, string | null>>;
   revision: number;
   values: Readonly<Record<string, ImmutableJsonValue>>;
 }
@@ -1313,6 +1315,11 @@ async function executeQueryOnClient(
   switch (definition.queryType) {
     case 'get': {
       const recordId = requiredUuid(args.recordId, 'recordId');
+      const targets = relationTargetPlans(
+        storage,
+        entity,
+        args.relationTargets,
+      );
       const record = await loadScopedRawRecord(
         client,
         entity,
@@ -1320,12 +1327,19 @@ async function executeQueryOnClient(
         includeArchived,
         filterPlans,
         readScope,
+        targets,
       );
       records = record ? [record] : [];
       return queryResult(
         definition.queryId,
         records.length === 1 ? 'exact' : 'not-found',
-        records.map((entry) => toDto(entity, entry, definition.selections)),
+        records.map((entry) =>
+          withRelationTargets(
+            toDto(entity, entry, definition.selections),
+            entry,
+            targets,
+          ),
+        ),
         null,
       );
     }
@@ -3650,6 +3664,7 @@ async function loadScopedRawRecord(
   includeArchived: boolean,
   filterPlans: readonly QueryFilterLoweringPlan[],
   readScope: VerifiedLegalEntityReadScope | null,
+  relationTargets: readonly RelationTargetPlan[] = [],
 ): Promise<RawRecord | null> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
@@ -3659,16 +3674,105 @@ async function loadScopedRawRecord(
   );
   appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const result = await client.query<QueryResultRow>(
-    selectSql(entity, predicates, 'LIMIT 1'),
+    selectSql(
+      entity,
+      predicates,
+      'LIMIT 1',
+      relationTargets.map((target) => target.column),
+    ),
     values,
   );
-  return result.rows[0] ? rawRecord(entity, result.rows[0]) : null;
+  const row = result.rows[0];
+  if (!row) return null;
+  const record = rawRecord(entity, row);
+  // The stated targets are read in the same statement as the record itself.
+  return relationTargets.length
+    ? Object.freeze({
+        ...record,
+        relationTargets: Object.freeze(
+          Object.fromEntries(
+            relationTargets.map((target) => [
+              target.relationId,
+              nullableUuid(row[target.column]),
+            ]),
+          ),
+        ),
+      })
+    : record;
+}
+
+interface RelationTargetPlan {
+  readonly column: string;
+  readonly relationId: string;
+}
+
+/**
+ * The relations a get is asked to state (`relationTargets`), resolved against
+ * the PINNED COMPILED storage, never against caller input: each must be a
+ * relation whose source is the queried entity, and it reads that relation's
+ * own compiled column. Anything else is refused by name rather than read, as
+ * list progress fails closed. The gateway has already ruled the shape.
+ */
+export function relationTargetPlans(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  requested: ImmutableJsonValue | undefined,
+): readonly RelationTargetPlan[] {
+  if (requested === undefined) return [];
+  if (!Array.isArray(requested) || requested.length === 0)
+    throw failure(
+      'MODULE_RELATION_TARGET_INVALID',
+      'relation targets must name at least one relation',
+    );
+  return Object.freeze(
+    requested.map((relationId) => {
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.relationId === relationId &&
+          candidate.sourceEntityId === entity.entityId,
+      );
+      if (!relation)
+        throw failure(
+          'MODULE_RELATION_TARGET_INVALID',
+          'a relation target must be a compiled relation of the queried entity',
+          typeof relationId === 'string' ? relationId : null,
+        );
+      return Object.freeze({
+        column: relation.relationColumn.physicalName,
+        relationId: relation.relationId,
+      });
+    }),
+  );
+}
+
+/** A get's stated relation targets: the stored target id, never a label. */
+function withRelationTargets(
+  dto: SemanticRecordDto,
+  record: RawRecord,
+  targets: readonly RelationTargetPlan[],
+): SemanticRecordDto {
+  if (!targets.length) return dto;
+  return Object.freeze({
+    ...dto,
+    relationLabels: Object.freeze(
+      Object.fromEntries(
+        targets.map((target) => [
+          target.relationId,
+          Object.freeze({
+            label: null,
+            recordId: record.relationTargets?.[target.relationId] ?? null,
+          }),
+        ]),
+      ),
+    ),
+  });
 }
 
 function selectSql(
   entity: StorageEntity,
   predicates: readonly string[],
   suffix: string,
+  extraColumns: readonly string[] = [],
 ): string {
   const columns = [
     entity.recordIdentity.column,
@@ -3676,6 +3780,8 @@ function selectSql(
     entity.archive.archivedAtColumn,
     ...entity.columns.map((column) => column.physicalName),
   ];
+  for (const column of extraColumns)
+    if (!columns.includes(column)) columns.push(column);
   return `SELECT ${columns.map(quoted).join(', ')}
             FROM north_star_module.${quoted(entity.physicalTableName)}
            WHERE ${predicates.length > 0 ? predicates.join(' AND ') : 'true'}

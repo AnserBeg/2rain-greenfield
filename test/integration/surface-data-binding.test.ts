@@ -33,7 +33,10 @@ import {
   AuthenticatedRequestEntryAdapter,
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
-import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import {
+  ModuleRuntimeInterpreterError,
+  relationTargetPlans,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { fulfillmentProjectionIdentity } from '../../packages/postgres-provider/src/fulfillment.js';
 import { fulfillmentReadModel } from '../../packages/postgres-provider/src/fulfillment-read-model.js';
 import { commercialReadModel } from '../../packages/postgres-provider/src/commercial-read-model.js';
@@ -43,12 +46,14 @@ import {
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
+  type RegisteredCapabilityOperationExecutor,
   type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
   type SemanticOperationNonAcceptedRequest,
   type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
+  MalformedSemanticQueryRequestError,
   SEMANTIC_QUERY_RESULT_VERSION,
   SEMANTIC_QUERY_REQUEST_VERSION,
   registeredSemanticQueryFromPinnedView,
@@ -92,6 +97,7 @@ import {
   FIXTURE_IDS,
   ordinaryModuleV1,
 } from '../fixtures/g2/module-conformance/definitions.js';
+import { governedStorageTarget } from '../helpers/governed-storage-target.js';
 import {
   EVERY_KIND_FIELD_IDS,
   everyFieldKindModule,
@@ -9272,6 +9278,1526 @@ test('ORDER-PARITY: a picker over purchase orders enumerates their plain list qu
   );
   assert.ok(reads(clone) > before.clone);
   assert.ok(computed.includes(clone));
+});
+
+// ORDER-PARITY increment B: record pages that show their exceptions and their
+// progress, link to the records they name, and work through several rows.
+const regexpText = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+/** A submitted value of a named control, as the page renders it. */
+function controlValue(html: string, name: string): string | undefined {
+  return new RegExp(`name="${regexpText(name)}" value="([^"]*)"`, 'u').exec(
+    html,
+  )?.[1];
+}
+/** Every row a multi-row Task shows, in order. */
+function taskRowIds(html: string): string[] {
+  return [...html.matchAll(/data-task-row="([^"]+)"/gu)].map(
+    (match) => match[1]!,
+  );
+}
+/** A released purchase order and its lines, stored as the providers do. */
+function seedPurchaseOrder(
+  f: OrderEntryWitness,
+  lines: readonly string[],
+  state = 'released',
+) {
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const order = f.executor.seed(
+    'purchase_order',
+    {
+      [`${ns}:field.purchase_order_number`]: 'PO-000042',
+      [`${ns}:field.purchase_order_supplier_party_id`]: f.party,
+      [`${ns}:field.purchase_order_currency`]: 'CAD',
+      [`${ns}:field.purchase_order_order_date`]: '2026-09-26T09:30:00Z',
+      ...Object.fromEntries(
+        [
+          'expected_date',
+          'notes',
+          'receiving_location_id',
+          'payment_terms',
+          'tax_code_id',
+          'freight_amount',
+          'freight_tax_code_id',
+          'freight_tax_rate_percent',
+          'other_fee_amount',
+          'other_fee_tax_code_id',
+          'other_fee_tax_rate_percent',
+        ].map((name) => [`${ns}:field.purchase_order_${name}`, null]),
+      ),
+      [`${ns}:derived_state_field.machine.purchase_order_lifecycle`]: `${ns}:state.purchase_order_${state}`,
+    },
+    scope,
+  );
+  const lineIds = lines.map((ordered, index) =>
+    f.executor.seed(
+      'purchase_order_line',
+      {
+        [`${ns}:field.purchase_order_line_line_number`]: String(index + 1),
+        [`${ns}:field.purchase_order_line_item_id`]: f.item,
+        [`${ns}:field.purchase_order_line_ordered_quantity`]: ordered,
+        [`${ns}:field.purchase_order_line_unit_price`]: '2.4',
+        [`${ns}:field.purchase_order_line_discount_percent`]: null,
+        [`${ns}:field.purchase_order_line_tax_code_id`]: null,
+        [`${ns}:field.purchase_order_line_tax_rate_percent`]: null,
+        [`${ns}:relation.purchase_order_line_order`]: order,
+      },
+      scope,
+    ),
+  );
+  return { order, lines: lineIds };
+}
+/** A gateway whose read models state the figures a test gives them. */
+function statingGateways(
+  f: OrderEntryWitness,
+  stated: {
+    readonly commercial?: (
+      key: string,
+      record: SemanticRecordDto,
+    ) => ImmutableJsonValue;
+    readonly fulfillment?: (
+      key: string,
+      record: SemanticRecordDto,
+    ) => ImmutableJsonValue;
+    readonly receiving?: (
+      key: string,
+      record: SemanticRecordDto,
+    ) => ImmutableJsonValue;
+  },
+  executor: SemanticQueryExecutor = f.executor,
+): SurfaceRuntimeGateways {
+  const stating =
+    (
+      state:
+        | ((key: string, record: SemanticRecordDto) => ImmutableJsonValue)
+        | undefined,
+    ) =>
+    async ({
+      definition,
+      result,
+    }: {
+      definition: { readModel?: { resultFields: Record<string, string> } };
+      result: SemanticQueryResultEnvelope;
+    }) => ({
+      ...result,
+      records: result.records.map((record) => ({
+        ...record,
+        values: {
+          ...record.values,
+          ...Object.fromEntries(
+            Object.entries(definition.readModel!.resultFields).map(
+              ([key, fieldId]) => [fieldId, state ? state(key, record) : null],
+            ),
+          ),
+        },
+      })),
+    });
+  return {
+    ...f.gateways,
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': stated.fulfillment
+          ? stating(stated.fulfillment)
+          : async ({ result }) => result,
+        'northstar.sales:capability.commercial': stating(stated.commercial),
+        'northstar.purchasing:capability.receiving': stating(stated.receiving),
+      },
+    ),
+  };
+}
+
+/**
+ * The receiving routes as this witness keeps them: a receipt takes its number
+ * when it is created, as the server assigns one, and the receiving capability
+ * posts it -- marked posted under its next revision, a replayed key answered
+ * with its first answer. Every call is recorded with the witness's own.
+ */
+function receivingGateways(
+  f: OrderEntryWitness,
+  gateways: SurfaceRuntimeGateways,
+): SurfaceRuntimeGateways {
+  const ns = f.ns;
+  let numbered = 0;
+  const executor: SemanticOperationExecutor = {
+    recordNonAccepted: () => f.executor.recordNonAccepted(),
+    async execute(request) {
+      const result = await f.executor.execute(request);
+      const created = result.readBack;
+      if (
+        request.definition.operationId ===
+          `${ns}:operation.goods_receipt_create` &&
+        created
+      ) {
+        const stored = f.executor.rows.get(created.recordId)!;
+        f.executor.rows.set(created.recordId, {
+          ...stored,
+          values: {
+            ...stored.values,
+            [`${ns}:field.goods_receipt_number`]: `RCV-${String(++numbered).padStart(6, '0')}`,
+          },
+        });
+      }
+      return result;
+    },
+  };
+  const receiving: RegisteredCapabilityOperationExecutor = {
+    capabilityId: 'northstar.purchasing:capability.receiving',
+    async prepareAuthorization(request) {
+      return {
+        decisionInput: request.input,
+        legalEntityReadScopeIds: [f.scopes[0]!],
+        readBackArguments: {
+          recordId: asRecord(request.input).recordId as string,
+          includeArchived: false,
+        },
+      };
+    },
+    async execute(request) {
+      f.executor.calls.push(request as never);
+      if (f.executor.failAt === f.executor.calls.length)
+        throw new Error('Isolated post failure');
+      const cached = f.executor.receipts.get(request.idempotencyKey);
+      if (cached) return cached;
+      const draft = f.executor.rows.get(
+        String(asRecord(request.input).recordId),
+      )!;
+      const posted: SemanticRecordDto = {
+        ...draft,
+        revision: draft.revision + 1,
+        values: {
+          ...draft.values,
+          [`${ns}:field.goods_receipt_state`]: `${ns}:option.goods_receipt_state_posted`,
+        },
+      };
+      f.executor.rows.set(posted.recordId, posted);
+      const result: SemanticOperationResultEnvelope = {
+        kind: 'semanticOperationResult',
+        schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+        operationId: request.definition.operationId,
+        outcome: 'succeeded',
+        readBack: posted,
+        unsupportedReason: null,
+        trust: {
+          changeDocumentId: randomUUID(),
+          domainEventId: randomUUID(),
+          invocationId: randomUUID(),
+          outboxId: randomUUID(),
+        },
+      };
+      f.executor.receipts.set(request.idempotencyKey, result);
+      return result;
+    },
+  };
+  return {
+    ...gateways,
+    operationGateway: new SemanticOperationGateway(
+      f.policy,
+      executor,
+      gateways.operationMediation,
+      undefined,
+      [receiving],
+    ),
+  };
+}
+
+test('ORDER-PARITY: an invoice states its sales order through its own get, labels it under current policy on every request and opens it', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const order = f.executor.seed(
+    'sales_order',
+    {
+      [id('field', 'sales_order_number')]: 'SO-000321',
+      [id('field', 'sales_order_customer_party_id')]: f.party,
+      [id('field', 'sales_order_order_date')]: '2026-09-20T12:00:00.000Z',
+      [id('field', 'sales_order_currency')]: 'CAD',
+      [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+        'state',
+        'sales_order_released',
+      ),
+    },
+    scope,
+  );
+  const invoice = f.executor.seed(
+    'customer_invoice',
+    {
+      [id('field', 'customer_invoice_number')]: 'INV-000007',
+      [id('field', 'customer_invoice_state')]: id(
+        'option',
+        'customer_invoice_state_open',
+      ),
+      [id('field', 'customer_invoice_invoice_date')]:
+        '2026-09-21T12:00:00.000Z',
+      [id('field', 'customer_invoice_due_date')]: '2026-10-21T12:00:00.000Z',
+      [id('field', 'customer_invoice_customer_party_id')]: f.party,
+      [id('field', 'customer_invoice_currency')]: 'CAD',
+      [id('field', 'customer_invoice_payment_terms')]: null,
+      ...Object.fromEntries(
+        [
+          'subtotal',
+          'charges',
+          'tax',
+          'total',
+          'paid_amount',
+          'credited_amount',
+          'balance',
+        ].map((name) => [id('field', `customer_invoice_${name}`), '0']),
+      ),
+      [id('relation', 'customer_invoice_order')]: order,
+    },
+    scope,
+  );
+  // Like the PostgreSQL provider: a stored relation is no value of a get, and
+  // each relation a get is asked to state is resolved by the provider's own
+  // planner against the governed compiled storage.
+  const storage = await governedStorageTarget();
+  const gets: Record<string, unknown>[] = [];
+  const executor: SemanticQueryExecutor = {
+    async execute(request) {
+      const result = await f.executor.execute(request);
+      if (request.definition.queryType !== 'get') return result;
+      const args = asRecord(request.arguments);
+      gets.push({ queryId: request.definition.queryId, ...args });
+      const targets = relationTargetPlans(
+        storage,
+        storage.entities.find(
+          (value) => value.entityId === request.definition.sourceEntityId,
+        )!,
+        args.relationTargets as ImmutableJsonValue | undefined,
+      );
+      return {
+        ...result,
+        records: result.records.map((record) => ({
+          ...record,
+          values: Object.fromEntries(
+            Object.entries(record.values).filter(
+              ([key]) => !key.includes(':relation.'),
+            ),
+          ),
+          ...(targets.length
+            ? {
+                relationLabels: Object.fromEntries(
+                  targets.map((target) => [
+                    target.relationId,
+                    {
+                      label: null,
+                      recordId:
+                        (record.values[target.relationId] as
+                          string | undefined) ?? null,
+                    },
+                  ]),
+                ),
+              }
+            : {}),
+        })),
+      };
+    },
+  };
+  const gateways = statingGateways(f, {}, executor);
+  const path = `/?${new URLSearchParams({
+    surface: id('surface', 'customer_invoice_detail'),
+    record: invoice,
+    [id('parameter', 'customer_invoice_get_legal_entity_scope')]: scope,
+  }).toString()}`;
+  const fact = (html: string) =>
+    /<div><dt>Sales order<\/dt><dd>([^<]*)<\/dd><\/div>/u.exec(html)?.[1];
+
+  const page = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(page.statusCode, 200);
+  assert.equal(fact(page.html), 'SO-000321');
+  // The invoice's own get stated its order, the one relation the page names.
+  assert.deepEqual(
+    gets.find((read) => read.queryId === id('query', 'customer_invoice_get'))
+      ?.relationTargets,
+    [id('relation', 'customer_invoice_order')],
+  );
+  // Open sales order: the order's own page in this company, with no way
+  // "back" to a page that is not the order's.
+  const href = /<a class="button" href="([^"]+)">Open sales order<\/a>/u
+    .exec(page.html)?.[1]
+    ?.replaceAll('&amp;', '&');
+  assert.ok(href);
+  const target = new URL(href, 'http://fixture.local');
+  assert.equal(
+    target.searchParams.get('surface'),
+    id('surface', 'sales_order_detail'),
+  );
+  assert.equal(target.searchParams.get('record'), order);
+  assert.equal(
+    target.searchParams.get(
+      id('parameter', 'commercial_order_get_legal_entity_scope'),
+    ),
+    scope,
+  );
+  assert.equal(target.searchParams.get('returnTo'), null);
+  // Current policy decides the label on every request: withheld, the fact
+  // reads "—" and the invoice still serves; restored, it reads again.
+  f.deniedReads.add(id('permission', 'sales_order_read'));
+  const withheld = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(withheld.statusCode, 200);
+  assert.equal(fact(withheld.html), '—');
+  assert.match(withheld.html, /INV-000007/u);
+  f.deniedReads.delete(id('permission', 'sales_order_read'));
+  assert.equal(
+    fact((await renderSurfaceRuntimeWithData(f.view, path, gateways)).html),
+    'SO-000321',
+  );
+
+  // The gateway rules the argument's shape; the provider its meaning.
+  const read = (queryId: string, args: Record<string, ImmutableJsonValue>) =>
+    gateways.queryGateway.invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', queryId),
+      arguments: {
+        ...args,
+        [id('parameter', `${queryId}_legal_entity_scope`)]: scope,
+      },
+    });
+  for (const relationTargets of [
+    [],
+    'customer_invoice_order',
+    [7],
+    ['not a canonical id'],
+    Array.from({ length: 5 }, (_, index) => id('relation', `r${index}`)),
+    [
+      id('relation', 'customer_invoice_order'),
+      id('relation', 'customer_invoice_order'),
+    ],
+  ])
+    await assert.rejects(
+      read('customer_invoice_get', {
+        recordId: invoice,
+        includeArchived: false,
+        relationTargets: relationTargets as ImmutableJsonValue,
+      }),
+      MalformedSemanticQueryRequestError,
+      JSON.stringify(relationTargets),
+    );
+  await assert.rejects(
+    read('customer_invoice_list', {
+      includeArchived: false,
+      relationTargets: [id('relation', 'customer_invoice_order')],
+    }),
+    /relation targets belong only to a registered get query/u,
+  );
+  // A relation the invoice does not own, or none at all, is refused by name.
+  for (const relation of [
+    id('relation', 'sales_order_line_order'),
+    id('relation', 'missing'),
+  ])
+    await assert.rejects(
+      read('customer_invoice_get', {
+        recordId: invoice,
+        includeArchived: false,
+        relationTargets: [relation],
+      }),
+      (error: unknown) =>
+        error instanceof ModuleRuntimeInterpreterError &&
+        error.code === 'MODULE_RELATION_TARGET_INVALID',
+      relation,
+    );
+});
+
+test('ORDER-PARITY: a truck receipt receives several lines in one receipt, filled from what is open, one request key per run', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const location = f.executor.seed('location', {
+    [id('field', 'location_name')]: 'Receiving dock',
+  });
+  const {
+    order,
+    lines: [lineA, lineB, lineC, lineD],
+  } = seedPurchaseOrder(f, ['5', '2', '4', '3']);
+  // Open to receive, as the commercial read model states it: nothing left on
+  // B, and C's received read withheld.
+  const open = new Map<string, string | null>([
+    [lineA!, '5'],
+    [lineB!, '0'],
+    [lineC!, null],
+    [lineD!, '3'],
+  ]);
+  const gateways = receivingGateways(
+    f,
+    statingGateways(f, {
+      commercial: (key, record) =>
+        key === 'open_to_receive' ? (open.get(record.recordId) ?? null) : null,
+    }),
+  );
+  const action = id('action', 'receive_lines_known');
+  const path = `/?${new URLSearchParams({
+    surface: id('surface', 'purchase_order_detail'),
+    record: order,
+    [id('parameter', 'commercial_purchase_order_get_legal_entity_scope')]:
+      scope,
+  }).toString()}`;
+  const page = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(page.statusCode, 200);
+  // Offered on the record, and as the order's next step.
+  assert.match(
+    page.html,
+    new RegExp(`name="compositionAction" value="${regexpText(action)}"`, 'u'),
+  );
+  assert.match(
+    page.html,
+    new RegExp(`data-next-action="${regexpText(action)}"`, 'u'),
+  );
+  assert.match(
+    page.html,
+    /aria-label="Next action: Receive lines with actual cost"/u,
+  );
+
+  const start = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  assert.equal(start.statusCode, 200);
+  // Nothing else is started while the Task is open.
+  assert.doesNotMatch(start.html, /data-next-action=/u);
+  const token = hiddenValue(start.html, 'taskToken');
+  // Every line with something to arrive, and the one whose figure is withheld.
+  assert.deepEqual(taskRowIds(start.html), [lineA, lineC, lineD]);
+  const quantity = (line: string) =>
+    `${id('input', 'receive_lines_quantity')}@${line}`;
+  const cost = (line: string) => `${id('input', 'receive_lines_cost')}@${line}`;
+  for (const line of [lineA!, lineC!, lineD!]) {
+    assert.equal(controlValue(start.html, quantity(line)), '');
+    assert.equal(controlValue(start.html, cost(line)), '');
+  }
+  // Each row's inputs are named with the line they belong to.
+  assert.match(
+    start.html,
+    /aria-label="Quantity to receive, Readable product, Line 1"/u,
+  );
+  assert.match(
+    start.html,
+    /<button type="submit" class="secondary-action" name="taskStage" value="fill" formnovalidate>Fill open quantities<\/button>/u,
+  );
+  // Enter reviews the Task; it never fills.
+  assert.ok(
+    start.html.indexOf('data-task-default') <
+      start.html.indexOf('value="fill"'),
+  );
+  const post = (values: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      { taskToken: token, compositionAction: action, ...values },
+      gateways,
+    );
+  const header = {
+    [id('input', 'receive_lines_location')]: location,
+    [id('input', 'receive_lines_currency')]: 'CAD',
+    [id('input', 'receive_lines_packing_slip')]: 'PS-77',
+    [id('input', 'receive_lines_notes')]: '',
+  };
+
+  // Fill: each row from what is still open; the withheld line stays empty
+  // and what was entered elsewhere is kept.
+  const filled = await post({ taskStage: 'fill', ...header });
+  assert.equal(controlValue(filled.html, quantity(lineA!)), '5');
+  assert.equal(controlValue(filled.html, quantity(lineD!)), '3');
+  assert.equal(controlValue(filled.html, quantity(lineC!)), '');
+  assert.equal(
+    controlValue(filled.html, id('input', 'receive_lines_packing_slip')),
+    'PS-77',
+  );
+  // Nothing entered on any line: refused beside the rows, nothing written.
+  const empty = await post({ taskStage: 'prepare', ...header });
+  assert.match(empty.html, /COMPOSITION_INPUT_INVALID/u);
+  assert.match(empty.html, /Enter at least one line\./u);
+  // A line given a quantity needs its cost; a bad quantity is named on its line.
+  const invalid = await post({
+    taskStage: 'prepare',
+    ...header,
+    [quantity(lineA!)]: '5',
+    [quantity(lineD!)]: '-1',
+    [cost(lineD!)]: '2',
+  });
+  assert.match(
+    invalid.html,
+    new RegExp(`id="${regexpText(`${cost(lineA!)}-error`)}">Required\\.<`, 'u'),
+  );
+  assert.match(
+    invalid.html,
+    new RegExp(
+      `id="${regexpText(`${quantity(lineD!)}-error`)}">Enter a positive exact quantity\\.<`,
+      'u',
+    ),
+  );
+  assert.equal(f.executor.calls.length, 0);
+
+  // Two lines of the truck; the withheld line is left empty and skipped.
+  const review = await post({
+    taskStage: 'prepare',
+    ...header,
+    [quantity(lineA!)]: '5',
+    [cost(lineA!)]: '2.50',
+    [quantity(lineD!)]: '2',
+    [cost(lineD!)]: '1.2',
+  });
+  assert.match(review.html, /data-task-phase="review"/u);
+  assert.deepEqual(taskRowIds(review.html), [lineA, lineD]);
+  assert.equal(f.executor.calls.length, 0);
+  // The second line's run fails: the reviewed runs are retried as they were.
+  f.executor.failAt = 3;
+  const failed = await post({
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.match(failed.html, /COMPOSITION_UNCERTAIN/u);
+  f.executor.failAt = 0;
+  const done = await post({ taskStage: 'retry' });
+  assert.match(done.html, /Receive lines with actual cost: done/u);
+  const calls = f.executor.calls;
+  assert.deepEqual(
+    calls.map((call) => call.definition.operationId),
+    [
+      id('operation', 'goods_receipt_create'),
+      id('operation', 'goods_receipt_line_create'),
+      id('operation', 'goods_receipt_line_create'),
+      id('operation', 'goods_receipt_line_create'),
+      id('operation', 'goods_receipt_post'),
+    ],
+  );
+  // One key per run, and the retried run kept its key and its exact input.
+  assert.equal(calls[3]!.idempotencyKey, calls[2]!.idempotencyKey);
+  assert.deepEqual(calls[3]!.input, calls[2]!.input);
+  assert.equal(
+    new Set(calls.map((call) => call.idempotencyKey)).size,
+    calls.length - 1,
+  );
+  const receipt = asRecord(calls[0]!.input);
+  const receiptId = String(receipt.recordId);
+  assert.deepEqual(asRecord(receipt.values), {
+    [id('field', 'goods_receipt_state')]: id(
+      'option',
+      'goods_receipt_state_draft',
+    ),
+    [id('field', 'goods_receipt_kind')]: id(
+      'option',
+      'goods_receipt_kind_initial',
+    ),
+    [id('field', 'goods_receipt_effective_at')]: asRecord(receipt.values)[
+      id('field', 'goods_receipt_effective_at')
+    ],
+    [id('field', 'goods_receipt_location_id')]: location,
+    [id('field', 'goods_receipt_reason_code')]: 'RECEIVE',
+    [id('field', 'goods_receipt_reason_narrative')]:
+      'Receive from purchase order',
+    [id('field', 'goods_receipt_packing_slip')]: 'PS-77',
+    [id('field', 'goods_receipt_notes')]: null,
+  });
+  assert.deepEqual(asRecord(receipt.relations), {
+    [id('relation', 'goods_receipt_order')]: order,
+  });
+  const lineRuns = [calls[1]!, calls[3]!].map((call) => asRecord(call.input));
+  assert.notEqual(lineRuns[0]!.recordId, lineRuns[1]!.recordId);
+  assert.deepEqual(
+    lineRuns.map((run) => {
+      const values = asRecord(run.values);
+      return [
+        values[id('field', 'goods_receipt_line_line_number')],
+        values[id('field', 'goods_receipt_line_quantity')],
+        values[id('field', 'goods_receipt_line_unit_id')],
+        values[id('field', 'goods_receipt_line_unit_cost')],
+        values[id('field', 'goods_receipt_line_currency')],
+        values[id('field', 'goods_receipt_line_cost_status')],
+        asRecord(run.relations)[
+          id('relation', 'goods_receipt_line_order_line')
+        ],
+        asRecord(run.relations)[id('relation', 'goods_receipt_line_receipt')],
+      ];
+    }),
+    [
+      [
+        '1',
+        '5',
+        'EA',
+        '2.5',
+        'CAD',
+        id('option', 'goods_receipt_line_cost_status_known'),
+        lineA,
+        receiptId,
+      ],
+      [
+        '4',
+        '2',
+        'EA',
+        '1.2',
+        'CAD',
+        id('option', 'goods_receipt_line_cost_status_known'),
+        lineD,
+        receiptId,
+      ],
+    ],
+  );
+  assert.deepEqual(asRecord(calls[4]!.input), {
+    recordId: receiptId,
+    expectedRevision: 1,
+  });
+  // A line with nothing open anywhere offers no truck receipt.
+  const none = statingGateways(f, {
+    commercial: (key) => (key === 'open_to_receive' ? '0' : null),
+  });
+  const closed = await renderSurfaceRuntimeWithData(f.view, path, none);
+  assert.doesNotMatch(
+    closed.html,
+    new RegExp(`value="${regexpText(action)}"`, 'u'),
+  );
+});
+
+test('ORDER-PARITY: reversing a receipt reverses each line that still adds to stock, at exactly that, through the receiving routes', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const location = f.executor.seed('location', {
+    [id('field', 'location_name')]: 'Receiving dock',
+  });
+  const {
+    order,
+    lines: [lineA, lineB],
+  } = seedPurchaseOrder(f, ['5', '2']);
+  const receipt = (state: 'draft' | 'posted') =>
+    f.executor.seed(
+      'goods_receipt',
+      {
+        [id('field', 'goods_receipt_number')]: `RCV-${state}`,
+        [id('field', 'goods_receipt_state')]: id(
+          'option',
+          `goods_receipt_state_${state}`,
+        ),
+        [id('field', 'goods_receipt_kind')]: id(
+          'option',
+          'goods_receipt_kind_initial',
+        ),
+        [id('field', 'goods_receipt_effective_at')]: '2026-09-27T10:00:00Z',
+        [id('field', 'goods_receipt_location_id')]: location,
+        [id('field', 'goods_receipt_packing_slip')]: null,
+        [id('relation', 'goods_receipt_order')]: order,
+      },
+      scope,
+    );
+  const posted = receipt('posted');
+  const receiptLine = (
+    parent: string,
+    number: string,
+    orderLine: string,
+    quantity: string,
+  ) =>
+    f.executor.seed(
+      'goods_receipt_line',
+      {
+        [id('field', 'goods_receipt_line_line_number')]: number,
+        [id('field', 'goods_receipt_line_item_id')]: f.item,
+        [id('field', 'goods_receipt_line_quantity')]: quantity,
+        [id('field', 'goods_receipt_line_unit_id')]: 'EA',
+        [id('field', 'goods_receipt_line_cost_status')]: id(
+          'option',
+          'goods_receipt_line_cost_status_known',
+        ),
+        // As the PostgreSQL provider reads a stored decimal back: at its
+        // column's scale, which is not an input the provider admits.
+        [id('field', 'goods_receipt_line_unit_cost')]: '2.500000000000000000',
+        [id('field', 'goods_receipt_line_currency')]: 'CAD',
+        [id('field', 'goods_receipt_line_reversal_of_movement_id')]: null,
+        [id('relation', 'goods_receipt_line_receipt')]: parent,
+        [id('relation', 'goods_receipt_line_order_line')]: orderLine,
+      },
+      scope,
+    );
+  const first = receiptLine(posted, '1', lineA!, '4');
+  // Already compensated in full: nothing of it is offered.
+  receiptLine(posted, '2', lineB!, '2');
+  // What each line still adds to stock, its movement and order line, as the
+  // receiving read model states them: the second is already compensated.
+  const movement = '0b000000-0000-4000-8000-00000000000a';
+  let movementsStated = true;
+  const receiving = (key: string, record: SemanticRecordDto) => {
+    const line = record.recordId === first;
+    if (key === 'order_line') return line ? lineA! : lineB!;
+    if (!movementsStated) return null;
+    if (key === 'movement') return line ? movement : randomUUID();
+    if (key === 'reversible') return line ? '4' : '0';
+    return line ? '-4' : '0';
+  };
+  const gateways = receivingGateways(
+    f,
+    statingGateways(f, {
+      commercial: (key) => (key === 'open_to_receive' ? '1' : null),
+      receiving,
+    }),
+  );
+  const receipts = id('dataset', 'purchasing_receipts');
+  const action = id('action', 'reverse_receipt');
+  const pathFor = (selected: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'purchase_order_detail'),
+      record: order,
+      [id('parameter', 'commercial_purchase_order_get_legal_entity_scope')]:
+        scope,
+      dataset: receipts,
+      selected,
+      [`select:${receipts}`]: selected,
+    }).toString()}`;
+  const path = pathFor(posted);
+  const page = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(page.statusCode, 200);
+  // The selected receipt shows its lines and offers its reversal.
+  assert.match(
+    page.html,
+    /data-composition-dataset="northstar\.app:dataset\.purchasing_receipt_lines" data-resolution="ready"/u,
+  );
+  assert.match(
+    page.html,
+    new RegExp(`name="compositionAction" value="${regexpText(action)}"`, 'u'),
+  );
+  const start = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  const token = hiddenValue(start.html, 'taskToken');
+  assert.deepEqual(taskRowIds(start.html), [first]);
+  const post = (values: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      { taskToken: token, compositionAction: action, ...values },
+      gateways,
+    );
+  const review = await post({
+    taskStage: 'prepare',
+    [id('input', 'reverse_receipt_reason')]: 'Wrong item delivered',
+  });
+  assert.deepEqual(taskRowIds(review.html), [first]);
+  const done = await post({
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.match(done.html, /Reverse receipt: done/u);
+  const calls = f.executor.calls;
+  assert.deepEqual(
+    calls.map((call) => call.definition.operationId),
+    [
+      id('operation', 'goods_receipt_create'),
+      id('operation', 'goods_receipt_line_create'),
+      id('operation', 'goods_receipt_post'),
+    ],
+  );
+  const header = asRecord(calls[0]!.input);
+  const values = asRecord(header.values);
+  assert.deepEqual(
+    [
+      values[id('field', 'goods_receipt_kind')],
+      values[id('field', 'goods_receipt_state')],
+      values[id('field', 'goods_receipt_location_id')],
+      values[id('field', 'goods_receipt_reason_code')],
+      values[id('field', 'goods_receipt_reason_narrative')],
+    ],
+    [
+      id('option', 'goods_receipt_kind_reversal'),
+      id('option', 'goods_receipt_state_draft'),
+      location,
+      'REVERSE',
+      'Wrong item delivered',
+    ],
+  );
+  assert.deepEqual(asRecord(header.relations), {
+    [id('relation', 'goods_receipt_order')]: order,
+    [id('relation', 'goods_receipt_supersedes')]: posted,
+  });
+  const line = asRecord(calls[1]!.input);
+  const lineValues = asRecord(line.values);
+  assert.deepEqual(
+    [
+      lineValues[id('field', 'goods_receipt_line_line_number')],
+      lineValues[id('field', 'goods_receipt_line_quantity')],
+      lineValues[id('field', 'goods_receipt_line_reversal_of_movement_id')],
+      lineValues[id('field', 'goods_receipt_line_cost_status')],
+      lineValues[id('field', 'goods_receipt_line_unit_cost')],
+      lineValues[id('field', 'goods_receipt_line_currency')],
+      lineValues[id('field', 'goods_receipt_line_unit_id')],
+    ],
+    [
+      '1',
+      '-4',
+      movement,
+      id('option', 'goods_receipt_line_cost_status_known'),
+      '2.5',
+      'CAD',
+      'EA',
+    ],
+  );
+  assert.deepEqual(asRecord(line.relations), {
+    [id('relation', 'goods_receipt_line_receipt')]: header.recordId,
+    [id('relation', 'goods_receipt_line_order_line')]: lineA,
+  });
+  assert.deepEqual(asRecord(calls[2]!.input), {
+    recordId: header.recordId,
+    expectedRevision: 1,
+  });
+
+  // Without the movement read nothing is stated, so nothing is offered, and
+  // a page opened before cannot start it.
+  movementsStated = false;
+  const withheld = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.doesNotMatch(
+    withheld.html,
+    new RegExp(`value="${regexpText(action)}"`, 'u'),
+  );
+  const stale = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  assert.match(stale.html, /COMPOSITION_TASK_UNAVAILABLE/u);
+  // A draft receipt has nothing to reverse.
+  movementsStated = true;
+  const draft = receipt('draft');
+  receiptLine(draft, '1', lineA!, '1');
+  const drafted = await renderSurfaceRuntimeWithData(
+    f.view,
+    pathFor(draft),
+    gateways,
+  );
+  assert.doesNotMatch(
+    drafted.html,
+    new RegExp(`value="${regexpText(action)}"`, 'u'),
+  );
+  assert.equal(f.executor.calls.length, 3);
+});
+
+test('ORDER-PARITY: an order page names the lines it is short and shows where it stands, with the first next step offered now', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const seedOrder = (state: string) => {
+    const order = f.executor.seed(
+      'sales_order',
+      {
+        [id('field', 'sales_order_number')]: `SO-${state}`,
+        [id('field', 'sales_order_customer_party_id')]: f.party,
+        [id('field', 'sales_order_order_date')]: '2026-09-20T12:00:00.000Z',
+        [id('field', 'sales_order_requested_date')]: '2026-10-11T00:00:00.000Z',
+        [id('field', 'sales_order_currency')]: 'CAD',
+        ...Object.fromEntries(
+          [
+            'notes',
+            'salesperson_party_id',
+            'payment_terms',
+            'ship_to_name',
+            'ship_to_region',
+            'tax_code_id',
+            'freight_amount',
+            'freight_tax_code_id',
+            'other_fee_amount',
+            'other_fee_tax_code_id',
+          ].map((name) => [id('field', `sales_order_${name}`), null]),
+        ),
+        // A complete ship-to, which Confirm requires (ruling E).
+        [id('field', 'sales_order_ship_to_street')]: '100 Industrial Way',
+        [id('field', 'sales_order_ship_to_city')]: 'Calgary',
+        [id('field', 'sales_order_ship_to_postal_code')]: 'T2P 0A1',
+        [id('field', 'sales_order_ship_to_country')]: 'Canada',
+        [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+          'state',
+          `sales_order_${state}`,
+        ),
+      },
+      scope,
+    );
+    const lines = ['5', '3'].map((ordered, index) =>
+      f.executor.seed(
+        'sales_order_line',
+        {
+          [id('field', 'sales_order_line_line_number')]: String(index + 1),
+          [id('field', 'sales_order_line_item_id')]: f.item,
+          [id('field', 'sales_order_line_ordered_quantity')]: ordered,
+          [id('field', 'sales_order_line_unit_id')]: 'EA',
+          ...Object.fromEntries(
+            ['unit_price', 'list_price', 'discount_percent', 'tax_code_id'].map(
+              (name) => [id('field', `sales_order_line_${name}`), null],
+            ),
+          ),
+          [id('relation', 'sales_order_line_order')]: order,
+        },
+        scope,
+      ),
+    );
+    return { order, lines };
+  };
+  const path = (order: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'sales_order_detail'),
+      record: order,
+      [id('parameter', 'commercial_order_get_legal_entity_scope')]: scope,
+    }).toString()}`;
+  const draft = seedOrder('draft');
+  let short = new Map<string, string | null>([
+    [draft.lines[0]!, '2'],
+    [draft.lines[1]!, '0'],
+  ]);
+  let toInvoice: string | null = null;
+  const gateways = statingGateways(f, {
+    fulfillment: (key, record) =>
+      key === 'short'
+        ? (short.get(record.recordId) ?? null)
+        : key === 'available_now'
+          ? '3'
+          : key === 'shipped' || key === 'coverage'
+            ? '0'
+            : String(
+                record.values[id('field', 'sales_order_line_ordered_quantity')],
+              ),
+    commercial: (key) =>
+      key === 'order_to_invoice'
+        ? toInvoice
+        : key === 'order_total'
+          ? toInvoice && '25'
+          : null,
+  });
+  const alert = (html: string) =>
+    /<section class="composition-alert"[^>]*>([\s\S]*?)<\/section>/u.exec(
+      html,
+    )?.[1];
+  const states = (html: string) =>
+    [...html.matchAll(/<li data-step-state="([a-z]+)"/gu)].map(
+      (match) => match[1],
+    );
+
+  const drafted = await renderSurfaceRuntimeWithData(
+    f.view,
+    path(draft.order),
+    gateways,
+  );
+  assert.equal(drafted.statusCode, 200);
+  // The line short of free stock is named; the covered one is not.
+  const banner = alert(drafted.html);
+  assert.ok(banner);
+  assert.match(
+    banner,
+    /<h2 id="composition-alert-0">Fulfillment exception<\/h2>/u,
+  );
+  assert.deepEqual(
+    [...banner.matchAll(/<li data-record-id="([^"]+)">/gu)].map(
+      (match) => match[1],
+    ),
+    [draft.lines[0]],
+  );
+  assert.match(
+    banner,
+    /<strong>Readable product<\/strong> <span>Short 2<\/span>/u,
+  );
+  // Never a live region, so it never competes with an outcome's status.
+  assert.doesNotMatch(banner, /role=/u);
+  assert.deepEqual(states(drafted.html), [
+    'current',
+    'upcoming',
+    'upcoming',
+    'upcoming',
+  ]);
+  // Next: the order's own Confirm, as its command bar offers it, under its
+  // own name.
+  assert.match(
+    drafted.html,
+    new RegExp(
+      `data-next-operation="${regexpText(id('operation', 'sales_order_release'))}"`,
+      'u',
+    ),
+  );
+  assert.match(drafted.html, /aria-label="Next action: [^"]+"/u);
+  // Nothing short, or nothing stated: no banner.
+  for (const stated of ['0', null]) {
+    short = new Map(draft.lines.map((line) => [line, stated]));
+    assert.equal(
+      alert(
+        (
+          await renderSurfaceRuntimeWithData(
+            f.view,
+            path(draft.order),
+            gateways,
+          )
+        ).html,
+      ),
+      undefined,
+    );
+  }
+  // Confirmed with shipped quantity to invoice: invoicing needs attention,
+  // and invoicing it is the next step.
+  const released = seedOrder('released');
+  toInvoice = '2';
+  const confirmed = await renderSurfaceRuntimeWithData(
+    f.view,
+    path(released.order),
+    gateways,
+  );
+  assert.deepEqual(states(confirmed.html), [
+    'complete',
+    'current',
+    'attention',
+    'upcoming',
+  ]);
+  assert.match(
+    confirmed.html,
+    new RegExp(
+      `data-next-action="${regexpText(id('action', 'invoice_shipped'))}"`,
+      'u',
+    ),
+  );
+  assert.match(
+    confirmed.html,
+    /aria-label="Next action: Invoice shipped quantities"/u,
+  );
+  // A cancelled order stopped at every step, with nothing next -- even with
+  // figures that would otherwise offer a step.
+  const cancelled = seedOrder('cancelled');
+  const stopped = await renderSurfaceRuntimeWithData(
+    f.view,
+    path(cancelled.order),
+    gateways,
+  );
+  assert.deepEqual(states(stopped.html), [
+    'stopped',
+    'stopped',
+    'stopped',
+    'stopped',
+  ]);
+  assert.doesNotMatch(stopped.html, /data-next-(?:action|operation)=/u);
+});
+
+test('PAYABLES: the order lists its bills and offers billing only while the order states something to bill; a bill binds its lines, payments and credits and offers each command in its states', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const order = f.executor.seed(
+    'purchase_order',
+    {
+      [`${ns}:field.purchase_order_number`]: 'PO-BILLED',
+      [`${ns}:field.purchase_order_supplier_party_id`]: f.party,
+      [`${ns}:field.purchase_order_currency`]: 'CAD',
+      [`${ns}:field.purchase_order_order_date`]: '2026-09-26T09:30:00Z',
+      ...Object.fromEntries(
+        [
+          'expected_date',
+          'notes',
+          'receiving_location_id',
+          'payment_terms',
+          'tax_code_id',
+          'freight_amount',
+          'freight_tax_code_id',
+          'freight_tax_rate_percent',
+          'other_fee_amount',
+          'other_fee_tax_code_id',
+          'other_fee_tax_rate_percent',
+        ].map((name) => [`${ns}:field.purchase_order_${name}`, null]),
+      ),
+      [`${ns}:derived_state_field.machine.purchase_order_lifecycle`]: `${ns}:state.purchase_order_released`,
+    },
+    scope,
+  );
+  const figures = (balance: string, paid: string) =>
+    Object.fromEntries(
+      (
+        [
+          ['subtotal', '22.5'],
+          ['charges', '35'],
+          ['tax', '2.38'],
+          ['total', '59.88'],
+          ['paid_amount', paid],
+          ['credited_amount', '0'],
+          ['balance', balance],
+        ] as const
+      ).map(([name, value]) => [`${ns}:field.vendor_bill_${name}`, value]),
+    );
+  const bill = (number: string, state: string, balance: string, paid: string) =>
+    f.executor.seed(
+      'vendor_bill',
+      {
+        [`${ns}:field.vendor_bill_number`]: number,
+        [`${ns}:field.vendor_bill_state`]: `${ns}:option.vendor_bill_state_${state}`,
+        [`${ns}:field.vendor_bill_bill_date`]: '2026-09-30T10:00:00.000Z',
+        [`${ns}:field.vendor_bill_due_date`]: '2026-10-30T10:00:00.000Z',
+        [`${ns}:field.vendor_bill_supplier_party_id`]: f.party,
+        [`${ns}:field.vendor_bill_supplier_invoice_number`]: `INV-${number}`,
+        [`${ns}:field.vendor_bill_currency`]: 'CAD',
+        [`${ns}:field.vendor_bill_payment_terms`]: null,
+        ...figures(balance, paid),
+        [`${ns}:relation.vendor_bill_order`]: order,
+      },
+      scope,
+    );
+  const open = bill('BILL-000001', 'open', '59.88', '0');
+  const paid = bill('BILL-000002', 'paid', '0', '59.88');
+  f.executor.seed(
+    'vendor_bill_line',
+    {
+      [`${ns}:field.vendor_bill_line_line_number`]: '1',
+      [`${ns}:field.vendor_bill_line_item_id`]: f.item,
+      [`${ns}:field.vendor_bill_line_unit_id`]: 'EA',
+      [`${ns}:field.vendor_bill_line_quantity`]: '2',
+      [`${ns}:field.vendor_bill_line_unit_price`]: '12.5',
+      [`${ns}:field.vendor_bill_line_discount_percent`]: '10',
+      [`${ns}:field.vendor_bill_line_tax_rate_percent`]: '5',
+      [`${ns}:field.vendor_bill_line_amount`]: '22.5',
+      [`${ns}:field.vendor_bill_line_tax`]: '1.13',
+      [`${ns}:relation.vendor_bill_line_bill`]: open,
+    },
+    scope,
+  );
+  f.executor.seed(
+    'vendor_payment',
+    {
+      [`${ns}:field.vendor_payment_number`]: 'VPAY-000001',
+      [`${ns}:field.vendor_payment_state`]: `${ns}:option.vendor_payment_state_posted`,
+      [`${ns}:field.vendor_payment_payment_date`]: '2026-09-30T11:00:00.000Z',
+      [`${ns}:field.vendor_payment_amount`]: '59.88',
+      [`${ns}:field.vendor_payment_method`]: `${ns}:option.vendor_payment_method_cheque`,
+      [`${ns}:field.vendor_payment_reference`]: 'CHQ-3301',
+      [`${ns}:relation.vendor_payment_bill`]: paid,
+    },
+    scope,
+  );
+  // The commercial read model states what is to bill as given; the order's
+  // total is stated.
+  const stating = (toBill: string | null): SurfaceRuntimeGateways =>
+    statingGateways(f, {
+      commercial: (key) =>
+        key === 'order_to_bill'
+          ? toBill
+          : key === 'order_total'
+            ? '10.00'
+            : null,
+    });
+  const orderPath = `/?${new URLSearchParams({
+    surface: `${ns}:surface.purchase_order_detail`,
+    record: order,
+    [`${ns}:parameter.commercial_purchase_order_get_legal_entity_scope`]: scope,
+  })}`;
+  for (const [toBill, offered] of [
+    ['2', true],
+    ['0', false],
+    [null, false],
+  ] as const) {
+    const html = (
+      await renderSurfaceRuntimeWithData(f.view, orderPath, stating(toBill))
+    ).html;
+    assert.equal(
+      html.includes(`value="${ns}:action.bill_received"`),
+      offered,
+      `Bill received quantities with ${String(toBill)} to bill`,
+    );
+    // Its progression's Billing step needs attention exactly then; a
+    // released order is otherwise billing as it receives.
+    assert.deepEqual(
+      [...html.matchAll(/<li data-step-state="([a-z]+)"/gu)].map(
+        (match) => match[1],
+      ),
+      [
+        'complete',
+        'complete',
+        'current',
+        offered ? 'attention' : 'current',
+        'upcoming',
+      ],
+      `the order's progression with ${String(toBill)} to bill`,
+    );
+    // The order's bills, each with its balance, whatever it offers.
+    assert.match(
+      html,
+      new RegExp(
+        `data-composition-dataset="${ns}:dataset.purchasing_bills" data-resolution="ready"`,
+        'u',
+      ),
+    );
+    assert.match(html, /BILL-000001/u);
+    assert.match(html, /BILL-000002/u);
+    assert.match(html, /INV-BILL-000001/u);
+  }
+
+  // A bill binds its lines, payments and credits; each command is offered
+  // only where the bill's state admits it.
+  const billPath = (recordId: string) =>
+    `/?${new URLSearchParams({
+      surface: `${ns}:surface.vendor_bill_detail`,
+      record: recordId,
+      [`${ns}:parameter.vendor_bill_get_legal_entity_scope`]: scope,
+    })}`;
+  const offeredOn = (html: string) =>
+    ['bill_record_payment', 'bill_record_credit', 'bill_void'].filter((local) =>
+      html.includes(`value="${ns}:action.${local}"`),
+    );
+  const openHtml = (
+    await renderSurfaceRuntimeWithData(f.view, billPath(open), stating(null))
+  ).html;
+  // Its line is read; it has no payment or credit yet, and neither read
+  // fails.
+  for (const [dataset, resolution] of [
+    ['bill_lines', 'ready'],
+    ['bill_payments', 'empty'],
+    ['bill_credits', 'empty'],
+  ] as const)
+    assert.match(
+      openHtml,
+      new RegExp(
+        `data-composition-dataset="${ns}:dataset.${dataset}" data-resolution="${resolution}"`,
+        'u',
+      ),
+      dataset,
+    );
+  assert.match(openHtml, /BILL-000001/u);
+  assert.match(openHtml, /INV-BILL-000001/u);
+  assert.match(openHtml, /59\.88/u);
+  assert.deepEqual(offeredOn(openHtml), [
+    'bill_record_payment',
+    'bill_record_credit',
+    'bill_void',
+  ]);
+  const paidHtml = (
+    await renderSurfaceRuntimeWithData(f.view, billPath(paid), stating(null))
+  ).html;
+  assert.deepEqual(offeredOn(paidHtml), []);
+  assert.match(
+    paidHtml,
+    new RegExp(
+      `data-composition-dataset="${ns}:dataset.bill_payments" data-resolution="ready"`,
+      'u',
+    ),
+  );
+  assert.match(paidHtml, /VPAY-000001/u);
+});
+
+test('PAYABLES (PY-G): each order line shows its three-way match as the read model states it, and a bill names and opens its order', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const {
+    order,
+    lines: [billedAbove, unbilled, matched],
+  } = seedPurchaseOrder(f, ['3', '4', '2']);
+  // The match as the purchase-line read model states it, per line; one line
+  // unstated, as a withheld bill read leaves it.
+  const stated = new Map<string, Record<string, string | null>>([
+    [
+      billedAbove!,
+      {
+        received: '1',
+        billed: '2',
+        to_bill: '0',
+        match_status: 'Billed above received',
+      },
+    ],
+    [
+      unbilled!,
+      {
+        received: '4',
+        billed: '1',
+        to_bill: '3',
+        match_status: 'Received, not billed',
+      },
+    ],
+    [
+      matched!,
+      { received: '2', billed: null, to_bill: null, match_status: null },
+    ],
+  ]);
+  const gateways = statingGateways(f, {
+    commercial: (key, record) => stated.get(record.recordId)?.[key] ?? null,
+  });
+  const orderPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({
+      surface: id('surface', 'purchase_order_detail'),
+      record: order,
+      [id('parameter', 'commercial_purchase_order_get_legal_entity_scope')]:
+        scope,
+    }).toString()}`,
+    gateways,
+  );
+  assert.equal(orderPage.statusCode, 200);
+  const section = new RegExp(
+    `<section id="${regexpText(id('dataset', 'purchasing_lines'))}"[\\s\\S]*?</section>`,
+    'u',
+  ).exec(orderPage.html)?.[0];
+  assert.ok(section, 'the Order lines section renders');
+  for (const label of ['Billed', 'To bill'])
+    assert.match(
+      section,
+      new RegExp(`<th scope="col"[^>]*>${label}</th>`, 'u'),
+    );
+  const row = (line: string) =>
+    new RegExp(
+      `<tr[^>]*data-record-id="${regexpText(line)}"[^>]*>([\\s\\S]*?)</tr>`,
+      'u',
+    ).exec(section)?.[1] ?? '';
+  const cell = (line: string, label: string) =>
+    new RegExp(`<td data-column-label="${label}"[^>]*>([^<]*)</td>`, 'u').exec(
+      row(line),
+    )?.[1];
+  // The match reads beside the product, without opening details.
+  const match = (line: string) =>
+    /<span class="composition-cell-label">Match<\/span> ([^<]*)<\/span>/u.exec(
+      row(line),
+    )?.[1];
+  assert.equal(match(billedAbove!), 'Billed above received');
+  assert.equal(cell(billedAbove!, 'Billed'), '2');
+  assert.equal(cell(billedAbove!, 'To bill'), '0');
+  assert.equal(match(unbilled!), 'Received, not billed');
+  assert.equal(cell(unbilled!, 'To bill'), '3');
+  // Unstated is shown as unstated, never a zero or a guessed match.
+  assert.equal(match(matched!), '—');
+  assert.equal(cell(matched!, 'Billed'), '—');
+  // Shown, never enforced: receiving is still offered on the line billed
+  // above what arrived.
+  assert.match(
+    orderPage.html,
+    new RegExp(
+      `name="compositionAction" value="${regexpText(id('action', 'receive_lines_known'))}"`,
+      'u',
+    ),
+  );
+
+  // The bill names its order through the stored relation and opens it.
+  const bill = f.executor.seed(
+    'vendor_bill',
+    {
+      [id('field', 'vendor_bill_number')]: 'BILL-000007',
+      [id('field', 'vendor_bill_state')]: id(
+        'option',
+        'vendor_bill_state_open',
+      ),
+      [id('field', 'vendor_bill_bill_date')]: '2026-09-30T10:00:00.000Z',
+      [id('field', 'vendor_bill_due_date')]: '2026-10-30T10:00:00.000Z',
+      [id('field', 'vendor_bill_supplier_party_id')]: f.party,
+      [id('field', 'vendor_bill_supplier_invoice_number')]: 'INV-5501',
+      [id('field', 'vendor_bill_currency')]: 'CAD',
+      [id('field', 'vendor_bill_payment_terms')]: null,
+      ...Object.fromEntries(
+        [
+          'subtotal',
+          'charges',
+          'tax',
+          'total',
+          'paid_amount',
+          'credited_amount',
+          'balance',
+        ].map((name) => [id('field', `vendor_bill_${name}`), '0']),
+      ),
+      [id('relation', 'vendor_bill_order')]: order,
+    },
+    scope,
+  );
+  // Like the PostgreSQL provider: a stored relation is no value of a get,
+  // and each relation a get is asked to state is resolved against the
+  // governed compiled storage.
+  const storage = await governedStorageTarget();
+  const gets: Record<string, unknown>[] = [];
+  const executor: SemanticQueryExecutor = {
+    async execute(request) {
+      const result = await f.executor.execute(request);
+      if (request.definition.queryType !== 'get') return result;
+      const args = asRecord(request.arguments);
+      gets.push({ queryId: request.definition.queryId, ...args });
+      const targets = relationTargetPlans(
+        storage,
+        storage.entities.find(
+          (value) => value.entityId === request.definition.sourceEntityId,
+        )!,
+        args.relationTargets as ImmutableJsonValue | undefined,
+      );
+      return {
+        ...result,
+        records: result.records.map((record) => ({
+          ...record,
+          values: Object.fromEntries(
+            Object.entries(record.values).filter(
+              ([key]) => !key.includes(':relation.'),
+            ),
+          ),
+          ...(targets.length
+            ? {
+                relationLabels: Object.fromEntries(
+                  targets.map((target) => [
+                    target.relationId,
+                    {
+                      label: null,
+                      recordId:
+                        (record.values[target.relationId] as
+                          string | undefined) ?? null,
+                    },
+                  ]),
+                ),
+              }
+            : {}),
+        })),
+      };
+    },
+  };
+  const billGateways = statingGateways(f, {}, executor);
+  const billPath = `/?${new URLSearchParams({
+    surface: id('surface', 'vendor_bill_detail'),
+    record: bill,
+    [id('parameter', 'vendor_bill_get_legal_entity_scope')]: scope,
+  }).toString()}`;
+  const fact = (html: string) =>
+    /<div><dt>Purchase order<\/dt><dd>([^<]*)<\/dd><\/div>/u.exec(html)?.[1];
+  const page = await renderSurfaceRuntimeWithData(
+    f.view,
+    billPath,
+    billGateways,
+  );
+  assert.equal(page.statusCode, 200);
+  assert.equal(fact(page.html), 'PO-000042');
+  // The bill's own get stated its order, the one relation the page names.
+  assert.deepEqual(
+    gets.find((read) => read.queryId === id('query', 'vendor_bill_get'))
+      ?.relationTargets,
+    [id('relation', 'vendor_bill_order')],
+  );
+  const href = /<a class="button" href="([^"]+)">Open purchase order<\/a>/u
+    .exec(page.html)?.[1]
+    ?.replaceAll('&amp;', '&');
+  assert.ok(href);
+  const target = new URL(href, 'http://fixture.local');
+  assert.equal(
+    target.searchParams.get('surface'),
+    id('surface', 'purchase_order_detail'),
+  );
+  assert.equal(target.searchParams.get('record'), order);
+  assert.equal(
+    target.searchParams.get(
+      id('parameter', 'commercial_purchase_order_get_legal_entity_scope'),
+    ),
+    scope,
+  );
+  // Current policy decides the label on every request: withheld, the fact
+  // reads "—" and the bill still serves.
+  f.deniedReads.add(id('permission', 'purchase_order_read'));
+  const withheld = await renderSurfaceRuntimeWithData(
+    f.view,
+    billPath,
+    billGateways,
+  );
+  assert.equal(withheld.statusCode, 200);
+  assert.equal(fact(withheld.html), '—');
+  assert.match(withheld.html, /BILL-000007/u);
+  f.deniedReads.delete(id('permission', 'purchase_order_read'));
 });
 
 test('INVENTORY-PARITY: the item page lists the stock and movements of one company by the item field, picks the company like an entry and re-authorizes every read', async () => {
