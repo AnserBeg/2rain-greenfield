@@ -1182,3 +1182,75 @@ test('INVENTORY-PARITY: a stock document is entered like an order, with a choice
     };
   }, /CANON_SCHEMA_INVALID/);
 });
+
+test('INVENTORY-PARITY: a new stock document is dated now, not midnight, a default of now (ruling INV-A)', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = Loose & {
+    fieldId: string;
+    defaultNow?: unknown;
+    defaultDaysFromToday?: number;
+  };
+  const ns = 'northstar.app';
+  const headerField = (candidate: Loose, document: string, name: string) =>
+    (
+      (candidate.surfaces as Loose[]).find(
+        (value) => value.surfaceId === `${ns}:surface.${document}_form`,
+      )!.documentEditor as { headerFields: EditorField[] }
+    ).headerFields.find(
+      (field) => field.fieldId === `${ns}:field.${document}_${name}`,
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  const effective = headerField(
+    source,
+    'inventory_transaction',
+    'effective_at',
+  );
+  assert.equal(effective.defaultNow, true);
+  assert.equal(effective.defaultDaysFromToday, undefined);
+  // Only a UTC date-time field, never beside another default, and only ever
+  // declared as true.
+  const refusal =
+    /a default of now is a UTC date-time field with no other default/;
+  refuse((candidate) => {
+    headerField(candidate, 'sales_order', 'ship_to_city').defaultNow = true;
+  }, refusal);
+  refuse((candidate) => {
+    headerField(
+      candidate,
+      'inventory_transaction',
+      'reason_narrative',
+    ).defaultNow = true;
+  }, refusal);
+  refuse((candidate) => {
+    headerField(
+      candidate,
+      'inventory_transaction',
+      'effective_at',
+    ).defaultDaysFromToday = 0;
+  }, refusal);
+  refuse((candidate) => {
+    headerField(candidate, 'inventory_transaction', 'effective_at').defaultNow =
+      false;
+  }, /CANON_SCHEMA_INVALID/);
+  // The instant the draft opens, to the second its control shows -- where a
+  // default counted from today is that day's midnight.
+  const opened = new Date('2026-09-30T14:03:27.456Z');
+  assert.equal(
+    declaredDefault({ defaultNow: true }, opened),
+    '2026-09-30T14:03:27.000Z',
+  );
+  assert.equal(
+    declaredDefault({ defaultDaysFromToday: 0 }, opened),
+    '2026-09-30T00:00:00.000Z',
+  );
+});

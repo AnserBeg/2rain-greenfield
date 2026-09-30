@@ -91,8 +91,9 @@ export interface SurfaceRuntimeGateways {
   readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
   /**
    * The request clock, read once per request: a List's "before today" views,
-   * their counts and its overdue dates all use the same instant. Injectable so
-   * a test fixes the day; the wall clock when absent.
+   * their counts and its overdue dates all use the same instant, as do a
+   * draft editor's declared defaults (a date days from today, or now).
+   * Injectable so a test fixes the day; the wall clock when absent.
    */
   readonly clock?: () => Date;
   readonly operationMediation: SemanticOperationMediationAuthority;

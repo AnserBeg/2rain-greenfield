@@ -34,7 +34,9 @@ test('an adjustment is entered like a document, numbered on save, and posted or 
     expect(await stock(page)).toEqual({ 'CAL-WH': '13', 'VAN-WH': '6' });
 
     // Inventory -> Inventory transactions -> New: the editor opens with an
-    // Adjustment dated today, and nothing for the number, state or source.
+    // Adjustment dated now -- a time of today, not midnight (ruling INV-A);
+    // the control drops a zero seconds field -- and nothing for the number,
+    // state or source.
     await openNew(page);
     await expect(page.getByLabel('Type *', { exact: true })).toHaveValue(
       `${ns}:option.inventory_transaction_type_adjustment`,
@@ -42,7 +44,9 @@ test('an adjustment is entered like a document, numbered on save, and posted or 
     await expect(
       page.getByLabel('Effective date (UTC) *', { exact: true }),
     ).toHaveValue(
-      new RegExp(`^${new Date().toISOString().slice(0, 10)}T00:00(?::00)?$`),
+      new RegExp(
+        `^${new Date().toISOString().slice(0, 10)}T\\d{2}:\\d{2}(?::\\d{2})?$`,
+      ),
     );
     for (const local of ['number', 'state', 'source_type', 'source_id'])
       await expect(
@@ -212,8 +216,9 @@ async function openNew(page: Page) {
 }
 
 /**
- * The header and one line. The effective time is now, so a document that
- * takes stock is not dated before the stock it takes arrived today.
+ * The header and one line. The Effective date is left as the editor dates a
+ * new document -- now (ruling INV-A) -- so a document that takes stock is not
+ * dated before the stock it takes, which the fixture received today.
  */
 async function enter(page: Page, document: Document) {
   await page
@@ -225,9 +230,6 @@ async function enter(page: Page, document: Document) {
   await page
     .getByLabel('Narrative', { exact: true })
     .fill(document.narrative ?? `${document.reason} in the browser`);
-  await page
-    .getByLabel('Effective date (UTC) *', { exact: true })
-    .fill(new Date().toISOString().slice(0, 19));
   await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
   if (document.line.from)
     await pick(

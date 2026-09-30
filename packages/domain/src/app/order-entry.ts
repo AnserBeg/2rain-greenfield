@@ -560,9 +560,11 @@ export function orderEntrySurfaces(
         field('inventory_transaction_reason_narrative', 'Narrative', {
           presentation: { kind: 'multiline' },
         }),
-        // Today, midnight UTC: the posting window admits no earlier day.
+        // Now, not midnight (ruling INV-A): stock received earlier today is
+        // on hand at that instant, so taking or moving it is not refused as
+        // negative stock. The posting window admits no earlier day.
         field('inventory_transaction_effective_at', 'Effective date', {
-          defaultDaysFromToday: 0,
+          defaultNow: true,
         }),
       ],
       createValues: [

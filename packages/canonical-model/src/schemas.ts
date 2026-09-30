@@ -1172,6 +1172,14 @@ const editorField = z.strictObject({
    * stores. Optional v6 key (ADR-0047 §7).
    */
   defaultDaysFromToday: z.number().int().min(0).max(366).optional(),
+  /**
+   * A never-saved document's starting value for a UTC date-time field: the
+   * instant the draft opens, to the second -- a stock document's effective
+   * time, so stock received earlier that day is already on hand. The user may
+   * change it; a saved record keeps what it stores. Optional v6 key
+   * (ADR-0047 §7).
+   */
+  defaultNow: z.literal(true).optional(),
 });
 export const SurfaceDocumentEditorSchema = z.strictObject({
   headerLabel: LabelSchema.optional(),

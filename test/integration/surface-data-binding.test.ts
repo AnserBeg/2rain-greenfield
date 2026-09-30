@@ -10015,3 +10015,86 @@ test('INVENTORY-PARITY: a stock document is entered in the shared editor; its fi
   assert.equal(locked.statusCode, 422);
   assert.match(locked.html, /DRAFT_EDITOR_LOCKED/u);
 });
+
+test('INVENTORY-PARITY: a new stock document is dated the instant it opens, not midnight, and a save that keeps that date sends it (ruling INV-A)', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const main = f.executor.seed('location', {
+    [field('location_code')]: 'CAL-WH',
+    [field('location_name')]: 'Calgary warehouse',
+    [field('location_type')]: id('option', 'warehouse'),
+  });
+  const form = f.surfaces.find(
+    (value) => value.surfaceId === id('surface', 'inventory_transaction_form'),
+  )!;
+  const url = new URL(
+    `http://fixture.local/?surface=${encodeURIComponent(form.surfaceId)}&${encodeURIComponent(id('parameter', 'inventory_transaction_get_legal_entity_scope'))}=${scope}`,
+  );
+  // The request clock: an afternoon instant, with milliseconds.
+  const gateways: SurfaceRuntimeGateways = {
+    ...f.gateways,
+    clock: () => new Date('2026-09-30T14:03:27.456Z'),
+  };
+  const editor = (await documentEditor(
+    f.view,
+    form,
+    f.surfaces,
+    url,
+    scope,
+    gateways,
+  ))!;
+  const html = Object.values(editor.slots!).join('');
+  const effective = new RegExp(
+    `<input type="datetime-local"[^>]*name="draft:[^"]+:${field('inventory_transaction_effective_at').replaceAll('.', '\\.')}" value="([^"]*)"`,
+    'u',
+  ).exec(html);
+  // Now, to the second its control shows -- not midnight, which would date a
+  // document that takes stock before the stock that arrived this morning.
+  assert.equal(effective?.[1], '2026-09-30T14:03:27');
+
+  // Saved with that date as shown: the create sends the same instant.
+  const entered: Record<string, string> = {
+    inventory_transaction_effective_at: effective![1]!,
+    inventory_transaction_type: id(
+      'option',
+      'inventory_transaction_type_adjustment',
+    ),
+    inventory_transaction_reason_code: 'DAMAGED',
+    inventory_transaction_reason_narrative: 'Forklift damage',
+    inventory_transaction_line_item_id: f.item,
+    inventory_transaction_line_from_location_id: main,
+    inventory_transaction_line_quantity: '-2',
+  };
+  const submission: Record<string, string> = {};
+  for (const match of html.matchAll(/name="(draft:[^"]+)"/g))
+    submission[match[1]!] = entered[match[1]!.split(':field.')[1]!] ?? '';
+  const saved = (await documentEditor(
+    f.view,
+    form,
+    f.surfaces,
+    url,
+    scope,
+    gateways,
+    {
+      draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+      draftAction: 'save',
+      ...submission,
+    },
+  ))!;
+  assert.equal(saved.statusCode, 303);
+  const create = f.executor.calls.find(
+    (call) =>
+      call.definition.operationId ===
+      id('operation', 'inventory_transaction_create'),
+  );
+  assert.equal(
+    asRecord(asRecord(create!.input).values)[
+      field('inventory_transaction_effective_at')
+    ],
+    '2026-09-30T14:03:27.000Z',
+  );
+});
