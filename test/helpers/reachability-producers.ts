@@ -33,6 +33,7 @@ export const reachabilityProducers = [
     'test/unit/canonical-model/negative-contracts.test.ts',
     'test/unit/canonical-model/normalization.test.ts',
     'test/unit/canonical-model/predicate-admission.test.ts',
+    'test/unit/canonical-model/surface-composition.test.ts',
     'test/unit/canonical-model/surface-list.test.ts',
     'test/unit/catalog-definition.test.ts',
     'test/unit/commercial-amounts.test.ts',
