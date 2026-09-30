@@ -10576,3 +10576,221 @@ test('PAYABLES: the order lists its bills and offers billing only while the orde
   );
   assert.match(paidHtml, /VPAY-000001/u);
 });
+
+test('PAYABLES (PY-G): each order line shows its three-way match as the read model states it, and a bill names and opens its order', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const {
+    order,
+    lines: [billedAbove, unbilled, matched],
+  } = seedPurchaseOrder(f, ['3', '4', '2']);
+  // The match as the purchase-line read model states it, per line; one line
+  // unstated, as a withheld bill read leaves it.
+  const stated = new Map<string, Record<string, string | null>>([
+    [
+      billedAbove!,
+      {
+        received: '1',
+        billed: '2',
+        to_bill: '0',
+        match_status: 'Billed above received',
+      },
+    ],
+    [
+      unbilled!,
+      {
+        received: '4',
+        billed: '1',
+        to_bill: '3',
+        match_status: 'Received, not billed',
+      },
+    ],
+    [
+      matched!,
+      { received: '2', billed: null, to_bill: null, match_status: null },
+    ],
+  ]);
+  const gateways = statingGateways(f, {
+    commercial: (key, record) => stated.get(record.recordId)?.[key] ?? null,
+  });
+  const orderPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({
+      surface: id('surface', 'purchase_order_detail'),
+      record: order,
+      [id('parameter', 'commercial_purchase_order_get_legal_entity_scope')]:
+        scope,
+    }).toString()}`,
+    gateways,
+  );
+  assert.equal(orderPage.statusCode, 200);
+  const section = new RegExp(
+    `<section id="${regexpText(id('dataset', 'purchasing_lines'))}"[\\s\\S]*?</section>`,
+    'u',
+  ).exec(orderPage.html)?.[0];
+  assert.ok(section, 'the Order lines section renders');
+  for (const label of ['Billed', 'To bill'])
+    assert.match(
+      section,
+      new RegExp(`<th scope="col"[^>]*>${label}</th>`, 'u'),
+    );
+  const row = (line: string) =>
+    new RegExp(
+      `<tr[^>]*data-record-id="${regexpText(line)}"[^>]*>([\\s\\S]*?)</tr>`,
+      'u',
+    ).exec(section)?.[1] ?? '';
+  const cell = (line: string, label: string) =>
+    new RegExp(`<td data-column-label="${label}"[^>]*>([^<]*)</td>`, 'u').exec(
+      row(line),
+    )?.[1];
+  // The match reads beside the product, without opening details.
+  const match = (line: string) =>
+    /<span class="composition-cell-label">Match<\/span> ([^<]*)<\/span>/u.exec(
+      row(line),
+    )?.[1];
+  assert.equal(match(billedAbove!), 'Billed above received');
+  assert.equal(cell(billedAbove!, 'Billed'), '2');
+  assert.equal(cell(billedAbove!, 'To bill'), '0');
+  assert.equal(match(unbilled!), 'Received, not billed');
+  assert.equal(cell(unbilled!, 'To bill'), '3');
+  // Unstated is shown as unstated, never a zero or a guessed match.
+  assert.equal(match(matched!), '—');
+  assert.equal(cell(matched!, 'Billed'), '—');
+  // Shown, never enforced: receiving is still offered on the line billed
+  // above what arrived.
+  assert.match(
+    orderPage.html,
+    new RegExp(
+      `name="compositionAction" value="${regexpText(id('action', 'receive_lines_known'))}"`,
+      'u',
+    ),
+  );
+
+  // The bill names its order through the stored relation and opens it.
+  const bill = f.executor.seed(
+    'vendor_bill',
+    {
+      [id('field', 'vendor_bill_number')]: 'BILL-000007',
+      [id('field', 'vendor_bill_state')]: id(
+        'option',
+        'vendor_bill_state_open',
+      ),
+      [id('field', 'vendor_bill_bill_date')]: '2026-09-30T10:00:00.000Z',
+      [id('field', 'vendor_bill_due_date')]: '2026-10-30T10:00:00.000Z',
+      [id('field', 'vendor_bill_supplier_party_id')]: f.party,
+      [id('field', 'vendor_bill_supplier_invoice_number')]: 'INV-5501',
+      [id('field', 'vendor_bill_currency')]: 'CAD',
+      [id('field', 'vendor_bill_payment_terms')]: null,
+      ...Object.fromEntries(
+        [
+          'subtotal',
+          'charges',
+          'tax',
+          'total',
+          'paid_amount',
+          'credited_amount',
+          'balance',
+        ].map((name) => [id('field', `vendor_bill_${name}`), '0']),
+      ),
+      [id('relation', 'vendor_bill_order')]: order,
+    },
+    scope,
+  );
+  // Like the PostgreSQL provider: a stored relation is no value of a get,
+  // and each relation a get is asked to state is resolved against the
+  // governed compiled storage.
+  const storage = await governedStorageTarget();
+  const gets: Record<string, unknown>[] = [];
+  const executor: SemanticQueryExecutor = {
+    async execute(request) {
+      const result = await f.executor.execute(request);
+      if (request.definition.queryType !== 'get') return result;
+      const args = asRecord(request.arguments);
+      gets.push({ queryId: request.definition.queryId, ...args });
+      const targets = relationTargetPlans(
+        storage,
+        storage.entities.find(
+          (value) => value.entityId === request.definition.sourceEntityId,
+        )!,
+        args.relationTargets as ImmutableJsonValue | undefined,
+      );
+      return {
+        ...result,
+        records: result.records.map((record) => ({
+          ...record,
+          values: Object.fromEntries(
+            Object.entries(record.values).filter(
+              ([key]) => !key.includes(':relation.'),
+            ),
+          ),
+          ...(targets.length
+            ? {
+                relationLabels: Object.fromEntries(
+                  targets.map((target) => [
+                    target.relationId,
+                    {
+                      label: null,
+                      recordId:
+                        (record.values[target.relationId] as
+                          string | undefined) ?? null,
+                    },
+                  ]),
+                ),
+              }
+            : {}),
+        })),
+      };
+    },
+  };
+  const billGateways = statingGateways(f, {}, executor);
+  const billPath = `/?${new URLSearchParams({
+    surface: id('surface', 'vendor_bill_detail'),
+    record: bill,
+    [id('parameter', 'vendor_bill_get_legal_entity_scope')]: scope,
+  }).toString()}`;
+  const fact = (html: string) =>
+    /<div><dt>Purchase order<\/dt><dd>([^<]*)<\/dd><\/div>/u.exec(html)?.[1];
+  const page = await renderSurfaceRuntimeWithData(
+    f.view,
+    billPath,
+    billGateways,
+  );
+  assert.equal(page.statusCode, 200);
+  assert.equal(fact(page.html), 'PO-000042');
+  // The bill's own get stated its order, the one relation the page names.
+  assert.deepEqual(
+    gets.find((read) => read.queryId === id('query', 'vendor_bill_get'))
+      ?.relationTargets,
+    [id('relation', 'vendor_bill_order')],
+  );
+  const href = /<a class="button" href="([^"]+)">Open purchase order<\/a>/u
+    .exec(page.html)?.[1]
+    ?.replaceAll('&amp;', '&');
+  assert.ok(href);
+  const target = new URL(href, 'http://fixture.local');
+  assert.equal(
+    target.searchParams.get('surface'),
+    id('surface', 'purchase_order_detail'),
+  );
+  assert.equal(target.searchParams.get('record'), order);
+  assert.equal(
+    target.searchParams.get(
+      id('parameter', 'commercial_purchase_order_get_legal_entity_scope'),
+    ),
+    scope,
+  );
+  // Current policy decides the label on every request: withheld, the fact
+  // reads "—" and the bill still serves.
+  f.deniedReads.add(id('permission', 'purchase_order_read'));
+  const withheld = await renderSurfaceRuntimeWithData(
+    f.view,
+    billPath,
+    billGateways,
+  );
+  assert.equal(withheld.statusCode, 200);
+  assert.equal(fact(withheld.html), '—');
+  assert.match(withheld.html, /BILL-000007/u);
+  f.deniedReads.delete(id('permission', 'purchase_order_read'));
+});

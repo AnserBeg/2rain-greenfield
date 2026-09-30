@@ -930,7 +930,8 @@ test('PAYABLES: the purchase order lists its bills and offers billing only when 
     },
   );
 
-  // The bill: each command where its state admits it, and nowhere else.
+  // The bill: each command where its state admits it, and nowhere else (the
+  // way back to its order is a link, not a command, and is always there).
   const bill = composition('vendor_bill_detail');
   assert.deepEqual(
     bill.children.map((child) => child.label),
@@ -938,6 +939,7 @@ test('PAYABLES: the purchase order lists its bills and offers billing only when 
   );
   const offered = (state: string) =>
     bill.actions
+      .filter((entry) => !entry.navigate)
       .filter((entry) =>
         entry.conditions.every((condition) => {
           const stateOption = `${ns}:option.vendor_bill_state_${state}`;
@@ -1029,5 +1031,150 @@ test('PAYABLES: the purchase order lists its bills and offers billing only when 
   assert.deepEqual(
     billList.views.map((view) => view.label),
     ['All', 'Open', 'Partially paid', 'Paid', 'Void'],
+  );
+});
+
+test('PAYABLES (PY-G): each order line shows its three-way match from the purchase-line read model, and a bill names and opens its order', () => {
+  const ns = 'northstar.app';
+  type Loose = Record<string, unknown>;
+  const source = composedApplicationDefinition() as Loose;
+  const composition = (local: string) =>
+    (
+      (source.surfaces as Loose[]).find(
+        (value) => value.surfaceId === `${ns}:surface.${local}`,
+      ) as Loose & {
+        composition: {
+          presentation: { header: { facts: string[] } };
+          fields: (Loose & { columnId: string; field: string })[];
+          children: (Loose & {
+            label: string;
+            query: { targetId: string };
+            columns: (Loose & {
+              columnId: string;
+              label: string;
+              field: string;
+              presentation?: { role: string };
+            })[];
+          })[];
+          actions: (Loose & {
+            actionId: string;
+            conditions: unknown[];
+            navigate?: {
+              surface: { targetId: string };
+              query: { targetId: string };
+              record: { source: string; field: string };
+            };
+          })[];
+        };
+      }
+    ).composition;
+  // The Order lines section: ordered and received, then billed, left to
+  // bill and the match, read from the purchase-line read model.
+  const lines = composition('purchase_order_detail').children.find(
+    (child) => child.label === 'Order lines',
+  )!;
+  assert.equal(
+    lines.query.targetId,
+    `${ns}:query.commercial_purchase_order_lines`,
+  );
+  assert.deepEqual(
+    lines.columns
+      .filter((column) =>
+        ['billed', 'to_bill', 'match'].some((local) =>
+          column.columnId.endsWith(`:column.purchasing_${local}`),
+        ),
+      )
+      .map((column) => [column.label, column.field, column.presentation?.role]),
+    [
+      ['Billed', `${ns}:metric.billed`, 'quantity'],
+      ['To bill', `${ns}:metric.to_bill`, 'quantity'],
+      ['Match', `${ns}:metric.match_status`, 'secondary'],
+    ],
+  );
+  // Shown, never enforced: no action is conditioned on the match.
+  assert.doesNotMatch(
+    JSON.stringify(
+      composition('purchase_order_detail').actions.map(
+        (action) => action.conditions,
+      ),
+    ),
+    /metric\.(?:billed|to_bill|match_status)/u,
+  );
+  const readModel = (
+    (source.queries as Loose[]).find(
+      (query) =>
+        query.queryId === `${ns}:query.commercial_purchase_order_lines`,
+    ) as Loose & {
+      readModel: {
+        queries: Record<string, { targetId: string }>;
+        resultFields: Record<string, string>;
+      };
+    }
+  ).readModel;
+  assert.deepEqual(Object.keys(readModel.resultFields), [
+    'line_amount',
+    'line_tax',
+    'received',
+    'open_to_receive',
+    'billed',
+    'to_bill',
+    'match_status',
+  ]);
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(readModel.queries).map(([key, value]) => [
+        key,
+        value.targetId,
+      ]),
+    ),
+    {
+      received: `${ns}:query.purchase_order_received_get`,
+      billLines: `${ns}:query.vendor_bill_line_list`,
+      bills: `${ns}:query.vendor_bill_list`,
+      bill: `${ns}:query.vendor_bill_get`,
+    },
+  );
+
+  // The bill names its order through the stored relation, labelled by the
+  // order's own get, and opens it -- from wherever the bill was opened.
+  const bill = composition('vendor_bill_detail');
+  const order = bill.fields.find((column) =>
+    column.columnId.endsWith(':column.bill_order'),
+  )!;
+  assert.equal(order.field, `${ns}:relation.vendor_bill_order`);
+  assert.deepEqual(order.reference, {
+    query: {
+      kind: 'queryReference',
+      schemaVersion: 'v6',
+      targetId: `${ns}:query.purchase_order_get`,
+    },
+    labelField: {
+      kind: 'fieldReference',
+      schemaVersion: 'v6',
+      targetId: `${ns}:field.purchase_order_number`,
+    },
+  });
+  assert.equal(bill.presentation.header.facts[0], `${ns}:column.bill_order`);
+  assert.ok(bill.presentation.header.facts.length <= 6);
+  const open = bill.actions.find(
+    (action) => action.actionId === `${ns}:action.bill_open_order`,
+  )!;
+  assert.deepEqual(open.conditions, []);
+  assert.deepEqual(open.navigate, {
+    surface: {
+      kind: 'surfaceReference',
+      schemaVersion: 'v6',
+      targetId: `${ns}:surface.purchase_order_detail`,
+    },
+    query: {
+      kind: 'queryReference',
+      schemaVersion: 'v6',
+      targetId: `${ns}:query.commercial_purchase_order_get`,
+    },
+    record: { source: 'record', field: `${ns}:relation.vendor_bill_order` },
+  });
+  // The page still validates as a whole.
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
   );
 });

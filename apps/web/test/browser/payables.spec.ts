@@ -84,6 +84,19 @@ test('a received purchase order is billed, paid in part and credited for the res
     ).toHaveText('INV-5501');
     // Everything received is billed, so the task is no longer offered.
     await expect(billTask()).toHaveCount(0);
+    // The line's three-way match (PY-G): 3 ordered, 2 received and 2 billed,
+    // nothing left to bill.
+    const line = dataset('purchasing_lines').locator('tbody tr').first();
+    await expect(line.locator('td[data-column-label="Received"]')).toHaveText(
+      '2',
+    );
+    await expect(line.locator('td[data-column-label="Billed"]')).toHaveText(
+      '2',
+    );
+    await expect(line.locator('td[data-column-label="To bill"]')).toHaveText(
+      '0',
+    );
+    await expect(line).toContainText('Matched');
     await capture(page, testInfo, 'order-billed');
 
     // The bill: its frozen figures, its line and its balance.
@@ -98,6 +111,8 @@ test('a received purchase order is billed, paid in part and credited for the res
     await expect(fact('Total')).toHaveText('59.88');
     await expect(fact('Balance')).toHaveText('59.88');
     await expect(fact('Supplier invoice number')).toHaveText('INV-5501');
+    // The bill names its order (PAYABLES increment 3).
+    await expect(fact('Purchase order')).toHaveText(order.number);
     await expect(fact('Due date')).not.toHaveText('');
     const lines = dataset('bill_lines').locator('tbody tr');
     await expect(lines).toHaveCount(1);
@@ -173,6 +188,15 @@ test('a received purchase order is billed, paid in part and credited for the res
       page.getByRole('button', { name: 'Record payment', exact: true }),
     ).toHaveCount(0);
     await capture(page, testInfo, 'bill-settled');
+
+    // The way back to the order, from wherever the bill was opened.
+    await page
+      .getByRole('link', { name: 'Open purchase order', exact: true })
+      .click();
+    await expect(page.locator('.composition-header h1')).toHaveText(
+      order.number,
+    );
+    await page.goto(billUrl);
 
     // The printable bill: every figure.
     await page.getByRole('link', { name: 'Print vendor bill' }).click();
