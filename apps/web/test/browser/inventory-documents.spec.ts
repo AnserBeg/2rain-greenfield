@@ -250,13 +250,17 @@ async function enter(page: Page, document: Document) {
     .fill(document.line.quantity);
 }
 
-/** Save draft opens the saved document, numbered by the server. */
+/**
+ * Save draft opens the saved document, titled by the number the server gave
+ * it: the page's heading, since a stock document's page declares no header
+ * of its own.
+ */
 async function saveDraft(page: Page): Promise<string> {
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
-  const header = page.locator('.composition-header');
-  await expect(header).toContainText(/STK-\d{6}/u);
-  return /STK-\d{6}/u.exec(await header.innerText())![0];
+  const title = page.getByRole('heading', { level: 1, name: /^STK-\d{6}$/u });
+  await expect(title).toBeVisible();
+  return (await title.innerText()).trim();
 }
 
 /** A confirmed command on the saved document. */
@@ -283,7 +287,7 @@ async function refused(page: Page, code: string) {
   if (await secondary.count()) await secondary.click();
   await page.getByRole('button', { name: 'Post', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm Post', exact: true }).click();
-  await expect(page.locator('[data-message-subject]')).toHaveText(code);
+  await expect(page.locator('[data-message-subject]').first()).toHaveText(code);
 }
 
 /**

@@ -2180,9 +2180,11 @@ async function createScopedStockDocument(
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
-  const header = page.locator('.composition-header');
-  await expect(header).toContainText(/STK-\d{6}/u);
-  return /STK-\d{6}/u.exec(await header.innerText())![0];
+  // Titled by the number the server gave it: a stock document's page
+  // declares no header of its own.
+  const title = page.getByRole('heading', { level: 1, name: /^STK-\d{6}$/u });
+  await expect(title).toBeVisible();
+  return (await title.innerText()).trim();
 }
 
 /**
