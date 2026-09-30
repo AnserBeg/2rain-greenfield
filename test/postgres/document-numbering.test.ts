@@ -9,9 +9,33 @@ import {
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import { unicodeCaseFold } from '../../packages/canonical-model/src/index.js';
 import {
+  PROJECTION_FAMILY_IDS,
+  type StorageTargetPayloadV1,
+} from '../../packages/compiler/src/index.js';
+import type { MintedUuid } from '../../packages/platform-runtime/src/index.js';
+import {
   fulfillmentColumn,
   fulfillmentTable,
+  quoteFulfillmentIdentifier,
 } from '../../packages/postgres-provider/src/fulfillment.js';
+import {
+  PostgresModuleRuntimeInterpreter,
+  verificationSentinelNumber,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import {
+  PostgresReleaseVerificationService,
+  releaseVerificationBinding,
+} from '../../packages/postgres-provider/src/release-verification-service.js';
+import { TrustedActorEnvelopeIssuer } from '../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
+import { projectionPayload } from '../fixtures/g2/party/compiler.js';
+import {
+  PARTY_IDS,
+  partyModuleDefinition,
+} from '../fixtures/g2/party/definition.js';
+import {
+  PARTY_TEST_SCOPE,
+  withRealPartyRuntime,
+} from '../fixtures/g2/party/runtime-harness.js';
 import {
   governedProjection,
   governedReleaseRoot,
@@ -396,3 +420,398 @@ test(
     });
   },
 );
+
+// A create's read-back is the get its operation names -- a declared projection,
+// not the record -- and nothing makes it select an assigned number. Party is
+// numbered here three ways: `party_number`, which the create's read-back
+// selects; `party_account_number`, which only a second get selects; and the
+// role's `party_role_number`, which no get selects at all (the role's list,
+// search and resolve do, and the resolve matches it first).
+const partyNumber = PARTY_IDS.fieldIds.number;
+const accountNumber = `${PARTY_IDS.namespace}:field.party_account_number`;
+const roleNumber = `${PARTY_IDS.namespace}:field.party_role_number`;
+
+test(
+  'release verification reads assigned numbers its create read-back omits, and archives every record it creates',
+  { timeout: 300_000 },
+  async () => {
+    await withRealPartyRuntime(
+      'verification-assigned-witness',
+      async (runtime) => {
+        const party = storageEntity(runtime.storage, PARTY_IDS.entityIds.party);
+        const role = storageEntity(runtime.storage, PARTY_IDS.entityIds.role);
+        const stored = async (
+          entity: StorageEntity,
+          tenantId: string,
+          environmentId: string,
+          fieldIds: readonly string[],
+        ) =>
+          (
+            await runtime.adminPool.query<Record<string, unknown>>(
+              `SELECT ${quoteFulfillmentIdentifier(entity.recordIdentity.column)}::text AS record_id,
+                      ${quoteFulfillmentIdentifier(entity.archive.archivedAtColumn)} IS NOT NULL AS archived,
+                      ${fieldIds
+                        .map(
+                          (fieldId, index) =>
+                            `${quoteFulfillmentIdentifier(storageColumn(entity, fieldId).physicalName)} AS value_${String(index)}`,
+                        )
+                        .join(', ')}
+                 FROM ${fulfillmentTable(entity)}
+                WHERE tenant_id = $1 AND environment_id = $2
+                ORDER BY 1`,
+              [tenantId, environmentId],
+            )
+          ).rows.map((row) => ({
+            archived: row.archived === true,
+            recordId: String(row.record_id),
+            values: Object.fromEntries(
+              fieldIds.map((fieldId, index) => [
+                fieldId,
+                row[`value_${String(index)}`],
+              ]),
+            ),
+          }));
+
+        // The premise: each create's read-back omits a number it assigns.
+        const operations = projectionPayload<{
+          operations: { operationId: string; readBackQueryId: string }[];
+        }>(runtime.compiled, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+        const queries = projectionPayload<{
+          queries: {
+            queryId: string;
+            queryType: string;
+            selections: { fieldId: string }[];
+          }[];
+        }>(runtime.compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
+        const selecting = (fieldId: string, queryType?: string) =>
+          queries
+            .filter(
+              (query) =>
+                (queryType === undefined || query.queryType === queryType) &&
+                query.selections.some(
+                  (selection) => selection.fieldId === fieldId,
+                ),
+            )
+            .map((query) => query.queryId);
+        const readBackOf = (local: string) =>
+          operations.find(
+            (operation) =>
+              operation.operationId ===
+              `${PARTY_IDS.namespace}:operation.${local}`,
+          )?.readBackQueryId;
+        assert.ok(selecting(partyNumber).includes(readBackOf('party_create')!));
+        assert.ok(
+          !selecting(accountNumber).includes(readBackOf('party_create')!),
+        );
+        assert.deepEqual(selecting(accountNumber, 'get'), [
+          `${PARTY_IDS.namespace}:query.party_account_get`,
+        ]);
+        assert.ok(
+          !selecting(roleNumber).includes(readBackOf('party_role_create')!),
+        );
+        assert.deepEqual(selecting(roleNumber, 'get'), []);
+
+        // Activation admitted the release: its verification executed every
+        // scenario and derived none, the probes that consume a number included.
+        const plan = releaseVerificationBinding(runtime.compiled).plan;
+        const probes = plan.scenarios.map(
+          (scenario) => `${scenario.kind} ${scenario.subjectId}`,
+        );
+        for (const probe of [
+          `uniquenessFold ${partyNumber}`,
+          `uniquenessFold ${accountNumber}`,
+          `uniquenessFold ${roleNumber}`,
+          `searchableExclusion ${accountNumber}`,
+          `resolverAuthority ${PARTY_IDS.namespace}:query.party_resolve`,
+          `resolverAuthority ${PARTY_IDS.namespace}:query.party_role_resolve`,
+        ]) {
+          assert.ok(probes.includes(probe), probe);
+        }
+        const evidence = await runtime.adminPool.query<{
+          execution_scope: string;
+          executed_environment_id: string;
+          executed_tenant_id: string;
+          verification_evidence_id: string;
+        }>(
+          `SELECT verification_evidence_id, executed_tenant_id,
+                  executed_environment_id, execution_scope
+             FROM platform.release_verification_evidence
+            WHERE release_root = $1
+              AND tenant_id = executed_tenant_id
+              AND environment_id = executed_environment_id`,
+          [runtime.compiled.releaseRoot],
+        );
+        assert.equal(evidence.rows.length, 1);
+        const executedIn = evidence.rows[0]!;
+        assert.equal(executedIn.execution_scope, 'FULL', 'nothing was derived');
+        const executed = await runtime.adminPool.query<{
+          scenario_id: string;
+        }>(
+          `SELECT scenario_id FROM platform.release_verification_results
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND verification_evidence_id = $3
+            ORDER BY scenario_id`,
+          [
+            executedIn.executed_tenant_id,
+            executedIn.executed_environment_id,
+            executedIn.verification_evidence_id,
+          ],
+        );
+        assert.deepEqual(
+          executed.rows.map((row) => row.scenario_id),
+          plan.scenarios.map((scenario) => scenario.scenarioId).toSorted(),
+          'release verification executed every scenario',
+        );
+
+        // Every number verification arranged is its record's sentinel -- read
+        // back, read through the second get, or (the role's) used unread --
+        // and no record it arranged is left live.
+        const arranged = [
+          [
+            party,
+            await stored(
+              party,
+              executedIn.executed_tenant_id,
+              executedIn.executed_environment_id,
+              [partyNumber, accountNumber],
+            ),
+            [partyNumber, accountNumber],
+          ],
+          [
+            role,
+            await stored(
+              role,
+              executedIn.executed_tenant_id,
+              executedIn.executed_environment_id,
+              [roleNumber],
+            ),
+            [roleNumber],
+          ],
+        ] as const;
+        for (const [entity, records, fieldIds] of arranged) {
+          assert.ok(
+            records.length > 0,
+            `verification arranged ${entity.entityId}`,
+          );
+          for (const record of records) {
+            for (const fieldId of fieldIds) {
+              assert.equal(
+                record.values[fieldId],
+                verificationSentinelNumber(
+                  record.recordId,
+                  fieldId,
+                  storageColumn(entity, fieldId).fieldContract.bounds
+                    .maximumLength,
+                ),
+              );
+            }
+          }
+          assert.deepEqual(
+            records
+              .filter((record) => !record.archived)
+              .map((record) => record.recordId),
+            [],
+            `verification left no ${entity.entityId} record live`,
+          );
+        }
+
+        // A verification whose creates take real numbers stops at its first
+        // numbered create: the read-back says `PTY-000001`, not the record's
+        // sentinel. The record was registered for archiving before its numbers
+        // were read, so it is archived all the same.
+        const staged = await runtime.adminPool.query<{
+          release_id: MintedUuid;
+          verification_evidence_id: MintedUuid;
+        }>(
+          `SELECT release_id, verification_evidence_id
+             FROM platform.tenant_releases
+            WHERE tenant_id = $1 AND environment_id = $2 AND content_hash = $3`,
+          [
+            PARTY_TEST_SCOPE.a.tenantId,
+            PARTY_TEST_SCOPE.a.environmentId,
+            runtime.compiled.releaseRoot,
+          ],
+        );
+        assert.equal(staged.rows.length, 1);
+        await assert.rejects(
+          new PostgresReleaseVerificationService(
+            runtime.runtimePool,
+          ).executeSemanticCandidateWithExecutor(
+            runtime.contexts.a,
+            {
+              compiledRelease: runtime.compiled,
+              evidenceId: staged.rows[0]!.verification_evidence_id,
+              releaseId: staged.rows[0]!.release_id,
+            },
+            new PostgresModuleRuntimeInterpreter(
+              runtime.runtimePool,
+              humanActorIssuer(),
+            ),
+          ),
+          (error: unknown) => {
+            assert.equal(
+              (error as { code?: unknown }).code,
+              'VERIFICATION_ASSIGNED_VALUE_MISMATCH',
+              String(error),
+            );
+            return true;
+          },
+        );
+        assert.deepEqual(
+          (
+            await stored(
+              party,
+              PARTY_TEST_SCOPE.a.tenantId,
+              PARTY_TEST_SCOPE.a.environmentId,
+              [partyNumber, accountNumber],
+            )
+          ).map((record) => [
+            record.values[partyNumber],
+            record.values[accountNumber],
+            record.archived,
+          ]),
+          [['PTY-000001', 'ACC-000001', true]],
+          'the record a stopped verification created is archived',
+        );
+        assert.deepEqual(
+          await stored(
+            role,
+            PARTY_TEST_SCOPE.a.tenantId,
+            PARTY_TEST_SCOPE.a.environmentId,
+            [roleNumber],
+          ),
+          [],
+        );
+      },
+      numberedPartyDefinition(),
+    );
+  },
+);
+
+type StorageEntity = StorageTargetPayloadV1['entities'][number];
+
+function storageEntity(
+  storage: StorageTargetPayloadV1,
+  entityId: string,
+): StorageEntity {
+  const entity = storage.entities.find(
+    (candidate) => candidate.entityId === entityId,
+  );
+  assert.ok(entity, `the storage target has no ${entityId}`);
+  return entity;
+}
+
+function storageColumn(entity: StorageEntity, fieldId: string) {
+  const column = entity.columns.find(
+    (candidate) => candidate.canonicalFieldId === fieldId,
+  );
+  assert.ok(column, `${entity.entityId} has no column for ${fieldId}`);
+  return column;
+}
+
+/** Party's own definition, numbered three ways (see `partyNumber` above). */
+function numberedPartyDefinition(): Record<string, unknown> {
+  type Json = Record<string, unknown>;
+  type Query = Json & {
+    queryId: string;
+    resolveMatchKeys?: Json[];
+    selections: Json[];
+  };
+  const ns = PARTY_IDS.namespace;
+  const definition = structuredClone(partyModuleDefinition()) as Json & {
+    fields: Json[];
+    queries: Query[];
+  };
+  const numbering = (local: string, prefix: string) => ({
+    kind: 'documentSequence',
+    minimumDigits: 6,
+    prefix,
+    sequenceId: `${ns}:document_sequence.${local}`,
+    start: 1,
+  });
+  const reference = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const query = (local: string) =>
+    definition.queries.find(
+      (entry) => entry.queryId === `${ns}:query.${local}`,
+    )!;
+  const selection = (queryId: string, fieldId: string, ordinal: number) => ({
+    field: reference('fieldReference', fieldId),
+    kind: 'querySelection',
+    orderKey: ordinal * 10,
+    schemaVersion: 'v6',
+    selectionId: `${queryId.replace(':query.', ':selection.')}_${String(ordinal)}`,
+  });
+  const number = definition.fields.find(
+    (entry) => entry.fieldId === partyNumber,
+  )!;
+  number.numbering = numbering('party', 'PTY');
+  definition.fields.push(
+    {
+      ...structuredClone(number),
+      fieldId: accountNumber,
+      label: 'Account number',
+      numbering: numbering('party_account', 'ACC'),
+      orderKey: 40,
+      searchable: false,
+    },
+    {
+      ...structuredClone(number),
+      entity: reference('entityReference', PARTY_IDS.entityIds.role),
+      fieldId: roleNumber,
+      label: 'Role number',
+      numbering: numbering('party_role', 'ROLE'),
+      orderKey: 30,
+    },
+  );
+  const accountGet = structuredClone(query('party_get'));
+  accountGet.queryId = `${ns}:query.party_account_get`;
+  accountGet.selections = [
+    selection(accountGet.queryId, accountNumber, 1),
+    selection(accountGet.queryId, PARTY_IDS.fieldIds.name, 2),
+  ];
+  definition.queries.push(accountGet);
+  for (const local of [
+    'party_role_list',
+    'party_role_search',
+    'party_role_resolve',
+  ]) {
+    const entry = query(local);
+    entry.selections.push(
+      selection(entry.queryId, roleNumber, entry.selections.length + 1),
+    );
+  }
+  const resolve = query('party_role_resolve');
+  resolve.resolveMatchKeys = [
+    {
+      authority: 'identifier',
+      field: reference('fieldReference', roleNumber),
+      kind: 'resolveMatchKey',
+      matchKeyId: `${ns}:resolve-key.party_role_number`,
+      orderKey: 10,
+      schemaVersion: 'v6',
+    },
+    ...(resolve.resolveMatchKeys ?? []).map((key) => ({
+      ...key,
+      orderKey: Number(key.orderKey) + 10,
+    })),
+  ];
+  return definition;
+}
+
+function humanActorIssuer(): TrustedActorEnvelopeIssuer {
+  return new TrustedActorEnvelopeIssuer({
+    async resolve(context) {
+      return {
+        approvingHumanId: null,
+        delegation: null,
+        executionPrincipal: { kind: 'HUMAN', principalId: context.principalId },
+        initiatingHumanId: context.principalId,
+        subject: null,
+      };
+    },
+  });
+}

@@ -1,21 +1,22 @@
 # PURCHASING-PARITY — Rain's purchase orders at PaneFlow parity through metadata
 
-Status: slices 1-3 (priced purchase orders and RCV numbers; ending an order; receiving paperwork without the received-on date) executable and pushed (draft PR #8 on `packet/SALES-PARITY`); slice 4 chartered; no merge, no deployment. Sole LOCAL BUILD, chartered by the owner on 2026-09-29 ("continue to what is left ... the other components ... without me"; recommendations accepted, decisions reported at the end).
+Status: slices 1-4 (priced purchase orders and RCV numbers; ending an order; receiving paperwork without the received-on date; what is still to arrive) executable, with the ADR-0066 re-baseline, pushed on draft PR #8 (stacked on PR #7); no merge, no deployment. Sole LOCAL BUILD, chartered by the owner on 2026-09-29 ("continue to what is left ... the other components ... without me"; recommendations accepted, decisions reported at the end).
 Tier: outside the Critical set — storage columns are added through the existing `addColumn` path (SALES-PARITY claims 10-11); slice 2 changes receiving's order lifecycle and amend path (`purchasing-order-lifecycle.ts`, `receiving-order-capability.ts`), not the posting kernel; no verification, trust, migration or grant change.
-Base: `packet/SALES-PARITY` at `b1aefa05`, merged in (stacked on draft PR #7; slice 1 was cut at `f0a38e76`). Reference: PaneFlow `d057daff` read from source; audit in `PURCHASING-PARITY-inventory.md`.
+Base: `packet/SALES-PARITY` at `a58508da`, merged in (stacked on draft PR #7; slice 1 was cut at `f0a38e76`). Reference: PaneFlow `d057daff` read from source; audit in `PURCHASING-PARITY-inventory.md`.
 
 ## Owner rulings (recommended, taken under the owner's standing instruction)
 
 - PA: ruling B extends to purchase orders. A PO carries payment terms, a tax code that new lines start from, a line discount %, a tax rate frozen per line and per charge, freight and an other fee each with a code, exact half-up per-line amounts and totals, one currency (no FX). The v1 plan's "no tax on orders" boundary (`purchasing-sales-v1-plan.md` §6, §7.3) moves for POs as ruling B moved it for sales orders. No accounting, payable or ledger posting follows.
 - PB: a supplier's defaults are its Party defaults (currency, terms, tax code), as PaneFlow keeps one set per business partner; the expected date starts 14 days out, PaneFlow's default.
 - PC: a unit cost is typed; defaulting it from a last cost or a standard cost waits for an item cost field (inventory packet).
+- PD (the owner, 2026-09-30, "Yes, with slice 4"): re-baseline the release lineage under ADR-0066 in slice 4's push. `app.compiled.json` was 82.4 MB at 26 entries (GitHub refuses 100 MB, each entry ~3-4 MB and a longer composed PostgreSQL job); no production tenant exists.
 
 ## Slices
 
 1. Priced purchase orders (P3, P4, P23) and RCV receipt numbers (P1): terms, tax, discount, charges, totals, printed totals.
 2. Ending an order (P8, P9) and what is still open per line (P10 in part): Cancel refused once anything is received; a line's open remainder closed with a reason; Received and Open on each order line.
 3. Receiving paperwork (P13 in part, P14): packing slip and notes on a receipt; a purchase order's "Receive into" location that receiving starts from. The received-on date waits for its kernel rule (Filed).
-4. What is still to arrive (P10, P11, P26): received/open quantities and a total on the PO List, an Expected receipts List of open lines, late marking.
+4. What is still to arrive (P11, P26; P10 in part): an Expected receipts List of released orders with Ordered, Received and Open summed in the list statement, To receive / Late / All released views and a days-late marker; Receive is no longer offered on a line with nothing open. The Purchase orders List's figures and Total move to ORDER-PARITY.
 Deferred to their own packets: approvals and "place order" (P5-P7), vendor bills (P21), vendor returns and drop ship (P19-P20), inventory (transfers, count and opening posting routes, availability, reorder rules, lot/serial, valuation, units).
 
 ## Claims
@@ -30,6 +31,10 @@ Deferred to their own packets: approvals and "place order" (P5-P7), vendor bills
 8. "Close open remainder" stages an amendment request marked `close_remainder` with a required reason and applies it through the receiving amend, which sets the ordered quantity to what is received when it runs, under the line's lock, and consumes every close request staged for that line revision together; a plain quantity request beside a close request is refused as two intents. The order then closes. A task binding a record revision into an integer field writes the field's canonical string.
 9. A goods receipt carries an optional packing slip and notes, entered in both receive tasks and shown among the order's connected receipts; an empty optional task input reaches its operation as `null`.
 10. A purchase order may name a "Receive into" location (a picker in the editor, a detail on the page); both receive tasks start their location from it. A reference task input may declare `defaultFrom` a record field (optional v6 key; refused on other inputs and on a field the record query does not select).
+11. List progress (optional v6 `surface.list.progress`): a List may sum per row, in the PostgreSQL list statement, its document's active lines and the active done rows of those lines, before the count, the page and the export, pinned to the row's tenant, environment and company and the issued read scope; open = ordered − done, zero outside the declared states. The gateway authorizes both progress queries under current policy on every request (a denial refuses by name) and requires the executor to echo them; the figures are non-sortable values.
+12. A view may keep rows with open quantity (`open`) or before today (`before`, anchor `startOfTodayUtc`): the release holds no date; the web runtime resolves the anchor per request from an injectable clock, the cursor binds it and SQL applies it before count and page; a date column's `overdue` marks "N days late" from the same anchor. Surface floor 11 -> 12; agent presets publish progress, open and before.
+13. Purchasing -> Expected receipts lists released orders with open quantity: To receive (default), Late, All released, CSV; a user without receipt read has it refused by name while Purchase orders still serves.
+14. A line with nothing open (`open_to_receive` exactly 0) offers no Receive action; a withheld Open keeps it offered, and the receiving kernel refuses over-receipt anyway.
 
 ## Decisions
 
@@ -38,7 +43,9 @@ Deferred to their own packets: approvals and "place order" (P5-P7), vendor bills
 - P8 is not a quick fix: Cancel after receipts was the only way to end a partly received order, because Close requires nothing open. Slice 2 therefore adds closing a line's open remainder with the refusal, and comes before the paperwork: it closes an integrity gap.
 - A remainder is closed per line, as PaneFlow closes open units, through the existing amendment request (ADR-0038's staged intent) rather than a new order-level input. A close request is resolved when it applies, not when it is staged, after an in-lane check (a subagent reading the diff, not a review arm; none is owed outside the Critical set) showed a receipt posted in between could strand the line with requests that no retry could apply.
 - Received and Open ride the commercial purchase-line read model rather than a new receiving read model: one executor, parameterized by document.
-- The received-on date is split out: the posting kernel accepts a future effective date today, so choosing a date needs a Critical kernel rule first (Filed).
+- The received-on date is split out: with the kernel's 0-day backdate window the only valid receipt date is today, which is already stamped; it follows POSTING-FORWARD-DATE (a 7-day window and one forward-date rule for every posting family).
+- Expected receipts lists ORDERS, as PaneFlow does (a line List would need filters on the parent's state and more than one label per relation); its figures sum units across items, as PaneFlow's do. "Today" is the UTC day every List date is shown in; the release holds no date.
+- The Purchase orders List is untouched here, so nobody without receipt read loses a screen; its figures and Total come with ORDER-PARITY's supplementary progress. Progress policy decisions name the listed companies; where two Lists read one entity, the List owning its record workspace stays the picker, breadcrumb and navigation authority.
 
 ## Controls
 
@@ -52,14 +59,17 @@ None owed: nothing in the Critical set changes.
 - `ba21d043` (rebased onto SALES-PARITY `f0a38e76`, whose slot order puts a document's lines first; this slice becomes lineage entry 24): release `--check` PASS; typecheck clean; unit `purchasing-definition` + `workspace-contract` 48/48; coverage unchanged (738). The PostgreSQL and browser runs above are at the pre-rebase heads; CI on the PR is the gate for the rebased head (see Filed).
 
 - `4a68c916` (slices 2-3, lineage entry 25, merged with SALES-PARITY `b1aefa05`; one container at a time): release `--check` PASS; typecheck clean; unit `purchasing-definition`, `workspace-contract`, `sales-definition`, `surface-list`, `field-numbering` 69/69; integration `surface-data-binding` 112/112; reachability and hygiene 21/21; language coverage PASS (2498 -> 2501 obligations, 738 -> 742 observed); the full-replay snapshot differs only by four nullable columns and their UPDATE grants; PostgreSQL `purchase-order-ending` 1/1 after one stale expectation (a stored quantity reads at its column's scale). CI at `a2492db2` (slice 1): quality, browser and scans passed; PostgreSQL was cancelled at its 30-minute bound (hence SALES-PARITY `d00f8bba`) and the compile budget was indeterminate (CPU idle 73%, below the 90% it requires). CI on PR #8 is the gate for this head.
+- Re-baseline `c9cb12a9` (merged `cf4ce59c`): `app.compiled.json` 82,378,697 B / 26 entries -> 4,667,601 B / 1 entry, the head's normalized definition byte-identical to entry 25; `--check` and `check:demo-release` PASS. The full-replay schema snapshot changes only the ordinal position of 73 columns in 9 tables (added by ALTER in later entries, now created in declared order); columns, types, grants, constraints, indexes, policies and triggers identical. The multi-entry history claims move to a synthetic lineage ("a fresh install replays a synthetic storage history": bootstrap, the recorded head, then one addColumn successor), and the Sales controls `added-company-column-carries-its-update-grant` and `replayed-create-keeps-later-column-grants` now name it (the one-entry lineage has no addColumn step). Unit 192/192; composed "activates through the kernel" 12/12 (224 s). Not yet run to completion locally (load 10-28, container starts timed out): the new synthetic-history test, the advance and ADR-0047 §6 tests, and the two re-pointed controls' `--run`; CI on the PR runs the first three.
+- Slice 4 (agent, then `7ef2806d`): unit 178/178, integration 232/232, compiler 175/175, web contract 31/31, six architecture files 108/108, agent 3/3; PostgreSQL `expected-receipts` 1/1 (162 s) locally. CI at `7ef2806d` (dispatched): quality, PostgreSQL schema and isolation, and PostgreSQL composed application passed; Browser was cancelled at its 20-minute bound (112 of 113 done), the scan red on the brace-expansion advisory (pinned at SALES-PARITY `44280f01`), the compile budget indeterminate.
+
 ## Test it yourself
 
-`PURCHASING-PARITY-test-it-yourself.md` §1 priced purchase order, §2 ending an order, §3 receiving paperwork.
+`PURCHASING-PARITY-test-it-yourself.md` §1 priced purchase order, §2 ending an order, §3 receiving paperwork, §4 what is still to arrive.
 
 ## Filed
 
-- `apps/web/release/app.compiled.json` grows about 3 MB per lineage entry (72 MB at 24 entries; GitHub refuses files over 100 MB): an ADR-0066 re-baseline (recommended: nothing is in production) or LFS is the owner's decision.
-- The posting kernel accepts a future effective date (only the backdate window and period locks are enforced); PaneFlow refuses a posting dated after today. Owed before a receipt date can be chosen, in the Critical set (`inventory-posting-service.ts`).
+- Re-baselined (ruling PD): a development database created from the old 26-entry lineage needs `corepack pnpm --filter @north-star/api dev:reset` before it can run this release; test and test-it-yourself databases are created per run.
+- Receipts and shipments already refuse a date after the tenant's today (`inventory-posting-service.ts`), but adjustments do not, and the backdate window is 0 days: POSTING-FORWARD-DATE (Critical, its own packet) adds one forward rule for every family and a 7-day window, after which a receipt date can be offered.
 - Both line sections of the order page read the commercial purchase-line model, so received quantities are read twice per line per page; one section could carry both.
 - A committed cancel's event now uses the purchasing order-event schema while a draft cancel's keeps the generic one (the event type is unchanged).
 
@@ -67,24 +77,27 @@ None owed: nothing in the Critical set changes.
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "PURCHASING-PARITY",
-  "base": "b1aefa054af33b2734e8816eaca4897d1713b1b7",
-  "head": "4a68c9164c7a84ec3454cfdef0c120cb1c0c676f",
+  "base": "a58508da8905d423f6edbd61d9687b7d222dc617",
+  "head": "cf4ce59c72fb45990f34c20cc70bfacfae6ab250",
   "changedPaths": [
-    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
-    "apps/web/src/surface-composition.ts", "apps/web/test/browser/purchase-pricing.spec.ts",
-    "apps/web/test/browser/receiving.composed-application.spec.ts", "packages/canonical-model/src/schemas.ts",
-    "packages/canonical-model/src/surface-composition.ts", "packages/domain/src/app/builder.ts",
-    "packages/domain/src/app/order-entry.ts", "packages/domain/src/purchasing/definition.ts",
-    "packages/domain/src/purchasing/workspace.ts", "packages/domain/src/sales/workspace.ts",
-    "packages/postgres-provider/src/commercial-read-model.ts", "packages/postgres-provider/src/purchasing-order-lifecycle.ts",
-    "packages/postgres-provider/src/receiving-capability-executor.ts", "packages/postgres-provider/src/receiving-order-capability.ts",
-    "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.test.ts",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/surface-data-binding.test.ts",
-    "test/postgres/commercial-totals.test.ts", "test/postgres/composed-application.test.ts",
-    "test/postgres/document-numbering.test.ts", "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
-    "test/postgres/inventory-posting.test.ts", "test/postgres/purchase-order-ending.test.ts",
-    "test/postgres/receiving-authorization.test.ts", "test/unit/canonical-model/field-numbering.test.ts",
-    "test/unit/purchasing-definition.test.ts", "test/unit/workspace-contract.test.ts"
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
+    "apps/web/src/list-declaration.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts",
+    "apps/web/test/browser/composed-application.spec.ts", "apps/web/test/browser/expected-receipts.spec.ts", "apps/web/test/browser/order-entry.spec.ts",
+    "apps/web/test/browser/purchase-pricing.spec.ts", "apps/web/test/browser/receiving.composed-application.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
+    "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-composition.ts",
+    "packages/canonical-model/src/surface-list.ts", "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts",
+    "packages/domain/src/app/list-declarations.ts", "packages/domain/src/app/order-entry.ts", "packages/domain/src/purchasing/definition.ts",
+    "packages/domain/src/purchasing/workspace.ts", "packages/domain/src/sales/workspace.ts", "packages/postgres-provider/src/commercial-read-model.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/purchasing-order-lifecycle.ts", "packages/postgres-provider/src/receiving-capability-executor.ts",
+    "packages/postgres-provider/src/receiving-order-capability.ts", "packages/runtime/src/list-behavior/cursor.ts", "packages/runtime/src/list-behavior/index.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/surface-grammar-conformance.test.ts", "test/evidence/RECEIPT.expected-red.json", "test/evidence/SALES-PARITY.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/order-entry-fixture.ts", "test/integration/surface-data-binding.test.ts",
+    "test/integration/table-behavior.test.ts", "test/postgres/commercial-totals.test.ts", "test/postgres/composed-application.test.ts",
+    "test/postgres/document-numbering.test.ts", "test/postgres/expected-receipts.test.ts", "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
+    "test/postgres/inventory-posting.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/purchase-order-ending.test.ts",
+    "test/postgres/receiving-authorization.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/canonical-model/field-numbering.test.ts",
+    "test/unit/canonical-model/surface-list.test.ts", "test/unit/purchasing-definition.test.ts", "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
     {"path": "packages/domain/src/purchasing/definition.ts", "name": "purchasingModuleDefinition"},
@@ -97,4 +110,4 @@ None owed: nothing in the Critical set changes.
 }
 ```
 
-Review: not owed — outside the Critical set (slices 1-3).
+Review: not owed — outside the Critical set (slices 1-4 and the re-baseline).
