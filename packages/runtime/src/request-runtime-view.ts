@@ -171,7 +171,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 12 adds List progress, open and before-today views and overdue dates.
     // 13 adds List row actions and supplementary (omitted-when-denied) progress.
     // 14 adds composition datasets scoped by a field of their own entity.
-    maximumSupportedVersion: 14,
+    // 15 adds List figures, views keeping a band, and Record form references.
+    maximumSupportedVersion: 15,
   },
 });
 

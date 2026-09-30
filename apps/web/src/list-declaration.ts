@@ -201,6 +201,148 @@ function progressArgument(list: SurfaceList, open: boolean) {
 }
 
 /**
+ * The figures argument a declared List sends -- the declaration in the list
+ * argument's own shape, band labels left out -- with a view's band as `keep`.
+ * Inferred rather than annotated, so it stays a plain JSON argument value.
+ */
+function figuresArgument(
+  list: SurfaceList,
+  band: SurfaceList['views'][number]['band'],
+) {
+  const figures = list.figures;
+  if (!figures) return undefined;
+  const within = (
+    value: NonNullable<NonNullable<SurfaceList['figures']>['latest']>[number]['within'],
+  ) =>
+    Object.freeze({
+      fieldId: value.field,
+      queryId: value.query.targetId,
+      relationId: value.relation,
+      values: Object.freeze([...value.values]),
+    });
+  const operand = (value: { figure: string } | { field: string }) =>
+    Object.freeze(
+      'figure' in value ? { figureId: value.figure } : { fieldId: value.field },
+    );
+  const threshold = (value: { field: string } | { value: string }) =>
+    Object.freeze(
+      'field' in value ? { fieldId: value.field } : { value: value.value },
+    );
+  return Object.freeze({
+    ...(figures.bands
+      ? {
+          bands: Object.freeze(
+            figures.bands.map((entry) =>
+              Object.freeze({
+                cases: Object.freeze(
+                  entry.cases.map((value) =>
+                    Object.freeze({
+                      value: value.value,
+                      ...(value.below ? { below: threshold(value.below) } : {}),
+                      ...(value.atMost
+                        ? { atMost: threshold(value.atMost) }
+                        : {}),
+                    }),
+                  ),
+                ),
+                figureId: entry.figureId,
+                of: entry.of,
+                otherwise: entry.otherwise.value,
+              }),
+            ),
+          ),
+        }
+      : {}),
+    ...(band
+      ? {
+          keep: Object.freeze({
+            figureId: band.figure,
+            values: Object.freeze([...band.values]),
+          }),
+        }
+      : {}),
+    ...(figures.latest
+      ? {
+          latest: Object.freeze(
+            figures.latest.map((entry) =>
+              Object.freeze({
+                byFieldId: entry.by,
+                figureId: entry.figureId,
+                label: Object.freeze({
+                  fieldId: entry.label.field,
+                  queryId: entry.label.query.targetId,
+                }),
+                rows: Object.freeze({
+                  matchFieldId: entry.rows.match,
+                  queryId: entry.rows.query.targetId,
+                }),
+                valueFieldId: entry.value,
+                within: within(entry.within),
+              }),
+            ),
+          ),
+        }
+      : {}),
+    sums: Object.freeze(
+      figures.sums.map((entry) =>
+        Object.freeze({
+          figureId: entry.figureId,
+          ...(entry.related
+            ? {
+                related: Object.freeze({
+                  fieldId: entry.related.quantity,
+                  queryId: entry.related.query.targetId,
+                  relationId: entry.related.relation,
+                }),
+              }
+            : {}),
+          rows: Object.freeze({
+            matchFieldId: entry.rows.match,
+            queryId: entry.rows.query.targetId,
+            ...(entry.rows.quantity
+              ? { quantityFieldId: entry.rows.quantity }
+              : {}),
+          }),
+          sum: entry.sum,
+          ...(entry.within ? { within: within(entry.within) } : {}),
+        }),
+      ),
+    ),
+    ...(figures.totals
+      ? {
+          totals: Object.freeze(
+            figures.totals.map((entry) =>
+              Object.freeze({
+                figureId: entry.figureId,
+                ...(entry.floor ? { floor: entry.floor } : {}),
+                minus: Object.freeze(entry.minus.map(operand)),
+                plus: Object.freeze(entry.plus.map(operand)),
+              }),
+            ),
+          ),
+        }
+      : {}),
+  });
+}
+
+/**
+ * What a person reads for a band figure's value: the label the List declares
+ * for it. `null` for anything that is not a band value of this List.
+ */
+export function figureBandLabel(
+  list: SurfaceList,
+  fieldId: string,
+  value: RuntimeViewContract.ImmutableJsonValue,
+): string | null {
+  const band = list.figures?.bands?.find((entry) => entry.figureId === fieldId);
+  if (!band || typeof value !== 'string') return null;
+  return (
+    [...band.cases, band.otherwise].find((entry) => entry.value === value)
+      ?.label ?? null
+  );
+}
+
+/**
  * The exact list-query arguments for one declared request. The cursor is
  * minted from the same fields the gateway digests, so a page number is an
  * offset the gateway itself would have issued, and a changed view, filter,
@@ -273,6 +415,9 @@ export function declaredListArguments(
   const progress = options.withoutProgress
     ? undefined
     : progressArgument(list, view?.open === true);
+  // Figures ride every request too: a count, a page and an export read the
+  // same figures, and a view's band narrows all three in the statement.
+  const figures = figuresArgument(list, view?.band);
   const beforeFilters = Object.freeze(
     view?.before
       ? [
@@ -292,6 +437,7 @@ export function declaredListArguments(
     parentScope: null,
     ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
     ...(progress ? { progress } : {}),
+    ...(figures ? { figures } : {}),
     ...(beforeFilters.length > 0 ? { beforeFilters } : {}),
     relationLabels: [],
     ...(referenceLabels.length > 0 ? { referenceLabels } : {}),
@@ -311,6 +457,7 @@ export function declaredListArguments(
           : null,
       ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
       ...(progress ? { progress } : {}),
+      ...(figures ? { figures } : {}),
       ...(beforeFilters.length > 0 ? { beforeFilters } : {}),
       matchMode: 'substring',
       ...(options.mode === 'export' ? { outputMode: 'export' } : {}),

@@ -37,6 +37,7 @@ import {
   declaredCellText,
   declaredListParameters,
   declaredRowAction,
+  figureBandLabel,
   orderedColumns,
   orderedFilters,
   orderedViews,
@@ -87,9 +88,25 @@ export type SurfaceRelationPickerState =
   | { readonly relationId: string; readonly status: 'refused' }
   | { readonly status: 'unavailable' };
 
+/**
+ * The records a Record form's reference field may hold, read through the
+ * declared list query for this request; `unavailable` when that read failed,
+ * so the field keeps its plain control and the stored id is never lost.
+ */
+export type SurfaceFormReferenceChoices =
+  | {
+      readonly options: readonly SurfaceRelationPickerOption[];
+      readonly status: 'ready';
+    }
+  | { readonly status: 'unavailable' };
+
 export interface SurfaceComponentContext {
   readonly data?: SurfaceDataRenderState;
   readonly feedback?: SurfaceOperationFeedback | null;
+  /** A Record form's reference choices, by the field they choose. */
+  readonly formReferences?: Readonly<
+    Record<string, SurfaceFormReferenceChoices>
+  >;
   readonly legalEntitySelection?: readonly string[];
   readonly operations?: readonly CompiledSurfaceOperationBinding[];
   readonly queryParameterValues?: Readonly<Record<string, string>>;
@@ -538,7 +555,9 @@ function renderDataGrid(context: SurfaceComponentContext): string {
             : null,
         list: context.surface.list,
         now: data.declaredList.now,
+        // A band figure reads as the label its List declares for the value.
         present: (record, fieldId, value) =>
+          figureBandLabel(context.surface.list!, fieldId, value) ??
           displayFieldValue(context.view, record, fieldId, value),
         progressWithheld: data.declaredList.progressWithheld ?? null,
         recordLabel,
@@ -1813,13 +1832,11 @@ function renderFormFields(
       const value = record ? record.values[fieldId] : undefined;
       const field = fieldsById.get(fieldId);
       const inputField = inputFieldsById.get(fieldId);
-      const control = renderFormControl(
-        field,
-        inputField,
-        fieldId,
-        index,
-        value,
-      );
+      const choices = context.formReferences?.[fieldId];
+      const control =
+        choices?.status === 'ready'
+          ? renderFormReferenceControl(choices.options, fieldId, value)
+          : renderFormControl(field, inputField, fieldId, index, value);
       const emptyIntent = renderEmptyIntentControl(
         inputField,
         fieldId,
@@ -1834,6 +1851,36 @@ function renderFormFields(
       return `<div class="form-field"><label><span>${escapeHtml(label)}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
     })
     .join('');
+}
+
+/**
+ * A reference field as a choice of the records its declared list returned,
+ * shown by label and submitted as the record id the field already admits. A
+ * stored id the list did not return stays selectable, so an update that does
+ * not touch it never drops it.
+ */
+function renderFormReferenceControl(
+  options: readonly SurfaceRelationPickerOption[],
+  fieldId: string,
+  value: unknown,
+): RenderedFormControl {
+  const current = typeof value === 'string' ? value : '';
+  const offered =
+    current !== '' && !options.some((option) => option.recordId === current)
+      ? [
+          ...options,
+          { label: `Unavailable (${shortIdentity(current)})`, recordId: current },
+        ]
+      : options;
+  return {
+    html: `<select name="value:${escapeHtml(fieldId)}" data-field-kind="textFieldType" data-form-reference="${escapeHtml(fieldId)}" autocomplete="off"><option value=""${current === '' ? ' selected' : ''}>None</option>${offered
+      .map(
+        (option) =>
+          `<option value="${escapeHtml(option.recordId)}"${option.recordId === current ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
+      )
+      .join('')}</select>`,
+    storedValueUnavailable: false,
+  };
 }
 
 /**

@@ -1000,6 +1000,13 @@ export type SurfaceComposition = z.infer<typeof SurfaceCompositionSchema>;
 export const SurfaceWorkspaceSchema = z.strictObject({
   membership: z.enum(['operational', 'setup', 'contextual']),
   ownerSurfaceId: CanonicalIdSchema.optional(),
+  /**
+   * The module whose navigation group lists this navigation List when that is
+   * not the List's own module -- a List over Catalog's items that is an
+   * Inventory destination. Compiled into the navigation tree only. Optional
+   * v6 key (ADR-0047 §7).
+   */
+  navigationModuleId: CanonicalIdSchema.optional(),
   entry: z
     .strictObject({
       companyQueryId: CanonicalIdSchema,
@@ -1303,6 +1310,119 @@ const listRowAction = z.strictObject({
   /** A dataset of the record page's composition, opened at its section. */
   section: CanonicalIdSchema.optional(),
 });
+/**
+ * The rows of a declared list query that hold the listed record's id in one of
+ * their own text fields -- an item's stock balances, reservations and order
+ * lines hold the item as plain text -- and, when summed, their quantity.
+ */
+const listFigureRows = z.strictObject({
+  query: compositionReference('queryReference'),
+  match: CanonicalIdSchema,
+  quantity: CanonicalIdSchema.optional(),
+});
+/**
+ * Only rows whose parent -- through the rows' relation to it -- holds one of
+ * these values in a field its own list query selects, such as order lines of
+ * released orders.
+ */
+const listFigureWithin = z.strictObject({
+  relation: CanonicalIdSchema,
+  query: compositionReference('queryReference'),
+  field: CanonicalIdSchema,
+  values: z.array(z.string().min(1).max(240)).min(1).max(8),
+});
+/** Rows pointing at each figure row through a relation, and their quantity. */
+const listFigureRelated = z.strictObject({
+  query: compositionReference('queryReference'),
+  relation: CanonicalIdSchema,
+  quantity: CanonicalIdSchema,
+});
+/**
+ * One per-row sum: `rows` adds the rows' quantity, `related` the related rows'
+ * quantity, and `remaining` each row's quantity less its related rows',
+ * never below zero per row -- what is still to arrive on a released order line.
+ */
+const listFigureSum = z.strictObject({
+  figureId: CanonicalIdSchema,
+  rows: listFigureRows,
+  within: listFigureWithin.optional(),
+  related: listFigureRelated.optional(),
+  sum: z.enum(['rows', 'related', 'remaining']),
+});
+/** A figure declared before, or an exact decimal the List's own query selects. */
+const listFigureOperand = z.union([
+  z.strictObject({ figure: CanonicalIdSchema }),
+  z.strictObject({ field: CanonicalIdSchema }),
+]);
+/**
+ * A signed total of figures and row fields; an unstated field leaves the total
+ * unstated rather than zero. `floor: 'zero'` never reads below zero.
+ */
+const listFigureTotal = z.strictObject({
+  figureId: CanonicalIdSchema,
+  plus: z.array(listFigureOperand).min(1).max(6),
+  minus: z.array(listFigureOperand).max(6),
+  floor: z.literal('zero').optional(),
+});
+/** A row field, or a fixed decimal, a figure is compared with. */
+const listFigureThreshold = z.union([
+  z.strictObject({ field: CanonicalIdSchema }),
+  z.strictObject({ value: CanonicalSignedDecimalStringSchema }),
+]);
+/**
+ * Names a figure's range: the first case whose comparison holds, else the
+ * otherwise value. A comparison with an unstated field never holds. Values
+ * are what the statement compares and a view keeps; labels are what a person
+ * reads, and never reach the statement.
+ */
+const listFigureBand = z.strictObject({
+  figureId: CanonicalIdSchema,
+  of: CanonicalIdSchema,
+  cases: z
+    .array(
+      z.strictObject({
+        value: CanonicalIdSchema,
+        label: LabelSchema,
+        below: listFigureThreshold.optional(),
+        atMost: listFigureThreshold.optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+  otherwise: z.strictObject({ value: CanonicalIdSchema, label: LabelSchema }),
+});
+/**
+ * The record id a parent of the most recent matching row holds -- by the
+ * parent's own date, newest first, then its record id -- named through an
+ * unscoped list query's label field, such as an item's last supplier.
+ */
+const listFigureLatest = z.strictObject({
+  figureId: CanonicalIdSchema,
+  rows: z.strictObject({
+    query: compositionReference('queryReference'),
+    match: CanonicalIdSchema,
+  }),
+  within: listFigureWithin,
+  by: CanonicalIdSchema,
+  value: CanonicalIdSchema,
+  label: z.strictObject({
+    query: compositionReference('queryReference'),
+    field: CanonicalIdSchema,
+  }),
+});
+/**
+ * Per List row, figures the list statement computes before the count and the
+ * page -- sums over rows that hold the row's id, totals of them, bands that
+ * name their ranges and the latest of a parent's values -- so a view keeping
+ * one band counts, pages and exports exactly that set. Shown, never sorted or
+ * searched. Optional v6 key (ADR-0047 §7).
+ */
+const listFigures = z.strictObject({
+  sums: z.array(listFigureSum).min(1).max(8),
+  totals: z.array(listFigureTotal).max(6).optional(),
+  bands: z.array(listFigureBand).max(2).optional(),
+  latest: z.array(listFigureLatest).max(2).optional(),
+});
 export const SurfaceListSchema = z.strictObject({
   kind: z.literal('surfaceList'),
   schemaVersion: v6NodeVersion,
@@ -1336,6 +1456,17 @@ export const SurfaceListSchema = z.strictObject({
             anchor: z.literal('startOfTodayUtc'),
           })
           .optional(),
+        /**
+         * Only rows whose band figure holds one of these values, judged by
+         * the list statement before the count and the page. Optional v6 key
+         * (ADR-0047 §7).
+         */
+        band: z
+          .strictObject({
+            figure: CanonicalIdSchema,
+            values: z.array(CanonicalIdSchema).min(1).max(4),
+          })
+          .optional(),
       }),
     )
     .max(8),
@@ -1361,17 +1492,42 @@ export const SurfaceListSchema = z.strictObject({
   export: z.strictObject({ format: z.literal('csv') }).optional(),
   progress: listProgress.optional(),
   rowActions: z.array(listRowAction).min(1).max(3).optional(),
+  figures: listFigures.optional(),
 });
 export type SurfaceList = z.infer<typeof SurfaceListSchema>;
 export type SurfaceListProgress = NonNullable<SurfaceList['progress']>;
+export type SurfaceListFigures = NonNullable<SurfaceList['figures']>;
 export type SurfaceListRowAction = NonNullable<
   SurfaceList['rowActions']
 >[number];
+/**
+ * A Record form's presentation of fields that hold another record's id, such
+ * as an item's preferred location: each is chosen from the records of an
+ * unscoped list query and shown by its label field, while the stored value
+ * stays the record id the field's own type admits. Optional v6 key (ADR-0047
+ * §7); a reader without it would ask for the id as free text.
+ */
+export const SurfaceFormSchema = z.strictObject({
+  kind: z.literal('surfaceForm'),
+  schemaVersion: v6NodeVersion,
+  references: z
+    .array(
+      z.strictObject({
+        field: CanonicalIdSchema,
+        query: compositionReference('queryReference'),
+        labelField: compositionReference('fieldReference'),
+      }),
+    )
+    .min(1)
+    .max(8),
+});
+export type SurfaceForm = z.infer<typeof SurfaceFormSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),
   documentEditor: SurfaceDocumentEditorSchema.optional(),
   list: SurfaceListSchema.optional(),
+  form: SurfaceFormSchema.optional(),
 });
 const authoredV6SurfaceDefinition = normalizedV6SurfaceDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
