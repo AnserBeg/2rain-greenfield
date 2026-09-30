@@ -944,6 +944,34 @@ export function purchasingWorkspace(
             undefined,
             'quantity',
           ),
+          // The three-way match (PAYABLES, PY-G): what is billed and left to
+          // bill beside ordered and received, and how billing compares with
+          // what arrived. Shown, never enforced.
+          column(
+            'billed',
+            'Billed',
+            35,
+            metric('billed'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'to_bill',
+            'To bill',
+            36,
+            metric('to_bill'),
+            undefined,
+            'quantity',
+          ),
+          // Beside the product, where it is read without opening details.
+          column(
+            'match',
+            'Match',
+            37,
+            metric('match_status'),
+            undefined,
+            'secondary',
+          ),
           column(
             'base_unit',
             'Product base unit',
@@ -1398,10 +1426,11 @@ export function billWorkspace(namespace: string): Record<string, unknown> {
         title: id('column', 'bill_number'),
         subtitle: [id('column', 'bill_vendor')],
         status: id('column', 'bill_state'),
+        // Six at most: the currency reads among the bill's details.
         facts: [
+          id('column', 'bill_order'),
           id('column', 'bill_date'),
           id('column', 'bill_due'),
-          id('column', 'bill_currency'),
           id('column', 'bill_total'),
           id('column', 'bill_balance'),
           id('column', 'bill_supplier_invoice'),
@@ -1439,6 +1468,17 @@ export function billWorkspace(namespace: string): Record<string, unknown> {
       ]),
       column('date', 'Bill date', 25, field('vendor_bill_bill_date')),
       column('due', 'Due date', 30, field('vendor_bill_due_date')),
+      // The order this bill bills: the bill stores it as a relation, stated
+      // by its get and labelled through the order's own get under current
+      // policy -- "—" when that read is withheld (as an invoice names its
+      // order).
+      column(
+        'order',
+        'Purchase order',
+        32,
+        id('relation', 'vendor_bill_order'),
+        ['purchase_order_get', 'purchase_order_number'],
+      ),
       column('currency', 'Currency', 35, field('vendor_bill_currency')),
       column('terms', 'Payment terms', 40, field('vendor_bill_payment_terms')),
       column(
@@ -1672,6 +1712,24 @@ export function billWorkspace(namespace: string): Record<string, unknown> {
             bind(['expectedRevision'], record('revision')),
           ]),
         ],
+      },
+      {
+        // The way back to the order from wherever the bill was opened.
+        actionId: id('action', 'bill_open_order'),
+        label: 'Open purchase order',
+        description: 'Open the purchase order this bill bills.',
+        orderKey: 40,
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref(
+            'surfaceReference',
+            id('surface', 'purchase_order_detail'),
+          ),
+          query: q('commercial_purchase_order_get'),
+          record: record(id('relation', 'vendor_bill_order')),
+        },
       },
     ],
   };

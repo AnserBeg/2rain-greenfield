@@ -5,6 +5,7 @@ import {
   lineAmounts,
   parseExact,
   sameExact,
+  threeWayMatch,
   type LineAmounts,
 } from './commercial-amounts.js';
 import { fulfillmentProjectionIdentity } from './fulfillment.js';
@@ -366,6 +367,71 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       return null;
     }
   };
+  /**
+   * What is billed against one purchase order line (PAYABLES, PY-G): its
+   * lines on the order's live bills -- open, partially paid or paid; drafts
+   * and void bills do not count -- found through the line's own reference,
+   * each bill's state read once per call. A withheld bill read states nothing
+   * for every line of the call, as a withheld received read does.
+   */
+  let billsWithheld = false;
+  const billStates = new Map<string, Promise<string | null>>();
+  const billStateOf = (billId: string) => {
+    let state = billStates.get(billId);
+    if (!state) {
+      state = invoke('bill', { recordId: billId, includeArchived: false }).then(
+        (read) =>
+          read.outcome === 'exact' && read.records[0]
+            ? String(read.records[0].values[field('vendor_bill_state')])
+            : null,
+      );
+      billStates.set(billId, state);
+    }
+    return state;
+  };
+  const billedOf = async (line: SemanticRecordDto): Promise<bigint | null> => {
+    if (billsWithheld) return null;
+    const billsQuery = model.queries.bills?.targetId;
+    if (!billsQuery)
+      throw new Error('Invalid commercial read-model dependency');
+    const lineBill = `${ns}:relation.vendor_bill_line_bill`;
+    const live = new Set(
+      ['open', 'partially_paid', 'paid'].map(
+        (state) => `${ns}:option.vendor_bill_state_${state}`,
+      ),
+    );
+    try {
+      let billed = 0n;
+      for (const billLine of await listAll(
+        'billLines',
+        `${ns}:relation.vendor_bill_line_order_line`,
+        line.recordId,
+        'referenceScope',
+        // Each bill line names its bill.
+        [
+          {
+            relationId: lineBill,
+            queryId: billsQuery,
+            fieldId: field('vendor_bill_number'),
+          },
+        ],
+      )) {
+        const billId = billLine.relationLabels?.[lineBill]?.recordId;
+        const quantity = units(
+          billLine.values[field('vendor_bill_line_quantity')],
+        );
+        if (!billId || quantity === null) return null;
+        const state = await billStateOf(billId);
+        if (state === null) return null;
+        if (live.has(state)) billed += quantity;
+      }
+      return billed;
+    } catch (error) {
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+      billsWithheld = true;
+      return null;
+    }
+  };
   const money = (cents: bigint | null) =>
     cents === null ? null : formatCents(cents);
   const rows: SemanticRecordDto[] = [];
@@ -385,8 +451,9 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       emit('line_tax', money(amounts?.taxCents ?? null));
       // What is still to arrive: ordered less received, when both are known.
       // A release whose purchase lines declare no progress states none.
+      const received =
+        purchase && model.resultFields.received ? await receivedOf(row) : null;
       if (purchase && model.resultFields.received) {
-        const received = await receivedOf(row);
         const ordered = units(
           row.values[field('purchase_order_line_ordered_quantity')],
         );
@@ -397,6 +464,19 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
             ? null
             : quantityText(ordered - received),
         );
+      }
+      // The three-way match (PAYABLES, PY-G): ordered and received beside
+      // what is billed, what is left to bill and how the two compare. Shown,
+      // never enforced; declared only where payables are composed.
+      if (purchase && model.resultFields.match_status) {
+        const billed = await billedOf(row);
+        const match = threeWayMatch(received, billed);
+        emit('billed', billed === null ? null : quantityText(billed));
+        emit(
+          'to_bill',
+          match.toBill === null ? null : quantityText(match.toBill),
+        );
+        emit('match_status', match.status);
       }
       // A unit price that differs from the list price it started from was
       // set by hand (ruling B); without a list price there is nothing to mark.
