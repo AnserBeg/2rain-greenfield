@@ -838,3 +838,196 @@ test('a new order starts its requested date three weeks out, a default counted f
     '2026-12-31T00:00:00.000Z',
   );
 });
+
+test('PAYABLES: the purchase order lists its bills and offers billing only when a post would bill something; a bill offers each command only in its states; the Invoices List reads as before', () => {
+  const ns = 'northstar.app';
+  type Loose = Record<string, unknown>;
+  type Condition = { value: Loose; operator: string; compare: unknown };
+  type Action = Loose & {
+    actionId: string;
+    conditions: Condition[];
+    inputs: Loose[];
+    steps: { operation: { targetId: string } }[];
+    navigate?: { surface: { targetId: string }; query: { targetId: string } };
+  };
+  type Composition = {
+    children: (Loose & {
+      datasetId: string;
+      label: string;
+      query: { targetId: string };
+      parent: { relationId: string };
+    })[];
+    actions: Action[];
+  };
+  const source = composedApplicationDefinition() as Loose;
+  const composition = (local: string) =>
+    (
+      (source.surfaces as Loose[]).find(
+        (value) => value.surfaceId === `${ns}:surface.${local}`,
+      ) as Loose & { composition: Composition }
+    ).composition;
+  const order = composition('purchase_order_detail');
+  const bills = order.children.find((child) => child.label === 'Bills')!;
+  assert.equal(bills.query.targetId, `${ns}:query.vendor_bill_list`);
+  assert.equal(bills.parent.relationId, `${ns}:relation.vendor_bill_order`);
+  const action = (value: Composition, local: string) =>
+    value.actions.find((entry) => entry.actionId === `${ns}:action.${local}`)!;
+  const billing = action(order, 'bill_received');
+  assert.equal(billing.label, 'Bill received quantities');
+  // Offered while the order states received quantity not yet billed and a
+  // total -- the read model counts each line's own positive part, as the
+  // post bills.
+  assert.deepEqual(
+    billing.conditions.map((condition) => [
+      condition.value.field,
+      condition.operator,
+    ]),
+    [
+      [`${ns}:metric.order_to_bill`, 'positive'],
+      [`${ns}:metric.order_total`, 'positive'],
+    ],
+  );
+  assert.deepEqual(
+    billing.inputs.map((input) => [input.label, input.type, input.required]),
+    [['Supplier invoice number', 'text', false]],
+  );
+  assert.deepEqual(
+    billing.steps.map((step) => step.operation.targetId),
+    [`${ns}:operation.vendor_bill_create`, `${ns}:operation.vendor_bill_post`],
+  );
+  assert.equal(
+    action(order, 'open_bill').navigate?.surface.targetId,
+    `${ns}:surface.vendor_bill_detail`,
+  );
+  // The order's read model states what is to bill, from its lines, their
+  // receipts and its live bills.
+  const readModel = (
+    (source.queries as Loose[]).find(
+      (query) => query.queryId === `${ns}:query.commercial_purchase_order_get`,
+    ) as Loose & {
+      readModel: {
+        queries: Record<string, { targetId: string }>;
+        resultFields: Record<string, string>;
+      };
+    }
+  ).readModel;
+  assert.equal(
+    readModel.resultFields.order_to_bill,
+    `${ns}:metric.order_to_bill`,
+  );
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(readModel.queries).map(([key, value]) => [
+        key,
+        value.targetId,
+      ]),
+    ),
+    {
+      lines: `${ns}:query.commercial_purchase_lines`,
+      received: `${ns}:query.purchase_order_received_get`,
+      bills: `${ns}:query.vendor_bill_list`,
+      billLines: `${ns}:query.vendor_bill_line_list`,
+    },
+  );
+
+  // The bill: each command where its state admits it, and nowhere else.
+  const bill = composition('vendor_bill_detail');
+  assert.deepEqual(
+    bill.children.map((child) => child.label),
+    ['Bill lines', 'Payments', 'Vendor credits'],
+  );
+  const offered = (state: string) =>
+    bill.actions
+      .filter((entry) =>
+        entry.conditions.every((condition) => {
+          const stateOption = `${ns}:option.vendor_bill_state_${state}`;
+          assert.equal(condition.value.field, `${ns}:field.vendor_bill_state`);
+          return condition.operator === 'equals'
+            ? condition.compare === stateOption
+            : condition.compare !== stateOption;
+        }),
+      )
+      .map((entry) => entry.label);
+  assert.deepEqual(offered('draft'), []);
+  assert.deepEqual(offered('open'), [
+    'Record payment',
+    'Record vendor credit',
+    'Void bill',
+  ]);
+  assert.deepEqual(offered('partially_paid'), [
+    'Record payment',
+    'Record vendor credit',
+  ]);
+  assert.deepEqual(offered('paid'), []);
+  assert.deepEqual(offered('void'), []);
+
+  // The Invoices List, now one settlement List among two, lowers exactly as
+  // it did before the Bills List joined it.
+  const list = (local: string) =>
+    (
+      (source.surfaces as Loose[]).find(
+        (value) => value.surfaceId === `${ns}:surface.${local}`,
+      ) as Loose & {
+        list: {
+          columns: (Loose & { columnId: string; label: string })[];
+          views: { viewId: string; label: string }[];
+          defaultSort: { columnId: string; direction: string }[];
+        };
+      }
+    ).list;
+  const invoices = list('customer_invoice_list');
+  assert.deepEqual(
+    invoices.columns.map((column) => [
+      column.columnId.split('customer_invoice_list_')[1],
+      column.label,
+      column.field,
+      column.format ?? null,
+    ]),
+    [
+      ['number', 'Number', `${ns}:field.customer_invoice_number`, null],
+      [
+        'customer',
+        'Customer',
+        `${ns}:field.customer_invoice_customer_party_id`,
+        null,
+      ],
+      [
+        'invoice_date',
+        'Invoice date',
+        `${ns}:field.customer_invoice_invoice_date`,
+        'date',
+      ],
+      ['due_date', 'Due', `${ns}:field.customer_invoice_due_date`, 'date'],
+      ['status', 'Status', `${ns}:field.customer_invoice_state`, null],
+      ['total', 'Total', `${ns}:field.customer_invoice_total`, 'money'],
+      ['balance', 'Balance', `${ns}:field.customer_invoice_balance`, 'money'],
+      ['currency', 'Currency', `${ns}:field.customer_invoice_currency`, null],
+    ],
+  );
+  assert.deepEqual(invoices.defaultSort, [
+    {
+      columnId: `${ns}:list_column.customer_invoice_list_invoice_date`,
+      direction: 'descending',
+    },
+  ]);
+  // The Bills List: the same shape with the supplier's own invoice number.
+  const billList = list('vendor_bill_list');
+  assert.deepEqual(
+    billList.columns.map((column) => column.label),
+    [
+      'Number',
+      'Vendor',
+      'Supplier invoice',
+      'Bill date',
+      'Due',
+      'Status',
+      'Total',
+      'Balance',
+      'Currency',
+    ],
+  );
+  assert.deepEqual(
+    billList.views.map((view) => view.label),
+    ['All', 'Open', 'Partially paid', 'Paid', 'Void'],
+  );
+});

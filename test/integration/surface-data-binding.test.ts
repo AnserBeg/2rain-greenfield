@@ -8635,3 +8635,218 @@ test('PURCHASING-PARITY: a line with nothing left to arrive offers no receipt; a
   assert.match(stale.html, /COMPOSITION_TASK_UNAVAILABLE/u);
   assert.equal(f.executor.calls.length, 0);
 });
+
+test('PAYABLES: the order lists its bills and offers billing only while the order states something to bill; a bill binds its lines, payments and credits and offers each command in its states', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const order = f.executor.seed(
+    'purchase_order',
+    {
+      [`${ns}:field.purchase_order_number`]: 'PO-BILLED',
+      [`${ns}:field.purchase_order_supplier_party_id`]: f.party,
+      [`${ns}:field.purchase_order_currency`]: 'CAD',
+      [`${ns}:field.purchase_order_order_date`]: '2026-09-26T09:30:00Z',
+      ...Object.fromEntries(
+        [
+          'expected_date',
+          'notes',
+          'receiving_location_id',
+          'payment_terms',
+          'tax_code_id',
+          'freight_amount',
+          'freight_tax_code_id',
+          'freight_tax_rate_percent',
+          'other_fee_amount',
+          'other_fee_tax_code_id',
+          'other_fee_tax_rate_percent',
+        ].map((name) => [`${ns}:field.purchase_order_${name}`, null]),
+      ),
+      [`${ns}:derived_state_field.machine.purchase_order_lifecycle`]: `${ns}:state.purchase_order_released`,
+    },
+    scope,
+  );
+  const figures = (balance: string, paid: string) =>
+    Object.fromEntries(
+      (
+        [
+          ['subtotal', '22.5'],
+          ['charges', '35'],
+          ['tax', '2.38'],
+          ['total', '59.88'],
+          ['paid_amount', paid],
+          ['credited_amount', '0'],
+          ['balance', balance],
+        ] as const
+      ).map(([name, value]) => [`${ns}:field.vendor_bill_${name}`, value]),
+    );
+  const bill = (number: string, state: string, balance: string, paid: string) =>
+    f.executor.seed(
+      'vendor_bill',
+      {
+        [`${ns}:field.vendor_bill_number`]: number,
+        [`${ns}:field.vendor_bill_state`]: `${ns}:option.vendor_bill_state_${state}`,
+        [`${ns}:field.vendor_bill_bill_date`]: '2026-09-30T10:00:00.000Z',
+        [`${ns}:field.vendor_bill_due_date`]: '2026-10-30T10:00:00.000Z',
+        [`${ns}:field.vendor_bill_supplier_party_id`]: f.party,
+        [`${ns}:field.vendor_bill_supplier_invoice_number`]: `INV-${number}`,
+        [`${ns}:field.vendor_bill_currency`]: 'CAD',
+        [`${ns}:field.vendor_bill_payment_terms`]: null,
+        ...figures(balance, paid),
+        [`${ns}:relation.vendor_bill_order`]: order,
+      },
+      scope,
+    );
+  const open = bill('BILL-000001', 'open', '59.88', '0');
+  const paid = bill('BILL-000002', 'paid', '0', '59.88');
+  f.executor.seed(
+    'vendor_bill_line',
+    {
+      [`${ns}:field.vendor_bill_line_line_number`]: '1',
+      [`${ns}:field.vendor_bill_line_item_id`]: f.item,
+      [`${ns}:field.vendor_bill_line_unit_id`]: 'EA',
+      [`${ns}:field.vendor_bill_line_quantity`]: '2',
+      [`${ns}:field.vendor_bill_line_unit_price`]: '12.5',
+      [`${ns}:field.vendor_bill_line_discount_percent`]: '10',
+      [`${ns}:field.vendor_bill_line_tax_rate_percent`]: '5',
+      [`${ns}:field.vendor_bill_line_amount`]: '22.5',
+      [`${ns}:field.vendor_bill_line_tax`]: '1.13',
+      [`${ns}:relation.vendor_bill_line_bill`]: open,
+    },
+    scope,
+  );
+  f.executor.seed(
+    'vendor_payment',
+    {
+      [`${ns}:field.vendor_payment_number`]: 'VPAY-000001',
+      [`${ns}:field.vendor_payment_state`]: `${ns}:option.vendor_payment_state_posted`,
+      [`${ns}:field.vendor_payment_payment_date`]: '2026-09-30T11:00:00.000Z',
+      [`${ns}:field.vendor_payment_amount`]: '59.88',
+      [`${ns}:field.vendor_payment_method`]: `${ns}:option.vendor_payment_method_cheque`,
+      [`${ns}:field.vendor_payment_reference`]: 'CHQ-3301',
+      [`${ns}:relation.vendor_payment_bill`]: paid,
+    },
+    scope,
+  );
+  // The commercial read model states what is to bill as given; the order's
+  // total is stated.
+  const stating = (toBill: string | null): SurfaceRuntimeGateways => ({
+    ...f.gateways,
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      f.executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': async ({ result }) => result,
+        'northstar.sales:capability.commercial': async ({
+          definition,
+          result,
+        }) => ({
+          ...result,
+          records: result.records.map((record) => ({
+            ...record,
+            values: {
+              ...record.values,
+              ...Object.fromEntries(
+                Object.entries(definition.readModel!.resultFields).map(
+                  ([key, fieldId]) => [
+                    fieldId,
+                    key === 'order_to_bill'
+                      ? toBill
+                      : key === 'order_total'
+                        ? '10.00'
+                        : null,
+                  ],
+                ),
+              ),
+            },
+          })),
+        }),
+      },
+    ),
+  });
+  const orderPath = `/?${new URLSearchParams({
+    surface: `${ns}:surface.purchase_order_detail`,
+    record: order,
+    [`${ns}:parameter.commercial_purchase_order_get_legal_entity_scope`]: scope,
+  })}`;
+  for (const [toBill, offered] of [
+    ['2', true],
+    ['0', false],
+    [null, false],
+  ] as const) {
+    const html = (
+      await renderSurfaceRuntimeWithData(f.view, orderPath, stating(toBill))
+    ).html;
+    assert.equal(
+      html.includes(`value="${ns}:action.bill_received"`),
+      offered,
+      `Bill received quantities with ${String(toBill)} to bill`,
+    );
+    // The order's bills, each with its balance, whatever it offers.
+    assert.match(
+      html,
+      new RegExp(
+        `data-composition-dataset="${ns}:dataset.purchasing_bills" data-resolution="ready"`,
+        'u',
+      ),
+    );
+    assert.match(html, /BILL-000001/u);
+    assert.match(html, /BILL-000002/u);
+    assert.match(html, /INV-BILL-000001/u);
+  }
+
+  // A bill binds its lines, payments and credits; each command is offered
+  // only where the bill's state admits it.
+  const billPath = (recordId: string) =>
+    `/?${new URLSearchParams({
+      surface: `${ns}:surface.vendor_bill_detail`,
+      record: recordId,
+      [`${ns}:parameter.vendor_bill_get_legal_entity_scope`]: scope,
+    })}`;
+  const offeredOn = (html: string) =>
+    ['bill_record_payment', 'bill_record_credit', 'bill_void'].filter((local) =>
+      html.includes(`value="${ns}:action.${local}"`),
+    );
+  const openHtml = (
+    await renderSurfaceRuntimeWithData(f.view, billPath(open), stating(null))
+  ).html;
+  // Its line is read; it has no payment or credit yet, and neither read
+  // fails.
+  for (const [dataset, resolution] of [
+    ['bill_lines', 'ready'],
+    ['bill_payments', 'empty'],
+    ['bill_credits', 'empty'],
+  ] as const)
+    assert.match(
+      openHtml,
+      new RegExp(
+        `data-composition-dataset="${ns}:dataset.${dataset}" data-resolution="${resolution}"`,
+        'u',
+      ),
+      dataset,
+    );
+  assert.match(openHtml, /BILL-000001/u);
+  assert.match(openHtml, /INV-BILL-000001/u);
+  assert.match(openHtml, /59\.88/u);
+  assert.deepEqual(offeredOn(openHtml), [
+    'bill_record_payment',
+    'bill_record_credit',
+    'bill_void',
+  ]);
+  const paidHtml = (
+    await renderSurfaceRuntimeWithData(f.view, billPath(paid), stating(null))
+  ).html;
+  assert.deepEqual(offeredOn(paidHtml), []);
+  assert.match(
+    paidHtml,
+    new RegExp(
+      `data-composition-dataset="${ns}:dataset.bill_payments" data-resolution="ready"`,
+      'u',
+    ),
+  );
+  assert.match(paidHtml, /VPAY-000001/u);
+});

@@ -516,6 +516,80 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'payables') {
+      // PAYABLES: a released, priced purchase order at Net 30 with freight
+      // and a fee, two of its three units received, for a browser proof to
+      // bill, pay and credit.
+      const created = await create('purchase_order', {
+        supplier_party_id: customer,
+        order_date: new Date().toISOString(),
+        expected_date: null,
+        currency: 'CAD',
+        notes: null,
+        payment_terms: `${ns}:option.purchase_order_payment_terms_net_30`,
+        freight_amount: '25',
+        freight_tax_code_id: taxCode.recordId,
+        freight_tax_rate_percent: '5',
+        other_fee_amount: '10',
+        other_fee_tax_code_id: null,
+        other_fee_tax_rate_percent: null,
+      });
+      const line = await create(
+        'purchase_order_line',
+        {
+          line_number: '1',
+          item_id: item,
+          ordered_quantity: '3',
+          unit_price: '12.5',
+          discount_percent: '10',
+          tax_code_id: taxCode.recordId,
+          tax_rate_percent: '5',
+        },
+        { order: created.recordId },
+      );
+      const released = await invoke('purchase_order_release', {
+        recordId: created.recordId,
+        expectedRevision: created.revision,
+      });
+      assert.equal(released.outcome, 'succeeded');
+      const receipt = await create(
+        'goods_receipt',
+        {
+          state: `${ns}:option.goods_receipt_state_draft`,
+          kind: `${ns}:option.goods_receipt_kind_initial`,
+          effective_at: new Date().toISOString(),
+          location_id: location,
+          reason_code: 'RECEIVE',
+          reason_narrative: 'Payables delivery',
+        },
+        { order: created.recordId },
+      );
+      await create(
+        'goods_receipt_line',
+        {
+          line_number: '1',
+          item_id: item,
+          quantity: '2',
+          unit_id: 'EA',
+          cost_status: `${ns}:option.goods_receipt_line_cost_status_absent`,
+          unit_cost: null,
+          currency: null,
+          reversal_of_movement_id: null,
+        },
+        { receipt: receipt.recordId, order_line: line.recordId },
+      );
+      const posted = await invoke('goods_receipt_post', {
+        recordId: receipt.recordId,
+        expectedRevision: receipt.revision,
+      });
+      assert.equal(posted.outcome, 'succeeded');
+      return {
+        phase,
+        number: String(created.values[`${ns}:field.purchase_order_number`]),
+        recordId: created.recordId,
+        observed: true,
+      };
+    }
     if (phase === 'second_company') {
       const company = await create(
         'legal_entity',

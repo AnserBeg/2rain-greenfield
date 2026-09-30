@@ -82,6 +82,23 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
         'SHP',
         `${ns}:document_sequence.shipment`,
       ],
+      // PAYABLES (PY-E): the bill, vendor credit and vendor payment numbers,
+      // each its own sequence, so PAY- and CM- stay receivables' own.
+      [
+        `${ns}:field.vendor_bill_number`,
+        'BILL',
+        `${ns}:document_sequence.vendor_bill`,
+      ],
+      [
+        `${ns}:field.vendor_credit_number`,
+        'VCM',
+        `${ns}:document_sequence.vendor_credit`,
+      ],
+      [
+        `${ns}:field.vendor_payment_number`,
+        'VPAY',
+        `${ns}:document_sequence.vendor_payment`,
+      ],
     ],
   );
 });

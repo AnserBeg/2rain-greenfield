@@ -28,6 +28,7 @@ import {
   LEGAL_ENTITY_RELATION_SEMANTICS_V1,
 } from '../../packages/domain/src/inventory/contracts.js';
 import {
+  PAYABLES_CAPABILITY_ID,
   PURCHASING_IDS,
   purchasingModuleDefinition,
 } from '../../packages/domain/src/purchasing/index.js';
@@ -2399,3 +2400,303 @@ function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
   if (!chunk) throw new Error(`no first chunk for ${familyId}`);
   return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
 }
+
+// ===========================================================================
+// PAYABLES: vendor bills, vendor payments and vendor credits (owner rulings
+// PY-A to PY-I), declared behind the product application's `payables` option.
+// ===========================================================================
+
+type PayablesShape = {
+  entities: Array<{ entityId: string }>;
+  fields: Array<{
+    fieldId: string;
+    presence: string;
+    searchable: boolean;
+    numbering?: { prefix: string; sequenceId: string; minimumDigits: number };
+  }>;
+  operations: Array<{
+    operationId: string;
+    effect: { kind: string; capability?: { targetId: string } };
+    permission: { targetId: string };
+    precondition?: unknown;
+    readBack: { targetId: string };
+    tier: string;
+  }>;
+  permissions: Array<{ permissionId: string; action: string }>;
+  queries: Array<{
+    queryId: string;
+    queryType: string;
+    legalEntityScope?: { cardinality: string };
+    exportMaximumResultCount?: number;
+    resolveMatchKeys?: Array<{ field: { targetId: string } }>;
+  }>;
+  relations: Array<{
+    relationId: string;
+    ownership: string;
+    sourceEntity: { targetId: string };
+    targetEntity: { targetId: string };
+  }>;
+  surfaces: Array<{ surfaceId: string }>;
+  capabilityRequirements: Array<{
+    capabilityId: string;
+    declaredEffects: string[];
+  }>;
+};
+
+function payables(): PayablesShape {
+  return purchasingModuleDefinition(namespace, {
+    commercialTerms: true,
+    payables: true,
+  }) as unknown as PayablesShape;
+}
+
+const PAYABLES_LOCALS = [
+  'vendor_bill',
+  'vendor_bill_line',
+  'vendor_payment',
+  'vendor_credit',
+] as const;
+
+test('PAYABLES: a compile without the payables option declares none of it, and payables require commercial terms', () => {
+  for (const definition of [
+    purchasingModuleDefinition(),
+    purchasingModuleDefinition(namespace, { commercialTerms: true }),
+  ])
+    assert.doesNotMatch(JSON.stringify(definition), /vendor_|payables/u);
+  assert.throws(
+    () => purchasingModuleDefinition(namespace, { payables: true }),
+    /payables require the commercial terms/u,
+  );
+  const declared = payables();
+  assert.deepEqual(
+    declared.entities
+      .map((entity) => entity.entityId)
+      .filter((id) => id.includes(':entity.vendor_')),
+    PAYABLES_LOCALS.map((local) => `${namespace}:entity.${local}`),
+  );
+  assert.deepEqual(
+    declared.capabilityRequirements
+      .filter(
+        (requirement) => requirement.capabilityId === PAYABLES_CAPABILITY_ID,
+      )
+      .map((requirement) => requirement.declaredEffects),
+    [['recordMutation']],
+  );
+  // The product application composes it.
+  const composed = composedApplicationDefinition() as unknown as PayablesShape;
+  assert.ok(
+    composed.entities.some(
+      (entity) => entity.entityId === 'northstar.app:entity.vendor_bill',
+    ),
+  );
+});
+
+test('PAYABLES: documents change only as drafts, post once through the payables capability, and are numbered BILL, VPAY and VCM', () => {
+  const declared = payables();
+  for (const [local, prefix] of [
+    ['vendor_bill', 'BILL'],
+    ['vendor_payment', 'VPAY'],
+    ['vendor_credit', 'VCM'],
+  ] as const) {
+    const number = declared.fields.find(
+      (field) => field.fieldId === `${namespace}:field.${local}_number`,
+    );
+    assert.equal(number?.numbering?.prefix, prefix);
+    assert.equal(number?.numbering?.minimumDigits, 6);
+    assert.equal(
+      number?.numbering?.sequenceId,
+      `${namespace}:document_sequence.${local}`,
+    );
+    const state = `${namespace}:field.${local}_state`;
+    for (const action of GENERIC_ACTIONS) {
+      const operation = declared.operations.find(
+        (candidate) =>
+          candidate.operationId === `${namespace}:operation.${local}_${action}`,
+      )!;
+      const evaluate = (value: string) =>
+        evaluateRegisteredOperationPrecondition(
+          operation.precondition as Parameters<
+            typeof evaluateRegisteredOperationPrecondition
+          >[0],
+          { [state]: value } as Parameters<
+            typeof evaluateRegisteredOperationPrecondition
+          >[1],
+        ).outcome;
+      assert.equal(
+        evaluate(`${namespace}:option.${local}_state_draft`),
+        'holds',
+      );
+      assert.equal(
+        evaluate(
+          `${namespace}:option.${local}_state_${local === 'vendor_bill' ? 'open' : 'posted'}`,
+        ),
+        'refused',
+        `${local}_${action} must refuse a posted document`,
+      );
+    }
+  }
+  // A bill's lines declare no guard of their own: the parent-scoped relation
+  // carries the bill's draft guard down to them.
+  assert.ok(
+    declared.operations
+      .filter((operation) =>
+        operation.operationId.startsWith(
+          `${namespace}:operation.vendor_bill_line_`,
+        ),
+      )
+      .every((operation) => operation.precondition === undefined),
+  );
+  assert.deepEqual(
+    declared.relations
+      .filter((relation) => relation.relationId.includes(':relation.vendor_'))
+      .map((relation) => [
+        relation.relationId.split(':relation.')[1],
+        relation.sourceEntity.targetId.split(':entity.')[1],
+        relation.targetEntity.targetId.split(':entity.')[1],
+        relation.ownership,
+      ]),
+    [
+      ['vendor_bill_order', 'vendor_bill', 'purchase_order', 'reference'],
+      [
+        'vendor_bill_line_bill',
+        'vendor_bill_line',
+        'vendor_bill',
+        'parentScopedChild',
+      ],
+      [
+        'vendor_bill_line_order_line',
+        'vendor_bill_line',
+        'purchase_order_line',
+        'reference',
+      ],
+      ['vendor_payment_bill', 'vendor_payment', 'vendor_bill', 'reference'],
+      ['vendor_credit_bill', 'vendor_credit', 'vendor_bill', 'reference'],
+    ],
+  );
+  // Each command runs on the payables capability, confirmed by a person, and
+  // is offered only in the state it applies to.
+  const commands = declared.operations.filter(
+    (operation) =>
+      operation.effect.capability?.targetId === PAYABLES_CAPABILITY_ID,
+  );
+  assert.deepEqual(
+    commands.map((operation) => operation.operationId),
+    [
+      `${namespace}:operation.vendor_bill_post`,
+      `${namespace}:operation.vendor_bill_void`,
+      `${namespace}:operation.vendor_payment_post`,
+      `${namespace}:operation.vendor_credit_post`,
+    ],
+  );
+  for (const [operation, local, holds, refuses] of [
+    [commands[0]!, 'vendor_bill', 'draft', 'open'],
+    [commands[1]!, 'vendor_bill', 'open', 'partially_paid'],
+    [commands[2]!, 'vendor_payment', 'draft', 'posted'],
+    [commands[3]!, 'vendor_credit', 'draft', 'posted'],
+  ] as const) {
+    assert.equal(operation.tier, 'o1');
+    assert.equal(
+      operation.readBack.targetId,
+      `${namespace}:query.${local}_get`,
+    );
+    const evaluate = (state: string) =>
+      evaluateRegisteredOperationPrecondition(
+        operation.precondition as Parameters<
+          typeof evaluateRegisteredOperationPrecondition
+        >[0],
+        {
+          [`${namespace}:field.${local}_state`]: `${namespace}:option.${local}_state_${state}`,
+        } as Parameters<typeof evaluateRegisteredOperationPrecondition>[1],
+      ).outcome;
+    assert.equal(evaluate(holds), 'holds');
+    assert.equal(evaluate(refuses), 'refused');
+  }
+});
+
+test('PAYABLES: twenty-four permissions, entity-owned queries, a bill List export bound and a vendor invoice number that is optional and searchable', () => {
+  const declared = payables();
+  const permissions = declared.permissions.filter((permission) =>
+    permission.permissionId.includes(':permission.vendor_'),
+  );
+  assert.equal(permissions.length, 24);
+  assert.deepEqual(
+    permissions
+      .filter((permission) => permission.action === 'transition')
+      .map((permission) => permission.permissionId.split(':permission.')[1]),
+    [
+      'vendor_bill_post',
+      'vendor_bill_void',
+      'vendor_payment_post',
+      'vendor_credit_post',
+    ],
+  );
+  const queries = declared.queries.filter((query) =>
+    query.queryId.includes(':query.vendor_'),
+  );
+  assert.equal(queries.length, 16);
+  assert.ok(
+    queries.every(
+      (query) => query.legalEntityScope?.cardinality === 'exactlyOne',
+    ),
+    'every payables query is scoped to exactly one company',
+  );
+  assert.deepEqual(
+    queries
+      .filter((query) => query.exportMaximumResultCount !== undefined)
+      .map((query) => [query.queryId, query.exportMaximumResultCount]),
+    [[`${namespace}:query.vendor_bill_list`, 5_000]],
+  );
+  assert.deepEqual(
+    PAYABLES_LOCALS.map((local) =>
+      queries
+        .find(
+          (query) => query.queryId === `${namespace}:query.${local}_resolve`,
+        )
+        ?.resolveMatchKeys?.map((key) => key.field.targetId),
+    ),
+    [
+      [`${namespace}:field.vendor_bill_number`],
+      [`${namespace}:field.vendor_bill_line_item_id`],
+      [`${namespace}:field.vendor_payment_number`],
+      [`${namespace}:field.vendor_credit_number`],
+    ],
+  );
+  const reference = declared.fields.find(
+    (field) =>
+      field.fieldId ===
+      `${namespace}:field.vendor_bill_supplier_invoice_number`,
+  );
+  assert.equal(reference?.presence, 'optional');
+  assert.equal(reference?.searchable, true);
+  // Every family is classified in both registries (entity-owned, same
+  // company as what it names).
+  for (const local of PAYABLES_LOCALS)
+    assert.equal(
+      LEGAL_ENTITY_FAMILY_MAP_V1.find((family) => family.familyId === local)
+        ?.classification,
+      'entityOwned',
+    );
+  for (const [source, target] of [
+    ['vendor_bill', 'purchase_order'],
+    ['vendor_bill_line', 'vendor_bill'],
+    ['vendor_bill_line', 'purchase_order_line'],
+    ['vendor_payment', 'vendor_bill'],
+    ['vendor_credit', 'vendor_bill'],
+  ] as const)
+    assert.ok(
+      LEGAL_ENTITY_RELATION_SEMANTICS_V1.some(
+        (rule) =>
+          rule.sourceFamilyId === source &&
+          rule.targetFamilyId === target &&
+          rule.semantics === 'sameEntity',
+      ),
+      `${source} -> ${target} is a same-company relation`,
+    );
+  // Twelve standard surfaces: a list, a detail and a form for each.
+  assert.equal(
+    declared.surfaces.filter((surface) =>
+      surface.surfaceId.includes(':surface.vendor_'),
+    ).length,
+    12,
+  );
+});

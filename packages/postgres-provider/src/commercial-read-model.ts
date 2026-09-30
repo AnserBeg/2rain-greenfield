@@ -311,6 +311,33 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
         lineOrderLine: 'customer_invoice_line_order_line',
       },
     });
+  /**
+   * Received quantity not yet on a live vendor bill (PAYABLES), from the
+   * receiving projection. A withheld read of what was received or billed
+   * states nothing -- the order itself still reads -- rather than a guessed
+   * zero.
+   */
+  const toBill = async (
+    orderId: string,
+    lines: readonly SemanticRecordDto[],
+  ): Promise<string | null> => {
+    try {
+      return await toSettle(orderId, lines, {
+        progressOf: receivedOf,
+        documents: 'bills',
+        documentLines: 'billLines',
+        document: 'vendor_bill',
+        relations: {
+          order: 'vendor_bill_order',
+          lineDocument: 'vendor_bill_line_bill',
+          lineOrderLine: 'vendor_bill_line_order_line',
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+      return null;
+    }
+  };
   const money = (cents: bigint | null) =>
     cents === null ? null : formatCents(cents);
   const rows: SemanticRecordDto[] = [];
@@ -395,6 +422,8 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       emit('order_total', complete ? money(subtotal + charges + tax) : null);
       if (model.resultFields.order_to_invoice)
         emit('order_to_invoice', await toInvoice(row.recordId, lines));
+      if (model.resultFields.order_to_bill)
+        emit('order_to_bill', await toBill(row.recordId, lines));
     } else throw new Error('Unknown commercial read-model binding');
     rows.push({ ...row, values });
   }

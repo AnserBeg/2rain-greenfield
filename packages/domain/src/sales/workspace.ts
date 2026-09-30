@@ -30,6 +30,13 @@ export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
     'order_total',
   ],
 } as const);
+/**
+ * A purchase order's received quantity not yet on a live vendor bill
+ * (PAYABLES), stated only when the application composes payables.
+ */
+export const PAYABLES_READ_MODEL_OUTPUTS = Object.freeze({
+  purchaseOrder: ['order_to_bill'],
+} as const);
 /** The order's ship-to lines, as the workspace shows and prints them. */
 const SHIP_TO_LINES = [
   ['ship_to_name', 'Ship-to recipient'],
@@ -914,6 +921,7 @@ export function salesWorkspaceQueries(
     kind: keyof typeof COMMERCIAL_READ_MODEL_BINDINGS,
     query: Record<string, unknown>,
     dependencyQueries: Record<string, string>,
+    outputs: readonly string[] = COMMERCIAL_READ_MODEL_OUTPUTS[kind],
   ) => ({
     ...query,
     readModel: {
@@ -929,10 +937,7 @@ export function salesWorkspaceQueries(
         ]),
       ),
       resultFields: Object.fromEntries(
-        COMMERCIAL_READ_MODEL_OUTPUTS[kind].map((key) => [
-          key,
-          `${namespace}:metric.${key}`,
-        ]),
+        outputs.map((key) => [key, `${namespace}:metric.${key}`]),
       ),
     },
   });
@@ -957,6 +962,12 @@ export function salesWorkspaceQueries(
   const purchasing = queries.some(
     (query) => query.queryId === `${namespace}:query.purchase_order_get`,
   );
+  // With payables composed, the order also states what is received and not
+  // yet on a live bill, so "Bill received quantities" is offered only when a
+  // post would bill something (PAYABLES).
+  const payables = queries.some(
+    (query) => query.queryId === `${namespace}:query.vendor_bill_get`,
+  );
   const purchaseCommercial = purchasing
     ? [
         clone('purchase_order_line_list', 'commercial_purchase_lines'),
@@ -968,7 +979,22 @@ export function salesWorkspaceQueries(
         commercial(
           'purchaseOrder',
           clone('purchase_order_get', 'commercial_purchase_order_get'),
-          { lines: 'commercial_purchase_lines' },
+          {
+            lines: 'commercial_purchase_lines',
+            ...(payables
+              ? {
+                  received: 'purchase_order_received_get',
+                  bills: 'vendor_bill_list',
+                  billLines: 'vendor_bill_line_list',
+                }
+              : {}),
+          },
+          payables
+            ? [
+                ...COMMERCIAL_READ_MODEL_OUTPUTS.purchaseOrder,
+                ...PAYABLES_READ_MODEL_OUTPUTS.purchaseOrder,
+              ]
+            : COMMERCIAL_READ_MODEL_OUTPUTS.purchaseOrder,
         ),
       ]
     : [];

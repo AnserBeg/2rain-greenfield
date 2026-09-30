@@ -59,6 +59,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,
+    // PAYABLES: the Bills List, by bill state.
+    `${ns}:surface.vendor_bill_list`,
   ]);
   // Its own clone of the Purchase orders query: same selections, scope,
   // permission and export limit; the Purchase orders List is unchanged.
@@ -407,6 +409,8 @@ test('a printable document is declared over the record composition and refused w
     [`${ns}:surface.customer_invoice_detail`, 'Invoice'],
     [`${ns}:surface.purchase_order_detail`, 'Purchase order'],
     [`${ns}:surface.sales_order_detail`, 'Sales order'],
+    // PAYABLES: the printable vendor bill.
+    [`${ns}:surface.vendor_bill_detail`, 'Vendor bill'],
   ]);
   const print = (app: ReturnType<typeof application>) =>
     (
