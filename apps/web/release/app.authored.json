@@ -40642,6 +40642,14 @@
                 },
                 "operator": "equals",
                 "compare": "northstar.app:state.purchase_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.open_to_receive"
+                },
+                "operator": "notEquals",
+                "compare": "0"
               }
             ],
             "inputs": [
@@ -40982,6 +40990,14 @@
                 },
                 "operator": "equals",
                 "compare": "northstar.app:state.purchase_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.open_to_receive"
+                },
+                "operator": "notEquals",
+                "compare": "0"
               }
             ],
             "inputs": [
