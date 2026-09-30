@@ -1,6 +1,6 @@
 # VALUATION — derived moving average, shipment cost and landed cost
 
-Status: active — resumed by the owner. Slice 1 implemented; checks refreshed after merging the PAYABLES dependency. Slices 2–3 await slice 1 CI. Draft PR pending; no integration or deployment.
+Status: active — resumed by the owner. Slice 1 implemented; checks refreshed after merging the PAYABLES dependency. Slices 2–3 await slice 1 CI. [Draft PR #12](https://github.com/AnserBeg/2rain-greenfield/pull/12) open; no integration or deployment.
 Critical paths touched: none. Review: not owed — outside the Critical set.
 Base: `a3b104db` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
@@ -8,7 +8,7 @@ Base: `a3b104db` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
 1. A registered canonical read capability computes item/company/currency moving averages from posted quantity movements and immutable actual receipt costs; there is no monetary storage or posting change.
 2. Unknown inflows remain unvalued; each currency relieves proportionately at the effective-time average, exact rational arithmetic rounds only for display, and compensations invert original effects.
-3. Complete transfers preserve company value; missing lineage, malformed paging and incomplete transfers refuse; negative cost coverage withholds monetary figures.
+3. Complete transfers preserve company value; missing lineage, malformed paging and incomplete transfers refuse; negative coverage or residual value without covered quantity withholds monetary figures.
 4. The Inventory value List and item page use compiled metadata and shared runtimes; every input is read through declared plain queries under current company and permission authority; a denied cost read refuses rather than returning zero.
 
 ## Decisions
@@ -30,9 +30,9 @@ None owed: no Critical-set path changes.
 
 ## Gates
 
-- Focused moving-average unit cases 5/5; scoped/paged/current-policy integration 1/1; release freshness `--check` PASS.
+- Focused moving-average unit cases 6/6; scoped/paged/current-policy integration 1/1; release freshness `--check` PASS.
 - Compiled from the PAYABLES base envelope: one added lineage entry (6 total), 102 surfaces, 17 navigation destinations, 573 verification scenarios; coverage re-derived: 2654 obligations / 811 observed, unchanged.
-- Lint, typecheck and formatting PASS after the dependency merge; focused unit/workspace/surface grammar 44/44; broader unit/compiler/integration/web contracts 257/257; PostgreSQL stored-row oracle 1/1; operations browser 1/1 (one worker, ~2 min); architecture 71 checks with one fixture drift corrected, surface grammar recheck 25/25. Hosted CI pending draft PR; it supplies the full matrix and executed-file evidence.
+- Lint, typecheck and formatting PASS after the dependency merge; focused unit/workspace/surface grammar 44/44; broader unit/compiler/integration/web contracts 257/257; PostgreSQL stored-row oracle 1/1; operations browser 1/1 (one worker, ~2 min); architecture 71 checks with one fixture drift corrected, surface grammar recheck 25/25. CI run [36783423844](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36783423844) reported one stale List inventory (208/209 unit cases); corrected locally, List 6/6. Refreshed compiler/integration/web contracts 237/237. Full green matrix remains pending.
 - Small bridges: fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
 
 ## Test it yourself
@@ -48,7 +48,7 @@ None owed: no Critical-set path changes.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "VALUATION",
   "base": "a3b104db44b58382db48ad67687ec159d8c31bba",
-  "head": "f026da595a308094e563279de824253f5187685c",
+  "head": "3e682b1d88bb95cd1de4b91bb59fc8d2fc6bd04f",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -75,6 +75,7 @@ None owed: no Critical-set path changes.
     "test/postgres/composed-application.test.ts",
     "test/postgres/inventory-valuation.test.ts",
     "test/postgres/module-storage-transition.test.ts",
+    "test/unit/canonical-model/surface-list.test.ts",
     "test/unit/inventory-valuation.test.ts"
   ],
   "symbols": [
