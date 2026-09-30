@@ -45,6 +45,8 @@ No currency's amount is added to another. The unknown share has no guessed
 amount. If a negative-stock history prevents a positive coverage denominator,
 withhold monetary figures and disclose the uncovered quantity; never repair
 history or infer a cost from a subsequent receipt.
+Compensation can also leave residual value at zero covered quantity; withhold
+monetary figures in that case rather than silently dropping the residual.
 
 A compensating movement restores/removes the exact proportional cost and
 unknown-quantity contribution of its named movement, scaled to its compensated

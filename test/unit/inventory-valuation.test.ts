@@ -171,6 +171,29 @@ test('compensation restores original relief after the average changed; paired tr
   );
 });
 
+test('receipt compensation with residual value at zero quantity withholds money instead of dropping value', () => {
+  const replay = replayInventoryValue(
+    [
+      movement('1', '10'),
+      movement('2', '-5', { sourceType: 'shipment', role: 'shipment' }),
+      movement('3', '5'),
+      movement('4', '-10', { reversal: '1' }),
+    ],
+    costs([
+      ['1', '5'],
+      ['3', '10'],
+    ]),
+  );
+  const state = replay.items.get('item')!;
+  assert.equal(display(state.pools.get('CAD')!.value, 2), '25.00');
+  assert.deepEqual(itemCostFigures(state), {
+    on_hand: '0',
+    average_cost: null,
+    inventory_value: null,
+    unvalued_quantity: 'Unstated: incomplete cost coverage',
+  });
+});
+
 test('missing or wrong compensation and mismatched receipt lineage refuse; negative coverage withholds money', () => {
   assert.throws(
     () =>

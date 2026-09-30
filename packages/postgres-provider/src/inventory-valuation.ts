@@ -218,7 +218,10 @@ export function replayInventoryValue(
       state.quantity.n >= 0n &&
       state.unvalued.n >= 0n &&
       [...state.pools.values()].every(
-        (pool) => pool.quantity.n >= 0n && pool.value.n >= 0n,
+        (pool) =>
+          pool.quantity.n >= 0n &&
+          pool.value.n >= 0n &&
+          (pool.quantity.n !== 0n || pool.value.n === 0n),
       );
     items.set(movement.item, { ...state, complete });
     effects.set(movement.id, effect);
