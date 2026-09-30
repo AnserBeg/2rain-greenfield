@@ -38,7 +38,8 @@ export async function seedInventoryValuation(f: Fixture) {
         line_number: '1',
         item_id: f.item,
         ordered_quantity: '10',
-        unit_price: cost,
+        // The estimate differs deliberately from the captured actual cost.
+        unit_price: '99',
       },
       { order: order.recordId },
     );

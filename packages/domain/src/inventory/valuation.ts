@@ -143,6 +143,13 @@ export function itemCostWorkspace(namespace: string): Record<string, unknown> {
         field: `${namespace}:metric.${key}`,
         orderKey: (index + 5) * 10,
       })),
+      ...['cad', 'usd', 'eur'].map((currency, index) => ({
+        columnId: `${namespace}:column.item_cost_price_${currency}`,
+        label: `Selling price (${currency.toUpperCase()})`,
+        field: field(`price_${currency}`),
+        format: 'money',
+        orderKey: (index + 9) * 10,
+      })),
     ],
     children: [],
     actions: [],

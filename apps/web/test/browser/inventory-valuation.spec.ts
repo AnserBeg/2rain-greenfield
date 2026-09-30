@@ -48,6 +48,10 @@ test('inventory value and item page show actual moving average and unvalued open
     await expect(page.locator('.composition-header-facts')).toContainText(
       'Unvalued quantity',
     );
+    const sellingPrice = page
+      .locator('[data-composition-fields] .record-fields > div')
+      .filter({ has: page.getByText('Selling price (CAD)', { exact: true }) });
+    await expect(sellingPrice.locator('dd')).toHaveText('12.50');
   });
 });
 

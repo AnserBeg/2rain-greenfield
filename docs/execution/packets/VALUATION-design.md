@@ -67,7 +67,7 @@ value display currency-labelled summaries, one independent figure per currency;
 there is no cross-currency total. With unknown quantity, value explicitly reads
 as the known value and U remains visible. No-stock is zero quantity/value and
 no average. The item record uses the same binding and facts, with its company
-entry and valuation figures; its editor and ordinary catalog queries stay plain.
+entry, valuation figures and existing selling prices; its editor and ordinary catalog queries stay plain.
 Read-model columns are supplementary unsorted values under the existing v6
 vocabulary, so no language-version change is required.
 

@@ -56417,6 +56417,27 @@
             "label": "Unvalued quantity",
             "field": "northstar.app:metric.unvalued_quantity",
             "orderKey": 80
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_price_cad",
+            "label": "Selling price (CAD)",
+            "field": "northstar.app:field.item_price_cad",
+            "format": "money",
+            "orderKey": 90
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_price_usd",
+            "label": "Selling price (USD)",
+            "field": "northstar.app:field.item_price_usd",
+            "format": "money",
+            "orderKey": 100
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_price_eur",
+            "label": "Selling price (EUR)",
+            "field": "northstar.app:field.item_price_eur",
+            "format": "money",
+            "orderKey": 110
           }
         ],
         "children": [],
