@@ -68,7 +68,28 @@ export interface ListSpec {
       readonly done: string;
       readonly open: string;
     };
+    /**
+     * `omit`: supplementary figures. A principal who may not read them still
+     * gets the List, with the figures reading "—"; only a view that keeps
+     * open rows is refused.
+     */
+    readonly whenDenied?: 'omit';
   };
+  /**
+   * Links from a row to its record page, at a named section of it. The first
+   * whose condition holds is the row's, so an unconditional one comes last.
+   */
+  readonly rowActions?: readonly {
+    readonly local: string;
+    readonly label: string;
+    readonly when?: {
+      readonly filters?: Readonly<Record<string, string>>;
+      /** Only while the row's progress leaves something open. */
+      readonly open?: true;
+    };
+    /** A dataset of the record page's composition. */
+    readonly section?: string;
+  }[];
 }
 
 const CURRENCIES = [
@@ -77,6 +98,35 @@ const CURRENCIES = [
   ['EUR', 'EUR'],
 ] as const;
 
+/**
+ * What a document List adds up per order (ORDER-PARITY): the units its active
+ * lines order against what has been done with them -- shipped for a sales
+ * order, received for a purchase order -- and the open remainder while the
+ * order is released. The figures are supplementary (owner ruling, 2026-09-30):
+ * without the reads they need the List still serves, with "—" in their place,
+ * and only the views that keep open rows are refused.
+ */
+interface OrderWork {
+  /** The list query of the document's lines the statement sums. */
+  readonly linesQuery: string;
+  readonly done: ListProgressSourceSpec & {
+    readonly local: string;
+    readonly label: string;
+  };
+  /** The worklist view: released with something open. */
+  readonly openView: { readonly local: string; readonly label: string };
+  /** A "Late" view over this date column, which then marks late rows. */
+  readonly late?: string;
+  /** The row's link while something is open, at a section of its page. */
+  readonly action: {
+    readonly local: string;
+    readonly label: string;
+    readonly section: string;
+  };
+  /** A read-model total, shown beside the currency and never sorted. */
+  readonly total?: string;
+}
+
 function documentList(
   namespace: string,
   document: 'sales_order' | 'purchase_order',
@@ -84,10 +134,14 @@ function documentList(
   dateColumns: readonly { field: string; label: string }[],
   /** Further parties named on the document, such as the salesperson. */
   namedParties: readonly { field: string; label: string }[] = [],
+  work?: OrderWork,
 ): ListSpec {
   const field = (local: string) => `${namespace}:field.${document}_${local}`;
   const state = (local: string) => `${namespace}:state.${document}_${local}`;
+  const output = (local: string) =>
+    `${namespace}:list_output.${document}_list_${local}`;
   const lifecycle = `${namespace}:derived_state_field.machine.${document}_lifecycle`;
+  const released = { [lifecycle]: state('released') };
   return {
     pageSize: 50,
     columns: [
@@ -120,6 +174,8 @@ function documentList(
         label: column.label,
         field: field(column.field),
         format: 'date' as const,
+        // The rows the Late tab counts read "N days late" on this date.
+        ...(work?.late === column.field ? { overdue: 'late' } : {}),
       })),
       {
         local: 'status',
@@ -131,11 +187,68 @@ function documentList(
           [state('closed')]: 'success' as const,
         },
       },
+      // Summed in the list statement: shown and exported, never sorted.
+      ...(work
+        ? [
+            {
+              local: 'ordered',
+              label: 'Ordered',
+              field: output('ordered'),
+              sortable: false,
+            },
+            {
+              local: work.done.local,
+              label: work.done.label,
+              field: output(work.done.local),
+              sortable: false,
+            },
+            {
+              local: 'open',
+              label: 'Open',
+              field: output('open'),
+              sortable: false,
+            },
+          ]
+        : []),
+      // Computed from the page's own rows: shown, never sorted or counted.
+      ...(work?.total
+        ? [
+            {
+              local: 'total',
+              label: 'Total',
+              field: work.total,
+              format: 'money' as const,
+              sortable: false,
+            },
+          ]
+        : []),
       { local: 'currency', label: 'Currency', field: field('currency') },
     ],
     defaultSort: [{ column: 'order_date', direction: 'descending' }],
     views: [
       { local: 'all', label: 'All', filters: {} },
+      // The worklist tabs lead, as the reference's "Open fulfillment" does.
+      ...(work
+        ? [
+            {
+              local: work.openView.local,
+              label: work.openView.label,
+              filters: released,
+              open: true as const,
+            },
+            ...(work.late
+              ? [
+                  {
+                    local: 'late',
+                    label: 'Late',
+                    filters: released,
+                    open: true as const,
+                    before: field(work.late),
+                  },
+                ]
+              : []),
+          ]
+        : []),
       ...(
         [
           ['draft', 'Draft'],
@@ -158,6 +271,40 @@ function documentList(
       },
     ],
     export: true,
+    ...(work
+      ? {
+          progress: {
+            lines: {
+              query: `${namespace}:query.${work.linesQuery}`,
+              relation: `${namespace}:relation.${document}_line_order`,
+              quantity: field('line_ordered_quantity'),
+            },
+            done: {
+              query: work.done.query,
+              relation: work.done.relation,
+              quantity: work.done.quantity,
+            },
+            openIn: { field: lifecycle, values: [state('released')] },
+            outputs: {
+              ordered: output('ordered'),
+              done: output(work.done.local),
+              open: output('open'),
+            },
+            whenDenied: 'omit' as const,
+          },
+          // A link to the order at the work, else to the order itself; the
+          // page re-checks everything it offers there.
+          rowActions: [
+            {
+              local: work.action.local,
+              label: work.action.label,
+              when: { filters: released, open: true as const },
+              section: work.action.section,
+            },
+            { local: 'view', label: 'View' },
+          ],
+        }
+      : {}),
   };
 }
 
@@ -515,6 +662,28 @@ export function composedListSpecs(
         { field: 'requested_date', label: 'Requested' },
       ],
       [{ field: 'salesperson_party_id', label: 'Salesperson' }],
+      {
+        // The plain clone of the line list: the line list itself carries the
+        // fulfillment read model, which the statement never runs.
+        linesQuery: 'commercial_lines',
+        // Shipped per line, net of corrections, as the fulfillment kernel
+        // keeps it.
+        done: {
+          local: 'shipped',
+          label: 'Shipped',
+          query: `${namespace}:query.sales_order_shipped_list`,
+          relation: `${namespace}:relation.sales_order_shipped_order_line`,
+          quantity: `${namespace}:field.sales_order_shipped_shipped_quantity`,
+        },
+        openView: { local: 'to_ship', label: 'To ship' },
+        // "Post shipment" waits for reservation coverage (a later increment):
+        // until then a row opens its order's fulfillment section.
+        action: {
+          local: 'fulfill',
+          label: 'Fulfill',
+          section: `${namespace}:dataset.fulfillment_lines`,
+        },
+      },
     ),
     purchase_order_list: documentList(
       namespace,
@@ -524,6 +693,27 @@ export function composedListSpecs(
         { field: 'order_date', label: 'Order date' },
         { field: 'expected_date', label: 'Expected' },
       ],
+      [],
+      {
+        linesQuery: 'purchase_order_line_list',
+        done: {
+          local: 'received',
+          label: 'Received',
+          query: `${namespace}:query.purchase_order_received_list`,
+          relation: `${namespace}:relation.purchase_order_received_order_line`,
+          quantity: `${namespace}:field.purchase_order_received_received_quantity`,
+        },
+        openView: { local: 'to_receive', label: 'To receive' },
+        late: 'expected_date',
+        action: {
+          local: 'receive',
+          label: 'Receive',
+          section: `${namespace}:dataset.purchasing_lines`,
+        },
+        // The List reads the commercial clone of its query (LIST_DATA_SOURCES
+        // in the builder), whose read model states each order's total.
+        total: `${namespace}:metric.order_total`,
+      },
     ),
     // What is still to arrive (PURCHASING-PARITY), beside Purchase orders.
     [EXPECTED_RECEIPT_LIST]: expectedReceiptList(namespace),
@@ -662,7 +852,34 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
                 }
               : {}),
             outputs: { ...spec.progress.outputs },
+            ...(spec.progress.whenDenied
+              ? { whenDenied: spec.progress.whenDenied }
+              : {}),
           },
+        }
+      : {}),
+    ...(spec.rowActions
+      ? {
+          rowActions: spec.rowActions.map((action, index) => ({
+            actionId: id('list_row_action', action.local),
+            label: action.label,
+            orderKey: (index + 1) * 10,
+            ...(action.when
+              ? {
+                  when: {
+                    ...(action.when.filters
+                      ? {
+                          filters: Object.entries(action.when.filters).map(
+                            ([field, value]) => ({ field, value }),
+                          ),
+                        }
+                      : {}),
+                    ...(action.when.open ? { open: true } : {}),
+                  },
+                }
+              : {}),
+            ...(action.section ? { section: action.section } : {}),
+          })),
         }
       : {}),
   };

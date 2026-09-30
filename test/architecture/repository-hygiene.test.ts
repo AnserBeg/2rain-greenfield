@@ -148,6 +148,7 @@ const suiteDefinitions = [
       'test/postgres/module-runtime.test.ts',
       'test/postgres/module-storage-transition.test.ts',
       'test/postgres/observability-health.test.ts',
+      'test/postgres/order-lists.test.ts',
       'test/postgres/packing-retrieval.test.ts',
       'test/postgres/party-runtime.test.ts',
       'test/postgres/payables.test.ts',
@@ -649,6 +650,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:postgres:composed',
     'corepack pnpm test:locale',
     'corepack pnpm test:browser',
+    'corepack pnpm test:browser:operations',
     'corepack pnpm check:reachability',
   ];
 
@@ -661,6 +663,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}postgres:$/mu);
   assert.match(workflow, /^ {2}postgres-composed:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
+  assert.match(workflow, /^ {2}browser-operations:$/mu);
   assert.match(workflow, /uses: actions\/upload-artifact@/u);
   assert.match(workflow, /retention-days: 7/u);
 });

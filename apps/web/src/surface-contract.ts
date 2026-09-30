@@ -1,4 +1,5 @@
 import {
+  canonicalize,
   SurfaceCompositionSchema,
   type SurfaceComposition,
 } from '../../../packages/canonical-model/src/index.js';
@@ -603,6 +604,59 @@ function familyDeclaresForm(
       surface.surfaceRole === 'form' &&
       registeredSemanticQueryFromPinnedView(view, surface.dataSourceQueryId)
         ?.sourceEntityId === entityId,
+  );
+}
+
+/**
+ * The query a record picker enumerates a List's records through. A picker
+ * needs labels only, so when the List's query computes a read model -- figures
+ * per row, such as each order's total, each costing further reads -- the
+ * options are read through a plain list query that presents the same records
+ * instead: active, over the same entity, with the same selections, filter,
+ * permission, tier and company-scope cardinality, and no read model. The
+ * List's own entry authorization query is preferred (its company authority is
+ * proven through that query), otherwise the first such query by id; with none
+ * the List's own query is read, as before. Which List stands for the entity is
+ * decided elsewhere and unchanged.
+ */
+export function pickerEnumerationQuery(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  bound: RegisteredQueryDefinition,
+): RegisteredQueryDefinition {
+  if (!bound.readModel) return bound;
+  const payload = view.projections.query.payload;
+  if (!isRecord(payload) || !Array.isArray(payload.queries)) return bound;
+  const fieldIds = (query: RegisteredQueryDefinition) =>
+    query.selections.map((selection) => selection.fieldId);
+  const plain = payload.queries.flatMap((entry) => {
+    const queryId = isRecord(entry) ? entry.queryId : undefined;
+    // Re-read through the validated catalog: only a checked definition counts.
+    const candidate =
+      typeof queryId === 'string'
+        ? registeredSemanticQueryFromPinnedView(view, queryId)
+        : undefined;
+    return candidate &&
+      candidate.queryType === 'list' &&
+      candidate.lifecycle === 'active' &&
+      !candidate.readModel &&
+      candidate.sourceEntityId === bound.sourceEntityId &&
+      candidate.tier === bound.tier &&
+      candidate.permissionId === bound.permissionId &&
+      candidate.legalEntityScope?.cardinality ===
+        bound.legalEntityScope?.cardinality &&
+      canonicalize(fieldIds(candidate)) === canonicalize(fieldIds(bound)) &&
+      canonicalize(candidate.filter) === canonicalize(bound.filter)
+      ? [candidate]
+      : [];
+  });
+  const preferred = surface.workspace?.entry?.authorizationQueryId;
+  return (
+    plain.find((candidate) => candidate.queryId === preferred) ??
+    plain.toSorted((left, right) =>
+      left.queryId.localeCompare(right.queryId),
+    )[0] ??
+    bound
   );
 }
 

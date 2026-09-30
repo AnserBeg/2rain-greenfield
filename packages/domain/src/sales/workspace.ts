@@ -996,6 +996,13 @@ export function salesWorkspaceQueries(
               ]
             : COMMERCIAL_READ_MODEL_OUTPUTS.purchaseOrder,
         ),
+        // The Purchase orders List reads its orders with their totals
+        // (ORDER-PARITY): the same figures, stated for each paged row.
+        commercial(
+          'purchaseOrder',
+          clone('purchase_order_list', 'commercial_purchase_order_list'),
+          { lines: 'commercial_purchase_lines' },
+        ),
       ]
     : [];
   const dependencies = {

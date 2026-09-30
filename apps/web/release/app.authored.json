@@ -36466,6 +36466,247 @@
         "kind": "queryLegalEntityScope",
         "operand": {
           "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.commercial_purchase_order_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.commercial_purchase_order_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "exportMaximumResultCount": 5000,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.purchase_order_read"
+      },
+      "queryId": "northstar.app:query.commercial_purchase_order_list",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_currency"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_expected_date"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_notes"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_order_date"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_receiving_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_supplier_party_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_payment_terms"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_10"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_freight_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 110,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_11"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_freight_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 120,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_12"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_other_fee_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 130,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_13"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_other_fee_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 140,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_14"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_freight_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 150,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_15"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_other_fee_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 160,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_16"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.sales:capability.commercial"
+        },
+        "binding": "northstar.sales:read_model.commercial_purchase_order",
+        "queries": {
+          "lines": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
+          }
+        },
+        "resultFields": {
+          "order_subtotal": "northstar.app:metric.order_subtotal",
+          "order_charges": "northstar.app:metric.order_charges",
+          "order_tax": "northstar.app:metric.order_tax",
+          "order_total": "northstar.app:metric.order_total"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
           "parameterId": "northstar.app:parameter.expected_receipt_list_legal_entity_scope",
           "schemaVersion": "v6"
         },
@@ -38481,12 +38722,39 @@
             ]
           },
           {
-            "columnId": "northstar.app:list_column.sales_order_list_currency",
-            "label": "Currency",
+            "columnId": "northstar.app:list_column.sales_order_list_ordered",
+            "label": "Ordered",
             "orderKey": 70,
-            "field": "northstar.app:field.sales_order_currency",
+            "field": "northstar.app:list_output.sales_order_list_ordered",
             "role": "value",
             "priority": 6,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.sales_order_list_shipped",
+            "label": "Shipped",
+            "orderKey": 80,
+            "field": "northstar.app:list_output.sales_order_list_shipped",
+            "role": "value",
+            "priority": 7,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.sales_order_list_open",
+            "label": "Open",
+            "orderKey": 90,
+            "field": "northstar.app:list_output.sales_order_list_open",
+            "role": "value",
+            "priority": 8,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.sales_order_list_currency",
+            "label": "Currency",
+            "orderKey": 100,
+            "field": "northstar.app:field.sales_order_currency",
+            "role": "value",
+            "priority": 9,
             "sortable": true
           }
         ],
@@ -38504,9 +38772,21 @@
             "filters": []
           },
           {
+            "viewId": "northstar.app:list_view.sales_order_list_to_ship",
+            "label": "To ship",
+            "orderKey": 20,
+            "filters": [
+              {
+                "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
+                "value": "northstar.app:state.sales_order_released"
+              }
+            ],
+            "open": true
+          },
+          {
             "viewId": "northstar.app:list_view.sales_order_list_draft",
             "label": "Draft",
-            "orderKey": 20,
+            "orderKey": 30,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
@@ -38517,7 +38797,7 @@
           {
             "viewId": "northstar.app:list_view.sales_order_list_released",
             "label": "Released",
-            "orderKey": 30,
+            "orderKey": 40,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
@@ -38528,7 +38808,7 @@
           {
             "viewId": "northstar.app:list_view.sales_order_list_closed",
             "label": "Closed",
-            "orderKey": 40,
+            "orderKey": 50,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
@@ -38539,7 +38819,7 @@
           {
             "viewId": "northstar.app:list_view.sales_order_list_cancelled",
             "label": "Cancelled",
-            "orderKey": 50,
+            "orderKey": 60,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
@@ -38561,7 +38841,59 @@
             ]
           }
         ],
-        "export": { "format": "csv" }
+        "export": { "format": "csv" },
+        "progress": {
+          "lines": {
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.commercial_lines"
+            },
+            "relation": "northstar.app:relation.sales_order_line_order",
+            "quantity": "northstar.app:field.sales_order_line_ordered_quantity"
+          },
+          "done": {
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.sales_order_shipped_list"
+            },
+            "relation": "northstar.app:relation.sales_order_shipped_order_line",
+            "quantity": "northstar.app:field.sales_order_shipped_shipped_quantity"
+          },
+          "openIn": {
+            "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
+            "values": ["northstar.app:state.sales_order_released"]
+          },
+          "outputs": {
+            "ordered": "northstar.app:list_output.sales_order_list_ordered",
+            "done": "northstar.app:list_output.sales_order_list_shipped",
+            "open": "northstar.app:list_output.sales_order_list_open"
+          },
+          "whenDenied": "omit"
+        },
+        "rowActions": [
+          {
+            "actionId": "northstar.app:list_row_action.sales_order_list_fulfill",
+            "label": "Fulfill",
+            "orderKey": 10,
+            "when": {
+              "filters": [
+                {
+                  "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
+                  "value": "northstar.app:state.sales_order_released"
+                }
+              ],
+              "open": true
+            },
+            "section": "northstar.app:dataset.fulfillment_lines"
+          },
+          {
+            "actionId": "northstar.app:list_row_action.sales_order_list_view",
+            "label": "View",
+            "orderKey": 20
+          }
+        ]
       }
     },
     {
@@ -44620,7 +44952,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.purchase_order_list"
+        "targetId": "northstar.app:query.commercial_purchase_order_list"
       },
       "kind": "surfaceDefinition",
       "label": "Purchase orders",
@@ -44748,7 +45080,10 @@
             "role": "value",
             "priority": 3,
             "sortable": true,
-            "format": "date"
+            "format": "date",
+            "overdue": {
+              "view": "northstar.app:list_view.purchase_order_list_late"
+            }
           },
           {
             "columnId": "northstar.app:list_column.purchase_order_list_status",
@@ -44770,12 +45105,49 @@
             ]
           },
           {
-            "columnId": "northstar.app:list_column.purchase_order_list_currency",
-            "label": "Currency",
+            "columnId": "northstar.app:list_column.purchase_order_list_ordered",
+            "label": "Ordered",
             "orderKey": 60,
-            "field": "northstar.app:field.purchase_order_currency",
+            "field": "northstar.app:list_output.purchase_order_list_ordered",
             "role": "value",
             "priority": 5,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.purchase_order_list_received",
+            "label": "Received",
+            "orderKey": 70,
+            "field": "northstar.app:list_output.purchase_order_list_received",
+            "role": "value",
+            "priority": 6,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.purchase_order_list_open",
+            "label": "Open",
+            "orderKey": 80,
+            "field": "northstar.app:list_output.purchase_order_list_open",
+            "role": "value",
+            "priority": 7,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.purchase_order_list_total",
+            "label": "Total",
+            "orderKey": 90,
+            "field": "northstar.app:metric.order_total",
+            "role": "value",
+            "priority": 8,
+            "sortable": false,
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:list_column.purchase_order_list_currency",
+            "label": "Currency",
+            "orderKey": 100,
+            "field": "northstar.app:field.purchase_order_currency",
+            "role": "value",
+            "priority": 9,
             "sortable": true
           }
         ],
@@ -44793,9 +45165,37 @@
             "filters": []
           },
           {
+            "viewId": "northstar.app:list_view.purchase_order_list_to_receive",
+            "label": "To receive",
+            "orderKey": 20,
+            "filters": [
+              {
+                "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
+                "value": "northstar.app:state.purchase_order_released"
+              }
+            ],
+            "open": true
+          },
+          {
+            "viewId": "northstar.app:list_view.purchase_order_list_late",
+            "label": "Late",
+            "orderKey": 30,
+            "filters": [
+              {
+                "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
+                "value": "northstar.app:state.purchase_order_released"
+              }
+            ],
+            "open": true,
+            "before": {
+              "field": "northstar.app:field.purchase_order_expected_date",
+              "anchor": "startOfTodayUtc"
+            }
+          },
+          {
             "viewId": "northstar.app:list_view.purchase_order_list_draft",
             "label": "Draft",
-            "orderKey": 20,
+            "orderKey": 40,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
@@ -44806,7 +45206,7 @@
           {
             "viewId": "northstar.app:list_view.purchase_order_list_released",
             "label": "Released",
-            "orderKey": 30,
+            "orderKey": 50,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
@@ -44817,7 +45217,7 @@
           {
             "viewId": "northstar.app:list_view.purchase_order_list_closed",
             "label": "Closed",
-            "orderKey": 40,
+            "orderKey": 60,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
@@ -44828,7 +45228,7 @@
           {
             "viewId": "northstar.app:list_view.purchase_order_list_cancelled",
             "label": "Cancelled",
-            "orderKey": 50,
+            "orderKey": 70,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
@@ -44850,7 +45250,59 @@
             ]
           }
         ],
-        "export": { "format": "csv" }
+        "export": { "format": "csv" },
+        "progress": {
+          "lines": {
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.purchase_order_line_list"
+            },
+            "relation": "northstar.app:relation.purchase_order_line_order",
+            "quantity": "northstar.app:field.purchase_order_line_ordered_quantity"
+          },
+          "done": {
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.purchase_order_received_list"
+            },
+            "relation": "northstar.app:relation.purchase_order_received_order_line",
+            "quantity": "northstar.app:field.purchase_order_received_received_quantity"
+          },
+          "openIn": {
+            "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
+            "values": ["northstar.app:state.purchase_order_released"]
+          },
+          "outputs": {
+            "ordered": "northstar.app:list_output.purchase_order_list_ordered",
+            "done": "northstar.app:list_output.purchase_order_list_received",
+            "open": "northstar.app:list_output.purchase_order_list_open"
+          },
+          "whenDenied": "omit"
+        },
+        "rowActions": [
+          {
+            "actionId": "northstar.app:list_row_action.purchase_order_list_receive",
+            "label": "Receive",
+            "orderKey": 10,
+            "when": {
+              "filters": [
+                {
+                  "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
+                  "value": "northstar.app:state.purchase_order_released"
+                }
+              ],
+              "open": true
+            },
+            "section": "northstar.app:dataset.purchasing_lines"
+          },
+          {
+            "actionId": "northstar.app:list_row_action.purchase_order_list_view",
+            "label": "View",
+            "orderKey": 20
+          }
+        ]
       }
     },
     {

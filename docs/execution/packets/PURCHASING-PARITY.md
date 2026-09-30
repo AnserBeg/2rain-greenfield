@@ -1,14 +1,15 @@
 # PURCHASING-PARITY — Rain's purchase orders at PaneFlow parity through metadata
 
-Status: slices 1-3 (priced purchase orders and RCV numbers; ending an order; receiving paperwork without the received-on date) executable and pushed (draft PR #8 on `packet/SALES-PARITY`); slice 4 chartered; no merge, no deployment. Sole LOCAL BUILD, chartered by the owner on 2026-09-29 ("continue to what is left ... the other components ... without me"; recommendations accepted, decisions reported at the end).
+Status: slices 1-4 (priced purchase orders and RCV numbers; ending an order; receiving paperwork without the received-on date; what is still to arrive) executable, with the ADR-0066 re-baseline, pushed on draft PR #8 (stacked on PR #7); no merge, no deployment. Sole LOCAL BUILD, chartered by the owner on 2026-09-29 ("continue to what is left ... the other components ... without me"; recommendations accepted, decisions reported at the end).
 Tier: outside the Critical set — storage columns are added through the existing `addColumn` path (SALES-PARITY claims 10-11); slice 2 changes receiving's order lifecycle and amend path (`purchasing-order-lifecycle.ts`, `receiving-order-capability.ts`), not the posting kernel; no verification, trust, migration or grant change.
-Base: `packet/SALES-PARITY` at `b1aefa05`, merged in (stacked on draft PR #7; slice 1 was cut at `f0a38e76`). Reference: PaneFlow `d057daff` read from source; audit in `PURCHASING-PARITY-inventory.md`.
+Base: `packet/SALES-PARITY` at `a58508da`, merged in (stacked on draft PR #7; slice 1 was cut at `f0a38e76`). Reference: PaneFlow `d057daff` read from source; audit in `PURCHASING-PARITY-inventory.md`.
 
 ## Owner rulings (recommended, taken under the owner's standing instruction)
 
 - PA: ruling B extends to purchase orders. A PO carries payment terms, a tax code that new lines start from, a line discount %, a tax rate frozen per line and per charge, freight and an other fee each with a code, exact half-up per-line amounts and totals, one currency (no FX). The v1 plan's "no tax on orders" boundary (`purchasing-sales-v1-plan.md` §6, §7.3) moves for POs as ruling B moved it for sales orders. No accounting, payable or ledger posting follows.
 - PB: a supplier's defaults are its Party defaults (currency, terms, tax code), as PaneFlow keeps one set per business partner; the expected date starts 14 days out, PaneFlow's default.
 - PC: a unit cost is typed; defaulting it from a last cost or a standard cost waits for an item cost field (inventory packet).
+- PD (the owner, 2026-09-30, "Yes, with slice 4"): re-baseline the release lineage under ADR-0066 in slice 4's push. `app.compiled.json` was 82.4 MB at 26 entries (GitHub refuses 100 MB, each entry ~3-4 MB and a longer composed PostgreSQL job); no production tenant exists.
 
 ## Slices
 
@@ -58,13 +59,16 @@ None owed: nothing in the Critical set changes.
 - `ba21d043` (rebased onto SALES-PARITY `f0a38e76`, whose slot order puts a document's lines first; this slice becomes lineage entry 24): release `--check` PASS; typecheck clean; unit `purchasing-definition` + `workspace-contract` 48/48; coverage unchanged (738). The PostgreSQL and browser runs above are at the pre-rebase heads; CI on the PR is the gate for the rebased head (see Filed).
 
 - `4a68c916` (slices 2-3, lineage entry 25, merged with SALES-PARITY `b1aefa05`; one container at a time): release `--check` PASS; typecheck clean; unit `purchasing-definition`, `workspace-contract`, `sales-definition`, `surface-list`, `field-numbering` 69/69; integration `surface-data-binding` 112/112; reachability and hygiene 21/21; language coverage PASS (2498 -> 2501 obligations, 738 -> 742 observed); the full-replay snapshot differs only by four nullable columns and their UPDATE grants; PostgreSQL `purchase-order-ending` 1/1 after one stale expectation (a stored quantity reads at its column's scale). CI at `a2492db2` (slice 1): quality, browser and scans passed; PostgreSQL was cancelled at its 30-minute bound (hence SALES-PARITY `d00f8bba`) and the compile budget was indeterminate (CPU idle 73%, below the 90% it requires). CI on PR #8 is the gate for this head.
+- Re-baseline `c9cb12a9` (merged `cf4ce59c`): `app.compiled.json` 82,378,697 B / 26 entries -> 4,667,601 B / 1 entry, the head's normalized definition byte-identical to entry 25; `--check` and `check:demo-release` PASS. The full-replay schema snapshot changes only the ordinal position of 73 columns in 9 tables (added by ALTER in later entries, now created in declared order); columns, types, grants, constraints, indexes, policies and triggers identical. The multi-entry history claims move to a synthetic lineage ("a fresh install replays a synthetic storage history": bootstrap, the recorded head, then one addColumn successor), and the Sales controls `added-company-column-carries-its-update-grant` and `replayed-create-keeps-later-column-grants` now name it (the one-entry lineage has no addColumn step). Unit 192/192; composed "activates through the kernel" 12/12 (224 s). Not yet run to completion locally (load 10-28, container starts timed out): the new synthetic-history test, the advance and ADR-0047 §6 tests, and the two re-pointed controls' `--run`; CI on the PR runs the first three.
+- Slice 4 (agent, then `7ef2806d`): unit 178/178, integration 232/232, compiler 175/175, web contract 31/31, six architecture files 108/108, agent 3/3; PostgreSQL `expected-receipts` 1/1 (162 s) locally. CI at `7ef2806d` (dispatched): quality, PostgreSQL schema and isolation, and PostgreSQL composed application passed; Browser was cancelled at its 20-minute bound (112 of 113 done), the scan red on the brace-expansion advisory (pinned at SALES-PARITY `44280f01`), the compile budget indeterminate.
+
 ## Test it yourself
 
-`PURCHASING-PARITY-test-it-yourself.md` §1 priced purchase order, §2 ending an order, §3 receiving paperwork.
+`PURCHASING-PARITY-test-it-yourself.md` §1 priced purchase order, §2 ending an order, §3 receiving paperwork, §4 what is still to arrive.
 
 ## Filed
 
-- `apps/web/release/app.compiled.json` grows about 3 MB per lineage entry (72 MB at 24 entries; GitHub refuses files over 100 MB): an ADR-0066 re-baseline (recommended: nothing is in production) or LFS is the owner's decision.
+- Re-baselined (ruling PD): a development database created from the old 26-entry lineage needs `corepack pnpm --filter @north-star/api dev:reset` before it can run this release; test and test-it-yourself databases are created per run.
 - Receipts and shipments already refuse a date after the tenant's today (`inventory-posting-service.ts`), but adjustments do not, and the backdate window is 0 days: POSTING-FORWARD-DATE (Critical, its own packet) adds one forward rule for every family and a 7-day window, after which a receipt date can be offered.
 - Both line sections of the order page read the commercial purchase-line model, so received quantities are read twice per line per page; one section could carry both.
 - A committed cancel's event now uses the purchasing order-event schema while a draft cancel's keeps the generic one (the event type is unchanged).
@@ -73,24 +77,27 @@ None owed: nothing in the Critical set changes.
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "PURCHASING-PARITY",
-  "base": "b1aefa054af33b2734e8816eaca4897d1713b1b7",
-  "head": "4a68c9164c7a84ec3454cfdef0c120cb1c0c676f",
+  "base": "a58508da8905d423f6edbd61d9687b7d222dc617",
+  "head": "cf4ce59c72fb45990f34c20cc70bfacfae6ab250",
   "changedPaths": [
-    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
-    "apps/web/src/surface-composition.ts", "apps/web/test/browser/purchase-pricing.spec.ts",
-    "apps/web/test/browser/receiving.composed-application.spec.ts", "packages/canonical-model/src/schemas.ts",
-    "packages/canonical-model/src/surface-composition.ts", "packages/domain/src/app/builder.ts",
-    "packages/domain/src/app/order-entry.ts", "packages/domain/src/purchasing/definition.ts",
-    "packages/domain/src/purchasing/workspace.ts", "packages/domain/src/sales/workspace.ts",
-    "packages/postgres-provider/src/commercial-read-model.ts", "packages/postgres-provider/src/purchasing-order-lifecycle.ts",
-    "packages/postgres-provider/src/receiving-capability-executor.ts", "packages/postgres-provider/src/receiving-order-capability.ts",
-    "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.test.ts",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/surface-data-binding.test.ts",
-    "test/postgres/commercial-totals.test.ts", "test/postgres/composed-application.test.ts",
-    "test/postgres/document-numbering.test.ts", "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
-    "test/postgres/inventory-posting.test.ts", "test/postgres/purchase-order-ending.test.ts",
-    "test/postgres/receiving-authorization.test.ts", "test/unit/canonical-model/field-numbering.test.ts",
-    "test/unit/purchasing-definition.test.ts", "test/unit/workspace-contract.test.ts"
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
+    "apps/web/src/list-declaration.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts",
+    "apps/web/test/browser/composed-application.spec.ts", "apps/web/test/browser/expected-receipts.spec.ts", "apps/web/test/browser/order-entry.spec.ts",
+    "apps/web/test/browser/purchase-pricing.spec.ts", "apps/web/test/browser/receiving.composed-application.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
+    "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-composition.ts",
+    "packages/canonical-model/src/surface-list.ts", "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts",
+    "packages/domain/src/app/list-declarations.ts", "packages/domain/src/app/order-entry.ts", "packages/domain/src/purchasing/definition.ts",
+    "packages/domain/src/purchasing/workspace.ts", "packages/domain/src/sales/workspace.ts", "packages/postgres-provider/src/commercial-read-model.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/purchasing-order-lifecycle.ts", "packages/postgres-provider/src/receiving-capability-executor.ts",
+    "packages/postgres-provider/src/receiving-order-capability.ts", "packages/runtime/src/list-behavior/cursor.ts", "packages/runtime/src/list-behavior/index.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/surface-grammar-conformance.test.ts", "test/evidence/RECEIPT.expected-red.json", "test/evidence/SALES-PARITY.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/order-entry-fixture.ts", "test/integration/surface-data-binding.test.ts",
+    "test/integration/table-behavior.test.ts", "test/postgres/commercial-totals.test.ts", "test/postgres/composed-application.test.ts",
+    "test/postgres/document-numbering.test.ts", "test/postgres/expected-receipts.test.ts", "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
+    "test/postgres/inventory-posting.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/purchase-order-ending.test.ts",
+    "test/postgres/receiving-authorization.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/canonical-model/field-numbering.test.ts",
+    "test/unit/canonical-model/surface-list.test.ts", "test/unit/purchasing-definition.test.ts", "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
     {"path": "packages/domain/src/purchasing/definition.ts", "name": "purchasingModuleDefinition"},
@@ -103,4 +110,4 @@ None owed: nothing in the Critical set changes.
 }
 ```
 
-Review: not owed — outside the Critical set (slices 1-3).
+Review: not owed — outside the Critical set (slices 1-4 and the re-baseline).

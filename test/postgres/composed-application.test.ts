@@ -163,6 +163,11 @@ const fullReplaySchemaSnapshotPath = resolve(
 );
 const execFileAsync = promisify(execFile);
 const rollbackFieldId = 'northstar.app:field.party_rollback_note';
+// The optional field `appendCompanyColumnSuccessor` adds to a company-scoped
+// entity (ADR-0066 synthetic storage history).
+const companyColumnEntityId = 'northstar.app:entity.purchase_order';
+const companyColumnFieldId =
+  'northstar.app:field.purchase_order_rebaseline_note';
 
 test('composed product does not invent a verification evidence identity', async () => {
   const source = await readFile(
@@ -707,6 +712,126 @@ test(
             tenantA.close(),
             tenantB?.close() ?? Promise.resolve(),
           ]);
+        }
+      },
+    );
+  },
+);
+
+// ADR-0066 pre-tenant re-baseline. The recorded lineage now has ONE entry, so
+// the fresh install above crosses a single edge -- the bootstrap to the head --
+// and creates every table whole. The storage history the old many-entry lineage
+// replayed is constructed here instead of being retained: the recorded head,
+// then a successor that adds one optional field to a company-scoped entity
+// (`appendCompanyColumnSuccessor`). That restores three facts the recorded
+// history used to carry:
+//   - a first tenant's fresh install crosses more than one edge, and every
+//     non-serving release -- the recorded head included -- refuses serving and
+//     is bound to its exact edge;
+//   - that install applies an `addColumn` to a company-scoped table, whose
+//     UPDATE grant is per column (SALES-PARITY `added-company-column-...`);
+//   - a second tenant replays the recorded head's create beneath the column the
+//     first tenant's serving release added, and that column keeps its grant
+//     (SALES-PARITY `replayed-create-keeps-later-column-grants`).
+test(
+  'a fresh install replays a synthetic storage history: every intermediate refuses serving, an added company column is granted, and a second tenant replaying the earlier create keeps that grant',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'rebaseline-storage-history',
+      async ({ connection, pool }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const recorded = parseCompiledApplication(compiledApplication);
+        const lineage = appendCompanyColumnSuccessor(compiledApplication);
+        const parsed = parseCompiledApplication(lineage);
+        // The construction is the control: the recorded head is retained as
+        // an intermediate, and the only storage change after it is the column.
+        assert.equal(
+          parsed.applications.length,
+          recorded.applications.length + 1,
+        );
+        assert.equal(
+          parsed.applications.at(-2)!.compiled.releaseRoot,
+          recorded.application.compiled.releaseRoot,
+        );
+        assert.deepEqual(
+          projectionPayload<{ elements: { kind: string }[] }>(
+            parsed.application.compiled,
+            PROJECTION_FAMILY_IDS.storageTransition,
+          ).elements.map((element) => element.kind),
+          ['addColumn'],
+        );
+        const added = companyColumnTarget(lineage);
+        const databaseUrl = connectionUrl(connection);
+
+        const refusedIntermediateRoots: string[] = [];
+        const first = await createRuntime(
+          lineage,
+          databaseUrl,
+          'storage-history-first',
+          undefined,
+          async (observation) => {
+            await assert.rejects(
+              observation.loadActiveRuntimeDefinition,
+              (error: unknown) => {
+                assert.ok(error instanceof RequestRuntimeViewLoadError);
+                assert.equal(error.code, 'ACTIVE_RELEASE_NOT_ADMITTED');
+                return true;
+              },
+            );
+            refusedIntermediateRoots.push(observation.releaseRoot);
+          },
+        );
+        try {
+          assert.equal(
+            first.releaseRoot,
+            parsed.application.compiled.releaseRoot,
+          );
+          assert.deepEqual(
+            refusedIntermediateRoots,
+            [parsed.bootstrap, ...parsed.applications]
+              .slice(0, -1)
+              .map((release) => release.compiled.releaseRoot),
+            'every intermediate, the recorded head included, refuses request serving until semantic admission',
+          );
+          await assertFreshInstallLineageEvidence(
+            pool,
+            first,
+            lineage,
+            connection,
+          );
+          await assertColumnUpdateGranted(
+            pool,
+            added,
+            'the addColumn edge grants the column UPDATE, as the table creation grants its other mutable columns',
+          );
+          await assertSyntheticReplayConvergesOnRecordedHeadSchema(
+            pool,
+            added.column,
+          );
+
+          const second = await createRuntime(
+            lineage,
+            databaseUrl,
+            'storage-history-second',
+          );
+          try {
+            assert.equal(
+              second.releaseRoot,
+              parsed.application.compiled.releaseRoot,
+            );
+          } finally {
+            await second.close();
+          }
+          await assertColumnUpdateGranted(
+            pool,
+            added,
+            "replaying the recorded head's create for a second tenant keeps the grant the first tenant's serving release added",
+          );
+        } finally {
+          await first.close();
         }
       },
     );
@@ -3358,17 +3483,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   compiledApplication: unknown,
   connection: pg.PoolConfig,
 ): Promise<void> {
-  const compiled = parseCompiledApplication(compiledApplication);
-  const lineage = [compiled.bootstrap, ...compiled.applications];
-  const unverifiedRoots = lineage
-    .slice(0, -1)
-    .map((release) => release.compiled.releaseRoot);
-  const transitionPairs = lineage.slice(1).map((release, index) => ({
-    sourceReleaseRoot: lineage[index]!.compiled.releaseRoot,
-    targetReleaseRoot: release.compiled.releaseRoot,
-  }));
   const servingScenarioCount = releaseVerificationBinding(
-    compiled.application.compiled,
+    parseCompiledApplication(compiledApplication).application.compiled,
   ).plan.scenarios.length;
   assertReceivingVerificationCoverage(compiledApplication);
   assertSalesVerificationCoverage(compiledApplication);
@@ -3412,6 +3528,41 @@ async function assertBoundedFreshTenantInstallEvidence(
     573,
     'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, and 72 for payables',
   );
+  await assertFreshInstallLineageEvidence(
+    pool,
+    runtime,
+    compiledApplication,
+    connection,
+  );
+}
+
+/**
+ * What a bounded fresh install records about the lineage it replayed, derived
+ * from that lineage alone: every non-serving release admitted for transition
+ * only, bound to its exact edge and ordinal in one install, and only the serving
+ * release semantically verified. Split out of
+ * `assertBoundedFreshTenantInstallEvidence` by the ADR-0066 re-baseline so a
+ * synthetic multi-entry lineage can be held to the same facts without the
+ * recorded head's scenario pins.
+ */
+async function assertFreshInstallLineageEvidence(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+  connection: pg.PoolConfig,
+): Promise<void> {
+  const compiled = parseCompiledApplication(compiledApplication);
+  const lineage = [compiled.bootstrap, ...compiled.applications];
+  const unverifiedRoots = lineage
+    .slice(0, -1)
+    .map((release) => release.compiled.releaseRoot);
+  const transitionPairs = lineage.slice(1).map((release, index) => ({
+    sourceReleaseRoot: lineage[index]!.compiled.releaseRoot,
+    targetReleaseRoot: release.compiled.releaseRoot,
+  }));
+  const servingScenarioCount = releaseVerificationBinding(
+    compiled.application.compiled,
+  ).plan.scenarios.length;
 
   const intermediate = await pool.query<{
     install_id: MintedUuid;
@@ -3652,6 +3803,105 @@ async function assertBoundedInstallMatchesFullReplaySchema(
   } finally {
     client.release();
   }
+}
+
+/** The company-scoped table and column `appendCompanyColumnSuccessor` adds. */
+function companyColumnTarget(compiledApplication: unknown): {
+  readonly column: string;
+  readonly table: string;
+} {
+  const entity = requiredStorageEntity(
+    storageTarget(
+      parseCompiledApplication(compiledApplication).application.compiled,
+    ),
+    companyColumnEntityId.split(':entity.')[1]!,
+  );
+  // Company-scoped, and neither a fact nor a period lock: the one table class
+  // whose runtime UPDATE is granted per column rather than per table.
+  assert.ok(entity.legalEntity);
+  assert.equal(entity.factStorage, undefined);
+  assert.equal(entity.periodLock, undefined);
+  return {
+    column: requiredStorageColumn(
+      entity,
+      companyColumnFieldId.split(':field.')[1]!,
+    ),
+    table: entity.physicalTableName,
+  };
+}
+
+async function assertColumnUpdateGranted(
+  pool: pg.Pool,
+  target: Readonly<{ column: string; table: string }>,
+  message: string,
+): Promise<void> {
+  const result = await pool.query<{
+    column_update: boolean;
+    table_update: boolean;
+  }>(
+    `SELECT has_column_privilege('north_star_module_runtime', $1, $2, 'UPDATE')
+              AS column_update,
+            has_table_privilege('north_star_module_runtime', $1, 'UPDATE')
+              AS table_update`,
+    [`north_star_module.${quoteSqlIdentifier(target.table)}`, target.column],
+  );
+  // Granted on the column, and never at table level: a company-scoped table's
+  // runtime UPDATE is per column by construction.
+  assert.deepEqual(
+    result.rows[0],
+    { column_update: true, table_update: false },
+    message,
+  );
+}
+
+/**
+ * The synthetic replay converges on the head catalog the checked-in full
+ * replay records: removing every catalog row that names the added column leaves
+ * that snapshot exactly, and the column itself is present once and granted.
+ * Anything else would be drift the extra edge introduced.
+ */
+async function assertSyntheticReplayConvergesOnRecordedHeadSchema(
+  pool: pg.Pool,
+  addedColumn: string,
+): Promise<void> {
+  const expected = JSON.parse(
+    await readFile(fullReplaySchemaSnapshotPath, 'utf8'),
+  ) as unknown;
+  const client = await pool.connect();
+  let actual: Awaited<ReturnType<typeof captureSchemaSnapshot>>;
+  try {
+    actual = await captureSchemaSnapshot(client, ['north_star_module']);
+  } finally {
+    client.release();
+  }
+  const namesAddedColumn = (row: unknown) =>
+    JSON.stringify(row).includes(addedColumn);
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(actual).map(([key, value]) => [
+        key,
+        Array.isArray(value)
+          ? value.filter((row) => !namesAddedColumn(row))
+          : value,
+      ]),
+    ),
+    expected,
+    'a replay across the added-column edge converges on the recorded head catalog',
+  );
+  assert.deepEqual(
+    actual.columns
+      .filter(namesAddedColumn)
+      .map((row) => row.column_name as string),
+    [addedColumn],
+  );
+  assert.ok(
+    actual.columnPrivileges.some(
+      (row) =>
+        namesAddedColumn(row) &&
+        row.grantee === 'north_star_module_runtime' &&
+        row.privilege_type === 'UPDATE',
+    ),
+  );
 }
 
 /**
@@ -6258,6 +6508,68 @@ function appendSameProfileSuccessor(compiledApplication: unknown): unknown {
         serializedRelease(release.normalizedDefinitionBytes, release.compiled),
       ),
       serializedRelease(headBytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
+}
+
+/**
+ * ADR-0066: the recorded lineage followed by a successor that adds one optional
+ * field (`companyColumnFieldId`) to a company-scoped entity. A pre-tenant
+ * re-baseline leaves one recorded entry whose install creates every table
+ * whole, so this is how a fresh install still crosses an `addColumn` on a
+ * company-scoped table after an intermediate, and how a second tenant still
+ * replays an earlier create beneath a column a later release added. Nothing is
+ * spliced into the recorded entries; the successor is compiled over the head.
+ */
+function appendCompanyColumnSuccessor(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const definition = structuredClone(composedApplicationDefinition()) as {
+    fields: Record<string, unknown>[];
+    languageVersion: string;
+    package: { version: string };
+  };
+  definition.package.version = '1.0.3';
+  // Version-from-artifact: the spliced node declares the candidate's own
+  // language version, not a literal.
+  const nodeVersion = definition.languageVersion;
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'unicodeCaseInsensitive',
+    defaultSemantics: 'nullable',
+    entity: {
+      kind: 'entityReference',
+      schemaVersion: nodeVersion,
+      targetId: companyColumnEntityId,
+    },
+    fieldId: companyColumnFieldId,
+    fieldType: {
+      kind: 'textFieldType',
+      maximumLength: 160,
+      schemaVersion: nodeVersion,
+    },
+    kind: 'fieldDefinition',
+    label: 'Re-baseline note',
+    orderKey: 990,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: nodeVersion,
+    searchable: false,
+  });
+  const bytes = new TextEncoder().encode(
+    canonicalize(normalizeApplicationPackage(definition)),
+  );
+  const successor = compileSuccessor(previous.application.compiled, bytes);
+  return {
+    applications: [
+      ...previous.applications.map((release) =>
+        serializedRelease(release.normalizedDefinitionBytes, release.compiled),
+      ),
+      serializedRelease(bytes, successor),
     ],
     bootstrap: serializedRelease(
       previous.bootstrap.normalizedDefinitionBytes,

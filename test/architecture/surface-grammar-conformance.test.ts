@@ -291,8 +291,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Draft document editing and workspace entry require reader 8; picker
   // eligibility and typed Task inputs require 9; declared Lists require 10;
   // editor defaults, scoped pickers and Task input eligibility require 11;
-  // List progress, open and before-today views and overdue dates require 12.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 12);
+  // List progress, open and before-today views and overdue dates require 12;
+  // List row actions and supplementary progress (ORDER-PARITY) require 13.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 13);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
