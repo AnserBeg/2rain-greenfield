@@ -253,6 +253,24 @@
           "expected": "search exclusion probe has no same-entity positive searchable field"
         }
       ]
+    },
+    {
+      "name": "verification-reads-numbers-the-read-back-omits",
+      "claim": "Release verification takes a create's assigned number from the create's read-back only when that declared projection selects it (else through a plain get that selects it, else as the record's sentinel), so a numbered entity whose create read-back omits a number activates and executes its scenarios.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    if (readBack !== null && Object.hasOwn(readBack.values, fieldId)) {\n",
+      "replacement": "    if (readBack !== null) {\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "release verification reads assigned numbers"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification reads assigned numbers its create read-back omits, and archives every record it creates",
+          "expected": "did not read back its assigned northstar\\.party:field\\.party_account_number \\(read-back\\)"
+        }
+      ]
     }
   ]
 }
