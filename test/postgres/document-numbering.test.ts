@@ -5,9 +5,21 @@ import test from 'node:test';
 import {
   parsePinnedOperationCatalog,
   SEMANTIC_OPERATION_REQUEST_VERSION,
+  type SemanticOperationExecutionRequest,
+  type SemanticOperationExecutor,
+  type SemanticOperationNonAcceptedRequest,
+  type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
+import type {
+  SemanticQueryExecutionRequest,
+  SemanticQueryExecutor,
+  SemanticQueryResultEnvelope,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
-import { unicodeCaseFold } from '../../packages/canonical-model/src/index.js';
+import {
+  inspectPredicateForExecution,
+  unicodeCaseFold,
+} from '../../packages/canonical-model/src/index.js';
 import {
   PROJECTION_FAMILY_IDS,
   type StorageTargetPayloadV1,
@@ -34,7 +46,9 @@ import {
 } from '../fixtures/g2/party/definition.js';
 import {
   PARTY_TEST_SCOPE,
+  invokePartyQuery,
   withRealPartyRuntime,
+  type RealPartyRuntime,
 } from '../fixtures/g2/party/runtime-harness.js';
 import {
   governedProjection,
@@ -417,37 +431,12 @@ test(
       async (runtime) => {
         const party = storageEntity(runtime.storage, PARTY_IDS.entityIds.party);
         const role = storageEntity(runtime.storage, PARTY_IDS.entityIds.role);
-        const stored = async (
+        const stored = (
           entity: StorageEntity,
           tenantId: string,
           environmentId: string,
           fieldIds: readonly string[],
-        ) =>
-          (
-            await runtime.adminPool.query<Record<string, unknown>>(
-              `SELECT ${quoteFulfillmentIdentifier(entity.recordIdentity.column)}::text AS record_id,
-                      ${quoteFulfillmentIdentifier(entity.archive.archivedAtColumn)} IS NOT NULL AS archived,
-                      ${fieldIds
-                        .map(
-                          (fieldId, index) =>
-                            `${quoteFulfillmentIdentifier(storageColumn(entity, fieldId).physicalName)} AS value_${String(index)}`,
-                        )
-                        .join(', ')}
-                 FROM ${fulfillmentTable(entity)}
-                WHERE tenant_id = $1 AND environment_id = $2
-                ORDER BY 1`,
-              [tenantId, environmentId],
-            )
-          ).rows.map((row) => ({
-            archived: row.archived === true,
-            recordId: String(row.record_id),
-            values: Object.fromEntries(
-              fieldIds.map((fieldId, index) => [
-                fieldId,
-                row[`value_${String(index)}`],
-              ]),
-            ),
-          }));
+        ) => storedRecords(runtime, entity, tenantId, environmentId, fieldIds);
 
         // The premise: each create's read-back omits a number it assigns.
         const operations = projectionPayload<{
@@ -504,38 +493,10 @@ test(
         ]) {
           assert.ok(probes.includes(probe), probe);
         }
-        const evidence = await runtime.adminPool.query<{
-          execution_scope: string;
-          executed_environment_id: string;
-          executed_tenant_id: string;
-          verification_evidence_id: string;
-        }>(
-          `SELECT verification_evidence_id, executed_tenant_id,
-                  executed_environment_id, execution_scope
-             FROM platform.release_verification_evidence
-            WHERE release_root = $1
-              AND tenant_id = executed_tenant_id
-              AND environment_id = executed_environment_id`,
-          [runtime.compiled.releaseRoot],
-        );
-        assert.equal(evidence.rows.length, 1);
-        const executedIn = evidence.rows[0]!;
+        const executedIn = await admittedEvidence(runtime);
         assert.equal(executedIn.execution_scope, 'FULL', 'nothing was derived');
-        const executed = await runtime.adminPool.query<{
-          scenario_id: string;
-        }>(
-          `SELECT scenario_id FROM platform.release_verification_results
-            WHERE tenant_id = $1 AND environment_id = $2
-              AND verification_evidence_id = $3
-            ORDER BY scenario_id`,
-          [
-            executedIn.executed_tenant_id,
-            executedIn.executed_environment_id,
-            executedIn.verification_evidence_id,
-          ],
-        );
         assert.deepEqual(
-          executed.rows.map((row) => row.scenario_id),
+          executedIn.scenarioIds,
           plan.scenarios.map((scenario) => scenario.scenarioId).toSorted(),
           'release verification executed every scenario',
         );
@@ -596,30 +557,13 @@ test(
         // numbered create: the read-back says `PTY-000001`, not the record's
         // sentinel. The record was registered for archiving before its numbers
         // were read, so it is archived all the same.
-        const staged = await runtime.adminPool.query<{
-          release_id: MintedUuid;
-          verification_evidence_id: MintedUuid;
-        }>(
-          `SELECT release_id, verification_evidence_id
-             FROM platform.tenant_releases
-            WHERE tenant_id = $1 AND environment_id = $2 AND content_hash = $3`,
-          [
-            PARTY_TEST_SCOPE.a.tenantId,
-            PARTY_TEST_SCOPE.a.environmentId,
-            runtime.compiled.releaseRoot,
-          ],
-        );
-        assert.equal(staged.rows.length, 1);
+        const staged = await stagedInTenantA(runtime);
         await assert.rejects(
           new PostgresReleaseVerificationService(
             runtime.runtimePool,
           ).executeSemanticCandidateWithExecutor(
             runtime.contexts.a,
-            {
-              compiledRelease: runtime.compiled,
-              evidenceId: staged.rows[0]!.verification_evidence_id,
-              releaseId: staged.rows[0]!.release_id,
-            },
+            staged,
             new PostgresModuleRuntimeInterpreter(
               runtime.runtimePool,
               humanActorIssuer(),
@@ -665,7 +609,349 @@ test(
   },
 );
 
+// A get the compiler admits need not be one the gateway runs: a Q0 get whose
+// filter is not the literal `true` is answered `unsupported`, without a read.
+// Party is numbered as above, but its `party_account_get` -- the entity's first
+// get, ahead of `party_get` -- is filtered `false`; the account number is also
+// selected by `party_z_account_get`, which runs, and the role's number only by
+// `party_role_number_get`, filtered `false`.
+const partyGet = `${PARTY_IDS.namespace}:query.party_get`;
+const unexecutedAccountGet = `${PARTY_IDS.namespace}:query.party_account_get`;
+const executedAccountGet = `${PARTY_IDS.namespace}:query.party_z_account_get`;
+const unexecutedRoleGet = `${PARTY_IDS.namespace}:query.party_role_number_get`;
+
+test(
+  'release verification reads numbers and archives records only through gets the gateway executes, and refuses a probe record it cannot read',
+  { timeout: 300_000 },
+  async () => {
+    await withRealPartyRuntime(
+      'verification-executed-gets',
+      async (runtime) => {
+        const party = storageEntity(runtime.storage, PARTY_IDS.entityIds.party);
+        const role = storageEntity(runtime.storage, PARTY_IDS.entityIds.role);
+
+        // The premise: the compiler admitted both gets that do not run, the
+        // party's sorts first, and the gateway answers it without reading.
+        type Query = {
+          filter: unknown;
+          lifecycle: string;
+          queryId: string;
+          queryType: string;
+          selections: { fieldId: string }[];
+          sourceEntityId: string;
+          tier: string;
+        };
+        const gets = (predicate: (query: Query) => boolean) =>
+          projectionPayload<{ queries: Query[] }>(
+            runtime.compiled,
+            PROJECTION_FAMILY_IDS.queryCatalog,
+          )
+            .queries.filter(
+              (query) => query.queryType === 'get' && predicate(query),
+            )
+            .map((query) => query.queryId);
+        const selecting = (fieldId: string) => (query: Query) =>
+          query.selections.some((selection) => selection.fieldId === fieldId);
+        assert.deepEqual(
+          gets((query) => query.sourceEntityId === PARTY_IDS.entityIds.party),
+          [unexecutedAccountGet, partyGet, executedAccountGet],
+        );
+        assert.deepEqual(gets(selecting(accountNumber)), [
+          unexecutedAccountGet,
+          executedAccountGet,
+        ]);
+        assert.deepEqual(gets(selecting(roleNumber)), [unexecutedRoleGet]);
+        assert.deepEqual(
+          gets(
+            (query) =>
+              query.lifecycle !== 'active' ||
+              query.tier !== 'q0' ||
+              inspectPredicateForExecution(query.filter).outcome !== 'accepted',
+          ),
+          [unexecutedAccountGet, unexecutedRoleGet],
+        );
+        const unexecuted = await invokePartyQuery(
+          runtime,
+          runtime.views.a,
+          'party_account_get',
+          { recordId: randomUUID() },
+        );
+        assert.deepEqual(
+          [unexecuted.outcome, unexecuted.unsupportedReason],
+          ['unsupported', 'query-filter-unsupported'],
+        );
+
+        // Activation admitted the release and executed every scenario: no
+        // number read as missing, the account number read through the get
+        // that runs and the role's used unread, as its sentinel; and cleanup
+        // archived every record, although the party's first get does not run.
+        const plan = releaseVerificationBinding(runtime.compiled).plan;
+        const executedIn = await admittedEvidence(runtime);
+        assert.equal(executedIn.execution_scope, 'FULL', 'nothing was derived');
+        assert.deepEqual(
+          executedIn.scenarioIds,
+          plan.scenarios.map((scenario) => scenario.scenarioId).toSorted(),
+          'release verification executed every scenario',
+        );
+        for (const [entity, fieldIds] of [
+          [party, [partyNumber, accountNumber]],
+          [role, [roleNumber]],
+        ] as const) {
+          const records = await storedRecords(
+            runtime,
+            entity,
+            executedIn.executed_tenant_id,
+            executedIn.executed_environment_id,
+            fieldIds,
+          );
+          assert.ok(
+            records.length > 0,
+            `verification arranged ${entity.entityId}`,
+          );
+          for (const record of records) {
+            for (const fieldId of fieldIds) {
+              assert.equal(
+                record.values[fieldId],
+                verificationSentinelNumber(
+                  record.recordId,
+                  fieldId,
+                  storageColumn(entity, fieldId).fieldContract.bounds
+                    .maximumLength,
+                ),
+              );
+            }
+          }
+          assert.deepEqual(
+            records
+              .filter((record) => !record.archived)
+              .map((record) => record.recordId),
+            [],
+            `verification left no ${entity.entityId} record live`,
+          );
+        }
+
+        // A probe record the cleanup get cannot read is refused by name, not
+        // skipped, after every record that can be read is archived. Here
+        // `party_get` is answered as the interpreter answers a get whose
+        // pinned contract it does not support: `unsupported`, with no record.
+        const executor = new UnsupportedGetExecutor(runtime, partyGet);
+        const staged = await stagedInTenantA(runtime);
+        let refusal = '';
+        await assert.rejects(
+          new PostgresReleaseVerificationService(
+            runtime.runtimePool,
+          ).executeSemanticCandidateWithExecutor(
+            runtime.contexts.a,
+            staged,
+            executor,
+          ),
+          (error: unknown) => {
+            assert.equal(
+              (error as { code?: unknown }).code,
+              'VERIFICATION_PROBE_RECORD_UNREADABLE',
+              String(error),
+            );
+            refusal = String(error);
+            return true;
+          },
+        );
+        assert.ok(
+          executor.queryIds.has(executedAccountGet),
+          'the account number was read through the get that runs',
+        );
+        const roles = await storedRecords(
+          runtime,
+          role,
+          PARTY_TEST_SCOPE.a.tenantId,
+          PARTY_TEST_SCOPE.a.environmentId,
+          [roleNumber],
+        );
+        assert.ok(roles.length > 0, 'the stopped verification arranged roles');
+        assert.deepEqual(
+          roles
+            .filter((record) => !record.archived)
+            .map((record) => record.recordId),
+          [],
+          'every record cleanup could read is archived',
+        );
+        const liveParties = (
+          await storedRecords(
+            runtime,
+            party,
+            PARTY_TEST_SCOPE.a.tenantId,
+            PARTY_TEST_SCOPE.a.environmentId,
+            [partyNumber],
+          )
+        ).filter((record) => !record.archived);
+        assert.ok(
+          liveParties.length > 0,
+          'the records cleanup could not read are left live',
+        );
+        assert.deepEqual(
+          liveParties
+            .map((record) => record.recordId)
+            .filter(
+              (recordId) =>
+                !refusal.includes(
+                  `${recordId} of ${PARTY_IDS.entityIds.party} through ${partyGet} (unsupported: query-contract-unsupported)`,
+                ),
+            ),
+          [],
+          'the refusal names every record it leaves live',
+        );
+      },
+      numberedPartyDefinition({ unexecutedGets: true }),
+    );
+  },
+);
+
 type StorageEntity = StorageTargetPayloadV1['entities'][number];
+
+/** Every record of an entity in one tenant environment, with field values. */
+async function storedRecords(
+  runtime: RealPartyRuntime,
+  entity: StorageEntity,
+  tenantId: string,
+  environmentId: string,
+  fieldIds: readonly string[],
+) {
+  return (
+    await runtime.adminPool.query<Record<string, unknown>>(
+      `SELECT ${quoteFulfillmentIdentifier(entity.recordIdentity.column)}::text AS record_id,
+              ${quoteFulfillmentIdentifier(entity.archive.archivedAtColumn)} IS NOT NULL AS archived,
+              ${fieldIds
+                .map(
+                  (fieldId, index) =>
+                    `${quoteFulfillmentIdentifier(storageColumn(entity, fieldId).physicalName)} AS value_${String(index)}`,
+                )
+                .join(', ')}
+         FROM ${fulfillmentTable(entity)}
+        WHERE tenant_id = $1 AND environment_id = $2
+        ORDER BY 1`,
+      [tenantId, environmentId],
+    )
+  ).rows.map((row) => ({
+    archived: row.archived === true,
+    recordId: String(row.record_id),
+    values: Object.fromEntries(
+      fieldIds.map((fieldId, index) => [
+        fieldId,
+        row[`value_${String(index)}`],
+      ]),
+    ),
+  }));
+}
+
+/**
+ * The evidence activation persisted where verification executed, with the
+ * scenarios it executed.
+ */
+async function admittedEvidence(runtime: RealPartyRuntime) {
+  const evidence = await runtime.adminPool.query<{
+    execution_scope: string;
+    executed_environment_id: string;
+    executed_tenant_id: string;
+    verification_evidence_id: string;
+  }>(
+    `SELECT verification_evidence_id, executed_tenant_id,
+            executed_environment_id, execution_scope
+       FROM platform.release_verification_evidence
+      WHERE release_root = $1
+        AND tenant_id = executed_tenant_id
+        AND environment_id = executed_environment_id`,
+    [runtime.compiled.releaseRoot],
+  );
+  assert.equal(evidence.rows.length, 1);
+  const executedIn = evidence.rows[0]!;
+  const executed = await runtime.adminPool.query<{ scenario_id: string }>(
+    `SELECT scenario_id FROM platform.release_verification_results
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND verification_evidence_id = $3
+      ORDER BY scenario_id`,
+    [
+      executedIn.executed_tenant_id,
+      executedIn.executed_environment_id,
+      executedIn.verification_evidence_id,
+    ],
+  );
+  return {
+    ...executedIn,
+    scenarioIds: executed.rows.map((row) => row.scenario_id),
+  };
+}
+
+/** Tenant a's staged candidate, which verification can execute again. */
+async function stagedInTenantA(runtime: RealPartyRuntime) {
+  const staged = await runtime.adminPool.query<{
+    release_id: MintedUuid;
+    verification_evidence_id: MintedUuid;
+  }>(
+    `SELECT release_id, verification_evidence_id
+       FROM platform.tenant_releases
+      WHERE tenant_id = $1 AND environment_id = $2 AND content_hash = $3`,
+    [
+      PARTY_TEST_SCOPE.a.tenantId,
+      PARTY_TEST_SCOPE.a.environmentId,
+      runtime.compiled.releaseRoot,
+    ],
+  );
+  assert.equal(staged.rows.length, 1);
+  return {
+    compiledRelease: runtime.compiled,
+    evidenceId: staged.rows[0]!.verification_evidence_id,
+    releaseId: staged.rows[0]!.release_id,
+  };
+}
+
+/**
+ * Verification's interpreter, in sentinel mode, except that it answers one get
+ * as it answers a get whose pinned contract it does not support (no
+ * `infrastructure`): `unsupported`, with no record. It records every query it
+ * runs; the gateway passes it only the queries the gateway executes.
+ */
+class UnsupportedGetExecutor
+  implements SemanticOperationExecutor, SemanticQueryExecutor
+{
+  readonly queryIds = new Set<string>();
+  readonly #interpreter: PostgresModuleRuntimeInterpreter;
+
+  constructor(
+    runtime: RealPartyRuntime,
+    private readonly unsupportedQueryId: string,
+  ) {
+    this.#interpreter = new PostgresModuleRuntimeInterpreter(
+      runtime.runtimePool,
+      humanActorIssuer(),
+      [],
+      undefined,
+      undefined,
+      { documentNumbers: 'verificationSentinel' },
+    );
+  }
+
+  execute(
+    request: SemanticQueryExecutionRequest,
+  ): Promise<SemanticQueryResultEnvelope>;
+  execute(
+    request: SemanticOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope>;
+  execute(
+    request: SemanticOperationExecutionRequest | SemanticQueryExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope | SemanticQueryResultEnvelope> {
+    if (!('arguments' in request)) return this.#interpreter.execute(request);
+    this.queryIds.add(request.definition.queryId);
+    if (request.definition.queryId !== this.unsupportedQueryId) {
+      return this.#interpreter.execute(request);
+    }
+    const { infrastructure, ...definition } = request.definition;
+    void infrastructure;
+    return this.#interpreter.execute({ ...request, definition });
+  }
+
+  recordNonAccepted(request: SemanticOperationNonAcceptedRequest) {
+    return this.#interpreter.recordNonAccepted(request);
+  }
+}
 
 function storageEntity(
   storage: StorageTargetPayloadV1,
@@ -686,8 +972,14 @@ function storageColumn(entity: StorageEntity, fieldId: string) {
   return column;
 }
 
-/** Party's own definition, numbered three ways (see `partyNumber` above). */
-function numberedPartyDefinition(): Record<string, unknown> {
+/**
+ * Party's own definition, numbered three ways (see `partyNumber` above); with
+ * `unexecutedGets`, also the gets the gateway does not run (see
+ * `unexecutedAccountGet` above).
+ */
+function numberedPartyDefinition({
+  unexecutedGets = false,
+}: { readonly unexecutedGets?: boolean } = {}): Record<string, unknown> {
   type Json = Record<string, unknown>;
   type Query = Json & {
     queryId: string;
@@ -751,6 +1043,25 @@ function numberedPartyDefinition(): Record<string, unknown> {
     selection(accountGet.queryId, PARTY_IDS.fieldIds.name, 2),
   ];
   definition.queries.push(accountGet);
+  if (unexecutedGets) {
+    const never = {
+      kind: 'booleanPredicate',
+      schemaVersion: 'v6',
+      value: false,
+    };
+    const executedGet = structuredClone(query('party_get'));
+    executedGet.queryId = executedAccountGet;
+    executedGet.selections = [
+      selection(executedGet.queryId, accountNumber, 1),
+      selection(executedGet.queryId, PARTY_IDS.fieldIds.name, 2),
+    ];
+    accountGet.filter = never;
+    const roleGet = structuredClone(query('party_role_get'));
+    roleGet.queryId = unexecutedRoleGet;
+    roleGet.filter = never;
+    roleGet.selections = [selection(roleGet.queryId, roleNumber, 1)];
+    definition.queries.push(executedGet, roleGet);
+  }
   for (const local of [
     'party_role_list',
     'party_role_search',
