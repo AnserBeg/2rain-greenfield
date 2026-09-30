@@ -1,3 +1,76 @@
+/**
+ * What each line of a posted receipt can still give back (ORDER-PARITY): its
+ * movement, what that movement still adds to stock after the compensations
+ * already posted against it, and its order line -- read by the receiving read
+ * model, so a reversal names exactly what the posting kernel will admit.
+ */
+export const RECEIVING_READ_MODEL_BINDINGS = Object.freeze({
+  receiptLine: 'northstar.purchasing:read_model.receipt_line',
+});
+/** The receiving outputs, by read-model binding. */
+export const RECEIVING_READ_MODEL_OUTPUTS = Object.freeze({
+  receiptLine: ['movement', 'reversible', 'reversal_quantity', 'order_line'],
+} as const);
+
+/**
+ * The receiving read model's query: a receipt's lines with what each can
+ * still reverse, cut from the receipt line list when the application composes
+ * purchasing with inventory. The movements and the lines it reads are the
+ * plain declared lists, under current policy and scope.
+ */
+export function receivingWorkspaceQueries(
+  namespace: string,
+  queries: readonly Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const named = (local: string) =>
+    queries.find((query) => query.queryId === `${namespace}:query.${local}`);
+  const source = named('goods_receipt_line_list');
+  if (!source || !named('inventory_movement_list')) return [];
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const name = 'receiving_receipt_lines';
+  const clone = JSON.parse(
+    JSON.stringify(source)
+      .replaceAll(
+        `${namespace}:query.goods_receipt_line_list`,
+        `${namespace}:query.${name}`,
+      )
+      .replaceAll('selection.goods_receipt_line_list_', `selection.${name}_`)
+      .replaceAll('parameter.goods_receipt_line_list_', `parameter.${name}_`),
+  ) as Record<string, unknown>;
+  return [
+    {
+      ...clone,
+      readModel: {
+        capability: ref(
+          'capabilityReference',
+          'northstar.purchasing:capability.receiving',
+        ),
+        binding: RECEIVING_READ_MODEL_BINDINGS.receiptLine,
+        queries: {
+          lines: ref(
+            'queryReference',
+            `${namespace}:query.goods_receipt_line_list`,
+          ),
+          movements: ref(
+            'queryReference',
+            `${namespace}:query.inventory_movement_list`,
+          ),
+        },
+        resultFields: Object.fromEntries(
+          RECEIVING_READ_MODEL_OUTPUTS.receiptLine.map((key) => [
+            key,
+            `${namespace}:metric.${key}`,
+          ]),
+        ),
+      },
+    },
+  ];
+}
+
 /** Purchasing declarations interpreted by the shared Record/Task renderer. */
 export function purchasingWorkspace(
   namespace: string,
@@ -245,6 +318,293 @@ export function purchasingWorkspace(
       ],
     };
   };
+  const released = {
+    value: record(
+      id('derived_state_field', 'machine.purchase_order_lifecycle'),
+    ),
+    operator: 'equals',
+    compare: id('state', 'purchase_order_released'),
+  };
+  const receiptLines = id('dataset', 'purchasing_receipt_lines');
+  /**
+   * A truck's delivery against this order (ORDER-PARITY, PaneFlow's
+   * multi-line receipt): one receipt into one location, with a quantity typed
+   * on each line that arrived. Rows start empty; "Fill open quantities" fills
+   * each from what is still to arrive, and a line left empty is not received.
+   * The receipt is created, each entered line added, then posted -- atomic in
+   * the posting kernel, which refuses an over-receipt of any line.
+   */
+  const receiveLines = (known: boolean) => {
+    const suffix = known ? 'known' : 'absent';
+    const header = `receipt_lines_${suffix}`;
+    const input = (name: string) => ({
+      source: 'input',
+      inputId: id('input', `receive_lines_${name}`),
+    });
+    return {
+      actionId: id('action', `receive_lines_${suffix}`),
+      label: known
+        ? 'Receive lines with actual cost'
+        : 'Receive lines with cost explicitly absent',
+      description: known
+        ? 'Posts one receipt for every line given a quantity, at the actual unit cost and currency you enter. A line left empty is not received.'
+        : 'Posts one receipt for every line given a quantity, with actual cost explicitly recorded as absent. A line left empty is not received.',
+      orderKey: known ? 5 : 6,
+      conditions: [released],
+      // A withheld open quantity keeps its line offered, left empty by Fill.
+      rows: {
+        datasetId: lines,
+        conditions: [
+          {
+            value: selected(metric('open_to_receive')),
+            operator: 'notEquals',
+            compare: '0',
+          },
+        ],
+        fillLabel: 'Fill open quantities',
+      },
+      inputs: [
+        {
+          inputId: id('input', 'receive_lines_quantity'),
+          label: 'Quantity to receive',
+          orderKey: 10,
+          type: 'quantity',
+          required: true,
+          perRow: {
+            fillFrom: {
+              datasetId: lines,
+              columnId: id('column', 'purchasing_open'),
+            },
+          },
+        },
+        {
+          inputId: id('input', 'receive_lines_unit'),
+          label: 'Base unit',
+          orderKey: 20,
+          type: 'text',
+          required: true,
+          perRow: {},
+          // Each line's product base unit, read on the server.
+          presentation: {
+            kind: 'derived',
+            column: {
+              datasetId: lines,
+              columnId: id('column', 'purchasing_base_unit'),
+            },
+          },
+        },
+        ...(known
+          ? [
+              {
+                inputId: id('input', 'receive_lines_cost'),
+                label: 'Actual received unit cost',
+                orderKey: 30,
+                type: 'text',
+                required: true,
+                perRow: {},
+              },
+            ]
+          : []),
+        {
+          inputId: id('input', 'receive_lines_location'),
+          label: 'Receiving location',
+          orderKey: 40,
+          type: 'reference',
+          required: true,
+          query: q('location_list'),
+          labelField: ref('fieldReference', f('location_name')),
+          defaultFrom: record(f('purchase_order_receiving_location_id')),
+        },
+        ...(known
+          ? [
+              {
+                inputId: id('input', 'receive_lines_currency'),
+                label: 'Actual cost currency',
+                orderKey: 50,
+                type: 'text',
+                required: true,
+                presentation: {
+                  kind: 'choice',
+                  options: [
+                    { value: 'CAD', label: 'CAD · Canadian dollar' },
+                    { value: 'USD', label: 'USD · US dollar' },
+                    { value: 'EUR', label: 'EUR · Euro' },
+                  ],
+                  defaultFrom: {
+                    source: 'record',
+                    field: f('purchase_order_currency'),
+                  },
+                },
+              },
+            ]
+          : []),
+        {
+          inputId: id('input', 'receive_lines_packing_slip'),
+          label: 'Packing slip / delivery note',
+          orderKey: 60,
+          type: 'text',
+          required: false,
+        },
+        {
+          inputId: id('input', 'receive_lines_notes'),
+          label: 'Notes',
+          orderKey: 70,
+          type: 'text',
+          required: false,
+          presentation: { kind: 'multiline' },
+        },
+      ],
+      steps: [
+        create(
+          header,
+          'goods_receipt',
+          {
+            state: literal(id('option', 'goods_receipt_state_draft')),
+            kind: literal(id('option', 'goods_receipt_kind_initial')),
+            effective_at: generated('instant'),
+            location_id: input('location'),
+            reason_code: literal('RECEIVE'),
+            reason_narrative: literal('Receive from purchase order'),
+            packing_slip: input('packing_slip'),
+            notes: input('notes'),
+          },
+          { order: record('recordId') },
+        ),
+        {
+          ...create(
+            `receipt_lines_line_${suffix}`,
+            'goods_receipt_line',
+            {
+              // The order line's own number, so the receipt reads as the order.
+              line_number: selected(f('purchase_order_line_line_number')),
+              item_id: selected(f('purchase_order_line_item_id')),
+              quantity: input('quantity'),
+              unit_id: input('unit'),
+              cost_status: literal(
+                id('option', `goods_receipt_line_cost_status_${suffix}`),
+              ),
+              unit_cost: known ? input('cost') : literal(null),
+              currency: known ? input('currency') : literal(null),
+              reversal_of_movement_id: literal(null),
+            },
+            {
+              receipt: stepValue(header, 'recordId'),
+              order_line: selected('recordId'),
+            },
+          ),
+          each: true,
+        },
+        step(`receipt_lines_post_${suffix}`, 'goods_receipt_post', [
+          bind(['recordId'], stepValue(header, 'recordId')),
+          bind(['expectedRevision'], stepValue(header, 'revision')),
+        ]),
+      ],
+    };
+  };
+  /**
+   * A posted receipt reversed through the receiving routes (ORDER-PARITY): a
+   * draft receipt of kind reversal naming the original, one line for every
+   * line of it that still adds to stock -- each at exactly that quantity,
+   * compensating its own movement -- then posted. The posting kernel admits
+   * only that (every uncompensated movement, each at its remainder, order
+   * line, item, location and unit kept) and refuses it once the stock has
+   * left; the read model offers only what it would admit.
+   */
+  const reverseReceipt = {
+    actionId: id('action', 'reverse_receipt'),
+    label: 'Reverse receipt',
+    description:
+      'Reverses every line of this receipt that still adds to stock, at exactly that quantity, with a posted reversal receipt. Refused if the stock has already left.',
+    orderKey: 32,
+    datasetId: receipts,
+    presentation: { placement: 'selection' },
+    conditions: [
+      released,
+      {
+        value: selected(f('goods_receipt_state')),
+        operator: 'equals',
+        compare: id('option', 'goods_receipt_state_posted'),
+      },
+      {
+        value: selected(f('goods_receipt_kind')),
+        operator: 'equals',
+        compare: id('option', 'goods_receipt_kind_initial'),
+      },
+    ],
+    rows: {
+      datasetId: receiptLines,
+      conditions: [
+        {
+          value: selected(metric('reversible')),
+          operator: 'positive',
+          compare: null,
+        },
+      ],
+    },
+    inputs: [
+      {
+        inputId: id('input', 'reverse_receipt_reason'),
+        label: 'Reason',
+        orderKey: 10,
+        type: 'text',
+        required: true,
+        presentation: { kind: 'multiline' },
+      },
+    ],
+    steps: [
+      create(
+        'reversal',
+        'goods_receipt',
+        {
+          state: literal(id('option', 'goods_receipt_state_draft')),
+          kind: literal(id('option', 'goods_receipt_kind_reversal')),
+          effective_at: generated('instant'),
+          // The original's location: a reversal gives back where it received.
+          location_id: selected(f('goods_receipt_location_id')),
+          reason_code: literal('REVERSE'),
+          reason_narrative: {
+            source: 'input',
+            inputId: id('input', 'reverse_receipt_reason'),
+          },
+          packing_slip: literal(null),
+          notes: literal(null),
+        },
+        { order: record('recordId'), supersedes: selected('recordId') },
+      ),
+      {
+        ...create(
+          'reversal_line',
+          'goods_receipt_line',
+          {
+            line_number: selected(f('goods_receipt_line_line_number')),
+            item_id: selected(f('goods_receipt_line_item_id')),
+            quantity: selected(metric('reversal_quantity')),
+            unit_id: selected(f('goods_receipt_line_unit_id')),
+            cost_status: selected(f('goods_receipt_line_cost_status')),
+            unit_cost: selected(f('goods_receipt_line_unit_cost')),
+            currency: selected(f('goods_receipt_line_currency')),
+            reversal_of_movement_id: selected(metric('movement')),
+          },
+          {
+            receipt: stepValue('reversal', 'recordId'),
+            order_line: selected(metric('order_line')),
+          },
+        ),
+        each: true,
+      },
+      step('reversal_post', 'goods_receipt_post', [
+        bind(['recordId'], stepValue('reversal', 'recordId')),
+        bind(['expectedRevision'], stepValue('reversal', 'revision')),
+      ]),
+    ],
+  };
+  const state = (operator: 'equals' | 'notEquals', local: string) => ({
+    value: record(
+      id('derived_state_field', 'machine.purchase_order_lifecycle'),
+    ),
+    operator,
+    compare: id('state', `purchase_order_${local}`),
+  });
   return {
     kind: 'surfaceComposition',
     schemaVersion: 'v6',
@@ -280,6 +640,79 @@ export function purchasingWorkspace(
           id('column', 'purchasing_total'),
         ],
         note: id('column', 'purchasing_notes'),
+      },
+      // Purchase to receipt: where this order stands and what to do next.
+      progression: {
+        title: 'Purchase to receipt',
+        steps: [
+          {
+            label: 'Draft',
+            current: [state('equals', 'draft')],
+            complete: [
+              state('notEquals', 'draft'),
+              state('notEquals', 'cancelled'),
+            ],
+            stopped: [state('equals', 'cancelled')],
+          },
+          {
+            label: 'Released',
+            current: [],
+            complete: [
+              state('notEquals', 'draft'),
+              state('notEquals', 'cancelled'),
+            ],
+            stopped: [state('equals', 'cancelled')],
+          },
+          {
+            label: 'Receiving',
+            current: [state('equals', 'released')],
+            complete: [state('equals', 'closed')],
+            stopped: [state('equals', 'cancelled')],
+            documents: receipts,
+          },
+          {
+            // PAYABLES: received quantity is waiting to be billed -- a closed
+            // order too, since it is still billed.
+            label: 'Billing',
+            current: [state('equals', 'released')],
+            complete: [state('equals', 'closed')],
+            attention: [
+              {
+                value: record(metric('order_to_bill')),
+                operator: 'positive',
+                compare: null,
+              },
+            ],
+            stopped: [state('equals', 'cancelled')],
+            documents: bills,
+          },
+          {
+            label: 'Closed',
+            current: [],
+            complete: [state('equals', 'closed')],
+            stopped: [state('equals', 'cancelled')],
+          },
+        ],
+        // Release, then receive what is still to arrive, bill what arrived,
+        // then close: Close is next only once nothing is left to receive or
+        // to bill.
+        next: [
+          {
+            operation: ref(
+              'operationReference',
+              id('operation', 'purchase_order_release'),
+            ),
+          },
+          { action: id('action', 'receive_lines_known') },
+          // Then bill what was received and is not yet billed (PAYABLES).
+          { action: id('action', 'bill_received') },
+          {
+            operation: ref(
+              'operationReference',
+              id('operation', 'purchase_order_close'),
+            ),
+          },
+        ],
       },
     },
     fields: [
@@ -538,7 +971,13 @@ export function purchasingWorkspace(
         label: 'Connected receipts',
         orderKey: 20,
         query: q('goods_receipt_list'),
-        presentation: { selection: 'none', compact: 'scrollTable' },
+        // Selectable (ORDER-PARITY): a selected receipt shows its lines and
+        // what can still be reversed.
+        presentation: {
+          selection: 'explicit',
+          selectedActions: 'row',
+          compact: 'scrollTable',
+        },
         parent: {
           relationId: id('relation', 'goods_receipt_order'),
           value: record('recordId'),
@@ -562,6 +1001,14 @@ export function purchasingWorkspace(
             'secondary',
           ),
           column(
+            'receipt_kind',
+            'Kind',
+            25,
+            f('goods_receipt_kind'),
+            undefined,
+            'secondary',
+          ),
+          column(
             'received_at',
             'Received at',
             30,
@@ -580,10 +1027,76 @@ export function purchasingWorkspace(
         ],
       },
       {
+        // The selected receipt's lines and what each still adds to stock.
+        datasetId: receiptLines,
+        label: 'Receipt lines',
+        orderKey: 30,
+        query: q('receiving_receipt_lines'),
+        presentation: {
+          selection: 'none',
+          compact: 'scrollTable',
+          description:
+            'Reversible is what each line still adds to stock after earlier corrections. Missing or unavailable data is not zero.',
+        },
+        parent: {
+          relationId: id('relation', 'goods_receipt_line_receipt'),
+          value: { ...selected('recordId'), datasetId: receipts },
+          ownership: 'parentScopedChild',
+        },
+        sort: [
+          {
+            fieldId: f('goods_receipt_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        columns: [
+          column(
+            'receipt_line',
+            'Line',
+            10,
+            f('goods_receipt_line_line_number'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'receipt_item',
+            'Product',
+            20,
+            f('goods_receipt_line_item_id'),
+            ['item_get', 'item_name'],
+            'primary',
+          ),
+          column(
+            'receipt_quantity',
+            'Quantity',
+            30,
+            f('goods_receipt_line_quantity'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'receipt_unit',
+            'Unit',
+            40,
+            f('goods_receipt_line_unit_id'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'receipt_reversible',
+            'Reversible',
+            50,
+            metric('reversible'),
+            undefined,
+            'quantity',
+          ),
+        ],
+      },
+      {
         // PAYABLES: the order's vendor bills and what each still owes.
         datasetId: bills,
         label: 'Bills',
-        orderKey: 30,
+        orderKey: 40,
         query: q('vendor_bill_list'),
         presentation: { selection: 'none', compact: 'scrollTable' },
         parent: {
@@ -611,6 +1124,9 @@ export function purchasingWorkspace(
       },
     ],
     actions: [
+      receiveLines(true),
+      receiveLines(false),
+      reverseReceipt,
       receive(true),
       receive(false),
       {

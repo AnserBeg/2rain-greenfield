@@ -824,6 +824,15 @@ const compositionInput = z.strictObject({
   defaultFrom: z
     .strictObject({ source: z.literal('record'), field: z.string().min(1) })
     .optional(),
+  /**
+   * Asked once for each row of the Task's declared `rows`, such as the
+   * quantity received on each line of a truck: rows start empty, a row left
+   * empty is skipped, and `fillFrom` lets one control fill every row from a
+   * column of that row -- its open quantity. Optional v6 key (ADR-0047 §7).
+   */
+  perRow: z
+    .strictObject({ fillFrom: compositionTaskColumn.optional() })
+    .optional(),
 });
 const compositionStep = z.strictObject({
   stepId: CanonicalIdSchema,
@@ -837,6 +846,12 @@ const compositionStep = z.strictObject({
     )
     .min(1)
     .max(60),
+  /**
+   * Runs once for each row the Task includes, in the dataset's order, reading
+   * that row as `selected` and its per-row inputs; one request key per run.
+   * Optional v6 key (ADR-0047 §7).
+   */
+  each: z.literal(true).optional(),
 });
 const compositionTaskValue = z.discriminatedUnion('source', [
   z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
@@ -880,6 +895,20 @@ const compositionAction = z.strictObject({
   conditions: z.array(compositionCondition).max(12),
   inputs: z.array(compositionInput).max(12),
   steps: z.array(compositionStep).max(5),
+  /**
+   * The rows a multi-row Task works through: every loaded row of the dataset
+   * whose conditions hold, each read as that row's `selected` values -- an
+   * order's lines with something still to arrive, or a receipt's lines that
+   * can still be reversed. `fillLabel` names the one control that fills every
+   * row's per-row inputs from their declared columns. Optional v6 key.
+   */
+  rows: z
+    .strictObject({
+      datasetId: CanonicalIdSchema,
+      conditions: z.array(compositionCondition).max(4),
+      fillLabel: LabelSchema.optional(),
+    })
+    .optional(),
   navigate: z
     .strictObject({
       surface: compositionReference('surfaceReference'),
@@ -969,6 +998,64 @@ export const SurfaceCompositionSchema = z.strictObject({
           }),
         )
         .max(3)
+        .optional(),
+      /**
+       * An exception banner: shown while any loaded row of the dataset states
+       * a positive value in the column, listing those rows by their primary
+       * cell and that value -- an order's lines short of stock. A presence
+       * test over governed cells, never a derived total. Optional v6 key.
+       */
+      alerts: z
+        .array(
+          z.strictObject({
+            label: LabelSchema,
+            description: LabelSchema,
+            datasetId: CanonicalIdSchema,
+            columnId: CanonicalIdSchema,
+          }),
+        )
+        .min(1)
+        .max(3)
+        .optional(),
+      /**
+       * The record's progress through its lifecycle: ordered steps, each
+       * complete, current, needing attention, stopped or upcoming by
+       * conditions over the record's own values, with a dataset's rows as its
+       * connected documents; and the first next entry offered now, an action
+       * of this composition or an operation the record page offers. Optional
+       * v6 key (ADR-0047 §7).
+       */
+      progression: z
+        .strictObject({
+          title: LabelSchema,
+          steps: z
+            .array(
+              z.strictObject({
+                label: LabelSchema,
+                current: z.array(compositionCondition).max(4),
+                complete: z.array(compositionCondition).max(4),
+                attention: z
+                  .array(compositionCondition)
+                  .min(1)
+                  .max(4)
+                  .optional(),
+                stopped: z.array(compositionCondition).min(1).max(4).optional(),
+                documents: CanonicalIdSchema.optional(),
+              }),
+            )
+            .min(2)
+            .max(8),
+          next: z
+            .array(
+              z.union([
+                z.strictObject({ action: CanonicalIdSchema }),
+                z.strictObject({
+                  operation: compositionReference('operationReference'),
+                }),
+              ]),
+            )
+            .max(6),
+        })
         .optional(),
     })
     .optional(),

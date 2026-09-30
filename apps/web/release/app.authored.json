@@ -36707,6 +36707,200 @@
         "kind": "queryLegalEntityScope",
         "operand": {
           "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.fulfillment_order_lines_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.fulfillment_order_lines_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.sales"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.sales_order_line_read"
+      },
+      "queryId": "northstar.app:query.fulfillment_order_lines",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_line_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_ordered_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_unit_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_list_price"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_discount_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_tax_rate_percent"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_9"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.sales:capability.fulfillment"
+        },
+        "binding": "northstar.sales:read_model.line",
+        "queries": {
+          "reservations": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.workspace_reservations"
+          },
+          "balances": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.reservation_balance_get"
+          },
+          "shipped": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_shipped_get"
+          },
+          "stockReservations": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.workspace_stock_reservations"
+          },
+          "stock": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.workspace_stock"
+          },
+          "orderLines": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_lines"
+          },
+          "order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_get"
+          }
+        },
+        "resultFields": {
+          "coverage": "northstar.app:metric.coverage",
+          "shipped": "northstar.app:metric.shipped",
+          "open_to_ship": "northstar.app:metric.open_to_ship",
+          "available_now": "northstar.app:metric.available_now",
+          "short": "northstar.app:metric.short"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
           "parameterId": "northstar.app:parameter.expected_receipt_list_legal_entity_scope",
           "schemaVersion": "v6"
         },
@@ -36919,6 +37113,163 @@
         "targetId": "northstar.app:entity.purchase_order"
       },
       "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.receiving_receipt_lines_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.receiving_receipt_lines_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.goods_receipt_line_read"
+      },
+      "queryId": "northstar.app:query.receiving_receipt_lines",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.goods_receipt_line_line_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.receiving_receipt_lines_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.goods_receipt_line_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.receiving_receipt_lines_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.goods_receipt_line_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.receiving_receipt_lines_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.goods_receipt_line_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.receiving_receipt_lines_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.goods_receipt_line_cost_status"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.receiving_receipt_lines_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.goods_receipt_line_unit_cost"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.receiving_receipt_lines_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.goods_receipt_line_currency"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.receiving_receipt_lines_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.goods_receipt_line_reversal_of_movement_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.receiving_receipt_lines_8"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.goods_receipt_line"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.purchasing:capability.receiving"
+        },
+        "binding": "northstar.purchasing:read_model.receipt_line",
+        "queries": {
+          "lines": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "movements": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.inventory_movement_list"
+          }
+        },
+        "resultFields": {
+          "movement": "northstar.app:metric.movement",
+          "reversible": "northstar.app:metric.reversible",
+          "reversal_quantity": "northstar.app:metric.reversal_quantity",
+          "order_line": "northstar.app:metric.order_line"
+        }
+      }
     }
   ],
   "relations": [
@@ -39036,7 +39387,173 @@
                 "northstar.app:column.ship_to_country"
               ]
             }
-          ]
+          ],
+          "alerts": [
+            {
+              "label": "Fulfillment exception",
+              "description": "Open quantity that neither this order’s reservations nor free stock now cover. Incoming purchase orders are not counted.",
+              "datasetId": "northstar.app:dataset.fulfillment_lines",
+              "columnId": "northstar.app:column.short"
+            }
+          ],
+          "progression": {
+            "title": "Order to cash",
+            "steps": [
+              {
+                "label": "Sales order",
+                "current": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_draft"
+                  }
+                ],
+                "complete": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "notEquals",
+                    "compare": "northstar.app:state.sales_order_draft"
+                  },
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "notEquals",
+                    "compare": "northstar.app:state.sales_order_cancelled"
+                  }
+                ],
+                "stopped": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_cancelled"
+                  }
+                ]
+              },
+              {
+                "label": "Fulfillment",
+                "current": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_released"
+                  }
+                ],
+                "complete": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_closed"
+                  }
+                ],
+                "stopped": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_cancelled"
+                  }
+                ],
+                "documents": "northstar.app:dataset.order_shipments"
+              },
+              {
+                "label": "Invoicing",
+                "current": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_released"
+                  }
+                ],
+                "complete": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_closed"
+                  }
+                ],
+                "attention": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:metric.order_to_invoice"
+                    },
+                    "operator": "positive",
+                    "compare": null
+                  }
+                ],
+                "stopped": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_cancelled"
+                  }
+                ],
+                "documents": "northstar.app:dataset.order_invoices"
+              },
+              {
+                "label": "Closed",
+                "current": [],
+                "complete": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_closed"
+                  }
+                ],
+                "stopped": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.sales_order_cancelled"
+                  }
+                ]
+              }
+            ],
+            "next": [
+              {
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.sales_order_release"
+                }
+              },
+              { "action": "northstar.app:action.invoice_shipped" }
+            ]
+          }
         },
         "fields": [
           {
@@ -39390,7 +39907,7 @@
             "query": {
               "kind": "queryReference",
               "schemaVersion": "v6",
-              "targetId": "northstar.app:query.sales_order_line_list"
+              "targetId": "northstar.app:query.fulfillment_order_lines"
             },
             "sort": [
               {
@@ -39490,6 +40007,20 @@
                 "orderKey": 70,
                 "field": "northstar.app:metric.open_to_ship",
                 "presentation": { "role": "quantity", "priority": 70 }
+              },
+              {
+                "columnId": "northstar.app:column.short",
+                "label": "Short",
+                "orderKey": 80,
+                "field": "northstar.app:metric.short",
+                "presentation": { "role": "quantity", "priority": 80 }
+              },
+              {
+                "columnId": "northstar.app:column.available_now",
+                "label": "Free stock now",
+                "orderKey": 90,
+                "field": "northstar.app:metric.available_now",
+                "presentation": { "role": "detail", "priority": 90 }
               }
             ]
           },
@@ -42354,7 +42885,10 @@
           "header": {
             "title": "northstar.app:column.packing_number",
             "subtitle": ["northstar.app:column.packing_location"],
-            "facts": ["northstar.app:column.packing_date"],
+            "facts": [
+              "northstar.app:column.packing_order",
+              "northstar.app:column.packing_date"
+            ],
             "status": "northstar.app:column.packing_state"
           },
           "blocks": [
@@ -42395,6 +42929,24 @@
                 "kind": "fieldReference",
                 "schemaVersion": "v6",
                 "targetId": "northstar.app:field.location_name"
+              }
+            }
+          },
+          {
+            "columnId": "northstar.app:column.packing_order",
+            "label": "Sales order",
+            "orderKey": 25,
+            "field": "northstar.app:relation.shipment_order",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.sales_order_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.sales_order_number"
               }
             }
           },
@@ -43406,6 +43958,7 @@
             "subtitle": ["northstar.app:column.invoice_customer"],
             "status": "northstar.app:column.invoice_state",
             "facts": [
+              "northstar.app:column.invoice_order",
               "northstar.app:column.invoice_date",
               "northstar.app:column.invoice_due",
               "northstar.app:column.invoice_currency",
@@ -43476,6 +44029,24 @@
             "label": "Due date",
             "orderKey": 30,
             "field": "northstar.app:field.customer_invoice_due_date"
+          },
+          {
+            "columnId": "northstar.app:column.invoice_order",
+            "label": "Sales order",
+            "orderKey": 32,
+            "field": "northstar.app:relation.customer_invoice_order",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.sales_order_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.sales_order_number"
+              }
+            }
           },
           {
             "columnId": "northstar.app:column.invoice_currency",
@@ -44095,6 +44666,31 @@
                 ]
               }
             ]
+          },
+          {
+            "actionId": "northstar.app:action.invoice_open_order",
+            "label": "Open sales order",
+            "description": "Open the sales order this invoice bills.",
+            "orderKey": 40,
+            "conditions": [],
+            "inputs": [],
+            "steps": [],
+            "navigate": {
+              "surface": {
+                "kind": "surfaceReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:surface.sales_order_detail"
+              },
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.commercial_order_get"
+              },
+              "record": {
+                "source": "record",
+                "field": "northstar.app:relation.customer_invoice_order"
+              }
+            }
           }
         ]
       },
@@ -45431,6 +46027,204 @@
               "northstar.app:column.purchasing_total"
             ],
             "note": "northstar.app:column.purchasing_notes"
+          },
+          "progression": {
+            "title": "Purchase to receipt",
+            "steps": [
+              {
+                "label": "Draft",
+                "current": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_draft"
+                  }
+                ],
+                "complete": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "notEquals",
+                    "compare": "northstar.app:state.purchase_order_draft"
+                  },
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "notEquals",
+                    "compare": "northstar.app:state.purchase_order_cancelled"
+                  }
+                ],
+                "stopped": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_cancelled"
+                  }
+                ]
+              },
+              {
+                "label": "Released",
+                "current": [],
+                "complete": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "notEquals",
+                    "compare": "northstar.app:state.purchase_order_draft"
+                  },
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "notEquals",
+                    "compare": "northstar.app:state.purchase_order_cancelled"
+                  }
+                ],
+                "stopped": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_cancelled"
+                  }
+                ]
+              },
+              {
+                "label": "Receiving",
+                "current": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_released"
+                  }
+                ],
+                "complete": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_closed"
+                  }
+                ],
+                "stopped": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_cancelled"
+                  }
+                ],
+                "documents": "northstar.app:dataset.purchasing_receipts"
+              },
+              {
+                "label": "Billing",
+                "current": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_released"
+                  }
+                ],
+                "complete": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_closed"
+                  }
+                ],
+                "attention": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:metric.order_to_bill"
+                    },
+                    "operator": "positive",
+                    "compare": null
+                  }
+                ],
+                "stopped": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_cancelled"
+                  }
+                ],
+                "documents": "northstar.app:dataset.purchasing_bills"
+              },
+              {
+                "label": "Closed",
+                "current": [],
+                "complete": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_closed"
+                  }
+                ],
+                "stopped": [
+                  {
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                    },
+                    "operator": "equals",
+                    "compare": "northstar.app:state.purchase_order_cancelled"
+                  }
+                ]
+              }
+            ],
+            "next": [
+              {
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.purchase_order_release",
+                  "schemaVersion": "v6"
+                }
+              },
+              { "action": "northstar.app:action.receive_lines_known" },
+              { "action": "northstar.app:action.bill_received" },
+              {
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.purchase_order_close",
+                  "schemaVersion": "v6"
+                }
+              }
+            ]
           }
         },
         "fields": [
@@ -45846,7 +46640,11 @@
               "targetId": "northstar.app:query.goods_receipt_list",
               "schemaVersion": "v6"
             },
-            "presentation": { "selection": "none", "compact": "scrollTable" },
+            "presentation": {
+              "selection": "explicit",
+              "selectedActions": "row",
+              "compact": "scrollTable"
+            },
             "parent": {
               "relationId": "northstar.app:relation.goods_receipt_order",
               "value": { "source": "record", "field": "recordId" },
@@ -45868,6 +46666,13 @@
                 "presentation": { "role": "secondary", "priority": 20 }
               },
               {
+                "columnId": "northstar.app:column.purchasing_receipt_kind",
+                "label": "Kind",
+                "orderKey": 25,
+                "field": "northstar.app:field.goods_receipt_kind",
+                "presentation": { "role": "secondary", "priority": 25 }
+              },
+              {
                 "columnId": "northstar.app:column.purchasing_received_at",
                 "label": "Received at",
                 "orderKey": 30,
@@ -45884,9 +46689,88 @@
             ]
           },
           {
+            "datasetId": "northstar.app:dataset.purchasing_receipt_lines",
+            "label": "Receipt lines",
+            "orderKey": 30,
+            "query": {
+              "kind": "queryReference",
+              "targetId": "northstar.app:query.receiving_receipt_lines",
+              "schemaVersion": "v6"
+            },
+            "presentation": {
+              "selection": "none",
+              "compact": "scrollTable",
+              "description": "Reversible is what each line still adds to stock after earlier corrections. Missing or unavailable data is not zero."
+            },
+            "parent": {
+              "relationId": "northstar.app:relation.goods_receipt_line_receipt",
+              "value": {
+                "source": "selected",
+                "field": "recordId",
+                "datasetId": "northstar.app:dataset.purchasing_receipts"
+              },
+              "ownership": "parentScopedChild"
+            },
+            "sort": [
+              {
+                "fieldId": "northstar.app:field.goods_receipt_line_line_number",
+                "direction": "ascending"
+              }
+            ],
+            "columns": [
+              {
+                "columnId": "northstar.app:column.purchasing_receipt_line",
+                "label": "Line",
+                "orderKey": 10,
+                "field": "northstar.app:field.goods_receipt_line_line_number",
+                "presentation": { "role": "secondary", "priority": 10 }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_receipt_item",
+                "label": "Product",
+                "orderKey": 20,
+                "field": "northstar.app:field.goods_receipt_line_item_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "targetId": "northstar.app:query.item_get",
+                    "schemaVersion": "v6"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "targetId": "northstar.app:field.item_name",
+                    "schemaVersion": "v6"
+                  }
+                },
+                "presentation": { "role": "primary", "priority": 20 }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_receipt_quantity",
+                "label": "Quantity",
+                "orderKey": 30,
+                "field": "northstar.app:field.goods_receipt_line_quantity",
+                "presentation": { "role": "quantity", "priority": 30 }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_receipt_unit",
+                "label": "Unit",
+                "orderKey": 40,
+                "field": "northstar.app:field.goods_receipt_line_unit_id",
+                "presentation": { "role": "secondary", "priority": 40 }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_receipt_reversible",
+                "label": "Reversible",
+                "orderKey": 50,
+                "field": "northstar.app:metric.reversible",
+                "presentation": { "role": "quantity", "priority": 50 }
+              }
+            ]
+          },
+          {
             "datasetId": "northstar.app:dataset.purchasing_bills",
             "label": "Bills",
-            "orderKey": 30,
+            "orderKey": 40,
             "query": {
               "kind": "queryReference",
               "targetId": "northstar.app:query.vendor_bill_list",
@@ -45953,6 +46837,1006 @@
           }
         ],
         "actions": [
+          {
+            "actionId": "northstar.app:action.receive_lines_known",
+            "label": "Receive lines with actual cost",
+            "description": "Posts one receipt for every line given a quantity, at the actual unit cost and currency you enter. A line left empty is not received.",
+            "orderKey": 5,
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.purchase_order_released"
+              }
+            ],
+            "rows": {
+              "datasetId": "northstar.app:dataset.purchasing_lines",
+              "conditions": [
+                {
+                  "value": {
+                    "source": "selected",
+                    "field": "northstar.app:metric.open_to_receive"
+                  },
+                  "operator": "notEquals",
+                  "compare": "0"
+                }
+              ],
+              "fillLabel": "Fill open quantities"
+            },
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.receive_lines_quantity",
+                "label": "Quantity to receive",
+                "orderKey": 10,
+                "type": "quantity",
+                "required": true,
+                "perRow": {
+                  "fillFrom": {
+                    "datasetId": "northstar.app:dataset.purchasing_lines",
+                    "columnId": "northstar.app:column.purchasing_open"
+                  }
+                }
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_unit",
+                "label": "Base unit",
+                "orderKey": 20,
+                "type": "text",
+                "required": true,
+                "perRow": {},
+                "presentation": {
+                  "kind": "derived",
+                  "column": {
+                    "datasetId": "northstar.app:dataset.purchasing_lines",
+                    "columnId": "northstar.app:column.purchasing_base_unit"
+                  }
+                }
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_cost",
+                "label": "Actual received unit cost",
+                "orderKey": 30,
+                "type": "text",
+                "required": true,
+                "perRow": {}
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_location",
+                "label": "Receiving location",
+                "orderKey": 40,
+                "type": "reference",
+                "required": true,
+                "query": {
+                  "kind": "queryReference",
+                  "targetId": "northstar.app:query.location_list",
+                  "schemaVersion": "v6"
+                },
+                "labelField": {
+                  "kind": "fieldReference",
+                  "targetId": "northstar.app:field.location_name",
+                  "schemaVersion": "v6"
+                },
+                "defaultFrom": {
+                  "source": "record",
+                  "field": "northstar.app:field.purchase_order_receiving_location_id"
+                }
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_currency",
+                "label": "Actual cost currency",
+                "orderKey": 50,
+                "type": "text",
+                "required": true,
+                "presentation": {
+                  "kind": "choice",
+                  "options": [
+                    { "value": "CAD", "label": "CAD · Canadian dollar" },
+                    { "value": "USD", "label": "USD · US dollar" },
+                    { "value": "EUR", "label": "EUR · Euro" }
+                  ],
+                  "defaultFrom": {
+                    "source": "record",
+                    "field": "northstar.app:field.purchase_order_currency"
+                  }
+                }
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_packing_slip",
+                "label": "Packing slip / delivery note",
+                "orderKey": 60,
+                "type": "text",
+                "required": false
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_notes",
+                "label": "Notes",
+                "orderKey": 70,
+                "type": "text",
+                "required": false,
+                "presentation": { "kind": "multiline" }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.receipt_lines_known",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.goods_receipt_create",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_state"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.goods_receipt_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_kind"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.goods_receipt_kind_initial"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_effective_at"
+                    ],
+                    "value": { "source": "generated", "value": "instant" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_location_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_location"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_reason_code"
+                    ],
+                    "value": { "source": "literal", "value": "RECEIVE" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_reason_narrative"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "Receive from purchase order"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_packing_slip"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_packing_slip"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_notes"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_notes"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_order"
+                    ],
+                    "value": { "source": "record", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.receipt_lines_line_known",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.goods_receipt_line_create",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_line_number"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.purchase_order_line_line_number"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_item_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.purchase_order_line_item_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_quantity"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_quantity"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_unit_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_unit"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_cost_status"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.goods_receipt_line_cost_status_known"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_unit_cost"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_cost"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_currency"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_currency"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_reversal_of_movement_id"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_line_receipt"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.receipt_lines_known",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_line_order_line"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  }
+                ],
+                "each": true
+              },
+              {
+                "stepId": "northstar.app:step.receipt_lines_post_known",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.goods_receipt_post",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.receipt_lines_known",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.receipt_lines_known",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.receive_lines_absent",
+            "label": "Receive lines with cost explicitly absent",
+            "description": "Posts one receipt for every line given a quantity, with actual cost explicitly recorded as absent. A line left empty is not received.",
+            "orderKey": 6,
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.purchase_order_released"
+              }
+            ],
+            "rows": {
+              "datasetId": "northstar.app:dataset.purchasing_lines",
+              "conditions": [
+                {
+                  "value": {
+                    "source": "selected",
+                    "field": "northstar.app:metric.open_to_receive"
+                  },
+                  "operator": "notEquals",
+                  "compare": "0"
+                }
+              ],
+              "fillLabel": "Fill open quantities"
+            },
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.receive_lines_quantity",
+                "label": "Quantity to receive",
+                "orderKey": 10,
+                "type": "quantity",
+                "required": true,
+                "perRow": {
+                  "fillFrom": {
+                    "datasetId": "northstar.app:dataset.purchasing_lines",
+                    "columnId": "northstar.app:column.purchasing_open"
+                  }
+                }
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_unit",
+                "label": "Base unit",
+                "orderKey": 20,
+                "type": "text",
+                "required": true,
+                "perRow": {},
+                "presentation": {
+                  "kind": "derived",
+                  "column": {
+                    "datasetId": "northstar.app:dataset.purchasing_lines",
+                    "columnId": "northstar.app:column.purchasing_base_unit"
+                  }
+                }
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_location",
+                "label": "Receiving location",
+                "orderKey": 40,
+                "type": "reference",
+                "required": true,
+                "query": {
+                  "kind": "queryReference",
+                  "targetId": "northstar.app:query.location_list",
+                  "schemaVersion": "v6"
+                },
+                "labelField": {
+                  "kind": "fieldReference",
+                  "targetId": "northstar.app:field.location_name",
+                  "schemaVersion": "v6"
+                },
+                "defaultFrom": {
+                  "source": "record",
+                  "field": "northstar.app:field.purchase_order_receiving_location_id"
+                }
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_packing_slip",
+                "label": "Packing slip / delivery note",
+                "orderKey": 60,
+                "type": "text",
+                "required": false
+              },
+              {
+                "inputId": "northstar.app:input.receive_lines_notes",
+                "label": "Notes",
+                "orderKey": 70,
+                "type": "text",
+                "required": false,
+                "presentation": { "kind": "multiline" }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.receipt_lines_absent",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.goods_receipt_create",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_state"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.goods_receipt_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_kind"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.goods_receipt_kind_initial"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_effective_at"
+                    ],
+                    "value": { "source": "generated", "value": "instant" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_location_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_location"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_reason_code"
+                    ],
+                    "value": { "source": "literal", "value": "RECEIVE" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_reason_narrative"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "Receive from purchase order"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_packing_slip"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_packing_slip"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_notes"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_notes"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_order"
+                    ],
+                    "value": { "source": "record", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.receipt_lines_line_absent",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.goods_receipt_line_create",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_line_number"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.purchase_order_line_line_number"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_item_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.purchase_order_line_item_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_quantity"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_quantity"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_unit_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.receive_lines_unit"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_cost_status"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.goods_receipt_line_cost_status_absent"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_unit_cost"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_currency"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_reversal_of_movement_id"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_line_receipt"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.receipt_lines_absent",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_line_order_line"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  }
+                ],
+                "each": true
+              },
+              {
+                "stepId": "northstar.app:step.receipt_lines_post_absent",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.goods_receipt_post",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.receipt_lines_absent",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.receipt_lines_absent",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.reverse_receipt",
+            "label": "Reverse receipt",
+            "description": "Reverses every line of this receipt that still adds to stock, at exactly that quantity, with a posted reversal receipt. Refused if the stock has already left.",
+            "orderKey": 32,
+            "datasetId": "northstar.app:dataset.purchasing_receipts",
+            "presentation": { "placement": "selection" },
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.purchase_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:field.goods_receipt_state"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:option.goods_receipt_state_posted"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:field.goods_receipt_kind"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:option.goods_receipt_kind_initial"
+              }
+            ],
+            "rows": {
+              "datasetId": "northstar.app:dataset.purchasing_receipt_lines",
+              "conditions": [
+                {
+                  "value": {
+                    "source": "selected",
+                    "field": "northstar.app:metric.reversible"
+                  },
+                  "operator": "positive",
+                  "compare": null
+                }
+              ]
+            },
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.reverse_receipt_reason",
+                "label": "Reason",
+                "orderKey": 10,
+                "type": "text",
+                "required": true,
+                "presentation": { "kind": "multiline" }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.reversal",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.goods_receipt_create",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_state"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.goods_receipt_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_kind"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.goods_receipt_kind_reversal"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_effective_at"
+                    ],
+                    "value": { "source": "generated", "value": "instant" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_location_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.goods_receipt_location_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_reason_code"
+                    ],
+                    "value": { "source": "literal", "value": "REVERSE" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_reason_narrative"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.reverse_receipt_reason"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_packing_slip"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_notes"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_order"
+                    ],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_supersedes"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.reversal_line",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.goods_receipt_line_create",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_line_number"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.goods_receipt_line_line_number"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_item_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.goods_receipt_line_item_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_quantity"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:metric.reversal_quantity"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_unit_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.goods_receipt_line_unit_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_cost_status"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.goods_receipt_line_cost_status"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_unit_cost"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.goods_receipt_line_unit_cost"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_currency"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.goods_receipt_line_currency"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.goods_receipt_line_reversal_of_movement_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:metric.movement"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_line_receipt"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.reversal",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.goods_receipt_line_order_line"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:metric.order_line"
+                    }
+                  }
+                ],
+                "each": true
+              },
+              {
+                "stepId": "northstar.app:step.reversal_post",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.goods_receipt_post",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.reversal",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.reversal",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
           {
             "actionId": "northstar.app:action.receive_known",
             "label": "Receive with actual cost",
