@@ -45,6 +45,6 @@ if [ "$SUITE_RC" -ne 0 ]; then
 fi
 
 if [ -n "$NORMALIZE_PLAYWRIGHT" ]; then
-  node --import tsx "$REPOSITORY_ROOT/test/helpers/normalize-playwright-evidence.ts"
+  node --import tsx "$REPOSITORY_ROOT/test/helpers/normalize-playwright-evidence.ts" "$SUITE"
   exit "$?"
 fi
