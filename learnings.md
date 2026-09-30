@@ -727,3 +727,8 @@ How to apply: reload actual display dependencies through governed reads; redact 
 Date: 2026-09-15
 Why: RAIN-META-SALES P2 reproduced an old review form dispatching replacement inputs from the same task session.
 How to apply: bind an immutable normalized preparation to a server-issued identity, reject stale confirmation before dispatch, and use deterministic barriers to prove delayed validation cannot overwrite newer or confirmed state. See [P1/P2 correction](docs/execution/packets/RAIN-META-SALES.md).
+
+## Classify tests by what they launch, not their directory
+Date: 2026-09-30
+Why: APPROVALS ran dependency-boundary tests directly beside a locked schema replay; the file's PostgreSQL leak/cleanup controls briefly created additional Docker containers before cleaning them up.
+How to apply: run `test/architecture/dependency-boundaries.test.ts` under the exclusive test lock, just like PostgreSQL and browser suites; inspect a focused suite's subprocesses before treating it as container-free. See [APPROVALS](docs/execution/packets/APPROVALS.md).
