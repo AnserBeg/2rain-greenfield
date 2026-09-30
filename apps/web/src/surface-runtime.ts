@@ -14,6 +14,8 @@ import {
   declaredListCsv,
   exportFileName,
   readDeclaredListState,
+  viewNeedsProgress,
+  withheldProgressQuery,
   type DeclaredListState,
 } from './list-declaration.js';
 import type { SurfaceList } from '../../../packages/canonical-model/src/index.js';
@@ -60,6 +62,7 @@ import {
   type SurfaceMessageRef,
 } from './message-render.js';
 import {
+  pickerEnumerationQuery,
   readCompiledSurfaceManifest,
   readCompiledSurfaceDataBinding,
   SurfaceProjectionError,
@@ -372,7 +375,6 @@ export async function renderSurfaceRuntimeWithData(
         declaredList.state,
         url,
         gateways.queryGateway,
-        await gateways.queryGateway.invoke(view, request),
         declaredList.now,
       );
     } else {
@@ -457,6 +459,11 @@ export async function renderSurfaceRuntimeWithData(
  * same search and filters. A page number past the end is answered with the
  * last page rather than an empty window that claims records exist. A view
  * count that cannot be read is omitted, never guessed.
+ *
+ * A List whose progress is supplementary (`whenDenied: 'omit'`) is read
+ * without it when current policy withholds either summed query: its figures
+ * read "—", its other views still serve and count, and a view that keeps only
+ * open rows -- which only the figures can judge -- is refused and uncounted.
  */
 async function declaredListData(
   view: RuntimeViewContract.RequestRuntimeView,
@@ -465,17 +472,71 @@ async function declaredListData(
   state: DeclaredListState,
   url: URL,
   queryGateway: SemanticQueryGateway,
-  first: SemanticQueryResultEnvelope,
   now: Date,
 ): Promise<SurfaceDataRenderState> {
   const scopeArguments = legalEntityScopeArguments(binding, url);
-  const request = (argumentsValue: RuntimeViewContract.ImmutableJsonValue) =>
-    ({
-      arguments: argumentsValue,
+  const read = (
+    mode: 'count' | 'page',
+    listState: DeclaredListState,
+    withoutProgress: boolean,
+    viewId?: string,
+  ) =>
+    queryGateway.invoke(view, {
+      arguments: declaredListArguments(list, listState, {
+        mode,
+        now,
+        ...(mode === 'page'
+          ? { pageOffset: (listState.page - 1) * list.pageSize }
+          : {}),
+        queryId: binding.query.queryId,
+        scopeArguments,
+        ...(viewId === undefined ? {} : { viewId }),
+        ...(withoutProgress ? { withoutProgress: true } : {}),
+      }),
       queryId: binding.query.queryId,
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-    }) as const;
-  let result = first;
+    });
+  const viewCounts = async (withoutProgress: boolean) => {
+    const counts: Record<string, number> = {};
+    for (const listView of list.views) {
+      // An open view is never counted without its figures: its tab shows no
+      // count, and its own page refuses.
+      if (withoutProgress && listView.open) continue;
+      try {
+        const counted = await read(
+          'count',
+          state,
+          withoutProgress,
+          listView.viewId,
+        );
+        if (counted.listCoverage)
+          counts[listView.viewId] = counted.listCoverage.totalCount;
+      } catch {
+        // Omitted: the tab still navigates, and its own page reports its count.
+      }
+    }
+    return counts;
+  };
+  let withheld: string | null = null;
+  let result: SemanticQueryResultEnvelope;
+  try {
+    result = await read('page', state, false);
+  } catch (error) {
+    withheld = withheldProgressQuery(list, error);
+    if (withheld === null) throw error;
+    if (viewNeedsProgress(list, state.viewId))
+      return {
+        code: 'QUERY_PERMISSION_DENIED',
+        declaredList: {
+          counts: await viewCounts(true),
+          now,
+          progressWithheld: withheld,
+          state,
+        },
+        status: 'DIAGNOSTIC',
+      };
+    result = await read('page', state, true);
+  }
   const coverage = result.listCoverage;
   if (
     coverage &&
@@ -485,43 +546,20 @@ async function declaredListData(
   ) {
     const lastPage = Math.ceil(coverage.totalCount / list.pageSize);
     state = { ...state, page: lastPage };
-    result = await queryGateway.invoke(
-      view,
-      request(
-        declaredListArguments(list, state, {
-          mode: 'page',
-          now,
-          pageOffset: (lastPage - 1) * list.pageSize,
-          queryId: binding.query.queryId,
-          scopeArguments,
-        }),
-      ),
-    );
+    result = await read('page', state, withheld !== null);
   }
-  const counts: Record<string, number> = {};
-  for (const listView of list.views) {
-    try {
-      const counted = await queryGateway.invoke(
-        view,
-        request(
-          declaredListArguments(list, state, {
-            mode: 'count',
-            now,
-            queryId: binding.query.queryId,
-            scopeArguments,
-            viewId: listView.viewId,
-          }),
-        ),
-      );
-      if (counted.listCoverage)
-        counts[listView.viewId] = counted.listCoverage.totalCount;
-    } catch {
-      // Omitted: the tab still navigates, and its own page reports its count.
-    }
-  }
+  const counts = await viewCounts(withheld !== null);
   const data = dataState(result);
   return data.status === 'READY'
-    ? { ...data, declaredList: { counts, now, state } }
+    ? {
+        ...data,
+        declaredList: {
+          counts,
+          now,
+          ...(withheld === null ? {} : { progressWithheld: withheld }),
+          state,
+        },
+      }
     : data;
 }
 
@@ -546,19 +584,33 @@ async function exportDeclaredList(
       : undefined;
   if (!list.export || exportMaximumResultCount === undefined)
     return renderApplicationDiagnostic(404, { code: 'QUERY_UNSUPPORTED' });
-  let result: SemanticQueryResultEnvelope;
-  try {
-    result = await queryGateway.invoke(view, {
+  const exported = (withoutProgress: boolean) =>
+    queryGateway.invoke(view, {
       arguments: declaredListArguments(list, state, {
         exportMaximumResultCount,
         mode: 'export',
         now,
         queryId: binding.query.queryId,
         scopeArguments: legalEntityScopeArguments(binding, url),
+        ...(withoutProgress ? { withoutProgress: true } : {}),
       }),
       queryId: binding.query.queryId,
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     });
+  let result: SemanticQueryResultEnvelope;
+  try {
+    try {
+      result = await exported(false);
+    } catch (error) {
+      // Supplementary figures withheld: the file keeps their columns empty,
+      // as the page reads "—"; an open view, which only they judge, refuses.
+      if (
+        withheldProgressQuery(list, error) === null ||
+        viewNeedsProgress(list, state.viewId)
+      )
+        throw error;
+      result = await exported(true);
+    }
   } catch (error) {
     return renderApplicationDiagnostic(422, { code: queryMessageCode(error) });
   }
@@ -1306,7 +1358,15 @@ async function recordPickerOptions(
   queryGateway: SemanticQueryGateway,
   legalEntitySelection: readonly string[],
 ): Promise<RecordPickerEnumeration | null> {
-  const scope = target.binding.query.legalEntityScope;
+  if (target.binding.query.queryType === 'aggregate') return null;
+  // Labels only: a List read with per-row figures is enumerated through the
+  // entity's plain list query, under that query's own company operand.
+  const query = pickerEnumerationQuery(
+    view,
+    target.surface,
+    target.binding.query,
+  );
+  const scope = query.legalEntityScope;
   if (scope && legalEntitySelection.length !== 1) return null;
   try {
     const result = await queryGateway.invoke(view, {
@@ -1315,7 +1375,7 @@ async function recordPickerOptions(
         list: {
           cursor: null,
           matchMode: 'substring',
-          pageSize: target.binding.query.maximumResultCount,
+          pageSize: query.maximumResultCount,
           relationLabels: [],
           schemaVersion: SHARED_LIST_QUERY_VERSION,
           search: '',
@@ -1325,7 +1385,7 @@ async function recordPickerOptions(
           ? { [scope.operand.parameterId]: legalEntitySelection[0]! }
           : {}),
       },
-      queryId: target.binding.query.queryId,
+      queryId: query.queryId,
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     });
     if (result.outcome !== 'exact') return null;

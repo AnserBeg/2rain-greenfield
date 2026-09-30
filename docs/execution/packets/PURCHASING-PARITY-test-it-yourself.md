@@ -46,3 +46,14 @@ The fixture's Alpine Office Supply is also a supplier; it defaults to CAD, Net 3
    Confirm → Back to order.
 3. **Connected receipts** lists the new RCV- number with Packing slip PS-1042; open it to read the slip and notes.
 4. Receive again leaving the slip and notes empty: the receipt saves with neither (empty, not blank text).
+
+## §4 What is still to arrive (slice 4)
+
+1. Purchasing → **Expected receipts**: tabs **To receive**, **Late** and **All released**, each with its count.
+2. New purchase order: vendor **Alpine**, **Expected** three days ago, line 1 **OFF-100** quantity 6. Save draft, Release.
+   Back on Expected receipts it is under To receive with Ordered 6, Received 0, Open 6, and under **Late**
+   its Expected date reads "3 days late".
+3. Receive 2 of it (Select the line → Receive with cost explicitly absent). The row reads Received 2, Open 4.
+4. Close the line's open remainder (reason "Short shipped"): the order leaves To receive and Late (still under
+   All released), and on the order page neither Receive nor Close open remainder is offered on that line.
+5. Export CSV from To receive: the figures are exact decimals; at phone width the List keeps its tabs.

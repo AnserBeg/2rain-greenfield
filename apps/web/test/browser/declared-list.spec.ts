@@ -133,9 +133,10 @@ test('a declared Sales List navigates views, search, sort, filters, pages and ex
       .replace(/^\uFEFF/u, '')
       .trimEnd()
       .split('\r\n');
-    // Ruling E adds the salesperson, named like the customer.
+    // Ruling E adds the salesperson, named like the customer; ORDER-PARITY
+    // the units each order's lines order, ship and leave open.
     expect(csv[0]).toBe(
-      'Number,Customer,Salesperson,Order date,Requested,Status,Currency',
+      'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency',
     );
     expect(csv.length - 1).toBe(expected.draft);
 

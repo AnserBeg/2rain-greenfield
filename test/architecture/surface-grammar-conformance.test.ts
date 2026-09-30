@@ -291,8 +291,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // eligibility and typed Task inputs require 9; declared Lists require 10;
   // editor defaults, scoped pickers and Task input eligibility require 11;
   // List progress, open and before-today views and overdue dates require 12;
-  // the item page's field-scoped stock and movements require 13.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 13);
+  // List row actions and supplementary progress (ORDER-PARITY) require 13;
+  // the item page's field-scoped stock and movements require 14.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 14);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.

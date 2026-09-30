@@ -366,12 +366,45 @@ export async function isEphemeralPostgresReadyInsideContainer(
 export async function removeEphemeralPostgresContainer(
   containerName: string,
   runDocker: DockerRunner = docker,
+  pauseMilliseconds = 250,
 ): Promise<void> {
   try {
     await runDocker(['rm', '--force', containerName]);
+    return;
   } catch (error) {
-    if (!isMissingDockerContainerError(error, containerName)) throw error;
+    if (isMissingDockerContainerError(error, containerName)) return;
+    // The container runs with --rm: once a test stops it, the daemon removes
+    // it itself and refuses a forced remove that races that removal. Wait for
+    // the daemon's removal, within a bound, rather than calling it a failure.
+    if (!isRemovalInProgressError(error)) throw error;
   }
+  for (let attempt = 0; attempt < REMOVAL_WAIT_ATTEMPTS; attempt += 1) {
+    const state = await inspectEphemeralPostgresContainer(
+      containerName,
+      runDocker,
+    );
+    if (state === 'removed') return;
+    await new Promise((resolveDelay) =>
+      setTimeout(resolveDelay, pauseMilliseconds),
+    );
+  }
+  throw new Error(
+    `docker did not finish removing ${containerName} after ${String(REMOVAL_WAIT_ATTEMPTS)} checks`,
+  );
+}
+
+const REMOVAL_WAIT_ATTEMPTS = 60;
+
+function isRemovalInProgressError(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (typeof cause !== 'object' || cause === null || !('stderr' in cause)) {
+    return false;
+  }
+  const stderr = cause.stderr;
+  return (
+    typeof stderr === 'string' &&
+    /removal of container \S+ is already in progress/iu.test(stderr)
+  );
 }
 
 async function containerLogs(containerName: string): Promise<DockerResult> {

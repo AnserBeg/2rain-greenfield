@@ -609,12 +609,14 @@ test(
       );
       assert.ok(refused instanceof SemanticQueryPolicyDeniedError);
       assert.equal(refused.queryId, `${ns}:query.purchase_order_received_list`);
+      // The Purchase orders List reads its commercial clone (ORDER-PARITY),
+      // whose company parameter is its own; its figures are supplementary.
       const orders = await page(
         listUrl(
           fixture,
           {},
           `${ns}:surface.purchase_order_list`,
-          `${ns}:parameter.purchase_order_list_legal_entity_scope`,
+          `${ns}:parameter.commercial_purchase_order_list_legal_entity_scope`,
         ),
       );
       assert.equal(orders.status, 200);

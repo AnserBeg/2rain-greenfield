@@ -1274,6 +1274,34 @@ const listProgress = z.strictObject({
     done: CanonicalIdSchema,
     open: CanonicalIdSchema,
   }),
+  /**
+   * `omit`: the figures are supplementary. When current policy denies either
+   * summed query, the List is read without them -- its progress columns read
+   * "—" -- and only a view that keeps open rows is refused. Absent, a denial
+   * refuses the whole List, as a List whose progress is its purpose must.
+   * Optional v6 key (ADR-0047 §7).
+   */
+  whenDenied: z.literal('omit').optional(),
+});
+/**
+ * A link from a List row to its record page, at one of the page's dataset
+ * sections. The first action (by order) whose condition holds is the row's,
+ * judged from server-projected values as an overdue date is; the record page
+ * re-checks everything it offers there. Optional v6 key (ADR-0047 §7).
+ */
+const listRowAction = z.strictObject({
+  actionId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  /** Exact stored values the row must hold, and something open when `open`. */
+  when: z
+    .strictObject({
+      filters: z.array(listFieldValue).max(3).optional(),
+      open: z.literal(true).optional(),
+    })
+    .optional(),
+  /** A dataset of the record page's composition, opened at its section. */
+  section: CanonicalIdSchema.optional(),
 });
 export const SurfaceListSchema = z.strictObject({
   kind: z.literal('surfaceList'),
@@ -1332,9 +1360,13 @@ export const SurfaceListSchema = z.strictObject({
     .max(4),
   export: z.strictObject({ format: z.literal('csv') }).optional(),
   progress: listProgress.optional(),
+  rowActions: z.array(listRowAction).min(1).max(3).optional(),
 });
 export type SurfaceList = z.infer<typeof SurfaceListSchema>;
 export type SurfaceListProgress = NonNullable<SurfaceList['progress']>;
+export type SurfaceListRowAction = NonNullable<
+  SurfaceList['rowActions']
+>[number];
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),

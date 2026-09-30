@@ -516,6 +516,209 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'order_lists') {
+      // ORDER-PARITY: a confirmed sales order with part of one line shipped
+      // and a draft beside it; a released purchase order with priced lines and
+      // part of one received, and one received in full -- for the order Lists'
+      // Ordered/Shipped/Received/Open columns, their work tabs, row actions and
+      // the purchase order total. Everything goes through the governed
+      // operations, as the order pages' own Tasks do.
+      const now = new Date().toISOString();
+      const number = (
+        record: { values: Readonly<Record<string, unknown>> },
+        local: string,
+      ) => String(record.values[`${ns}:field.${local}_number`]);
+      const salesOrder = async (quantities: readonly string[]) => {
+        const order = await create('sales_order', {
+          customer_party_id: customer,
+          order_date: now,
+          requested_date: now,
+          currency: 'CAD',
+          notes: null,
+          ...shipTo,
+        });
+        const lines = [];
+        for (const [index, quantity] of quantities.entries())
+          lines.push(
+            await create(
+              'sales_order_line',
+              {
+                item_id: item,
+                line_number: String(index + 1),
+                ordered_quantity: quantity,
+                unit_id: 'EA',
+                unit_price: null,
+              },
+              { order: order.recordId },
+            ),
+          );
+        return { order, lines };
+      };
+      const shipping = await salesOrder(['5', '3']);
+      const confirmed = await invoke('sales_order_release', {
+        recordId: shipping.order.recordId,
+        expectedRevision: shipping.order.revision,
+      });
+      assert.equal(confirmed.outcome, 'succeeded');
+      const reservation = await create(
+        'reservation',
+        {
+          item_id: item,
+          location_id: location,
+          number: `RSV-${randomUUID()}`,
+          quantity: '4',
+          reason: 'Order Lists fixture',
+          state: `${ns}:option.reservation_state_draft`,
+          unit_id: 'EA',
+        },
+        { order_line: shipping.lines[0]!.recordId },
+      );
+      const reserved = await invoke('reservation_reserve', {
+        recordId: reservation.recordId,
+        expectedRevision: reservation.revision,
+      });
+      assert.equal(reserved.outcome, 'succeeded');
+      const shipment = await create(
+        'shipment',
+        {
+          carrier: 'Northline Freight',
+          shipping_reference_kind: `${ns}:option.shipment_shipping_reference_kind_tracking`,
+          shipping_reference: 'TRK-ORDER-LISTS',
+          state: `${ns}:option.shipment_state_draft`,
+          kind: `${ns}:option.shipment_kind_initial`,
+          effective_at: now,
+          location_id: location,
+          external_reference: null,
+          reason_code: 'SHIP',
+          reason_narrative: 'Order Lists fixture',
+          ...shipTo,
+        },
+        { order: shipping.order.recordId },
+      );
+      await create(
+        'shipment_line',
+        {
+          line_number: '1',
+          item_id: item,
+          quantity: '3',
+          unit_id: 'EA',
+          reversal_of_movement_id: null,
+        },
+        {
+          shipment: shipment.recordId,
+          order_line: shipping.lines[0]!.recordId,
+          reservation: reservation.recordId,
+        },
+      );
+      const shipped = await invoke('shipment_post', {
+        recordId: shipment.recordId,
+        expectedRevision: shipment.revision,
+      });
+      assert.equal(shipped.outcome, 'succeeded');
+      const drafted = await salesOrder(['2']);
+      const purchase = async (
+        lines: readonly (readonly [
+          ordered: string,
+          price: string,
+          received: string,
+        ])[],
+      ) => {
+        const order = await create('purchase_order', {
+          supplier_party_id: customer,
+          order_date: now,
+          expected_date: null,
+          currency: 'CAD',
+          notes: null,
+        });
+        const made = [];
+        for (const [index, [ordered, price]] of lines.entries())
+          made.push(
+            await create(
+              'purchase_order_line',
+              {
+                line_number: String(index + 1),
+                item_id: item,
+                ordered_quantity: ordered,
+                unit_price: price,
+              },
+              { order: order.recordId },
+            ),
+          );
+        const released = await invoke('purchase_order_release', {
+          recordId: order.recordId,
+          expectedRevision: order.revision,
+        });
+        assert.equal(released.outcome, 'succeeded');
+        for (const [index, [, , quantity]] of lines.entries()) {
+          if (quantity === '0') continue;
+          const receipt = await create(
+            'goods_receipt',
+            {
+              state: `${ns}:option.goods_receipt_state_draft`,
+              kind: `${ns}:option.goods_receipt_kind_initial`,
+              effective_at: new Date().toISOString(),
+              location_id: location,
+              reason_code: 'RECEIVE',
+              reason_narrative: 'Order Lists fixture',
+            },
+            { order: order.recordId },
+          );
+          await create(
+            'goods_receipt_line',
+            {
+              line_number: '1',
+              item_id: item,
+              quantity,
+              unit_id: 'EA',
+              cost_status: `${ns}:option.goods_receipt_line_cost_status_absent`,
+              unit_cost: null,
+              currency: null,
+              reversal_of_movement_id: null,
+            },
+            { receipt: receipt.recordId, order_line: made[index]!.recordId },
+          );
+          const posted = await invoke('goods_receipt_post', {
+            recordId: receipt.recordId,
+            expectedRevision: receipt.revision,
+          });
+          assert.equal(posted.outcome, 'succeeded');
+        }
+        return order;
+      };
+      // 10 × 2.50 + 5 × 1.20, untaxed and with no charges: 31.00.
+      const receiving = await purchase([
+        ['10', '2.5', '4'],
+        ['5', '1.2', '0'],
+      ]);
+      // 3 × 4.00 = 12.00, all of it received.
+      const complete = await purchase([['3', '4', '3']]);
+      return {
+        phase,
+        sales: {
+          shipping: {
+            number: number(shipping.order, 'sales_order'),
+            recordId: shipping.order.recordId,
+          },
+          draft: {
+            number: number(drafted.order, 'sales_order'),
+            recordId: drafted.order.recordId,
+          },
+        },
+        purchases: {
+          receiving: {
+            number: number(receiving, 'purchase_order'),
+            recordId: receiving.recordId,
+            total: '31.00',
+          },
+          complete: {
+            number: number(complete, 'purchase_order'),
+            recordId: complete.recordId,
+            total: '12.00',
+          },
+        },
+        observed: true,
+      };
+    }
     if (phase === 'item_stock') {
       // INVENTORY-PARITY: Field notebook's stock moves at two locations. The
       // opening 10 at CAL-WH, 6 more at VAN-WH, a receipt of 5 and a shipment

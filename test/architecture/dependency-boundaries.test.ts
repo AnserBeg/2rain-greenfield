@@ -295,6 +295,38 @@ test('ephemeral PostgreSQL readiness observes terminal states and Docker failure
     'removed',
   );
   await removeEphemeralPostgresContainer(containerName, missingRunner);
+  // A --rm container a test stopped is being removed by the daemon: the
+  // forced remove is refused as in progress, and the helper waits for that
+  // removal, within its bound, instead of failing the run.
+  const inProgress = new Error('docker rm failed', {
+    cause: {
+      stderr:
+        'Error response from daemon: removal of container 3f2a9c is already in progress',
+    },
+  });
+  const calls: string[] = [];
+  await removeEphemeralPostgresContainer(
+    containerName,
+    async (arguments_) => {
+      calls.push(arguments_[0] ?? '');
+      if (arguments_[0] === 'rm') throw inProgress;
+      if (calls.length === 2) return { stderr: '', stdout: 'removing\n' };
+      throw missing;
+    },
+    0,
+  );
+  assert.deepEqual(calls, ['rm', 'inspect', 'inspect']);
+  await assert.rejects(
+    removeEphemeralPostgresContainer(
+      containerName,
+      async (arguments_) => {
+        if (arguments_[0] === 'rm') throw inProgress;
+        return { stderr: '', stdout: 'removing\n' };
+      },
+      0,
+    ),
+    /did not finish removing north-star-control/u,
+  );
   await assert.rejects(
     inspectEphemeralPostgresContainer(containerName, unavailableRunner),
     (error: unknown) => error === daemonUnavailable,
