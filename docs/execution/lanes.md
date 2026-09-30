@@ -12,7 +12,7 @@
 |---|---|---|
 | **BUILD** | `RAIN-ORDER-ENTRY` | workspace interaction completion at `d9eca60a` (Inventory destinations, eligible pickers, in-place references, shared Task controls); sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; ONLINE review complete (D1-D5 closed); [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / owner acceptance; stopped without integration; retained databases preserved |
 | **BUILD** | `SALES-PARITY` | Sales + shared List parity with PaneFlow through metadata, stacked on PR #6 `994a7dc9`; sole local author on `packet/SALES-PARITY`; vertical checkpoint 2026-09-29 (slices 1-4, 5a, 6, 7, 8 pushed; returns not built); review rounds 1-4 fixed through `bf24b925` (round 4's R1), round 5 (confirm) owed; draft PR #7 open; [record](packets/SALES-PARITY.md); no merge/deployment |
-| **BUILD** | `PURCHASING-PARITY` | Purchasing parity with PaneFlow through metadata, stacked on `packet/SALES-PARITY`; sole local author on `packet/PURCHASING-PARITY`; slices 1-3 (priced purchase orders, ending an order, receiving paperwork) pushed on draft PR #8, slice 4 chartered (2026-09-29); outside the Critical set; [record](packets/PURCHASING-PARITY.md); no merge/deployment |
+| **BUILD** | `PURCHASING-PARITY` | Purchasing parity with PaneFlow through metadata, stacked on `packet/SALES-PARITY`; sole local author on `packet/PURCHASING-PARITY`; slices 1-4 (priced purchase orders, ending an order, receiving paperwork, what is still to arrive) and the ADR-0066 re-baseline on draft PR #8 (2026-09-30); outside the Critical set; [record](packets/PURCHASING-PARITY.md); no merge/deployment |
 | **SUPPORT** | — | idle |
 
 
