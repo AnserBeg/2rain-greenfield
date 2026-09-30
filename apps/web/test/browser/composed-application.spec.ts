@@ -1011,6 +1011,7 @@ async function inventoryNavigationJourney(
     'Stock count',
     'Party',
     'Party role',
+    'Inventory value',
     'Item',
     'Tax code',
     'Location',
