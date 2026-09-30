@@ -4,16 +4,16 @@ import { dirname, resolve } from 'node:path';
 import type { JSONReport, JSONReportSuite } from '@playwright/test/reporter';
 
 import type { SuiteEvidence } from './reachability-evidence.js';
-import { getReachabilityProducer } from './reachability-producers.js';
+import { getPlaywrightReachabilityProducer } from './reachability-producers.js';
 import { resolveReachabilityRunId } from './reachability-run.mjs';
 
-const producer = getReachabilityProducer('browser');
-if (!producer.rawEvidencePath) {
-  throw new Error('Browser producer is missing its raw JSON evidence path');
+// The suite id run-suite.sh prepared this run's evidence under; each
+// Playwright producer normalizes only its own raw report and invocation.
+const suiteId = process.argv[2];
+if (!suiteId) {
+  throw new Error('Usage: normalize-playwright-evidence.ts <suite-id>');
 }
-if (!producer.invocationEvidencePath) {
-  throw new Error('Browser producer is missing its invocation evidence path');
-}
+const producer = getPlaywrightReachabilityProducer(suiteId);
 const repositoryRoot = resolve('.');
 const currentRunId = resolveReachabilityRunId({ repositoryRoot });
 const invocation = parseObservedInvocation(
