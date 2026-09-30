@@ -3,6 +3,7 @@ import type { SurfaceComposition } from '../../../packages/canonical-model/src/i
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
   type SemanticRecordDto,
   type SemanticQueryGateway,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
@@ -84,6 +85,74 @@ const recordValue = (
 };
 const text = (value: ImmutableJsonValue): string =>
   value === null ? '—' : String(value);
+/** A positive exact decimal, as a governed figure states one. */
+const POSITIVE_DECIMAL = /^(?:[1-9]\d*(?:\.\d+)?|0\.\d*[1-9]\d*)$/;
+
+/**
+ * The relations of its record a composition names -- a column labelled
+ * through the related record's get, or a link that opens it -- which the
+ * record's get is asked to state (`relationTargets`). The validator admits a
+ * name outside the record query's results only as a relation of the record.
+ */
+export function compositionRelationTargets(
+  view: RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+): readonly string[] {
+  const composition = surface.composition;
+  const definition = registeredSemanticQueryFromPinnedView(
+    view,
+    surface.dataSourceQueryId,
+  );
+  if (!composition || !definition || definition.queryType !== 'get') return [];
+  const results = new Set<string>([
+    'recordId',
+    'revision',
+    ...definition.selections.map((selection) => selection.fieldId),
+    ...Object.values(definition.readModel?.resultFields ?? {}),
+  ]);
+  return [
+    ...new Set(
+      [
+        ...composition.fields.map((column) => column.field),
+        ...composition.actions.flatMap((action) =>
+          action.navigate?.record.source === 'record'
+            ? [action.navigate.record.field]
+            : [],
+        ),
+      ].filter((field) => !results.has(field)),
+    ),
+  ];
+}
+
+/** The record read a composition page and its Tasks make: the record, with the relations it names. */
+function recordArguments(
+  view: RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  recordId: string | null,
+): Record<string, ImmutableJsonValue> {
+  const relationTargets = compositionRelationTargets(view, surface);
+  return {
+    recordId,
+    includeArchived: false,
+    ...(relationTargets.length
+      ? { relationTargets: [...relationTargets] }
+      : {}),
+  };
+}
+
+/** The page seen from one row of a dataset: that row selected there. */
+function withRow(
+  data: CompositionData,
+  datasetId: string,
+  record: SemanticRecordDto,
+): CompositionData {
+  return {
+    ...data,
+    selected: record,
+    selectedDatasetId: datasetId,
+    selections: { ...data.selections, [datasetId]: record },
+  };
+}
 
 async function query(
   view: RequestRuntimeView,
@@ -167,6 +236,13 @@ async function present(
   scope: string | null,
   record: SemanticRecordDto,
   columns: readonly Column[],
+  /**
+   * Columns naming a relation of the record, such as an invoice's order. The
+   * related record is read through its own get under current policy; one it
+   * withholds, or one that is gone, reads "—" rather than failing the page
+   * that can itself be read.
+   */
+  related: ReadonlySet<string> = new Set(),
 ): Promise<Row> {
   const cells: Record<string, string> = {};
   for (const column of columns) {
@@ -175,16 +251,37 @@ async function present(
       cells[column.columnId] =
         column.format === 'money' && typeof value === 'string'
           ? moneyText(value)
-          : displayFieldValue(view, record, column.field, value);
+          : related.has(column.field)
+            ? text(null)
+            : displayFieldValue(view, record, column.field, value);
       continue;
     }
-    const result = await query(
-      view,
-      gateways,
-      column.reference.query.targetId,
-      scope,
-      { recordId: value, includeArchived: false },
-    );
+    let result: Awaited<ReturnType<typeof query>>;
+    try {
+      result = await query(
+        view,
+        gateways,
+        column.reference.query.targetId,
+        scope,
+        { recordId: value, includeArchived: false },
+      );
+    } catch (error) {
+      if (
+        related.has(column.field) &&
+        error instanceof SemanticQueryPolicyDeniedError
+      ) {
+        cells[column.columnId] = text(null);
+        continue;
+      }
+      throw error;
+    }
+    if (
+      related.has(column.field) &&
+      (result.outcome !== 'exact' || result.records.length !== 1)
+    ) {
+      cells[column.columnId] = text(null);
+      continue;
+    }
     if (result.outcome !== 'exact' || result.records.length !== 1)
       throw new Error('A referenced record is unavailable.');
     cells[column.columnId] = text(
@@ -222,6 +319,7 @@ export async function loadSurfaceComposition(
       scope,
       record,
       composition.fields,
+      new Set(compositionRelationTargets(view, surface)),
     );
   } catch {
     data.fieldsFailed = true;
@@ -362,27 +460,56 @@ function resolveValue(
     }
   }
 }
+type Condition = Action['conditions'][number];
+/** A declared condition over governed values; an unavailable value never holds. */
+function holds(condition: Condition, data: CompositionData): boolean {
+  try {
+    const actual = resolveValue(condition.value, data, {}, {}, {});
+    if (condition.operator === 'positive')
+      return typeof actual === 'string' && POSITIVE_DECIMAL.test(actual);
+    return condition.operator === 'equals'
+      ? actual === condition.compare
+      : actual !== condition.compare;
+  } catch {
+    return false;
+  }
+}
+/**
+ * The rows a multi-row Task works through: the loaded rows of its dataset
+ * whose conditions hold, each judged as that row's `selected` values, in the
+ * dataset's order. A dataset that failed to load offers none.
+ */
+function taskRows(action: Action, data: CompositionData): Row[] {
+  const rows = action.rows;
+  if (!rows) return [];
+  const child = data.children.find(
+    (value) => value.definition.datasetId === rows.datasetId,
+  );
+  if (!child || child.status !== 'ready') return [];
+  return child.rows.filter((row) =>
+    rows.conditions.every((condition) =>
+      holds(condition, withRow(data, rows.datasetId, row.record)),
+    ),
+  );
+}
 function applicable(action: Action, data: CompositionData): boolean {
   if (
     action.datasetId &&
     (!data.selected || action.datasetId !== data.selectedDatasetId)
   )
     return false;
-  try {
-    return action.conditions.every((condition) => {
-      const actual = resolveValue(condition.value, data, {}, {}, {});
-      if (condition.operator === 'positive')
-        return (
-          typeof actual === 'string' &&
-          /^(?:[1-9]\d*(?:\.\d+)?|0\.\d*[1-9]\d*)$/.test(actual)
-        );
-      return condition.operator === 'equals'
-        ? actual === condition.compare
-        : actual !== condition.compare;
-    });
-  } catch {
+  if (!action.conditions.every((condition) => holds(condition, data)))
     return false;
+  // A link opens a stated record; a multi-row Task needs a row to work on.
+  if (action.navigate) {
+    try {
+      const target = resolveValue(action.navigate.record, data, {}, {}, {});
+      if (typeof target !== 'string' || !target) return false;
+    } catch {
+      return false;
+    }
   }
+  return !action.rows || taskRows(action, data).length > 0;
 }
 
 /** Presentation consumes refreshed, governed cells; it never derives business quantities. */
@@ -402,6 +529,166 @@ export function renderCompositionHeader(
     );
   return `<header class="composition-header"><p class="eyebrow">${h(surface.label)}</p><div class="composition-heading"><div><h1>${cell(header.title)}</h1><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p></div>${header.status ? `<span class="composition-business-status">${cell(header.status)}</span>` : ''}</div><dl class="composition-header-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl></header>`;
 }
+/** A dataset's row name: its primary cell, else its first column's. */
+function rowName(
+  definition: SurfaceComposition['children'][number],
+  row: Row,
+): string {
+  const named =
+    definition.columns.find(
+      (column) => column.presentation?.role === 'primary',
+    ) ?? ordered(definition.columns)[0];
+  return named ? (row.cells[named.columnId] ?? '—') : row.record.recordId;
+}
+
+/**
+ * Declared exception banners (`presentation.alerts`): each shows while any
+ * loaded row of its dataset states a positive value in its column, and names
+ * those rows by their primary cell with that value -- an order's lines that
+ * are short. A presence test over governed cells, never a derived total; a
+ * dataset that failed to load states nothing. Not a live region, so it never
+ * competes with an outcome's status.
+ */
+export function renderCompositionAlerts(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+): string {
+  return (surface.composition?.presentation?.alerts ?? [])
+    .map((alert, index) => {
+      const child = data.children.find(
+        (value) => value.definition.datasetId === alert.datasetId,
+      );
+      const column = child?.definition.columns.find(
+        (value) => value.columnId === alert.columnId,
+      );
+      if (!child || !column || child.status !== 'ready') return '';
+      const flagged = child.rows.filter((row) => {
+        try {
+          const value = recordValue(row.record, column.field);
+          return typeof value === 'string' && POSITIVE_DECIMAL.test(value);
+        } catch {
+          return false;
+        }
+      });
+      if (!flagged.length) return '';
+      const heading = `composition-alert-${String(index)}`;
+      return `<section class="composition-alert" aria-labelledby="${heading}" data-composition-alert="${h(alert.columnId)}"><span class="composition-alert-marker" aria-hidden="true">!</span><div><h2 id="${heading}">${h(alert.label)}</h2><p>${h(alert.description)}</p><ul>${flagged.map((row) => `<li data-record-id="${h(row.record.recordId)}"><strong>${h(rowName(child.definition, row))}</strong> <span>${h(column.label)} ${h(row.cells[column.columnId] ?? '—')}</span></li>`).join('')}</ul></div></section>`;
+    })
+    .join('');
+}
+
+type ProgressionStepState =
+  'complete' | 'current' | 'attention' | 'stopped' | 'upcoming';
+
+/** Each step's state: stopped, needing attention, complete, current, or upcoming. */
+export function compositionProgressionStates(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+): readonly ProgressionStepState[] {
+  const all = (conditions: readonly Condition[] | undefined) =>
+    !!conditions?.length &&
+    conditions.every((condition) => holds(condition, data));
+  return (surface.composition?.presentation?.progression?.steps ?? []).map(
+    (step) =>
+      all(step.stopped)
+        ? 'stopped'
+        : all(step.attention)
+          ? 'attention'
+          : all(step.complete)
+            ? 'complete'
+            : all(step.current)
+              ? 'current'
+              : 'upcoming',
+  );
+}
+
+const PROGRESSION_STATE_LABELS: Readonly<Record<ProgressionStepState, string>> =
+  Object.freeze({
+    attention: 'Needs attention',
+    complete: 'Complete',
+    current: 'Current',
+    stopped: 'Stopped',
+    upcoming: 'Upcoming',
+  });
+
+/**
+ * The record's progression (`presentation.progression`): its steps in order,
+ * each with its state from the record's own values and its connected
+ * documents, and the first next entry offered now -- an action of this page
+ * by its own conditions, or an operation the record page offers now (the
+ * caller renders that, as its command bar does). Each next control carries
+ * its own accessible name, so it never doubles a control elsewhere on the
+ * page; none is offered while a Task is open.
+ */
+export function renderCompositionProgression(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+  view: RequestRuntimeView,
+  operationControl: (operationId: string, name: string) => string | null,
+  offerNext = true,
+): string {
+  const progression = surface.composition?.presentation?.progression;
+  if (!progression || data.fieldsFailed) return '';
+  const states = compositionProgressionStates(surface, data);
+  const documents = (datasetId: string, label: string) => {
+    const child = data.children.find(
+      (value) => value.definition.datasetId === datasetId,
+    );
+    if (!child || child.status !== 'ready') return '';
+    const opener = surface.composition!.actions.find(
+      (action) =>
+        action.datasetId === datasetId &&
+        action.presentation?.placement === 'row' &&
+        action.navigate,
+    );
+    const shown = child.rows.slice(0, 6);
+    return `<ul class="composition-progression-documents" aria-label="${h(`${label} documents`)}">${shown
+      .map((row) => {
+        const rowData = withRow(data, datasetId, row.record);
+        const name = h(rowName(child.definition, row));
+        return `<li>${opener && applicable(opener, rowData) ? `<a href="${h(navigateHref(opener, rowData, view))}">${name}</a>` : `<span>${name}</span>`}</li>`;
+      })
+      .join(
+        '',
+      )}${child.rows.length > shown.length ? `<li><a href="#${h(datasetId)}">${h(`${String(child.rows.length - shown.length)} more in ${child.definition.label}`)}</a></li>` : ''}</ul>`;
+  };
+  const steps = progression.steps
+    .map((step, index) => {
+      const state = states[index]!;
+      const marker =
+        state === 'complete'
+          ? '✓'
+          : state === 'attention'
+            ? '!'
+            : state === 'stopped'
+              ? '✕'
+              : String(index + 1);
+      return `<li data-step-state="${state}"${state === 'current' || state === 'attention' ? ' aria-current="step"' : ''}><span class="composition-progression-marker" aria-hidden="true">${marker}</span><div><span class="composition-progression-state">${PROGRESSION_STATE_LABELS[state]}</span><strong>${h(step.label)}</strong>${step.documents ? documents(step.documents, step.label) : ''}</div></li>`;
+    })
+    .join('');
+  // A stopped record (a cancelled order) has no next step.
+  let next = '';
+  const offered = offerNext && !states.includes('stopped');
+  for (const entry of offered ? progression.next : []) {
+    if ('action' in entry) {
+      const action = surface.composition!.actions.find(
+        (value) => value.actionId === entry.action,
+      );
+      if (action && applicable(action, data)) {
+        next = `<div class="composition-progression-next" data-next-action="${h(action.actionId)}"><div><p class="eyebrow">Next action</p><strong>${h(action.label)}</strong><p>${h(action.description)}</p></div>${actionLink(action, data, view, `Next action: ${action.label}`)}</div>`;
+        break;
+      }
+    } else {
+      const control = operationControl(entry.operation.targetId, 'Next action');
+      if (control) {
+        next = `<div class="composition-progression-next" data-next-operation="${h(entry.operation.targetId)}"><div><p class="eyebrow">Next action</p></div>${control}</div>`;
+        break;
+      }
+    }
+  }
+  return `<section class="panel composition-progression" aria-labelledby="composition-progression-heading" data-composition-progression><header><p class="eyebrow">Record progression</p><h2 id="composition-progression-heading">${h(progression.title)}</h2></header><ol class="composition-progression-steps">${steps}</ol>${next}</section>`;
+}
+
 function selectionUrl(
   data: CompositionData,
   datasetId: string,
@@ -414,32 +701,55 @@ function selectionUrl(
   url.hash = datasetId;
   return url;
 }
-function actionLink(
+/**
+ * Where a navigate action leads: its target page for the resolved record, in
+ * the page's company. A document opened from this one (a row's receipt) comes
+ * back here; the record this one refers to (an invoice's order) is opened as
+ * itself, with no way "back" to a page that is not its own.
+ */
+function navigateHref(
   action: Action,
   data: CompositionData,
   view: RequestRuntimeView,
 ): string {
-  if (action.navigate) {
-    const url = new URL(data.url, 'http://surface-runtime.local');
-    url.hash = '';
-    url.searchParams.set('surface', action.navigate.surface.targetId);
+  const navigate = action.navigate!;
+  const url = new URL(data.url, 'http://surface-runtime.local');
+  url.hash = '';
+  for (const name of [...url.searchParams.keys()])
+    if (
+      navigate.record.source === 'record' &&
+      (name === 'dataset' || name === 'selected' || name.startsWith('select:'))
+    )
+      url.searchParams.delete(name);
+  url.searchParams.set('surface', navigate.surface.targetId);
+  url.searchParams.set(
+    'record',
+    String(resolveValue(navigate.record, data, {}, {}, {})),
+  );
+  if (navigate.record.source === 'record') url.searchParams.delete('returnTo');
+  else url.searchParams.set('returnTo', data.url);
+  const target = registeredSemanticQueryFromPinnedView(
+    view,
+    navigate.query.targetId,
+  );
+  if (target?.legalEntityScope && data.scope)
     url.searchParams.set(
-      'record',
-      String(resolveValue(action.navigate.record, data, {}, {}, {})),
+      target.legalEntityScope.operand.parameterId,
+      data.scope,
     );
-    url.searchParams.set('returnTo', data.url);
-    const target = registeredSemanticQueryFromPinnedView(
-      view,
-      action.navigate.query.targetId,
-    );
-    if (target?.legalEntityScope && data.scope)
-      url.searchParams.set(
-        target.legalEntityScope.operand.parameterId,
-        data.scope,
-      );
-    return `<a class="button" href="${h(url.pathname + url.search)}">${h(action.label)}</a>`;
-  }
-  return `<form method="post" action="${h(data.url)}"><input type="hidden" name="compositionAction" value="${h(action.actionId)}"><button type="submit">${h(action.label)}</button></form>`;
+  return url.pathname + url.search;
+}
+function actionLink(
+  action: Action,
+  data: CompositionData,
+  view: RequestRuntimeView,
+  /** An accessible name that differs from a control of the same label elsewhere on the page. */
+  name?: string,
+): string {
+  const named = name ? ` aria-label="${h(name)}"` : '';
+  if (action.navigate)
+    return `<a class="button" href="${h(navigateHref(action, data, view))}"${named}>${h(action.label)}</a>`;
+  return `<form method="post" action="${h(data.url)}"><input type="hidden" name="compositionAction" value="${h(action.actionId)}"><button type="submit"${named}>${h(action.label)}</button></form>`;
 }
 function renderPresentedChild(
   child: CompositionData['children'][number],
@@ -764,28 +1074,7 @@ export function renderCompositionActions(
   }
   const actions = ordered(surface.composition!.actions)
     .filter((action) => applicable(action, data))
-    .map((action) => {
-      if (action.navigate) {
-        const url = new URL(data.url, 'http://surface-runtime.local');
-        url.searchParams.set('surface', action.navigate.surface.targetId);
-        url.searchParams.set(
-          'record',
-          String(resolveValue(action.navigate.record, data, {}, {}, {})),
-        );
-        url.searchParams.set('returnTo', data.url);
-        const targetQuery = registeredSemanticQueryFromPinnedView(
-          view,
-          action.navigate.query.targetId,
-        );
-        if (targetQuery?.legalEntityScope && data.scope)
-          url.searchParams.set(
-            targetQuery.legalEntityScope.operand.parameterId,
-            data.scope,
-          );
-        return `<a class="button" href="${h(url.pathname + url.search)}">${h(action.label)}</a>`;
-      }
-      return `<form method="post" action="${h(data.url)}"><input type="hidden" name="compositionAction" value="${h(action.actionId)}"><button type="submit">${h(action.label)}</button></form>`;
-    })
+    .map((action) => actionLink(action, data, view))
     .join('');
   const returnTo = new URL(
     data.url,
@@ -955,14 +1244,31 @@ function renderTaskConfirmation(
 ): string {
   return `<section class="composition-task-confirmation" aria-label="Proposed action"><h3>${h(task.confirmation.title)} <strong>${h(snapshot.quantity)} ${h(snapshot.unit)}</strong></h3><p><strong>${h(snapshot.identity)}</strong>${snapshot.secondary ? ` <span class="muted">${h(snapshot.secondary)}</span>` : ''}</p>${snapshot.context ? `<p>${h(snapshot.context)}</p>` : ''}</section>`;
 }
+/** One run of a step: a step once, or a per-row step once for its row. */
+interface TaskRun {
+  readonly step: number;
+  readonly row: string | null;
+}
 interface TaskSession {
   action: Action;
   surfaceId: string;
   data: CompositionData;
   identity: string;
   inputs: Record<string, string>;
+  /**
+   * A multi-row Task's rows, frozen with the context when the Task started,
+   * in the dataset's order, and what was entered on each (per-row inputs).
+   */
+  rowIds: readonly string[];
+  rowInputs: Record<string, Record<string, string>>;
   results: Record<string, SemanticRecordDto>;
   generated: Record<string, string>;
+  /**
+   * The runs to make, in order, with one request key each: fixed when a
+   * multi-row Task is first confirmed (its included rows expand its per-row
+   * steps), at creation otherwise. A retry replays the same runs and keys.
+   */
+  plan: readonly TaskRun[] | null;
   keys: string[];
   stepInputs: Record<string, ImmutableJsonValue>[];
   next: number;
@@ -972,12 +1278,22 @@ interface TaskSession {
     readonly id: string;
     readonly inputs: Readonly<Record<string, string>>;
     readonly presentation: TaskConfirmationSnapshot | null;
+    /** The rows the plan includes, in order, with their canonical values. */
+    readonly rows: readonly string[];
+    readonly rowInputs: Readonly<
+      Record<string, Readonly<Record<string, string>>>
+    >;
   } | null;
   receipt: string | null;
   created: number;
   busy: boolean;
   committedWithheld: boolean;
 }
+/** Every run of the Task has committed and was read back. */
+const finished = (session: TaskSession) =>
+  session.plan !== null && session.next === session.plan.length;
+/** The most rows one multi-row Task confirms at once. */
+const MAXIMUM_TASK_ROWS = 100;
 // Tokens retain the exact plan and retry inputs. They are not business authority:
 // each step still goes through current policy, confirmation and the registered gateway.
 const sessions = new Map<string, TaskSession>();
@@ -1020,7 +1336,7 @@ export async function submitCompositionAction(
           gateways,
           surface.dataSourceQueryId,
           session.data.scope,
-          { recordId: session.data.record.recordId, includeArchived: false },
+          recordArguments(view, surface, session.data.record.recordId),
         );
         if (
           result.outcome !== 'exact' ||
@@ -1070,7 +1386,7 @@ export async function submitCompositionAction(
         // Receipts are gateway-issued recovery information, never cached business DTOs.
         const code = session.committedWithheld
           ? 'COMPOSITION_COMMITTED_WITHHELD'
-          : session.next === session.action.steps.length
+          : finished(session)
             ? 'COMPOSITION_COMPLETE'
             : session.confirmed
               ? 'COMPOSITION_UNCERTAIN'
@@ -1141,7 +1457,7 @@ export async function submitCompositionAction(
       const header = surface.composition!.presentation!.header;
       const phase = session.committedWithheld
         ? 'recovery'
-        : session.next === session.action.steps.length
+        : finished(session)
           ? 'result'
           : session.confirmed
             ? 'recovery'
@@ -1206,7 +1522,7 @@ export async function submitCompositionAction(
       gateways,
       surface.dataSourceQueryId,
       scope,
-      { recordId: url.searchParams.get('record'), includeArchived: false },
+      recordArguments(view, surface, url.searchParams.get('record')),
     );
     if (!action || !result.records[0])
       return taskDocument(() =>
@@ -1231,9 +1547,17 @@ export async function submitCompositionAction(
       data,
       identity: identity(view),
       inputs: {},
+      rowIds: Object.freeze(
+        taskRows(action, data).map((row) => row.record.recordId),
+      ),
+      rowInputs: {},
       results: {},
       generated: {},
-      keys: action.steps.map(() => randomUUID()),
+      // A multi-row Task's runs depend on the rows it confirms.
+      plan: action.rows
+        ? null
+        : Object.freeze(action.steps.map((_, step) => ({ step, row: null }))),
+      keys: action.rows ? [] : action.steps.map(() => randomUUID()),
       stepInputs: [],
       next: 0,
       confirmed: false,
@@ -1249,13 +1573,70 @@ export async function submitCompositionAction(
   const current = session;
   const url = current.data.url;
   const back = `<p><a href="${h(url)}">Back to order</a></p>`;
+  // A multi-row Task: its rows as they were when it started, the inputs asked
+  // once per row and those the operator types (a derived one is read).
+  const taskRowsDeclared = current.action.rows;
+  const rowsDataset = taskRowsDeclared
+    ? current.data.children.find(
+        (child) => child.definition.datasetId === taskRowsDeclared.datasetId,
+      )
+    : undefined;
+  const frozenRow = (rowId: string) =>
+    rowsDataset?.rows.find((row) => row.record.recordId === rowId);
+  const headerInputs = current.action.inputs.filter((input) => !input.perRow);
+  const perRowInputs = ordered(current.action.inputs).filter(
+    (input) => input.perRow,
+  );
+  const typedPerRow = perRowInputs.filter(
+    (input) => input.presentation?.kind !== 'derived',
+  );
+  const rowField = (inputId: string, rowId: string) => `${inputId}@${rowId}`;
+  const rowColumns = () => {
+    const columns = rowsDataset ? ordered(rowsDataset.definition.columns) : [];
+    return {
+      primary:
+        columns.find((column) => column.presentation?.role === 'primary') ??
+        columns[0],
+      secondary: columns.filter(
+        (column) => column.presentation?.role === 'secondary',
+      ),
+      quantities: columns.filter(
+        (column) => column.presentation?.role === 'quantity',
+      ),
+    };
+  };
+  /** Each row's typed per-row values, as submitted (trimmed). */
+  const enteredRows = () =>
+    Object.fromEntries(
+      current.rowIds.map((rowId) => [
+        rowId,
+        Object.fromEntries(
+          typedPerRow.map((input) => [
+            input.inputId,
+            (submission[rowField(input.inputId, rowId)] ?? '').trim(),
+          ]),
+        ),
+      ]),
+    ) as Record<string, Record<string, string>>;
+  // Rows the reviewed plan includes, with what each run will write.
+  const previewRows = () => {
+    const prepared = current.prepared;
+    if (!taskRowsDeclared || !prepared || !rowsDataset) return '';
+    const { primary, quantities } = rowColumns();
+    return `<div class="data-table-wrap composition-task-rows-review"><table><caption>${h(`${rowsDataset.definition.label} (${String(prepared.rows.length)})`)}</caption><thead><tr><th scope="col">${h(primary?.label ?? '')}</th>${quantities.map((column) => `<th scope="col" class="composition-quantity">${h(column.label)}</th>`).join('')}${perRowInputs.map((input) => `<th scope="col">${h(input.label)}</th>`).join('')}</tr></thead><tbody>${prepared.rows
+      .map((rowId) => {
+        const row = frozenRow(rowId);
+        return `<tr data-compact-card="true" data-task-row="${h(rowId)}"><td data-cell-role="primary" data-column-label="${h(primary?.label ?? '')}"><strong>${h(row ? rowName(rowsDataset.definition, row) : '—')}</strong></td>${quantities.map((column) => `<td data-cell-role="quantity" data-column-label="${h(column.label)}">${h(row?.cells[column.columnId] ?? '—')}</td>`).join('')}${perRowInputs.map((input) => `<td data-column-label="${h(input.label)}">${h(prepared.rowInputs[rowId]?.[input.inputId] || '—')}</td>`).join('')}</tr>`;
+      })
+      .join('')}</tbody></table></div>`;
+  };
   const previewInputs = () =>
     current.action.presentation?.task && current.prepared?.presentation
       ? renderTaskConfirmation(
           current.action.presentation.task,
           current.prepared.presentation,
         )
-      : `<dl class="composition-reviewed-inputs">${current.action.inputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(shownInput(input, displayInputs[input.inputId] ?? ''))}</dd></div>`).join('')}</dl>`;
+      : `<dl class="composition-reviewed-inputs">${headerInputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(shownInput(input, displayInputs[input.inputId] ?? ''))}</dd></div>`).join('')}</dl>${previewRows()}`;
   const hidden = `<input type="hidden" name="taskToken" value="${h(token!)}"><input type="hidden" name="compositionAction" value="${h(current.action.actionId)}">`;
   if (current.busy)
     return taskDocument(
@@ -1269,11 +1650,53 @@ export async function submitCompositionAction(
   let error = '';
   // Problems with the entered values, named beside each input.
   const fieldErrors = new Map<string, string>();
+  // Problems with a row's entered values, keyed by the row's own input.
+  const rowErrors = new Map<string, string>();
+  let rowsError = '';
+  if (
+    submission.taskStage === 'fill' &&
+    taskRowsDeclared?.fillLabel &&
+    !current.confirmed
+  ) {
+    // Fill each row from its declared column -- what is still open -- and keep
+    // everything else as entered. A row whose figure is not stated stays as it
+    // was: nothing is filled on a guess.
+    ++current.preparation;
+    current.prepared = null;
+    current.inputs = Object.fromEntries(
+      headerInputs
+        .filter((input) => input.presentation?.kind !== 'derived')
+        .map((input) => [
+          input.inputId,
+          (submission[input.inputId] ?? '').trim(),
+        ]),
+    );
+    current.rowInputs = enteredRows();
+    for (const rowId of current.rowIds)
+      for (const input of typedPerRow) {
+        const fill = input.perRow?.fillFrom;
+        const column = fill
+          ? rowsDataset?.definition.columns.find(
+              (value) => value.columnId === fill.columnId,
+            )
+          : undefined;
+        const row = frozenRow(rowId);
+        if (!column || !row) continue;
+        let value: ImmutableJsonValue = null;
+        try {
+          value = recordValue(row.record, column.field);
+        } catch {
+          /* An unstated figure fills nothing. */
+        }
+        if (typeof value === 'string' && POSITIVE_DECIMAL.test(value))
+          current.rowInputs[rowId]![input.inputId] = value;
+      }
+  }
   if (submission.taskStage === 'prepare' && !current.confirmed) {
     const generation = ++current.preparation;
     current.prepared = null;
     const collected: Record<string, string> = {};
-    for (const input of current.action.inputs) {
+    for (const input of headerInputs) {
       const presentation = input.presentation;
       let value = (submission[input.inputId] ?? '').trim();
       if (presentation?.kind === 'derived') {
@@ -1301,19 +1724,72 @@ export async function submitCompositionAction(
           else value = canonicalDecimal(value) ?? value;
         }
       }
-      if (
-        input.type === 'quantity' &&
-        value &&
-        !/^(?:[1-9]\d*(?:\.\d+)?|0\.\d*[1-9]\d*)$/.test(value)
-      )
+      if (input.type === 'quantity' && value && !POSITIVE_DECIMAL.test(value))
         fieldErrors.set(input.inputId, 'Enter a positive exact quantity.');
       if (input.required && !value && !fieldErrors.has(input.inputId))
         fieldErrors.set(input.inputId, 'Required.');
       collected[input.inputId] = value;
     }
+    // Each row the operator entered something on is included; a row left
+    // empty is skipped. Without inputs to type, every row is included.
+    const includedRows: string[] = [];
+    const preparedRows: Record<string, Record<string, string>> = {};
+    if (taskRowsDeclared) {
+      const entered = enteredRows();
+      for (const rowId of current.rowIds) {
+        const row = frozenRow(rowId);
+        const values = entered[rowId]!;
+        if (
+          !row ||
+          (typedPerRow.length &&
+            typedPerRow.every((input) => !values[input.inputId]))
+        )
+          continue;
+        const canonical: Record<string, string> = {};
+        for (const input of perRowInputs) {
+          const key = rowField(input.inputId, rowId);
+          const presentation = input.presentation;
+          let value = values[input.inputId] ?? '';
+          if (presentation?.kind === 'derived') {
+            // Read on the server from this row; never from the submission.
+            value =
+              (await derivedInputValue(
+                view,
+                gateways,
+                withRow(current.data, taskRowsDeclared.datasetId, row.record),
+                presentation.column,
+              ).catch(() => null)) ?? '';
+            if (!value) rowErrors.set(key, 'Not available for this line.');
+          } else if (value && input.type === 'text') {
+            const bound = boundInputField(view, current.action, input.inputId);
+            if (bound && DECIMAL_KINDS.includes(bound.kind)) {
+              const problem = decimalProblem(value, bound);
+              if (problem) rowErrors.set(key, problem);
+              else value = canonicalDecimal(value) ?? value;
+            }
+          }
+          if (
+            input.type === 'quantity' &&
+            value &&
+            !POSITIVE_DECIMAL.test(value)
+          )
+            rowErrors.set(key, 'Enter a positive exact quantity.');
+          if (input.required && !value && !rowErrors.has(key))
+            rowErrors.set(key, 'Required.');
+          canonical[input.inputId] = value;
+        }
+        includedRows.push(rowId);
+        preparedRows[rowId] = canonical;
+      }
+      current.rowInputs = entered;
+      if (!includedRows.length) rowsError = 'Enter at least one line.';
+      else if (includedRows.length > MAXIMUM_TASK_ROWS)
+        rowsError = `Enter at most ${String(MAXIMUM_TASK_ROWS)} lines at a time.`;
+    }
     const inputs = Object.freeze(collected);
     const referenceLabels: Record<string, string> = { ...inputs };
-    if (fieldErrors.size) error = 'Complete the required inputs.';
+    if (fieldErrors.size || rowErrors.size || rowsError)
+      error = 'Complete the required inputs.';
     try {
       for (const input of current.action.inputs.filter(
         (input) => input.type === 'reference',
@@ -1370,6 +1846,15 @@ export async function submitCompositionAction(
         id: randomUUID(),
         inputs,
         presentation,
+        rows: Object.freeze(includedRows),
+        rowInputs: Object.freeze(
+          Object.fromEntries(
+            Object.entries(preparedRows).map(([rowId, values]) => [
+              rowId,
+              Object.freeze(values),
+            ]),
+          ),
+        ),
       });
       current.prepared = prepared;
       return taskDocument(
@@ -1392,14 +1877,33 @@ export async function submitCompositionAction(
     (submission.taskStage === 'retry' && current.confirmed)
   ) {
     current.inputs = current.prepared!.inputs;
+    if (!current.plan) {
+      // Fixed once, at the first confirmation: each per-row step runs once for
+      // every included row, in order, and every run keeps its own request key,
+      // so a retry replays exactly the runs that were reviewed.
+      const prepared = current.prepared!;
+      current.rowInputs = Object.fromEntries(
+        prepared.rows.map((rowId) => [rowId, { ...prepared.rowInputs[rowId] }]),
+      );
+      const runs: TaskRun[] = current.action.steps.flatMap(
+        (step, index): TaskRun[] =>
+          step.each
+            ? prepared.rows.map((row) => ({ step: index, row }))
+            : [{ step: index, row: null }],
+      );
+      current.plan = Object.freeze(runs);
+      current.keys = runs.map(() => randomUUID());
+    }
     current.confirmed = true;
     current.busy = true;
     try {
       const catalog = parsePinnedOperationCatalog(
         view.projections.operation.payload,
       );
-      for (; current.next < current.action.steps.length; current.next++) {
-        const step = current.action.steps[current.next]!;
+      const plan = current.plan!;
+      for (; current.next < plan.length; current.next++) {
+        const run = plan[current.next]!;
+        const step = current.action.steps[run.step]!;
         const operation = catalog.find(
           (candidate) => candidate.operationId === step.operation.targetId,
         );
@@ -1407,6 +1911,17 @@ export async function submitCompositionAction(
           throw new Error('The declared operation is unavailable.');
         let input = current.stepInputs[current.next];
         if (!input) {
+          // A per-row run reads its row as the selection and its row's values.
+          const row = run.row === null ? undefined : frozenRow(run.row);
+          if (run.row !== null && (!row || !taskRowsDeclared))
+            throw new Error('A task row is unavailable.');
+          const context = row
+            ? withRow(current.data, taskRowsDeclared!.datasetId, row.record)
+            : current.data;
+          const values =
+            run.row === null
+              ? current.inputs
+              : { ...current.inputs, ...current.rowInputs[run.row] };
           const object: Record<string, ImmutableJsonValue> = {};
           for (const binding of step.bindings) {
             let target = object;
@@ -1421,28 +1936,35 @@ export async function submitCompositionAction(
               throw new Error('Invalid input path');
             const value = resolveValue(
               binding.value,
-              current.data,
-              current.inputs,
+              context,
+              values,
               current.results,
               current.generated,
-              `${step.stepId}:${binding.path.join('.')}`,
+              `${step.stepId}${run.row === null ? '' : `@${run.row}`}:${binding.path.join('.')}`,
             );
             // An integer field's value is its canonical decimal string; a
             // bound record revision arrives as a number and is written as one.
-            const integerField =
+            const boundKind =
               binding.path.length === 2 &&
-              (binding.path[0] === 'values' || binding.path[0] === 'patch') &&
-              operation.inputContract?.fields.some(
-                (field) =>
-                  field.fieldId === key &&
-                  field.fieldKind === 'integerFieldType',
-              );
+              (binding.path[0] === 'values' || binding.path[0] === 'patch')
+                ? operation.inputContract?.fields.find(
+                    (field) => field.fieldId === key,
+                  )?.fieldKind
+                : undefined;
+            // A decimal field takes its canonical form, as a typed one does:
+            // a stored decimal read back from a record -- a receipt line's
+            // cost -- arrives at its column's scale ("2.500000000000000000"),
+            // which the provider refuses as input.
             target[key] =
-              integerField &&
+              boundKind === 'integerFieldType' &&
               typeof value === 'number' &&
               Number.isSafeInteger(value)
                 ? String(value)
-                : value;
+                : boundKind &&
+                    DECIMAL_KINDS.includes(boundKind) &&
+                    typeof value === 'string'
+                  ? (canonicalDecimal(value) ?? value)
+                  : value;
           }
           input = object;
           current.stepInputs[current.next] = input;
@@ -1476,7 +1998,8 @@ export async function submitCompositionAction(
               `${compositionMessage('COMPOSITION_COMMITTED_WITHHELD', 'status')}<pre>${h(JSON.stringify(result.trust))}</pre>${back}`,
           );
         }
-        current.results[step.stepId] = result.readBack;
+        // A per-row run's read-back is its row's alone; no later step reads it.
+        if (run.row === null) current.results[step.stepId] = result.readBack;
       }
       return taskDocument(
         () =>
@@ -1506,12 +2029,15 @@ export async function submitCompositionAction(
     // Focus opens on the first input with a problem (autofocus without the
     // script), so the operator lands where the correction is needed.
     let focusTaken = false;
-    const controls = ordered(current.action.inputs).map((input) => {
+    const focus = (problem: string | undefined) => {
+      const takes = !!problem && !focusTaken;
+      if (takes) focusTaken = true;
+      return takes;
+    };
+    const controls = ordered(headerInputs).map((input) => {
       const presentation = input.presentation;
       const problem = fieldErrors.get(input.inputId);
-      const takesFocus =
-        !!problem && presentation?.kind !== 'derived' && !focusTaken;
-      if (takesFocus) focusTaken = true;
+      const takesFocus = presentation?.kind !== 'derived' && focus(problem);
       const invalid = problem
         ? ` aria-invalid="true" aria-describedby="${h(input.inputId)}-error"${takesFocus ? ' data-task-initial-focus autofocus' : ''}`
         : '';
@@ -1551,7 +2077,55 @@ export async function submitCompositionAction(
       // its accessible name, so it sits after the label.
       return `<div class="composition-input"><label class="field">${h(input.label)}${control}</label>${problem ? `<small class="field-error" id="${h(input.inputId)}-error">${h(problem)}</small>` : ''}</div>`;
     });
-    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${controls.join('')}<p class="composition-task-consequence">${h(current.action.description)}</p><footer class="composition-task-footer"><button name="taskStage" value="prepare">${h(current.action.presentation?.task?.confirmation.reviewLabel ?? `Review ${current.action.label}`)}</button></footer></form>${back}`;
+    // A multi-row Task's rows: one line each, its figures for context and an
+    // input for each value asked per row, named with the line it belongs to.
+    // Rows start empty; the fill control fills them on the server, so it works
+    // without script, and a hidden default keeps Enter reviewing the Task.
+    let rows = '';
+    if (taskRowsDeclared && rowsDataset) {
+      const fresh = renderData?.children.find(
+        (child) => child.definition.datasetId === taskRowsDeclared.datasetId,
+      );
+      const { primary, secondary, quantities } = rowColumns();
+      const errorId = 'composition-task-rows-error';
+      rows = `<fieldset class="composition-task-rows" data-task-rows="${h(taskRowsDeclared.datasetId)}"${rowsError ? ` aria-describedby="${errorId}"` : ''}><legend>${h(rowsDataset.definition.label)}</legend>${taskRowsDeclared.fillLabel ? `<button type="submit" class="secondary-action" name="taskStage" value="fill" formnovalidate>${h(taskRowsDeclared.fillLabel)}</button>` : ''}${rowsError ? `<small class="field-error" id="${errorId}">${h(rowsError)}</small>` : ''}<div class="data-table-wrap"><table><thead><tr><th scope="col">${h(primary?.label ?? '')}</th>${quantities.map((column) => `<th scope="col" class="composition-quantity">${h(column.label)}</th>`).join('')}${perRowInputs.map((input) => `<th scope="col">${h(input.label)}</th>`).join('')}</tr></thead><tbody>${current.rowIds
+        .map((rowId) => {
+          const cells =
+            (
+              fresh?.rows.find((row) => row.record.recordId === rowId) ??
+              frozenRow(rowId)
+            )?.cells ?? {};
+          const name = primary ? (cells[primary.columnId] ?? '—') : '—';
+          const context = secondary[0]
+            ? `, ${secondary[0].label} ${cells[secondary[0].columnId] ?? '—'}`
+            : '';
+          return `<tr data-compact-card="true" data-task-row="${h(rowId)}"><td data-cell-role="primary" data-column-label="${h(primary?.label ?? '')}"><strong>${h(name)}</strong>${secondary.length ? `<div class="composition-cell-secondary">${secondary.map((column) => `<span><span class="composition-cell-label">${h(column.label)}</span> ${h(cells[column.columnId] ?? '—')}</span>`).join('')}</div>` : ''}</td>${quantities.map((column) => `<td data-cell-role="quantity" data-column-label="${h(column.label)}">${h(cells[column.columnId] ?? '—')}</td>`).join('')}${perRowInputs
+            .map((input) => {
+              const key = rowField(input.inputId, rowId);
+              const problem = rowErrors.get(key);
+              const described = `${key}-error`;
+              const message = problem
+                ? `<small class="field-error" id="${h(described)}">${h(problem)}</small>`
+                : '';
+              if (input.presentation?.kind === 'derived')
+                return `<td data-column-label="${h(input.label)}"><output class="derived-value" data-derived-input>${h(cells[input.presentation.column.columnId] ?? '—')}</output>${message}</td>`;
+              const bound =
+                input.type === 'text'
+                  ? boundInputField(view, current.action, input.inputId)
+                  : null;
+              const numeric =
+                input.type === 'quantity' ||
+                (bound !== null && DECIMAL_KINDS.includes(bound.kind));
+              return `<td data-column-label="${h(input.label)}"><input name="${h(key)}" value="${h(current.rowInputs[rowId]?.[input.inputId] ?? '')}" aria-label="${h(`${input.label}, ${name}${context}`)}"${numeric ? ' inputmode="decimal" autocomplete="off"' : ''}${problem ? ` aria-invalid="true" aria-describedby="${h(described)}"${focus(problem) ? ' data-task-initial-focus autofocus' : ''}` : ''}>${message}</td>`;
+            })
+            .join('')}</tr>`;
+        })
+        .join('')}</tbody></table></div></fieldset>`;
+    }
+    const reviewLabel =
+      current.action.presentation?.task?.confirmation.reviewLabel ??
+      `Review ${current.action.label}`;
+    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${taskRowsDeclared?.fillLabel ? '<button type="submit" class="sr-only" name="taskStage" value="prepare" tabindex="-1" aria-hidden="true" data-task-default></button>' : ''}${controls.join('')}${rows}<p class="composition-task-consequence">${h(current.action.description)}</p><footer class="composition-task-footer"><button name="taskStage" value="prepare">${h(reviewLabel)}</button></footer></form>${back}`;
   });
 }
 

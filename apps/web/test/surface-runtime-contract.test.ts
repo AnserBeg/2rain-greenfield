@@ -11,7 +11,11 @@ import {
   SURFACE_CLIENT_SCRIPT,
 } from '../src/surface-client.js';
 
-import { STATUS_ROLES, SurfaceListSchema } from '@north-star/canonical-model';
+import {
+  STATUS_ROLES,
+  SurfaceCompositionSchema,
+  SurfaceListSchema,
+} from '@north-star/canonical-model';
 import {
   RequestRuntimeViewLoadError,
   type RequestRuntimeViewLoadErrorCode,
@@ -59,17 +63,28 @@ import {
 } from '../src/component-registry.js';
 import { readDemoCompiledFixture } from '../src/demo-runtime.js';
 import {
+  declaredCellText,
   declaredListArguments,
   declaredListCsv,
+  declaredRowAction,
   overdueDays,
   readDeclaredListState,
   startOfTodayUtc,
+  viewNeedsProgress,
+  withheldProgressQuery,
 } from '../src/list-declaration.js';
 import { renderSurfaceRuntime } from '../src/surface-runtime.js';
 import {
   INTENT_RENDERED_ARITY,
   readCompiledSurfaceManifest,
+  type CompiledSurfaceDefinition,
 } from '../src/surface-contract.js';
+import {
+  compositionProgressionStates,
+  renderCompositionAlerts,
+  renderCompositionProgression,
+  type CompositionData,
+} from '../src/surface-composition.js';
 import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
 
 const APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT =
@@ -1145,6 +1160,583 @@ test('a declared List sends before-today as the injected day, keeps each tab ope
     csv,
     '\uFEFFNumber,Expected,ordered,received,open\r\nPO-1,2026-09-25T12:00:00.000Z,15,4,10.5\r\n',
   );
+});
+
+/**
+ * ORDER-PARITY: a row's action is the first declared one whose condition holds
+ * on the row's own server-projected values; supplementary progress (`omit`)
+ * is re-requested without, only for views that do not keep open rows. The
+ * shared List runtime knows no surface, so a synthetic declaration stands in
+ * for the order Lists; their markup is rendered by the integration witness.
+ */
+test('a declared List links a row to its first applicable action and reads without withheld figures', () => {
+  const ns = 'northstar.fixture';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const released = id('state', 'order_released');
+  const state = id('field', 'order_state');
+  const output = (local: string) => id('list_output', `orders_${local}`);
+  const ref = (targetId: string) => ({
+    kind: 'queryReference',
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const list = SurfaceListSchema.parse({
+    kind: 'surfaceList',
+    schemaVersion: 'v6',
+    pageSize: 2,
+    columns: [
+      {
+        columnId: id('list_column', 'orders_number'),
+        label: 'Number',
+        orderKey: 10,
+        field: id('field', 'order_number'),
+        role: 'title',
+        priority: 0,
+        sortable: true,
+      },
+      ...(['ordered', 'shipped', 'open'] as const).map((local, index) => ({
+        columnId: id('list_column', `orders_${local}`),
+        label: local,
+        orderKey: 20 + index * 10,
+        field: output(local),
+        role: 'value',
+        priority: 1 + index,
+        sortable: false,
+      })),
+      {
+        columnId: id('list_column', 'orders_total'),
+        label: 'Total',
+        orderKey: 50,
+        field: id('metric', 'order_total'),
+        role: 'value',
+        priority: 4,
+        sortable: false,
+        format: 'money',
+      },
+    ],
+    defaultSort: [
+      { columnId: id('list_column', 'orders_number'), direction: 'ascending' },
+    ],
+    views: [
+      {
+        viewId: id('list_view', 'orders_all'),
+        label: 'All',
+        orderKey: 10,
+        filters: [],
+      },
+      {
+        viewId: id('list_view', 'orders_to_ship'),
+        label: 'To ship',
+        orderKey: 20,
+        filters: [{ field: state, value: released }],
+        open: true,
+      },
+    ],
+    filters: [],
+    export: { format: 'csv' },
+    progress: {
+      lines: {
+        query: ref(id('query', 'order_line_list')),
+        relation: id('relation', 'order_line_order'),
+        quantity: id('field', 'order_line_quantity'),
+      },
+      done: {
+        query: ref(id('query', 'order_shipped_list')),
+        relation: id('relation', 'order_shipped_line'),
+        quantity: id('field', 'order_shipped_quantity'),
+      },
+      openIn: { field: state, values: [released] },
+      outputs: {
+        ordered: output('ordered'),
+        done: output('shipped'),
+        open: output('open'),
+      },
+      whenDenied: 'omit',
+    },
+    // Declared out of order: the order key, not the position, decides.
+    rowActions: [
+      {
+        actionId: id('list_row_action', 'orders_view'),
+        label: 'View',
+        orderKey: 20,
+      },
+      {
+        actionId: id('list_row_action', 'orders_fulfill'),
+        label: 'Fulfill',
+        orderKey: 10,
+        when: { filters: [{ field: state, value: released }], open: true },
+        section: id('dataset', 'fulfillment_lines'),
+      },
+    ],
+  });
+  const row = (values: Record<string, string | null>) => ({
+    archived: false,
+    entityId: id('entity', 'order'),
+    recordId: '00000000-0000-4000-8000-000000000002',
+    revision: 1,
+    values: {
+      [state]: released,
+      [id('field', 'order_number')]: 'SO-1',
+      [output('ordered')]: '15',
+      [output('shipped')]: '4',
+      [output('open')]: '11',
+      ...values,
+    },
+  });
+  const chosen = (values: Record<string, string | null>) =>
+    declaredRowAction(list, row(values))?.label;
+  assert.equal(chosen({}), 'Fulfill');
+  // Nothing open, another state, or figures the row does not state: View.
+  for (const values of [
+    { [output('open')]: '0' },
+    { [output('open')]: '0.000' },
+    { [state]: id('state', 'order_draft') },
+    { [output('open')]: null },
+  ])
+    assert.equal(chosen(values), 'View', JSON.stringify(values));
+  const withheld = row({});
+  delete (withheld.values as Record<string, unknown>)[output('open')];
+  assert.equal(declaredRowAction(list, withheld)?.label, 'View');
+  // Only the open view needs the figures.
+  assert.equal(
+    viewNeedsProgress(list, id('list_view', 'orders_to_ship')),
+    true,
+  );
+  assert.equal(viewNeedsProgress(list, id('list_view', 'orders_all')), false);
+  assert.equal(viewNeedsProgress(list, null), false);
+
+  // Only a policy refusal of one of the two summed queries is a withheld
+  // figure, and only on a List that declares its figures supplementary.
+  const deniedFor = (queryId: string) =>
+    new queryGateway.SemanticQueryPolicyDeniedError(queryId, {
+      release: { contentHash: 'fixture', releaseId: 'fixture' },
+    } as unknown as IssuedRequestRuntimeView);
+  assert.equal(
+    withheldProgressQuery(list, deniedFor(id('query', 'order_shipped_list'))),
+    id('query', 'order_shipped_list'),
+  );
+  assert.equal(
+    withheldProgressQuery(list, deniedFor(id('query', 'order_line_list'))),
+    id('query', 'order_line_list'),
+  );
+  for (const refusal of [
+    deniedFor(id('query', 'orders')),
+    deniedFor(id('query', 'party_list')),
+    new Error(`current policy denied query ${id('query', 'order_line_list')}`),
+  ])
+    assert.equal(withheldProgressQuery(list, refusal), null);
+  const purpose = SurfaceListSchema.parse({
+    ...list,
+    progress: { ...list.progress, whenDenied: undefined },
+  });
+  assert.equal(
+    withheldProgressQuery(
+      purpose,
+      deniedFor(id('query', 'order_shipped_list')),
+    ),
+    null,
+  );
+
+  // Without its figures the request carries no progress; an open view is
+  // never read that way, since it would count every row.
+  const now = new Date('2026-09-29T12:00:00.000Z');
+  const all = readDeclaredListState(list, new URL('http://list.local/'));
+  const sent = declaredListArguments(list, all, {
+    mode: 'page',
+    now,
+    queryId: id('query', 'orders'),
+    scopeArguments: {},
+    withoutProgress: true,
+  }) as unknown as { list: Record<string, unknown> };
+  assert.equal('progress' in sent.list, false);
+  assert.equal(
+    'progress' in
+      (
+        declaredListArguments(list, all, {
+          mode: 'count',
+          now,
+          queryId: id('query', 'orders'),
+          scopeArguments: {},
+        }) as unknown as { list: Record<string, unknown> }
+      ).list,
+    true,
+  );
+  assert.throws(() =>
+    declaredListArguments(list, all, {
+      mode: 'count',
+      now,
+      queryId: id('query', 'orders'),
+      scopeArguments: {},
+      viewId: id('list_view', 'orders_to_ship'),
+      withoutProgress: true,
+    }),
+  );
+  // Withheld figures and an unstated total are no value: the page reads "\u2014"
+  // for them and the file leaves their cells empty.
+  const unstated = row({ [output('ordered')]: null });
+  delete (unstated.values as Record<string, unknown>)[output('shipped')];
+  delete (unstated.values as Record<string, unknown>)[output('open')];
+  for (const column of list.columns.slice(1))
+    assert.equal(declaredCellText(column, unstated), null, column.label);
+  assert.equal(
+    declaredCellText(
+      list.columns[4]!,
+      row({ [id('metric', 'order_total')]: '1234.5' }),
+    ),
+    '1,234.50',
+  );
+  assert.equal(
+    declaredListCsv(list, [unstated], (_record, _fieldId, value) =>
+      String(value),
+    ),
+    '\uFEFFNumber,ordered,shipped,open,Total\r\nSO-1,,,,\r\n',
+  );
+});
+
+test('a record names its short rows and its progress, and offers only the first next step, as a plain form under its own name', () => {
+  const ns = 'northstar.fixture';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const state = id('field', 'order_state');
+  const inState = (value: string, operator = 'equals') => ({
+    value: { source: 'record', field: state },
+    operator,
+    compare: id('state', `order_${value}`),
+  });
+  const column = (
+    local: string,
+    label: string,
+    orderKey: number,
+    field: string,
+    role?: string,
+  ) => ({
+    columnId: id('column', local),
+    label,
+    orderKey,
+    field,
+    ...(role ? { presentation: { role, priority: orderKey } } : {}),
+  });
+  const composition = SurfaceCompositionSchema.parse({
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: id('column', 'number'),
+        subtitle: [],
+        facts: [],
+        status: id('column', 'state'),
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+      alerts: [
+        {
+          label: 'Fulfillment exception',
+          description: 'Open quantity free stock does not cover.',
+          datasetId: id('dataset', 'lines'),
+          columnId: id('column', 'short'),
+        },
+      ],
+      progression: {
+        title: 'Order to cash',
+        steps: [
+          {
+            label: 'Order',
+            current: [inState('draft')],
+            complete: [inState('draft', 'notEquals')],
+            stopped: [inState('cancelled')],
+          },
+          {
+            label: 'Fulfillment',
+            current: [inState('released')],
+            complete: [inState('closed')],
+            attention: [
+              {
+                value: { source: 'record', field: id('metric', 'to_invoice') },
+                operator: 'positive',
+                compare: null,
+              },
+            ],
+            stopped: [inState('cancelled')],
+            documents: id('dataset', 'shipments'),
+          },
+        ],
+        next: [
+          { operation: ref('operationReference', id('operation', 'release')) },
+          { action: id('action', 'close') },
+        ],
+      },
+    },
+    fields: [
+      column('number', 'Order', 10, id('field', 'order_number')),
+      column('state', 'State', 20, state),
+    ],
+    children: ['lines', 'shipments'].map((local, index) => ({
+      datasetId: id('dataset', local),
+      label: local === 'lines' ? 'Lines' : 'Shipments',
+      orderKey: 10 + index * 10,
+      query: ref('queryReference', id('query', `${local}_list`)),
+      presentation: { selection: 'none' },
+      parent: {
+        relationId: id('relation', `${local}_order`),
+        value: { source: 'record', field: 'recordId' },
+        ownership: 'reference',
+      },
+      columns:
+        local === 'lines'
+          ? [
+              column('item', 'Item', 10, id('field', 'line_item'), 'primary'),
+              column('short', 'Short', 20, id('metric', 'short'), 'quantity'),
+            ]
+          : [column('shipment', 'Shipment', 10, id('field', 'number'))],
+    })),
+    actions: [
+      {
+        actionId: id('action', 'close'),
+        label: 'Close order',
+        description: 'Closes the order.',
+        orderKey: 10,
+        conditions: [inState('released')],
+        inputs: [],
+        steps: [
+          {
+            stepId: id('step', 'close'),
+            operation: ref('operationReference', id('operation', 'close')),
+            bindings: [
+              {
+                path: ['recordId'],
+                value: { source: 'record', field: 'recordId' },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const surface = {
+    surfaceId: id('surface', 'order_detail'),
+    label: 'Order',
+    composition,
+    dataSourceQueryId: id('query', 'order_get'),
+  } as unknown as CompiledSurfaceDefinition;
+  const dto = (
+    recordId: string,
+    values: Record<string, string | null>,
+  ): CompositionData['record'] => ({
+    archived: false,
+    entityId: id('entity', 'order'),
+    recordId,
+    revision: 1,
+    values,
+  });
+  const data = (
+    order: Record<string, string | null>,
+    shortages: readonly (string | null)[],
+    shipments = 0,
+    status: 'ready' | 'failed' = 'ready',
+  ): CompositionData => {
+    const record = dto('00000000-0000-4000-8000-000000000001', {
+      [id('field', 'order_number')]: 'SO-1',
+      [id('metric', 'to_invoice')]: null,
+      ...order,
+    });
+    return {
+      record,
+      fields: { record, cells: {} },
+      fieldsFailed: false,
+      children: [
+        {
+          definition: composition.children[0]!,
+          status,
+          rows: shortages.map((short, index) => {
+            const line = dto(`00000000-0000-4000-8000-00000000010${index}`, {
+              [id('metric', 'short')]: short,
+            });
+            return {
+              record: line,
+              cells: {
+                [id('column', 'item')]: `Item ${String(index + 1)}`,
+                [id('column', 'short')]: short ?? '—',
+              },
+            };
+          }),
+        },
+        {
+          definition: composition.children[1]!,
+          status: shipments ? 'ready' : 'empty',
+          rows: Array.from({ length: shipments }, (_, index) => ({
+            record: dto(`00000000-0000-4000-8000-00000000020${index}`, {}),
+            cells: { [id('column', 'shipment')]: `SHP-${String(index + 1)}` },
+          })),
+        },
+      ],
+      selections: {},
+      selected: null,
+      selectedDatasetId: null,
+      url: '/?surface=order&record=00000000-0000-4000-8000-000000000001',
+      scope: null,
+    };
+  };
+  const draft = { [state]: id('state', 'order_draft') };
+  const released = { [state]: id('state', 'order_released') };
+
+  // Only rows stating a positive figure are named, by their primary cell; a
+  // zero, an unstated figure or a failed dataset states nothing.
+  const banner = renderCompositionAlerts(
+    surface,
+    data(draft, ['2', '0', null, '0.5']),
+  );
+  assert.deepEqual(
+    [
+      ...banner.matchAll(
+        /<li data-record-id="[^"]+"><strong>([^<]+)<\/strong> <span>([^<]+)<\/span>/gu,
+      ),
+    ].map((match) => [match[1], match[2]]),
+    [
+      ['Item 1', 'Short 2'],
+      ['Item 4', 'Short 0.5'],
+    ],
+  );
+  assert.match(
+    banner,
+    /<h2 id="composition-alert-0">Fulfillment exception<\/h2>/u,
+  );
+  // Never a live region: an outcome's status stays the page's only one.
+  assert.doesNotMatch(banner, /role=|aria-live/u);
+  assert.equal(renderCompositionAlerts(surface, data(draft, ['0', null])), '');
+  assert.equal(
+    renderCompositionAlerts(surface, data(draft, ['3'], 0, 'failed')),
+    '',
+  );
+
+  // States: stopped, then attention, then complete, then current.
+  assert.deepEqual(compositionProgressionStates(surface, data(draft, [])), [
+    'current',
+    'upcoming',
+  ]);
+  assert.deepEqual(compositionProgressionStates(surface, data(released, [])), [
+    'complete',
+    'current',
+  ]);
+  assert.deepEqual(
+    compositionProgressionStates(
+      surface,
+      data({ ...released, [id('metric', 'to_invoice')]: '1' }, []),
+    ),
+    ['complete', 'attention'],
+  );
+  assert.deepEqual(
+    compositionProgressionStates(
+      surface,
+      data({ [state]: id('state', 'order_cancelled') }, []),
+    ),
+    ['stopped', 'stopped'],
+  );
+
+  // The first next entry offered now: the operation the page offers, else
+  // the record task whose conditions hold -- a plain form, no script needed,
+  // named apart from the command bar's own control.
+  const offered: string[] = [];
+  const operationControl =
+    (available: boolean) => (operationId: string, prefix: string) => {
+      offered.push(operationId);
+      return available
+        ? `<form method="post" data-offered="${operationId}"><button type="submit" aria-label="${prefix}: Release">Release</button></form>`
+        : null;
+    };
+  const view = {} as never;
+  const first = renderCompositionProgression(
+    surface,
+    data(draft, [], 8),
+    view,
+    operationControl(true),
+  );
+  assert.match(
+    first,
+    new RegExp(`data-next-operation="${id('operation', 'release')}"`, 'u'),
+  );
+  assert.match(first, /aria-label="Next action: Release"/u);
+  assert.deepEqual(offered, [id('operation', 'release')]);
+  // Current and attention steps carry aria-current; markers are not read.
+  assert.match(
+    first,
+    /<li data-step-state="current" aria-current="step"><span class="composition-progression-marker" aria-hidden="true">1<\/span>/u,
+  );
+  // Documents: the first six by their primary cell, then how many more.
+  assert.equal((first.match(/<li><span>SHP-/gu) ?? []).length, 6);
+  assert.match(
+    first,
+    new RegExp(
+      `<a href="#${id('dataset', 'shipments')}">2 more in Shipments</a>`,
+      'u',
+    ),
+  );
+  const next = renderCompositionProgression(
+    surface,
+    data(released, []),
+    view,
+    operationControl(false),
+  );
+  assert.match(
+    next,
+    new RegExp(
+      `<form method="post" action="[^"]+"><input type="hidden" name="compositionAction" value="${id('action', 'close')}"><button type="submit" aria-label="Next action: Close order">Close order</button></form>`,
+      'u',
+    ),
+  );
+  // Nothing next while a Task is open, once stopped, or with nothing offered.
+  for (const [order, offerNext] of [
+    [released, false],
+    [{ [state]: id('state', 'order_cancelled') }, true],
+    [{ [state]: id('state', 'order_closed') }, true],
+  ] as const)
+    assert.doesNotMatch(
+      renderCompositionProgression(
+        surface,
+        data(order, []),
+        view,
+        operationControl(false),
+        offerNext,
+      ),
+      /data-next-(?:action|operation)=/u,
+    );
+  // A record whose own fields failed states no progress at all.
+  assert.equal(
+    renderCompositionProgression(
+      surface,
+      { ...data(draft, []), fieldsFailed: true },
+      view,
+      operationControl(true),
+    ),
+    '',
+  );
+});
+
+test('the task rows, alert and progression lay out at phone width without a sideways scroll', () => {
+  const source = readFileSync(`${webRoot}/src/surface-runtime.ts`, 'utf8');
+  // Steps wrap into as many columns as fit; the banner and every panel span
+  // the page; a task row becomes a labelled card through the shared rule.
+  for (const rule of [
+    '.composition-progression-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))',
+    '.composition-alert{grid-column:1/-1;',
+    '.composition-progression{grid-column:1/-1;',
+    '.composition-progression-next>div{flex:1 1 16rem;min-width:0}',
+    '.data-table-wrap tr[data-compact-card=true] td{display:grid;',
+  ])
+    assert.ok(source.includes(rule), rule);
+  const composition = readFileSync(
+    `${webRoot}/src/surface-composition.ts`,
+    'utf8',
+  );
+  // Each task row is a compact card whose cells carry their labels.
+  assert.match(
+    composition,
+    /<tr data-compact-card="true" data-task-row="\$\{h\(rowId\)\}">/u,
+  );
+  assert.match(composition, /data-column-label="\$\{h\(input\.label\)\}"/u);
 });
 
 test('unknown surface and malformed projection fail as rendered diagnostics', async () => {

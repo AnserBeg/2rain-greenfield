@@ -223,6 +223,20 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     operator: 'equals',
     compare: id('state', 'sales_order_released'),
   };
+  const lifecycle = (
+    operator: 'equals' | 'notEquals',
+    state: 'draft' | 'released' | 'closed' | 'cancelled',
+  ) => ({
+    value: record(
+      `${namespace}:derived_state_field.machine.sales_order_lifecycle`,
+    ),
+    operator,
+    compare: id('state', `sales_order_${state}`),
+  });
+  const inState = (state: Parameters<typeof lifecycle>[1]) =>
+    lifecycle('equals', state);
+  const notInState = (state: Parameters<typeof lifecycle>[1]) =>
+    lifecycle('notEquals', state);
   const active = {
     value: selected(id('metric', 'remaining')),
     operator: 'positive',
@@ -280,6 +294,65 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           columns: SHIP_TO_LINES.map(([name]) => id('column', name)),
         },
       ],
+      // PaneFlow's fulfillment exception: the lines this order is short.
+      alerts: [
+        {
+          label: 'Fulfillment exception',
+          description:
+            'Open quantity that neither this order’s reservations nor free stock now cover. Incoming purchase orders are not counted.',
+          datasetId: lines,
+          columnId: id('column', 'short'),
+        },
+      ],
+      // Order to cash: where this order stands and what to do next.
+      progression: {
+        title: 'Order to cash',
+        steps: [
+          {
+            label: 'Sales order',
+            current: [inState('draft')],
+            complete: [notInState('draft'), notInState('cancelled')],
+            stopped: [inState('cancelled')],
+          },
+          {
+            label: 'Fulfillment',
+            current: [inState('released')],
+            complete: [inState('closed')],
+            stopped: [inState('cancelled')],
+            documents: shipments,
+          },
+          {
+            label: 'Invoicing',
+            current: [inState('released')],
+            complete: [inState('closed')],
+            // Shipped quantity is waiting to be invoiced.
+            attention: [
+              {
+                value: record(id('metric', 'order_to_invoice')),
+                operator: 'positive',
+                compare: null,
+              },
+            ],
+            stopped: [inState('cancelled')],
+            documents: invoices,
+          },
+          {
+            label: 'Closed',
+            current: [],
+            complete: [inState('closed')],
+            stopped: [inState('cancelled')],
+          },
+        ],
+        next: [
+          {
+            operation: ref(
+              'operationReference',
+              id('operation', 'sales_order_release'),
+            ),
+          },
+          { action: id('action', 'invoice_shipped') },
+        ],
+      },
     },
     fields: [
       column('order_number', 'Sales order', 10, field('sales_order_number')),
@@ -454,7 +527,9 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         presentation: { selection: 'explicit', selectedActions: 'row' },
         label: 'Fulfillment',
         orderKey: 10,
-        query: q('sales_order_line_list'),
+        // The line figures and what each line is short (ORDER-PARITY), read
+        // only where this page shows them.
+        query: q('fulfillment_order_lines'),
         sort: [
           {
             fieldId: field('sales_order_line_line_number'),
@@ -495,10 +570,20 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             column('coverage', 'Reserved', 50, id('metric', 'coverage')),
             column('shipped', 'Shipped', 60, id('metric', 'shipped')),
             column('open', 'Open to ship', 70, id('metric', 'open_to_ship')),
+            // Advisory (owner ruling of 2026-09-30): open quantity neither
+            // this line's reservations nor free stock now cover.
+            column('short', 'Short', 80, id('metric', 'short')),
+            column(
+              'available_now',
+              'Free stock now',
+              90,
+              id('metric', 'available_now'),
+            ),
           ],
           'item',
           ['sku', 'unit', 'unit_price'],
-          ['ordered', 'coverage', 'shipped', 'open'],
+          ['ordered', 'coverage', 'shipped', 'open', 'short'],
+          ['available_now'],
         ),
       },
       {
@@ -970,6 +1055,13 @@ export function salesWorkspaceQueries(
           clone('purchase_order_get', 'commercial_purchase_order_get'),
           { lines: 'commercial_purchase_lines' },
         ),
+        // The Purchase orders List reads its orders with their totals
+        // (ORDER-PARITY): the same figures, stated for each paged row.
+        commercial(
+          'purchaseOrder',
+          clone('purchase_order_list', 'commercial_purchase_order_list'),
+          { lines: 'commercial_purchase_lines' },
+        ),
       ]
     : [];
   const dependencies = {
@@ -978,6 +1070,41 @@ export function salesWorkspaceQueries(
     shipped: 'sales_order_shipped_get',
     stockReservations: 'workspace_stock_reservations',
     stock: 'workspace_stock',
+  };
+  const fulfillment = (
+    name: keyof typeof FULFILLMENT_READ_MODEL_BINDINGS,
+    outputs: readonly string[],
+    queriesByKey: Record<string, string>,
+  ) => ({
+    capability: ref(
+      'capabilityReference',
+      'northstar.sales:capability.fulfillment',
+    ),
+    binding: FULFILLMENT_READ_MODEL_BINDINGS[name],
+    queries: Object.fromEntries(
+      Object.entries(queriesByKey).map(([key, value]) => [
+        key,
+        ref('queryReference', `${namespace}:query.${value}`),
+      ]),
+    ),
+    resultFields: Object.fromEntries(
+      outputs.map((key) => [key, `${namespace}:metric.${key}`]),
+    ),
+  });
+  // The order page's Fulfillment lines: the same line figures, and what each
+  // line is short, allocated over the order's lines (ORDER-PARITY). Its own
+  // query, so no other reader of the lines pays for the stock reads.
+  const fulfillmentLines = {
+    ...clone('sales_order_line_list', 'fulfillment_order_lines'),
+    readModel: fulfillment(
+      'line',
+      ['coverage', 'shipped', 'open_to_ship', 'available_now', 'short'],
+      {
+        ...dependencies,
+        orderLines: 'commercial_lines',
+        order: 'sales_order_get',
+      },
+    ),
   };
   return [
     ...queries.map((query) => {
@@ -994,22 +1121,7 @@ export function salesWorkspaceQueries(
           : ['remaining', 'on_hand', 'reserved', 'available'];
       return {
         ...query,
-        readModel: {
-          capability: ref(
-            'capabilityReference',
-            'northstar.sales:capability.fulfillment',
-          ),
-          binding: FULFILLMENT_READ_MODEL_BINDINGS[name],
-          queries: Object.fromEntries(
-            Object.entries(dependencies).map(([key, value]) => [
-              key,
-              ref('queryReference', `${namespace}:query.${value}`),
-            ]),
-          ),
-          resultFields: Object.fromEntries(
-            outputs.map((key) => [key, `${namespace}:metric.${key}`]),
-          ),
-        },
+        readModel: fulfillment(name, outputs, dependencies),
       };
     }),
     plain,
@@ -1019,6 +1131,7 @@ export function salesWorkspaceQueries(
     pricedLines,
     orderTotals,
     ...purchaseCommercial,
+    fulfillmentLines,
   ];
 }
 
@@ -1136,6 +1249,7 @@ export function invoiceWorkspace(namespace: string): Record<string, unknown> {
         subtitle: [id('column', 'invoice_customer')],
         status: id('column', 'invoice_state'),
         facts: [
+          id('column', 'invoice_order'),
           id('column', 'invoice_date'),
           id('column', 'invoice_due'),
           id('column', 'invoice_currency'),
@@ -1183,6 +1297,16 @@ export function invoiceWorkspace(namespace: string): Record<string, unknown> {
         field('customer_invoice_invoice_date'),
       ),
       column('due', 'Due date', 30, field('customer_invoice_due_date')),
+      // The order this invoice bills (ORDER-PARITY): the invoice stores it as
+      // a relation, stated by its get and labelled through the order's own
+      // get under current policy -- "—" when that read is withheld.
+      column(
+        'order',
+        'Sales order',
+        32,
+        id('relation', 'customer_invoice_order'),
+        ['sales_order_get', 'sales_order_number'],
+      ),
       column('currency', 'Currency', 35, field('customer_invoice_currency')),
       column(
         'terms',
@@ -1428,6 +1552,21 @@ export function invoiceWorkspace(namespace: string): Record<string, unknown> {
           ]),
         ],
       },
+      {
+        // The way back to the order from wherever the invoice was opened.
+        actionId: id('action', 'invoice_open_order'),
+        label: 'Open sales order',
+        description: 'Open the sales order this invoice bills.',
+        orderKey: 40,
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref('surfaceReference', id('surface', 'sales_order_detail')),
+          query: q('commercial_order_get'),
+          record: record(id('relation', 'customer_invoice_order')),
+        },
+      },
     ],
   };
 }
@@ -1468,7 +1607,10 @@ export function packingWorkspace(namespace: string): Record<string, unknown> {
       header: {
         title: `${namespace}:column.packing_number`,
         subtitle: [`${namespace}:column.packing_location`],
-        facts: [`${namespace}:column.packing_date`],
+        facts: [
+          `${namespace}:column.packing_order`,
+          `${namespace}:column.packing_date`,
+        ],
         status: `${namespace}:column.packing_state`,
       },
       // The address the shipment went to, as one block.
@@ -1489,6 +1631,15 @@ export function packingWorkspace(namespace: string): Record<string, unknown> {
         'location_get',
         'location_name',
       ]),
+      // The order this shipment fulfils (ORDER-PARITY): the relation stated by
+      // the shipment's get, labelled through the order's own get.
+      {
+        ...column('order', 'Sales order', 25, 'shipment_order', [
+          'sales_order_get',
+          'sales_order_number',
+        ]),
+        field: `${namespace}:relation.shipment_order`,
+      },
       column('date', 'Shipped at', 30, 'shipment_effective_at'),
       column('state', 'Shipment state', 40, 'shipment_state'),
       column('carrier', 'Carrier', 50, 'shipment_carrier'),
