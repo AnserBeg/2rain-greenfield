@@ -516,6 +516,176 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'item_stock') {
+      // INVENTORY-PARITY: Field notebook's stock moves at two locations. The
+      // opening 10 at CAL-WH, 6 more at VAN-WH, a receipt of 5 and a shipment
+      // of 2 against a reservation of 3 at CAL-WH, each through its governed
+      // operation. Its page then shows CAL-WH 13 / 1 / 12 and VAN-WH 6 / 0 / 6.
+      const overflow = '71000000-0000-4000-8000-000000000023';
+      const at = () => new Date().toISOString();
+      const done = async (local: string, recordId: string, revision: number) =>
+        assert.equal(
+          (await invoke(local, { recordId, expectedRevision: revision }))
+            .outcome,
+          'succeeded',
+        );
+      const adjustment = await create('inventory_transaction', {
+        actor_id: 'order-entry-fixture',
+        effective_at: at(),
+        recorded_at: at(),
+        number: `ADJ-${randomUUID()}`,
+        reason_code: 'SETUP',
+        reason_narrative: 'Item page overflow stock',
+        source_id: randomUUID(),
+        source_type: 'test',
+        state: `${ns}:option.inventory_transaction_state_draft`,
+        type: `${ns}:option.inventory_transaction_type_adjustment`,
+      });
+      await create(
+        'inventory_transaction_line',
+        {
+          from_location_id: null,
+          to_location_id: overflow,
+          item_id: item,
+          line_number: '1',
+          quantity: '6',
+          unit_id: 'EA',
+        },
+        { transaction: adjustment.recordId },
+      );
+      await done(
+        'inventory_transaction_post',
+        adjustment.recordId,
+        adjustment.revision,
+      );
+      // Receive 5 at CAL-WH on a confirmed purchase order.
+      const purchase = await create('purchase_order', {
+        supplier_party_id: customer,
+        order_date: at(),
+        expected_date: at(),
+        currency: 'CAD',
+        notes: null,
+      });
+      const purchaseLine = await create(
+        'purchase_order_line',
+        {
+          line_number: '1',
+          item_id: item,
+          ordered_quantity: '5',
+          unit_price: null,
+        },
+        { order: purchase.recordId },
+      );
+      await done(
+        'purchase_order_release',
+        purchase.recordId,
+        purchase.revision,
+      );
+      const receipt = await create(
+        'goods_receipt',
+        {
+          state: `${ns}:option.goods_receipt_state_draft`,
+          kind: `${ns}:option.goods_receipt_kind_initial`,
+          effective_at: at(),
+          location_id: location,
+          reason_code: 'RECEIVE',
+          reason_narrative: 'Item page receipt',
+        },
+        { order: purchase.recordId },
+      );
+      await create(
+        'goods_receipt_line',
+        {
+          line_number: '1',
+          item_id: item,
+          quantity: '5',
+          unit_id: 'EA',
+          cost_status: `${ns}:option.goods_receipt_line_cost_status_absent`,
+          unit_cost: null,
+          currency: null,
+          reversal_of_movement_id: null,
+        },
+        { receipt: receipt.recordId, order_line: purchaseLine.recordId },
+      );
+      await done('goods_receipt_post', receipt.recordId, receipt.revision);
+      // Reserve 3 at CAL-WH on a confirmed sales order, then ship 2 of them.
+      const order = await create('sales_order', {
+        customer_party_id: customer,
+        order_date: at(),
+        requested_date: at(),
+        currency: 'CAD',
+        notes: 'Item page order',
+        ...shipTo,
+      });
+      const orderLine = await create(
+        'sales_order_line',
+        {
+          item_id: item,
+          line_number: '1',
+          ordered_quantity: '5',
+          unit_id: 'EA',
+          unit_price: null,
+        },
+        { order: order.recordId },
+      );
+      await done('sales_order_release', order.recordId, order.revision);
+      const reservation = await create(
+        'reservation',
+        {
+          item_id: item,
+          location_id: location,
+          number: `RSV-${randomUUID()}`,
+          quantity: '3',
+          reason: 'Item page reservation',
+          state: `${ns}:option.reservation_state_draft`,
+          unit_id: 'EA',
+        },
+        { order_line: orderLine.recordId },
+      );
+      await done(
+        'reservation_reserve',
+        reservation.recordId,
+        reservation.revision,
+      );
+      const shipment = await create(
+        'shipment',
+        {
+          effective_at: at(),
+          external_reference: randomUUID(),
+          kind: `${ns}:option.shipment_kind_initial`,
+          location_id: location,
+          reason_code: 'SHIP',
+          reason_narrative: 'Item page shipment',
+          state: `${ns}:option.shipment_state_draft`,
+          ...shipTo,
+        },
+        { order: order.recordId },
+      );
+      await create(
+        'shipment_line',
+        {
+          item_id: item,
+          line_number: '1',
+          quantity: '2',
+          reversal_of_movement_id: null,
+          unit_id: 'EA',
+        },
+        {
+          order_line: orderLine.recordId,
+          reservation: reservation.recordId,
+          shipment: shipment.recordId,
+        },
+      );
+      await done('shipment_post', shipment.recordId, shipment.revision);
+      return {
+        phase,
+        itemId: item,
+        main: location,
+        overflow,
+        shipmentId: shipment.recordId,
+        observed: true,
+      };
+    }
     if (phase === 'second_company') {
       const company = await create(
         'legal_entity',

@@ -169,7 +169,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 10 adds declared Lists: columns, saved views, filters, sort and export.
     // 11 adds editor defaults and scoped pickers.
     // 12 adds List progress, open and before-today views and overdue dates.
-    maximumSupportedVersion: 12,
+    // 13 adds composition datasets scoped by a field of their own entity.
+    maximumSupportedVersion: 13,
   },
 });
 

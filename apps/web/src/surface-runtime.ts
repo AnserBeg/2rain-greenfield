@@ -4,7 +4,10 @@ import {
   displayFieldValue,
   renderCompositionPrintDocument,
 } from './surface-composition.js';
-import { resolveWorkspaceEntry } from './workspace-entry.js';
+import {
+  resolveWorkspaceEntry,
+  type WorkspaceEntry,
+} from './workspace-entry.js';
 import { documentEditor } from './document-editor.js';
 import {
   declaredListArguments,
@@ -200,7 +203,15 @@ export async function renderSurfaceRuntimeWithData(
     gateways.queryGateway,
     legalEntitySelection,
     url,
+    entry,
   );
+  // A record every company shares reads its company-owned sections in the
+  // company its entry settled on; its own record and commands stay unscoped.
+  const compositionScope = binding.query.legalEntityScope
+    ? (legalEntitySelection[0] ?? null)
+    : entry?.shared
+      ? entry.selected
+      : null;
   if (binding.query.legalEntityScope && legalEntitySelection.length === 0) {
     return renderSelectedSurface(
       view,
@@ -379,7 +390,7 @@ export async function renderSurfaceRuntimeWithData(
             selection.selected,
             data.records[0],
             requestUrl,
-            legalEntitySelection[0] ?? null,
+            compositionScope,
             gateways,
           ),
         };
@@ -1144,8 +1155,37 @@ async function loadWorkspaceContextBar(
   queryGateway: SemanticQueryGateway,
   legalEntitySelection: readonly string[],
   currentUrl: URL,
+  /** The entry the page already resolved, so it is not proved twice. */
+  resolved?: WorkspaceEntry | null,
 ): Promise<WorkspaceContextBar | null> {
-  if (!selectedBinding.query.legalEntityScope) return null;
+  if (!selectedBinding.query.legalEntityScope) {
+    // A record every company shares (an item) offers the companies its entry
+    // admits; each choice opens the same record in that company.
+    const recordId = currentUrl.searchParams.get('record');
+    if (
+      !recordId ||
+      selection.selected.surfaceRole !== 'record' ||
+      !selection.selected.workspace?.entry
+    )
+      return null;
+    const entry =
+      resolved !== undefined
+        ? resolved
+        : await resolveWorkspaceEntry(
+            view,
+            selection.selected,
+            new URL(currentUrl),
+            queryGateway,
+          );
+    if (!entry?.shared) return null;
+    return Object.freeze({
+      options: entry.options,
+      parameterId: entry.parameter,
+      preservedParameters: Object.freeze([['record', recordId] as const]),
+      selectedRecordId: entry.selected,
+      targetSurfaceId: selection.selected.surfaceId,
+    });
+  }
   const entityNamespace = selectedBinding.query.sourceEntityId.split(
     ':entity.',
     1,

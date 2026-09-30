@@ -917,6 +917,23 @@ const compositionDataset = z.strictObject({
       ownership: z.enum(['parentScopedChild', 'reference']),
     })
     .optional(),
+  /**
+   * The rows of the dataset's own entity that hold the record's id in one of
+   * their text fields, where no declared relation reaches the record -- an
+   * item's stock balances and movements hold the item as plain text. Applied
+   * by the list query as an exact field filter before the count and the page,
+   * and echoed back. A dataset declares this or `parent`, never both.
+   * Optional v6 key (ADR-0047 §7).
+   */
+  fieldScope: z
+    .strictObject({
+      fieldId: CanonicalIdSchema,
+      value: z.strictObject({
+        source: z.literal('record'),
+        field: z.literal('recordId'),
+      }),
+    })
+    .optional(),
   columns: z.array(compositionColumn).min(1).max(30),
 });
 export const SurfaceCompositionSchema = z.strictObject({

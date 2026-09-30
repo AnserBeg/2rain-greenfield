@@ -530,6 +530,10 @@ export function orderEntrySurfaces(
     // orders) is a business destination of its own, entered with the caller's
     // company and authorized by its own query.
     const worklist = role === 'list' && isWorklist(name);
+    // An item is shared by every company; its page shows one company's stock
+    // and movements, entered like the Posted stock List and authorized by
+    // that List's query (INVENTORY-PARITY).
+    const stockPage = role === 'record' && local === 'item';
     const listQueryId = String(
       (surface.dataSource as { targetId?: unknown } | undefined)?.targetId,
     );
@@ -562,12 +566,18 @@ export function orderEntrySurfaces(
         ...(editor ||
         owner ||
         worklist ||
+        stockPage ||
         local === 'posted_stock_balance' ||
         (role === 'list' && companyScoped.has(listQueryId))
           ? {
               entry: {
                 ...company,
-                authorizationQueryId: id('query', `${owner ?? local}_list`),
+                authorizationQueryId: id(
+                  'query',
+                  stockPage
+                    ? 'posted_stock_balance_list'
+                    : `${owner ?? local}_list`,
+                ),
               },
             }
           : {}),

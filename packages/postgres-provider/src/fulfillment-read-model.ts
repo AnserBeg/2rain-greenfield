@@ -137,6 +137,24 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
       ),
     );
   };
+  // What active reservations still hold of one item at one location: the sum
+  // of what remains on every reservation there. A released or fully consumed
+  // reservation holds nothing, and a draft one has no balance yet.
+  const reservedAt = async (
+    item: ImmutableJsonValue,
+    location: ImmutableJsonValue,
+  ) => {
+    const reservations = await list('stockReservations', {
+      fieldFilters: [
+        { fieldId: `${ns}:field.reservation_item_id`, value: item },
+        { fieldId: `${ns}:field.reservation_location_id`, value: location },
+      ],
+    });
+    let reserved = 0n;
+    for (const reservation of reservations)
+      reserved += await remaining(reservation);
+    return reserved;
+  };
   const rows: SemanticRecordDto[] = [];
   for (const row of result.records) {
     const values: Record<string, ImmutableJsonValue> = { ...row.values };
@@ -186,15 +204,7 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
     } else if (model.binding === FULFILLMENT_READ_MODEL_BINDINGS.reservation) {
       const item = row.values[`${ns}:field.reservation_item_id`]!;
       const location = row.values[`${ns}:field.reservation_location_id`]!;
-      const reservations = await list('stockReservations', {
-        fieldFilters: [
-          { fieldId: `${ns}:field.reservation_item_id`, value: item },
-          { fieldId: `${ns}:field.reservation_location_id`, value: location },
-        ],
-      });
-      let reserved = 0n;
-      for (const reservation of reservations)
-        reserved += await remaining(reservation);
+      const reserved = await reservedAt(item, location);
       const balances = await list('stock', {
         fieldFilters: [
           { fieldId: `${ns}:field.posted_stock_balance_item_id`, value: item },
@@ -213,6 +223,18 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
         );
       emit('remaining', await remaining(row));
       emit('on_hand', onHand);
+      emit('reserved', reserved);
+      emit('available', onHand - reserved);
+    } else if (model.binding === FULFILLMENT_READ_MODEL_BINDINGS.stock) {
+      // One posted balance of an item at a location, as the item page shows
+      // it: what reservations still hold there and what is left. Reads only.
+      const onHand = fulfillmentQuantity(
+        String(row.values[`${ns}:field.posted_stock_balance_posted_quantity`]),
+      );
+      const reserved = await reservedAt(
+        row.values[`${ns}:field.posted_stock_balance_item_id`]!,
+        row.values[`${ns}:field.posted_stock_balance_location_id`]!,
+      );
       emit('reserved', reserved);
       emit('available', onHand - reserved);
     } else throw new Error('Unknown fulfillment read-model binding');

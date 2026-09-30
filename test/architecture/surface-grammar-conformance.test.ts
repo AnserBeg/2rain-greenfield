@@ -290,8 +290,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Draft document editing and workspace entry require reader 8; picker
   // eligibility and typed Task inputs require 9; declared Lists require 10;
   // editor defaults, scoped pickers and Task input eligibility require 11;
-  // List progress, open and before-today views and overdue dates require 12.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 12);
+  // List progress, open and before-today views and overdue dates require 12;
+  // the item page's field-scoped stock and movements require 13.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 13);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
@@ -940,7 +941,39 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     salesModuleDefinition('northstar.app'),
     'sales',
   );
-  return composed;
+  return withPlainItemPage(composed);
+}
+
+/**
+ * INVENTORY-PARITY: the item page shows Inventory's stock and movements with
+ * Sales' reservations, entered through Inventory's Posted stock List. Without
+ * those modules it is the plain record page it was before: Catalog's own
+ * surface in its contextual workspace.
+ */
+function withPlainItemPage(
+  composed: Record<string, unknown>,
+): Record<string, unknown> {
+  const surfaceId = 'northstar.app:surface.item_detail';
+  const surfaces = composed.surfaces;
+  assert.ok(Array.isArray(surfaces));
+  const plain = (
+    catalogModuleDefinition('northstar.app', { sellingPrices: true })
+      .surfaces as Record<string, unknown>[]
+  ).find((surface) => surface.surfaceId === surfaceId);
+  assert.ok(plain);
+  assert.equal(
+    surfaces.filter((surface) => surface.surfaceId === surfaceId).length,
+    1,
+    'flat fixture must find the item page exactly once',
+  );
+  return {
+    ...composed,
+    surfaces: surfaces.map((surface) =>
+      surface.surfaceId === surfaceId
+        ? { ...plain, workspace: { membership: 'contextual' } }
+        : surface,
+    ),
+  };
 }
 
 function withoutModule(

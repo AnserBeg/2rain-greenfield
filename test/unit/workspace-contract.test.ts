@@ -15,6 +15,7 @@ import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.j
 import { legalEntityReadScopeRequirement } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { moneyText } from '../../apps/web/src/list-declaration.js';
 import { declaredDefault } from '../../apps/web/src/control-semantics.js';
+import { FULFILLMENT_READ_MODEL_BINDINGS } from '../../packages/domain/src/sales/workspace.js';
 
 test('the scaffold exposes a canonical workspace contract', () => {
   assert.deepEqual(platformContract, {
@@ -837,4 +838,172 @@ test('a new order starts its requested date three weeks out, a default counted f
     ),
     '2026-12-31T00:00:00.000Z',
   );
+});
+
+test('INVENTORY-PARITY: the item page lists its stock and movements by a field of their own entity, in the company its entry names', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Dataset = Loose & {
+    datasetId: string;
+    query: { targetId: string };
+    parent?: Loose;
+    fieldScope?: { fieldId: string; value: Loose };
+  };
+  const ns = 'northstar.app';
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === `${ns}:surface.${local}`,
+    ) as Loose & {
+      composition?: { children: Dataset[]; actions: unknown[] };
+      workspace?: { entry?: Loose; membership: string };
+    };
+  const dataset = (candidate: Loose, local: string) =>
+    surface(candidate, 'item_detail').composition!.children.find(
+      (value) => value.datasetId === `${ns}:dataset.item_${local}`,
+    )!;
+  const query = (candidate: Loose, local: string) =>
+    (candidate.queries as Loose[]).find(
+      (value) => value.queryId === `${ns}:query.${local}`,
+    ) as Loose & {
+      readModel?: {
+        binding: string;
+        queries: Record<string, { targetId: string }>;
+        resultFields: Record<string, string>;
+      };
+      selections: { field: { targetId: string } }[];
+    };
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The shipped declaration: the item's own page, read-only, entered like the
+  // Posted stock List, each dataset scoped by the item field of its entity.
+  const page = surface(source, 'item_detail');
+  assert.deepEqual(page.composition!.actions, []);
+  assert.equal(page.workspace!.membership, 'contextual');
+  assert.equal(
+    page.workspace!.entry!.authorizationQueryId,
+    `${ns}:query.posted_stock_balance_list`,
+  );
+  assert.deepEqual(
+    page.composition!.children.map((value) => [
+      value.query.targetId,
+      value.fieldScope?.fieldId,
+      value.parent,
+    ]),
+    [
+      [
+        `${ns}:query.item_stock_positions`,
+        `${ns}:field.posted_stock_balance_item_id`,
+        undefined,
+      ],
+      [
+        `${ns}:query.inventory_movement_list`,
+        `${ns}:field.inventory_movement_item_id`,
+        undefined,
+      ],
+    ],
+  );
+  // Stock by location reads its own copy of the posted stock list with the
+  // fulfillment read model's stock figures; the list itself is untouched.
+  const positions = query(source, 'item_stock_positions');
+  const posted = query(source, 'posted_stock_balance_list');
+  assert.equal(posted.readModel, undefined);
+  assert.equal(
+    positions.readModel!.binding,
+    FULFILLMENT_READ_MODEL_BINDINGS.stock,
+  );
+  assert.deepEqual(positions.readModel!.resultFields, {
+    reserved: `${ns}:metric.reserved`,
+    available: `${ns}:metric.available`,
+  });
+  assert.deepEqual(
+    Object.values(positions.readModel!.queries).map((value) => value.targetId),
+    [
+      `${ns}:query.workspace_stock_reservations`,
+      `${ns}:query.reservation_balance_get`,
+    ],
+  );
+  const { readModel: _readModel, ...copy } = positions;
+  void _readModel;
+  assert.deepEqual(
+    JSON.parse(
+      JSON.stringify(copy).replaceAll(
+        'item_stock_positions',
+        'posted_stock_balance_list',
+      ),
+    ),
+    posted,
+  );
+
+  // Exactly one scope: a parent relation or a field, never both or neither.
+  refuse((candidate) => {
+    dataset(candidate, 'stock').parent = {
+      relationId: `${ns}:relation.reservation_order_line`,
+      value: { source: 'record', field: 'recordId' },
+      ownership: 'reference',
+    };
+  }, /a dataset is scoped by its parent relation or by a field, not both/);
+  refuse((candidate) => {
+    delete dataset(candidate, 'movements').fieldScope;
+  }, /child datasets require a scoped list/);
+  // The field holds the record's id: a selected text field of the dataset's
+  // own entity long enough for one.
+  const scopedBy = (fieldId: string) => (candidate: Loose) => {
+    dataset(candidate, 'stock').fieldScope!.fieldId = fieldId;
+  };
+  const fieldScopeRefusal =
+    /a field scope reads a selected text field of the dataset's own entity that can hold a record id/;
+  // Not text: the posted quantity.
+  refuse(
+    scopedBy(`${ns}:field.posted_stock_balance_posted_quantity`),
+    fieldScopeRefusal,
+  );
+  // Too short to hold a record id: the unit.
+  refuse(
+    scopedBy(`${ns}:field.posted_stock_balance_unit_id`),
+    fieldScopeRefusal,
+  );
+  // A read-model figure is not a stored field.
+  refuse(scopedBy(`${ns}:metric.reserved`), fieldScopeRefusal);
+  // Another entity's field.
+  refuse(scopedBy(`${ns}:field.reservation_item_id`), fieldScopeRefusal);
+  // A field the dataset's list does not select.
+  refuse((candidate) => {
+    const copy = query(candidate, 'item_stock_positions');
+    copy.selections = copy.selections.filter(
+      (selection) =>
+        selection.field.targetId !== `${ns}:field.posted_stock_balance_item_id`,
+    );
+  }, fieldScopeRefusal);
+  // A closed declaration: the record's own id is the only value, and a
+  // record identity is not a field.
+  refuse(scopedBy('recordId'), /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    dataset(candidate, 'stock').fieldScope!.value = {
+      source: 'record',
+      field: `${ns}:field.item_sku`,
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    dataset(candidate, 'stock').fieldScope!.value = {
+      source: 'selected',
+      field: 'recordId',
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  // One company's rows on a record every company shares need the company its
+  // entry names.
+  refuse((candidate) => {
+    delete surface(candidate, 'item_detail').workspace!.entry;
+  }, /a company's dataset on a record every company shares requires a workspace entry/);
 });

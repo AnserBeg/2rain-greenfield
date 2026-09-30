@@ -19,6 +19,7 @@ import {
 } from './list-declarations.js';
 import { purchasingWorkspace } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
+import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -87,6 +88,8 @@ const RECORD_COMPOSITIONS: Readonly<
     inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
   stock_count_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'stock_count'),
+  // An item's stock by location and its movements (INVENTORY-PARITY).
+  item_detail: itemStockWorkspace,
 });
 
 /**
