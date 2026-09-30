@@ -10005,7 +10005,9 @@ test('ORDER-PARITY: reversing a receipt reverses each line that still adds to st
           'option',
           'goods_receipt_line_cost_status_known',
         ),
-        [id('field', 'goods_receipt_line_unit_cost')]: '2.5',
+        // As the PostgreSQL provider reads a stored decimal back: at its
+        // column's scale, which is not an input the provider admits.
+        [id('field', 'goods_receipt_line_unit_cost')]: '2.500000000000000000',
         [id('field', 'goods_receipt_line_currency')]: 'CAD',
         [id('field', 'goods_receipt_line_reversal_of_movement_id')]: null,
         [id('relation', 'goods_receipt_line_receipt')]: parent,
