@@ -1,3 +1,4 @@
+import { withoutInventoryValuation } from '../helpers/without-inventory-valuation.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -5751,10 +5752,12 @@ function composedApplicationWithoutInventoryForTransition(): Record<
     salesModuleDefinition(APPLICATION_NAMESPACE),
     'sales',
   );
-  return withoutModuleForTransition(
-    application,
-    inventoryModuleDefinition(APPLICATION_NAMESPACE),
-    'inventory',
+  return withoutInventoryValuation(
+    withoutModuleForTransition(
+      application,
+      inventoryModuleDefinition(APPLICATION_NAMESPACE),
+      'inventory',
+    ),
   );
 }
 

@@ -1,3 +1,4 @@
+import { inventoryValuationReadModel } from '../../packages/postgres-provider/src/inventory-valuation-read-model.js';
 import type { SurfaceComposition } from '../../packages/canonical-model/src/index.js';
 import { documentEditor } from '../../apps/web/src/document-editor.js';
 import { resolveWorkspaceEntry } from '../../apps/web/src/workspace-entry.js';
@@ -10575,4 +10576,103 @@ test('PAYABLES: the order lists its bills and offers billing only while the orde
     ),
   );
   assert.match(paidHtml, /VPAY-000001/u);
+});
+
+test('inventory valuation executes declared scoped dependencies, pages history and rechecks current policy', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  f.executor.pageLists = true;
+  const header = f.executor.seed(
+    'goods_receipt',
+    {
+      [`${ns}:field.goods_receipt_state`]: `${ns}:option.goods_receipt_state_posted`,
+    },
+    scope,
+  );
+  const line = f.executor.seed(
+    'goods_receipt_line',
+    {
+      [`${ns}:field.goods_receipt_line_item_id`]: f.item,
+      [`${ns}:field.goods_receipt_line_unit_id`]: 'EA',
+      [`${ns}:field.goods_receipt_line_cost_status`]: `${ns}:option.goods_receipt_line_cost_status_known`,
+      [`${ns}:field.goods_receipt_line_unit_cost`]: '5',
+      [`${ns}:field.goods_receipt_line_currency`]: 'CAD',
+    },
+    scope,
+  );
+  const seedMovement = (
+    company: string,
+    sourceId: string,
+    sourceLine: string,
+    quantity: string,
+    sourceType = 'goodsReceipt',
+  ) =>
+    f.executor.seed(
+      'inventory_movement',
+      Object.fromEntries(
+        Object.entries({
+          item_id: f.item,
+          unit_id: 'EA',
+          quantity_delta: quantity,
+          effective_at: '2026-09-30T10:00:00.000Z',
+          recorded_at: '2026-09-30T10:00:00.000Z',
+          source_type: sourceType,
+          source_id: sourceId,
+          source_line: sourceLine,
+          posting_role: `${ns}:option.inventory_posting_role_receipt`,
+          reversal_of_movement_id: null,
+        }).map(([key, value]) => [
+          `${ns}:field.inventory_movement_${key}`,
+          value,
+        ]),
+      ),
+      company,
+    );
+  seedMovement(scope, header, line, '2');
+  // More than one history page, all unvalued, and another company's quantity.
+  for (let i = 0; i < 100; i++)
+    seedMovement(scope, randomUUID(), randomUUID(), '1', 'opening');
+  seedMovement(f.scopes[1]!, randomUUID(), randomUUID(), '999', 'opening');
+  const gateway = new SemanticQueryGateway(
+    f.policy,
+    f.executor,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { 'northstar.inventory:capability.valuation': inventoryValuationReadModel },
+  );
+  const query = registeredSemanticQueryFromPinnedView(
+    f.view,
+    `${ns}:query.inventory_value_get`,
+  )!;
+  const request = {
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    queryId: query.queryId,
+    arguments: {
+      recordId: f.item,
+      includeArchived: false,
+      [query.legalEntityScope!.operand.parameterId]: scope,
+    },
+  };
+  const read = await gateway.invoke(f.view, request);
+  assert.equal(read.records[0]!.values[`${ns}:metric.on_hand`], '102');
+  assert.equal(
+    read.records[0]!.values[`${ns}:metric.inventory_value`],
+    'CAD 10.00',
+  );
+  assert.equal(
+    read.records[0]!.values[`${ns}:metric.unvalued_quantity`],
+    '100',
+  );
+  assert.equal(
+    f.executor.listReads.get(`${ns}:query.inventory_movement_list`),
+    2,
+  );
+  f.deniedReads.add(`${ns}:permission.goods_receipt_line_read`);
+  await assert.rejects(
+    gateway.invoke(f.view, request),
+    SemanticQueryPolicyDeniedError,
+  );
 });

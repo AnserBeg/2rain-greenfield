@@ -1,3 +1,5 @@
+import { VALUATION_CAPABILITY_ID } from '../../domain/src/inventory/valuation.js';
+import { inventoryValuationReadModel } from './inventory-valuation-read-model.js';
 import { FULFILLMENT_CAPABILITY_ID } from './fulfillment.js';
 import { COMMERCIAL_CAPABILITY_ID } from '../../domain/src/sales/definition.js';
 import { commercialReadModel } from './commercial-read-model.js';
@@ -678,6 +680,7 @@ export async function createComposedApplicationRuntime(
       {
         [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
         [COMMERCIAL_CAPABILITY_ID]: commercialReadModel,
+        [VALUATION_CAPABILITY_ID]: inventoryValuationReadModel,
         // A receipt's lines with what each can still reverse (ORDER-PARITY).
         [RECEIVING_CAPABILITY_ID]: receivingReadModel,
       },

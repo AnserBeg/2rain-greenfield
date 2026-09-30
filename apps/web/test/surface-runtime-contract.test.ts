@@ -2370,3 +2370,33 @@ async function close(server: Server): Promise<void> {
     server.close((error) => (error ? reject(error) : resolve()));
   });
 }
+
+test('inventory value is a declared List and item cost is a compiled record composition', () => {
+  const definition = composedApplicationDefinition();
+  const surfaces = definition.surfaces as Record<string, unknown>[];
+  const list = surfaces.find(
+    (surface) =>
+      surface.surfaceId === 'northstar.app:surface.inventory_value_list',
+  )!;
+  const declaration = SurfaceListSchema.parse(list.list);
+  assert.deepEqual(
+    declaration.columns.map((column) => column.label),
+    ['Item', 'On hand', 'Average cost', 'Known value', 'Unvalued quantity'],
+  );
+  assert.ok(declaration.columns.slice(1).every((column) => !column.sortable));
+  const item = surfaces.find(
+    (surface) => surface.surfaceId === 'northstar.app:surface.item_detail',
+  )!;
+  const composition = SurfaceCompositionSchema.parse(item.composition);
+  assert.ok(
+    composition.fields.some(
+      (field) => field.field === 'northstar.app:metric.average_cost',
+    ),
+  );
+  assert.ok(
+    composition.fields.some(
+      (field) => field.field === 'northstar.app:metric.inventory_value',
+    ),
+  );
+  assert.deepEqual(composition.actions, []);
+});

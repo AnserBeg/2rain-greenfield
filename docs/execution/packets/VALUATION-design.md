@@ -57,7 +57,7 @@ estimates, not immutable financial postings.
 
 A supported `northstar.inventory:capability.valuation` read capability and
 registered item binding are authored in canonical metadata, projected by the
-compiler and registered in the shared composed runtime. Inventory -> Inventory
+compiler and registered in the shared composed runtime. Catalog -> Inventory
 value is a List of catalog items in the selected company. One item occupies one
 row, preserving the ordinary List's paging/count/search/export semantics.
 Columns: item, on hand, average cost, value, unvalued quantity. Average cost and
