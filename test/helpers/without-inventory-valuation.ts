@@ -24,11 +24,12 @@ export function withoutInventoryValuation(
           return [];
         if (surface.surfaceId !== 'northstar.app:surface.item_detail')
           return [surface];
-        const { composition: _, workspace, ...plain } = surface;
-        const { entry: __, ...membership } = workspace as Record<
-          string,
-          unknown
-        >;
+        const plain = { ...surface };
+        delete plain.composition;
+        const membership = {
+          ...(surface.workspace as Record<string, unknown>),
+        };
+        delete membership.entry;
         return [
           {
             ...plain,
