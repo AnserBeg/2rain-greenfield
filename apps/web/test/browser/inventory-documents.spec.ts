@@ -67,16 +67,11 @@ test('an adjustment is entered like a document, numbered on save, and posted or 
     });
     const damaged = await saveDraft(page);
     await command(page, 'Post');
-    // The document's movement carries its reason; stock drops by two.
-    expect(
-      (
-        await rows(
-          page.locator(
-            `[data-composition-dataset="${ns}:dataset.inventory_transaction_inventory_movement"]`,
-          ),
-        )
-      ).map((row) => [row.Location, row['Quantity change'], row.Reason]),
-    ).toEqual([['Calgary warehouse', '-2', 'DAMAGED']]);
+    // The document's movement carries its reason; stock drops by two -- of
+    // stock the fixture received today, which the default of now is after.
+    expect(await postedMovements(page, damaged)).toEqual([
+      ['Calgary warehouse', '-2', 'DAMAGED'],
+    ]);
     await page.screenshot({
       path: testInfo.outputPath('stock-document-posted.png'),
       fullPage: true,
@@ -91,7 +86,7 @@ test('an adjustment is entered like a document, numbered on save, and posted or 
       line: { from: 'Calgary warehouse', quantity: '3' },
     });
     const addedInFrom = await saveDraft(page);
-    expect(addedInFrom).not.toBe(damaged);
+    expect(addedInFrom.number).not.toBe(damaged.number);
     await refused(page, 'INVENTORY_POSTING_INPUT_INVALID');
 
     // More than is on hand: the posting's own refusal.
@@ -128,19 +123,9 @@ test('a transfer moves unreserved stock, and opening stock goes only where there
         quantity: '5',
       },
     });
-    await saveDraft(page);
+    const moved = await saveDraft(page);
     await command(page, 'Post');
-    expect(
-      (
-        await rows(
-          page.locator(
-            `[data-composition-dataset="${ns}:dataset.inventory_transaction_inventory_movement"]`,
-          ),
-        )
-      )
-        .map((row) => [row.Location, row['Quantity change'], row.Reason])
-        .sort(),
-    ).toEqual([
+    expect((await postedMovements(page, moved)).sort()).toEqual([
       ['Edmonton store', '5', 'RELOCATION'],
       ['Vancouver warehouse', '-5', 'RELOCATION'],
     ]);
@@ -250,17 +235,42 @@ async function enter(page: Page, document: Document) {
     .fill(document.line.quantity);
 }
 
+/** A saved stock document: the number the server gave it, and its page. */
+interface Saved {
+  readonly number: string;
+  readonly url: string;
+}
+
 /**
  * Save draft opens the saved document, titled by the number the server gave
  * it: the page's heading, since a stock document's page declares no header
  * of its own.
  */
-async function saveDraft(page: Page): Promise<string> {
+async function saveDraft(page: Page): Promise<Saved> {
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   const title = page.getByRole('heading', { level: 1, name: /^STK-\d{6}$/u });
   await expect(title).toBeVisible();
-  return (await title.innerText()).trim();
+  return { number: (await title.innerText()).trim(), url: page.url() };
+}
+
+/**
+ * A document's posted movements as its own page lists them -- location,
+ * signed change and reason. A command answers with its result, so the
+ * document is opened again, as a person returns to it.
+ */
+async function postedMovements(page: Page, saved: Saved) {
+  await page.goto(saved.url);
+  await expect(
+    page.getByRole('heading', { level: 1, name: saved.number, exact: true }),
+  ).toBeVisible();
+  return (
+    await rows(
+      page.locator(
+        `[data-composition-dataset="${ns}:dataset.inventory_transaction_inventory_movement"]`,
+      ),
+    )
+  ).map((row) => [row.Location, row['Quantity change'], row.Reason]);
 }
 
 /** A confirmed command on the saved document. */
