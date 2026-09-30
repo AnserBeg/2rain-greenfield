@@ -18,10 +18,19 @@ const fields = (definition: Record<string, unknown>) =>
   );
 const transaction = (name: string) =>
   `${ns}:field.inventory_transaction_${name}`;
-/** The four fields a stock document stops authoring (owner ruling R5'). */
-const DERIVED = ['source_type', 'source_id', 'recorded_at', 'actor_id'];
+/**
+ * The four fields a stock document never has typed (owner ruling R5'). They
+ * stay required: the editor's first save writes them, because a released
+ * field's NOT NULL is not a storage transition the planner admits.
+ */
+const WRITTEN_AT_FIRST_SAVE = [
+  'source_type',
+  'source_id',
+  'recorded_at',
+  'actor_id',
+];
 
-test('INVENTORY-PARITY: the product mounts stock documents numbered STK-000001, with their source, recorded time and actor no longer authored', () => {
+test('INVENTORY-PARITY: the product mounts stock documents numbered STK-000001, their source, recorded time and actor still required', () => {
   const composed = inventoryModuleDefinition(ns, { documentEntry: true });
   assert.doesNotThrow(() => normalizeApplicationPackage(composed));
   const declared = fields(composed);
@@ -32,11 +41,11 @@ test('INVENTORY-PARITY: the product mounts stock documents numbered STK-000001, 
     minimumDigits: 6,
     start: 1,
   });
-  for (const name of DERIVED) {
-    assert.equal(declared.get(transaction(name))!.presence, 'optional', name);
+  for (const name of WRITTEN_AT_FIRST_SAVE) {
+    assert.equal(declared.get(transaction(name))!.presence, 'required', name);
     assert.equal(
       declared.get(transaction(name))!.defaultSemantics,
-      'nullable',
+      'none',
       name,
     );
   }
@@ -53,9 +62,7 @@ test('INVENTORY-PARITY: the standalone kernel harness keeps the module it has al
   assert.deepEqual(inventoryModuleDefinition(ns, {}), standalone);
   const declared = fields(standalone);
   assert.equal(declared.get(transaction('number'))!.numbering, undefined);
-  for (const name of DERIVED)
-    assert.equal(declared.get(transaction(name))!.presence, 'required', name);
-  // Only the transaction's number and four fields differ between the two.
+  // Only the transaction's number differs between the two.
   const composed = fields(
     inventoryModuleDefinition(ns, { documentEntry: true }),
   );
@@ -64,8 +71,5 @@ test('INVENTORY-PARITY: the standalone kernel harness keeps the module it has al
       JSON.stringify(composed.get(fieldId)) !==
       JSON.stringify(declared.get(fieldId)),
   );
-  assert.deepEqual(
-    differing.toSorted(),
-    ['number', ...DERIVED].map(transaction).toSorted(),
-  );
+  assert.deepEqual(differing, [transaction('number')]);
 });

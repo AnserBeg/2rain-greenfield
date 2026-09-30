@@ -137,6 +137,8 @@ test(
               'inventory_transaction',
               {
                 ...values,
+                actor_id: 'fulfillment-test',
+                recorded_at: new Date().toISOString(),
                 source_id: recordId,
                 source_type: 'inventoryTransaction',
               },

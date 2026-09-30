@@ -63,6 +63,7 @@ import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  trustedContextForRequestRuntimeView,
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
@@ -9902,7 +9903,7 @@ test('INVENTORY-PARITY: a stock document is entered in the shared editor; its fi
     'u',
   ).exec(html)![1]!;
 
-  // A forged number, state or source rides along and is ignored.
+  // A forged number, state, source or actor rides along and is ignored.
   const saved = (await post(editor, 'save', {
     ...fill(editor),
     [`draft:${headerId}:${field('inventory_transaction_number')}`]:
@@ -9912,6 +9913,7 @@ test('INVENTORY-PARITY: a stock document is entered in the shared editor; its fi
       'inventory_transaction_state_posted',
     ),
     [`draft:${headerId}:${field('inventory_transaction_source_id')}`]: 'forged',
+    [`draft:${headerId}:${field('inventory_transaction_actor_id')}`]: 'forged',
   }))!;
   assert.equal(saved.statusCode, 303);
   const recordId = new URL(
@@ -9927,7 +9929,17 @@ test('INVENTORY-PARITY: a stock document is entered in the shared editor; its fi
   const created = asRecord(create!.input);
   assert.equal(created.recordId, recordId);
   assert.equal(created.legalEntityId, scope);
-  assert.deepEqual(asRecord(created.values), {
+  // When and by whom it was first recorded: the save's instant and the
+  // saving principal, never typed.
+  const {
+    [field('inventory_transaction_recorded_at')]: recordedAt,
+    ...firstSave
+  } = asRecord(created.values);
+  assert.match(
+    String(recordedAt),
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+  );
+  assert.deepEqual(firstSave, {
     [field('inventory_transaction_type')]: id(
       'option',
       'inventory_transaction_type_adjustment',
@@ -9941,6 +9953,8 @@ test('INVENTORY-PARITY: a stock document is entered in the shared editor; its fi
     ),
     [field('inventory_transaction_source_type')]: 'inventoryTransaction',
     [field('inventory_transaction_source_id')]: recordId,
+    [field('inventory_transaction_actor_id')]:
+      trustedContextForRequestRuntimeView(f.view).principalId,
   });
   // The line: the product, where the stock comes from, the signed quantity,
   // the product's own unit and the next line number, under this document.

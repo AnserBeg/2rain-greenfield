@@ -1074,7 +1074,8 @@ test('INVENTORY-PARITY: a stock document is entered like an order, with a choice
       `${ns}:option.inventory_transaction_type_transfer`,
     ],
   );
-  // G2: the draft state and the document itself as its source, first create only.
+  // G2: the draft state, the document itself as its source, and when and by
+  // whom it was recorded -- first create only.
   assert.deepEqual(editor(source).createValues, [
     {
       fieldId: `${ns}:field.inventory_transaction_state`,
@@ -1091,6 +1092,14 @@ test('INVENTORY-PARITY: a stock document is entered like an order, with a choice
       fieldId: `${ns}:field.inventory_transaction_source_id`,
       value: { source: 'record', field: 'recordId' },
     },
+    {
+      fieldId: `${ns}:field.inventory_transaction_recorded_at`,
+      value: { source: 'generated', value: 'instant' },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_actor_id`,
+      value: { source: 'actor', field: 'principalId' },
+    },
   ]);
 
   // A choice over an enumeration offers only its options.
@@ -1103,8 +1112,9 @@ test('INVENTORY-PARITY: a stock document is entered like an order, with a choice
       `${ns}:option.inventory_transaction_type_shipment`;
   }, /choice presentation requires a text or enumeration field/);
   // A create value is a header field no editor field offers, with a value it
-  // admits: text that fits, an option of its enumeration, or the record id
-  // into text long enough to hold one.
+  // admits: text that fits, an option of its enumeration, the record id or
+  // the principal into text long enough to hold one, the save's instant into
+  // a UTC instant.
   const createValueRefusal =
     /a create value is a header field no editor field offers, holding a value it admits/;
   refuse((candidate) => {
@@ -1136,11 +1146,26 @@ test('INVENTORY-PARITY: a stock document is entered like an order, with a choice
     ).maximumLength = 35;
   }, createValueRefusal);
   refuse((candidate) => {
+    editor(candidate).createValues[1]!.value = {
+      source: 'generated',
+      value: 'instant',
+    };
+  }, createValueRefusal);
+  refuse((candidate) => {
+    (
+      (candidate.fields as Loose[]).find(
+        (value) =>
+          value.fieldId === `${ns}:field.inventory_transaction_actor_id`,
+      )!.fieldType as { maximumLength: number }
+    ).maximumLength = 35;
+  }, createValueRefusal);
+  refuse((candidate) => {
     editor(candidate).createValues.push(
       structuredClone(editor(candidate).createValues[0]!),
     );
   }, /a create value names each field once/);
-  // A closed declaration: a literal or the record's own id, nothing else.
+  // A closed declaration: a literal, the record's own id, the save's instant
+  // or the saving principal -- nothing else.
   refuse((candidate) => {
     editor(candidate).createValues[2]!.value = {
       source: 'selected',
@@ -1149,5 +1174,11 @@ test('INVENTORY-PARITY: a stock document is entered like an order, with a choice
   }, /CANON_SCHEMA_INVALID/);
   refuse((candidate) => {
     editor(candidate).createValues[2]!.fallback = 'none';
+  }, /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    editor(candidate).createValues[3]!.value = {
+      source: 'generated',
+      value: 'uuid',
+    };
   }, /CANON_SCHEMA_INVALID/);
 });

@@ -176,11 +176,13 @@ export function inventoryModuleDefinition(
     /**
      * Stock documents recorded like any other document (INVENTORY-PARITY):
      * a transaction takes a server-assigned `STK-000001` number on its first
-     * save, and its source, recorded time and actor stop being authored --
-     * the editor stores the document as its own posting source, and the
-     * movements carry the recorded time and actor. The product application
-     * mounts Inventory with this; the standalone kernel harness keeps the
-     * module it has always compiled.
+     * save. Its source, recorded time and actor stay required and are never
+     * typed: the editor's first save writes them -- the document as its own
+     * posting source, the save's time and the saving person -- because a
+     * released field's NOT NULL cannot be relaxed by the storage planner
+     * (only a relation's can). The product application mounts Inventory with
+     * this; the standalone kernel harness keeps the module it has always
+     * compiled.
      */
     readonly documentEntry?: boolean;
   } = {},
@@ -375,7 +377,6 @@ export function inventoryModuleDefinition(
         'Source type',
         60,
         text(80),
-        { optional: documentEntry },
       ),
       field(
         definitionIds,
@@ -384,7 +385,6 @@ export function inventoryModuleDefinition(
         'Source id',
         70,
         text(80),
-        { optional: documentEntry },
       ),
       field(
         definitionIds,
@@ -401,7 +401,6 @@ export function inventoryModuleDefinition(
         'Recorded at',
         90,
         instant(),
-        { optional: documentEntry },
       ),
       field(
         definitionIds,
@@ -410,7 +409,6 @@ export function inventoryModuleDefinition(
         'Actor id',
         100,
         text(80),
-        { optional: documentEntry },
       ),
 
       field(

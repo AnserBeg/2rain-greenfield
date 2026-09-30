@@ -579,8 +579,9 @@ export function validateSurfaceWorkspaces(
       );
     // What a never-saved document's first create also writes: header fields
     // the editor does not offer, each once, with a value the field admits --
-    // text that fits, an option of its enumeration, or the document's own
-    // record id into text long enough to hold one.
+    // text that fits, an option of its enumeration, the document's own record
+    // id or the saving principal into text long enough to hold one, or the
+    // save's instant into a UTC instant.
     const headerEntity = headerQuery!.sourceEntity.targetId;
     const offered = new Set(
       [...editor.headerFields, ...editor.lineFields].map((value) =>
@@ -602,13 +603,18 @@ export function validateSurfaceWorkspaces(
     for (const entry of createValues) {
       const type = fields.get(entry.fieldId)?.fieldType;
       const value = entry.value;
+      // A record id or principal is a uuid: text of at least 36 characters.
+      // The save's instant is a UTC instant.
       const admissible =
-        value.source === 'record'
+        value.source === 'record' || value.source === 'actor'
           ? type?.kind === 'textFieldType' && type.maximumLength >= 36
-          : type?.kind === 'textFieldType'
-            ? [...value.value].length <= type.maximumLength
-            : type?.kind === 'enumFieldType' &&
-              type.options.some((option) => option.optionId === value.value);
+          : value.source === 'generated'
+            ? type?.kind === 'dateTimeFieldType' &&
+              type.timezoneSemantics === 'utcInstant'
+            : type?.kind === 'textFieldType'
+              ? [...value.value].length <= type.maximumLength
+              : type?.kind === 'enumFieldType' &&
+                type.options.some((option) => option.optionId === value.value);
       if (
         !createsHeader ||
         fields.get(entry.fieldId)?.entity.targetId !== headerEntity ||

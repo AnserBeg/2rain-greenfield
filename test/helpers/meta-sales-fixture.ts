@@ -102,9 +102,11 @@ async function seed(
   const stock = await create(
     'inventory_transaction',
     {
+      actor_id: 'meta-sales-fixture',
       effective_at: now,
       reason_code: 'SETUP',
       reason_narrative: 'Isolated metadata workspace fixture',
+      recorded_at: now,
       source_id: stockId,
       source_type: 'inventoryTransaction',
       state: `${ns}:option.inventory_transaction_state_draft`,

@@ -1194,9 +1194,9 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
   /**
    * Values a never-saved document's first create also writes, in header
    * fields the editor does not offer: a literal (a draft state, a source
-   * type) or the document's own record id (a stock document naming itself as
-   * its posting source). An update never sends them. Optional v6 key
-   * (ADR-0047 §7).
+   * type), the document's own record id (a stock document naming itself as
+   * its posting source), the save's instant, or the saving principal. An
+   * update never sends them. Optional v6 key (ADR-0047 §7).
    */
   createValues: z
     .array(
@@ -1211,11 +1211,19 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
             source: z.literal('record'),
             field: z.literal('recordId'),
           }),
+          z.strictObject({
+            source: z.literal('generated'),
+            value: z.literal('instant'),
+          }),
+          z.strictObject({
+            source: z.literal('actor'),
+            field: z.literal('principalId'),
+          }),
         ]),
       }),
     )
     .min(1)
-    .max(4)
+    .max(8)
     .optional(),
 });
 export type SurfaceDocumentEditor = z.infer<typeof SurfaceDocumentEditorSchema>;

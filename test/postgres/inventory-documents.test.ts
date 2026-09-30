@@ -152,7 +152,9 @@ test(
         const header = await fixture.create(
           'inventory_transaction',
           {
+            actor_id: 'stock-document-test',
             effective_at: new Date().toISOString(),
+            recorded_at: new Date().toISOString(),
             reason_code: reason,
             reason_narrative:
               options.narrative === undefined
@@ -232,7 +234,11 @@ test(
           legalEntityId: fixture.scope,
           values: {
             [field('number')]: 'STK-999999',
+            [field('actor_id')]: 'stock-document-test',
             [field('effective_at')]: new Date().toISOString(),
+            [field('recorded_at')]: new Date().toISOString(),
+            [field('source_id')]: typed,
+            [field('source_type')]: 'inventoryTransaction',
             [field('state')]: option('state_draft'),
             [field('type')]: option('type_adjustment'),
           },

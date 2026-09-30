@@ -219,7 +219,8 @@ async function seed(
   const now = new Date().toISOString();
   /**
    * A stock document as the editor saves one (INVENTORY-PARITY): the server
-   * numbers it, and it is a draft naming itself as its posting source.
+   * numbers it, and it is a draft naming itself as its posting source, with
+   * when and by whom it was recorded.
    */
   const stockDocument = (
     values: Record<string, ImmutableJsonValue>,
@@ -229,6 +230,8 @@ async function seed(
       'inventory_transaction',
       {
         ...values,
+        actor_id: 'order-entry-fixture',
+        recorded_at: new Date().toISOString(),
         source_id: recordId,
         source_type: 'inventoryTransaction',
         state: `${ns}:option.inventory_transaction_state_draft`,

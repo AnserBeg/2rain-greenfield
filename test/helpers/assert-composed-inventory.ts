@@ -152,7 +152,8 @@ function assertDocumentComposition(
 /**
  * The stock document editor, pinned by what makes it this document's: its
  * pages, lines, draft state and the values its first save writes -- the draft
- * state and the document itself as its posting source.
+ * state, the document itself as its posting source, the save's time and the
+ * saving person.
  */
 function assertStockDocumentEditor(namespace: string, editor: unknown): void {
   const id = (kind: string, local: string) => `${namespace}:${kind}.${local}`;
@@ -202,8 +203,16 @@ function assertStockDocumentEditor(namespace: string, editor: unknown): void {
         fieldId: id('field', 'inventory_transaction_source_id'),
         value: { source: 'record', field: 'recordId' },
       },
+      {
+        fieldId: id('field', 'inventory_transaction_recorded_at'),
+        value: { source: 'generated', value: 'instant' },
+      },
+      {
+        fieldId: id('field', 'inventory_transaction_actor_id'),
+        value: { source: 'actor', field: 'principalId' },
+      },
     ],
-    'a stock document is saved as a draft naming itself as its source',
+    'a stock document is saved as a draft naming itself as its source, with when and by whom',
   );
 }
 

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import type {
-  RequestRuntimeView,
-  ImmutableJsonValue,
+import {
+  trustedContextForRequestRuntimeView,
+  type RequestRuntimeView,
+  type ImmutableJsonValue,
 } from '../../../packages/runtime/src/request-runtime-view.js';
 import {
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -2551,7 +2552,9 @@ function snapshot(
 /**
  * The declared create values a row's save also writes: only the header's
  * first create, never an update, a removal or a line. A literal is sent as
- * declared; the record id is the header row's own, the id its create sends.
+ * declared; the record id is the header row's own, the id its create sends;
+ * the instant is the save's and the principal the saving person's. The save
+ * plan freezes them with the step, so a retry resends the same values.
  */
 export function createValuesFor(
   definition: SurfaceDocumentEditor,
@@ -2561,12 +2564,19 @@ export function createValuesFor(
     readonly removed: boolean;
   },
   header: boolean,
+  save: { readonly instant: string; readonly principalId: string },
 ): Readonly<Record<string, string>> {
   if (!header || row.record || row.removed) return {};
   return Object.fromEntries(
     (definition.createValues ?? []).map((entry) => [
       entry.fieldId,
-      entry.value.source === 'record' ? row.id : entry.value.value,
+      entry.value.source === 'record'
+        ? row.id
+        : entry.value.source === 'generated'
+          ? save.instant
+          : entry.value.source === 'actor'
+            ? save.principalId
+            : entry.value.value,
     ]),
   );
 }
@@ -2578,6 +2588,10 @@ function plan(
 ): SaveStep[] {
   const definition = buffer.definition;
   const steps: SaveStep[] = [];
+  const save = {
+    instant: new Date().toISOString(),
+    principalId: trustedContextForRequestRuntimeView(view).principalId,
+  };
   const append = (
     row: DraftRow,
     surfaceId: string,
@@ -2616,7 +2630,7 @@ function plan(
       values[field.fieldId] = value;
     }
     for (const [fieldId, value] of Object.entries(
-      createValuesFor(definition, row, row === buffer.header),
+      createValuesFor(definition, row, row === buffer.header, save),
     )) {
       if (!allowed.has(fieldId)) throw new Error('Editor field unavailable');
       values[fieldId] = value;

@@ -2169,6 +2169,14 @@ test('a document editor writes its declared create values on the header first cr
         fieldId: id('field', 'slip_source_id'),
         value: { source: 'record', field: 'recordId' },
       },
+      {
+        fieldId: id('field', 'slip_recorded_at'),
+        value: { source: 'generated', value: 'instant' },
+      },
+      {
+        fieldId: id('field', 'slip_actor_id'),
+        value: { source: 'actor', field: 'principalId' },
+      },
     ],
   });
   const header = {
@@ -2176,11 +2184,17 @@ test('a document editor writes its declared create values on the header first cr
     record: null,
     removed: false,
   };
-  // The header's first create: the literal as declared, and its own id --
-  // the id the create itself sends.
-  assert.deepEqual(createValuesFor(definition, header, true), {
+  const save = {
+    instant: '2026-09-30T14:05:09.123Z',
+    principalId: '00000000-0000-4000-8000-0000000000b2',
+  };
+  // The header's first create: the literal as declared, its own id -- the id
+  // the create itself sends -- and the save's instant and principal.
+  assert.deepEqual(createValuesFor(definition, header, true, save), {
     [id('field', 'slip_state')]: id('option', 'slip_state_draft'),
     [id('field', 'slip_source_id')]: header.id,
+    [id('field', 'slip_recorded_at')]: save.instant,
+    [id('field', 'slip_actor_id')]: save.principalId,
   });
   // Never an update of a saved header, a removal or a line.
   assert.deepEqual(
@@ -2188,16 +2202,17 @@ test('a document editor writes its declared create values on the header first cr
       definition,
       { ...header, record: { recordId: header.id } },
       true,
+      save,
     ),
     {},
   );
   assert.deepEqual(
-    createValuesFor(definition, { ...header, removed: true }, true),
+    createValuesFor(definition, { ...header, removed: true }, true, save),
     {},
   );
-  assert.deepEqual(createValuesFor(definition, header, false), {});
+  assert.deepEqual(createValuesFor(definition, header, false, save), {});
   // An editor that declares none writes none.
   const { createValues: _declared, ...plain } = definition;
   void _declared;
-  assert.deepEqual(createValuesFor(plain, header, true), {});
+  assert.deepEqual(createValuesFor(plain, header, true, save), {});
 });

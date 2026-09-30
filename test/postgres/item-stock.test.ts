@@ -334,9 +334,11 @@ test(
       const opening = await createIn(
         'inventory_transaction',
         {
+          actor_id: 'item-stock-test',
           effective_at: now,
           reason_code: 'SETUP-B',
           reason_narrative: 'Second company stock',
+          recorded_at: now,
           source_id: openingId,
           source_type: 'inventoryTransaction',
           state: `${ns}:option.inventory_transaction_state_draft`,

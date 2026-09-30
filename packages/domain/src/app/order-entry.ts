@@ -482,8 +482,9 @@ export function orderEntrySurfaces(
   /**
    * A stock document (INVENTORY-PARITY): an adjustment or a transfer, entered
    * like an order. The server numbers it STK-000001 on its first save, which
-   * also writes its draft state and names the document itself as its posting
-   * source; Post stays the existing confirmed command on the saved record.
+   * also writes its draft state, names the document itself as its posting
+   * source and records when and by whom; Post stays the existing confirmed
+   * command on the saved record.
    */
   const stockDocument = () => {
     const field = (
@@ -576,6 +577,16 @@ export function orderEntrySurfaces(
         {
           fieldId: id('field', 'inventory_transaction_source_id'),
           value: { source: 'record', field: 'recordId' },
+        },
+        // When and by whom the document was first recorded; the movements
+        // carry their own posting time and actor.
+        {
+          fieldId: id('field', 'inventory_transaction_recorded_at'),
+          value: { source: 'generated', value: 'instant' },
+        },
+        {
+          fieldId: id('field', 'inventory_transaction_actor_id'),
+          value: { source: 'actor', field: 'principalId' },
         },
       ],
       lineFields: [
