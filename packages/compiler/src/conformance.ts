@@ -2406,11 +2406,24 @@ export function validateModuleConformance(
     // write path. Its commands identify the entity through their declared
     // read-back; granting generic CRUD as well would allow callers to forge
     // capability-produced records. Partly generic entities still owe all CRUD.
-    const capabilityOwned = entityOperations.length === 0 && packageRevision.operations.some((operation) =>
-      operation.lifecycle === 'active' && operation.effect.kind === 'registeredCapabilityEffect' &&
-      queryById.get(operation.readBack.targetId)?.sourceEntity.targetId === entity.entityId &&
-      packageRevision.capabilityRequirements.some((requirement) => requirement.capabilityId === operation.effect.capability.targetId && requirement.supportStatus === 'supported' && requirement.declaredEffects.includes('recordMutation')),
-    );
+    const capabilityOwned =
+      entityOperations.length === 0 &&
+      packageRevision.operations.some((operation) => {
+        if (
+          operation.lifecycle !== 'active' ||
+          operation.effect.kind !== 'registeredCapabilityEffect' ||
+          queryById.get(operation.readBack.targetId)?.sourceEntity.targetId !==
+            entity.entityId
+        )
+          return false;
+        const capabilityId = operation.effect.capability.targetId;
+        return packageRevision.capabilityRequirements.some(
+          (requirement) =>
+            requirement.capabilityId === capabilityId &&
+            requirement.supportStatus === 'supported' &&
+            requirement.declaredEffects.includes('recordMutation'),
+        );
+      });
     const authoredEntityOperations = providerWrittenReadModelRule
       ? packageRevision.operations.filter((operation) =>
           operationTargetsEntity(packageRevision, operation, entity.entityId),

@@ -269,12 +269,29 @@ export function withPurchaseOrderApprovals(
   );
   return {
     ...definition,
-    assertions: [...collection('assertions'), ...Object.keys(specs).map((local) => ({
-      kind: 'assertionDefinition', schemaVersion: version, assertionId: id('assertion', `${local}_walking_slice`),
-      evidenceKinds: ['structure', 'provider', 'userInterface', 'agent', 'migration', 'recovery'],
-      expectedDiagnosticCode: null, expectedOutcome: 'succeeds',
-      invocation: { kind: 'queryInvocation', schemaVersion: version, query: ref('queryReference', id('query', `${local}_get`)) },
-    }))],
+    assertions: [
+      ...collection('assertions'),
+      ...Object.keys(specs).map((local) => ({
+        kind: 'assertionDefinition',
+        schemaVersion: version,
+        assertionId: id('assertion', `${local}_walking_slice`),
+        evidenceKinds: [
+          'structure',
+          'provider',
+          'userInterface',
+          'agent',
+          'migration',
+          'recovery',
+        ],
+        expectedDiagnosticCode: null,
+        expectedOutcome: 'succeeds',
+        invocation: {
+          kind: 'queryInvocation',
+          schemaVersion: version,
+          query: ref('queryReference', id('query', `${local}_get`)),
+        },
+      })),
+    ],
     capabilityRequirements: [
       ...collection('capabilityRequirements'),
       {
