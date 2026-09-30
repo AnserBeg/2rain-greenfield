@@ -119,10 +119,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
       await control.evaluate((element, id) => {
         (element as HTMLInputElement).value = id;
       }, value);
+    // A datetime-local input normalizes ":00" seconds away, so a value typed
+    // to the second at the top of a minute reads back as malformed; the
+    // journey needs the minute, not the second.
     else
       await control.fill(
         (await control.getAttribute('type')) === 'datetime-local'
-          ? value.slice(0, 19)
+          ? value.slice(0, 16)
           : value,
       );
   };
