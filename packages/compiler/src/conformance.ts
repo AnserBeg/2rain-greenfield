@@ -51,6 +51,8 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'goods_receipt_line' },
   { classification: 'entityOwned', familyId: 'purchase_order_received' },
   { classification: 'entityOwned', familyId: 'purchase_order_amendment' },
+  { classification: 'entityOwned', familyId: 'purchase_order_approval' },
+  { classification: 'tenantShared', familyId: 'purchasing_settings' },
   { classification: 'entityOwned', familyId: 'sales_order' },
   { classification: 'entityOwned', familyId: 'sales_order_line' },
   { classification: 'entityOwned', familyId: 'reservation' },
@@ -184,6 +186,11 @@ const LEGAL_ENTITY_MASTER_FIELD_ROLES = Object.freeze({
   status: 'legal_entity_status',
 } as const);
 const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'purchase_order_approval',
+    targetFamilyId: 'purchase_order',
+  },
   {
     semantics: 'sameEntity',
     sourceFamilyId: 'inventory_movement',

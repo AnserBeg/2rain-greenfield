@@ -44,6 +44,7 @@ export async function withOrderEntryFixture(
   orderVolume = 0,
   /** A compiled release to serve instead of the checked-in one. */
   compiledApplication?: unknown,
+  purchaseOrdersRequireApproval = false,
 ) {
   await withEphemeralPostgres('order-entry', async ({ connection, pool }) => {
     const app = await startComposedApplication({
@@ -52,6 +53,9 @@ export async function withOrderEntryFixture(
       port: 0,
       seedProfile,
       tenantSlug: 'order-entry',
+      ...(purchaseOrdersRequireApproval
+        ? { purchaseOrdersRequireApproval: true as const }
+        : {}),
     });
     try {
       await run(await seed(app, pool, lookupVolume, orderVolume));
@@ -1291,5 +1295,7 @@ if (process.argv.includes('--serve')) {
         .find((value) => value.startsWith('--order-volume='))
         ?.slice('--order-volume='.length) ?? 0,
     ),
+    undefined,
+    process.argv.includes('--approvals'),
   );
 }

@@ -1063,7 +1063,7 @@ export const SurfaceCompositionSchema = z.strictObject({
   schemaVersion: v6NodeVersion,
   fields: z.array(compositionColumn).max(30),
   children: z.array(compositionDataset).max(8),
-  actions: z.array(compositionAction).max(12),
+  actions: z.array(compositionAction).max(16),
 });
 export type SurfaceComposition = z.infer<typeof SurfaceCompositionSchema>;
 /** Optional v6 workspace declarations; absence preserves historical bytes. */

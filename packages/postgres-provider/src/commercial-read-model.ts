@@ -10,6 +10,10 @@ import {
 import { fulfillmentProjectionIdentity } from './fulfillment.js';
 import { receivedIdentity } from './goods-receipt.js';
 import {
+  purchaseOrderRevisionDigest,
+  currentPurchaseOrderApproval,
+} from './purchase-order-approval.js';
+import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryPolicyDeniedError,
@@ -367,7 +371,7 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
   const rows: SemanticRecordDto[] = [];
   for (const row of result.records) {
     const values: Record<string, ImmutableJsonValue> = { ...row.values };
-    const emit = (key: string, value: string | null) => {
+    const emit = (key: string, value: ImmutableJsonValue) => {
       const target = model.resultFields[key];
       if (!target) throw new Error('Read-model output is undeclared');
       values[target] = value;
@@ -414,6 +418,58 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseOrder
     ) {
       const lines = await totalledLines(row.recordId);
+      if (purchase && model.resultFields.approval_ready) {
+        // Read authority is re-entered for both dependencies. Unknown never means approved.
+        let required: boolean | null = null;
+        let approval: string | null = null;
+        let ready: boolean | null = null;
+        try {
+          const settings = await invoke('settings', { includeArchived: false });
+          if (settings.outcome !== 'exact')
+            throw new Error('Purchasing settings could not be read exactly');
+          required = settings.records.some(
+            (record) =>
+              record.values[field('purchasing_settings_key')] ===
+                'purchase-orders' &&
+              record.values[field('purchasing_settings_require_approval')] ===
+                true,
+          );
+          if (!required) {
+            approval = 'Not required';
+            ready = true;
+          } else if (lines !== null) {
+            const requests = await listAll(
+              'approvals',
+              `${ns}:relation.purchase_order_approval_order`,
+              row.recordId,
+              'referenceScope',
+            );
+            approval = currentPurchaseOrderApproval(
+              purchaseOrderRevisionDigest(row.revision, lines),
+              requests.map((record) => ({
+                digest: String(
+                  record.values[
+                    field('purchase_order_approval_revision_digest')
+                  ],
+                ),
+                kind: String(
+                  record.values[field('purchase_order_approval_kind')],
+                ),
+                state:
+                  String(
+                    record.values[field('purchase_order_approval_state')],
+                  ).split('purchase_order_approval_state_')[1] ?? '',
+              })),
+            );
+            ready = approval === 'Approved';
+          }
+        } catch (error) {
+          if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+        }
+        emit('approval_required', required);
+        emit('approval_status', approval);
+        emit('approval_ready', ready);
+      }
       // Withheld lines state nothing, as an unpriced line does.
       let complete = lines !== null;
       let subtotal = 0n;

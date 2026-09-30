@@ -8,6 +8,7 @@ import {
 import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 import { SURFACE_CLIENT_CSP_HASH } from './surface-client.js';
+import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 
 import {
   FRAGMENT_REQUEST_HEADER,
@@ -26,9 +27,10 @@ export type { SurfaceRuntimeApplicationExtension } from './surface-runtime.js';
 export function createSurfaceRuntimeServer(
   entry: AuthenticatedRequestRuntimeEntryAdapter,
   gateways?: SurfaceRuntimeGateways,
+  demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
 ): Server {
   return createServer((request, response) => {
-    void handleRequest(entry, gateways, request, response);
+    void handleRequest(entry, gateways, request, response, demoActors);
   });
 }
 
@@ -37,6 +39,7 @@ async function handleRequest(
   gateways: SurfaceRuntimeGateways | undefined,
   request: IncomingMessage,
   response: ServerResponse,
+  demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
@@ -114,6 +117,42 @@ async function handleRequest(
   try {
     const submission =
       request.method === 'POST' ? await readFormSubmission(request) : null;
+    if (
+      demoActors &&
+      submission &&
+      Object.hasOwn(submission, 'localDemoActAs')
+    ) {
+      const actor = demoActors.find(
+        (candidate) => candidate.key === submission.localDemoActAs,
+      );
+      if (!actor) {
+        writeHtml(response, { statusCode: 400, html: '' });
+        return;
+      }
+      // A cross-site form cannot switch the fixture's selected identity.
+      const origin = request.headers.origin;
+      if (
+        request.headers['sec-fetch-site'] !== 'same-origin' &&
+        (typeof origin !== 'string' ||
+          new URL(origin).host !== request.headers.host)
+      ) {
+        writeHtml(response, { statusCode: 403, html: '' });
+        return;
+      }
+      response.setHeader(
+        'set-cookie',
+        `northstar-demo-actor=${actor.key}; Path=/; HttpOnly; SameSite=Strict`,
+      );
+      // Return to the page, dropping any prepared Task owned by the prior actor.
+      for (const name of [...url.searchParams.keys()])
+        if (name.toLowerCase().includes('task')) url.searchParams.delete(name);
+      writeHtml(response, {
+        statusCode: 303,
+        html: '',
+        location: `${url.pathname}${url.search}`,
+      });
+      return;
+    }
     const result = gateways
       ? await entry.run({ headers: request.headers }, (view) =>
           submission
@@ -123,7 +162,16 @@ async function handleRequest(
       : await entry.run({ headers: request.headers }, (view) =>
           renderSurfaceRuntime(view, url.href),
         );
-    writeHtml(response, result);
+    const selectedActor = localDemoActor(request.headers.cookie);
+    const demoBar = demoActors
+      ? `<aside aria-label="Local demo identity"><form method="post"><label>Acting as <select name="localDemoActAs" aria-label="Acting as">${demoActors.map((actor) => `<option value="${actor.key}"${actor.key === selectedActor ? ' selected' : ''}>${actor.label}</option>`).join('')}</select></label><button type="submit">Switch person</button><span>Local demo</span></form></aside>`
+      : '';
+    writeHtml(
+      response,
+      demoBar
+        ? { ...result, html: result.html.replace('<body>', `<body>${demoBar}`) }
+        : result,
+    );
   } catch (error) {
     if (error instanceof AuthenticationRequiredError) {
       writeHtml(
