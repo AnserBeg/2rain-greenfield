@@ -70,11 +70,13 @@ import {
   type SemanticQueryExecutionContext,
   type SemanticQueryExecutor,
   type SemanticQueryResultEnvelope,
+  type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
   type ModuleProviderErrorMapping,
   ModuleRuntimeInterpreterError,
   PostgresModuleRuntimeInterpreter,
+  verificationSentinelNumber,
 } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
@@ -1104,6 +1106,7 @@ interface VerificationQueryContractBase {
     };
     readonly schemaVersion: string;
   };
+  readonly lifecycle: 'active' | 'retired';
   readonly parameters?: readonly { readonly parameterId: string }[];
   readonly queryId: string;
   /** Present when a read model states figures on read; see `#queryForEntity`. */
@@ -1114,6 +1117,7 @@ interface VerificationQueryContractBase {
   }[];
   readonly selections: readonly { readonly fieldId: string }[];
   readonly sourceEntityId: string;
+  readonly tier: 'q0' | 'q1';
 }
 
 interface VerificationAggregateQueryContract extends VerificationQueryContractBase {
@@ -1825,7 +1829,6 @@ class SemanticVerificationExecutor {
       arrangementPath,
     );
     const operation = this.#createOperation(entityId);
-    const created = await this.#invokeOperation(operation, input);
     const systemInput = operation.inputContract.systemInput;
     const legalEntityId = systemInput ? input[systemInput.argumentKey] : null;
     if (legalEntityId !== null && typeof legalEntityId !== 'string') {
@@ -1834,31 +1837,120 @@ class SemanticVerificationExecutor {
         'verification arranged a record with an invalid system input value',
       );
     }
-    // A server-assigned number is not in the input; the probes that search,
-    // resolve or compare it read the value the create stored.
-    const assignedValues: Record<string, string> = {};
-    for (const assigned of operation.inputContract.assignedFields ?? []) {
-      const value = created.readBack?.values[assigned.fieldId];
-      if (typeof value !== 'string' || value.length === 0) {
-        throw failure(
-          'VERIFICATION_ASSIGNED_VALUE_MISSING',
-          `create ${operation.operationId} did not read back its assigned ${assigned.fieldId}`,
-        );
-      }
-      assignedValues[assigned.fieldId] = value;
-    }
-    const record = Object.freeze({
+    const created = await this.#invokeOperation(operation, input);
+    // Registered for archiving the moment it exists: whatever fails below,
+    // `archiveProbeRecords` still archives it.
+    const arranged: VerificationRecord = Object.freeze({
       entityId,
       legalEntityId,
       recordId: String(input.recordId),
       relations: input.relations as Readonly<Record<string, string>>,
       values: Object.freeze({
         ...(input.values as Readonly<Record<string, unknown>>),
-        ...assignedValues,
       }),
     });
-    this.#createdRecords.push(record);
+    const registered = this.#createdRecords.push(arranged) - 1;
+    const assignedFields = operation.inputContract.assignedFields ?? [];
+    if (assignedFields.length === 0) return arranged;
+    // A server-assigned number is not in the input; the probes that search,
+    // resolve or compare it use the value the create stored.
+    const assignedValues: Record<string, string> = {};
+    for (const assigned of assignedFields) {
+      const value = await this.#assignedWitness(
+        operation,
+        assigned.fieldId,
+        arranged,
+        created.readBack,
+      );
+      assignedValues[assigned.fieldId] = value;
+    }
+    const record = Object.freeze({
+      ...arranged,
+      values: Object.freeze({ ...arranged.values, ...assignedValues }),
+    });
+    this.#createdRecords[registered] = record;
     return record;
+  }
+
+  /**
+   * The value a create assigned to one of its numbered fields. Verification's
+   * creates take sentinel numbers, so the value is known without a read
+   * (`verificationSentinelNumber`); it is still read wherever the release lets
+   * a caller read it by record id -- the create's read-back when that
+   * projection selects the field, else a plain get that selects it -- and must
+   * be that sentinel. A read-back is a declared projection, not the record:
+   * one that omits the field says nothing about the assignment. Only when no
+   * read by record id selects the field is the sentinel used unread.
+   */
+  async #assignedWitness(
+    operation: VerificationOperationContract,
+    fieldId: string,
+    record: VerificationRecord,
+    readBack: SemanticRecordDto | null,
+  ): Promise<string> {
+    const column = this.#requiredStorageEntity(record.entityId).columns.find(
+      (candidate) => candidate.canonicalFieldId === fieldId,
+    );
+    if (!column) {
+      throw failure(
+        'VERIFICATION_STORAGE_FIELD_MISSING',
+        `compiled verification field has no storage column: ${fieldId}`,
+      );
+    }
+    const sentinel = verificationSentinelNumber(
+      record.recordId,
+      fieldId,
+      column.fieldContract.bounds.maximumLength,
+    );
+    let observed: unknown;
+    let source: string;
+    if (readBack !== null && Object.hasOwn(readBack.values, fieldId)) {
+      observed = readBack.values[fieldId];
+      source = 'read-back';
+    } else {
+      // A Q0 filter is the literal `true`, so an active plain Q0 get returns
+      // any record by id; a read-model get is never the read (`#queryForEntity`).
+      const get = this.#queries.find(
+        (candidate) =>
+          candidate.sourceEntityId === record.entityId &&
+          candidate.queryType === 'get' &&
+          candidate.lifecycle === 'active' &&
+          candidate.tier === 'q0' &&
+          candidate.readModel === undefined &&
+          candidate.selections.some(
+            (selection) => selection.fieldId === fieldId,
+          ),
+      );
+      if (!get) return sentinel;
+      const read = await this.#invokeQuery(
+        get,
+        { recordId: record.recordId },
+        record,
+      );
+      const row =
+        isRecord(read) && Array.isArray(read.records)
+          ? read.records.find(
+              (candidate) =>
+                isRecord(candidate) && candidate.recordId === record.recordId,
+            )
+          : undefined;
+      observed =
+        isRecord(row) && isRecord(row.values) ? row.values[fieldId] : undefined;
+      source = `query ${get.queryId}`;
+    }
+    if (typeof observed !== 'string' || observed.length === 0) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_VALUE_MISSING',
+        `create ${operation.operationId} did not read back its assigned ${fieldId} (${source})`,
+      );
+    }
+    if (observed !== sentinel) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_VALUE_MISMATCH',
+        `create ${operation.operationId} assigned ${fieldId} ${observed} (${source}), not its verification sentinel ${sentinel}: release verification must not consume real document numbers`,
+      );
+    }
+    return observed;
   }
 
   async #createInput(
