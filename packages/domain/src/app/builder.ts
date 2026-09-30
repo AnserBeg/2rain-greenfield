@@ -12,7 +12,11 @@ import { partyWorkspace } from '../party/workspace.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
 import { orderEntrySurfaces } from './order-entry.js';
-import { declareLists } from './list-declarations.js';
+import {
+  declareLists,
+  worklistQueries,
+  worklistSurfaces,
+} from './list-declarations.js';
 import { purchasingWorkspace } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 
@@ -52,7 +56,8 @@ type CollectionName =
 const MODULE_REGISTRY = Object.freeze([
   Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
   Object.freeze({
-    create: purchasingModuleDefinition,
+    create: (namespace: string) =>
+      purchasingModuleDefinition(namespace, { commercialTerms: true }),
     moduleName: 'purchasing',
   }),
   Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
@@ -98,6 +103,7 @@ const LINES_LEAD: ReadonlySet<string> = new Set([
 /** Workspaces that read their record through a read-model query. */
 const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
   sales_order_detail: 'commercial_order_get',
+  purchase_order_detail: 'commercial_purchase_order_get',
 });
 
 /** The mounted module names, in composition order, for callers that assert on the set. */
@@ -187,17 +193,25 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       version: '1.0.0',
     },
     permissions: merged(definitions, 'permissions'),
-    queries: salesWorkspaceQueries(
-      APPLICATION_NAMESPACE,
-      merged(definitions, 'queries') as Record<string, unknown>[],
-    ),
+    queries: [
+      ...salesWorkspaceQueries(
+        APPLICATION_NAMESPACE,
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
+      // A worklist reads its own clone of its source List's query.
+      ...worklistQueries(
+        APPLICATION_NAMESPACE,
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
+    ],
     relations: merged(definitions, 'relations'),
     schemaVersion: version,
     stateMachines: merged(definitions, 'stateMachines'),
     storageMappings: merged(definitions, 'storageMappings'),
     surfaces: orderEntrySurfaces(
       APPLICATION_NAMESPACE,
-      merged(definitions, 'surfaces').map((surface) => {
+      // Worklists join the workspace pass as Lists of their own.
+      withWorklistSurfaces(merged(definitions, 'surfaces')).map((surface) => {
         if (!isRecord(surface))
           throw new TypeError('surface must be an object');
         const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
@@ -253,6 +267,17 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       merged(definitions, 'queries') as Record<string, unknown>[],
     ),
   });
+}
+
+/** A worklist's List surface joins the composed surfaces beside its source. */
+function withWorklistSurfaces(surfaces: unknown[]): unknown[] {
+  return [
+    ...surfaces,
+    ...worklistSurfaces(
+      APPLICATION_NAMESPACE,
+      surfaces as Record<string, unknown>[],
+    ),
+  ];
 }
 
 /** Declared Lists apply after the workspace pass, over the final surfaces. */

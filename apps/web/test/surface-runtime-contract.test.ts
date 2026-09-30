@@ -11,7 +11,7 @@ import {
   SURFACE_CLIENT_SCRIPT,
 } from '../src/surface-client.js';
 
-import { STATUS_ROLES } from '@north-star/canonical-model';
+import { STATUS_ROLES, SurfaceListSchema } from '@north-star/canonical-model';
 import {
   RequestRuntimeViewLoadError,
   type RequestRuntimeViewLoadErrorCode,
@@ -58,6 +58,13 @@ import {
   surfaceSupportsRuntimeIntent,
 } from '../src/component-registry.js';
 import { readDemoCompiledFixture } from '../src/demo-runtime.js';
+import {
+  declaredListArguments,
+  declaredListCsv,
+  overdueDays,
+  readDeclaredListState,
+  startOfTodayUtc,
+} from '../src/list-declaration.js';
 import { renderSurfaceRuntime } from '../src/surface-runtime.js';
 import {
   INTENT_RENDERED_ARITY,
@@ -921,6 +928,223 @@ test('inherited object names cannot execute as unregistered components', async (
   } finally {
     rmSync(temporaryDirectory, { force: true, recursive: true });
   }
+});
+
+/**
+ * PURCHASING-PARITY: a declared List's "before today" is made from the
+ * request's injected clock, never compiled in. The shared List runtime knows
+ * no surface, so a synthetic declaration stands in for Expected receipts.
+ */
+test('a declared List sends before-today as the injected day, keeps each tab open filter and marks the same rows late', () => {
+  const ns = 'northstar.fixture';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const released = id('state', 'order_released');
+  const state = id('field', 'order_state');
+  const expected = id('field', 'order_expected_date');
+  const output = (local: string) => id('list_output', `worklist_${local}`);
+  const ref = (targetId: string) => ({
+    kind: 'queryReference',
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const list = SurfaceListSchema.parse({
+    kind: 'surfaceList',
+    schemaVersion: 'v6',
+    pageSize: 2,
+    columns: [
+      {
+        columnId: id('list_column', 'worklist_number'),
+        label: 'Number',
+        orderKey: 10,
+        field: id('field', 'order_number'),
+        role: 'title',
+        priority: 0,
+        sortable: true,
+      },
+      {
+        columnId: id('list_column', 'worklist_expected'),
+        label: 'Expected',
+        orderKey: 20,
+        field: expected,
+        role: 'value',
+        priority: 1,
+        sortable: true,
+        format: 'date',
+        overdue: { view: id('list_view', 'worklist_late') },
+      },
+      ...(['ordered', 'received', 'open'] as const).map((local, index) => ({
+        columnId: id('list_column', `worklist_${local}`),
+        label: local,
+        orderKey: 30 + index * 10,
+        field: output(local),
+        role: 'value',
+        priority: 2 + index,
+        sortable: false,
+      })),
+    ],
+    defaultSort: [
+      {
+        columnId: id('list_column', 'worklist_expected'),
+        direction: 'ascending',
+      },
+    ],
+    views: [
+      {
+        viewId: id('list_view', 'worklist_open'),
+        label: 'To receive',
+        orderKey: 10,
+        filters: [{ field: state, value: released }],
+        open: true,
+      },
+      {
+        viewId: id('list_view', 'worklist_late'),
+        label: 'Late',
+        orderKey: 20,
+        filters: [{ field: state, value: released }],
+        open: true,
+        before: { field: expected, anchor: 'startOfTodayUtc' },
+      },
+      {
+        viewId: id('list_view', 'worklist_all'),
+        label: 'All',
+        orderKey: 30,
+        filters: [{ field: state, value: released }],
+      },
+    ],
+    filters: [],
+    export: { format: 'csv' },
+    progress: {
+      lines: {
+        query: ref(id('query', 'order_line_list')),
+        relation: id('relation', 'order_line_order'),
+        quantity: id('field', 'order_line_quantity'),
+      },
+      done: {
+        query: ref(id('query', 'order_received_list')),
+        relation: id('relation', 'order_received_line'),
+        quantity: id('field', 'order_received_quantity'),
+      },
+      openIn: { field: state, values: [released] },
+      outputs: {
+        ordered: output('ordered'),
+        done: output('received'),
+        open: output('open'),
+      },
+    },
+  });
+  const queryId = id('query', 'worklist');
+  // One second before midnight UTC: still the 29th, whatever the host zone.
+  const now = new Date('2026-09-29T23:59:59.999Z');
+  assert.equal(startOfTodayUtc(now).toISOString(), '2026-09-29T00:00:00.000Z');
+  const late = readDeclaredListState(
+    list,
+    new URL(
+      `http://list.local/?view=${encodeURIComponent(id('list_view', 'worklist_late'))}&page=2`,
+    ),
+  );
+  type Sent = {
+    list: {
+      cursor: string | null;
+      beforeFilters?: unknown;
+      progress?: { openOnly?: true; outputs: unknown };
+    };
+  };
+  const sent = (
+    options: Partial<Parameters<typeof declaredListArguments>[2]>,
+  ) =>
+    declaredListArguments(list, late, {
+      mode: 'page',
+      now,
+      queryId,
+      scopeArguments: {},
+      ...options,
+    }) as unknown as Sent;
+  const page = sent({ pageOffset: 2 });
+  assert.deepEqual(page.list.beforeFilters, [
+    { before: '2026-09-29T00:00:00.000Z', fieldId: expected },
+  ]);
+  assert.equal(page.list.progress?.openOnly, true);
+  // The page-2 cursor is the gateway's own: it decodes for this day and shape
+  // and for no other.
+  const parse = (value: Sent) =>
+    listBehavior.parseSharedListArguments(
+      value as unknown as Parameters<
+        typeof listBehavior.parseSharedListArguments
+      >[0],
+      { declaredParameterIds: [], maximumResultCount: 100, queryId },
+    );
+  assert.equal(parse(page)?.pageOffset, 2);
+  const tomorrow = sent({
+    now: new Date('2026-09-30T00:00:00.000Z'),
+    pageOffset: 2,
+  });
+  assert.throws(
+    () =>
+      parse({
+        list: { ...tomorrow.list, cursor: page.list.cursor },
+      }),
+    (error: unknown) =>
+      error instanceof listBehavior.SharedListContractError &&
+      error.code === 'LIST_CURSOR_INVALID',
+  );
+  // Each tab is counted with its own filters and the same clock.
+  const count = (local: string) =>
+    sent({ mode: 'count', viewId: id('list_view', `worklist_${local}`) }).list;
+  assert.equal(count('open').progress?.openOnly, true);
+  assert.equal(count('open').beforeFilters, undefined);
+  assert.deepEqual(count('late').beforeFilters, page.list.beforeFilters);
+  assert.equal(count('all').progress?.openOnly, undefined);
+  assert.deepEqual(count('all').progress?.outputs, {
+    done: output('received'),
+    open: output('open'),
+    ordered: output('ordered'),
+  });
+
+  // "N days late" judges the Late view's conditions on the row's own values.
+  const column = list.columns.find((value) => value.overdue)!;
+  const row = (values: Record<string, string | null>) => ({
+    archived: false,
+    entityId: id('entity', 'order'),
+    recordId: '00000000-0000-4000-8000-000000000001',
+    revision: 1,
+    values: {
+      [state]: released,
+      [expected]: '2026-09-25T12:00:00.000Z',
+      [output('ordered')]: '15',
+      [output('received')]: '4',
+      [output('open')]: '11',
+      ...values,
+    },
+  });
+  assert.equal(overdueDays(list, column, row({}), now), 4);
+  assert.equal(
+    overdueDays(
+      list,
+      column,
+      row({ [expected]: '2026-09-28T23:59:59.999Z' }),
+      now,
+    ),
+    1,
+  );
+  for (const values of [
+    { [expected]: '2026-09-29T00:00:00.000Z' },
+    { [expected]: null },
+    { [output('open')]: '0' },
+    { [output('open')]: '0.000' },
+    { [state]: id('state', 'order_closed') },
+  ])
+    assert.equal(overdueDays(list, column, row(values), now), null);
+
+  // The export keeps the summed figures as the exact decimals they are.
+  const csv = declaredListCsv(
+    list,
+    [row({ [id('field', 'order_number')]: 'PO-1', [output('open')]: '10.5' })],
+    (_record, _fieldId, value) => String(value),
+  );
+  assert.equal(
+    csv,
+    '\uFEFFNumber,Expected,ordered,received,open\r\nPO-1,2026-09-25T12:00:00.000Z,15,4,10.5\r\n',
+  );
 });
 
 test('unknown surface and malformed projection fail as rendered diagnostics', async () => {

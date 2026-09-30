@@ -71,9 +71,9 @@ type StateLocalId = (typeof STATES)[number][0];
  * |---|---|---|
  * | `draft -> released` | the release | **yes** |
  * | `draft -> cancelled` | the cancel of an uncommitted order | **yes** |
- * | `released -> cancelled` | the cancel of a committed order | **yes** |
- * | `released -> closed` | the close | **NO -- `PUR-2`'s** |
- * | `closed -> released` | the reopen | **NO -- `PUR-2`'s** |
+ * | `released -> cancelled` | the cancel of a committed order | **yes**; through receiving since PURCHASING-PARITY |
+ * | `released -> closed` | the close | **NO -- `PUR-2`'s**, through receiving |
+ * | `closed -> released` | the reopen | **NO -- `PUR-2`'s**, through receiving |
  * | `released -> draft` | **refused** -- `draft` asserts no commitments exist, and once released, receipts may |  |
  * | `closed -> cancelled` | **refused** -- reopen first |  |
  * | `cancelled -> anything` | **refused** -- terminal; reissue instead |  |
@@ -99,16 +99,25 @@ type StateLocalId = (typeof STATES)[number][0];
  * STATE, and deferring these two operations to the packet that can give them
  * semantics is cheap. Plan section 7.17 says what closes an order is `PUR-2`'s to
  * decide, and this file now says the same thing.
+ *
+ * PURCHASING-PARITY moves the committed cancel the same way: a released order
+ * is cancelled through receiving, which reads its receipts under the order's
+ * lock and refuses once anything is received, as a sales order's cancel is
+ * refused through fulfillment once anything shipped. The draft cancel stays a
+ * plain transition: a draft has no receipts.
  */
 const TRANSITIONS = [
   ['release', 'Release order', 10, 'draft', 'released', 'release', true],
   ['draft_cancel', 'Cancel order', 20, 'draft', 'cancelled', 'cancel', true],
   ['close', 'Close order', 30, 'released', 'closed', 'close', false],
   ['reopen', 'Reopen order', 40, 'closed', 'released', 'reopen', false],
-  ['cancel', 'Cancel order', 50, 'released', 'cancelled', 'cancel', true],
+  ['cancel', 'Cancel order', 50, 'released', 'cancelled', 'cancel', false],
 ] as const;
 
-/** The transitions `PUR-1` binds an operation to. The rest are declared only. */
+/**
+ * The transitions a generic transition operation drives. The rest are
+ * declared edges that only the receiving operations move.
+ */
 const DRIVEN_TRANSITIONS = TRANSITIONS.filter(([, , , , , , driven]) => driven);
 
 type TransitionLocalId = (typeof TRANSITIONS)[number][0];
@@ -165,6 +174,7 @@ function ids(namespace: string) {
         notes: field('purchase_order', 'notes'),
         number: field('purchase_order', 'number'),
         orderDate: field('purchase_order', 'order_date'),
+        receivingLocationId: field('purchase_order', 'receiving_location_id'),
         supplierPartyId: field('purchase_order', 'supplier_party_id'),
       },
       purchaseOrderLine: {
@@ -172,6 +182,33 @@ function ids(namespace: string) {
         lineNumber: field('purchase_order_line', 'line_number'),
         orderedQuantity: field('purchase_order_line', 'ordered_quantity'),
         unitPrice: field('purchase_order_line', 'unit_price'),
+      },
+    },
+    /**
+     * Commercial terms (PURCHASING-PARITY, owner ruling B extended to purchase
+     * orders), declared only when the product application asks for them.
+     */
+    commercialFieldIds: {
+      purchaseOrder: {
+        paymentTerms: field('purchase_order', 'payment_terms'),
+        taxCodeId: field('purchase_order', 'tax_code_id'),
+        freightAmount: field('purchase_order', 'freight_amount'),
+        freightTaxCodeId: field('purchase_order', 'freight_tax_code_id'),
+        otherFeeAmount: field('purchase_order', 'other_fee_amount'),
+        otherFeeTaxCodeId: field('purchase_order', 'other_fee_tax_code_id'),
+        freightTaxRatePercent: field(
+          'purchase_order',
+          'freight_tax_rate_percent',
+        ),
+        otherFeeTaxRatePercent: field(
+          'purchase_order',
+          'other_fee_tax_rate_percent',
+        ),
+      },
+      purchaseOrderLine: {
+        discountPercent: field('purchase_order_line', 'discount_percent'),
+        taxCodeId: field('purchase_order_line', 'tax_code_id'),
+        taxRatePercent: field('purchase_order_line', 'tax_rate_percent'),
       },
     },
     machineId,
@@ -228,8 +265,17 @@ export const PURCHASING_IDS = Object.freeze(defaultIds);
  */
 export function purchasingModuleDefinition(
   namespace: string = PURCHASING_NAMESPACE,
+  options: {
+    /**
+     * Payment terms, a tax code, charges and line discounts and tax on the
+     * purchase order. Only the product application passes it: the terms read
+     * Catalog tax codes, which a purchasing-only harness does not compile.
+     */
+    readonly commercialTerms?: boolean;
+  } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
+  const commercialTerms = options.commercialTerms === true;
   const { entityIds, fieldIds, moduleId, packageId, stateFieldId } =
     definitionIds;
   const standardEntities = [
@@ -380,6 +426,18 @@ export function purchasingModuleDefinition(
         text(1000),
         { optional: true },
       ),
+      // Where the order's goods are received (PURCHASING-PARITY): a location
+      // id, as a receipt's own location is, which each receipt starts from.
+      // 150, after the commercial terms' 70-140.
+      field(
+        definitionIds,
+        entityIds.purchaseOrder,
+        fieldIds.purchaseOrder.receivingLocationId,
+        'Receive into',
+        150,
+        text(80),
+        { optional: true },
+      ),
 
       field(
         definitionIds,
@@ -424,6 +482,7 @@ export function purchasingModuleDefinition(
         decimal(),
         { optional: true },
       ),
+      ...(commercialTerms ? commercialFields(definitionIds) : []),
     ],
     hashAlgorithm: 'sha256',
     impactAnalyses: [],
@@ -467,9 +526,19 @@ export function purchasingModuleDefinition(
       ...(['post'] as const).map((action) =>
         receivingOperation(definitionIds, 'goods_receipt', action),
       ),
-      ...(['close', 'reopen'] as const).map((action) =>
-        receivingOperation(definitionIds, 'purchase_order', action),
-      ),
+      // Close, reopen and the committed cancel run through receiving, which
+      // reads the order's receipts under its lock; the declared guard keeps
+      // each out of the other states' commands, as on a sales order.
+      ...(
+        [
+          ['close', 'released'],
+          ['reopen', 'closed'],
+          ['cancel', 'released'],
+        ] as const
+      ).map(([action, state]) => ({
+        ...receivingOperation(definitionIds, 'purchase_order', action),
+        precondition: inState(stateFieldId, definitionIds.stateIds[state]),
+      })),
       receivingOperation(definitionIds, 'purchase_order_line', 'amend'),
       ...operations(
         definitionIds,
@@ -487,9 +556,9 @@ export function purchasingModuleDefinition(
         'purchase_order_line',
         entityIds.purchaseOrderLine,
       ),
-      // DRIVEN_TRANSITIONS, not TRANSITIONS. `close` and `reopen` are declared
-      // edges with no operation, so nothing can invoke them until `PUR-2` binds
-      // one. See the table above the transition list.
+      // DRIVEN_TRANSITIONS, not TRANSITIONS. `close`, `reopen` and the
+      // committed `cancel` are declared edges that only the receiving
+      // operations above move. See the table above the transition list.
       ...DRIVEN_TRANSITIONS.map(([local, , , fromState, , permission]) =>
         transitionOperation(
           definitionIds,
@@ -551,7 +620,7 @@ export function purchasingModuleDefinition(
         definitionIds,
         local,
         entityId,
-        selectedFieldsForEntity(definitionIds, local),
+        selectedFieldsForEntity(definitionIds, local, commercialTerms),
         resolveFieldForEntity(fieldIds, local) ||
           `${namespace}:field.${local}_${local === 'goods_receipt' || local === 'purchase_order_amendment' ? 'number' : local === 'goods_receipt_line' ? 'item_id' : 'unit_id'}`,
       ),
@@ -647,6 +716,119 @@ function derivedStateFieldId(machineId: string): string {
   return `${machineId.slice(0, separator)}:derived_state_field.${machineId.slice(separator + 1)}`;
 }
 
+/** Payment terms a purchase order may carry, labelled as a party's terms are. */
+const PAYMENT_TERMS = [
+  ['due_on_receipt', 'Due on receipt'],
+  ['net_15', 'Net 15'],
+  ['net_30', 'Net 30'],
+  ['net_45', 'Net 45'],
+  ['net_60', 'Net 60'],
+] as const;
+
+/**
+ * A purchase order's commercial terms (owner ruling B extended to purchase
+ * orders): payment terms, the order's tax code, which new lines start from,
+ * two charges each taxed by its own code with the rate frozen beside it, and
+ * each line's discount and frozen tax. All optional; no accounting, payable or
+ * ledger posting follows from them.
+ */
+function commercialFields(ids: PurchasingIds): Array<Record<string, unknown>> {
+  const header = ids.commercialFieldIds.purchaseOrder;
+  const line = ids.commercialFieldIds.purchaseOrderLine;
+  const order = ids.entityIds.purchaseOrder;
+  const orderLine = ids.entityIds.purchaseOrderLine;
+  const paymentTerms: FieldType = {
+    kind: 'enumFieldType',
+    schemaVersion: version,
+    options: PAYMENT_TERMS.map(([value, label], index) => ({
+      kind: 'enumOption',
+      schemaVersion: version,
+      optionId: `${ids.namespace}:option.purchase_order_payment_terms_${value}`,
+      label,
+      orderKey: (index + 1) * 10,
+    })),
+  };
+  const optional = { optional: true };
+  return [
+    field(
+      ids,
+      order,
+      header.paymentTerms,
+      'Payment terms',
+      70,
+      paymentTerms,
+      optional,
+    ),
+    field(ids, order, header.taxCodeId, 'Tax code', 80, text(80), optional),
+    field(ids, order, header.freightAmount, 'Freight', 90, decimal(), optional),
+    field(
+      ids,
+      order,
+      header.freightTaxCodeId,
+      'Freight tax code',
+      100,
+      text(80),
+      optional,
+    ),
+    field(
+      ids,
+      order,
+      header.otherFeeAmount,
+      'Other fee',
+      110,
+      decimal(),
+      optional,
+    ),
+    field(
+      ids,
+      order,
+      header.otherFeeTaxCodeId,
+      'Other fee tax code',
+      120,
+      text(80),
+      optional,
+    ),
+    // Each charge's rate, frozen from its tax code when chosen.
+    field(
+      ids,
+      order,
+      header.freightTaxRatePercent,
+      'Freight tax rate %',
+      130,
+      decimal(),
+      optional,
+    ),
+    field(
+      ids,
+      order,
+      header.otherFeeTaxRatePercent,
+      'Other fee tax rate %',
+      140,
+      decimal(),
+      optional,
+    ),
+    field(
+      ids,
+      orderLine,
+      line.discountPercent,
+      'Discount %',
+      50,
+      decimal(),
+      optional,
+    ),
+    field(ids, orderLine, line.taxCodeId, 'Tax code', 60, text(80), optional),
+    field(
+      ids,
+      orderLine,
+      line.taxRatePercent,
+      'Tax rate %',
+      70,
+      decimal(),
+      optional,
+    ),
+  ];
+}
+
 function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
   const enumType = (
     local: string,
@@ -727,6 +909,27 @@ function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
       decimal(),
     ],
     ['purchase_order_received', 'unit_id', 'Base unit', text(32)],
+    // A request to close a line's open remainder (PURCHASING-PARITY): the
+    // amend sets the ordered quantity to what is received when it runs, not
+    // to a quantity read earlier, and consumes every such request staged
+    // for the line's revision together.
+    [
+      'purchase_order_amendment',
+      'close_remainder',
+      'Close the open remainder',
+      boolean(),
+      true,
+    ],
+    // A receipt's paperwork (PURCHASING-PARITY), appended so every earlier
+    // field keeps its orderKey.
+    [
+      'goods_receipt',
+      'packing_slip',
+      'Packing slip / delivery note',
+      text(80),
+      true,
+    ],
+    ['goods_receipt', 'notes', 'Notes', text(1000), true],
   ];
   return specs.map(([local, name, label, type, optional], index) =>
     field(
@@ -745,6 +948,11 @@ function receiptFields(ids: PurchasingIds): Array<Record<string, unknown>> {
           name === 'item_id' ||
           (local === 'purchase_order_received' && name === 'unit_id'),
         businessKey: name === 'number',
+        // A goods receipt takes a server-assigned number on its first save
+        // (PURCHASING-PARITY), as a purchase order does: RCV-000001.
+        ...(local === 'goods_receipt' && name === 'number'
+          ? { numberedAs: 'RCV' }
+          : {}),
       },
     ),
   );
@@ -973,12 +1181,24 @@ function editableStates(ids: PurchasingIds): Record<string, unknown> {
 function selectedFieldsForEntity(
   ids: PurchasingIds,
   local: string,
+  commercialTerms: boolean,
 ): readonly string[] {
   switch (local) {
     case 'purchase_order':
-      return [ids.stateFieldId, ...Object.values(ids.fieldIds.purchaseOrder)];
+      return [
+        ids.stateFieldId,
+        ...Object.values(ids.fieldIds.purchaseOrder),
+        ...(commercialTerms
+          ? Object.values(ids.commercialFieldIds.purchaseOrder)
+          : []),
+      ];
     case 'purchase_order_line':
-      return Object.values(ids.fieldIds.purchaseOrderLine);
+      return [
+        ...Object.values(ids.fieldIds.purchaseOrderLine),
+        ...(commercialTerms
+          ? Object.values(ids.commercialFieldIds.purchaseOrderLine)
+          : []),
+      ];
     default:
       return receiptFields(ids)
         .filter(
@@ -1083,6 +1303,10 @@ function field(
 const text = (maximumLength: number): FieldType => ({
   kind: 'textFieldType',
   maximumLength,
+  schemaVersion: version,
+});
+const boolean = (): FieldType => ({
+  kind: 'booleanFieldType',
   schemaVersion: version,
 });
 const integer = (): FieldType => ({

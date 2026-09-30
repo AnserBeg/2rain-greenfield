@@ -8,9 +8,11 @@ import {
   type LineAmounts,
 } from './commercial-amounts.js';
 import { fulfillmentProjectionIdentity } from './fulfillment.js';
+import { receivedIdentity } from './goods-receipt.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
   type SemanticQueryReadModelExecutor,
   type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
@@ -21,8 +23,8 @@ import {
 import type { ImmutableJsonValue } from '../../runtime/src/request-runtime-view.js';
 
 /**
- * Line amounts and order totals (owner ruling B), from each line's and
- * charge's own frozen figures; the order's lines are read through the declared
+ * Line amounts and order totals (owner ruling B, for sales and purchase
+ * orders), from each line's and charge's own frozen figures; the order's lines are read through the declared
  * dependency query, re-entering current policy and scope. A figure that cannot
  * be stated -- an unpriced line, a discount outside 0-100%, a tax code without
  * a frozen rate -- is `null`, and so is every total it would feed: nothing is
@@ -46,6 +48,12 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
   if (typeof scopeId !== 'string')
     throw new Error('Commercial scope is not exact');
   const field = (name: string) => `${ns}:field.${name}`;
+  // A purchase order states the same figures from its own fields (ruling B
+  // extended to purchasing); a sales order also has list prices and invoices.
+  const purchase =
+    model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseLine ||
+    model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseOrder;
+  const doc = purchase ? 'purchase_order' : 'sales_order';
   const invoke = async (
     key: string,
     arguments_: Record<string, ImmutableJsonValue>,
@@ -81,12 +89,12 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
         : null;
   const priced = (line: SemanticRecordDto): LineAmounts | null =>
     lineAmounts({
-      quantity: line.values[field('sales_order_line_ordered_quantity')],
-      unitPrice: line.values[field('sales_order_line_unit_price')],
-      discountPercent: line.values[field('sales_order_line_discount_percent')],
+      quantity: line.values[field(`${doc}_line_ordered_quantity`)],
+      unitPrice: line.values[field(`${doc}_line_unit_price`)],
+      discountPercent: line.values[field(`${doc}_line_discount_percent`)],
       taxRatePercent: frozenRate(
-        line.values[field('sales_order_line_tax_code_id')],
-        line.values[field('sales_order_line_tax_rate_percent')],
+        line.values[field(`${doc}_line_tax_code_id`)],
+        line.values[field(`${doc}_line_tax_rate_percent`)],
       ),
     });
   /**
@@ -136,7 +144,7 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
     return records;
   };
   const linesOf = (orderId: string) =>
-    listAll('lines', `${ns}:relation.sales_order_line_order`, orderId);
+    listAll('lines', `${ns}:relation.${doc}_line_order`, orderId);
   /** An exact quantity as units at scale 18, or `null`. */
   const units = (value: ImmutableJsonValue | undefined): bigint | null => {
     const parsed = parseExact(value);
@@ -152,6 +160,38 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       .padStart(18, '0')
       .replace(/0+$/u, '');
     return `${value < 0n ? '-' : ''}${String(magnitude / scale)}${fraction ? `.${fraction}` : ''}`;
+  };
+  /**
+   * What has arrived against a purchase line (PURCHASING-PARITY): the
+   * receiving projection's received quantity, read under current policy.
+   * Nothing received yet has no projection row and reads as zero; a withheld
+   * or unanswered read states nothing, rather than a guessed zero. One denial
+   * answers for every line of the call: the same principal, scope and
+   * permission would be refused again.
+   */
+  let receivedWithheld = false;
+  const receivedOf = async (
+    line: SemanticRecordDto,
+  ): Promise<bigint | null> => {
+    if (receivedWithheld) return null;
+    try {
+      const read = await invoke('received', {
+        recordId: receivedIdentity(view, scopeId, line.recordId),
+        includeArchived: false,
+      });
+      const [record] = read.records;
+      if (read.outcome === 'exact' && record)
+        return units(
+          record.values[field('purchase_order_received_received_quantity')],
+        );
+      return read.outcome === 'not-found' || read.outcome === 'exact'
+        ? 0n
+        : null;
+    } catch (error) {
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+      receivedWithheld = true;
+      return null;
+    }
   };
   /**
    * Shipped quantity not yet on an invoice that counts (ruling C): what the
@@ -222,23 +262,47 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       if (!target) throw new Error('Read-model output is undeclared');
       values[target] = value;
     };
-    if (model.binding === COMMERCIAL_READ_MODEL_BINDINGS.line) {
+    if (
+      model.binding === COMMERCIAL_READ_MODEL_BINDINGS.line ||
+      model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseLine
+    ) {
       const amounts = priced(row);
       emit('line_amount', money(amounts?.amountCents ?? null));
       emit('line_tax', money(amounts?.taxCents ?? null));
+      // What is still to arrive: ordered less received, when both are known.
+      // A release whose purchase lines declare no progress states none.
+      if (purchase && model.resultFields.received) {
+        const received = await receivedOf(row);
+        const ordered = units(
+          row.values[field('purchase_order_line_ordered_quantity')],
+        );
+        emit('received', received === null ? null : quantityText(received));
+        emit(
+          'open_to_receive',
+          received === null || ordered === null
+            ? null
+            : quantityText(ordered - received),
+        );
+      }
       // A unit price that differs from the list price it started from was
       // set by hand (ruling B); without a list price there is nothing to mark.
-      const list = row.values[field('sales_order_line_list_price')];
-      const unit = row.values[field('sales_order_line_unit_price')];
-      emit(
-        'price_basis',
-        list === null || list === undefined || list === ''
-          ? null
-          : sameExact(list, unit)
-            ? 'List price'
-            : 'Manual price',
-      );
-    } else if (model.binding === COMMERCIAL_READ_MODEL_BINDINGS.order) {
+      // A purchase line has no list price: its cost is always typed.
+      if (!purchase) {
+        const list = row.values[field('sales_order_line_list_price')];
+        const unit = row.values[field('sales_order_line_unit_price')];
+        emit(
+          'price_basis',
+          list === null || list === undefined || list === ''
+            ? null
+            : sameExact(list, unit)
+              ? 'List price'
+              : 'Manual price',
+        );
+      }
+    } else if (
+      model.binding === COMMERCIAL_READ_MODEL_BINDINGS.order ||
+      model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseOrder
+    ) {
       let complete = true;
       let subtotal = 0n;
       let tax = 0n;
@@ -254,10 +318,10 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       let charges = 0n;
       for (const charge of ['freight', 'other_fee'] as const) {
         const amounts = chargeAmounts(
-          row.values[field(`sales_order_${charge}_amount`)],
+          row.values[field(`${doc}_${charge}_amount`)],
           frozenRate(
-            row.values[field(`sales_order_${charge}_tax_code_id`)],
-            row.values[field(`sales_order_${charge}_tax_rate_percent`)],
+            row.values[field(`${doc}_${charge}_tax_code_id`)],
+            row.values[field(`${doc}_${charge}_tax_rate_percent`)],
           ),
         );
         if (!amounts) complete = false;

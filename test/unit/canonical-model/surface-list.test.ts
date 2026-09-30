@@ -10,6 +10,7 @@ import { composedApplicationDefinition } from '../../../packages/domain/src/app/
 type Json = Record<string, unknown>;
 const ns = 'northstar.app';
 const salesList = `${ns}:surface.sales_order_list`;
+const expectedList = `${ns}:surface.expected_receipt_list`;
 
 function application(): Json & { surfaces: Json[]; queries: Json[] } {
   return structuredClone(composedApplicationDefinition()) as Json & {
@@ -53,10 +54,48 @@ test('the composed application declares its Lists and they normalize unchanged',
   assert.deepEqual(declared.map((surface) => surface.surfaceId).sort(), [
     // Ruling C: the Invoices List.
     `${ns}:surface.customer_invoice_list`,
+    // PURCHASING-PARITY: what is still to arrive, beside Purchase orders.
+    expectedList,
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,
   ]);
+  // Its own clone of the Purchase orders query: same selections, scope,
+  // permission and export limit; the Purchase orders List is unchanged.
+  type Selected = { selections: Array<{ field: { targetId: string } }> };
+  const clone = normalized.queries.find(
+    (value) => value.queryId === `${ns}:query.expected_receipt_list`,
+  )!;
+  const source = normalized.queries.find(
+    (value) => value.queryId === `${ns}:query.purchase_order_list`,
+  )!;
+  assert.deepEqual(
+    (clone as unknown as Selected).selections.map(
+      (selection) => selection.field.targetId,
+    ),
+    (source as unknown as Selected).selections.map(
+      (selection) => selection.field.targetId,
+    ),
+  );
+  assert.equal(clone.permission.targetId, source.permission.targetId);
+  assert.equal(
+    'exportMaximumResultCount' in clone && clone.exportMaximumResultCount,
+    5000,
+  );
+  const expected = declared.find(
+    (surface) => surface.surfaceId === expectedList,
+  )!;
+  type Declared = { list: { progress?: unknown } };
+  const list = (expected as unknown as Declared).list;
+  assert.ok(list.progress, 'Expected receipts declares its progress');
+  assert.equal(
+    (
+      declared.find(
+        (surface) => surface.surfaceId === `${ns}:surface.purchase_order_list`,
+      ) as unknown as Declared
+    ).list.progress,
+    undefined,
+  );
   const sales = declared.find((surface) => surface.surfaceId === salesList)!;
   assert.deepEqual(
     sales.slots.map((slot) => slot.slot),
@@ -203,6 +242,143 @@ test('a List declaration is refused for each combination the runtime cannot hono
   const outcomes = cases.map(([reason, mutate]) => [reason, refused(mutate)]);
   for (const [reason, rule] of outcomes)
     assert.match(rule!, new RegExp(reason!), `${reason!} -> ${rule!}`);
+});
+
+test('List progress, open and before views and overdue dates are refused for each misuse the runtime cannot honour', () => {
+  type Progress = {
+    lines: { query: { targetId: string }; relation: string; quantity: string };
+    done: { query: { targetId: string }; relation: string; quantity: string };
+    openIn?: { field: string; values: string[] };
+    outputs: { ordered: string; done: string; open: string };
+  };
+  const expected = (app: ReturnType<typeof application>) => {
+    const { list } = listOf(app, expectedList);
+    const column = (local: string) =>
+      list.columns.find(
+        (value) =>
+          value.columnId === `${ns}:list_column.expected_receipt_list_${local}`,
+      )!;
+    const view = (local: string) =>
+      list.views.find(
+        (value) =>
+          value.viewId === `${ns}:list_view.expected_receipt_list_${local}`,
+      )!;
+    return { list, column, view, progress: list.progress as Progress };
+  };
+  const cases: Array<[string, (app: ReturnType<typeof application>) => void]> =
+    [
+      [
+        'a progress column is an unsorted plain value',
+        (app) => {
+          expected(app).column('open').sortable = true;
+        },
+      ],
+      [
+        "an open view needs the List's declared progress",
+        (app) => {
+          listOf(app).list.views[1]!.open = true;
+        },
+      ],
+      [
+        'a before view compares a selected date or UTC instant field',
+        (app) => {
+          (expected(app).view('late').before as { field: string }).field =
+            `${ns}:field.purchase_order_number`;
+        },
+      ],
+      [
+        'an overdue marker names a view that keeps rows before today on its own date',
+        (app) => {
+          (
+            expected(app).column('expected_date').overdue as { view: string }
+          ).view = `${ns}:list_view.expected_receipt_list_to_receive`;
+        },
+      ],
+      [
+        'list progress reads an active q0 list query',
+        (app) => {
+          expected(app).progress.lines.query.targetId =
+            `${ns}:query.purchase_order_line_get`;
+        },
+      ],
+      [
+        'list progress sums an exact decimal its query selects',
+        (app) => {
+          expected(app).progress.done.quantity =
+            `${ns}:field.purchase_order_received_unit_id`;
+        },
+      ],
+      [
+        "list progress lines are the List's children through a parentScopedChild relation",
+        (app) => {
+          expected(app).progress.lines.relation =
+            `${ns}:relation.purchase_order_received_order_line`;
+        },
+      ],
+      [
+        'list progress done rows point at its lines through a relation',
+        (app) => {
+          expected(app).progress.done.relation =
+            `${ns}:relation.purchase_order_line_order`;
+        },
+      ],
+      [
+        'list progress outputs must be unique',
+        (app) => {
+          const { column, progress } = expected(app);
+          progress.outputs.open = progress.outputs.ordered;
+          column('open').field = progress.outputs.ordered;
+        },
+      ],
+      [
+        'list progress outputs name no field or column',
+        (app) => {
+          const { column, progress } = expected(app);
+          progress.outputs.open = `${ns}:field.purchase_order_notes`;
+          column('open').field = `${ns}:field.purchase_order_notes`;
+        },
+      ],
+      [
+        'an enumeration filter value is one of its options',
+        (app) => {
+          expected(app).progress.openIn!.values = [
+            `${ns}:state.purchase_order_shipped`,
+          ];
+        },
+      ],
+      [
+        'list progress reads company rows only under a company List',
+        (app) => {
+          // The same progress on an unscoped List: nothing issues it a company.
+          const query = app.queries.find(
+            (value) => value.queryId === `${ns}:query.expected_receipt_list`,
+          )!;
+          delete query.legalEntityScope;
+          delete query.parameters;
+          delete (listOf(app, expectedList).surface.workspace as Json).entry;
+        },
+      ],
+    ];
+  const outcomes = cases.map(([reason, mutate]) => [reason, refused(mutate)]);
+  for (const [reason, rule] of outcomes)
+    assert.match(
+      rule!,
+      new RegExp(reason!.replace(/[()']/gu, '.')),
+      `${reason!} -> ${rule!}`,
+    );
+  // Closed keys: an unknown progress or view member is refused, not ignored.
+  assert.match(
+    refused((app) => {
+      (expected(app).progress as unknown as Json).sortable = true;
+    }),
+    /closed supported schema/u,
+  );
+  assert.match(
+    refused((app) => {
+      (expected(app).view('late').before as Json).anchor = 'now';
+    }),
+    /closed supported schema|anchor/u,
+  );
 });
 
 test('an unknown List key is refused rather than ignored', () => {

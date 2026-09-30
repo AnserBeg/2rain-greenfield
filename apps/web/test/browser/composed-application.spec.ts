@@ -994,12 +994,14 @@ async function inventoryNavigationJourney(
       ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2) > .nav-group-label',
     ),
   ).toHaveText(['Sales', 'Purchasing', 'Inventory', 'Party', 'More']);
-  // Sales lists its invoices beside its orders (ruling C) and Catalog its
+  // Sales lists its invoices beside its orders (ruling C), Purchasing its
+  // expected receipts beside its orders (PURCHASING-PARITY) and Catalog its
   // tax codes beside its items (ruling B), so each is a group of two.
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
     'Invoices',
     'Sales orders',
-    'Purchasing',
+    'Expected receipts',
+    'Purchase orders',
     'Inventory movement',
     'Inventory period lock',
     'Inventory transaction',
@@ -1012,12 +1014,11 @@ async function inventoryNavigationJourney(
     'Tax code',
     'Location',
   ]);
-  // Inside the collapsed Sales group: hidden text names nothing, so the link
-  // is found by its text rather than its accessible name.
+  // Inside the collapsed Sales and Purchasing groups: hidden text names
+  // nothing, so each link is found by its text rather than its accessible name.
   const salesOwner = navigation.locator('a', { hasText: 'Sales orders' });
-  const purchasingOwner = navigation.getByRole('link', {
-    name: 'Purchasing',
-    exact: true,
+  const purchasingOwner = navigation.locator('a', {
+    hasText: 'Purchase orders',
   });
   await expect(salesOwner).toHaveAttribute(
     'href',
@@ -1191,9 +1192,13 @@ async function inventoryRecordNavigationJourney(
     .getByRole('group')
     .filter({ hasText: 'More' });
   await moreNavigation.getByText('More', { exact: true }).click();
-  const purchasingNavigation = navigation.getByRole('link', {
-    name: 'Purchasing',
-    exact: true,
+  // Purchasing is a group of its orders and expected receipts; its orders
+  // link sits inside it, found by text while the group is collapsed.
+  const purchasingGroup = primaryEntries
+    .getByRole('group')
+    .filter({ hasText: 'Purchasing' });
+  const purchasingNavigation = navigation.locator('a', {
+    hasText: 'Purchase orders',
   });
   const postedStockScope = await loadSurfaceScopeParameterId(
     'posted_stock_balance_list',
@@ -1275,6 +1280,7 @@ async function inventoryRecordNavigationJourney(
   expect(
     new URL(purchasingHref ?? '', baseUrl).searchParams.get(purchasingScope),
   ).toBe(browserLegalEntityId);
+  await purchasingGroup.getByText('Purchasing', { exact: true }).click();
   await purchasingNavigation.click();
   expect(new URL(page.url()).searchParams.get(purchasingScope)).toBe(
     browserLegalEntityId,

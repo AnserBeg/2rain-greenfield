@@ -63,13 +63,14 @@ const LIFECYCLE = {
 } as const;
 
 /**
- * The transitions `PUR-1` binds an operation to. `close` and `reopen` are
- * DECLARED EDGES ONLY -- plan section 7.17 says what closes an order is `PUR-2`'s to
- * decide, so emitting an operation for either would let a caller persist an
- * arbitrary manual close today with no receipt rule behind it.
+ * The transitions a generic transition operation drives. `close`, `reopen` and
+ * the committed `cancel` are DECLARED EDGES ONLY for the press -- plan section
+ * 7.17 says what closes an order is `PUR-2`'s to decide, and PURCHASING-PARITY
+ * refuses a cancel after any net receipt -- so each is moved by a guarded
+ * receiving operation that reads the order's receipts under its lock.
  */
-const DRIVEN = ['release', 'draft_cancel', 'cancel'] as const;
-const DECLARED_ONLY = ['close', 'reopen'] as const;
+const DRIVEN = ['release', 'draft_cancel'] as const;
+const DECLARED_ONLY = ['close', 'reopen', 'cancel'] as const;
 
 /**
  * Five transitions, four permissions: both cancels authorize on one
@@ -815,10 +816,12 @@ test('each transition is offered only where it can move the record', () => {
   const operations = operationCatalog(compile());
   const expected: Record<string, readonly string[]> = {
     cancel: ['released'],
+    close: ['released'],
     draft_cancel: ['draft'],
     release: ['draft'],
+    reopen: ['closed'],
   };
-  for (const action of DRIVEN) {
+  for (const action of [...DRIVEN, ...DECLARED_ONLY]) {
     const guard = precondition(
       operations,
       `${namespace}:operation.purchase_order_${action}`,
@@ -841,7 +844,7 @@ test('each transition is offered only where it can move the record', () => {
   }
 });
 
-test('close and reopen use the guarded receiving capability, never generic state transitions', () => {
+test('close, reopen and the committed cancel use the guarded receiving capability, never generic state transitions', () => {
   // THE FINDING THIS EXISTS FOR. An earlier version of this module emitted an
   // operation for every transition in the table, which made `released -> closed`
   // and `closed -> released` executable through the semantic operation gateway
@@ -880,16 +883,17 @@ test('close and reopen use the guarded receiving capability, never generic state
       `${action} is invocable, so a caller can persist that move today`,
     );
     assert.equal(
-      operations.some(
+      operations.find(
         (operation) =>
           operation.operationId ===
           `${namespace}:operation.purchase_order_${action}`,
-      ),
-      true,
+      )?.effect.kind,
+      'registeredCapabilityEffect',
+      `${action} must run through receiving, which reads the order's receipts`,
     );
   }
 
-  // The check is not passing over an empty catalog: the three driven
+  // The check is not passing over an empty catalog: the two driven
   // transitions ARE invocable, by the same reader.
   assert.deepEqual(
     operations
@@ -1186,6 +1190,7 @@ test('commercial order intent stays separate from received facts; no sales or ha
       PURCHASING_IDS.fieldIds.purchaseOrder.expectedDate,
       PURCHASING_IDS.fieldIds.purchaseOrder.currency,
       PURCHASING_IDS.fieldIds.purchaseOrder.notes,
+      PURCHASING_IDS.fieldIds.purchaseOrder.receivingLocationId,
     ],
   );
   assert.deepEqual(
@@ -1618,6 +1623,483 @@ function mutated(vary: (definition: AuthoredShape) => void): AuthoredShape {
  * platform and kernel only. There is no purchasing migration because the
  * projection below is the authority for physical shape.
  */
+test('PURCHASING-PARITY: the product application prices a purchase order like a sales order', () => {
+  type Loose = Record<string, unknown>;
+  const app = composedApplicationDefinition() as unknown as {
+    fields: Array<Loose & { fieldId: string; fieldType: Loose }>;
+    queries: Array<Loose & { queryId: string; readModel?: Loose }>;
+    surfaces: Array<Loose & { surfaceId: string }>;
+  };
+  const local = (value: string) => value.split('.').pop()!;
+  const commercial = [
+    'purchase_order_payment_terms',
+    'purchase_order_tax_code_id',
+    'purchase_order_freight_amount',
+    'purchase_order_freight_tax_code_id',
+    'purchase_order_other_fee_amount',
+    'purchase_order_other_fee_tax_code_id',
+    'purchase_order_freight_tax_rate_percent',
+    'purchase_order_other_fee_tax_rate_percent',
+    'purchase_order_line_discount_percent',
+    'purchase_order_line_tax_code_id',
+    'purchase_order_line_tax_rate_percent',
+  ];
+  const declared = new Set(app.fields.map((value) => local(value.fieldId)));
+  assert.deepEqual(
+    commercial.filter((name) => !declared.has(name)),
+    [],
+    'every commercial field is declared in the product application',
+  );
+  // A purchasing-only compile carries none of them: they read Catalog tax
+  // codes, which it does not compose.
+  const standalone = new Set(
+    (
+      purchasingModuleDefinition() as unknown as {
+        fields: Array<{ fieldId: string }>;
+      }
+    ).fields.map((value) => local(value.fieldId)),
+  );
+  assert.deepEqual(
+    commercial.filter((name) => standalone.has(name)),
+    [],
+  );
+  // A goods receipt is numbered by the server, like the order: RCV-000001.
+  assert.deepEqual(
+    app.fields.find((value) => local(value.fieldId) === 'goods_receipt_number')!
+      .numbering,
+    {
+      kind: 'documentSequence',
+      sequenceId: 'northstar.app:document_sequence.goods_receipt',
+      prefix: 'RCV',
+      minimumDigits: 6,
+      start: 1,
+    },
+  );
+  // Terms are labelled as a Party's, so the supplier's default fills them.
+  const terms = app.fields.find(
+    (value) => local(value.fieldId) === 'purchase_order_payment_terms',
+  )!.fieldType as { options: Array<{ label: string }> };
+  assert.deepEqual(
+    terms.options.map((option) => option.label),
+    ['Due on receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60'],
+  );
+  // The editor: supplier defaults, two weeks out, a line tax code from the
+  // order, rates frozen from the codes.
+  const editor = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_form',
+  )!.documentEditor as {
+    headerFields: Array<Loose & { fieldId: string }>;
+    lineFields: Array<Loose & { fieldId: string }>;
+  };
+  const header = (name: string) =>
+    editor.headerFields.find(
+      (value) => local(value.fieldId) === `purchase_order_${name}`,
+    )!;
+  const line = (name: string) =>
+    editor.lineFields.find(
+      (value) => local(value.fieldId) === `purchase_order_line_${name}`,
+    )!;
+  assert.equal(header('expected_date').defaultDaysFromToday, 14);
+  for (const [name, source] of [
+    ['currency', 'party_default_currency'],
+    ['payment_terms', 'party_payment_terms'],
+    ['tax_code_id', 'party_default_tax_code_id'],
+  ] as const)
+    assert.deepEqual(
+      header(name).defaultFrom,
+      {
+        referenceFieldId:
+          'northstar.app:field.purchase_order_supplier_party_id',
+        sourceFieldId: `northstar.app:field.${source}`,
+      },
+      name,
+    );
+  assert.equal(
+    (line('tax_code_id').defaultFrom as Loose).headerFieldId,
+    'northstar.app:field.purchase_order_tax_code_id',
+  );
+  assert.deepEqual(
+    ['freight_tax_rate_percent', 'other_fee_tax_rate_percent'].map(
+      (name) => (header(name).presentation as Loose).kind,
+    ),
+    ['derived', 'derived'],
+  );
+  assert.equal(
+    (line('tax_rate_percent').presentation as Loose).kind,
+    'derived',
+  );
+  // Priced lines and totals are read through the commercial read model.
+  const bindings = Object.fromEntries(
+    app.queries
+      .filter((value) => value.readModel)
+      .map((value) => [
+        local(value.queryId),
+        (value.readModel as { binding: string }).binding,
+      ]),
+  );
+  assert.equal(
+    bindings.commercial_purchase_order_lines,
+    'northstar.sales:read_model.commercial_purchase_line',
+  );
+  assert.equal(
+    bindings.commercial_purchase_order_get,
+    'northstar.sales:read_model.commercial_purchase_order',
+  );
+  const detail = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_detail',
+  )! as unknown as {
+    dataSource: { targetId: string };
+    composition: {
+      fields: Array<{ columnId: string; format?: string }>;
+      presentation: { print: { totals: string[] } };
+    };
+  };
+  assert.equal(
+    local(detail.dataSource.targetId),
+    'commercial_purchase_order_get',
+  );
+  assert.deepEqual(detail.composition.presentation.print.totals.map(local), [
+    'purchasing_subtotal',
+    'purchasing_freight',
+    'purchasing_other_fee',
+    'purchasing_tax',
+    'purchasing_total',
+  ]);
+  assert.deepEqual(
+    detail.composition.fields
+      .filter((value) => value.format === 'money')
+      .map((value) => local(value.columnId)),
+    [
+      'purchasing_freight',
+      'purchasing_other_fee',
+      'purchasing_subtotal',
+      'purchasing_charges',
+      'purchasing_tax',
+      'purchasing_total',
+    ],
+  );
+});
+
+test('PURCHASING-PARITY: an order line shows what is still to arrive, and its open remainder closes with a reason', () => {
+  type Loose = Record<string, unknown>;
+  const app = composedApplicationDefinition() as unknown as {
+    queries: Array<Loose & { queryId: string; readModel?: Loose }>;
+    surfaces: Array<Loose & { surfaceId: string }>;
+  };
+  const local = (value: string) => value.split('.').pop()!;
+  // The purchase line read model states received and open-to-receive from the
+  // receiving projection, read through its own get under current policy.
+  const lines = app.queries.find(
+    (value) => local(value.queryId) === 'commercial_purchase_order_lines',
+  )!.readModel as {
+    queries: Record<string, { targetId: string }>;
+    resultFields: Record<string, string>;
+  };
+  assert.deepEqual(Object.keys(lines.resultFields).toSorted(), [
+    'line_amount',
+    'line_tax',
+    'open_to_receive',
+    'received',
+  ]);
+  assert.equal(
+    lines.queries.received?.targetId,
+    'northstar.app:query.purchase_order_received_get',
+  );
+  const composition = (
+    app.surfaces.find(
+      (value) => local(value.surfaceId) === 'purchase_order_detail',
+    )! as unknown as {
+      composition: {
+        children: Array<{
+          datasetId: string;
+          query: { targetId: string };
+          columns: Array<{ columnId: string; field: string }>;
+        }>;
+        actions: Array<
+          Loose & {
+            actionId: string;
+            conditions: Loose[];
+            inputs: Array<Loose & { inputId: string }>;
+            steps: Array<{
+              operation: { targetId: string };
+              bindings: Array<{ path: string[]; value: Loose }>;
+            }>;
+          }
+        >;
+      };
+    }
+  ).composition;
+  const orderLines = composition.children.find(
+    (value) => local(value.datasetId) === 'purchasing_lines',
+  )!;
+  assert.equal(
+    local(orderLines.query.targetId),
+    'commercial_purchase_order_lines',
+  );
+  assert.deepEqual(
+    orderLines.columns
+      .filter((value) => value.field.includes(':metric.'))
+      .map((value) => [local(value.columnId), local(value.field)]),
+    [
+      ['purchasing_received', 'received'],
+      ['purchasing_open', 'open_to_receive'],
+    ],
+  );
+  // Offered on a released order's line with something still open; the new
+  // ordered quantity is the line's received quantity, staged with the reason
+  // and applied by the receiving amend, which refuses less than received.
+  const close = composition.actions.find(
+    (value) => local(value.actionId) === 'close_remainder',
+  )!;
+  assert.equal(local(String(close.datasetId)), 'purchasing_lines');
+  assert.deepEqual(close.conditions, [
+    {
+      value: {
+        source: 'record',
+        field:
+          'northstar.app:derived_state_field.machine.purchase_order_lifecycle',
+      },
+      operator: 'equals',
+      compare: 'northstar.app:state.purchase_order_released',
+    },
+    {
+      value: {
+        source: 'selected',
+        field: 'northstar.app:metric.open_to_receive',
+      },
+      operator: 'positive',
+      compare: null,
+    },
+  ]);
+  assert.deepEqual(
+    close.inputs.map((value) => [
+      local(value.inputId),
+      value.required,
+      (value.presentation as Loose | undefined)?.kind,
+    ]),
+    [['close_remainder_reason', true, 'multiline']],
+  );
+  assert.deepEqual(
+    close.steps.map((value) => local(value.operation.targetId)),
+    ['purchase_order_amendment_create', 'purchase_order_line_amend'],
+  );
+  const staged = Object.fromEntries(
+    close.steps[0]!.bindings.map((value) => [
+      local(value.path.at(-1)!),
+      value.value,
+    ]),
+  );
+  assert.deepEqual(staged.purchase_order_amendment_quantity, {
+    source: 'selected',
+    field: 'northstar.app:metric.received',
+  });
+  assert.deepEqual(staged.purchase_order_amendment_line_revision, {
+    source: 'selected',
+    field: 'revision',
+  });
+  // A close request: the amend closes to what is received when it runs.
+  assert.deepEqual(staged.purchase_order_amendment_close_remainder, {
+    source: 'literal',
+    value: true,
+  });
+  assert.deepEqual(staged.purchase_order_amendment_reason, {
+    source: 'input',
+    inputId: 'northstar.app:input.close_remainder_reason',
+  });
+  assert.deepEqual(staged.purchase_order_amendment_order_line, {
+    source: 'selected',
+    field: 'recordId',
+  });
+  assert.deepEqual(
+    close.steps[1]!.bindings.map((value) => [value.path, value.value]),
+    [
+      [['recordId'], { source: 'selected', field: 'recordId' }],
+      [['expectedRevision'], { source: 'selected', field: 'revision' }],
+    ],
+  );
+});
+
+test('PURCHASING-PARITY: a receipt keeps its paperwork, and receiving starts where the order is received', () => {
+  type Loose = Record<string, unknown>;
+  type Field = Loose & {
+    fieldId: string;
+    entity: { targetId: string };
+    fieldType: Loose;
+    orderKey: number;
+  };
+  type Column = Loose & {
+    columnId: string;
+    field: string;
+    reference?: {
+      query: { targetId: string };
+      labelField: { targetId: string };
+    };
+  };
+  const local = (value: string) => value.split('.').pop()!;
+  // Base fields, so the purchasing-only compile declares them too.
+  const standalone = (
+    purchasingModuleDefinition() as unknown as { fields: Field[] }
+  ).fields;
+  for (const [name, entity, label, maximumLength] of [
+    [
+      'goods_receipt_packing_slip',
+      'goods_receipt',
+      'Packing slip / delivery note',
+      80,
+    ],
+    ['goods_receipt_notes', 'goods_receipt', 'Notes', 1000],
+    [
+      'purchase_order_receiving_location_id',
+      'purchase_order',
+      'Receive into',
+      80,
+    ],
+  ] as const) {
+    const declared = standalone.find((value) => local(value.fieldId) === name);
+    assert.ok(declared, `${name} is declared`);
+    assert.deepEqual(
+      [
+        local(declared.entity.targetId),
+        declared.label,
+        declared.fieldType.kind,
+        declared.fieldType.maximumLength,
+      ],
+      [entity, label, 'textFieldType', maximumLength],
+      name,
+    );
+    // Optional and never searched: nothing has to be typed to save.
+    assert.deepEqual(
+      [declared.presence, declared.defaultSemantics, declared.searchable],
+      ['optional', 'nullable', false],
+      name,
+    );
+  }
+  const app = composedApplicationDefinition() as unknown as {
+    fields: Field[];
+    surfaces: Array<Loose & { surfaceId: string }>;
+  };
+  // Beside the commercial terms, each order field keeps its own orderKey.
+  const orderKeys = app.fields
+    .filter((value) => local(value.entity.targetId) === 'purchase_order')
+    .map((value) => value.orderKey);
+  assert.equal(new Set(orderKeys).size, orderKeys.length);
+  // The draft editor picks the location from the Location list.
+  const editor = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_form',
+  )!.documentEditor as { headerFields: Array<Loose & { fieldId: string }> };
+  const receiveInto = editor.headerFields.find(
+    (value) => local(value.fieldId) === 'purchase_order_receiving_location_id',
+  );
+  assert.ok(receiveInto, 'the draft editor offers Receive into');
+  assert.equal(receiveInto.label, 'Receive into');
+  assert.deepEqual(receiveInto.reference, {
+    queryId: 'northstar.app:query.location_list',
+    getQueryId: 'northstar.app:query.location_get',
+    labelFieldIds: ['northstar.app:field.location_name'],
+    detailFieldIds: ['northstar.app:field.location_code'],
+  });
+  const composition = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_detail',
+  )!.composition as {
+    presentation: { header: { facts: string[] } };
+    fields: Column[];
+    children: Array<{ datasetId: string; columns: Column[] }>;
+    actions: Array<{
+      actionId: string;
+      inputs: Array<Loose & { inputId: string }>;
+      steps: Array<{
+        operation: { targetId: string };
+        bindings: Array<{ path: string[]; value: Loose }>;
+      }>;
+    }>;
+  };
+  // The order's page reads the location's name in its details, not the header.
+  const shown = composition.fields.find(
+    (value) => local(value.columnId) === 'purchasing_receive_into',
+  );
+  assert.ok(shown, 'the order page shows Receive into');
+  assert.deepEqual(
+    [
+      shown.label,
+      local(shown.field),
+      shown.reference?.query.targetId,
+      shown.reference?.labelField.targetId,
+    ],
+    [
+      'Receive into',
+      'purchase_order_receiving_location_id',
+      'northstar.app:query.location_get',
+      'northstar.app:field.location_name',
+    ],
+  );
+  assert.equal(
+    composition.presentation.header.facts.includes(shown.columnId),
+    false,
+  );
+  // Each connected receipt shows its packing slip.
+  assert.deepEqual(
+    composition.children
+      .find((value) => local(value.datasetId) === 'purchasing_receipts')!
+      .columns.filter(
+        (value) => local(value.field) === 'goods_receipt_packing_slip',
+      )
+      .map((value) => [local(value.columnId), value.label]),
+    [['purchasing_packing_slip', 'Packing slip']],
+  );
+  for (const suffix of ['known', 'absent']) {
+    const action = composition.actions.find(
+      (value) => local(value.actionId) === `receive_${suffix}`,
+    )!;
+    const input = (name: string) =>
+      action.inputs.find((value) => local(value.inputId) === `receive_${name}`);
+    // Both paperwork inputs may stay empty; notes take several lines.
+    assert.deepEqual(
+      ['packing_slip', 'notes'].map((name) => {
+        const value = input(name);
+        return [
+          value?.label,
+          value?.type,
+          value?.required,
+          (value?.presentation as Loose | undefined)?.kind,
+        ];
+      }),
+      [
+        ['Packing slip / delivery note', 'text', false, undefined],
+        ['Notes', 'text', false, 'multiline'],
+      ],
+      suffix,
+    );
+    // They are kept on the receipt the first step creates.
+    const create = action.steps[0]!;
+    assert.equal(local(create.operation.targetId), 'goods_receipt_create');
+    const bound = Object.fromEntries(
+      create.bindings.map((value) => [local(value.path.at(-1)!), value.value]),
+    );
+    assert.deepEqual(
+      [bound.goods_receipt_packing_slip, bound.goods_receipt_notes],
+      [
+        {
+          source: 'input',
+          inputId: 'northstar.app:input.receive_packing_slip',
+        },
+        { source: 'input', inputId: 'northstar.app:input.receive_notes' },
+      ],
+      suffix,
+    );
+    // The receiving location starts from the order's own.
+    assert.deepEqual(
+      input('location')?.defaultFrom,
+      {
+        source: 'record',
+        field: 'northstar.app:field.purchase_order_receiving_location_id',
+      },
+      suffix,
+    );
+  }
+  // The whole declaration is admitted, the default included.
+  assert.doesNotThrow(() => normalizeApplicationPackage(structuredClone(app)));
+});
+
 function compile(
   definition: unknown = purchasingModuleDefinition(),
 ): CompileSuccess {

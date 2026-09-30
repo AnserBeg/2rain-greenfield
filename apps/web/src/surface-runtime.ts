@@ -33,6 +33,7 @@ import {
 
 import {
   FORM_EMPTY_INTENT_PREFIX,
+  recordWorkspaceOwners,
   renderRegisteredSurfaceComponent,
   surfaceSupportsRuntimeIntent,
   type SurfaceDataRenderState,
@@ -82,6 +83,12 @@ export interface SurfaceRuntimeResponse {
 
 export interface SurfaceRuntimeGateways {
   readonly applicationExtension?: SurfaceRuntimeApplicationExtension;
+  /**
+   * The request clock, read once per request: a List's "before today" views,
+   * their counts and its overdue dates all use the same instant. Injectable so
+   * a test fixes the day; the wall clock when absent.
+   */
+  readonly clock?: () => Date;
   readonly operationMediation: SemanticOperationMediationAuthority;
   readonly operationGateway: SemanticOperationGateway;
   readonly queryGateway: SemanticQueryGateway;
@@ -288,6 +295,9 @@ export async function renderSurfaceRuntimeWithData(
     selection.selected.list && binding.query.queryType === 'list'
       ? {
           list: selection.selected.list,
+          // One instant for the whole request: the page, each tab count, the
+          // export and every overdue date agree on what "today" is.
+          now: gateways.clock?.() ?? new Date(),
           state: readDeclaredListState(selection.selected.list, url),
         }
       : null;
@@ -300,11 +310,13 @@ export async function renderSurfaceRuntimeWithData(
       declaredList.state,
       url,
       gateways.queryGateway,
+      declaredList.now,
     );
   }
   const queryArguments = declaredList
     ? declaredListArguments(declaredList.list, declaredList.state, {
         mode: 'page',
+        now: declaredList.now,
         pageOffset: (declaredList.state.page - 1) * declaredList.list.pageSize,
         queryId: binding.query.queryId,
         scopeArguments: legalEntityScopeArguments(binding, url),
@@ -350,6 +362,7 @@ export async function renderSurfaceRuntimeWithData(
         url,
         gateways.queryGateway,
         await gateways.queryGateway.invoke(view, request),
+        declaredList.now,
       );
     } else {
       const result = await gateways.queryGateway.invoke(view, request);
@@ -442,6 +455,7 @@ async function declaredListData(
   url: URL,
   queryGateway: SemanticQueryGateway,
   first: SemanticQueryResultEnvelope,
+  now: Date,
 ): Promise<SurfaceDataRenderState> {
   const scopeArguments = legalEntityScopeArguments(binding, url);
   const request = (argumentsValue: RuntimeViewContract.ImmutableJsonValue) =>
@@ -465,6 +479,7 @@ async function declaredListData(
       request(
         declaredListArguments(list, state, {
           mode: 'page',
+          now,
           pageOffset: (lastPage - 1) * list.pageSize,
           queryId: binding.query.queryId,
           scopeArguments,
@@ -480,6 +495,7 @@ async function declaredListData(
         request(
           declaredListArguments(list, state, {
             mode: 'count',
+            now,
             queryId: binding.query.queryId,
             scopeArguments,
             viewId: listView.viewId,
@@ -494,7 +510,7 @@ async function declaredListData(
   }
   const data = dataState(result);
   return data.status === 'READY'
-    ? { ...data, declaredList: { counts, state } }
+    ? { ...data, declaredList: { counts, now, state } }
     : data;
 }
 
@@ -511,6 +527,7 @@ async function exportDeclaredList(
   state: DeclaredListState,
   url: URL,
   queryGateway: SemanticQueryGateway,
+  now: Date,
 ): Promise<SurfaceRuntimeResponse> {
   const exportMaximumResultCount =
     'exportMaximumResultCount' in binding.query
@@ -524,6 +541,7 @@ async function exportDeclaredList(
       arguments: declaredListArguments(list, state, {
         exportMaximumResultCount,
         mode: 'export',
+        now,
         queryId: binding.query.queryId,
         scopeArguments: legalEntityScopeArguments(binding, url),
       }),
@@ -553,7 +571,7 @@ async function exportDeclaredList(
             : JSON.stringify(value);
       }),
       contentType: 'text/csv; charset=utf-8' as const,
-      fileName: exportFileName(surface.label, new Date()),
+      fileName: exportFileName(surface.label, now),
     }),
     html: '',
     statusCode: 200,
@@ -1210,7 +1228,12 @@ interface RecordPickerEnumeration {
   readonly options: readonly SurfaceRelationPickerOption[];
 }
 
-/** Exactly one active list surface is the candidate authority for one entity. */
+/**
+ * Exactly one active list surface is the candidate authority for one entity.
+ * A worklist may read the same records beside the entity's own List; the
+ * authority is then the List that owns the entity's Record workspace, and two
+ * Lists with no such owner still refuse rather than one being chosen by order.
+ */
 function pickerListSurfaceFor(
   view: RuntimeViewContract.RequestRuntimeView,
   surfaces: readonly CompiledSurfaceDefinition[],
@@ -1229,7 +1252,12 @@ function pickerListSurfaceFor(
       return [];
     }
   });
-  return candidates.length === 1 ? candidates[0]! : null;
+  if (candidates.length <= 1) return candidates[0] ?? null;
+  const owners = recordWorkspaceOwners(view, surfaces, targetEntityId);
+  const owned = candidates.filter((candidate) =>
+    owners.has(candidate.surface.surfaceId),
+  );
+  return owned.length === 1 ? owned[0]! : null;
 }
 
 async function recordPickerOptions(
@@ -1835,12 +1863,12 @@ function navigationItem(
       entry.children[0]?.kind === 'navigationSurface'
     ) {
       const surface = surfaceForNavigation(surfaces, entry.children[0]);
-      return `<li class="navigation-node navigation-node--direct">${navigationLink(view, surface, selected, entry.label, workspaceContext)}</li>`;
+      return `<li class="navigation-node navigation-node--direct">${navigationLink(view, surface, selected, entry.label, workspaceContext, surfaces)}</li>`;
     }
     return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${escapeHtml(entry.label.slice(0, 1).toUpperCase())}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${entry.children.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`;
   }
   const surface = surfaceForNavigation(surfaces, entry);
-  return `<li class="navigation-node navigation-node--surface">${navigationLink(view, surface, selected, navigationLabel(surface), workspaceContext)}</li>`;
+  return `<li class="navigation-node navigation-node--surface">${navigationLink(view, surface, selected, navigationLabel(surface), workspaceContext, surfaces)}</li>`;
 }
 
 function navigationLink(
@@ -1849,12 +1877,13 @@ function navigationLink(
   selected: CompiledSurfaceDefinition | null,
   label: string,
   workspaceContext: WorkspaceContextBar | null,
+  surfaces: readonly CompiledSurfaceDefinition[],
 ): string {
   const current = selected?.workspace?.ownerSurfaceId
     ? selected.workspace.ownerSurfaceId === surface.surfaceId
     : selected
       ? surface.surfaceId === selected.surfaceId ||
-        sharesSurfaceEntity(view, surface, selected)
+        sharesSurfaceEntity(view, surface, selected, surfaces)
       : false;
   const parameters = new URLSearchParams({ surface: surface.surfaceId });
   if (workspaceContext?.selectedRecordId) {
@@ -1941,6 +1970,7 @@ function navigationEntryIsCurrent(
         view,
         surfaceForNavigation(surfaces, entry),
         selected,
+        surfaces,
       ) || entry.surfaceId === selected.surfaceId
     : entry.children.some((child) =>
         navigationEntryIsCurrent(view, child, surfaces, selected),
@@ -1976,16 +2006,43 @@ function isNavigationSurface(surface: CompiledSurfaceDefinition): boolean {
             surface.archetype === 'task'));
 }
 
+/**
+ * Whether a navigation List stands for the selected surface's records. A
+ * selected List is its own destination, so a worklist over the same records
+ * beside it is not current; and where several Lists read one entity, only the
+ * List that owns the entity's Record workspace stands for its records.
+ */
 function sharesSurfaceEntity(
   view: RuntimeViewContract.RequestRuntimeView,
   navigation: CompiledSurfaceDefinition,
   selected: CompiledSurfaceDefinition,
+  surfaces: readonly CompiledSurfaceDefinition[],
 ): boolean {
   if (navigation.surfaceRole !== 'list') return false;
   try {
+    const entityId = readCompiledSurfaceDataBinding(view, selected).query
+      .sourceEntityId;
+    if (
+      readCompiledSurfaceDataBinding(view, navigation).query.sourceEntityId !==
+      entityId
+    )
+      return false;
+    if (selected.surfaceRole === 'list')
+      return navigation.surfaceId === selected.surfaceId;
+    const lists = surfaces.filter((candidate) => {
+      if (candidate.surfaceRole !== 'list') return false;
+      try {
+        return (
+          readCompiledSurfaceDataBinding(view, candidate).query
+            .sourceEntityId === entityId
+        );
+      } catch {
+        return false;
+      }
+    });
     return (
-      readCompiledSurfaceDataBinding(view, navigation).query.sourceEntityId ===
-      readCompiledSurfaceDataBinding(view, selected).query.sourceEntityId
+      lists.length <= 1 ||
+      recordWorkspaceOwners(view, surfaces, entityId).has(navigation.surfaceId)
     );
   } catch {
     return false;

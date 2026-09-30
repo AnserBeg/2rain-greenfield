@@ -61,6 +61,12 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
         'PAY',
         `${ns}:document_sequence.customer_payment`,
       ],
+      // PURCHASING-PARITY: a goods receipt's number, RCV-000001.
+      [
+        `${ns}:field.goods_receipt_number`,
+        'RCV',
+        `${ns}:document_sequence.goods_receipt`,
+      ],
       [
         `${ns}:field.purchase_order_number`,
         'PO',

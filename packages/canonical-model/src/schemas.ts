@@ -816,6 +816,14 @@ const compositionInput = z.strictObject({
   presentation: compositionInputPresentation.optional(),
   /** A reference input's eligibility, as a draft editor picker declares it. Optional v6 key. */
   eligibility: pickerEligibility.optional(),
+  /**
+   * A reference input's starting choice: the record's stored value of a field
+   * its query selects, preselected only when that record is offered -- an
+   * order's receiving location. Optional v6 key (ADR-0047 §7).
+   */
+  defaultFrom: z
+    .strictObject({ source: z.literal('record'), field: z.string().min(1) })
+    .optional(),
 });
 const compositionStep = z.strictObject({
   stepId: CanonicalIdSchema,
@@ -1209,10 +1217,46 @@ const listColumn = z.strictObject({
     )
     .max(12)
     .optional(),
+  /**
+   * A date cell marked "N days late" when its row meets the named view's
+   * conditions -- that view keeps rows whose date is before today -- judged
+   * from server-projected values and the request's own anchor. Optional v6
+   * key (ADR-0047 §7).
+   */
+  overdue: z.strictObject({ view: CanonicalIdSchema }).optional(),
 });
 const listFieldValue = z.strictObject({
   field: CanonicalIdSchema,
   value: z.string().min(1).max(240),
+});
+/** A declared list query and the relation and quantity its rows add up. */
+const listProgressSource = z.strictObject({
+  query: compositionReference('queryReference'),
+  relation: CanonicalIdSchema,
+  quantity: CanonicalIdSchema,
+});
+/**
+ * Per List row, what its active lines order and what their active done rows
+ * record, summed by the list statement before the count and the page, and the
+ * open remainder between them. `openIn` names the row states in which anything
+ * is open; in any other state open reads 0. The outputs are the ids the row's
+ * values carry them under: shown, never sorted, searched or filtered but by
+ * a view's `open`. Optional v6 key (ADR-0047 §7).
+ */
+const listProgress = z.strictObject({
+  lines: listProgressSource,
+  done: listProgressSource,
+  openIn: z
+    .strictObject({
+      field: CanonicalIdSchema,
+      values: z.array(z.string().min(1).max(240)).min(1).max(8),
+    })
+    .optional(),
+  outputs: z.strictObject({
+    ordered: CanonicalIdSchema,
+    done: CanonicalIdSchema,
+    open: CanonicalIdSchema,
+  }),
 });
 export const SurfaceListSchema = z.strictObject({
   kind: z.literal('surfaceList'),
@@ -1234,6 +1278,19 @@ export const SurfaceListSchema = z.strictObject({
         label: LabelSchema,
         orderKey: boundedOrderKey,
         filters: z.array(listFieldValue).max(3),
+        /** Only rows whose declared progress leaves something open. */
+        open: z.literal(true).optional(),
+        /**
+         * Only rows whose date is before a symbolic anchor. The release stays
+         * clock-free: the runtime turns the anchor into an instant when the
+         * request is made -- `startOfTodayUtc` is midnight UTC of that day.
+         */
+        before: z
+          .strictObject({
+            field: CanonicalIdSchema,
+            anchor: z.literal('startOfTodayUtc'),
+          })
+          .optional(),
       }),
     )
     .max(8),
@@ -1257,8 +1314,10 @@ export const SurfaceListSchema = z.strictObject({
     )
     .max(4),
   export: z.strictObject({ format: z.literal('csv') }).optional(),
+  progress: listProgress.optional(),
 });
 export type SurfaceList = z.infer<typeof SurfaceListSchema>;
+export type SurfaceListProgress = NonNullable<SurfaceList['progress']>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),

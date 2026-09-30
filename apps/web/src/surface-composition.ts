@@ -345,7 +345,10 @@ function resolveValue(
     case 'input': {
       const input = inputs[value.inputId];
       if (input === undefined) throw new Error('A task input is missing.');
-      return input;
+      // Admission refuses an empty required input, so an empty one here is an
+      // optional input left blank: it is no value, never an empty string --
+      // which a decimal, enumeration or date field would refuse.
+      return input === '' ? null : input;
     }
     case 'step':
       return recordValue(results[value.stepId] ?? null, value.field);
@@ -899,6 +902,25 @@ function choiceDefault(input: TaskInput, data: CompositionData | null): string {
   return presentation.defaultValue ?? '';
 }
 
+/** A reference input's initial choice: the record's stored value, when it is offered. */
+function referenceDefault(
+  input: TaskInput,
+  data: CompositionData | null,
+  choices: readonly SemanticRecordDto[],
+): string {
+  if (!input.defaultFrom || !data) return '';
+  try {
+    const stored = recordValue(data.record, input.defaultFrom.field);
+    return typeof stored === 'string' &&
+      choices.some((choice) => choice.recordId === stored)
+      ? stored
+      : '';
+  } catch {
+    /* An unavailable record value is simply no default. */
+    return '';
+  }
+}
+
 type TaskPresentation = NonNullable<
   NonNullable<Action['presentation']>['task']
 >;
@@ -1397,7 +1419,7 @@ export async function submitCompositionAction(
             const key = binding.path.at(-1)!;
             if (['__proto__', 'constructor', 'prototype'].includes(key))
               throw new Error('Invalid input path');
-            target[key] = resolveValue(
+            const value = resolveValue(
               binding.value,
               current.data,
               current.inputs,
@@ -1405,6 +1427,22 @@ export async function submitCompositionAction(
               current.generated,
               `${step.stepId}:${binding.path.join('.')}`,
             );
+            // An integer field's value is its canonical decimal string; a
+            // bound record revision arrives as a number and is written as one.
+            const integerField =
+              binding.path.length === 2 &&
+              (binding.path[0] === 'values' || binding.path[0] === 'patch') &&
+              operation.inputContract?.fields.some(
+                (field) =>
+                  field.fieldId === key &&
+                  field.fieldKind === 'integerFieldType',
+              );
+            target[key] =
+              integerField &&
+              typeof value === 'number' &&
+              Number.isSafeInteger(value)
+                ? String(value)
+                : value;
           }
           input = object;
           current.stepInputs[current.next] = input;
@@ -1480,9 +1518,14 @@ export async function submitCompositionAction(
       const required = input.required ? ' required' : '';
       const value = current.inputs[input.inputId] ?? '';
       let control: string;
-      if (input.type === 'reference' && input.query && input.labelField)
-        control = `<select name="${h(input.inputId)}"${required}${invalid}><option value="">Select…</option>${(displayChoices[input.inputId] ?? []).map((record) => `<option value="${h(record.recordId)}" ${value === record.recordId ? 'selected' : ''}>${h(text(recordValue(record, input.labelField!.targetId)))}</option>`).join('')}</select>`;
-      else if (presentation?.kind === 'derived')
+      if (input.type === 'reference' && input.query && input.labelField) {
+        const choices = displayChoices[input.inputId] ?? [];
+        // A declared record default preselects only until a value is submitted.
+        const chosen =
+          current.inputs[input.inputId] ??
+          referenceDefault(input, renderData, choices);
+        control = `<select name="${h(input.inputId)}"${required}${invalid}><option value="">Select…</option>${choices.map((record) => `<option value="${h(record.recordId)}" ${chosen === record.recordId ? 'selected' : ''}>${h(text(recordValue(record, input.labelField!.targetId)))}</option>`).join('')}</select>`;
+      } else if (presentation?.kind === 'derived')
         // Read-only: taken from the selected row, never from the submission.
         control = `<output class="derived-value" data-derived-input>${h(renderData ? taskColumnText(renderData, presentation.column) : '—')}</output>`;
       else if (presentation?.kind === 'choice')
