@@ -22,3 +22,10 @@ then open the printed URL. Ctrl-C stops it and removes its container.
 
 1. Purchasing → **Bills**: tabs by state; the bill is under Paid; CSV exports it.
 2. The purchase order page lists its bill; receive the remaining 2 and **Bill received quantities** is offered again.
+
+## §4 Three-way match and Cancel (increment 3)
+
+1. On the order from §1, the line reads Billed 3, To bill 0 and **Matched** under the product; receive 2 more and it
+   reads **Received, not billed** until you bill them.
+2. Record actions → **Cancel**: refused while a live bill exists ("void its bills first"); void an unsettled bill and Cancel goes through.
+3. On a bill, **Open purchase order** opens its order.
