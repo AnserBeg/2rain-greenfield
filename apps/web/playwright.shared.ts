@@ -4,13 +4,13 @@ import { devices, type PlaywrightTestConfig } from '@playwright/test';
  * The browser suite runs as two CI jobs under the same bound, split by file
  * name. The operations job (playwright.operations.config.ts) runs the specs
  * this rule matches — purchasing, receiving and receivables, inventory,
- * payables and every composed-application journey — and the browser job
+ * payables, the order pages and every composed-application journey — and the browser job
  * (playwright.config.ts) ignores exactly these, so every spec runs in exactly
  * one job. The rule reads the file name only: nothing after the matched word
  * may be a directory.
  */
 export const operationsBrowserSpecs =
-  /(?:purchase|receiv|inventory|payable|composed-application|expected-receipts|order-lists|item-stock)[^/]*\.spec\.ts$/u;
+  /(?:purchase|receiv|inventory|payable|composed-application|expected-receipts|order-lists|order-pages|item-stock)[^/]*\.spec\.ts$/u;
 
 /** The composed-application journeys; every one also matches the rule above. */
 export const composedApplicationSpecs = /composed-application\.spec\.ts$/u;

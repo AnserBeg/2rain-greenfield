@@ -17,7 +17,10 @@ import {
   worklistQueries,
   worklistSurfaces,
 } from './list-declarations.js';
-import { purchasingWorkspace } from '../purchasing/workspace.js';
+import {
+  purchasingWorkspace,
+  receivingWorkspaceQueries,
+} from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 
 const version = 'v6' as const;
@@ -209,6 +212,11 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       ),
       // A worklist reads its own clone of its source List's query.
       ...worklistQueries(
+        APPLICATION_NAMESPACE,
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
+      // A receipt's lines with what each can still reverse (ORDER-PARITY).
+      ...receivingWorkspaceQueries(
         APPLICATION_NAMESPACE,
         merged(definitions, 'queries') as Record<string, unknown>[],
       ),

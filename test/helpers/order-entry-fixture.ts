@@ -719,6 +719,245 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'order_pages') {
+      // ORDER-PARITY increment B: a purchase order a truck delivers (three
+      // lines, nothing received yet, received into the fixture's location);
+      // one whose two lines arrived on one posted receipt, to reverse; a
+      // confirmed sales order asking for more than free stock, one line with a
+      // reservation of its own, beside an order reserving stock elsewhere; and
+      // the invoice of a shipped order. Everything goes through the governed
+      // operations, as the order pages' own Tasks do.
+      const now = new Date().toISOString();
+      const number = (
+        record: { values: Readonly<Record<string, unknown>> },
+        local: string,
+      ) => String(record.values[`${ns}:field.${local}_number`]);
+      const purchase = async (quantities: readonly string[]) => {
+        const order = await create('purchase_order', {
+          supplier_party_id: customer,
+          order_date: now,
+          expected_date: null,
+          currency: 'CAD',
+          notes: null,
+          receiving_location_id: location,
+        });
+        const lines = [];
+        for (const [index, ordered] of quantities.entries())
+          lines.push(
+            await create(
+              'purchase_order_line',
+              {
+                line_number: String(index + 1),
+                item_id: item,
+                ordered_quantity: ordered,
+                unit_price: '2.5',
+              },
+              { order: order.recordId },
+            ),
+          );
+        const released = await invoke('purchase_order_release', {
+          recordId: order.recordId,
+          expectedRevision: order.revision,
+        });
+        assert.equal(released.outcome, 'succeeded');
+        return { order, lines };
+      };
+      const truck = await purchase(['5', '2', '4']);
+      const delivered = await purchase(['6', '3']);
+      const receipt = await create(
+        'goods_receipt',
+        {
+          state: `${ns}:option.goods_receipt_state_draft`,
+          kind: `${ns}:option.goods_receipt_kind_initial`,
+          effective_at: new Date().toISOString(),
+          location_id: location,
+          reason_code: 'RECEIVE',
+          reason_narrative: 'Order pages fixture',
+        },
+        { order: delivered.order.recordId },
+      );
+      const receiptLines = [];
+      for (const [index, [quantity, known]] of (
+        [
+          ['4', true],
+          ['3', false],
+        ] as const
+      ).entries())
+        receiptLines.push(
+          await create(
+            'goods_receipt_line',
+            {
+              line_number: String(index + 1),
+              item_id: item,
+              quantity,
+              unit_id: 'EA',
+              cost_status: `${ns}:option.goods_receipt_line_cost_status_${known ? 'known' : 'absent'}`,
+              unit_cost: known ? '2.5' : null,
+              currency: known ? 'CAD' : null,
+              reversal_of_movement_id: null,
+            },
+            {
+              receipt: receipt.recordId,
+              order_line: delivered.lines[index]!.recordId,
+            },
+          ),
+        );
+      const posted = await invoke('goods_receipt_post', {
+        recordId: receipt.recordId,
+        expectedRevision: receipt.revision,
+      });
+      assert.equal(posted.outcome, 'succeeded');
+      const salesOrder = async (quantities: readonly string[]) => {
+        const order = await create('sales_order', {
+          customer_party_id: customer,
+          order_date: now,
+          requested_date: now,
+          currency: 'CAD',
+          notes: null,
+          ...shipTo,
+        });
+        const lines = [];
+        for (const [index, quantity] of quantities.entries())
+          lines.push(
+            await create(
+              'sales_order_line',
+              {
+                item_id: item,
+                line_number: String(index + 1),
+                ordered_quantity: quantity,
+                unit_id: 'EA',
+                unit_price: '12.5',
+              },
+              { order: order.recordId },
+            ),
+          );
+        const confirmed = await invoke('sales_order_release', {
+          recordId: order.recordId,
+          expectedRevision: order.revision,
+        });
+        assert.equal(confirmed.outcome, 'succeeded');
+        return { order, lines };
+      };
+      const reserve = async (line: { recordId: string }, quantity: string) => {
+        const reservation = await create(
+          'reservation',
+          {
+            item_id: item,
+            location_id: location,
+            number: `RSV-${randomUUID()}`,
+            quantity,
+            reason: 'Order pages fixture',
+            state: `${ns}:option.reservation_state_draft`,
+            unit_id: 'EA',
+          },
+          { order_line: line.recordId },
+        );
+        const reserved = await invoke('reservation_reserve', {
+          recordId: reservation.recordId,
+          expectedRevision: reservation.revision,
+        });
+        assert.equal(reserved.outcome, 'succeeded');
+        return reservation;
+      };
+      // Stock reserved for another order is not free for this one.
+      const elsewhere = await salesOrder(['4']);
+      await reserve(elsewhere.lines[0]!, '4');
+      // The invoice of a shipped order: 2 reserved, shipped and invoiced.
+      const billed = await salesOrder(['2']);
+      const billing = await reserve(billed.lines[0]!, '2');
+      const shipment = await create(
+        'shipment',
+        {
+          carrier: 'Northline Freight',
+          shipping_reference_kind: `${ns}:option.shipment_shipping_reference_kind_tracking`,
+          shipping_reference: 'TRK-ORDER-PAGES',
+          state: `${ns}:option.shipment_state_draft`,
+          kind: `${ns}:option.shipment_kind_initial`,
+          effective_at: now,
+          location_id: location,
+          external_reference: null,
+          reason_code: 'SHIP',
+          reason_narrative: 'Order pages fixture',
+          ...shipTo,
+        },
+        { order: billed.order.recordId },
+      );
+      await create(
+        'shipment_line',
+        {
+          line_number: '1',
+          item_id: item,
+          quantity: '2',
+          unit_id: 'EA',
+          reversal_of_movement_id: null,
+        },
+        {
+          shipment: shipment.recordId,
+          order_line: billed.lines[0]!.recordId,
+          reservation: billing.recordId,
+        },
+      );
+      const shipped = await invoke('shipment_post', {
+        recordId: shipment.recordId,
+        expectedRevision: shipment.revision,
+      });
+      assert.equal(shipped.outcome, 'succeeded');
+      const invoice = await create(
+        'customer_invoice',
+        {
+          state: `${ns}:option.customer_invoice_state_draft`,
+          invoice_date: now,
+        },
+        { order: billed.order.recordId },
+      );
+      const invoiced = await invoke('customer_invoice_post', {
+        recordId: invoice.recordId,
+        expectedRevision: invoice.revision,
+      });
+      assert.equal(invoiced.outcome, 'succeeded');
+      // Asking for more than is free: 12 (3 of them reserved) and 9. On hand
+      // is the opening 10 and the 7 received, less the 2 shipped; 4 are held
+      // elsewhere and 3 by this order, so 8 are free: line 1 is 1 short and
+      // line 2 all 9, until the receipt is reversed.
+      const short = await salesOrder(['12', '9']);
+      await reserve(short.lines[0]!, '3');
+      const lineIds = (lines: readonly { recordId: string }[]) =>
+        lines.map((line) => line.recordId);
+      return {
+        phase,
+        truck: {
+          number: number(truck.order, 'purchase_order'),
+          recordId: truck.order.recordId,
+          lines: lineIds(truck.lines),
+        },
+        delivered: {
+          number: number(delivered.order, 'purchase_order'),
+          recordId: delivered.order.recordId,
+          lines: lineIds(delivered.lines),
+          receipt: {
+            number: number(receipt, 'goods_receipt'),
+            recordId: receipt.recordId,
+            lines: lineIds(receiptLines),
+          },
+        },
+        short: {
+          number: number(short.order, 'sales_order'),
+          recordId: short.order.recordId,
+          lines: lineIds(short.lines),
+        },
+        invoice: {
+          number: number(invoice, 'customer_invoice'),
+          recordId: invoice.recordId,
+          order: {
+            number: number(billed.order, 'sales_order'),
+            recordId: billed.order.recordId,
+          },
+        },
+        location,
+        scope,
+        observed: true,
+      };
+    }
     if (phase === 'second_company') {
       const company = await create(
         'legal_entity',
