@@ -85,15 +85,33 @@ export const reachabilityProducers = [
     'apps/web/package.json',
   ),
   // The composed application's replay of every release runs in its own job,
-  // under the same bound, so neither job nears it.
+  // and so do the commercial document workflows, each under the same bound,
+  // so no job nears it.
   nodeProducer('postgres', 'postgres', 'test:postgres', [
-    'test/postgres/**/!(composed-application).test.ts',
+    'test/postgres/**/!(composed-application|commercial-totals|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization).test.ts',
   ]),
   nodeProducer(
     'postgres-composed',
     'postgres-composed',
     'test:postgres:composed',
     ['test/postgres/composed-application.test.ts'],
+  ),
+  nodeProducer(
+    'postgres-commercial',
+    'postgres-commercial',
+    'test:postgres:commercial',
+    [
+      'test/postgres/commercial-totals.test.ts',
+      'test/postgres/expected-receipts.test.ts',
+      'test/postgres/fulfillment.test.ts',
+      'test/postgres/order-lists.test.ts',
+      'test/postgres/order-pages.test.ts',
+      'test/postgres/packing-retrieval.test.ts',
+      'test/postgres/payables.test.ts',
+      'test/postgres/purchase-order-ending.test.ts',
+      'test/postgres/receivables.test.ts',
+      'test/postgres/receiving-authorization.test.ts',
+    ],
   ),
   // The browser suite runs as two jobs under the same bound, split by file name
   // (apps/web/playwright.shared.ts): the Sales and platform specs, and the

@@ -1923,11 +1923,15 @@ test('PURCHASING-PARITY: an order line shows what is still to arrive, and its op
     queries: Record<string, { targetId: string }>;
     resultFields: Record<string, string>;
   };
+  // PAYABLES adds what is billed, what is still to bill and the match status.
   assert.deepEqual(Object.keys(lines.resultFields).toSorted(), [
+    'billed',
     'line_amount',
     'line_tax',
+    'match_status',
     'open_to_receive',
     'received',
+    'to_bill',
   ]);
   assert.equal(
     lines.queries.received?.targetId,
@@ -1971,6 +1975,9 @@ test('PURCHASING-PARITY: an order line shows what is still to arrive, and its op
     [
       ['purchasing_received', 'received'],
       ['purchasing_open', 'open_to_receive'],
+      ['purchasing_billed', 'billed'],
+      ['purchasing_to_bill', 'to_bill'],
+      ['purchasing_match', 'match_status'],
     ],
   );
   // Offered on a released order's line with something still open; the new
