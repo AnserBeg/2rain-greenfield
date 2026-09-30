@@ -104,6 +104,15 @@ export function purchasingWorkspace(
           operator: 'equals',
           compare: id('state', 'purchase_order_released'),
         },
+        // Nothing is offered to receive on a line with nothing left to arrive:
+        // its open quantity reads exactly '0'. A withheld received read states
+        // no open quantity at all, and receiving stays offered -- the
+        // receiving kernel refuses an over-receipt either way.
+        {
+          value: selected(metric('open_to_receive')),
+          operator: 'notEquals',
+          compare: '0',
+        },
       ],
       inputs: [
         {

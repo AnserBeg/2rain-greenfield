@@ -8518,3 +8518,120 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
   assert.doesNotMatch(stillServed.html, /QUERY_PERMISSION_DENIED/u);
   assert.match(stillServed.html, /PO-LATE/u);
 });
+
+test('PURCHASING-PARITY: a line with nothing left to arrive offers no receipt; a withheld open quantity keeps it offered', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const order = f.executor.seed(
+    'purchase_order',
+    {
+      [`${ns}:field.purchase_order_number`]: 'PO-NOTHING-OPEN',
+      [`${ns}:field.purchase_order_supplier_party_id`]: f.party,
+      [`${ns}:field.purchase_order_currency`]: 'CAD',
+      [`${ns}:field.purchase_order_order_date`]: '2026-09-26T09:30:00Z',
+      // Selected but unset, as the provider returns them.
+      ...Object.fromEntries(
+        [
+          'expected_date',
+          'notes',
+          'receiving_location_id',
+          'payment_terms',
+          'tax_code_id',
+          'freight_amount',
+          'freight_tax_code_id',
+          'freight_tax_rate_percent',
+          'other_fee_amount',
+          'other_fee_tax_code_id',
+          'other_fee_tax_rate_percent',
+        ].map((name) => [`${ns}:field.purchase_order_${name}`, null]),
+      ),
+      [`${ns}:derived_state_field.machine.purchase_order_lifecycle`]: `${ns}:state.purchase_order_released`,
+    },
+    scope,
+  );
+  const line = f.executor.seed(
+    'purchase_order_line',
+    {
+      [`${ns}:field.purchase_order_line_line_number`]: '1',
+      [`${ns}:field.purchase_order_line_item_id`]: f.item,
+      [`${ns}:field.purchase_order_line_ordered_quantity`]: '2',
+      [`${ns}:field.purchase_order_line_unit_price`]: '2.4',
+      [`${ns}:field.purchase_order_line_discount_percent`]: null,
+      [`${ns}:field.purchase_order_line_tax_code_id`]: null,
+      [`${ns}:field.purchase_order_line_tax_rate_percent`]: null,
+      [`${ns}:relation.purchase_order_line_order`]: order,
+    },
+    scope,
+  );
+  const lines = `${ns}:dataset.purchasing_lines`;
+  const path = `/?${new URLSearchParams({
+    surface: `${ns}:surface.purchase_order_detail`,
+    record: order,
+    [`${ns}:parameter.commercial_purchase_order_get_legal_entity_scope`]: scope,
+    dataset: lines,
+    selected: line,
+    [`select:${lines}`]: line,
+  })}`;
+  // The commercial read model states the line's open quantity as given: a
+  // canonical decimal, or nothing when the received read is withheld.
+  const gatewaysStating = (open: string | null): SurfaceRuntimeGateways => ({
+    ...f.gateways,
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      f.executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': async ({ result }) => result,
+        'northstar.sales:capability.commercial': async ({
+          definition,
+          result,
+        }) => ({
+          ...result,
+          records: result.records.map((record) => ({
+            ...record,
+            values: {
+              ...record.values,
+              ...Object.fromEntries(
+                Object.entries(definition.readModel!.resultFields).map(
+                  ([key, fieldId]) => [
+                    fieldId,
+                    key === 'open_to_receive' ? open : null,
+                  ],
+                ),
+              ),
+            },
+          })),
+        }),
+      },
+    ),
+  });
+  const receive = ['receive_known', 'receive_absent'].map(
+    (local) => `value="${ns}:action.${local}"`,
+  );
+  for (const [open, offered] of [
+    ['0', false],
+    [null, true],
+    ['3', true],
+  ] as const) {
+    const html = (
+      await renderSurfaceRuntimeWithData(f.view, path, gatewaysStating(open))
+    ).html;
+    // The line stays selected either way; only what it offers changes.
+    assert.match(html, /aria-current="true">Selected<\/a>/u, String(open));
+    for (const action of receive)
+      assert.equal(html.includes(action), offered, `${action} open=${open}`);
+  }
+  // A stale page cannot start the receipt: submission re-checks the offer.
+  const stale = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: `${ns}:action.receive_known` },
+    gatewaysStating('0'),
+  );
+  assert.match(stale.html, /COMPOSITION_TASK_UNAVAILABLE/u);
+  assert.equal(f.executor.calls.length, 0);
+});

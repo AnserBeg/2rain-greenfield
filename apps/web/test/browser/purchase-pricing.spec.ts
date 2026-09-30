@@ -207,9 +207,19 @@ test('a partly received order shows what is still open, closes its remainder wit
     await expect(cell('Ordered')).toHaveText(/^2(?:\.0+)?$/u);
     await expect(cell('Open')).toHaveText('0');
     await row().getByRole('link', { name: 'Select', exact: true }).click();
+    // Nothing is left to arrive: the line is still selected, but neither a
+    // receipt nor another close is offered on it.
     await expect(
-      page.getByRole('button', { name: 'Close open remainder', exact: true }),
-    ).toHaveCount(0);
+      row().getByRole('link', { name: 'Selected', exact: true }),
+    ).toHaveAttribute('aria-current', 'true');
+    for (const label of [
+      'Close open remainder',
+      'Receive with actual cost',
+      'Receive with cost explicitly absent',
+    ])
+      await expect(
+        page.getByRole('button', { name: label, exact: true }),
+      ).toHaveCount(0);
     await capture(page, testInfo, 'purchase-remainder-closed');
     // Nothing is open, so the order closes.
     await page.goto(orderUrl);
