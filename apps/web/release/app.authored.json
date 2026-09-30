@@ -30702,6 +30702,118 @@
         "kind": "queryLegalEntityScope",
         "operand": {
           "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.item_stock_positions_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.item_stock_positions_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "exportMaximumResultCount": 5000,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.posted_stock_balance_read"
+      },
+      "queryId": "northstar.app:query.item_stock_positions",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.posted_stock_balance_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_stock_positions_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.posted_stock_balance_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_stock_positions_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.posted_stock_balance_posted_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_stock_positions_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.posted_stock_balance_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.item_stock_positions_4"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.posted_stock_balance"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.sales:capability.fulfillment"
+        },
+        "binding": "northstar.sales:read_model.stock",
+        "queries": {
+          "stockReservations": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.workspace_stock_reservations"
+          },
+          "balances": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.reservation_balance_get"
+          }
+        },
+        "resultFields": {
+          "reserved": "northstar.app:metric.reserved",
+          "available": "northstar.app:metric.available"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
           "parameterId": "northstar.app:parameter.commercial_lines_legal_entity_scope",
           "schemaVersion": "v6"
         },
@@ -46661,7 +46773,7 @@
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
-          "orderKey": 40,
+          "orderKey": 90,
           "schemaVersion": "v6",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.item_detail_key_facts"
@@ -46677,12 +46789,265 @@
           "schemaVersion": "v6",
           "slot": "sections",
           "slotId": "northstar.app:slot.item_detail_sections"
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "childTables",
+          "slotId": "northstar.app:slot.item_detail_children",
+          "orderKey": 60,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
         }
       ],
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.item_detail",
       "surfaceRole": "record",
-      "workspace": { "membership": "contextual" }
+      "composition": {
+        "kind": "surfaceComposition",
+        "schemaVersion": "v6",
+        "presentation": {
+          "header": {
+            "title": "northstar.app:column.item_name",
+            "subtitle": ["northstar.app:column.item_sku"],
+            "facts": [
+              "northstar.app:column.item_base_unit",
+              "northstar.app:column.item_price_cad",
+              "northstar.app:column.item_price_usd",
+              "northstar.app:column.item_price_eur"
+            ]
+          },
+          "context": {
+            "label": "Stock",
+            "description": "Stock at each location and the latest movements, in the company chosen above."
+          },
+          "recordActions": "progressive",
+          "technicalDetails": "progressive"
+        },
+        "fields": [
+          {
+            "columnId": "northstar.app:column.item_name",
+            "label": "Name",
+            "orderKey": 10,
+            "field": "northstar.app:field.item_name"
+          },
+          {
+            "columnId": "northstar.app:column.item_sku",
+            "label": "SKU",
+            "orderKey": 20,
+            "field": "northstar.app:field.item_sku"
+          },
+          {
+            "columnId": "northstar.app:column.item_description",
+            "label": "Description",
+            "orderKey": 30,
+            "field": "northstar.app:field.item_description"
+          },
+          {
+            "columnId": "northstar.app:column.item_base_unit",
+            "label": "Base unit",
+            "orderKey": 40,
+            "field": "northstar.app:field.item_base_unit"
+          },
+          {
+            "columnId": "northstar.app:column.item_price_cad",
+            "label": "Price (CAD)",
+            "orderKey": 50,
+            "field": "northstar.app:field.item_price_cad",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.item_price_usd",
+            "label": "Price (USD)",
+            "orderKey": 60,
+            "field": "northstar.app:field.item_price_usd",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.item_price_eur",
+            "label": "Price (EUR)",
+            "orderKey": 70,
+            "field": "northstar.app:field.item_price_eur",
+            "format": "money"
+          }
+        ],
+        "children": [
+          {
+            "datasetId": "northstar.app:dataset.item_stock",
+            "presentation": {
+              "selection": "none",
+              "description": "On hand is the stock posted at the location in this company. Reserved is what active reservations still hold there, and Available is on hand less reserved. Missing or unavailable data is not zero stock."
+            },
+            "label": "Stock by location",
+            "orderKey": 10,
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.item_stock_positions"
+            },
+            "sort": [
+              {
+                "fieldId": "northstar.app:field.posted_stock_balance_posted_quantity",
+                "direction": "descending"
+              }
+            ],
+            "fieldScope": {
+              "fieldId": "northstar.app:field.posted_stock_balance_item_id",
+              "value": { "source": "record", "field": "recordId" }
+            },
+            "columns": [
+              {
+                "columnId": "northstar.app:column.item_stock_location",
+                "label": "Location",
+                "orderKey": 10,
+                "field": "northstar.app:field.posted_stock_balance_location_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.location_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.location_code"
+                  }
+                },
+                "presentation": { "role": "primary", "priority": 10 }
+              },
+              {
+                "columnId": "northstar.app:column.item_stock_on_hand",
+                "label": "On hand",
+                "orderKey": 20,
+                "field": "northstar.app:field.posted_stock_balance_posted_quantity",
+                "presentation": { "role": "quantity", "priority": 20 }
+              },
+              {
+                "columnId": "northstar.app:column.item_stock_reserved",
+                "label": "Reserved",
+                "orderKey": 30,
+                "field": "northstar.app:metric.reserved",
+                "presentation": { "role": "quantity", "priority": 30 }
+              },
+              {
+                "columnId": "northstar.app:column.item_stock_available",
+                "label": "Available",
+                "orderKey": 40,
+                "field": "northstar.app:metric.available",
+                "presentation": { "role": "quantity", "priority": 40 }
+              },
+              {
+                "columnId": "northstar.app:column.item_stock_unit",
+                "label": "Unit",
+                "orderKey": 50,
+                "field": "northstar.app:field.posted_stock_balance_unit_id"
+              }
+            ]
+          },
+          {
+            "datasetId": "northstar.app:dataset.item_movements",
+            "presentation": {
+              "selection": "none",
+              "compact": "scrollTable",
+              "description": "Every posted change to this item's stock in this company, newest first. A positive change adds stock and a negative one removes it."
+            },
+            "label": "Recent movements",
+            "orderKey": 20,
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.inventory_movement_list"
+            },
+            "sort": [
+              {
+                "fieldId": "northstar.app:field.inventory_movement_effective_at",
+                "direction": "descending"
+              },
+              {
+                "fieldId": "northstar.app:field.inventory_movement_recorded_at",
+                "direction": "descending"
+              }
+            ],
+            "fieldScope": {
+              "fieldId": "northstar.app:field.inventory_movement_item_id",
+              "value": { "source": "record", "field": "recordId" }
+            },
+            "columns": [
+              {
+                "columnId": "northstar.app:column.item_movement_date",
+                "label": "Date",
+                "orderKey": 10,
+                "field": "northstar.app:field.inventory_movement_effective_at",
+                "presentation": { "role": "primary", "priority": 10 }
+              },
+              {
+                "columnId": "northstar.app:column.item_movement_role",
+                "label": "Role",
+                "orderKey": 20,
+                "field": "northstar.app:field.inventory_movement_posting_role"
+              },
+              {
+                "columnId": "northstar.app:column.item_movement_location",
+                "label": "Location",
+                "orderKey": 30,
+                "field": "northstar.app:field.inventory_movement_location_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.location_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.location_code"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.item_movement_change",
+                "label": "Change",
+                "orderKey": 40,
+                "field": "northstar.app:field.inventory_movement_quantity_delta",
+                "presentation": { "role": "quantity", "priority": 40 }
+              },
+              {
+                "columnId": "northstar.app:column.item_movement_unit",
+                "label": "Unit",
+                "orderKey": 50,
+                "field": "northstar.app:field.inventory_movement_unit_id"
+              },
+              {
+                "columnId": "northstar.app:column.item_movement_source",
+                "label": "Source",
+                "orderKey": 60,
+                "field": "northstar.app:field.inventory_movement_source_type"
+              },
+              {
+                "columnId": "northstar.app:column.item_movement_reason",
+                "label": "Reason",
+                "orderKey": 70,
+                "field": "northstar.app:field.inventory_movement_reason_code"
+              }
+            ]
+          }
+        ],
+        "actions": []
+      },
+      "workspace": {
+        "membership": "contextual",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.posted_stock_balance_list"
+        }
+      }
     },
     {
       "archetype": "record",
