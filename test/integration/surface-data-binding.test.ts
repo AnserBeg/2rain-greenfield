@@ -4638,7 +4638,16 @@ class OrderEntryExecutor
     this.rows.set(recordId, {
       recordId,
       entityId: `${this.namespace}:entity.${entity}`,
-      values,
+      // Like a newly added nullable storage column in the PostgreSQL DTO.
+      values: {
+        ...(entity === 'purchase_order'
+          ? {
+              [`${this.namespace}:field.purchase_order_supplier_reference`]:
+                null,
+            }
+          : {}),
+        ...values,
+      },
       revision: 1,
       archived: false,
     });
@@ -10376,6 +10385,88 @@ test('ORDER-PARITY: an order page names the lines it is short and shows where it
     'stopped',
   ]);
   assert.doesNotMatch(stopped.html, /data-next-(?:action|operation)=/u);
+});
+
+test('APPROVAL-PO: declared Tasks gate Place order on current approval and suppress the unconditioned capability command', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const order = seedPurchaseOrder(f, ['5'], 'draft').order;
+  const path = `/?${new URLSearchParams({ surface: `${ns}:surface.purchase_order_detail`, record: order, [`${ns}:parameter.commercial_purchase_order_get_legal_entity_scope`]: scope })}`;
+  for (const [status, required, ready, submit] of [
+    ['Not requested', true, false, true],
+    ['Pending', true, false, false],
+    ['Approved', true, true, false],
+    ['Rejected', true, false, true],
+    ['Not required', false, true, false],
+    [null, null, null, false],
+  ] as const) {
+    const html = (
+      await renderSurfaceRuntimeWithData(
+        f.view,
+        path,
+        statingGateways(f, {
+          commercial: (key) =>
+            ({
+              approval_status: status,
+              approval_required: required,
+              approval_ready: ready,
+            })[key as 'approval_status'] ?? null,
+        }),
+      )
+    ).html;
+    assert.equal(
+      html.includes(`value="${ns}:action.place_order"`),
+      ready === true,
+      String(status),
+    );
+    assert.equal(
+      html.includes(`value="${ns}:action.submit_approval"`),
+      submit,
+      String(status),
+    );
+    assert.doesNotMatch(
+      html,
+      /name="operationId" value="northstar.app:operation.purchase_order_release"/u,
+      'a raw Release command must not bypass the declared Task',
+    );
+  }
+  const request = f.executor.seed(
+    'purchase_order_approval',
+    {
+      [`${ns}:field.purchase_order_approval_number`]: 'REQ-TEST',
+      [`${ns}:field.purchase_order_approval_order_number`]: 'PO-000042',
+      [`${ns}:field.purchase_order_approval_state`]: `${ns}:option.purchase_order_approval_state_pending`,
+      [`${ns}:field.purchase_order_approval_kind`]: 'order',
+      [`${ns}:field.purchase_order_approval_revision_digest`]: '0'.repeat(64),
+      [`${ns}:field.purchase_order_approval_requested_by`]: 'buyer',
+      ...Object.fromEntries(
+        [
+          'reason',
+          'decided_by',
+          'decision_reason',
+          'current_quantity',
+          'proposed_quantity',
+        ].map((name) => [`${ns}:field.purchase_order_approval_${name}`, null]),
+      ),
+      [`${ns}:relation.purchase_order_approval_order`]: order,
+    },
+    scope,
+  );
+  const requestPath = `/?${new URLSearchParams({ surface: `${ns}:surface.purchase_order_approval_detail`, record: request, [`${ns}:parameter.purchase_order_approval_get_legal_entity_scope`]: scope })}`;
+  const html = (
+    await renderSurfaceRuntimeWithData(
+      f.view,
+      requestPath,
+      statingGateways(f, {}),
+    )
+  ).html;
+  for (const action of ['approve', 'reject'])
+    assert.ok(
+      html.includes(`value="${ns}:action.approval_${action}"`),
+      html.replace(/<[^>]*>/gu, ' ').slice(-3500),
+    );
+  assert.match(html, /PO-000042/u);
 });
 
 test('PAYABLES: the order lists its bills and offers billing only while the order states something to bill; a bill binds its lines, payments and credits and offers each command in its states', async () => {

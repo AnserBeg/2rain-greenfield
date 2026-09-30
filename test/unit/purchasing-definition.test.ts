@@ -151,6 +151,12 @@ test('the approval inbox is a declared List and requests have no generic write p
   );
   assert.ok(placeOrder && 'label' in placeOrder);
   assert.equal(placeOrder.label, 'Place order');
+  const supplierReference = model.fields.find(
+    (field) =>
+      field.fieldId === 'northstar.app:field.purchase_order_supplier_reference',
+  );
+  assert.equal(supplierReference?.presence, 'optional');
+  assert.equal(supplierReference?.searchable, false);
   for (const local of ['approve', 'reject'])
     assert.equal(
       model.operations.find(
@@ -163,6 +169,49 @@ test('the approval inbox is a declared List and requests have no generic write p
 });
 
 const namespace = PURCHASING_IDS.namespace;
+test('capability-owned approval storage compiles without generic CRUD, but a partial generic path does not earn that exception', () => {
+  const definition = composedApplicationDefinition() as Record<string, unknown>;
+  assert.equal(
+    compileApplication(compilerInput(definition)).status,
+    'compiled',
+  );
+  const mixed = structuredClone(definition);
+  const operations = mixed.operations as Record<string, unknown>[];
+  const template = operations.find(
+    (entry) =>
+      entry.operationId ===
+      'northstar.app:operation.purchasing_settings_update',
+  )!;
+  operations.push({
+    ...template,
+    operationId: 'northstar.app:operation.purchase_order_approval_update_probe',
+    effect: {
+      kind: 'updateRecordEffect',
+      schemaVersion: 'v6',
+      entity: {
+        kind: 'entityReference',
+        schemaVersion: 'v6',
+        targetId: 'northstar.app:entity.purchase_order_approval',
+      },
+    },
+    readBack: {
+      kind: 'queryReference',
+      schemaVersion: 'v6',
+      targetId: 'northstar.app:query.purchase_order_approval_get',
+    },
+  });
+  const result = compileApplication(compilerInput(mixed));
+  assert.equal(result.status, 'failed');
+  if (result.status === 'failed')
+    assert.ok(
+      result.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === 'COMPILER_ENTITY_PROJECTION_MISSING' &&
+          diagnostic.subjectId ===
+            'northstar.app:entity.purchase_order_approval',
+      ),
+    );
+});
 const stateFieldId = PURCHASING_IDS.stateFieldId;
 const orderEntityId = PURCHASING_IDS.entityIds.purchaseOrder;
 const lineEntityId = PURCHASING_IDS.entityIds.purchaseOrderLine;

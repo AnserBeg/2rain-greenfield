@@ -202,9 +202,19 @@ async function journey(
   const orderLineId = (await orderLine.getAttribute('data-record-id'))!;
   expect(orderLineId).toBeTruthy();
   const orderUrl = url('purchase_order', 'detail', orderId);
-  await page.locator('.composition-record-actions > summary').click();
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Release complete');
+  await page.getByRole('button', { name: 'Place order', exact: true }).click();
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Review Place order', exact: true })
+    .click();
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Confirm Place order', exact: true })
+    .click();
+  await expect(page.getByRole('status').first()).toContainText(
+    'Place order: done',
+  );
+  await page.goto(orderUrl);
   await expectOrderProgress('5', '0', '5');
   // The receipt number is assigned by the server on first save.
   await page.goto(url('goods_receipt', 'form'));

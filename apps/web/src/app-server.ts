@@ -14,6 +14,7 @@ import {
   FRAGMENT_REQUEST_HEADER,
   renderApplicationDiagnostic,
   renderSurfaceRuntime,
+  withLocalDemoIdentity,
   renderSurfaceRuntimeWithData,
   submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
@@ -162,15 +163,13 @@ async function handleRequest(
       : await entry.run({ headers: request.headers }, (view) =>
           renderSurfaceRuntime(view, url.href),
         );
-    const selectedActor = localDemoActor(request.headers.cookie);
-    const demoBar = demoActors
-      ? `<aside aria-label="Local demo identity"><form method="post"><label>Acting as <select name="localDemoActAs" aria-label="Acting as">${demoActors.map((actor) => `<option value="${actor.key}"${actor.key === selectedActor ? ' selected' : ''}>${actor.label}</option>`).join('')}</select></label><button type="submit">Switch person</button><span>Local demo</span></form></aside>`
-      : '';
     writeHtml(
       response,
-      demoBar
-        ? { ...result, html: result.html.replace('<body>', `<body>${demoBar}`) }
-        : result,
+      withLocalDemoIdentity(
+        result,
+        demoActors,
+        localDemoActor(request.headers.cookie),
+      ),
     );
   } catch (error) {
     if (error instanceof AuthenticationRequiredError) {

@@ -140,8 +140,22 @@ test('a partly received order shows what is still open, closes its remainder wit
         .getByRole('button', { name: 'Save draft', exact: true })
         .click();
       await expect(page).toHaveURL(/purchase_order_detail/u);
-      await command(page, 'Release', false);
-      await expect(page.getByRole('status')).toContainText('Release complete');
+      const orderUrl = page.url();
+      await page
+        .getByRole('button', { name: 'Place order', exact: true })
+        .click();
+      await page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Review Place order', exact: true })
+        .click();
+      await page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Confirm Place order', exact: true })
+        .click();
+      await expect(page.getByRole('status').first()).toContainText(
+        'Place order: done',
+      );
+      await page.goto(orderUrl);
       return page.url();
     };
     const row = () =>

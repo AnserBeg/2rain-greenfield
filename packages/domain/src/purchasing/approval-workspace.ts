@@ -60,6 +60,11 @@ export function approvalWorkspace(namespace: string): Record<string, unknown> {
     kind: 'surfaceComposition',
     schemaVersion: 'v6',
     presentation: {
+      context: {
+        label: 'Approval decision',
+        description:
+          'Approve or reject this request with a reason. Only the current purchase-order revision may be approved.',
+      },
       header: {
         title: `${namespace}:column.approval_order_number`,
         subtitle: [],
@@ -321,28 +326,6 @@ export function withApprovalWorkspace(
       place,
       requestAmendment,
       ...(composition.actions as Record<string, unknown>[]),
-      {
-        actionId: id('action', 'open_approval'),
-        label: 'Open approval',
-        description: 'Read or decide this request.',
-        orderKey: 90,
-        datasetId: id('dataset', 'purchasing_approvals'),
-        presentation: { placement: 'row' },
-        conditions: [],
-        inputs: [],
-        steps: [],
-        navigate: {
-          surface: ref(
-            'surfaceReference',
-            id('surface', 'purchase_order_approval_detail'),
-          ),
-          query: ref(
-            'queryReference',
-            id('query', 'purchase_order_approval_get'),
-          ),
-          record: { source: 'selected', field: 'recordId' },
-        },
-      },
     ],
   };
 }

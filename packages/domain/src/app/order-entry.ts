@@ -253,7 +253,7 @@ export function orderEntrySurfaces(
       linesLabel: 'Order lines',
       saveDescription: sales
         ? 'Save commits the header and each line in sequence. Drafts do not change stock. Confirm is a separate action, offered once the order has a complete ship-to address (street, city, postal code and country).'
-        : 'Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.',
+        : 'Save commits the header and each line in sequence. Drafts do not change stock. Place order is a separate action.',
       saveMode: 'sequential',
       headerFormSurfaceId: id('surface', `${local}_form`),
       recordSurfaceId: id('surface', `${local}_detail`),
@@ -518,17 +518,20 @@ export function orderEntrySurfaces(
     const local = name.replace(/_(list|detail|form)$/, '');
     const editor = documents.get(local);
     const owner =
-      local.startsWith('purchase_order') || local.startsWith('goods_receipt')
-        ? 'purchase_order'
-        : local.startsWith('sales_order') ||
-            [
-              'reservation',
-              'reservation_balance',
-              'shipment',
-              'shipment_line',
-            ].includes(local)
-          ? 'sales_order'
-          : (lineOwners[local] ?? null);
+      local === 'purchase_order_approval'
+        ? 'purchase_order_approval'
+        : local.startsWith('purchase_order') ||
+            local.startsWith('goods_receipt')
+          ? 'purchase_order'
+          : local.startsWith('sales_order') ||
+              [
+                'reservation',
+                'reservation_balance',
+                'shipment',
+                'shipment_line',
+              ].includes(local)
+            ? 'sales_order'
+            : (lineOwners[local] ?? null);
     const master = masterOwners[local] ?? null;
     // A worklist beside a document's List (Expected receipts beside Purchase
     // orders) is a business destination of its own, entered with the caller's
@@ -555,6 +558,7 @@ export function orderEntrySurfaces(
               worklist ||
               local === 'posted_stock_balance' ||
               local === 'customer_invoice' ||
+              local === 'purchase_order_approval' ||
               local === 'vendor_bill'
               ? 'operational'
               : owner || master

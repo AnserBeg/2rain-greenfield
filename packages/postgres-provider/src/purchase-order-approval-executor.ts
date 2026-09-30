@@ -541,7 +541,7 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
   ) {
     const a = this.#approval,
       f = (name: string) => this.#field(a, name);
-    let currentQuantity: string | null = null,
+    let orderedBeforeProposal: string | null = null,
       proposedQuantity: string | null = null;
     if (amendmentId) {
       const staged = await receiptRow(
@@ -558,7 +558,7 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
         p.legalEntityId,
         p.recordId,
       );
-      currentQuantity = String(
+      orderedBeforeProposal = String(
         line[this.#field(this.#binding.orderLine, 'ordered_quantity')],
       );
       proposedQuantity =
@@ -577,7 +577,7 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
       [f('reason')]: reason,
       [f('decision_reason')]: null,
       [f('amendment_id')]: amendmentId,
-      [f('current_quantity')]: currentQuantity,
+      [f('current_quantity')]: orderedBeforeProposal,
       [f('proposed_quantity')]: proposedQuantity,
       [receiptRelation(this.#binding, a, 'purchase_order_approval_order')]:
         p.orderId,

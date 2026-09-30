@@ -8,6 +8,7 @@ import test, { type TestContext } from 'node:test';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
+import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
@@ -1180,7 +1181,7 @@ async function assertRealProductDefinition(
     // then the invoice, its lines, payments and credits (list, detail, form
     // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
     // vendor bill, its lines, payments and credits (list, detail, form each).
-    assert.equal(surfaces.length, 101);
+    assert.equal(surfaces.length, 106);
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     for (const local of [
       'goods_receipt',
@@ -2708,6 +2709,7 @@ async function assertFailClosedIdentitySeam(
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl,
@@ -3525,8 +3527,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   // invoice number is searchable, so it adds no search exclusion.
   assert.equal(
     servingScenarioCount,
-    573,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, and 72 for payables',
+    605,
+    'compiled APPROVALS adds 21 request, 10 settings and one supplier-reference exclusion to the prior 573',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5865,13 +5867,13 @@ async function assertExactPartitionEvidence(
   // the compiled head): 573, 496.
   assert.equal(
     evidence.results.length,
-    496,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, and payables 72',
+    507,
+    'compiled APPROVALS adds ten settings scenarios and one supplier-reference exclusion to the prior 496 constructible scenarios',
   );
   assert.equal(
     derivations.length,
-    77,
-    'the 20 operationless reserved-coverage and shipped-quantity scenarios join the prior 57 derivations',
+    98,
+    'the capability-owned approval request adds 21 derivations to the prior 77',
   );
   assert.equal(
     binding.plan.scenarios.some(
@@ -5896,7 +5898,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    77,
+    98,
   );
   const executedScenarioIdSet = new Set(executedScenarioIds);
   const salesEntityIds = new Set<string>([
@@ -6394,6 +6396,7 @@ function createRuntime(
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
     ],
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,

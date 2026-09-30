@@ -79,31 +79,35 @@ async function seed(
     local: string,
     input: ImmutableJsonValue,
     key = randomUUID(),
+    actor: 'buyer' | 'manager' = 'buyer',
   ) =>
-    app.runtime.entry.run({ headers: {} }, (view) => {
-      const operationId = `${ns}:operation.${local}`;
-      const operation = parsePinnedOperationCatalog(
-        view.projections.operation.payload,
-      ).find((value) => value.operationId === operationId)!;
-      return app.runtime.operationGateway.invoke(
-        view,
-        {
-          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-          operationId,
-          input,
-          idempotencyKey: key,
-          confirmationGrant:
-            operation.confirmation === 'humanRequired'
-              ? app.runtime.operationMediation.issueConfirmationGrant(
-                  view,
-                  operationId,
-                  input,
-                )
-              : null,
-        },
-        app.runtime.operationMediation.issueInvocation(view, 'UI'),
-      );
-    });
+    app.runtime.entry.run(
+      { headers: { cookie: `northstar-demo-actor=${actor}` } },
+      (view) => {
+        const operationId = `${ns}:operation.${local}`;
+        const operation = parsePinnedOperationCatalog(
+          view.projections.operation.payload,
+        ).find((value) => value.operationId === operationId)!;
+        return app.runtime.operationGateway.invoke(
+          view,
+          {
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+            operationId,
+            input,
+            idempotencyKey: key,
+            confirmationGrant:
+              operation.confirmation === 'humanRequired'
+                ? app.runtime.operationMediation.issueConfirmationGrant(
+                    view,
+                    operationId,
+                    input,
+                  )
+                : null,
+          },
+          app.runtime.operationMediation.issueInvocation(view, 'UI'),
+        );
+      },
+    );
   const create = async (
     local: string,
     values: Record<string, ImmutableJsonValue>,
@@ -518,6 +522,31 @@ async function seed(
         complete: await purchase(at(-2), [['3', '3']]),
         draft: await purchase(at(-3), [['7', '0']], false),
         observed: true,
+      };
+    }
+    if (phase === 'approval_order') {
+      const header = await create('purchase_order', {
+        supplier_party_id: customer,
+        order_date: new Date().toISOString(),
+        expected_date: null,
+        currency: 'CAD',
+        notes: null,
+      });
+      const line = await create(
+        'purchase_order_line',
+        {
+          line_number: '1',
+          item_id: item,
+          ordered_quantity: '5',
+          unit_price: '12.5',
+        },
+        { order: header.recordId },
+      );
+      return {
+        phase,
+        recordId: header.recordId,
+        number: String(header.values[`${ns}:field.purchase_order_number`]),
+        lineId: line.recordId,
       };
     }
     if (phase === 'payables') {

@@ -504,8 +504,27 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
         let approval: string | null = null;
         let ready: boolean | null = null;
         try {
-          const settings = await invoke('settings', { includeArchived: false });
-          if (settings.outcome !== 'exact')
+          const settings = requireSharedListResult(
+            await invoke('settings', {
+              includeArchived: false,
+              list: {
+                schemaVersion: SHARED_LIST_QUERY_VERSION,
+                cursor: null,
+                matchMode: 'substring',
+                pageSize: 1,
+                search: '',
+                sort: [],
+                relationLabels: [],
+                fieldFilters: [
+                  {
+                    fieldId: field('purchasing_settings_key'),
+                    value: 'purchase-orders',
+                  },
+                ],
+              },
+            }),
+          );
+          if (settings.listCoverage.hasMore)
             throw new Error('Purchasing settings could not be read exactly');
           required = settings.records.some(
             (record) =>

@@ -2,13 +2,41 @@
   "schemaVersion": "northstar.web:current-policy-bindings/v1",
   "packages": {
     "northstar.app:package.application": [
-      { "action": "transition", "permissionId": "northstar.app:permission.purchase_order_approve", "resource": "northstar.app:entity.purchase_order_approval" },
-      { "action": "read", "permissionId": "northstar.app:permission.purchase_order_approval_read", "resource": "northstar.app:entity.purchase_order_approval" },
-      { "action": "create", "permissionId": "northstar.app:permission.purchasing_settings_create", "resource": "northstar.app:entity.purchasing_settings" },
-      { "action": "read", "permissionId": "northstar.app:permission.purchasing_settings_read", "resource": "northstar.app:entity.purchasing_settings" },
-      { "action": "update", "permissionId": "northstar.app:permission.purchasing_settings_update", "resource": "northstar.app:entity.purchasing_settings" },
-      { "action": "archive", "permissionId": "northstar.app:permission.purchasing_settings_archive", "resource": "northstar.app:entity.purchasing_settings" },
-      { "action": "restore", "permissionId": "northstar.app:permission.purchasing_settings_restore", "resource": "northstar.app:entity.purchasing_settings" },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.purchase_order_approve",
+        "resource": "northstar.app:entity.purchase_order_approval"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.purchase_order_approval_read",
+        "resource": "northstar.app:entity.purchase_order_approval"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.purchasing_settings_create",
+        "resource": "northstar.app:entity.purchasing_settings"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.purchasing_settings_read",
+        "resource": "northstar.app:entity.purchasing_settings"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.purchasing_settings_update",
+        "resource": "northstar.app:entity.purchasing_settings"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.purchasing_settings_archive",
+        "resource": "northstar.app:entity.purchasing_settings"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.purchasing_settings_restore",
+        "resource": "northstar.app:entity.purchasing_settings"
+      },
       {
         "action": "archive",
         "permissionId": "northstar.app:permission.purchase_order_amendment_archive",

@@ -100,7 +100,8 @@ export function withPurchaseOrderApprovals(
     classification: 'internal',
     collation: 'binary',
     reportable: true,
-    searchable: true,
+    // The reference is displayed, not a new indexed-search contract.
+    searchable: false,
   });
   const operation = (
     local: string,

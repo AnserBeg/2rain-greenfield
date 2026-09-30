@@ -28,7 +28,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
           // Sales confirms (ruling F) once a ship-to is complete; Purchasing releases.
           const boundary = await page
             .getByText(
-              /^Save commits the header and each line in sequence\. Drafts do not change stock\. (Confirm is a separate action, offered once the order has a complete ship-to address \(street, city, postal code and country\)|Release is a separate action)\.$/u,
+              /^Save commits the header and each line in sequence\. Drafts do not change stock\. (Confirm is a separate action, offered once the order has a complete ship-to address \(street, city, postal code and country\)|Place order is a separate action)\.$/u,
             )
             .boundingBox();
           const save = await page
@@ -315,8 +315,18 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     );
     await capture('sales-packing');
     await page.goto(purchaseUrl);
-    await page.locator('.composition-record-actions > summary').click();
-    await page.getByRole('button', { name: 'Release', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Place order', exact: true })
+      .click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Review Place order', exact: true })
+      .click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Confirm Place order', exact: true })
+      .click();
+    await page.goto(purchaseUrl);
     await expect(
       page.getByRole('link', { name: 'Edit', exact: true }),
     ).toHaveCount(0);
