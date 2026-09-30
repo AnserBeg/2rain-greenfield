@@ -1,11 +1,17 @@
-import type { SurfaceList } from '../../../packages/canonical-model/src/index.js';
+import type {
+  SurfaceList,
+  SurfaceListRowAction,
+} from '../../../packages/canonical-model/src/index.js';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import {
   encodeSharedListCursor,
   SHARED_LIST_QUERY_VERSION,
   type SharedListQueryRequest,
 } from '../../../packages/runtime/src/list-behavior/index.js';
-import type { SemanticRecordDto } from '../../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  SemanticQueryPolicyDeniedError,
+  type SemanticRecordDto,
+} from '../../../packages/runtime/src/semantic-query-gateway.js';
 
 /**
  * A declared List (canonical `surface.list`) read from the request URL. The
@@ -142,6 +148,12 @@ interface ListArgumentOptions {
   >;
   /** For a view count, the view counted instead of the selected one. */
   readonly viewId?: string | null;
+  /**
+   * The List's progress withheld by current policy (`whenDenied: 'omit'`):
+   * the request carries none, so its figures read "—". A view that keeps
+   * only open rows cannot be asked this way -- it would count every row.
+   */
+  readonly withoutProgress?: boolean;
 }
 
 const DAY_MILLISECONDS = 86_400_000;
@@ -256,7 +268,11 @@ export function declaredListArguments(
   // Every request of the List carries its progress, so a count, a page and
   // an export read the same figures; a view's `open` and `before` narrow all
   // three in the statement, never over a fetched page.
-  const progress = progressArgument(list, view?.open === true);
+  if (options.withoutProgress && view?.open)
+    throw new Error('an open view is never read without its progress');
+  const progress = options.withoutProgress
+    ? undefined
+    : progressArgument(list, view?.open === true);
   const beforeFilters = Object.freeze(
     view?.before
       ? [
@@ -379,24 +395,99 @@ export function overdueDays(
     )
   )
     return null;
-  if (view.open) {
-    const open = list.progress
-      ? record.values[list.progress.outputs.open]
-      : undefined;
-    // Above zero: an unsigned exact decimal with a digit other than zero.
-    if (
-      typeof open !== 'string' ||
-      !/^\d+(?:\.\d+)?$/u.test(open) ||
-      !/[1-9]/u.test(open)
-    )
-      return null;
-  }
+  if (view.open && !somethingOpen(list, record)) return null;
   const value = record.values[view.before.field];
   const instant = typeof value === 'string' ? Date.parse(value) : Number.NaN;
   const anchor = startOfTodayUtc(now).getTime();
   if (!Number.isFinite(instant) || instant >= anchor) return null;
   const day = startOfTodayUtc(new Date(instant)).getTime();
   return Math.round((anchor - day) / DAY_MILLISECONDS);
+}
+
+/**
+ * Whether the row's server-projected progress leaves something open: an
+ * unsigned exact decimal with a digit other than zero. A withheld or absent
+ * figure is not open -- nothing unstated is guessed.
+ */
+function somethingOpen(list: SurfaceList, record: SemanticRecordDto): boolean {
+  const open = list.progress
+    ? record.values[list.progress.outputs.open]
+    : undefined;
+  return (
+    typeof open === 'string' &&
+    /^\d+(?:\.\d+)?$/u.test(open) &&
+    /[1-9]/u.test(open)
+  );
+}
+
+/**
+ * Whether a view can be read only with the List's progress: it keeps the
+ * rows with something open, which only the list statement can judge. Without
+ * the progress such a view is refused; every other view still serves.
+ */
+export function viewNeedsProgress(
+  list: SurfaceList,
+  viewId: string | null,
+): boolean {
+  return (
+    list.views.find((candidate) => candidate.viewId === viewId)?.open === true
+  );
+}
+
+/**
+ * The progress query current policy withheld from a List whose progress is
+ * supplementary (`whenDenied: 'omit'`), named by the gateway's refusal; `null`
+ * for anything else -- the List's own query, a label, or a List whose progress
+ * is its purpose, which keep refusing as they did.
+ */
+export function withheldProgressQuery(
+  list: SurfaceList,
+  error: unknown,
+): string | null {
+  const progress = list.progress;
+  if (
+    progress?.whenDenied !== 'omit' ||
+    !(error instanceof SemanticQueryPolicyDeniedError)
+  )
+    return null;
+  const summed: readonly string[] = [
+    progress.lines.query.targetId,
+    progress.done.query.targetId,
+  ];
+  return summed.includes(error.queryId) ? error.queryId : null;
+}
+
+export type DeclaredListRowAction = SurfaceListRowAction;
+
+export function orderedRowActions(
+  list: SurfaceList,
+): readonly DeclaredListRowAction[] {
+  return [...(list.rowActions ?? [])].sort(
+    (left, right) =>
+      left.orderKey - right.orderKey ||
+      left.actionId.localeCompare(right.actionId),
+  );
+}
+
+/**
+ * The row's action: the first declared (in order) whose condition holds --
+ * its exact filters and, for `open`, something open -- judged from the row's
+ * server-projected values, as an overdue date is. With its progress withheld
+ * a row states nothing open, so an action that needs it is not the row's.
+ */
+export function declaredRowAction(
+  list: SurfaceList,
+  record: SemanticRecordDto,
+): DeclaredListRowAction | null {
+  return (
+    orderedRowActions(list).find(
+      (action) =>
+        (action.when?.filters ?? []).every(
+          (filter) => record.values[filter.field] === filter.value,
+        ) &&
+        (!action.when?.open || somethingOpen(list, record)),
+    ) ?? null
+  );
 }
 
 // A leading = + - @ (or tab/CR) makes a spreadsheet evaluate the cell. The

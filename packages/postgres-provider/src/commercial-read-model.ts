@@ -145,6 +145,30 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
   };
   const linesOf = (orderId: string) =>
     listAll('lines', `${ns}:relation.${doc}_line_order`, orderId);
+  /**
+   * An order's lines for its totals. On a List the totals are supplementary
+   * (ORDER-PARITY, owner ruling of 2026-09-30): a withheld line read states no
+   * totals rather than refusing the page, and one denial answers for every row
+   * of the call, as a withheld received read does. A single order's read keeps
+   * refusing -- its page is the document those lines make up.
+   */
+  let linesWithheld = false;
+  const totalledLines = async (
+    orderId: string,
+  ): Promise<readonly SemanticRecordDto[] | null> => {
+    if (linesWithheld) return null;
+    try {
+      return await linesOf(orderId);
+    } catch (error) {
+      if (
+        definition.queryType !== 'list' ||
+        !(error instanceof SemanticQueryPolicyDeniedError)
+      )
+        throw error;
+      linesWithheld = true;
+      return null;
+    }
+  };
   /** An exact quantity as units at scale 18, or `null`. */
   const units = (value: ImmutableJsonValue | undefined): bigint | null => {
     const parsed = parseExact(value);
@@ -303,11 +327,12 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       model.binding === COMMERCIAL_READ_MODEL_BINDINGS.order ||
       model.binding === COMMERCIAL_READ_MODEL_BINDINGS.purchaseOrder
     ) {
-      let complete = true;
+      const lines = await totalledLines(row.recordId);
+      // Withheld lines state nothing, as an unpriced line does.
+      let complete = lines !== null;
       let subtotal = 0n;
       let tax = 0n;
-      const lines = await linesOf(row.recordId);
-      for (const line of lines) {
+      for (const line of lines ?? []) {
         const amounts = priced(line);
         if (!amounts) complete = false;
         else {
@@ -335,7 +360,10 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       emit('order_tax', complete ? money(tax) : null);
       emit('order_total', complete ? money(subtotal + charges + tax) : null);
       if (model.resultFields.order_to_invoice)
-        emit('order_to_invoice', await toInvoice(row.recordId, lines));
+        emit(
+          'order_to_invoice',
+          lines === null ? null : await toInvoice(row.recordId, lines),
+        );
     } else throw new Error('Unknown commercial read-model binding');
     rows.push({ ...row, values });
   }

@@ -36,12 +36,14 @@ import { sharedListView } from './list-runtime.js';
 import {
   declaredCellText,
   declaredListParameters,
+  declaredRowAction,
   orderedColumns,
   orderedFilters,
   orderedViews,
   overdueDays,
   startOfTodayUtc,
   type DeclaredListColumn,
+  type DeclaredListRowAction,
   type DeclaredListState,
   type FieldPresenter,
 } from './list-declaration.js';
@@ -115,6 +117,21 @@ export interface SurfaceComponentRenderResult {
   readonly state: SurfaceSlotResolutionState;
 }
 
+/**
+ * Server counts per saved view, the request's declared List state, and the
+ * instant the request's "before today" views were counted at.
+ */
+export interface DeclaredListRenderData {
+  readonly counts: Readonly<Record<string, number>>;
+  readonly now: Date;
+  /**
+   * The progress query current policy withheld from a List whose figures are
+   * supplementary: they read "—", and a view that keeps open rows refuses.
+   */
+  readonly progressWithheld?: string;
+  readonly state: DeclaredListState;
+}
+
 export type SurfaceDataRenderState =
   | { readonly status: 'UNBOUND' }
   | {
@@ -131,15 +148,7 @@ export type SurfaceDataRenderState =
       readonly salesOrder?: SalesOrderSection;
       readonly packingDocument?: ShipmentPackingDocument;
       readonly result?: SemanticQueryResultEnvelope;
-      /**
-       * Server counts per saved view, the request's declared List state, and
-       * the instant the request's "before today" views were counted at.
-       */
-      readonly declaredList?: {
-        readonly counts: Readonly<Record<string, number>>;
-        readonly now: Date;
-        readonly state: DeclaredListState;
-      };
+      readonly declaredList?: DeclaredListRenderData;
       readonly status: 'READY';
     }
   | { readonly status: 'EMPTY' }
@@ -148,6 +157,8 @@ export type SurfaceDataRenderState =
       // catalog, so the render state cannot admit a code the catalog does not
       // register, and the gateway-error mapping targets the same set.
       readonly code: QueryDiagnosticCode;
+      /** A refused List view: the List's other views still serve. */
+      readonly declaredList?: DeclaredListRenderData;
       readonly status: 'DIAGNOSTIC';
     };
 
@@ -474,8 +485,11 @@ function declaredListBase(context: SurfaceComponentContext): URLSearchParams {
 
 function renderSavedViews(context: SurfaceComponentContext): string {
   const list = context.surface.list;
+  // A refused view keeps its tabs: the List's other views still serve.
   const declared =
-    context.data?.status === 'READY' ? context.data.declaredList : undefined;
+    context.data?.status === 'READY' || context.data?.status === 'DIAGNOSTIC'
+      ? context.data.declaredList
+      : undefined;
   return slotPanel(
     context,
     list && declared
@@ -508,15 +522,16 @@ function renderDataGrid(context: SurfaceComponentContext): string {
       context.view,
       context.surface,
     );
+    const detailHref = (record: SemanticRecordDto) =>
+      detail
+        ? surfaceHref(detail, record.recordId, record.archived, context)
+        : null;
     return slotPanel(
       context,
       `${feedbackHtml(context.feedback)}${renderDeclaredList({
         base: declaredListBase(context),
         coverage: data.result.listCoverage,
-        detailHref: (record) =>
-          detail
-            ? surfaceHref(detail, record.recordId, record.archived, context)
-            : null,
+        detailHref,
         exportLimit:
           'exportMaximumResultCount' in binding.query
             ? (binding.query.exportMaximumResultCount ?? null)
@@ -525,8 +540,21 @@ function renderDataGrid(context: SurfaceComponentContext): string {
         now: data.declaredList.now,
         present: (record, fieldId, value) =>
           displayFieldValue(context.view, record, fieldId, value),
+        progressWithheld: data.declaredList.progressWithheld ?? null,
         recordLabel,
         records: data.records,
+        // The row's record page, at the section its action names -- only a
+        // section the page's composition declares (the validator refuses any
+        // other), so a link never promises a place the page does not have.
+        rowActionHref: (record, action) => {
+          const href = detailHref(record);
+          if (href === null || action.section === undefined) return href;
+          return detail?.composition?.children.some(
+            (child) => child.datasetId === action.section,
+          )
+            ? `${href}#${action.section}`
+            : null;
+        },
         selectionCell: hasNamedSlot(context.surface, 'bulkActions')
           ? (record, title) => selectionCell(formId, record, recordLabel, title)
           : null,
@@ -536,9 +564,17 @@ function renderDataGrid(context: SurfaceComponentContext): string {
     );
   }
   if (data.status === 'DIAGNOSTIC') {
+    // A view refused for its withheld figures says which figures it needs.
+    const withheld =
+      context.surface.list && data.declaredList?.progressWithheld
+        ? progressWithheldNote(
+            context.surface.list,
+            data.declaredList.progressWithheld,
+          )
+        : '';
     return slotPanel(
       context,
-      `${feedbackHtml(context.feedback)}${dataDiagnostic(data.code)}`,
+      `${feedbackHtml(context.feedback)}${withheld}${dataDiagnostic(data.code)}`,
       'data-grid-slot',
     );
   }
@@ -2202,11 +2238,44 @@ interface DeclaredListRenderInput {
   /** The request's instant: overdue dates are judged against its day. */
   readonly now: Date;
   readonly present: FieldPresenter;
+  /** The progress query current policy withheld; its figures read "—". */
+  readonly progressWithheld: string | null;
   readonly recordLabel: string;
   readonly records: readonly SemanticRecordDto[];
+  /** Where a row's action leads, or `null` when it cannot be linked. */
+  readonly rowActionHref: (
+    record: SemanticRecordDto,
+    action: DeclaredListRowAction,
+  ) => string | null;
   readonly selectionCell:
     ((record: SemanticRecordDto, title: string) => string) | null;
   readonly state: DeclaredListState;
+}
+
+/**
+ * Says which figures a List reads without, and which views they would have
+ * served: the progress columns, withheld by current policy, and the views
+ * that keep only open rows, which are refused while they are.
+ */
+function progressWithheldNote(list: SurfaceList, withheld: string): string {
+  if (!list.progress) return '';
+  const outputs = new Set(Object.values(list.progress.outputs));
+  const series = (labels: readonly string[]) =>
+    labels.length > 1
+      ? `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)!}`
+      : (labels[0] ?? '');
+  const figures = orderedColumns(list)
+    .filter((column) => outputs.has(column.field))
+    .map((column) => column.label);
+  const views = orderedViews(list)
+    .filter((view) => view.open)
+    .map((view) => view.label);
+  const text = `${figures.length > 0 ? series(figures) : 'Progress figures'} ${figures.length === 1 ? 'is' : 'are'} withheld by current policy${
+    views.length > 0
+      ? `; ${series(views)} ${views.length === 1 ? 'needs them and is' : 'need them and are'} unavailable`
+      : ''
+  }.`;
+  return `<p class="muted" data-list-progress-withheld="${escapeHtml(withheld)}">${escapeHtml(text)}</p>`;
 }
 
 /** Saved-view tabs; counts are server counts of each view under the current search and filters. */
@@ -2313,6 +2382,19 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
       return `<th scope="col" aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
     })
     .join('');
+  const rowActions = (list.rowActions ?? []).length > 0;
+  // The row's one action -- the first whose condition holds -- as a link to
+  // its record page at the named section, named with the row it opens.
+  const actionCell = (record: SemanticRecordDto, title: string) => {
+    if (!rowActions) return '';
+    const action = declaredRowAction(list, record);
+    const href = action ? input.rowActionHref(record, action) : null;
+    return `<td data-column-label="Actions" data-cell-role="actions">${
+      action && href
+        ? `<a class="secondary-action" href="${escapeHtml(href)}" data-row-action="${escapeHtml(action.actionId)}" aria-label="${escapeHtml(`${action.label} ${title}`)}">${escapeHtml(action.label)}</a>`
+        : '<span class="muted">—</span>'
+    }</td>`;
+  };
   const body = input.records
     .map((record) => {
       const cells = columns
@@ -2340,7 +2422,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           record,
           input.present,
         ) ?? record.recordId.slice(0, 8);
-      return `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${input.selectionCell ? input.selectionCell(record, title) : ''}${cells}</tr>`;
+      return `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${input.selectionCell ? input.selectionCell(record, title) : ''}${cells}${actionCell(record, title)}</tr>`;
     })
     .join('');
   const empty =
@@ -2379,5 +2461,9 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
   const anchor = list.views.some((view) => view.before)
     ? ` data-list-anchor="${escapeHtml(startOfTodayUtc(input.now).toISOString())}"`
     : '';
-  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
+  // Figures withheld by current policy are said once, above the rows.
+  const withheld = input.progressWithheld
+    ? progressWithheldNote(list, input.progressWithheld)
+    : '';
+  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
 }
