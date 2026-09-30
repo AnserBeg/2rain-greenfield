@@ -206,9 +206,8 @@ test('a partly received order shows what is still open, closes its remainder wit
     });
     await expect(cell('Ordered')).toHaveText(/^2(?:\.0+)?$/u);
     await expect(cell('Open')).toHaveText('0');
-    await row().getByRole('link', { name: 'Select', exact: true }).click();
-    // Nothing is left to arrive: the line is still selected, but neither a
-    // receipt nor another close is offered on it.
+    // Back on the order the line is still the selection; nothing is left to
+    // arrive, so neither a receipt nor another close is offered on it.
     await expect(
       row().getByRole('link', { name: 'Selected', exact: true }),
     ).toHaveAttribute('aria-current', 'true');
