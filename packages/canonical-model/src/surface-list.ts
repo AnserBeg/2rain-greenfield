@@ -3,7 +3,11 @@ import type {
   SurfaceList,
   VersionedNormalizedApplicationPackage,
 } from './schemas.js';
-import { CanonicalModelError, diagnostic } from './diagnostics.js';
+import {
+  CanonicalModelError,
+  compareCodeUnits,
+  diagnostic,
+} from './diagnostics.js';
 
 /**
  * A declared List is cross-reference checked against the surface's own list
@@ -344,7 +348,7 @@ export function validateSurfaceLists(
       const ordered = [...list.rowActions].sort(
         (left, right) =>
           left.orderKey - right.orderKey ||
-          left.actionId.localeCompare(right.actionId),
+          compareCodeUnits(left.actionId, right.actionId),
       );
       for (const [index, action] of ordered.entries()) {
         if (!action.when) {
