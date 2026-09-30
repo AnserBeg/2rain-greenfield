@@ -5860,11 +5860,13 @@ async function assertExactPartitionEvidence(
   // create, so no numbered entity derives for want of an input. 348 + 137 =
   // 485 emitted, of which the prior 77 derive. PURCHASING-PARITY's 16 execute
   // on the purchase order, its line, the goods receipt and the amendment
-  // request, each with a generic create: 501, 424.
+  // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
+  // (each vendor document has a generic create, replayed by this oracle over
+  // the compiled head): 573, 496.
   assert.equal(
     evidence.results.length,
-    424,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, and purchasing parity 16',
+    496,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, and payables 72',
   );
   assert.equal(
     derivations.length,
