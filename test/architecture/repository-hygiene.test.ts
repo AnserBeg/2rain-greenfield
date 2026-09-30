@@ -126,15 +126,24 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern: 'test/postgres/**/*.test.ts',
-    excludedFiles: ['test/postgres/composed-application.test.ts'],
+    excludedFiles: [
+      'test/postgres/composed-application.test.ts',
+      'test/postgres/commercial-totals.test.ts',
+      'test/postgres/expected-receipts.test.ts',
+      'test/postgres/fulfillment.test.ts',
+      'test/postgres/order-lists.test.ts',
+      'test/postgres/order-pages.test.ts',
+      'test/postgres/packing-retrieval.test.ts',
+      'test/postgres/payables.test.ts',
+      'test/postgres/purchase-order-ending.test.ts',
+      'test/postgres/receivables.test.ts',
+      'test/postgres/receiving-authorization.test.ts',
+    ],
     expectedFiles: [
       'test/postgres/catalog-runtime.test.ts',
-      'test/postgres/commercial-totals.test.ts',
       'test/postgres/current-policy.test.ts',
       'test/postgres/declared-list.test.ts',
       'test/postgres/document-numbering.test.ts',
-      'test/postgres/expected-receipts.test.ts',
-      'test/postgres/fulfillment.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',
       'test/postgres/inventory-dimension-set-replay.test.ts',
@@ -151,18 +160,11 @@ const suiteDefinitions = [
       'test/postgres/module-runtime.test.ts',
       'test/postgres/module-storage-transition.test.ts',
       'test/postgres/observability-health.test.ts',
-      'test/postgres/order-lists.test.ts',
-      'test/postgres/order-pages.test.ts',
-      'test/postgres/packing-retrieval.test.ts',
       'test/postgres/party-runtime.test.ts',
-      'test/postgres/payables.test.ts',
       'test/postgres/predicate-absent-semantics.test.ts',
       'test/postgres/predicate-parity-corpus.test.ts',
-      'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
       'test/postgres/query-filter-lowering.test.ts',
-      'test/postgres/receivables.test.ts',
-      'test/postgres/receiving-authorization.test.ts',
       'test/postgres/release-activation.test.ts',
       'test/postgres/release-approval.test.ts',
       'test/postgres/releases.test.ts',
@@ -180,6 +182,23 @@ const suiteDefinitions = [
     discoveryPattern: 'test/postgres/composed-application.test.ts',
     expectedFiles: ['test/postgres/composed-application.test.ts'],
     script: 'test:postgres:composed',
+  },
+  {
+    discoveryPattern:
+      'test/postgres/**/@(commercial-totals|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization).test.ts',
+    expectedFiles: [
+      'test/postgres/commercial-totals.test.ts',
+      'test/postgres/expected-receipts.test.ts',
+      'test/postgres/fulfillment.test.ts',
+      'test/postgres/order-lists.test.ts',
+      'test/postgres/order-pages.test.ts',
+      'test/postgres/packing-retrieval.test.ts',
+      'test/postgres/payables.test.ts',
+      'test/postgres/purchase-order-ending.test.ts',
+      'test/postgres/receivables.test.ts',
+      'test/postgres/receiving-authorization.test.ts',
+    ],
+    script: 'test:postgres:commercial',
   },
 ] as const;
 
@@ -652,6 +671,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm check:schema',
     'corepack pnpm test:postgres',
     'corepack pnpm test:postgres:composed',
+    'corepack pnpm test:postgres:commercial',
     'corepack pnpm test:locale',
     'corepack pnpm test:browser',
     'corepack pnpm test:browser:operations',
@@ -666,6 +686,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}performance:$/mu);
   assert.match(workflow, /^ {2}postgres:$/mu);
   assert.match(workflow, /^ {2}postgres-composed:$/mu);
+  assert.match(workflow, /^ {2}postgres-commercial:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
   assert.match(workflow, /^ {2}browser-operations:$/mu);
   assert.match(workflow, /uses: actions\/upload-artifact@/u);

@@ -7,6 +7,7 @@ import {
   lineAmounts,
   parseExact,
   sameExact,
+  threeWayMatch,
   toCents,
 } from '../../packages/postgres-provider/src/commercial-amounts.js';
 
@@ -87,4 +88,32 @@ test('exact decimal helpers round half up and compare by value', () => {
   assert.equal(sameExact('12.5', '12.500000000000000000'), true);
   assert.equal(sameExact('12.5', '12.51'), false);
   assert.equal(sameExact('12.5', null), false);
+});
+
+test('PAYABLES (PY-G): a purchase line three-way match compares what is billed with what was received, and states nothing for a withheld side', () => {
+  const unit = 10n ** 18n;
+  const match = (received: bigint | null, billed: bigint | null) => {
+    const { toBill, status } = threeWayMatch(received, billed);
+    return [toBill === null ? null : toBill / unit, status];
+  };
+  // Nothing received nor billed.
+  assert.deepEqual(match(0n, 0n), [0n, 'Not received']);
+  // Received and not yet (or not all) billed: the rest is left to bill.
+  assert.deepEqual(match(3n * unit, 0n), [3n, 'Received, not billed']);
+  assert.deepEqual(match(3n * unit, 2n * unit), [1n, 'Received, not billed']);
+  // Billed exactly what was received.
+  assert.deepEqual(match(2n * unit, 2n * unit), [0n, 'Matched']);
+  // A receipt corrected after billing leaves the line billed above what was
+  // received; nothing is left to bill and nothing is refused (PY-G).
+  assert.deepEqual(match(unit, 2n * unit), [0n, 'Billed above received']);
+  assert.deepEqual(match(0n, unit), [0n, 'Billed above received']);
+  // A fraction of a unit counts as it is.
+  assert.deepEqual(threeWayMatch(unit / 2n, 0n), {
+    toBill: unit / 2n,
+    status: 'Received, not billed',
+  });
+  // A withheld receipt or bill read is not a zero.
+  assert.deepEqual(match(null, unit), [null, null]);
+  assert.deepEqual(match(unit, null), [null, null]);
+  assert.deepEqual(match(null, null), [null, null]);
 });

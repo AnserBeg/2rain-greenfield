@@ -129,3 +129,35 @@ export function sameExact(left: unknown, right: unknown): boolean {
   const scale = Math.max(a.scale, b.scale);
   return a.units * pow10(scale - a.scale) === b.units * pow10(scale - b.scale);
 }
+
+/** How one purchase order line's billing stands against its receipts. */
+export type ThreeWayMatchStatus =
+  'Matched' | 'Billed above received' | 'Received, not billed' | 'Not received';
+
+/**
+ * The three-way match of one purchase order line (PAYABLES, owner ruling
+ * PY-G): what is received and not yet billed, and how the two compare, from
+ * exact quantities at one scale. Either side unstated states nothing: a
+ * withheld read is not a zero. It is shown, never enforced.
+ */
+export function threeWayMatch(
+  received: bigint | null,
+  billed: bigint | null,
+): {
+  readonly toBill: bigint | null;
+  readonly status: ThreeWayMatchStatus | null;
+} {
+  if (received === null || billed === null)
+    return { toBill: null, status: null };
+  return {
+    toBill: received > billed ? received - billed : 0n,
+    status:
+      billed > received
+        ? 'Billed above received'
+        : received > billed
+          ? 'Received, not billed'
+          : received === 0n
+            ? 'Not received'
+            : 'Matched',
+  };
+}
