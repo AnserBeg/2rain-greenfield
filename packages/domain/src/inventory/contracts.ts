@@ -181,6 +181,8 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'goods_receipt_line' },
   { classification: 'entityOwned', familyId: 'purchase_order_received' },
   { classification: 'entityOwned', familyId: 'purchase_order_amendment' },
+  { classification: 'entityOwned', familyId: 'purchase_order_approval' },
+  { classification: 'tenantShared', familyId: 'purchasing_settings' },
   { classification: 'entityOwned', familyId: 'sales_order' },
   { classification: 'entityOwned', familyId: 'sales_order_line' },
   { classification: 'entityOwned', familyId: 'reservation' },
@@ -201,6 +203,11 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
 ] as const satisfies readonly LegalEntityFamilyRuleV1[]);
 
 export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'purchase_order_approval',
+    targetFamilyId: 'purchase_order',
+  },
   {
     semantics: 'sameEntity',
     sourceFamilyId: 'inventory_movement',

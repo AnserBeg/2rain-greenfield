@@ -10,6 +10,12 @@ import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
 import { partyWorkspace } from '../party/workspace.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
+import { withPurchaseOrderApprovals } from '../purchasing/approvals.js';
+import {
+  approvalWorkspace,
+  withApprovalWorkspace,
+  declareApprovalReadModels,
+} from '../purchasing/approval-workspace.js';
 import { salesModuleDefinition } from '../sales/definition.js';
 import { orderEntrySurfaces } from './order-entry.js';
 import {
@@ -61,10 +67,13 @@ const MODULE_REGISTRY = Object.freeze([
   Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
   Object.freeze({
     create: (namespace: string) =>
-      purchasingModuleDefinition(namespace, {
-        commercialTerms: true,
-        payables: true,
-      }),
+      withPurchaseOrderApprovals(
+        purchasingModuleDefinition(namespace, {
+          commercialTerms: true,
+          payables: true,
+        }),
+        namespace,
+      ),
     moduleName: 'purchasing',
   }),
   Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
@@ -87,7 +96,9 @@ const RECORD_COMPOSITIONS: Readonly<
 > = Object.freeze({
   party_detail: partyWorkspace,
   sales_order_detail: salesWorkspace,
-  purchase_order_detail: purchasingWorkspace,
+  purchase_order_detail: (namespace) =>
+    withApprovalWorkspace(namespace, purchasingWorkspace(namespace)),
+  purchase_order_approval_detail: approvalWorkspace,
   shipment_detail: packingWorkspace,
   customer_invoice_detail: invoiceWorkspace,
   vendor_bill_detail: billWorkspace,
@@ -312,6 +323,10 @@ function withDeclaredLists<
 >(application: T): T {
   return {
     ...application,
+    queries: declareApprovalReadModels(
+      APPLICATION_NAMESPACE,
+      application.queries,
+    ),
     surfaces: declareLists(
       APPLICATION_NAMESPACE,
       application.surfaces.map((surface) => {
