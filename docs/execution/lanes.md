@@ -11,6 +11,7 @@
 | lane | packet | state |
 |---|---|---|
 | **BUILD** | `RAIN-ORDER-ENTRY` | workspace interaction completion at `d9eca60a` (Inventory destinations, eligible pickers, in-place references, shared Task controls); sole local author on `packet/RAIN-ORDER-ENTRY`, stacked on PR #5 `3830f95`; ONLINE review complete (D1-D5 closed); [draft handoff](packets/RAIN-ORDER-ENTRY.md) for fresh CI / owner acceptance; stopped without integration; retained databases preserved |
+| **BUILD** | `SALES-PARITY` | Sales + shared List parity with PaneFlow through metadata, stacked on PR #6 `994a7dc9`; sole local author on `packet/SALES-PARITY`; vertical checkpoint 2026-09-29 (slices 1-4, 5a, 6, 7, 8 pushed; returns not built); review rounds 1-4 fixed through `bf24b925`; round 5's two production findings (P2a, P2b) fixed at `f339e83c` (tests and controls `45b4733c`, merged `28ecce28`), round 6 (confirm) owed; draft PR #7 open; [record](packets/SALES-PARITY.md); no merge/deployment |
 | **SUPPORT** | — | idle |
 
 

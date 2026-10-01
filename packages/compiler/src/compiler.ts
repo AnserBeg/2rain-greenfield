@@ -1521,6 +1521,13 @@ function decorateV3ProjectionPlans(
                     ...legalEntityScopeCatalogEntry(query),
                     lifecycle: query.lifecycle,
                     maximumResultCount: query.maximumResultCount,
+                    ...('exportMaximumResultCount' in query &&
+                    query.exportMaximumResultCount !== undefined
+                      ? {
+                          exportMaximumResultCount:
+                            query.exportMaximumResultCount,
+                        }
+                      : {}),
                     ...('parameters' in query
                       ? { parameters: queryParameterCatalogEntries(query) }
                       : {}),

@@ -133,12 +133,18 @@ async function seed(
     false,
   );
   const order = await create('sales_order', {
-    number: `SO-META-${randomUUID().slice(0, 8)}`,
     customer_party_id: customer,
     order_date: now,
     requested_date: now,
     currency: 'CAD',
     notes: 'Metadata-rendered fulfillment',
+    // Confirm needs a complete ship-to (ruling E); the shipment copies it.
+    ship_to_name: 'Receiving dock',
+    ship_to_street: '100 Industrial Way',
+    ship_to_city: 'Calgary',
+    ship_to_region: 'AB',
+    ship_to_postal_code: 'T2P 0A1',
+    ship_to_country: 'Canada',
   });
   const line = await create(
     'sales_order_line',
@@ -158,8 +164,10 @@ async function seed(
   const url = new URL(app.baseUrl);
   url.searchParams.set('surface', `${ns}:surface.sales_order_detail`);
   url.searchParams.set('record', order.recordId);
+  // The order workspace reads through the commercial order query (its
+  // totals), so the scope operand is that query's parameter.
   url.searchParams.set(
-    `${ns}:parameter.sales_order_get_legal_entity_scope`,
+    `${ns}:parameter.commercial_order_get_legal_entity_scope`,
     scope,
   );
   return {

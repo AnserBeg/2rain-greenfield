@@ -46,6 +46,10 @@ export {
   type SurfaceComposition,
   SurfaceWorkspaceSchema,
   type SurfaceWorkspace,
+  SurfaceListSchema,
+  type SurfaceList,
+  FieldNumberingSchema,
+  type FieldNumbering,
   SurfaceDocumentEditorSchema,
   type SurfaceDocumentEditor,
   type V6AuthoredApplicationPackage,
@@ -148,6 +152,7 @@ export {
   UNICODE_CASE_FOLD_VERSION,
   unicodeCaseFold,
 } from './unicode-case-fold.js';
+export { VERIFICATION_SENTINEL_PREFIX } from './field-numbering.js';
 
 export const platformContract = Object.freeze({
   authority: 'canonical-model',

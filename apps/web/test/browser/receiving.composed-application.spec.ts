@@ -174,7 +174,7 @@ async function journey(
       page.getByRole('combobox', { name, exact: true }),
     ).toHaveAttribute('data-selected-label', option);
   };
-  await page.getByLabel('Order number *').fill(`RECEIPT-PO-${suffix}`);
+  // The order number is assigned by the server on first save.
   await page
     .getByLabel('Order date (UTC) *')
     .fill(new Date().toISOString().slice(0, 16));
@@ -184,6 +184,10 @@ async function journey(
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('5');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/purchase_order_detail/u);
+  const orderNumber = (
+    await page.locator('.composition-header h1').innerText()
+  ).trim();
+  expect(orderNumber).toMatch(/^PO-\d{6}$/u);
   const orderId = new URL(page.url()).searchParams.get('record')!;
   const orderLine = page
     .locator('[data-composition-dataset$="dataset.purchasing_lines"] tbody tr')
@@ -293,7 +297,7 @@ async function journey(
     .click();
   await page
     .getByRole('link', {
-      name: `Open Purchase orders RECEIPT-PO-${suffix}`,
+      name: `Open Purchase orders ${orderNumber}`,
       exact: true,
     })
     .click();

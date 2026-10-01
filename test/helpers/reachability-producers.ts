@@ -29,10 +29,13 @@ export const reachabilityProducers = [
   nodeProducer('unit', 'quality', 'test:unit', [
     'test/unit/canonical-model/diagnostic-ordering.test.ts',
     'test/unit/canonical-model/disclosure-tier.test.ts',
+    'test/unit/canonical-model/field-numbering.test.ts',
     'test/unit/canonical-model/negative-contracts.test.ts',
     'test/unit/canonical-model/normalization.test.ts',
     'test/unit/canonical-model/predicate-admission.test.ts',
+    'test/unit/canonical-model/surface-list.test.ts',
     'test/unit/catalog-definition.test.ts',
+    'test/unit/commercial-amounts.test.ts',
     'test/unit/dev-environment.test.ts',
     'test/unit/language-conformance-ledger.test.ts',
     'test/unit/location-definition.test.ts',
@@ -80,25 +83,30 @@ export const reachabilityProducers = [
     ['test/surface-runtime-contract.test.ts'],
     'apps/web/package.json',
   ),
+  // The composed application's replay of every release runs in its own job,
+  // under the same bound, so neither job nears it.
   nodeProducer('postgres', 'postgres', 'test:postgres', [
-    'test/postgres/**/*.test.ts',
+    'test/postgres/**/!(composed-application).test.ts',
   ]),
-  {
-    id: 'browser',
-    runner: 'playwright',
-    command: 'corepack pnpm test:browser',
-    argv: ['test', '--config', 'apps/web/playwright.config.ts'],
-    ciJob: 'browser',
-    ciInvocation: 'corepack pnpm test:browser',
-    evidencePath: 'test-results/reachability/browser.json',
-    rawEvidencePath: 'test-results/reachability/browser.raw.json',
-    invocationEvidencePath: 'test-results/reachability/browser.argv.json',
-    implementation: {
-      kind: 'script',
-      manifestPath: 'package.json',
-      script: 'test:browser',
-    },
-  },
+  nodeProducer(
+    'postgres-composed',
+    'postgres-composed',
+    'test:postgres:composed',
+    ['test/postgres/composed-application.test.ts'],
+  ),
+  // The browser suite runs as two jobs under the same bound, split by file name
+  // (apps/web/playwright.shared.ts): the Sales and platform specs, and the
+  // operations specs with the composed application's journeys.
+  playwrightProducer(
+    'browser',
+    'test:browser',
+    'apps/web/playwright.config.ts',
+  ),
+  playwrightProducer(
+    'browser-operations',
+    'test:browser:operations',
+    'apps/web/playwright.operations.config.ts',
+  ),
   {
     id: 'observability',
     runner: 'node:test',
@@ -126,6 +134,41 @@ export function getReachabilityProducer(id: string): ReachabilityProducer {
   return producer;
 }
 
+export interface PlaywrightReachabilityProducer extends ReachabilityProducer {
+  readonly runner: 'playwright';
+  readonly rawEvidencePath: string;
+  readonly invocationEvidencePath: string;
+}
+
+/**
+ * The Playwright producer a config's reporter or its normalization works for.
+ * Each config names its own, so two browser jobs never read or write each
+ * other's evidence; anything that is not a declared Playwright producer is
+ * refused rather than defaulted.
+ */
+export function getPlaywrightReachabilityProducer(
+  id: unknown,
+): PlaywrightReachabilityProducer {
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new Error('A Playwright reachability producer id is required');
+  }
+  const producer = getReachabilityProducer(id);
+  const { rawEvidencePath, invocationEvidencePath } = producer;
+  if (
+    producer.runner !== 'playwright' ||
+    rawEvidencePath === undefined ||
+    invocationEvidencePath === undefined
+  ) {
+    throw new Error(`Not a Playwright reachability producer: ${id}`);
+  }
+  return {
+    ...producer,
+    runner: 'playwright',
+    rawEvidencePath,
+    invocationEvidencePath,
+  };
+}
+
 function nodeProducer(
   id: string,
   ciJob: string,
@@ -143,5 +186,25 @@ function nodeProducer(
     ciInvocation: command,
     evidencePath: `test-results/reachability/${id}.json`,
     implementation: { kind: 'script', manifestPath, script },
+  };
+}
+
+function playwrightProducer(
+  id: string,
+  script: string,
+  config: string,
+): ReachabilityProducer {
+  const command = `corepack pnpm ${script}`;
+  return {
+    id,
+    runner: 'playwright',
+    command,
+    argv: ['test', '--config', config],
+    ciJob: id,
+    ciInvocation: command,
+    evidencePath: `test-results/reachability/${id}.json`,
+    rawEvidencePath: `test-results/reachability/${id}.raw.json`,
+    invocationEvidencePath: `test-results/reachability/${id}.argv.json`,
+    implementation: { kind: 'script', manifestPath: 'package.json', script },
   };
 }

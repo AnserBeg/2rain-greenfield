@@ -1,4 +1,5 @@
 import {
+  invoiceWorkspace,
   salesWorkspace,
   salesWorkspaceQueries,
   packingWorkspace,
@@ -7,9 +8,11 @@ import { catalogModuleDefinition } from '../catalog/definition.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
+import { partyWorkspace } from '../party/workspace.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
 import { orderEntrySurfaces } from './order-entry.js';
+import { declareLists } from './list-declarations.js';
 import { purchasingWorkspace } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 
@@ -53,8 +56,16 @@ const MODULE_REGISTRY = Object.freeze([
     moduleName: 'purchasing',
   }),
   Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
-  Object.freeze({ create: partyModuleDefinition, moduleName: 'party' }),
-  Object.freeze({ create: catalogModuleDefinition, moduleName: 'catalog' }),
+  Object.freeze({
+    create: (namespace: string) =>
+      partyModuleDefinition(namespace, { salesMasterData: true }),
+    moduleName: 'party',
+  }),
+  Object.freeze({
+    create: (namespace: string) =>
+      catalogModuleDefinition(namespace, { sellingPrices: true }),
+    moduleName: 'catalog',
+  }),
   Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),
 ] as const);
 
@@ -62,13 +73,31 @@ const MODULE_REGISTRY = Object.freeze([
 const RECORD_COMPOSITIONS: Readonly<
   Record<string, (namespace: string) => Record<string, unknown>>
 > = Object.freeze({
+  party_detail: partyWorkspace,
   sales_order_detail: salesWorkspace,
   purchase_order_detail: purchasingWorkspace,
   shipment_detail: packingWorkspace,
+  customer_invoice_detail: invoiceWorkspace,
   inventory_transaction_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
   stock_count_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'stock_count'),
+});
+
+/**
+ * Commercial documents whose lines lead the page (ruling B): their details --
+ * ship-to, terms, charges, carrier -- follow the line tables, so the lines are
+ * on the first screen however many details a document carries.
+ */
+const LINES_LEAD: ReadonlySet<string> = new Set([
+  'sales_order_detail',
+  'purchase_order_detail',
+  'customer_invoice_detail',
+]);
+
+/** Workspaces that read their record through a read-model query. */
+const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
+  sales_order_detail: 'commercial_order_get',
 });
 
 /** The mounted module names, in composition order, for callers that assert on the set. */
@@ -137,7 +166,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     collection(definition, 'capabilityRequirements').slice(1),
   );
 
-  return {
+  return withDeclaredLists({
     assertions: merged(definitions, 'assertions'),
     capabilityRequirements: [sharedCapability, ...moduleCapabilities],
     entities: merged(definitions, 'entities'),
@@ -171,10 +200,12 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       merged(definitions, 'surfaces').map((surface) => {
         if (!isRecord(surface))
           throw new TypeError('surface must be an object');
-        const composition = RECORD_COMPOSITIONS[
-          String(surface.surfaceId).split(':surface.')[1] ?? ''
-        ]?.(APPLICATION_NAMESPACE);
+        const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
+        const composition = RECORD_COMPOSITIONS[local]?.(APPLICATION_NAMESPACE);
         if (!composition) return surface;
+        // A workspace may read its record with a read model's figures, such as
+        // a sales order's totals; the record query stays the plain get.
+        const dataSource = RECORD_DATA_SOURCES[local];
         const slots = surface.slots as Record<string, unknown>[];
         const slot = (name: string, suffix: string, orderKey: number) => ({
           kind: 'surfaceSlot',
@@ -190,23 +221,47 @@ export function composedApplicationDefinition(): Record<string, unknown> {
         });
         return {
           ...surface,
+          ...(dataSource
+            ? {
+                dataSource: {
+                  kind: 'queryReference',
+                  schemaVersion: version,
+                  targetId: `${APPLICATION_NAMESPACE}:query.${dataSource}`,
+                },
+              }
+            : {}),
           composition,
           slots: [
             ...slots.map((slot) => ({
               ...slot,
               ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
+              ...(slot.slot === 'sections' && LINES_LEAD.has(local)
+                ? { orderKey: 70 }
+                : {}),
             })),
             // A composition renders its fields in `sections`; a read-only
             // document that never declared one gains it here.
             ...(slots.some((value) => value.slot === 'sections')
               ? []
-              : [slot('sections', 'sections', 50)]),
+              : [
+                  slot('sections', 'sections', LINES_LEAD.has(local) ? 70 : 50),
+                ]),
             slot('childTables', 'children', 60),
           ],
         };
       }),
       merged(definitions, 'queries') as Record<string, unknown>[],
     ),
+  });
+}
+
+/** Declared Lists apply after the workspace pass, over the final surfaces. */
+function withDeclaredLists<T extends { surfaces: Record<string, unknown>[] }>(
+  application: T,
+): T {
+  return {
+    ...application,
+    surfaces: declareLists(APPLICATION_NAMESPACE, application.surfaces),
   };
 }
 
@@ -217,6 +272,9 @@ export const APPLICATION_IDS = Object.freeze({
       baseUnit: `${APPLICATION_NAMESPACE}:field.item_base_unit`,
       description: `${APPLICATION_NAMESPACE}:field.item_description`,
       name: `${APPLICATION_NAMESPACE}:field.item_name`,
+      priceCad: `${APPLICATION_NAMESPACE}:field.item_price_cad`,
+      priceEur: `${APPLICATION_NAMESPACE}:field.item_price_eur`,
+      priceUsd: `${APPLICATION_NAMESPACE}:field.item_price_usd`,
       sku: `${APPLICATION_NAMESPACE}:field.item_sku`,
     }),
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.item_form`,
@@ -236,12 +294,50 @@ export const APPLICATION_IDS = Object.freeze({
   }),
   namespace: APPLICATION_NAMESPACE,
   packageId,
+  taxCode: Object.freeze({
+    createOperationId: `${APPLICATION_NAMESPACE}:operation.tax_code_create`,
+    fieldIds: Object.freeze({
+      code: `${APPLICATION_NAMESPACE}:field.tax_code_code`,
+      name: `${APPLICATION_NAMESPACE}:field.tax_code_name`,
+      ratePercent: `${APPLICATION_NAMESPACE}:field.tax_code_rate_percent`,
+    }),
+  }),
   party: Object.freeze({
+    address: Object.freeze({
+      createOperationId: `${APPLICATION_NAMESPACE}:operation.party_address_create`,
+      fieldIds: Object.freeze({
+        city: `${APPLICATION_NAMESPACE}:field.party_address_city`,
+        country: `${APPLICATION_NAMESPACE}:field.party_address_country`,
+        label: `${APPLICATION_NAMESPACE}:field.party_address_label`,
+        postalCode: `${APPLICATION_NAMESPACE}:field.party_address_postal_code`,
+        recipient: `${APPLICATION_NAMESPACE}:field.party_address_recipient`,
+        region: `${APPLICATION_NAMESPACE}:field.party_address_region`,
+        street: `${APPLICATION_NAMESPACE}:field.party_address_street`,
+      }),
+      partyRelationId: `${APPLICATION_NAMESPACE}:relation.party_address_party`,
+    }),
     createOperationId: `${APPLICATION_NAMESPACE}:operation.party_create`,
     fieldIds: Object.freeze({
       contactSummary: `${APPLICATION_NAMESPACE}:field.party_contact_summary`,
+      defaultCurrency: `${APPLICATION_NAMESPACE}:field.party_default_currency`,
+      defaultSalespersonPartyId: `${APPLICATION_NAMESPACE}:field.party_default_salesperson_party_id`,
+      defaultShipToAddressId: `${APPLICATION_NAMESPACE}:field.party_default_ship_to_address_id`,
+      defaultTaxCodeId: `${APPLICATION_NAMESPACE}:field.party_default_tax_code_id`,
       name: `${APPLICATION_NAMESPACE}:field.party_name`,
       number: `${APPLICATION_NAMESPACE}:field.party_number`,
+      paymentTerms: `${APPLICATION_NAMESPACE}:field.party_payment_terms`,
+    }),
+    currencyOptionIds: Object.freeze({
+      cad: `${APPLICATION_NAMESPACE}:option.party_default_currency_cad`,
+      eur: `${APPLICATION_NAMESPACE}:option.party_default_currency_eur`,
+      usd: `${APPLICATION_NAMESPACE}:option.party_default_currency_usd`,
+    }),
+    paymentTermOptionIds: Object.freeze({
+      dueOnReceipt: `${APPLICATION_NAMESPACE}:option.party_payment_terms_due_on_receipt`,
+      net15: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_15`,
+      net30: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_30`,
+      net45: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_45`,
+      net60: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_60`,
     }),
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_form`,
     listQueryId: `${APPLICATION_NAMESPACE}:query.party_list`,
@@ -255,6 +351,7 @@ export const APPLICATION_IDS = Object.freeze({
       optionIds: Object.freeze({
         active: `${APPLICATION_NAMESPACE}:option.active`,
         customer: `${APPLICATION_NAMESPACE}:option.customer`,
+        salesperson: `${APPLICATION_NAMESPACE}:option.salesperson`,
         supplier: `${APPLICATION_NAMESPACE}:option.supplier`,
       }),
       partyRelationId: `${APPLICATION_NAMESPACE}:relation.party_role_party`,

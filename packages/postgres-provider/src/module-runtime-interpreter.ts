@@ -4,6 +4,7 @@ import {
   PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
+  VERIFICATION_SENTINEL_PREFIX,
   canonicalize,
   unicodeCaseFold,
   type CanonicalScalar,
@@ -60,6 +61,7 @@ import {
   SHARED_LIST_RESULT_VERSION,
   SharedListContractError,
   type AuthorizedSharedListRelationLabel,
+  type AuthorizedSharedListReferenceLabel,
   type AuthorizedSharedListRequest,
   type SharedListCoverage,
 } from '../../runtime/src/list-behavior/index.js';
@@ -185,6 +187,7 @@ export class PostgresModuleRuntimeInterpreter
   readonly #pinnedStorageTargets: ValidatedPinnedStorageTargetCache;
   readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly #trust: PostgresTrustService;
+  readonly #documentNumbers: DocumentNumberMode;
 
   constructor(
     private readonly pool: Pool,
@@ -196,7 +199,9 @@ export class PostgresModuleRuntimeInterpreter
     observePinnedStorageTargetCache:
       | ((observation: PinnedStorageTargetCacheObservation) => void)
       | undefined = undefined,
+    options: { readonly documentNumbers?: DocumentNumberMode } = {},
   ) {
+    this.#documentNumbers = options.documentNumbers ?? 'sequence';
     this.#pinnedStorageTargets = new ValidatedPinnedStorageTargetCache(
       observePinnedStorageTargetCache,
     );
@@ -308,7 +313,7 @@ export class PostgresModuleRuntimeInterpreter
   async #executeOperation(
     request: SemanticOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope> {
-    const input = parseMutationInput(request.definition, request.input);
+    const parsedInput = parseMutationInput(request.definition, request.input);
     const actor = await this.actorIssuer.issue(request.context);
     const receipt = await this.#trust.executeIdempotentAcceptedMutation(
       request.context,
@@ -332,7 +337,7 @@ export class PostgresModuleRuntimeInterpreter
         assertOperationSystemInputStorageContract(
           request.definition,
           currentEntity,
-          input,
+          parsedInput,
         );
         return withModuleRuntimeRole(client, async () => {
           try {
@@ -341,7 +346,16 @@ export class PostgresModuleRuntimeInterpreter
               currentStorage,
               currentEntity,
               request.definition,
-              input,
+              parsedInput,
+            );
+            // Assigned before the change is prepared, so the change document
+            // records the number the record is created with.
+            const input = await assignDocumentNumbers(
+              client,
+              currentEntity,
+              request.definition,
+              parsedInput,
+              this.#documentNumbers,
             );
             const preparation = await prepareMutation(
               client,
@@ -743,6 +757,123 @@ async function executeMutationOnClient(
   return toDto(entity, record, readBackSelections);
 }
 
+/**
+ * `sequence` assigns real document numbers; `verificationSentinel` is used only
+ * by release verification, whose arranged records must not consume them.
+ */
+export type DocumentNumberMode = 'sequence' | 'verificationSentinel';
+
+/**
+ * The number a numbered field takes in `verificationSentinel` mode: the
+ * sentinel prefix, a hyphen and the hexadecimal SHA-256 of the record id and
+ * the field, cut to the column's length. It depends on nothing the create
+ * decides, so release verification knows the number of a record it arranged
+ * even when no read of that record selects the field.
+ */
+export function verificationSentinelNumber(
+  recordId: string,
+  fieldId: string,
+  maximumLength: number | null,
+): string {
+  const sentinel = `${VERIFICATION_SENTINEL_PREFIX}-${createHash('sha256')
+    .update(recordId, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(fieldId, 'utf8')
+    .digest('hex')}`;
+  return maximumLength === null ? sentinel : sentinel.slice(0, maximumLength);
+}
+
+/**
+ * A create's server-assigned document numbers (canonical field `numbering`):
+ * the next value of each named sequence per tenant and environment. One
+ * allocator runs at a time per sequence -- the transaction-scoped lock is held
+ * to commit, so concurrent creates serialize and a rolled-back create gives
+ * its number back. The next value follows the highest existing number of that
+ * prefix among ALL of the tenant's records, archived and in every company,
+ * whatever its digit count (leading zeros included), so a number is never
+ * reused. Stored values are read through the business key's own fold -- its
+ * stored folded companion, the column its unique index covers -- so a value
+ * the key equates with the next number (`ſO-000016` and `SO-000016`) is
+ * counted without folding every row again; the key's unique index, over live
+ * records of its scope, remains the backstop. A next number that no longer fits
+ * its field refuses by name. A replay of the same idempotency key never reaches
+ * this, so a retry keeps its number.
+ */
+async function assignDocumentNumbers(
+  client: PoolClient,
+  entity: StorageEntity,
+  definition: SemanticOperationExecutionRequest['definition'],
+  input: MutationInput,
+  mode: DocumentNumberMode,
+): Promise<MutationInput> {
+  const assigned =
+    definition.effect.kind === 'createRecordEffect'
+      ? (definition.inputContract?.assignedFields ?? [])
+      : [];
+  if (assigned.length === 0) return input;
+  const patch: Record<string, ImmutableJsonValue> = { ...input.patch };
+  for (const field of assigned) {
+    if (Object.hasOwn(patch, field.fieldId))
+      throw failure(
+        'MODULE_FIELD_UNSUPPORTED',
+        'an assigned document number is not an operation input',
+        field.fieldId,
+      );
+    const column = entity.columns.find(
+      (candidate) => candidate.canonicalFieldId === field.fieldId,
+    );
+    if (!column || column.fieldContract.fieldKind !== 'textFieldType')
+      throw failure(
+        'MODULE_FIELD_UNSUPPORTED',
+        'an assigned document number has no compiled text column',
+        field.fieldId,
+      );
+    if (mode === 'verificationSentinel') {
+      // Release verification arranges records to exercise a release; it asks
+      // no business question and must not consume a tenant's document numbers.
+      // Its number is a `V-` sentinel hashed from the record id and field, at
+      // least 64 bits of it (the numbering contract's width floor), so
+      // arranged records collide only with negligible probability. No sequence
+      // may use the prefix (the contract reserves it), so a sentinel is never a
+      // business number.
+      patch[field.fieldId] = verificationSentinelNumber(
+        input.recordId,
+        field.fieldId,
+        column.fieldContract.bounds.maximumLength,
+      );
+      continue;
+    }
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended(
+         north_star_internal.trusted_tenant_id()::text || ':' ||
+         north_star_internal.trusted_environment_id()::text || ':' || $1, 0))`,
+      [field.sequenceId],
+    );
+    const highest = await client.query<{ highest: string | null }>(
+      `SELECT max(((regexp_match(${foldedColumnSql(entity, column)}, $1))[1])::numeric)::text AS highest
+         FROM north_star_module.${quoted(entity.physicalTableName)}
+        WHERE tenant_id = north_star_internal.trusted_tenant_id()
+          AND environment_id = north_star_internal.trusted_environment_id()`,
+      [`^${unicodeCaseFold(field.prefix)}-([0-9]+)$`],
+    );
+    const observed = highest.rows[0]?.highest ?? null;
+    const next =
+      observed === null || BigInt(observed) < BigInt(field.start)
+        ? BigInt(field.start)
+        : BigInt(observed) + 1n;
+    const number = `${field.prefix}-${next.toString().padStart(field.minimumDigits, '0')}`;
+    const maximumLength = column.fieldContract.bounds.maximumLength;
+    if (maximumLength !== null && number.length > maximumLength)
+      throw failure(
+        'MODULE_DOCUMENT_SEQUENCE_EXHAUSTED',
+        'the next document number no longer fits its field',
+        field.fieldId,
+      );
+    patch[field.fieldId] = number;
+  }
+  return Object.freeze({ ...input, patch: Object.freeze(patch) });
+}
+
 async function insertRecord(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
@@ -1130,9 +1261,19 @@ async function executeQueryOnClient(
   const entity = requiredEntity(storage, definition.sourceEntityId);
   const relationPlans =
     definition.queryType === 'list' && list
-      ? list.relationLabels.map((authorization, index) =>
-          listRelationPlan(storage, entity, authorization, index),
-        )
+      ? [
+          ...list.relationLabels.map((authorization, index) =>
+            listRelationPlan(storage, entity, authorization, index),
+          ),
+          ...(list.referenceLabels ?? []).map((reference, index) =>
+            listReferencePlan(
+              storage,
+              entity,
+              reference,
+              list.relationLabels.length + index,
+            ),
+          ),
+        ]
       : [];
   const readScope = await verifyLegalEntityReadScope(
     client,
@@ -2028,11 +2169,19 @@ async function listRecords(
 }
 
 interface ListRelationPlan {
-  readonly authorization: AuthorizedSharedListRelationLabel;
   readonly labelColumn: StorageEntity['columns'][number];
   readonly labelAlias: string;
+  /** The relation id or reference id the label is reported and sorted under. */
+  readonly labelId: string;
   readonly recordAlias: string;
-  readonly relation: StorageTargetPayloadV1['relations'][number];
+  /**
+   * The source column joined to the target's record id: a compiled relation
+   * column (uuid), or -- for a reference label -- a text field that stores a
+   * record id, compared as text so a malformed value finds no label rather
+   * than failing the whole list.
+   */
+  readonly sourceColumn: string;
+  readonly sourceIsText: boolean;
   readonly tableAlias: string;
   readonly target: StorageEntity;
 }
@@ -2306,6 +2455,7 @@ async function listSharedRecords(
     ...(relatedFilter && list.query.relatedFilter
       ? { relatedFilter: list.query.relatedFilter }
       : {}),
+    ...(list.query.outputMode ? { outputMode: list.query.outputMode } : {}),
     projectedSearchValueCount:
       list.query.search.trim() === '' ? 0 : searchExpressions.length,
     requestedPageSize: list.query.requestedPageSize,
@@ -2358,11 +2508,60 @@ function listRelationPlan(
     );
   }
   return Object.freeze({
-    authorization,
     labelAlias: `nsm_table_relation_${String(index)}_label`,
     labelColumn,
+    labelId: authorization.relationId,
     recordAlias: `nsm_table_relation_${String(index)}_record`,
-    relation,
+    sourceColumn: relation.relationColumn.physicalName,
+    sourceIsText: false,
+    tableAlias: `table_relation_${String(index)}`,
+    target,
+  });
+}
+
+/**
+ * A reference label resolves against the PINNED COMPILED storage: the source
+ * field must be a text column of the queried entity and the label a column of
+ * the authorized target entity. A request can therefore name only compiled
+ * identities; neither a column nor a table comes from caller input.
+ */
+function listReferencePlan(
+  storage: StorageTargetPayloadV1,
+  source: StorageEntity,
+  reference: AuthorizedSharedListReferenceLabel,
+  index: number,
+): ListRelationPlan {
+  const sourceColumn = source.columns.find(
+    (candidate) => candidate.canonicalFieldId === reference.sourceFieldId,
+  );
+  if (
+    !sourceColumn ||
+    sourceColumn.fieldContract.fieldKind !== 'textFieldType'
+  ) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'a reference label reads a compiled text column of the queried entity',
+      reference.sourceFieldId,
+    );
+  }
+  const target = requiredEntity(storage, reference.targetEntityId);
+  const labelColumn = target.columns.find(
+    (candidate) => candidate.canonicalFieldId === reference.fieldId,
+  );
+  if (!labelColumn) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'authorized reference label field has no compiled target column',
+      reference.fieldId,
+    );
+  }
+  return Object.freeze({
+    labelAlias: `nsm_table_relation_${String(index)}_label`,
+    labelColumn,
+    labelId: reference.referenceId,
+    recordAlias: `nsm_table_relation_${String(index)}_record`,
+    sourceColumn: sourceColumn.physicalName,
+    sourceIsText: true,
     tableAlias: `table_relation_${String(index)}`,
     target,
   });
@@ -2382,7 +2581,7 @@ function listFromSql(
         `LEFT JOIN north_star_module.${quoted(plan.target.physicalTableName)} AS ${quoted(plan.tableAlias)}
            ON ${qualified(plan.tableAlias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
           AND ${qualified(plan.tableAlias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
-          AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)} = ${qualified(sourceAlias, plan.relation.relationColumn.physicalName)}${legalEntityReadScopeJoinConjunction(
+          AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)}${plan.sourceIsText ? '::text' : ''} = ${qualified(sourceAlias, plan.sourceColumn)}${legalEntityReadScopeJoinConjunction(
             plan.target,
             readScope,
             values,
@@ -2436,7 +2635,7 @@ function listOrderBy(
     selectedColumns.map((column) => [column.canonicalFieldId, column] as const),
   );
   const relationsById = new Map(
-    relations.map((plan) => [plan.authorization.relationId, plan] as const),
+    relations.map((plan) => [plan.labelId, plan] as const),
   );
   const order = list.query.sort.map((sort) => {
     const column = selectedById.get(sort.fieldId);
@@ -2495,7 +2694,7 @@ function toListDto(
   const relationLabels = Object.freeze(
     Object.fromEntries(
       relations.map((plan) => [
-        plan.authorization.relationId,
+        plan.labelId,
         Object.freeze({
           label: nullableDisplayValue(row[plan.labelAlias]),
           recordId: nullableUuid(row[plan.recordAlias]),
@@ -4152,9 +4351,11 @@ function fieldClassification(
   contract: RegisteredOperationInputContract | undefined,
   fieldId: string,
 ): 'INTERNAL' | 'PUBLIC' {
-  const field = contract?.fields.find(
-    (candidate) => candidate.fieldId === fieldId,
-  );
+  const field =
+    contract?.fields.find((candidate) => candidate.fieldId === fieldId) ??
+    contract?.assignedFields?.find(
+      (candidate) => candidate.fieldId === fieldId,
+    );
   if (!field) {
     throw failure(
       'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',

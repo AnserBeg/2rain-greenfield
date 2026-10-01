@@ -198,6 +198,15 @@ function writeHtml(
 ): void {
   response.statusCode = result.statusCode;
   if (result.location) response.setHeader('location', result.location);
+  if (result.download) {
+    response.setHeader('content-type', result.download.contentType);
+    response.setHeader(
+      'content-disposition',
+      `attachment; filename="${result.download.fileName}"`,
+    );
+    response.end(result.download.body);
+    return;
+  }
   response.setHeader('content-type', 'text/html; charset=utf-8');
   response.end(result.html);
 }

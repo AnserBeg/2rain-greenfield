@@ -95,9 +95,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     selectedEntity = legalEntityId,
   ) => {
     const queryRole = role === 'list' ? 'list' : 'get';
+    // The order page reads its totals query (ruling B), so its company is
+    // that query's parameter.
+    const query =
+      local === 'sales_order' && role === 'detail' ? 'commercial_order' : local;
     const parameters = new URLSearchParams({
       surface: `northstar.app:surface.${local}_${role}`,
-      [`northstar.app:parameter.${local}_${queryRole}_legal_entity_scope`]:
+      [`northstar.app:parameter.${query}_${queryRole}_legal_entity_scope`]:
         selectedEntity,
     });
     if (recordId) parameters.set('record', recordId);
@@ -115,10 +119,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
       await control.evaluate((element, id) => {
         (element as HTMLInputElement).value = id;
       }, value);
+    // A datetime-local input normalizes ":00" seconds away, so a value typed
+    // to the second at the top of a minute reads back as malformed; the
+    // journey needs the minute, not the second.
     else
       await control.fill(
         (await control.getAttribute('type')) === 'datetime-local'
-          ? value.slice(0, 19)
+          ? value.slice(0, 16)
           : value,
       );
   };
@@ -126,7 +133,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     const editor = page.locator('#draft-editor-form');
     const id = (await editor.count())
       ? (await page
-          .locator('[name^="draft:"][name$=":field.sales_order_number"]')
+          .locator('[name^="draft:"][name$=":field.sales_order_currency"]')
           .getAttribute('name'))!.split(':')[1]!
       : await page
           .locator('form#surface-record-form input[name="recordId"]')
@@ -161,7 +168,11 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
   });
-  await navigation.getByRole('link', { name: 'Sales', exact: true }).click();
+  // Sales is a group of its orders and invoices; open it, then its orders.
+  await navigation.getByText('Sales', { exact: true }).click();
+  await navigation
+    .getByRole('link', { name: 'Sales orders', exact: true })
+    .click();
   await expect(
     page.getByRole('heading', { name: 'Sales orders', level: 1, exact: true }),
   ).toBeVisible();
@@ -183,22 +194,29 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Create complete');
 
-  const suffix = randomUUID().slice(0, 8);
   await page.goto(url('sales_order', 'form'));
-  await field('sales_order', 'number', `SO-${suffix}`);
+  // The order number is assigned by the server on first save.
   await field('sales_order', 'customer_party_id', customerPartyId);
   await field('sales_order', 'order_date', new Date().toISOString());
   await field('sales_order', 'requested_date', new Date().toISOString());
   await field('sales_order', 'currency', 'CAD');
   await field('sales_order', 'notes', 'Initial sales order');
+  // Confirm needs a complete ship-to (ruling E); this customer has no address
+  // book, so the order's own lines are typed. Submitted with the customer, they
+  // are kept rather than reset to the customer's (absent) default.
+  await field('sales_order', 'ship_to_street', '100 Industrial Way');
+  await field('sales_order', 'ship_to_city', 'Calgary');
+  await field('sales_order', 'ship_to_postal_code', 'T2P 0A1');
+  await field('sales_order', 'ship_to_country', 'Canada');
   // The unit is derived from the selected product's base unit, not entered.
   await field('sales_order_line', 'item_id', itemId);
   await field('sales_order_line', 'ordered_quantity', '10');
   await field('sales_order_line', 'unit_price', '12.5');
   const orderId = await save();
-  await expect(page.locator('.composition-header')).toContainText(
-    `SO-${suffix}`,
-  );
+  const orderNumber = (
+    await page.locator('.composition-header h1').innerText()
+  ).trim();
+  expect(orderNumber).toMatch(/^SO-\d{6}$/u);
   const parent = target.relations.find(
     (value) =>
       value.relationId === 'northstar.app:relation.sales_order_line_order',
@@ -218,9 +236,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.goto(orderFormUrl);
   await field('sales_order', 'notes', 'Edited while draft');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(page.locator('.composition-header')).toContainText(
-    `SO-${suffix}`,
-  );
+  // An edit never changes the assigned number.
+  await expect(page.locator('.composition-header h1')).toHaveText(orderNumber);
   expect(await snapshot()).toEqual(initialStock);
 
   staleUpdate.idempotencyKey = randomUUID();
@@ -273,8 +290,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     'Unit EA',
   );
   await page.locator('.composition-record-actions > summary').click();
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Release complete');
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Confirm complete');
   expect(await snapshot()).toEqual(initialStock);
 
   releasedLineAttempt.idempotencyKey = randomUUID();

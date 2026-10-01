@@ -38,6 +38,20 @@ export interface SharedListRelationLabelRequest {
 }
 
 /**
+ * A label read through a declared list query for a field that STORES another
+ * record's id, where no compiled relation exists (for example an order's
+ * customer party id). The executor joins the target entity on its record id,
+ * so search and sort by the label are complete server facts, never a lookup
+ * over the shown page. `referenceId` names the label in the result and in sort.
+ */
+export interface SharedListReferenceLabelRequest {
+  readonly fieldId: string;
+  readonly queryId: string;
+  readonly referenceId: string;
+  readonly sourceFieldId: string;
+}
+
+/**
  * An exact parent restriction for a `parentScopedChild` relation. It narrows a
  * child list to one parent record BEFORE the count and the page window, so a
  * caller that wants one parent's children never pages a broader set. Naming the
@@ -81,6 +95,13 @@ export interface SharedListQueryRequest {
   }[];
   readonly relatedFilter?: SharedListRelatedFilter;
   readonly relationLabels: readonly SharedListRelationLabelRequest[];
+  readonly referenceLabels?: readonly SharedListReferenceLabelRequest[];
+  /**
+   * `export` asks for the whole filtered set in ONE statement, bounded by the
+   * query's declared export limit. It never pages: a set larger than the limit
+   * comes back with `hasMore`, and the caller must refuse rather than truncate.
+   */
+  readonly outputMode?: 'export';
   readonly requestedPageSize: number;
   readonly schemaVersion: typeof SHARED_LIST_QUERY_VERSION;
   readonly search: string;
@@ -96,9 +117,14 @@ export interface AuthorizedSharedListRelatedFilter extends SharedListRelatedFilt
   readonly relatedEntityId: string;
 }
 
+export interface AuthorizedSharedListReferenceLabel extends SharedListReferenceLabelRequest {
+  readonly targetEntityId: string;
+}
+
 export interface AuthorizedSharedListRequest {
   readonly query: SharedListQueryRequest;
   readonly relationLabels: readonly AuthorizedSharedListRelationLabel[];
+  readonly referenceLabels?: readonly AuthorizedSharedListReferenceLabel[];
   readonly relatedFilter?: AuthorizedSharedListRelatedFilter;
 }
 
@@ -123,6 +149,8 @@ export interface SharedListCoverage {
   }[];
   /** Echoed like `parentScope`, so an executor that ignored it is observable. */
   readonly relatedFilter?: SharedListRelatedFilter;
+  /** Echoed so an executor that paged an export instead is observable. */
+  readonly outputMode?: 'export';
   readonly projectedSearchValueCount: number;
   readonly requestedPageSize: number;
   readonly returnedCount: number;
@@ -142,6 +170,7 @@ export function parseSharedListArguments(
   argumentsValue: ImmutableJsonValue,
   input: {
     readonly declaredParameterIds: readonly string[];
+    readonly exportMaximumResultCount?: number;
     readonly maximumResultCount: number;
     readonly queryId: string;
   },
@@ -171,6 +200,8 @@ export function parseSharedListArguments(
     fieldFilters: fieldFiltersValue,
     referenceScope: referenceScopeValue,
     relatedFilter: relatedFilterValue,
+    referenceLabels: referenceLabelsValue,
+    outputMode: outputModeValue,
     ...closedList
   } = list;
   assertExactKeys(closedList, [
@@ -239,11 +270,28 @@ export function parseSharedListArguments(
   }
   const sort = parseSort(list.sort);
   const relationLabels = parseRelationLabels(list.relationLabels);
+  const referenceLabels =
+    referenceLabelsValue === undefined
+      ? undefined
+      : parseReferenceLabels(referenceLabelsValue, relationLabels);
+  if (outputModeValue !== undefined && outputModeValue !== 'export')
+    throw malformed('list outputMode must be export');
+  const exporting = outputModeValue === 'export';
+  if (exporting && input.exportMaximumResultCount === undefined)
+    throw new SharedListContractError(
+      'LIST_EXPORT_UNSUPPORTED',
+      'this list query declares no export limit',
+      input.queryId,
+    );
   const cursor = parseNullableCursor(list.cursor);
+  if (exporting && cursor !== null)
+    throw malformed('an export reads the whole set and takes no cursor');
   const requestedPageSize = Number(list.pageSize);
   const effectivePageSize = Math.min(
     requestedPageSize,
-    input.maximumResultCount,
+    exporting
+      ? (input.exportMaximumResultCount ?? 0)
+      : input.maximumResultCount,
   );
   const bindingDigest = sharedListBindingDigest(input.queryId, {
     includeArchived,
@@ -253,6 +301,7 @@ export function parseSharedListArguments(
     ...(fieldFilters ? { fieldFilters } : {}),
     ...(relatedFilter ? { relatedFilter } : {}),
     relationLabels,
+    ...(referenceLabels ? { referenceLabels } : {}),
     search: list.search,
     sort,
   });
@@ -268,6 +317,8 @@ export function parseSharedListArguments(
     ...(fieldFilters ? { fieldFilters } : {}),
     ...(relatedFilter ? { relatedFilter } : {}),
     relationLabels,
+    ...(referenceLabels ? { referenceLabels } : {}),
+    ...(exporting ? { outputMode: 'export' as const } : {}),
     requestedPageSize,
     schemaVersion: SHARED_LIST_QUERY_VERSION,
     search: list.search,
@@ -282,9 +333,19 @@ export function authorizeSharedListFields(
     readonly selectedFieldIds: ReadonlySet<string>;
   },
 ): void {
-  const relationIds = new Set(
-    query.relationLabels.map((relation) => relation.relationId),
-  );
+  const relationIds = new Set([
+    ...query.relationLabels.map((relation) => relation.relationId),
+    ...(query.referenceLabels ?? []).map((reference) => reference.referenceId),
+  ]);
+  for (const reference of query.referenceLabels ?? []) {
+    if (!input.selectedFieldIds.has(reference.sourceFieldId)) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a reference label reads a field the list query selects',
+        reference.sourceFieldId,
+      );
+    }
+  }
   for (const sort of query.sort) {
     if (
       !input.selectedFieldIds.has(sort.fieldId) &&
@@ -416,6 +477,46 @@ function parseRelationLabels(
         fieldId: entry.fieldId,
         queryId: entry.queryId,
         relationId: entry.relationId,
+      });
+    }),
+  );
+}
+
+function parseReferenceLabels(
+  value: ImmutableJsonValue,
+  relationLabels: readonly SharedListRelationLabelRequest[],
+): readonly SharedListReferenceLabelRequest[] {
+  if (!Array.isArray(value) || value.length > 8) {
+    throw malformed('list referenceLabels must contain at most eight entries');
+  }
+  const ids = new Set(relationLabels.map((relation) => relation.relationId));
+  return Object.freeze(
+    value.map((entry): SharedListReferenceLabelRequest => {
+      if (!isRecord(entry)) {
+        throw malformed('list reference label entry must be an object');
+      }
+      assertExactKeys(entry, [
+        'fieldId',
+        'queryId',
+        'referenceId',
+        'sourceFieldId',
+      ]);
+      assertCanonicalId(entry.fieldId, 'list reference label fieldId');
+      assertCanonicalId(entry.queryId, 'list reference label queryId');
+      assertCanonicalId(entry.referenceId, 'list reference label referenceId');
+      assertCanonicalId(
+        entry.sourceFieldId,
+        'list reference label sourceFieldId',
+      );
+      if (ids.has(entry.referenceId)) {
+        throw malformed('list label ids must be unique');
+      }
+      ids.add(entry.referenceId);
+      return Object.freeze({
+        fieldId: entry.fieldId,
+        queryId: entry.queryId,
+        referenceId: entry.referenceId,
+        sourceFieldId: entry.sourceFieldId,
       });
     }),
   );

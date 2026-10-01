@@ -78,7 +78,9 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // lists remain reachable from the owner or by deep link. Nothing here is a
     // new violation KIND; closing the remaining shared grammar debt is platform
     // work rather than an order-entry-specific renderer rewrite.
-    violationCount: 57,
+    // SALES-PARITY declares the purchase-order List with saved views, so its
+    // savedViews slot is present: SG003 + SG009 there close, 57 - 2 = 55.
+    violationCount: 55,
   }),
   Object.freeze({
     moduleId: 'northstar.sales:module.sales',
@@ -94,6 +96,14 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // RAIN-ORDER-ENTRY's one operational workspace owner closes the former
     // compact-navigation budget violation while contextual fulfillment lists
     // remain reachable from that owner or by deep link.
-    violationCount: 61,
+    // SALES-PARITY declares the sales-order List with saved views, closing
+    // that List's missing savedViews slot (SG003 + SG009): 61 - 2 = 59.
+    // SALES-PARITY (ruling C) then adds the invoice, its lines, payments and
+    // credits through the module's standard surfaces, each with the same
+    // known slot gaps: invoice detail (SG003 + SG009, 2) and form (4), and the
+    // three contextual documents' list (2), detail (4) and form (4) each. The
+    // invoice List declares saved views, so it adds none: 59 + 36 = 95. No new
+    // violation kind.
+    violationCount: 95,
   }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);

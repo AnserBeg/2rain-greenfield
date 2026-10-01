@@ -158,7 +158,6 @@ test(
           const order = await create(
             'purchase_order',
             {
-              number: `AUTH-PO-${randomUUID()}`,
               supplier_party_id: 'receiving-auth-supplier',
               order_date: new Date().toISOString(),
               currency: 'CAD',

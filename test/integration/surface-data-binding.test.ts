@@ -5514,7 +5514,7 @@ test('order entry picker and quick create: offered-only selection, verified carr
   type Rendered = NonNullable<Awaited<ReturnType<OrderEntryWitness['open']>>>;
   const html = (rendered: Rendered) => Object.values(rendered.slots!).join('');
   const headerOf = (rendered: Rendered) =>
-    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_currency"/.exec(
       rendered.slots!.keyFacts!,
     )![1]!;
   const carrier = (rendered: Rendered, rowId: string, fieldId: string) =>
@@ -5553,7 +5553,7 @@ test('order entry picker and quick create: offered-only selection, verified carr
     const header = headerOf(editor);
     const customer = `${f.ns}:field.sales_order_customer_party_id`;
     const opened = (await f.post(editor, `create:${header}:${customer}`, {
-      [`draft:${header}:${f.ns}:field.sales_order_number`]: 'SO-KEPT',
+      [`draft:${header}:${f.ns}:field.sales_order_notes`]: 'SO-KEPT',
       [`draftSearch:${header}:${customer}`]: term,
     }))!;
     return { header, customer, opened };
@@ -5665,7 +5665,7 @@ test('order entry picker and quick create: offered-only selection, verified carr
       assert.equal(created.statusCode, 200);
       assert.match(created.slots!.keyFacts!, /data-editor-create-selected/);
       assert.doesNotMatch(created.slots!.keyFacts!, /<dialog/);
-      assert.match(created.slots!.keyFacts!, /value="SO-KEPT"/);
+      assert.match(created.slots!.keyFacts!, />SO-KEPT<\/textarea>/);
       const [party] = creates(f, 'party');
       const [role] = creates(f, 'party_role');
       assert.equal(creates(f, 'party').length, 1);
@@ -5708,7 +5708,7 @@ test('order entry picker and quick create: offered-only selection, verified carr
       assert.equal(cancelled.statusCode, 200);
       assert.equal(f.executor.calls.length, 0);
       assert.doesNotMatch(cancelled.slots!.keyFacts!, /<dialog/);
-      assert.match(cancelled.slots!.keyFacts!, /value="SO-KEPT"/);
+      assert.match(cancelled.slots!.keyFacts!, />SO-KEPT<\/textarea>/);
       assert.equal(carrier(cancelled, header, customer), '');
       assert.match(
         cancelled.slots!.keyFacts!,
@@ -5809,13 +5809,13 @@ test('order entry values: exact decimals, bounded before any write, choice set a
         const values = f.values(editor);
         const refused = (await f.post(editor, 'save', {
           ...values,
-          [key(values, 'field.sales_order_number')]: '',
+          [key(values, 'field.sales_order_order_date')]: '',
         }))!;
         assert.equal(refused.statusCode, 422);
         const header = refused.slots!.keyFacts!;
         assert.match(
           header,
-          /<label class="form-field__label" for="([^"]+)">Order number \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
+          /<label class="form-field__label" for="([^"]+)">Order date \(UTC\) \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
         );
         assert.match(header, /<small class="field-error" id="[^"]+-error">/);
         assert.doesNotMatch(
@@ -5961,7 +5961,7 @@ test('Milestone A: role-eligible lookups and policy-aware quick create', async (
   type Rendered = NonNullable<Awaited<ReturnType<OrderEntryWitness['open']>>>;
   const keyFacts = (rendered: Rendered) => rendered.slots!.keyFacts!;
   const headerOf = (rendered: Rendered) =>
-    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.(?:sales|purchase)_order_number"/.exec(
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.(?:sales|purchase)_order_currency"/.exec(
       keyFacts(rendered),
     )![1]!;
   const optionNames = (rendered: Rendered) =>
@@ -6179,7 +6179,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
     const editor = (await f.open())!;
     const all = Object.values(editor.slots!).join('');
     const header =
-      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_currency"/.exec(
         all,
       )![1]!;
     const line =
@@ -6230,6 +6230,31 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       );
     const id = (rowId: string, fieldId: string) =>
       `editor-${rowId}-${fieldId.replace(/[^a-z0-9]/giu, '-')}`;
+    // The customer's declared followers (ruling E), in declaration order: a
+    // follower that is a picker is replaced whole, any other by its control.
+    const customerFollowers = (rowId: string) =>
+      [
+        ['salesperson_party_id', true],
+        ['currency', false],
+        ['payment_terms', false],
+        // Ruling B: the order's tax code, then each charge's code and the
+        // rate frozen from it.
+        ['tax_code_id', true],
+        ['freight_tax_code_id', true],
+        ['freight_tax_rate_percent', false],
+        ['other_fee_tax_code_id', true],
+        ['other_fee_tax_rate_percent', false],
+        ['ship_to_address_id', true],
+        ['ship_to_name', false],
+        ['ship_to_street', false],
+        ['ship_to_city', false],
+        ['ship_to_region', false],
+        ['ship_to_postal_code', false],
+        ['ship_to_country', false],
+      ].map(
+        ([name, picker]) =>
+          `${id(rowId, `${f.ns}:field.sales_order_${String(name)}`)}${picker ? '-field' : ''}`,
+      );
     return {
       f,
       dual,
@@ -6243,6 +6268,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       select,
       targets,
       id,
+      customerFollowers,
       editor,
     };
   };
@@ -6263,7 +6289,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       // No document: no form, fieldset or other field of the order.
       assert.doesNotMatch(
         answer.html,
-        /<form|<fieldset|data-document-editor|sales_order_number/,
+        /<form|<fieldset|data-document-editor|sales_order_currency/,
       );
       assert.equal(s.f.executor.calls.length, 0);
       // The page's draft version did not move: its next full submit applies.
@@ -6311,10 +6337,16 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       ]);
       const productChosen = await s.select(s.line, s.product, s.f.item, 1, 0);
       assert.equal(productChosen.statusCode, 200);
-      // The field and its declared dependent (Unit), and nothing else.
+      // The field and its declared dependents -- the unit, the price in the
+      // order's currency and its list price, the tax code from the order and
+      // the rate frozen from it (ruling B) -- and nothing else.
       assert.deepEqual(s.targets(productChosen), [
         `${s.id(s.line, s.product)}-field`,
         s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_id`),
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_price`),
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_list_price`),
+        `${s.id(s.line, `${s.f.ns}:field.sales_order_line_tax_code_id`)}-field`,
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_tax_rate_percent`),
       ]);
       assert.match(productChosen.html, />EA</);
       release();
@@ -6500,6 +6532,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       assert.deepEqual(s.targets(created), [
         'editor-create-slot',
         `${s.id(s.header, s.customer)}-field`,
+        ...s.customerFollowers(s.header),
       ]);
       assert.match(created.html, /data-selected-label="Zenith Glazing"/);
       assert.match(created.html, /data-editor-create-selected/);
@@ -6531,6 +6564,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
       assert.deepEqual(s.targets(cancelled), [
         'editor-create-slot',
         `${s.id(s.header, s.customer)}-field`,
+        ...s.customerFollowers(s.header),
       ]);
       assert.match(cancelled.html, /data-selected-label="Zenith Glazing"/);
       assert.equal(s.f.executor.calls.length, 2, 'nothing more was written');
@@ -6612,6 +6646,7 @@ test('Milestone B: reference fields answer in place, bound to their own request 
         assert.deepEqual(s.targets(cancelled), [
           'editor-create-slot',
           `${s.id(s.header, s.customer)}-field`,
+          ...s.customerFollowers(s.header),
         ]);
       } finally {
         gateway.previewEligibility = preview;
@@ -6682,7 +6717,7 @@ test('Milestone B: the fragment transport is same-origin, header-bound and falls
     assert.match(html, /<script>/);
     const session = hiddenValue(html, 'draftSession');
     const header =
-      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_currency"/.exec(
         html,
       )![1]!;
     const customer = `${f.ns}:field.sales_order_customer_party_id`;
@@ -7057,7 +7092,7 @@ test('FORM-1: unselected lookup results are shown only under the current read au
   // Every request below goes through SurfaceRuntime and the real gateways.
   let page = await renderSurfaceRuntimeWithData(f.view, path, f.gateways);
   const header =
-    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_currency"/.exec(
       page.html,
     )![1]!;
   const submit = async (action: string, extra: Record<string, string> = {}) => {
@@ -7068,7 +7103,7 @@ test('FORM-1: unselected lookup results are shown only under the current read au
         draftSession: hiddenValue(page.html, 'draftSession'),
         draftVersion: hiddenValue(page.html, 'draftVersion'),
         draftAction: action,
-        [`draft:${header}:${f.ns}:field.sales_order_number`]: 'SO-FORM1',
+        [`draft:${header}:${f.ns}:field.sales_order_notes`]: 'SO-FORM1',
         ...extra,
       },
       f.gateways,
@@ -7091,7 +7126,7 @@ test('FORM-1: unselected lookup results are shown only under the current read au
   assert.doesNotMatch(page.html, protectedResults);
   await submit(`more:${header}:${customer}`);
   assert.doesNotMatch(page.html, protectedResults);
-  assert.match(page.html, /value="SO-FORM1"/);
+  assert.match(page.html, />SO-FORM1<\/textarea>/);
   // Read handling performed no business mutation.
   assert.equal(f.executor.calls.length, calls);
 
@@ -7127,7 +7162,7 @@ test('FORM-PAGING: a bounded lookup says when more matches exist beyond its disp
     // Every request goes through SurfaceRuntime and the real gateways.
     let page = await renderSurfaceRuntimeWithData(f.view, path, f.gateways);
     const header =
-      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_number"/.exec(
+      /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_currency"/.exec(
         page.html,
       )![1]!;
     const submit = async (
@@ -7141,7 +7176,7 @@ test('FORM-PAGING: a bounded lookup says when more matches exist beyond its disp
           draftSession: hiddenValue(page.html, 'draftSession'),
           draftVersion: hiddenValue(page.html, 'draftVersion'),
           draftAction: action,
-          [`draft:${header}:${f.ns}:field.sales_order_number`]: 'SO-PAGING',
+          [`draft:${header}:${f.ns}:field.sales_order_notes`]: 'SO-PAGING',
           ...extra,
         },
         f.gateways,
@@ -7234,7 +7269,7 @@ test('FORM-PAGING: a bounded lookup says when more matches exist beyond its disp
           ),
       );
       assert.match(p.html(), /data-selected-label="Paging match 201"/);
-      assert.match(p.html(), /value="SO-PAGING"/);
+      assert.match(p.html(), />SO-PAGING<\/textarea>/);
       assert.equal(p.f.executor.calls.length, 0);
     },
   );
@@ -7464,7 +7499,7 @@ test('FORM-3: a declared choice inside quick create is rendered, defaulted and a
       const unit = `create:${f.ns}:field.inventory_transaction_line_unit_id`;
       let editor = (await f.open())!;
       const header =
-        /name="draft:([0-9a-f-]{36}):northstar\.app:field\.purchase_order_number"/.exec(
+        /name="draft:([0-9a-f-]{36}):northstar\.app:field\.purchase_order_currency"/.exec(
           editor.slots!.keyFacts!,
         )![1]!;
       const notes = `${f.ns}:field.purchase_order_notes`;

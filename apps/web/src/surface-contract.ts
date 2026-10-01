@@ -5,6 +5,8 @@ import {
 import {
   SurfaceWorkspaceSchema,
   SurfaceDocumentEditorSchema,
+  SurfaceListSchema,
+  type SurfaceList,
   type SurfaceWorkspace,
   type SurfaceDocumentEditor,
 } from '../../../packages/canonical-model/src/schemas.js';
@@ -272,6 +274,7 @@ export interface CompiledSurfaceSlot {
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly list?: SurfaceList;
   readonly workspace?: SurfaceWorkspace;
   readonly documentEditor?: SurfaceDocumentEditor;
   readonly composition?: SurfaceComposition;
@@ -544,7 +547,7 @@ export function readCompiledSurfaceDataBinding(
         confirmation: operation.confirmation,
         inputFields: operation.inputFields,
         intent: operation.intent,
-        label: operationLabel(operation.operationId),
+        label: operation.label ?? operationLabel(operation.operationId),
         operationId: operation.operationId,
         precondition: operation.precondition,
         systemInputArgumentKey: operation.systemInputArgumentKey,
@@ -932,6 +935,9 @@ function parseSurface(
     ...(value.workspace === undefined
       ? {}
       : { workspace: SurfaceWorkspaceSchema.parse(value.workspace) }),
+    ...(value.list === undefined
+      ? {}
+      : { list: SurfaceListSchema.parse(value.list) }),
     ...(value.documentEditor === undefined
       ? {}
       : {
@@ -1143,6 +1149,7 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
   readonly entityId: string | null;
   readonly inputFields: readonly CompiledSurfaceInputField[] | null;
   readonly intent: SurfaceOperationIntent;
+  readonly label: string | null;
   readonly lifecycle: RegisteredOperationDefinition['lifecycle'];
   readonly operationId: string;
   readonly precondition: Readonly<
@@ -1169,6 +1176,7 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
     capabilityId: capabilityEffect ? effect.capability.targetId : null,
     confirmation: value.confirmation,
     entityId: capabilityEffect ? null : effect.entity.targetId,
+    label: value.label ?? null,
     inputFields:
       value.inputContract === undefined
         ? null

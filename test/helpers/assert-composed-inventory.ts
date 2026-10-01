@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 
+import { declareLists } from '../../packages/domain/src/app/list-declarations.js';
+
 type Value = Readonly<Record<string, unknown>>;
 
 function record(value: unknown): asserts value is Value {
@@ -179,7 +181,11 @@ export function assertComposedInventoryCollection(
     const local = String(source.surfaceId).split(':surface.')[1] ?? '';
     const document = Object.hasOwn(DOCUMENT_LINES, local);
     const { workspace, composition, slots, ...protectedSurface } = candidate;
-    const { slots: sourceSlots, ...protectedSource } = source;
+    // The one other addition the product makes to an inventory surface is its
+    // declared List (SALES-PARITY), with the saved-views slot its views need.
+    const declared = declareLists(namespace, [source])[0];
+    record(declared);
+    const { slots: sourceSlots, ...protectedSource } = declared;
     if (document)
       assertDocumentComposition(namespace, local, source, composition, slots);
     else {

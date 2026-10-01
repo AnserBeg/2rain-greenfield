@@ -385,6 +385,16 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Legal entity required',
     subject: null,
   },
+  LIST_EXPORT_OVER_LIMIT: {
+    consequence: 'blocking',
+    detail:
+      'This view holds more records than one export may contain, so no file was produced. An export is never cut short.',
+    nextAction:
+      'Go back, narrow the view with a tab, filter or search, and export again.',
+    placements: ['page'],
+    sentence: 'Export limit exceeded',
+    subject: null,
+  },
   WORKSPACE_COMPANY_UNAVAILABLE: {
     consequence: 'blocking',
     detail:

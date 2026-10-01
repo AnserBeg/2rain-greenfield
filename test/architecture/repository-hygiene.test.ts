@@ -24,10 +24,13 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
       'test/unit/canonical-model/disclosure-tier.test.ts',
+      'test/unit/canonical-model/field-numbering.test.ts',
       'test/unit/canonical-model/negative-contracts.test.ts',
       'test/unit/canonical-model/normalization.test.ts',
       'test/unit/canonical-model/predicate-admission.test.ts',
+      'test/unit/canonical-model/surface-list.test.ts',
       'test/unit/catalog-definition.test.ts',
+      'test/unit/commercial-amounts.test.ts',
       'test/unit/dev-environment.test.ts',
       'test/unit/language-conformance-ledger.test.ts',
       'test/unit/location-definition.test.ts',
@@ -121,10 +124,13 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern: 'test/postgres/**/*.test.ts',
+    excludedFiles: ['test/postgres/composed-application.test.ts'],
     expectedFiles: [
       'test/postgres/catalog-runtime.test.ts',
-      'test/postgres/composed-application.test.ts',
+      'test/postgres/commercial-totals.test.ts',
       'test/postgres/current-policy.test.ts',
+      'test/postgres/declared-list.test.ts',
+      'test/postgres/document-numbering.test.ts',
       'test/postgres/fulfillment.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',
@@ -147,6 +153,7 @@ const suiteDefinitions = [
       'test/postgres/predicate-parity-corpus.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
       'test/postgres/query-filter-lowering.test.ts',
+      'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
       'test/postgres/release-activation.test.ts',
       'test/postgres/release-approval.test.ts',
@@ -160,6 +167,11 @@ const suiteDefinitions = [
       'test/postgres/trust-substrate.test.ts',
     ],
     script: 'test:postgres',
+  },
+  {
+    discoveryPattern: 'test/postgres/composed-application.test.ts',
+    expectedFiles: ['test/postgres/composed-application.test.ts'],
+    script: 'test:postgres:composed',
   },
 ] as const;
 
@@ -631,8 +643,10 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:contracts',
     'corepack pnpm check:schema',
     'corepack pnpm test:postgres',
+    'corepack pnpm test:postgres:composed',
     'corepack pnpm test:locale',
     'corepack pnpm test:browser',
+    'corepack pnpm test:browser:operations',
     'corepack pnpm check:reachability',
   ];
 
@@ -643,7 +657,9 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}quality:$/mu);
   assert.match(workflow, /^ {2}performance:$/mu);
   assert.match(workflow, /^ {2}postgres:$/mu);
+  assert.match(workflow, /^ {2}postgres-composed:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
+  assert.match(workflow, /^ {2}browser-operations:$/mu);
   assert.match(workflow, /uses: actions\/upload-artifact@/u);
   assert.match(workflow, /retention-days: 7/u);
 });

@@ -46,6 +46,7 @@ import {
   requireSharedListResult,
   SharedListContractError,
   type AuthorizedSharedListRelatedFilter,
+  type AuthorizedSharedListReferenceLabel,
   type AuthorizedSharedListRequest,
   type SharedListCoverage,
 } from './list-behavior/index.js';
@@ -161,6 +162,8 @@ interface RegisteredQueryDefinitionBase {
 }
 
 export interface RegisteredQueryDefinition extends RegisteredQueryDefinitionBase {
+  /** The most rows one declared export statement returns; absent = no export. */
+  readonly exportMaximumResultCount?: number;
   readonly readModel?: QueryReadModel;
   readonly parameters?: readonly RegisteredQueryParameterDefinition[];
   readonly infrastructure?: {
@@ -560,6 +563,10 @@ export class SemanticQueryGateway {
     const listQuery = parseSharedListArguments(request.arguments, {
       declaredParameterIds:
         definition.parameters?.map((parameter) => parameter.parameterId) ?? [],
+      ...('exportMaximumResultCount' in definition &&
+      definition.exportMaximumResultCount !== undefined
+        ? { exportMaximumResultCount: definition.exportMaximumResultCount }
+        : {}),
       maximumResultCount: definition.maximumResultCount,
       queryId: definition.queryId,
     });
@@ -844,6 +851,62 @@ async function authorizeSharedListProjection(
       }),
     );
   }
+  const referenceLabels: AuthorizedSharedListReferenceLabel[] = [];
+  for (const reference of query.referenceLabels ?? []) {
+    const targetDefinition = registeredQueryFromPinnedView(
+      view,
+      reference.queryId,
+    );
+    // A label is joined on the target's record id without the target's own
+    // company scope, so only a list that shows the whole entity may supply it.
+    if (
+      !targetDefinition ||
+      targetDefinition.lifecycle !== 'active' ||
+      targetDefinition.tier !== 'q0' ||
+      targetDefinition.queryType !== 'list' ||
+      targetDefinition.legalEntityScope !== undefined ||
+      !targetDefinition.selections.some(
+        (selection) => selection.fieldId === reference.fieldId,
+      )
+    ) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'reference label must use a selected field of an active, unscoped pinned list query',
+        reference.fieldId,
+      );
+    }
+    const decision = await authorizeCurrentPolicy(
+      currentPolicy,
+      view,
+      targetDefinition.permissionId,
+      Object.freeze({
+        arguments: Object.freeze({
+          fieldId: reference.fieldId,
+          referenceId: reference.referenceId,
+          sourceFieldId: reference.sourceFieldId,
+        }),
+        kind: 'registeredSemanticListReferencePolicyInput',
+        queryId: targetDefinition.queryId,
+        requestId: view.requestId,
+        schemaVersion: QUERY_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (decision.decision === 'DENY') {
+      await recordDenied(targetDefinition.queryId, decision.policyVersion);
+      throw new SemanticQueryPolicyDeniedError(targetDefinition.queryId, view);
+    }
+    const predicateReceipt = inspectPredicateForExecution(
+      targetDefinition.filter,
+    );
+    observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+    if (predicateReceipt.outcome !== 'accepted') return null;
+    referenceLabels.push(
+      Object.freeze({
+        ...reference,
+        targetEntityId: targetDefinition.sourceEntityId,
+      }),
+    );
+  }
   let relatedFilter: AuthorizedSharedListRelatedFilter | undefined;
   if (query.relatedFilter) {
     const related = query.relatedFilter;
@@ -906,6 +969,9 @@ async function authorizeSharedListProjection(
   return Object.freeze({
     query,
     relationLabels: Object.freeze(relationLabels),
+    ...(query.referenceLabels
+      ? { referenceLabels: Object.freeze(referenceLabels) }
+      : {}),
     ...(relatedFilter ? { relatedFilter } : {}),
   });
 }
@@ -1102,10 +1168,13 @@ function parseQueryDefinition(
   const hasFilterPlan = Object.hasOwn(value, 'filterPlan');
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   const hasResolveMatchKeys = Object.hasOwn(value, 'resolveMatchKeys');
+  const hasExportMaximum =
+    !aggregate && Object.hasOwn(value, 'exportMaximumResultCount');
   assertExactKeys(
     value,
     [
       ...expectedKeys,
+      ...(hasExportMaximum ? ['exportMaximumResultCount'] : []),
       ...(Object.hasOwn(value, 'readModel') ? ['readModel'] : []),
       ...(hasLegalEntityScope ? ['legalEntityScope'] : []),
       ...(hasParameters ? ['parameters'] : []),
@@ -1130,7 +1199,12 @@ function parseQueryDefinition(
     Number(value.maximumResultCount) < 1 ||
     !isRecord(value.filter) ||
     (!aggregate && !Array.isArray(value.selections)) ||
-    (hasResolveMatchKeys && !Array.isArray(value.resolveMatchKeys))
+    (hasResolveMatchKeys && !Array.isArray(value.resolveMatchKeys)) ||
+    (hasExportMaximum &&
+      (value.queryType !== 'list' ||
+        !Number.isSafeInteger(value.exportMaximumResultCount) ||
+        Number(value.exportMaximumResultCount) < 1 ||
+        Number(value.exportMaximumResultCount) > 10_000))
   ) {
     throw invalid('pinned query definition has an invalid shape');
   }

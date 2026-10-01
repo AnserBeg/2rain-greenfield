@@ -173,6 +173,7 @@ export async function workspaceSearch(
   search: string,
   cursor: string | null,
   eligibility?: ReferenceEligibility,
+  parentScope?: { readonly relationId: string; readonly recordId: string },
 ): Promise<{
   records: readonly SemanticRecordDto[];
   hasMore: boolean;
@@ -209,6 +210,7 @@ export async function workspaceSearch(
           sort: [],
           relationLabels: [],
           ...(relatedFilter ? { relatedFilter } : {}),
+          ...(parentScope ? { parentScope } : {}),
         },
       },
     }),
@@ -223,6 +225,13 @@ export async function workspaceSearch(
       !sameFilters(applied.fieldFilters, relatedFilter.fieldFilters))
   )
     throw new Error('Eligibility filter not applied');
+  // Likewise a parent scope the executor did not echo was not applied.
+  if (
+    parentScope &&
+    (result.listCoverage.parentScope?.relationId !== parentScope.relationId ||
+      result.listCoverage.parentScope.recordId !== parentScope.recordId)
+  )
+    throw new Error('Parent scope not applied');
   return {
     records: result.records,
     hasMore: result.listCoverage.hasMore,
@@ -290,6 +299,39 @@ export async function workspaceEligible(
   )
     throw new Error('Eligibility check not applied');
   return result.records.length > 0;
+}
+
+/**
+ * Whether one record is tied to a parent through a declared owned relation,
+ * read now through the record entity's own List restricted to that parent.
+ * The owned children of one parent are few; a set too large to read whole
+ * within the bounded pages is refused rather than guessed.
+ */
+export async function workspaceWithin(
+  view: RequestRuntimeView,
+  gateway: SemanticQueryGateway,
+  queryId: string,
+  parentScope: { readonly relationId: string; readonly recordId: string },
+  recordId: string,
+): Promise<boolean> {
+  let cursor: string | null = null;
+  for (let page = 0; page < 5; page++) {
+    const result = await workspaceSearch(
+      view,
+      gateway,
+      queryId,
+      null,
+      '',
+      cursor,
+      undefined,
+      parentScope,
+    );
+    if (result.records.some((record) => record.recordId === recordId))
+      return true;
+    if (!result.hasMore || result.nextCursor === null) return false;
+    cursor = result.nextCursor;
+  }
+  throw new Error('Parent scope too large to verify');
 }
 
 const sameFilters = (

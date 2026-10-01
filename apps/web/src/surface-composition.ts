@@ -28,6 +28,7 @@ import {
   type CompiledSurfaceInputField,
 } from './surface-contract.js';
 import { escapeHtml as h } from './html.js';
+import { moneyText } from './list-declaration.js';
 import {
   DECIMAL_KINDS,
   admitsChoice,
@@ -112,7 +113,8 @@ const presentedFields = new WeakMap<
   RequestRuntimeView,
   Map<string, CompiledSurfaceField>
 >();
-function displayFieldValue(
+/** Presents a stored value by its compiled field kind; shared with declared Lists. */
+export function displayFieldValue(
   view: RequestRuntimeView,
   record: SemanticRecordDto,
   fieldId: string,
@@ -170,12 +172,10 @@ async function present(
   for (const column of columns) {
     const value = recordValue(record, column.field);
     if (!column.reference || value === null) {
-      cells[column.columnId] = displayFieldValue(
-        view,
-        record,
-        column.field,
-        value,
-      );
+      cells[column.columnId] =
+        column.format === 'money' && typeof value === 'string'
+          ? moneyText(value)
+          : displayFieldValue(view, record, column.field, value);
       continue;
     }
     const result = await query(
@@ -527,6 +527,84 @@ function renderPresentedChild(
             .join('')}</tbody></table></div>`;
   return `<section id="${h(definition.datasetId)}" class="panel data-panel composition-collection" data-composition-dataset="${h(definition.datasetId)}" data-resolution="${child.status}"><div class="composition-collection-heading"><h2>${h(definition.label)}</h2>${definition.presentation?.description ? `<details><summary>About these quantities</summary><p class="composition-description">${h(definition.presentation.description)}</p></details>` : ''}</div>${body}</section>`;
 }
+/** The URL of this record's printable document, preserving its scope. */
+export function compositionPrintHref(data: CompositionData): string {
+  const url = new URL(data.url, 'http://surface-runtime.local');
+  for (const name of [...url.searchParams.keys()])
+    if (name === 'dataset' || name === 'selected' || name.startsWith('select:'))
+      url.searchParams.delete(name);
+  url.searchParams.set('print', 'document');
+  return url.pathname + url.search;
+}
+
+/**
+ * A declared printable document (composition `presentation.print`): the header,
+ * each named dataset IN FULL and the note, from the same governed load as the
+ * record page. A dataset that failed or stopped short refuses the document --
+ * a printed order is never the first page of one.
+ */
+export function renderCompositionPrintDocument(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+  generatedAt: Date,
+): { readonly complete: boolean; readonly html: string } {
+  const print = surface.composition?.presentation?.print;
+  const header = surface.composition?.presentation?.header;
+  if (!print || !header) return { complete: false, html: '' };
+  const printed = print.datasets.map((id) =>
+    data.children.find((child) => child.definition.datasetId === id),
+  );
+  if (
+    data.fieldsFailed ||
+    printed.some((child) => !child || child.status === 'failed')
+  )
+    return {
+      complete: false,
+      html: compositionMessage('COMPOSITION_CHILD_FAILED', 'alert'),
+    };
+  const cell = (id: string) => h(data.fields.cells[id] ?? '—');
+  const label = (id: string) =>
+    h(
+      surface.composition!.fields.find((column) => column.columnId === id)
+        ?.label ?? '',
+    );
+  const tables = printed
+    .map((child) => {
+      const columns = ordered(child!.definition.columns);
+      return `<section class="print-section"><h2>${h(child!.definition.label)}</h2>${
+        child!.rows.length === 0
+          ? '<p>None.</p>'
+          : `<div class="print-table"><table><thead><tr>${columns.map((column) => `<th scope="col">${h(column.label)}</th>`).join('')}</tr></thead><tbody>${child!.rows
+              .map(
+                (row) =>
+                  `<tr>${columns.map((column) => `<td>${h(row.cells[column.columnId] ?? '—')}</td>`).join('')}</tr>`,
+              )
+              .join(
+                '',
+              )}</tbody></table></div><p class="print-count">${String(child!.rows.length)} ${child!.rows.length === 1 ? 'line' : 'lines'}</p>`
+      }</section>`;
+    })
+    .join('');
+  const note = print.note ? data.fields.cells[print.note] : undefined;
+  // Totals print as a labelled list under the lines: subtotal, tax, total.
+  const totals = print.totals?.length
+    ? `<dl class="print-totals">${print.totals.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl>`
+    : '';
+  // A block prints its present lines in order, such as a ship-to address.
+  const blocks = (surface.composition!.presentation?.blocks ?? [])
+    .map((block) => {
+      const lines = block.columns
+        .map((id) => data.fields.cells[id])
+        .filter((value): value is string => !!value && value !== '—');
+      return `<section class="print-block"><h2>${h(block.label)}</h2>${lines.length ? `<p>${lines.map((line) => h(line)).join('<br>')}</p>` : '<p>None.</p>'}</section>`;
+    })
+    .join('');
+  return {
+    complete: true,
+    html: `<article class="print-document" data-print-document="${h(surface.surfaceId)}"><header class="print-header"><p class="eyebrow">${h(print.label)}</p><h1>${cell(header.title)}</h1><p>${header.subtitle.map(cell).join(' · ')}</p>${header.status ? `<p class="print-status">${cell(header.status)}</p>` : ''}<dl class="print-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl></header>${blocks}${tables}${totals}${note && note !== '—' ? `<section class="print-section"><h2>${label(print.note!)}</h2><p class="print-note">${h(note)}</p></section>` : ''}<footer class="print-footer"><p>Printed ${h(generatedAt.toISOString().slice(0, 16).replace('T', ' '))} UTC from the current record.</p><p class="print-guidance">Use your browser's Print command to print this document or save it as PDF.</p></footer></article>`,
+  };
+}
+
 export function renderCompositionFields(
   surface: CompiledSurfaceDefinition,
   data: CompositionData,
@@ -542,21 +620,38 @@ export function renderCompositionFields(
         ...(header.status ? [header.status] : []),
       ]
     : [];
+  const blocks = surface.composition!.presentation?.blocks ?? [];
+  const blocked = new Set(blocks.flatMap((block) => block.columns));
   const fields = surface.composition!.fields.filter(
-    (column) => !assigned.includes(column.columnId),
+    (column) =>
+      !assigned.includes(column.columnId) && !blocked.has(column.columnId),
   );
-  if (!fields.length) return '';
+  if (!fields.length && !blocks.length) return '';
+  // A block reads as one card of its present lines, such as a ship-to
+  // address, placed where its first column would be.
+  const place = (columnId: string) =>
+    surface.composition!.fields.find((column) => column.columnId === columnId)
+      ?.orderKey ?? 0;
+  const cards = [
+    ...fields.map((column) => ({
+      orderKey: column.orderKey,
+      html: `<div><dt>${h(column.label)}</dt><dd>${h(data.fields.cells[column.columnId] ?? '—')}</dd></div>`,
+    })),
+    ...blocks.map((block) => {
+      const lines = block.columns
+        .map((id) => data.fields.cells[id])
+        .filter((value): value is string => !!value && value !== '—');
+      return {
+        orderKey: place(block.columns[0]!),
+        // One compact line on screen; printed documents keep one per line.
+        html: `<div data-composition-block><dt>${h(block.label)}</dt><dd>${lines.length ? lines.map((line) => h(line)).join(', ') : '—'}</dd></div>`,
+      };
+    }),
+  ].sort((left, right) => left.orderKey - right.orderKey);
   // Stored fields the header does not carry, read back as saved. Under a
   // declared header the label is already the page's identity, so it is not
   // repeated as this panel's heading.
-  return `<section class="panel" data-composition-fields><h2>${h(header ? 'Details' : surface.label)}</h2><dl class="record-fields">${ordered(
-    fields,
-  )
-    .map(
-      (column) =>
-        `<div><dt>${h(column.label)}</dt><dd>${h(data.fields.cells[column.columnId] ?? '—')}</dd></div>`,
-    )
-    .join('')}</dl></section>`;
+  return `<section class="panel" data-composition-fields><h2>${h(header ? 'Details' : surface.label)}</h2><dl class="record-fields">${cards.map((card) => card.html).join('')}</dl></section>`;
 }
 export function renderCompositionChildren(
   data: CompositionData,
@@ -605,6 +700,9 @@ export function renderCompositionActions(
     const back = returnTo?.startsWith('/?')
       ? `<a class="composition-back" href="${h(returnTo)}">Back to order</a>`
       : '';
+    const printLink = presentation.print
+      ? `<a class="secondary-action composition-print" href="${h(compositionPrintHref(data))}">Print ${h(presentation.print.label.toLowerCase())}</a>`
+      : '';
     const context = presentation.context;
     const actions = ordered(surface.composition!.actions).filter(
       (value) =>
@@ -639,6 +737,12 @@ export function renderCompositionActions(
             })
             .join(' · ')
         : null;
+    // Record-level tasks (no dataset to select from) are offered together,
+    // beside the context they change, such as a customer's order defaults.
+    const recordTasks = ordered(surface.composition!.actions).filter(
+      (value) =>
+        !value.presentation && !value.datasetId && applicable(value, data),
+    );
     const controls = actions.length
       ? actionLink(actions[0]!, data, view) +
         (actions.length > 1
@@ -648,7 +752,12 @@ export function renderCompositionActions(
               .join('')}</details>`
           : '')
       : '';
-    return `${back}${context ? `<section class="composition-context">${controls ? `<div class="composition-context-heading"><div><h2>${h(context.label)}</h2><p>${h(selection ?? context.description)}</p></div><div class="composition-local-actions" aria-label="Selected record actions">${controls}</div></div>` : ''}<nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav></section>` : ''}`;
+    // The printable document is offered beside the section links, so it adds
+    // no row above the document's first lines.
+    const tasks = recordTasks.length
+      ? `<div class="composition-local-actions" aria-label="Record tasks">${recordTasks.map((action) => actionLink(action, data, view)).join('')}</div>`
+      : '';
+    return `${back}${context ? '' : printLink}${context ? `<section class="composition-context">${controls || tasks ? `<div class="composition-context-heading"><div><h2>${h(context.label)}</h2><p>${h(selection ?? context.description)}</p></div>${controls ? `<div class="composition-local-actions" aria-label="Selected record actions">${controls}</div>` : ''}${tasks}</div>` : ''}<div class="composition-context-links"><nav aria-label="Document sections">${data.children.map((child) => `<a href="#${h(child.definition.datasetId)}">${h(child.definition.label)}</a>`).join('')}</nav>${printLink}</div></section>` : ''}`;
   }
   const actions = ordered(surface.composition!.actions)
     .filter((action) => applicable(action, data))
@@ -1419,6 +1528,18 @@ async function referenceChoices(
     throw new Error('Reference input requires a list');
   const records: SemanticRecordDto[] = [];
   let cursor: string | null = null;
+  // Declared eligibility narrows the list before paging, as a draft editor
+  // picker's does; an executor that did not apply it cannot echo it.
+  const relatedFilter = input.eligibility
+    ? {
+        queryId: input.eligibility.queryId,
+        relationId: input.eligibility.relationId,
+        fieldFilters: input.eligibility.filters.map((filter) => ({
+          fieldId: filter.fieldId,
+          value: filter.value,
+        })),
+      }
+    : undefined;
   do {
     const page: ReturnType<typeof requireSharedListResult<SemanticRecordDto>> =
       requireSharedListResult(
@@ -1432,9 +1553,23 @@ async function referenceChoices(
             search: '',
             sort: [],
             relationLabels: [],
+            ...(relatedFilter ? { relatedFilter } : {}),
           },
         }),
       );
+    const applied = page.listCoverage.relatedFilter;
+    if (
+      relatedFilter &&
+      (applied?.queryId !== relatedFilter.queryId ||
+        applied.relationId !== relatedFilter.relationId ||
+        applied.fieldFilters?.length !== relatedFilter.fieldFilters.length ||
+        relatedFilter.fieldFilters.some(
+          (filter, index) =>
+            applied.fieldFilters?.[index]?.fieldId !== filter.fieldId ||
+            applied.fieldFilters[index]?.value !== filter.value,
+        ))
+    )
+      throw new Error('Reference eligibility was not applied');
     records.push(...page.records);
     if (
       page.listCoverage.hasMore &&

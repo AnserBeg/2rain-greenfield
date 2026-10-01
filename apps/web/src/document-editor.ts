@@ -35,6 +35,7 @@ import {
   workspaceList,
   workspacePrincipalKey,
   workspaceSearch,
+  workspaceWithin,
 } from './workspace-entry.js';
 import {
   DECIMAL_KINDS,
@@ -262,6 +263,9 @@ async function editorResponse(
 ): Promise<EditorResponse | null> {
   const definition = surface.documentEditor!;
   const recordSurface = surfaceFor(surfaces, definition.recordSurfaceId);
+  // The editor reads its record through the header form's get: a record
+  // workspace may read a read model's figures, which the editor never edits.
+  const recordRead = surfaceFor(surfaces, definition.headerFormSurfaceId);
   const recordId = url.searchParams.get('record');
   for (const [key, value] of buffers)
     if (!value.busy && performance.now() - value.touched > expiry)
@@ -328,7 +332,7 @@ async function editorResponse(
       await getRecord(
         view,
         gateways,
-        recordSurface,
+        recordRead,
         continuation.header.id,
         scope,
       );
@@ -353,7 +357,7 @@ async function editorResponse(
   }
   const initialRead = await requiredRead(continuation, async () =>
     recordId
-      ? await getRecord(view, gateways, recordSurface, recordId, scope)
+      ? await getRecord(view, gateways, recordRead, recordId, scope)
       : null,
   );
   if (initialRead.outcome === 'redacted') return initialRead.response;
@@ -418,37 +422,402 @@ async function editorResponse(
     buffer.header.id === rowId
       ? buffer.header
       : buffer.lines.find((value) => value.id === rowId && !value.removed);
+  /** The parent a scoped picker lists within: its sibling's selection. */
+  const withinParent = (
+    field: SurfaceDocumentEditor['headerFields'][number],
+    draft: DraftRow,
+  ) => {
+    const within = field.reference?.within;
+    const selected = within ? draft.values[within.referenceFieldId] : null;
+    return within && typeof selected === 'string' && selected
+      ? { relationId: within.relationId, recordId: selected }
+      : null;
+  };
   /**
-   * Re-reads the record a reference now selects and updates every field derived
-   * from it. The read is the declared exact get; if it is refused the dependent
-   * is cleared rather than left describing the previous record.
+   * The fields that follow a reference in the same row: those derived from
+   * it, those defaulted from it, and pickers scoped to it. A change of the
+   * reference's selection updates each of them, and through them their own
+   * followers, so a customer's default address then fills the ship-to lines.
    */
-  const dependentsOf = (referenceFieldId: string) =>
+  const directFollowersOf = (referenceFieldId: string) =>
     rowsOf(referenceFieldId).fields.filter(
       (value) =>
-        value.presentation?.kind === 'derived' &&
-        value.presentation.referenceFieldId === referenceFieldId,
+        (value.presentation?.kind === 'derived' &&
+          value.presentation.referenceFieldId === referenceFieldId) ||
+        value.defaultFrom?.referenceFieldId === referenceFieldId ||
+        value.reference?.within?.referenceFieldId === referenceFieldId,
     );
-  /** Sets every field derived from a reference from the record it now selects. */
-  const applyDerived = (
+  const dependentsOf = (referenceFieldId: string) => {
+    const found: SurfaceDocumentEditor['headerFields'] = [];
+    const visit = (fieldId: string) => {
+      for (const follower of directFollowersOf(fieldId))
+        if (!found.includes(follower)) {
+          found.push(follower);
+          if (follower.reference) visit(follower.fieldId);
+        }
+    };
+    visit(referenceFieldId);
+    return found;
+  };
+  /**
+   * An enumeration default names the target's option with the source option's
+   * label; the validator proved each source label is offered exactly once.
+   */
+  const enumerationOptions = (fieldId: string) => {
+    for (const candidate of surfaces)
+      for (const value of candidate.fields ?? [])
+        if (value.fieldId === fieldId && value.kind === 'enumFieldType')
+          return value.options;
+    return null;
+  };
+  /**
+   * The record field a declaration reads: the one a header value chooses
+   * (the item price in the order's currency), else its own source.
+   */
+  const chosenSource = (
+    declared: {
+      sourceFieldId?: string | undefined;
+      sourceByHeader?:
+        | {
+            headerFieldId: string;
+            cases: readonly { value: string; sourceFieldId: string }[];
+          }
+        | undefined;
+    },
+    header: Values,
+  ) => {
+    const chooser = declared.sourceByHeader;
+    if (!chooser) return declared.sourceFieldId ?? null;
+    const choice = header[chooser.headerFieldId];
+    return (
+      chooser.cases.find((value) => value.value === choice)?.sourceFieldId ??
+      null
+    );
+  };
+  /** The header values a row's declarations read while it is planned. */
+  const headerOf = (draft: DraftRow, scratch: Values) =>
+    draft.id === buffer.header.id ? scratch : buffer.header.values;
+  const derivedValue = (
+    presentation: Extract<
+      NonNullable<
+        SurfaceDocumentEditor['headerFields'][number]['presentation']
+      >,
+      { kind: 'derived' }
+    >,
+    record: SemanticRecordDto | null,
+    header: Values,
+  ): ImmutableJsonValue => {
+    const source = chosenSource(presentation, header);
+    const value = source ? record?.values[source] : undefined;
+    return typeof value === 'string' && value ? value : null;
+  };
+  const defaultedValue = (
+    field: SurfaceDocumentEditor['headerFields'][number],
+    record: SemanticRecordDto | null,
+    header: Values,
+  ): ImmutableJsonValue => {
+    const declared = field.defaultFrom!;
+    // The header's own value of a field, or the chosen record's.
+    const source = declared.headerFieldId ?? chosenSource(declared, header);
+    const value = declared.headerFieldId
+      ? header[declared.headerFieldId]
+      : source
+        ? record?.values[source]
+        : undefined;
+    const fallback = declaredDefault(field) ?? null;
+    if (!source || typeof value !== 'string' || !value) return fallback;
+    const sourceOptions = enumerationOptions(source);
+    const label = sourceOptions?.find(
+      (option) => option.optionId === value,
+    )?.label;
+    const targetOptions = enumerationOptions(field.fieldId);
+    // Into text an enumeration copies its label (a currency code); text copies
+    // as it is.
+    if (!targetOptions) return sourceOptions ? (label ?? fallback) : value;
+    return (
+      targetOptions.find((option) => option.label === label)?.optionId ??
+      fallback
+    );
+  };
+  /**
+   * Updates every follower of a reference from the record it now selects:
+   * derived values are copied (cleared when there is none), defaults reset to
+   * the record's value or the field's own default, and a scoped picker is
+   * cleared unless its default re-selects a record it may still select.
+   *
+   * Every read happens first, against a scratch copy of the row; the result is
+   * applied in one synchronous step and only while the reference still holds
+   * the selection it was planned for, so a newer selection is never
+   * overwritten by the followers of an older one.
+   */
+  type FollowerValue = {
+    fieldId: string;
+    value: ImmutableJsonValue;
+    reference: boolean;
+  };
+  const planFollowers = async (
     draft: DraftRow,
     referenceFieldId: string,
     record: SemanticRecordDto | null,
-  ) => {
-    for (const dependent of dependentsOf(referenceFieldId)) {
-      if (dependent.presentation?.kind !== 'derived') continue;
-      const value = record?.values[dependent.presentation.sourceFieldId];
-      draft.values[dependent.fieldId] =
-        typeof value === 'string' && value ? value : null;
+    scratch: Values,
+    planned: FollowerValue[],
+    keep: ReadonlySet<string>,
+  ): Promise<void> => {
+    for (const follower of directFollowersOf(referenceFieldId)) {
+      // A value the same submission changed is the operator's, and stays;
+      // a derived value is read-only and always follows.
+      if (
+        keep.has(follower.fieldId) &&
+        follower.presentation?.kind !== 'derived'
+      )
+        continue;
+      if (follower.presentation?.kind === 'derived') {
+        const derived = derivedValue(
+          follower.presentation,
+          record,
+          headerOf(draft, scratch),
+        );
+        scratch[follower.fieldId] = derived;
+        planned.push({
+          fieldId: follower.fieldId,
+          value: derived,
+          reference: false,
+        });
+        continue;
+      }
+      const next =
+        follower.defaultFrom?.referenceFieldId === referenceFieldId
+          ? defaultedValue(follower, record, headerOf(draft, scratch))
+          : null;
+      if (!follower.reference) {
+        scratch[follower.fieldId] = next;
+        planned.push({
+          fieldId: follower.fieldId,
+          value: next,
+          reference: false,
+        });
+        continue;
+      }
+      // A defaulted or scoped picker: its selection must be one this field
+      // could select itself, or it stays empty.
+      let selected: SemanticRecordDto | null = null;
+      if (typeof next === 'string' && next)
+        try {
+          selected = await readSelectable(follower, next, {
+            ...draft,
+            values: scratch,
+          });
+        } catch {
+          selected = null;
+        }
+      scratch[follower.fieldId] = selected?.recordId ?? null;
+      planned.push({
+        fieldId: follower.fieldId,
+        value: selected?.recordId ?? null,
+        reference: true,
+      });
+      await planFollowers(
+        draft,
+        follower.fieldId,
+        selected,
+        scratch,
+        planned,
+        keep,
+      );
     }
   };
-  const derive = async (rowId: string, referenceFieldId: string) => {
+  const applyDerived = async (
+    draft: DraftRow,
+    referenceFieldId: string,
+    record: SemanticRecordDto | null,
+    keep: ReadonlySet<string> = new Set(),
+  ): Promise<void> => {
+    const selection = draft.values[referenceFieldId];
+    const planned: FollowerValue[] = [];
+    await planFollowers(
+      draft,
+      referenceFieldId,
+      record,
+      { ...draft.values },
+      planned,
+      keep,
+    );
+    if (draft.values[referenceFieldId] !== selection) return;
+    const before = draft.id === buffer.header.id ? { ...draft.values } : null;
+    for (const value of planned) {
+      draft.values[value.fieldId] = value.value;
+      if (!value.reference) continue;
+      const key = referenceKey(draft.id, value.fieldId);
+      buffer.lookups.delete(key);
+      nextGeneration(key);
+    }
+    // A header default can move a value the lines read (the currency).
+    if (before)
+      await followHeader(
+        new Set(
+          planned
+            .filter((value) => (before[value.fieldId] ?? null) !== value.value)
+            .map((value) => value.fieldId),
+        ),
+        before,
+      );
+  };
+  /** The header fields a line field's value is chosen by or copied from. */
+  const lineDependsOn = (
+    field: SurfaceDocumentEditor['lineFields'][number],
+  ): string[] => [
+    ...(field.presentation?.kind === 'derived' &&
+    field.presentation.sourceByHeader
+      ? [field.presentation.sourceByHeader.headerFieldId]
+      : []),
+    ...(field.defaultFrom?.sourceByHeader
+      ? [field.defaultFrom.sourceByHeader.headerFieldId]
+      : []),
+    ...(field.defaultFrom?.headerFieldId
+      ? [field.defaultFrom.headerFieldId]
+      : []),
+  ];
+  /** Header values, not pickers, that priced lines read (the currency). */
+  const lineSourceIds = new Set(
+    definition.lineFields
+      .flatMap((field) => lineDependsOn(field))
+      .filter(
+        (fieldId) =>
+          !definition.headerFields.find((value) => value.fieldId === fieldId)
+            ?.reference,
+      ),
+  );
+  /**
+   * Whether the page shows a line-source value this draft has not seen yet,
+   * such as a currency changed but not saved: an in-place answer would price
+   * a line in the old one, so the page answers instead.
+   */
+  const lineSourceMoved = (submitted: SurfaceRuntimeSubmission) =>
+    [...lineSourceIds].some((fieldId) => {
+      const value = submitted[inputName(buffer.header, fieldId)];
+      return (
+        value !== undefined &&
+        (value === '' ? null : value) !==
+          (buffer.header.values[fieldId] ?? null)
+      );
+    });
+  const triggerOf = (field: SurfaceDocumentEditor['lineFields'][number]) =>
+    field.presentation?.kind === 'derived'
+      ? field.presentation.referenceFieldId
+      : field.defaultFrom?.referenceFieldId;
+  /**
+   * Whether choosing `record` in this header field would move a header value
+   * that a chosen line reads: its followers are planned, not applied.
+   */
+  const reachesLines = async (
+    draft: DraftRow,
+    fieldId: string,
+    record: SemanticRecordDto | null,
+  ): Promise<boolean> => {
+    if (draft.id !== buffer.header.id) return false;
+    const selection = record?.recordId ?? null;
+    const scratch: Values = { ...draft.values, [fieldId]: selection };
+    const planned: FollowerValue[] = [];
+    await planFollowers(draft, fieldId, record, scratch, planned, new Set());
+    // An absent value and a null one are the same emptiness.
+    const changed = new Set(
+      planned
+        .filter(
+          (value) => (draft.values[value.fieldId] ?? null) !== value.value,
+        )
+        .map((value) => value.fieldId),
+    );
+    if ((draft.values[fieldId] ?? null) !== selection) changed.add(fieldId);
+    const dependent = definition.lineFields.filter((field) =>
+      lineDependsOn(field).some((id) => changed.has(id)),
+    );
+    return buffer.lines.some(
+      (line) =>
+        !line.removed &&
+        dependent.some((field) => {
+          const trigger = triggerOf(field);
+          const value = trigger ? line.values[trigger] : null;
+          return typeof value === 'string' && value !== '';
+        }),
+    );
+  };
+  /**
+   * Line values a header value chooses or copies -- a price in the order's
+   * currency, a tax code from the order's -- follow a change of that header
+   * value on every line whose product is chosen. A default the operator
+   * changed stays; a derived value always follows.
+   */
+  const followHeader = async (
+    changed: ReadonlySet<string>,
+    before: Values,
+  ): Promise<void> => {
+    const affected = definition.lineFields.filter((field) =>
+      lineDependsOn(field).some((id) => changed.has(id)),
+    );
+    if (!affected.length) return;
+    const kinds = inputsOf(definition.lineFormSurfaceId);
+    for (const line of buffer.lines) {
+      if (line.removed) continue;
+      for (const field of affected) {
+        const triggerId = triggerOf(field);
+        const trigger = definition.lineFields.find(
+          (value) => value.fieldId === triggerId,
+        );
+        const chosen = triggerId ? line.values[triggerId] : null;
+        if (!trigger?.reference?.getQueryId || typeof chosen !== 'string')
+          continue;
+        if (!chosen) continue;
+        const record = await selectedFor(trigger, line);
+        if (field.presentation?.kind === 'derived') {
+          line.values[field.fieldId] = derivedValue(
+            field.presentation,
+            record,
+            buffer.header.values,
+          );
+          continue;
+        }
+        const previous = defaultedValue(field, record, before);
+        if (
+          !sameValue(
+            kinds.get(field.fieldId)?.kind ?? 'textFieldType',
+            line.values[field.fieldId] ?? null,
+            previous,
+          )
+        )
+          continue;
+        const next = defaultedValue(field, record, buffer.header.values);
+        if (!field.reference) {
+          line.values[field.fieldId] = next;
+          continue;
+        }
+        // A picker that follows the header takes its own followers with it,
+        // such as the tax rate frozen from a line's tax code.
+        const key = referenceKey(line.id, field.fieldId);
+        let selected: SemanticRecordDto | null = null;
+        if (typeof next === 'string' && next)
+          try {
+            selected = await readSelectable(field, next, line);
+          } catch {
+            selected = null;
+          }
+        line.values[field.fieldId] = selected?.recordId ?? null;
+        buffer.lookups.delete(key);
+        nextGeneration(key);
+        await applyDerived(line, field.fieldId, selected);
+      }
+    }
+  };
+  const derive = async (
+    rowId: string,
+    referenceFieldId: string,
+    keep: ReadonlySet<string>,
+  ) => {
     const { fields } = rowsOf(referenceFieldId);
     const draft = findRow(rowId);
     const source = fields.find((value) => value.fieldId === referenceFieldId);
     if (
       !draft ||
-      !dependentsOf(referenceFieldId).length ||
+      !directFollowersOf(referenceFieldId).length ||
       !source?.reference?.getQueryId
     )
       return;
@@ -466,7 +835,7 @@ async function editorResponse(
       } catch {
         record = null;
       }
-    applyDerived(draft, referenceFieldId, record);
+    await applyDerived(draft, referenceFieldId, record, keep);
   };
   /** Every change of a field's selection moves its generation on. */
   const nextGeneration = (key: string) =>
@@ -523,6 +892,7 @@ async function editorResponse(
   const readLookup = async (
     field: SurfaceDocumentEditor['headerFields'][number],
     key: string,
+    draft: DraftRow,
   ): Promise<ReferenceLookup | null> => {
     const known = lookupReads.get(key);
     if (known) return known;
@@ -533,7 +903,11 @@ async function editorResponse(
     // Query continuation and the display limit are separate facts: only this
     // request's authorized read says whether the query continues.
     let queryContinues = false;
+    // A scoped picker searches within its sibling's selection, and offers
+    // nothing until that sibling selects a record.
+    const parent = withinParent(field, draft);
     for (let page = 0; page < state.pages; page++) {
+      if (field.reference.within && !parent) break;
       const result = await workspaceSearch(
         view,
         gateways.queryGateway,
@@ -542,6 +916,7 @@ async function editorResponse(
         state.term,
         cursor,
         field.reference.eligibility,
+        parent ?? undefined,
       );
       records.push(...result.records);
       cursor = result.nextCursor;
@@ -571,6 +946,7 @@ async function editorResponse(
   const readSelectable = async (
     field: SurfaceDocumentEditor['headerFields'][number],
     recordId: string,
+    draft: DraftRow,
   ): Promise<SemanticRecordDto | null> => {
     const reference = field.reference!;
     if (!reference.getQueryId) return null;
@@ -590,6 +966,21 @@ async function editorResponse(
         reference.eligibility,
         record.recordId,
       ))
+    )
+      return null;
+    // A scoped picker selects only a record tied to its sibling's selection,
+    // read now through the same parent-scoped List its search uses.
+    const parent = withinParent(field, draft);
+    if (
+      reference.within &&
+      (!parent ||
+        !(await workspaceWithin(
+          view,
+          gateways.queryGateway,
+          reference.queryId,
+          parent,
+          record.recordId,
+        )))
     )
       return null;
     return record;
@@ -721,7 +1112,7 @@ async function editorResponse(
       }
       let lookup: ReferenceLookup | null = null;
       try {
-        lookup = await readLookup(field, key);
+        lookup = await readLookup(field, key, draft);
       } catch (error) {
         // A failed search shows no earlier results beside its notice.
         dropLookup(key);
@@ -744,7 +1135,7 @@ async function editorResponse(
         return true;
       }
       try {
-        const record = await readSelectable(field, recordId);
+        const record = await readSelectable(field, recordId, draft);
         if (!record) {
           buffer.notice = warning(
             { code: 'OPERATION_INPUT_INVALID' },
@@ -755,8 +1146,8 @@ async function editorResponse(
         }
         draft.values[field.fieldId] = record.recordId;
         buffer.lookups.delete(key);
-        applyDerived(draft, field.fieldId, record);
         nextGeneration(key);
+        await applyDerived(draft, field.fieldId, record);
         buffer.focus = controlId(rowId, field.fieldId);
       } catch (error) {
         buffer.notice = warning(operationMessageRef(error), field.label);
@@ -767,8 +1158,8 @@ async function editorResponse(
     if (verb === 'clear') {
       draft.values[field.fieldId] = null;
       buffer.lookups.delete(key);
-      applyDerived(draft, field.fieldId, null);
       nextGeneration(key);
+      await applyDerived(draft, field.fieldId, null);
       buffer.focus = controlId(rowId, field.fieldId);
       return true;
     }
@@ -873,7 +1264,13 @@ async function editorResponse(
    * writes nothing further, a partial create is named as partial and not
    * selected, and a record that cannot be read back is not selected either.
    */
-  const runCreate = async () => {
+  /**
+   * Runs the open create. Answering in place, it stops before selecting a
+   * created record whose defaults would move a value priced lines read, and
+   * says so: the page then answers, finishing this same task (its done steps
+   * are not run again), so those lines are re-rendered with it.
+   */
+  const runCreate = async (inPlace = false): Promise<'page' | void> => {
     const task = buffer.create;
     if (!task || task.id !== submission?.draftCreateTask) {
       invalidTarget();
@@ -1017,10 +1414,17 @@ async function editorResponse(
     const created = task.steps[create.selectStep]!.recordId;
     let record: SemanticRecordDto | null = null;
     try {
-      record = await readSelectable(field, created);
+      record = await readSelectable(field, created, draft);
     } catch {
       record = null;
     }
+    if (
+      inPlace &&
+      record &&
+      (draft.values[task.fieldId] ?? null) === task.openedValue &&
+      (await reachesLines(draft, task.fieldId, record))
+    )
+      return 'page';
     buffer.create = null;
     buffer.focus = controlId(task.rowId, task.fieldId);
     if (!record) {
@@ -1033,8 +1437,8 @@ async function editorResponse(
     }
     draft.values[task.fieldId] = record.recordId;
     buffer.lookups.delete(referenceKey(task.rowId, task.fieldId));
-    applyDerived(draft, task.fieldId, record);
     nextGeneration(referenceKey(task.rowId, task.fieldId));
+    await applyDerived(draft, task.fieldId, record);
     buffer.notice = `<div role="status" class="draft-note draft-note--done" data-editor-create-selected><p>${h(create.label)} created and selected. It is its own record; saving or discarding this order does not undo it.</p></div>`;
   };
   const workspaceEntry = await requiredRead(buffer, () =>
@@ -1056,7 +1460,7 @@ async function editorResponse(
       current = await getRecord(
         view,
         gateways,
-        recordSurface,
+        recordRead,
         buffer.recordId,
         scope,
       );
@@ -1159,6 +1563,8 @@ async function editorResponse(
       accessibleName,
       focus,
       error: buffer.errors.get(controlId(draft.id, field.fieldId)) ?? null,
+      lineSource:
+        draft.id === buffer.header.id && lineSourceIds.has(field.fieldId),
     };
   };
   const referenceContext = async (
@@ -1178,8 +1584,11 @@ async function editorResponse(
       noun: field.label,
       generation: buffer.generations.get(key) ?? 0,
       seq: buffer.seqs.get(key) ?? 0,
+      // A follower that is itself a picker is replaced whole, like its field.
       dependents: dependentsOf(field.fieldId).map((dependent) =>
-        controlId(draft.id, dependent.fieldId),
+        dependent.reference
+          ? `${controlId(draft.id, dependent.fieldId)}-field`
+          : controlId(draft.id, dependent.fieldId),
       ),
     };
   };
@@ -1335,10 +1744,24 @@ async function editorResponse(
         ],
       ];
       for (const dependent of dependentsOf(fieldId))
-        parts.push([
-          controlId(draft.id, dependent.fieldId),
-          renderValueControl(fieldContext(draft, dependent)),
-        ]);
+        parts.push(
+          dependent.reference
+            ? [
+                `${controlId(draft.id, dependent.fieldId)}-field`,
+                renderReferenceControl(
+                  await referenceContext(
+                    fieldContext(draft, dependent),
+                    draft,
+                    dependent,
+                    null,
+                  ),
+                ),
+              ]
+            : [
+                controlId(draft.id, dependent.fieldId),
+                renderValueControl(fieldContext(draft, dependent)),
+              ],
+        );
       return parts;
     };
     const slot = (html: string) =>
@@ -1353,12 +1776,21 @@ async function editorResponse(
         );
       if (task.busy)
         return answer([], note('Still creating. Wait for the result.'), 409);
+      // The page shows a line source not yet seen: the page answers instead.
+      // A created record whose defaults would re-price chosen lines is found
+      // after the create, and the page finishes it; a cancel, a refusal or a
+      // create that moves no priced value answers in place.
+      if (lineSourceMoved(submission))
+        return { html: '', statusCode: 409, fallback: true };
       task.busy = true;
+      let outcome: 'page' | void;
       try {
-        await runCreate();
+        outcome = await runCreate(true);
       } finally {
         task.busy = false;
       }
+      if (outcome === 'page')
+        return { html: '', statusCode: 409, fallback: true };
       buffer.touched = performance.now();
       if (buffer.create)
         return answer(
@@ -1409,7 +1841,7 @@ async function editorResponse(
       let lookup: ReferenceLookup | null = null;
       let failure = '';
       try {
-        lookup = await readLookup(declared, key);
+        lookup = await readLookup(declared, key, draft);
       } catch (error) {
         // A failed read drops the lookup; nothing read before is shown again.
         if (buffer.seqs.get(key) === seq) dropLookup(key);
@@ -1434,6 +1866,8 @@ async function editorResponse(
       );
     }
     if (verb === 'select' || verb === 'clear') {
+      if (lineSourceMoved(submission))
+        return { html: '', statusCode: 409, fallback: true };
       const generation = buffer.generations.get(key) ?? 0;
       const resync = async (status: number, message: string) =>
         answer(await fieldParts(draft, declared.fieldId), message, status);
@@ -1455,7 +1889,7 @@ async function editorResponse(
           return resync(409, note('Those results changed. Search again.'));
         const version = buffer.version;
         try {
-          record = await readSelectable(declared, recordId);
+          record = await readSelectable(declared, recordId, draft);
         } catch (error) {
           if (buffer.lookups.get(key) === state) dropLookup(key);
           return resync(
@@ -1498,10 +1932,15 @@ async function editorResponse(
           Promise.resolve(record),
         );
       }
+      // A header choice whose defaults would move a value priced lines
+      // read (the currency, the tax code) is answered by the page, which
+      // re-renders those lines too; otherwise it lands in place.
+      if (await reachesLines(draft, declared.fieldId, record))
+        return { html: '', statusCode: 409, fallback: true };
       draft.values[declared.fieldId] = record?.recordId ?? null;
-      applyDerived(draft, declared.fieldId, record);
       buffer.lookups.delete(key);
       nextGeneration(key);
+      await applyDerived(draft, declared.fieldId, record);
       return answer(await fieldParts(draft, declared.fieldId));
     }
     // verb === 'create'
@@ -1573,6 +2012,12 @@ async function editorResponse(
         if (!buffer.pending && buffer.withheld === 'none' && !buffer.create) {
           const sources = referenceSources(definition);
           const before = snapshot(buffer, sources);
+          const prior = new Map(
+            [buffer.header, ...buffer.lines].map((row) => [
+              row.id,
+              { ...row.values },
+            ]),
+          );
           const headerInputs = inputsOf(definition.headerFormSurfaceId);
           const lineInputs = inputsOf(definition.lineFormSurfaceId);
           const refusedLabels = [
@@ -1609,7 +2054,7 @@ async function editorResponse(
             if (getQueryId && typeof value === 'string' && value) {
               let readable = false;
               try {
-                readable = (await readSelectable(field, value)) !== null;
+                readable = (await readSelectable(field, value, draft)) !== null;
               } catch {
                 readable = false;
               }
@@ -1622,8 +2067,30 @@ async function editorResponse(
               }
             }
             nextGeneration(key);
-            await derive(rowId, fieldId);
+            // Fields this submission set itself keep the submitted values;
+            // the rest follow the newly chosen record.
+            const submitted = new Set(
+              Object.keys(draft.values).filter(
+                (name) => prior.get(rowId)?.[name] !== draft.values[name],
+              ),
+            );
+            await derive(rowId, fieldId, submitted);
           }
+          // A header value the operator changed (the currency) moves the
+          // line values it chooses.
+          const headerBefore = prior.get(buffer.header.id) ?? {};
+          await followHeader(
+            new Set(
+              definition.headerFields
+                .map((field) => field.fieldId)
+                .filter(
+                  (fieldId) =>
+                    (headerBefore[fieldId] ?? null) !==
+                    (buffer.header.values[fieldId] ?? null),
+                ),
+            ),
+            headerBefore,
+          );
         }
         if (
           !buffer.pending &&
@@ -1832,7 +2299,7 @@ async function editorResponse(
         let lookup: ReferenceLookup | null = null;
         if (!locked && buffer.lookups.has(key))
           try {
-            lookup = await readLookup(field, key);
+            lookup = await readLookup(field, key, draft);
           } catch (error) {
             dropLookup(key);
             buffer.notice += warning(operationMessageRef(error), field.label);

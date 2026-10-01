@@ -1051,7 +1051,10 @@ async function assertRealProductDefinition(
     ).surfaces.map((surface) => surface.surfaceId);
     // Prior 51 + Sales order entry and the fulfillment document/read-model
     // surfaces. Projection carriers deliberately omit editable forms.
-    assert.equal(surfaces.length, 70);
+    // SALES-PARITY adds Party's ship-to address book and Catalog's tax codes,
+    // then the invoice, its lines, payments and credits (list, detail, form
+    // each).
+    assert.equal(surfaces.length, 88);
     for (const local of [
       'goods_receipt',
       'goods_receipt_line',
@@ -3386,10 +3389,17 @@ async function assertBoundedFreshTenantInstallEvidence(
   // shipment (19), shipment line (14), and shipped quantity (10).
   // `assertSalesVerificationCoverage` pins every entity contribution and the
   // server-owned lifecycle-field exclusion independently of this total.
+  // SALES-PARITY adds 40 through its optional fields: shipment carrier and
+  // reference (4), order master data (10), shipment ship-to (6), Party's
+  // customer defaults (6) and its address book (14); then 25 for ruling B:
+  // the order's tax code and charges (7), line pricing (4), a customer
+  // default tax code (1), item prices (3) and the tax code master (10); then
+  // 72 for ruling C: invoice (23), invoice line (17), payment (17) and
+  // credit (15).
   assert.equal(
     servingScenarioCount,
-    348,
-    'the release includes the prior 198 scenarios, 59 for receiving, and 91 for Sales and fulfillment',
+    485,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, and 137 for Sales parity',
   );
 
   const intermediate = await pool.query<{
@@ -4179,7 +4189,6 @@ async function assertPurchaseOrderParentGuard(
       [purchasing.fieldIds.currency]: 'CAD',
       [purchasing.fieldIds.expectedDate]: '2026-09-01T00:00:00.000Z',
       [purchasing.fieldIds.notes]: 'parent guard vertical',
-      [purchasing.fieldIds.number]: 'PO-GUARD-001',
       [purchasing.fieldIds.orderDate]: '2026-08-22T00:00:00.000Z',
       [purchasing.fieldIds.supplierPartyId]: 'SUP-GUARD-001',
     },
@@ -5585,10 +5594,14 @@ async function assertExactPartitionEvidence(
   // operationless projection carriers derive. The partition assertion below
   // still forces executed + derived to equal the emitted plan, and the
   // independent constructibility oracle still verifies every member.
+  // SALES-PARITY's 137 scenarios all execute: every entity it adds has a
+  // generic create, and a server-assigned document number is written by that
+  // create, so no numbered entity derives for want of an input. 348 + 137 =
+  // 485 emitted, of which the prior 77 derive.
   assert.equal(
     evidence.results.length,
-    271,
-    'fulfillment adds 47 executed scenarios to the prior 224',
+    408,
+    'fulfillment adds 47 executed scenarios to the prior 224, and Sales parity 137',
   );
   assert.equal(
     derivations.length,
@@ -5628,7 +5641,8 @@ async function assertExactPartitionEvidence(
   const salesScenarioIds = binding.plan.scenarios
     .filter((scenario) => salesEntityIds.has(scenario.entityId))
     .map((scenario) => scenario.scenarioId);
-  assert.equal(salesScenarioIds.length, 24);
+  // 29 + 16, as `assertSalesVerificationCoverage` pins them per entity.
+  assert.equal(salesScenarioIds.length, 45);
   assert.equal(
     salesScenarioIds.every((scenarioId) =>
       executedScenarioIdSet.has(scenarioId),
@@ -5833,11 +5847,20 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
   for (const [local, count] of Object.entries({
     reservation: 14,
     reservation_balance: 10,
-    sales_order: 12,
-    sales_order_line: 12,
+    // SALES-PARITY: salesperson, terms, ship-to address and six ship-to lines,
+    // then the tax code and two charges with codes and frozen rates.
+    sales_order: 29,
+    // SALES-PARITY: list price, discount, tax code and frozen rate.
+    sales_order_line: 16,
     sales_order_shipped: 10,
-    shipment: 19,
+    // SALES-PARITY: carrier, reference type and reference, then six ship-to lines.
+    shipment: 29,
     shipment_line: 14,
+    // SALES-PARITY (ruling C): the receivables documents.
+    customer_invoice: 23,
+    customer_invoice_line: 17,
+    customer_payment: 17,
+    customer_credit: 15,
   })) {
     assert.equal(
       plan.scenarios.filter(
@@ -5882,6 +5905,7 @@ function assertIndependentConstructibilityPartition(
         readonly kind: string;
       };
       readonly inputContract: {
+        readonly assignedFields?: readonly { readonly fieldId: string }[];
         readonly fields: readonly { readonly fieldId: string }[];
         readonly relationInputs: readonly {
           readonly relationId: string;
@@ -5931,6 +5955,13 @@ function assertIndependentConstructibilityPartition(
       if (relation) {
         constructibleColumns.add(relation.relationColumn.physicalName);
       }
+    }
+    // SALES-PARITY: a document number is assigned by the create itself.
+    for (const assigned of createOperation.inputContract.assignedFields ?? []) {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === assigned.fieldId,
+      );
+      if (column) constructibleColumns.add(column.physicalName);
     }
     const systemInput = createOperation.inputContract.systemInput;
     if (systemInput) {
