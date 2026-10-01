@@ -87,7 +87,7 @@ test('an adjustment is entered like a document, numbered on save, and posted or 
     });
     const addedInFrom = await saveDraft(page);
     expect(addedInFrom.number).not.toBe(damaged.number);
-    await refused(page, 'INVENTORY_POSTING_INPUT_INVALID');
+    await refused(page, addedInFrom, 'INVENTORY_POSTING_INPUT_INVALID');
 
     // More than is on hand: the posting's own refusal.
     await openNew(page);
@@ -96,8 +96,8 @@ test('an adjustment is entered like a document, numbered on save, and posted or 
       reason: 'Lost',
       line: { from: 'Calgary warehouse', quantity: '-999' },
     });
-    await saveDraft(page);
-    await refused(page, 'INVENTORY_STOCK_NEGATIVE');
+    const tooMany = await saveDraft(page);
+    await refused(page, tooMany, 'INVENTORY_STOCK_NEGATIVE');
     expect(await stock(page)).toEqual({ 'CAL-WH': '11', 'VAN-WH': '6' });
   });
 });
@@ -146,8 +146,8 @@ test('a transfer moves unreserved stock, and opening stock goes only where there
       reason: 'Relocation',
       line: { from: 'Calgary warehouse', to: 'Beltline store', quantity: '13' },
     });
-    await saveDraft(page);
-    await refused(page, 'FULFILLMENT_RESERVATION_SHORTAGE');
+    const allOfCalgary = await saveDraft(page);
+    await refused(page, allOfCalgary, 'FULFILLMENT_RESERVATION_SHORTAGE');
 
     // Opening stock: twenty into the Beltline store, which has none.
     await openNew(page);
@@ -165,8 +165,8 @@ test('a transfer moves unreserved stock, and opening stock goes only where there
       reason: 'Opening stock',
       line: { to: 'Calgary warehouse', quantity: '5' },
     });
-    await saveDraft(page);
-    await refused(page, 'INVENTORY_POSTING_INPUT_INVALID');
+    const openingOver = await saveDraft(page);
+    await refused(page, openingOver, 'INVENTORY_POSTING_INPUT_INVALID');
     expect(await stock(page)).toEqual({
       'CAL-WH': '13',
       'EDM-ST': '5',
@@ -289,8 +289,12 @@ async function command(page: Page, label: string) {
   await expect(page.getByRole('status')).toContainText(`${label} complete`);
 }
 
-/** Post, confirmed and refused: the refusal names its code. */
-async function refused(page: Page, code: string) {
+/**
+ * Post, confirmed and refused: the refusal names its code. Its page is a
+ * diagnostic of its own, so the document is opened again -- still the draft it
+ * was, at its first revision.
+ */
+async function refused(page: Page, saved: Saved, code: string) {
   const secondary = page.locator(
     '.composition-record-actions:not([open]) > summary',
   );
@@ -298,6 +302,11 @@ async function refused(page: Page, code: string) {
   await page.getByRole('button', { name: 'Post', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm Post', exact: true }).click();
   await expect(page.locator('[data-message-subject]').first()).toHaveText(code);
+  await page.goto(saved.url);
+  await expect(
+    page.getByRole('heading', { level: 1, name: saved.number, exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(/Active · revision 1/u)).toBeVisible();
 }
 
 /**
