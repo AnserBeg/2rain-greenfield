@@ -1,0 +1,353 @@
+{
+  "version": 1,
+  "packet": "RETURNS",
+  "entries": [
+    {
+      "name": "return-bound-removed",
+      "claim": "B1. Per sales order line, net returned plus what a return attempts stays between zero and net shipped, read from the ledger under the order row locks; an over-return is refused with its order line, shipped, returned-before and attempted quantities.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    if (after < 0n || after > shipped.quantity)\n",
+      "replacement": "    if (after < 0n)\n",
+      "test": {
+        "files": ["test/postgres/customer-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B1 an over-return is refused inside the posting with its four operands and writes nothing",
+          "expected": "Missing expected rejection: returning six of five shipped units must be refused with its operands"
+        },
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B4 two concurrent returns of one line into two locations serialize on the order: exactly one commits",
+          "expected": "exactly one of two concurrent returns of three against five shipped may commit"
+        }
+      ]
+    },
+    {
+      "name": "returns-counted-as-unshipped",
+      "claim": "B2. A return lands in its chosen location and leaves what was shipped, the shipped row and the reservations as they were: what may still come back is net shipped less net returned.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "after > shipped.quantity)",
+      "replacement": "after > shipped.quantity - returned.quantity)",
+      "test": {
+        "files": ["test/postgres/customer-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B2 returns count apart from shipments: after 2 of 5 come back, shipped stays 5 and 3 more may return",
+          "expected": "FULFILLMENT_RETURN_QUANTITY_OUT_OF_BOUNDS"
+        }
+      ]
+    },
+    {
+      "name": "shipment-guard-removed",
+      "claim": "B3. A shipment correction or reversal may not take a line's net shipped below its net returned.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    if (shippedAfter < returned.quantity)\n",
+      "replacement": "    if (false && shippedAfter < returned.quantity)\n",
+      "test": {
+        "files": ["test/postgres/customer-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B3 a shipment reversal cannot take back units the customer has returned",
+          "expected": "Missing expected rejection: a shipment reversal below the two returned units must be refused"
+        }
+      ]
+    },
+    {
+      "name": "return-order-lock-dropped",
+      "claim": "B4. Returns of one order serialize on the order row and its line rows, taken before either ledger is read, so two returns into two locations cannot together exceed what shipped.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  // different locations, and the period lock comes after the bound.\n  const serializeOrder = true;\n",
+      "replacement": "  // different locations, and the period lock comes after the bound.\n  const serializeOrder = false;\n",
+      "test": {
+        "files": ["test/postgres/customer-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B4 two concurrent returns of one line into two locations serialize on the order: exactly one commits",
+          "expected": "exactly one of two concurrent returns of three against five shipped may commit"
+        }
+      ]
+    },
+    {
+      "name": "return-correction-accepts-foreign-movement",
+      "claim": "B5. A correction or reversal names a posted return of the same order and takes back only that return's own movements, each once, from where they went.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "        AND movement.${qf(fulfillmentColumn(m, 'inventory_movement_source_id'))}=$4\n",
+      "replacement": "        AND (movement.${qf(fulfillmentColumn(m, 'inventory_movement_source_id'))}=$4 OR $4::text IS NOT NULL)\n",
+      "test": {
+        "files": ["test/postgres/customer-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B5 a correction or reversal takes back only movements of the return it names",
+          "expected": "Missing expected rejection: a correction naming another return of the order must be refused"
+        }
+      ]
+    },
+    {
+      "name": "return-verifier-call-deleted",
+      "claim": "B6. Every relation a return writes (the return, its companion transaction and lines) is read back column for column before commit, and the executed verifiers cover the observed write set.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  await verifyCustomerReturnPosting(\n    client,\n    binding,\n    context,\n    posting,\n    locked,\n    actorId,\n    recordedAt,\n    coverage,\n  );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/customer-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B2 returns count apart from shipments: after 2 of 5 come back, shipped stays 5 and 3 more may return",
+          "expected": "wrote module relations no executed verifier observed"
+        },
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B3 a shipment reversal cannot take back units the customer has returned",
+          "expected": "wrote module relations no executed verifier observed"
+        },
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B4 two concurrent returns of one line into two locations serialize on the order: exactly one commits",
+          "expected": "exactly one of two concurrent returns of three against five shipped may commit"
+        },
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B5 a correction or reversal takes back only movements of the return it names",
+          "expected": "wrote module relations no executed verifier observed"
+        },
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B6 a posted return writes the return, its companion transaction and one movement, each read back",
+          "expected": "wrote module relations no executed verifier observed"
+        },
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B7 the same key with a changed return conflicts; a duplicate delivery posts once",
+          "expected": "wrote module relations no executed verifier observed"
+        }
+      ]
+    },
+    {
+      "name": "return-digest-drops-quantities",
+      "claim": "B7. Customer-return input digest version 7 covers every header field and every line, so the same key with a changed return conflicts and a duplicate delivery replays without posting again.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            return returned;\n",
+      "replacement": "            return { returnLineId: returned.returnLineId };\n",
+      "test": {
+        "files": ["test/postgres/customer-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B7 the same key with a changed return conflicts; a duplicate delivery posts once",
+          "expected": "Missing expected rejection: the same key with a changed return quantity must conflict"
+        }
+      ]
+    },
+    {
+      "name": "return-replay-hashes-current-policy",
+      "claim": "B7. A customer-return retry is digested with the recorded invocation's own policy evidence, so a retry under a later policy revision replays instead of conflicting.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "receipt.input_digest_version === 7 &&",
+      "replacement": "receipt.input_digest_version === -7 &&",
+      "test": {
+        "files": ["test/postgres/customer-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B7 the same key with a changed return conflicts; a duplicate delivery posts once",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT"
+        }
+      ]
+    },
+    {
+      "name": "vendor-return-bound-removed",
+      "claim": "V1. Per purchase order line, a vendor return never takes net received below zero, read from the ledger under the order row locks; it is refused with its order line, received-before and attempted quantities.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    if (receivedBefore + attempted < 0n)\n",
+      "replacement": "    if (false && receivedBefore + attempted < 0n)\n",
+      "test": {
+        "files": ["test/postgres/vendor-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V1 a vendor return of more than the line received is refused inside the posting with its operands and writes nothing",
+          "expected": "Missing expected rejection: sending back six of five received units must be refused with its operands"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V5 two concurrent vendor returns of one line from two locations serialize on the order: exactly one commits",
+          "expected": "exactly one of two concurrent vendor returns of three against five received may commit"
+        }
+      ]
+    },
+    {
+      "name": "received-ledger-ignores-vendor-returns",
+      "claim": "V2. What a purchase order line has received is net of its vendor returns: the posted received row falls by the quantity sent back, the line reopens to receive, and a receipt correction cannot take back returned units.",
+      "file": "packages/postgres-provider/src/goods-receipt.ts",
+      "original": "'inventory_movement_source_type'))}='vendorReturn' AND m.archived_at IS NULL`",
+      "replacement": "'inventory_movement_source_type'))}='vendorReturnIgnored' AND m.archived_at IS NULL`",
+      "test": {
+        "files": ["test/postgres/vendor-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V2 a vendor return lowers what the line received and reopens it; a receipt reversal cannot take back returned units",
+          "expected": "received must fall by the two units sent back"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V3 reconciliation counts a vendor return: the received row equals the ledger",
+          "expected": "read-only reconciliation reports no received discrepancy after a vendor return"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V5 two concurrent vendor returns of one line from two locations serialize on the order: exactly one commits",
+          "expected": "exactly one of two concurrent vendor returns of three against five received may commit"
+        }
+      ]
+    },
+    {
+      "name": "received-sweep-ignores-vendor-returns",
+      "claim": "V3. The independent received-quantity sweep counts each posted vendor return movement through its own lineage, so reconciliation reports no discrepancy after a vendor return.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "'inventory_movement_source_type'))}='vendorReturn' AND m.archived_at IS NULL ORDER BY m.record_id`",
+      "replacement": "'inventory_movement_source_type'))}='vendorReturnIgnored' AND m.archived_at IS NULL ORDER BY m.record_id`",
+      "test": {
+        "files": ["test/postgres/vendor-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V3 reconciliation counts a vendor return: the received row equals the ledger",
+          "expected": "read-only reconciliation reports no received discrepancy after a vendor return"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V4 destroying and rebuilding the received rows reproduces a returned line net of its return",
+          "expected": "Rebuilt received projection failed independent verification"
+        }
+      ]
+    },
+    {
+      "name": "received-rebuild-ignores-vendor-returns",
+      "claim": "V4. Destroying and rebuilding the received rows reproduces each line net of its vendor returns, verified by the independent sweep.",
+      "file": "packages/postgres-provider/src/received-quantity-projection.ts",
+      "original": "        AND m.${q(receiptColumn(m, 'inventory_movement_source_type'))}='vendorReturn'\n",
+      "replacement": "        AND m.${q(receiptColumn(m, 'inventory_movement_source_type'))}='vendorReturnIgnored'\n",
+      "test": {
+        "files": ["test/postgres/vendor-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V4 destroying and rebuilding the received rows reproduces a returned line net of its return",
+          "expected": "Rebuilt received projection failed independent verification"
+        }
+      ]
+    },
+    {
+      "name": "vendor-return-order-lock-dropped",
+      "claim": "V5. Vendor returns of one order serialize on the order row and its line rows, taken before the received ledger is read, so two returns from two locations cannot together send back more than was received.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  // serialize two returns from two different locations.\n  const serializeOrder = true;\n",
+      "replacement": "  // serialize two returns from two different locations.\n  const serializeOrder = false;\n",
+      "test": {
+        "files": ["test/postgres/vendor-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V5 two concurrent vendor returns of one line from two locations serialize on the order: exactly one commits",
+          "expected": "exactly one of two concurrent vendor returns of three against five received may commit"
+        }
+      ]
+    },
+    {
+      "name": "vendor-return-verifier-call-deleted",
+      "claim": "V6. Every relation a vendor return writes (the return, its companion transaction and lines, and each line's received row) is read back column for column before commit, the received rows against the ledger.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  await verifyVendorReturnPosting(\n    client,\n    binding,\n    context,\n    posting,\n    locked,\n    actorId,\n    recordedAt,\n    coverage,\n  );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/vendor-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V2 a vendor return lowers what the line received and reopens it; a receipt reversal cannot take back returned units",
+          "expected": "wrote module relations no executed verifier observed"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V3 reconciliation counts a vendor return: the received row equals the ledger",
+          "expected": "wrote module relations no executed verifier observed"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V4 destroying and rebuilding the received rows reproduces a returned line net of its return",
+          "expected": "wrote module relations no executed verifier observed"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V5 two concurrent vendor returns of one line from two locations serialize on the order: exactly one commits",
+          "expected": "exactly one of two concurrent vendor returns of three against five received may commit"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V6 a posted vendor return writes the return, its companion transaction and one movement, each read back",
+          "expected": "wrote module relations no executed verifier observed"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V7 the same key with a changed vendor return conflicts; a duplicate delivery posts once",
+          "expected": "wrote module relations no executed verifier observed"
+        }
+      ]
+    },
+    {
+      "name": "vendor-return-digest-drops-quantities",
+      "claim": "V7. Vendor-return input digest version 8 covers every header field and every line, so the same key with a changed return conflicts and a duplicate delivery replays without posting again.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "            return sentBack;\n",
+      "replacement": "            return { returnLineId: sentBack.returnLineId };\n",
+      "test": {
+        "files": ["test/postgres/vendor-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V7 the same key with a changed vendor return conflicts; a duplicate delivery posts once",
+          "expected": "Missing expected rejection: the same key with a changed vendor return quantity must conflict"
+        }
+      ]
+    },
+    {
+      "name": "vendor-return-replay-hashes-current-policy",
+      "claim": "V7. A vendor-return retry is digested with the recorded invocation's own policy evidence, so a retry under a later policy revision replays instead of conflicting.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "receipt.input_digest_version === 8 &&",
+      "replacement": "receipt.input_digest_version === -8 &&",
+      "test": {
+        "files": ["test/postgres/vendor-return.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V7 the same key with a changed vendor return conflicts; a duplicate delivery posts once",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT"
+        }
+      ]
+    }
+  ]
+}
