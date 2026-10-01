@@ -25,6 +25,7 @@ Average cost **CAD 10**, Known value **CAD 200.00**, Unvalued quantity **10**.
 The opening units contribute no guessed cost. Search for Field notebook and
 export the List: the same known/unknown figures accompany its item row.
 Open that item's page from Catalog -> Items. The selected company is stated;
-the page shows the same average, known value and unvalued quantity.
+the page shows the same average, known value and unvalued quantity, alongside
+the existing CAD selling price of **12.50**. The PO estimate of 99 is not a cost.
 
 Each currency is labelled separately. There is no converted or combined value.

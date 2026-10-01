@@ -2,7 +2,7 @@
 
 Status: active — resumed by the owner. Slice 1 implemented; checks refreshed after merging the PAYABLES dependency. Slices 2–3 await slice 1 CI. [Draft PR #12](https://github.com/AnserBeg/2rain-greenfield/pull/12) open; no integration or deployment.
 Critical paths touched: none. Review: not owed — outside the Critical set.
-Base: `a3b104db` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
+Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
 ## Claims
 
@@ -15,7 +15,7 @@ Base: `a3b104db` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
 - Owner rulings are recorded in ADR-0067: derived moving average, unvalued quantities, no FX, separate currencies, landed cost after payables; it amends the plan's reserved valuation seam and ADR-0017, retaining quantity-only movements and the accounting exclusion.
 - Inventory value lives beside Items in Catalog because the existing canonical grammar keeps a surface, query and source entity in one module; one item/company row labels each currency's independent figures.
-- Known value is labelled as such; unknown stock never receives the PO or selling price, and no cross-currency total is claimed.
+- Known value is labelled as such; unknown stock never receives the PO or selling price, and no cross-currency total is claimed. Existing selling prices remain visible beside item costs; the fixture deliberately uses a PO estimate of 99 against actual costs of 5 and 15.
 - Shared item storage remains tenant-level; valuation adds a company query operand for its company-owned dependencies, without adding a column or changing identity.
 
 ## Slices
@@ -32,7 +32,9 @@ None owed: no Critical-set path changes.
 
 - Focused moving-average unit cases 6/6; scoped/paged/current-policy integration 1/1; release freshness `--check` PASS.
 - Compiled from the PAYABLES base envelope: one added lineage entry (6 total), 102 surfaces, 17 navigation destinations, 573 verification scenarios; coverage re-derived: 2654 obligations / 811 observed, unchanged.
-- Lint, typecheck and formatting PASS after the dependency merge; focused unit/workspace/surface grammar 44/44; broader unit/compiler/integration/web contracts 257/257; PostgreSQL stored-row oracle 1/1; operations browser 1/1 (one worker, ~2 min); architecture 71 checks with one fixture drift corrected, surface grammar recheck 25/25. First CI [36783423844](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36783423844): quality 208/209, PostgreSQL 224/225, operations browser 30/31; three stale inventories corrected (Lists, PAYABLES numbering, navigation). New stored-row oracle and valuation browser passed; composed replay, commercial PostgreSQL, standard browser, performance and security green. Local List 6/6, numbering 2/2, refreshed compiler/integration/web contracts 237/237; navigation browser queued under the exclusive lock. Full green matrix remains pending.
+- Local typecheck, lint and formatting PASS after merging `681f4675`; focused unit/workspace/surface grammar 44/44, compiler/integration/web contracts 237/237, List 6/6, numbering PostgreSQL 2/2, item contract 1/1 and suite inventory 1/1 pass. Stored-row oracle and valuation browser passed locally and in hosted CI.
+- CI [36785820975](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36785820975): all three PostgreSQL jobs, standard browser, performance, security and observability green. Quality failed the new file's alphabetic inventory position; operations failed a fuzzy Inventory group selector also matching More. Both corrected. Full green matrix remains pending.
+- Local full hygiene had an environmental red from another lane's container during its lock negative control; the focused suite inventory passes. The navigation browser never started: the exclusive lock stayed busy and exited 75. No readiness bound or timeout changed.
 - Small bridges: PAYABLES numbering and composed navigation inventories measured from compilation; fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
 
 ## Test it yourself
@@ -47,8 +49,8 @@ None owed: no Critical-set path changes.
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "VALUATION",
-  "base": "a3b104db44b58382db48ad67687ec159d8c31bba",
-  "head": "75cb4a9da46988294eb39fc91e178fe1694e54ae",
+  "base": "681f46751b2a4c3cc9027956534b741c35dd4a03",
+  "head": "706d7f8126d92faf2280b288148908a1c20d5db3",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -74,7 +76,6 @@ None owed: no Critical-set path changes.
     "test/helpers/without-inventory-valuation.ts",
     "test/integration/surface-data-binding.test.ts",
     "test/postgres/composed-application.test.ts",
-    "test/postgres/document-numbering.test.ts",
     "test/postgres/inventory-valuation.test.ts",
     "test/postgres/module-storage-transition.test.ts",
     "test/unit/canonical-model/surface-list.test.ts",
