@@ -156,8 +156,18 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
     // stored receipt binds principal, release, action and input digest. Fresh
     // commands remain exact in `assertCurrent`.
     if (
-      (operation.endsWith(':operation.shipment_post') ||
-        operation.endsWith(':operation.customer_return_post')) &&
+      operation.endsWith(':operation.shipment_post') &&
+      currentRevision !== expectedRevision &&
+      currentRevision !== expectedRevision + 1
+    )
+      throw fulfillmentError(
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+        'Fulfillment target revision is no longer current',
+      );
+    // RETURNS: a return posts the same way -- its current revision, or the
+    // one after it for an exact replay.
+    if (
+      operation.endsWith(':operation.customer_return_post') &&
       currentRevision !== expectedRevision &&
       currentRevision !== expectedRevision + 1
     )

@@ -607,8 +607,10 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
           'INVENTORY_POSTING_INPUT_INVALID',
           'Posted vendor return did not read back exactly',
         );
-    } catch (error) {
-      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+    } catch (denied) {
+      // Only a typed, current-policy read denial withholds the read-back of
+      // a committed return; any other failure is not disguised as success.
+      if (!(denied instanceof SemanticQueryPolicyDeniedError)) throw denied;
     }
     return {
       kind: 'semanticOperationResult',
