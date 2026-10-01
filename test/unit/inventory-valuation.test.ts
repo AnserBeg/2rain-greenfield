@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  deriveShipmentCosts,
+  deriveInvoiceCosts,
+  relievedCostFigures,
+  productMargin,
+  shippedProductRevenue,
+} from '../../packages/postgres-provider/src/inventory-shipment-cost.js';
+import {
   itemCostFigures,
   replayInventoryValue,
   display,
@@ -40,6 +47,230 @@ const costs = (entries: readonly [string, string | null, string?][]) =>
       },
     ]),
   );
+
+test('shipment relief and compensation use original cost; partial live invoices share net line cost and never overclaim it', () => {
+  const rows = [
+    movement('1', '10'),
+    movement('2', '-4', {
+      sourceType: 'shipment',
+      role: 'shipment',
+      sourceId: 'ship',
+    }),
+    movement('3', '10'),
+    movement('4', '2', {
+      sourceType: 'shipment',
+      role: 'shipment',
+      sourceId: 'return',
+      reversal: '2',
+    }),
+  ];
+  const replay = replayInventoryValue(
+    rows,
+    costs([
+      ['1', '5'],
+      ['3', '15'],
+    ]),
+  );
+  const sources = new Map([
+    [
+      '2',
+      {
+        shipment: 'ship',
+        orderLine: 'line',
+        item: 'item',
+        unit: 'EA',
+        posted: true,
+      },
+    ],
+    [
+      '4',
+      {
+        shipment: 'return',
+        orderLine: 'line',
+        item: 'item',
+        unit: 'EA',
+        posted: true,
+      },
+    ],
+  ]);
+  const orders = new Map([
+    [
+      'line',
+      {
+        order: 'order',
+        item: 'item',
+        unit: 'EA',
+        unitPrice: '25',
+        discountPercent: '10',
+      },
+    ],
+  ]);
+  const derived = deriveShipmentCosts(rows, replay, sources, orders);
+  assert.equal(
+    relievedCostFigures(derived.shipmentLines.get('2')!).cost_of_goods,
+    'CAD 20.00',
+  );
+  assert.equal(
+    relievedCostFigures(derived.shipments.get('return')!).cost_of_goods,
+    'CAD -10.00',
+  );
+  const order = derived.orders.get('order')!;
+  assert.equal(relievedCostFigures(order).cost_of_goods, 'CAD 10.00');
+  assert.equal(
+    productMargin(
+      order,
+      'CAD',
+      shippedProductRevenue('order', orders, derived.orderLines),
+    ),
+    'CAD 35.00',
+  );
+  const billed = deriveInvoiceCosts(
+    [
+      { id: 'void', date: '0', live: false },
+      { id: 'b', date: '1', live: true },
+      { id: 'a', date: '1', live: true },
+      { id: 'c', date: '2', live: true },
+    ],
+    [
+      { invoice: 'void', orderLine: 'line', quantity: '99', amount: '990' },
+      ...['a', 'b', 'c'].map((invoice) => ({
+        invoice,
+        orderLine: 'line',
+        quantity: '1',
+        amount: '25',
+      })),
+    ],
+    derived.orderLines,
+  );
+  for (const id of ['a', 'b']) {
+    const invoice = billed.get(id)!;
+    assert.equal(relievedCostFigures(invoice.cost).cost_of_goods, 'CAD 5.00');
+    assert.equal(
+      productMargin(invoice.cost, 'CAD', invoice.revenue),
+      'CAD 20.00',
+    );
+  }
+  assert.equal(billed.has('void'), false);
+  assert.equal(relievedCostFigures(billed.get('c')!.cost).cost_of_goods, null);
+  assert.match(billed.get('c')!.coverage!, /billed above net shipped/u);
+  assert.throws(
+    () => deriveShipmentCosts(rows, replay, new Map(), orders),
+    /lineage/u,
+  );
+});
+
+test('shipment costs expose unknown quantities and currencies, withholding margin rather than guessing or converting', () => {
+  const rows = [
+    movement('1', '2'),
+    movement('2', '2'),
+    movement('3', '2'),
+    movement('4', '-3', {
+      sourceType: 'shipment',
+      role: 'shipment',
+      sourceId: 'ship',
+    }),
+  ];
+  const derived = deriveShipmentCosts(
+    rows,
+    replayInventoryValue(
+      rows,
+      costs([
+        ['1', '10'],
+        ['2', '20', 'USD'],
+        ['3', null],
+      ]),
+    ),
+    new Map([
+      [
+        '4',
+        {
+          shipment: 'ship',
+          orderLine: 'line',
+          item: 'item',
+          unit: 'EA',
+          posted: true,
+        },
+      ],
+    ]),
+    new Map([
+      [
+        'line',
+        {
+          order: 'order',
+          item: 'item',
+          unit: 'EA',
+          unitPrice: '25',
+          discountPercent: null,
+        },
+      ],
+    ]),
+  );
+  const cost = derived.orders.get('order')!;
+  assert.deepEqual(relievedCostFigures(cost), {
+    cost_of_goods: 'CAD 10.00 · USD 20.00',
+    cost_unvalued_quantity: '1',
+    cost_coverage: 'Unvalued quantity',
+  });
+  assert.equal(productMargin(cost, 'CAD', { n: 75n, d: 1n }), null);
+  const fullyKnown = { ...cost, unvalued: { n: 0n, d: 1n } };
+  assert.equal(productMargin(fullyKnown, 'CAD', { n: 75n, d: 1n }), null);
+  assert.equal(
+    relievedCostFigures(fullyKnown).cost_coverage,
+    'Multiple cost currencies',
+  );
+});
+
+test('known zero shipment cost permits margin; an absent live invoice line and incomplete coverage state no cost', () => {
+  const rows = [
+    movement('1', '2'),
+    movement('2', '-1', {
+      sourceType: 'shipment',
+      role: 'shipment',
+      sourceId: 'ship',
+    }),
+  ];
+  const derived = deriveShipmentCosts(
+    rows,
+    replayInventoryValue(rows, costs([['1', '0']])),
+    new Map([
+      [
+        '2',
+        {
+          shipment: 'ship',
+          orderLine: 'line',
+          item: 'item',
+          unit: 'EA',
+          posted: true,
+        },
+      ],
+    ]),
+    new Map([
+      [
+        'line',
+        {
+          order: 'order',
+          item: 'item',
+          unit: 'EA',
+          unitPrice: '25',
+          discountPercent: null,
+        },
+      ],
+    ]),
+  );
+  const cost = derived.orders.get('order')!;
+  assert.equal(productMargin(cost, 'CAD', { n: 25n, d: 1n }), 'CAD 25.00');
+  assert.equal(
+    productMargin({ ...cost, complete: false }, 'CAD', { n: 25n, d: 1n }),
+    null,
+  );
+  const absent = deriveInvoiceCosts(
+    [{ id: 'invoice', date: '1', live: true }],
+    [],
+    derived.orderLines,
+  ).get('invoice')!;
+  assert.equal(relievedCostFigures(absent.cost).cost_of_goods, null);
+  assert.match(absent.coverage!, /lines are absent/u);
+});
 
 test('moving average uses remaining stock and exact effective ordering; inputs are never changed', () => {
   const rows = [

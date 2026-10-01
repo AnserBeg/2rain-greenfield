@@ -3,6 +3,7 @@ import {
   valuationQueries,
   valuationSurfaces,
   VALUATION_CAPABILITY_ID,
+  withShipmentValuation,
 } from '../inventory/valuation.js';
 import {
   invoiceWorkspace,
@@ -198,7 +199,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     collection(definition, 'capabilityRequirements').slice(1),
   );
 
-  return withDeclaredLists({
+  const application = withDeclaredLists({
     assertions: merged(definitions, 'assertions'),
     capabilityRequirements: [
       sharedCapability,
@@ -320,6 +321,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       ],
     ),
   });
+  return withShipmentValuation(APPLICATION_NAMESPACE, application);
 }
 
 /** A worklist's List surface joins the composed surfaces beside its source. */

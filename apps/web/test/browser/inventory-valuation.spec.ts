@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 interface Seeded {
   readonly item: string;
   readonly company: string;
+  readonly shipment?: string;
+  readonly order?: string;
+  readonly invoice?: string;
 }
 
 test('inventory value and item page show actual moving average and unvalued opening quantities', async ({
@@ -55,12 +58,55 @@ test('inventory value and item page show actual moving average and unvalued open
   });
 });
 
+test('inventory shipment relief and order/invoice margin remain at shipment cost after a later receipt', async ({
+  page,
+}) => {
+  test.setTimeout(480_000);
+  await fixture(async (url, seed) => {
+    const data = await seed('valuation-shipped');
+    const destination = new URL(url);
+    destination.search = '';
+    for (const [local, query, record] of [
+      ['shipment_detail', 'shipment_get', data.shipment],
+      ['sales_order_detail', 'commercial_order_get', data.order],
+      ['customer_invoice_detail', 'customer_invoice_get', data.invoice],
+    ]) {
+      destination.search = '';
+      destination.searchParams.set('surface', `northstar.app:surface.${local}`);
+      destination.searchParams.set('record', record!);
+      destination.searchParams.set(
+        `northstar.app:parameter.${query}_legal_entity_scope`,
+        data.company,
+      );
+      await page.goto(destination.toString());
+      const details = page.locator('[data-composition-fields]');
+      await expect(details).toContainText('CAD 40.00');
+      await expect(details).toContainText('Fully valued');
+      if (local === 'shipment_detail')
+        await expect(
+          page.locator('[data-composition-dataset$="dataset.shipment_relief"]'),
+        ).toContainText('CAD 40.00');
+      else await expect(details).toContainText('CAD 60.00');
+    }
+    await page
+      .getByRole('link', { name: 'Print invoice', exact: true })
+      .click();
+    const printed = page.locator('[data-print-document]');
+    await expect(printed).toBeVisible();
+    await expect(printed).not.toContainText('cost of goods');
+    await expect(printed).not.toContainText('margin');
+  });
+});
+
 /**
  * The order-entry fixture, served with `--verify` so the purchase order is
  * seeded through its own governed operations once the application is up.
  */
 async function fixture(
-  run: (url: string, seed: () => Promise<Seeded>) => Promise<void>,
+  run: (
+    url: string,
+    seed: (phase?: string) => Promise<Seeded>,
+  ) => Promise<void>,
 ) {
   const child = spawn(
     process.execPath,
@@ -101,11 +147,11 @@ async function fixture(
     });
     child.once('exit', () => reject(new Error(output)));
   });
-  const seed = () =>
+  const seed = (phase = 'valuation') =>
     new Promise<Seeded>((resolve, reject) => {
       seeded = resolve;
       child.once('exit', () => reject(new Error(output)));
-      child.stdin.write(`${JSON.stringify({ phase: 'valuation' })}\n`);
+      child.stdin.write(`${JSON.stringify({ phase })}\n`);
     });
   try {
     await run(await ready, seed);

@@ -1,4 +1,7 @@
-import { seedInventoryValuation } from './inventory-valuation-fixture.js';
+import {
+  seedInventoryValuation,
+  seedInventoryShipmentValuation,
+} from './inventory-valuation-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
@@ -521,6 +524,19 @@ async function seed(
       return {
         phase,
         ...(await seedInventoryValuation({
+          invoke,
+          create,
+          scope,
+          item,
+          location,
+          customer,
+        })),
+        observed: true,
+      };
+    if (phase === 'valuation-shipped')
+      return {
+        phase,
+        ...(await seedInventoryShipmentValuation({
           invoke,
           create,
           scope,

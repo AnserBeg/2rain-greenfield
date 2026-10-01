@@ -1,8 +1,10 @@
 import { VALUATION_CAPABILITY_ID } from '../../domain/src/inventory/valuation.js';
-import { inventoryValuationReadModel } from './inventory-valuation-read-model.js';
+import {
+  inventoryValuationReadModel,
+  commercialReadModelWithInventoryCost,
+} from './inventory-valuation-read-model.js';
 import { FULFILLMENT_CAPABILITY_ID } from './fulfillment.js';
 import { COMMERCIAL_CAPABILITY_ID } from '../../domain/src/sales/definition.js';
-import { commercialReadModel } from './commercial-read-model.js';
 import { fulfillmentReadModel } from './fulfillment-read-model.js';
 import { receivingReadModel } from './receiving-read-model.js';
 import { RECEIVING_CAPABILITY_ID } from './goods-receipt.js';
@@ -679,7 +681,7 @@ export async function createComposedApplicationRuntime(
       new PostgresSemanticQueryDenialRecorder(runtimePool, actorIssuer),
       {
         [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
-        [COMMERCIAL_CAPABILITY_ID]: commercialReadModel,
+        [COMMERCIAL_CAPABILITY_ID]: commercialReadModelWithInventoryCost,
         [VALUATION_CAPABILITY_ID]: inventoryValuationReadModel,
         // A receipt's lines with what each can still reverse (ORDER-PARITY).
         [RECEIVING_CAPABILITY_ID]: receivingReadModel,

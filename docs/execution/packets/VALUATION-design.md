@@ -14,7 +14,10 @@ single-company operand; tenant/environment come from the pinned request view.
 The catalog item remains tenant-shared; its valuation query adds the company
 operand for its dependencies without making item storage company-owned.
 No provider SQL bypass, cached privileged answer or nested read model is used.
-A denied dependency refuses the valuation read rather than reporting zero.
+A denied dependency refuses the item valuation read rather than reporting zero.
+On a commercial document, supplementary cost and margin are withheld with a
+current-policy coverage statement; its independently authorized stored facts
+and commercial totals remain readable.
 Paging reads every dependency page and verifies its echo; malformed/incomplete
 history is refused. Draft receipt lines never value stock: movement lineage
 must name the posted receipt and its line, item and unit exactly.
@@ -85,6 +88,12 @@ only when its billed quantity is fully costed in the invoice currency. Freight,
 fees, taxes, payments and credits do not become product margin. Voided invoices
 have no cost/margin. No-FX means mixed-currency relief cannot produce a margin
 in one currency; disclose that absence instead of converting or dropping it.
+The order margin compares net shipped quantity at the stored order-line price
+and discount with its relieved cost; unshipped revenue is excluded. Shipment
+line relief is a separate read-only child table beside the original packed
+facts. Cost, coverage and margin are internal record fields, excluded from the
+customer invoice print declaration. Existing query identities and company
+operands are retained so document links remain valid.
 
 ## Slice 3 — landed cost
 

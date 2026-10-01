@@ -11,7 +11,10 @@ import {
 } from '../../packages/postgres-provider/src/fulfillment.js';
 import { governedStorageTarget } from '../helpers/governed-storage-target.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
-import { seedInventoryValuation } from '../helpers/inventory-valuation-fixture.js';
+import {
+  seedInventoryValuation,
+  seedInventoryShipmentValuation,
+} from '../helpers/inventory-valuation-fixture.js';
 
 const ns = 'northstar.app';
 test(
@@ -100,6 +103,135 @@ test(
           )
         ).rows[0].n,
         3,
+      );
+    });
+  },
+);
+
+test(
+  'shipment, order and invoice costs equal stored-row average at shipment time, while a later receipt changes current stock value',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (f) => {
+      const seed = await seedInventoryShipmentValuation(f);
+      const target = await governedStorageTarget();
+      const entity = (local: string) =>
+        target.entities.find((e) => e.entityId === `${ns}:entity.${local}`)!;
+      const movement = entity('inventory_movement');
+      const receipt = entity('goods_receipt_line');
+      const invoiceLine = entity('customer_invoice_line');
+      const m = (key: string) =>
+        `m.${q(fulfillmentColumn(movement, `inventory_movement_${key}`))}`;
+      const r = (key: string) =>
+        `r.${q(fulfillmentColumn(receipt, `goods_receipt_line_${key}`))}`;
+      // Independent SQL observes the stored business ordering: the two initial
+      // receipt instants precede the shipment, and the final one follows it.
+      const {
+        rows: [oracle],
+      } = await f.pool.query(
+        `
+        WITH shipped AS (
+          SELECT -sum(${m('quantity_delta')}) AS shipped_quantity, max(${m('effective_at')}) AS instant
+          FROM ${fulfillmentTable(movement)} m
+          WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3
+            AND ${m('source_type')}='shipment' AND ${m('source_id')}=$5
+        ), inputs AS (
+          SELECT ${m('quantity_delta')} AS quantity, ${r('unit_cost')} AS cost,
+            ${m('effective_at')} < shipped.instant AS before_ship
+          FROM ${fulfillmentTable(movement)} m
+          JOIN ${fulfillmentTable(receipt)} r ON r.record_id::text=${m('source_line')}
+            AND r.tenant_id=m.tenant_id AND r.environment_id=m.environment_id AND r.legal_entity_id=m.legal_entity_id
+          CROSS JOIN shipped
+          WHERE m.tenant_id=$1 AND m.environment_id=$2 AND m.legal_entity_id=$3 AND ${m('item_id')}=$4
+            AND ${m('source_type')}='goodsReceipt'
+        ) SELECT (shipped.shipped_quantity * sum(quantity*cost) FILTER (WHERE before_ship) / sum(quantity) FILTER (WHERE before_ship))::numeric(38,2)::text AS relieved,
+          (sum(quantity*cost) - shipped.shipped_quantity * sum(quantity*cost) FILTER (WHERE before_ship) / sum(quantity) FILTER (WHERE before_ship))::numeric(38,2)::text AS remaining
+          FROM inputs CROSS JOIN shipped GROUP BY shipped.shipped_quantity`,
+        [
+          f.app.runtime.identity.tenantId,
+          f.app.runtime.identity.environmentId,
+          f.scope,
+          seed.item,
+          seed.shipment,
+        ],
+      );
+      assert.equal(oracle.relieved, '40.00');
+      assert.equal(oracle.remaining, '460.00');
+      const {
+        rows: [billed],
+      } = await f.pool.query(
+        `SELECT sum(${q(fulfillmentColumn(invoiceLine, 'customer_invoice_line_amount'))})::numeric(38,2)::text AS revenue,
+        sum(${q(fulfillmentColumn(invoiceLine, 'customer_invoice_line_quantity'))})::text AS quantity
+        FROM ${fulfillmentTable(invoiceLine)} WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3
+          AND ${q(target.relations.find((relation) => relation.relationId === `${ns}:relation.customer_invoice_line_invoice`)!.relationColumn.physicalName)}=$4`,
+        [
+          f.app.runtime.identity.tenantId,
+          f.app.runtime.identity.environmentId,
+          f.scope,
+          seed.invoice,
+        ],
+      );
+      assert.equal(billed.revenue, '100.00');
+      assert.equal(Number(billed.quantity), 4);
+      const read = (local: string, recordId: string) =>
+        f.app.runtime.entry.run({ headers: {} }, (view) => {
+          const query = registeredSemanticQueryFromPinnedView(
+            view,
+            `${ns}:query.${local}`,
+          )!;
+          return f.app.runtime.queryGateway.invoke(view, {
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+            queryId: query.queryId,
+            arguments: {
+              recordId,
+              includeArchived: false,
+              [query.legalEntityScope!.operand.parameterId]: f.scope,
+            },
+          });
+        });
+      for (const [local, id] of [
+        ['shipment_get', seed.shipment],
+        ['commercial_order_get', seed.order],
+        ['customer_invoice_get', seed.invoice],
+      ]) {
+        const row = (await read(local!, id!)).records[0]!;
+        assert.equal(
+          row.values[`${ns}:metric.cost_of_goods`],
+          `CAD ${oracle.relieved}`,
+          local,
+        );
+        assert.equal(row.values[`${ns}:metric.cost_unvalued_quantity`], '0');
+        if (local !== 'shipment_get')
+          assert.equal(
+            row.values[`${ns}:metric.product_margin`],
+            `CAD ${(Number(billed.revenue) - Number(oracle.relieved)).toFixed(2)}`,
+          );
+      }
+      const stock = (await read('inventory_value_get', seed.item)).records[0]!;
+      assert.equal(
+        stock.values[`${ns}:metric.inventory_value`],
+        `CAD ${oracle.remaining}`,
+      );
+      assert.equal(stock.values[`${ns}:metric.average_cost`], 'CAD 17.692308');
+      const lines = await f.app.runtime.entry.run({ headers: {} }, (view) => {
+        const query = registeredSemanticQueryFromPinnedView(
+          view,
+          `${ns}:query.valuation_shipment_line_list`,
+        )!;
+        return f.app.runtime.queryGateway.invoke(view, {
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          queryId: query.queryId,
+          arguments: {
+            includeArchived: false,
+            [query.legalEntityScope!.operand.parameterId]: f.scope,
+          },
+        });
+      });
+      assert.equal(
+        lines.records.find((row) => row.recordId === seed.shipmentLine)!.values[
+          `${ns}:metric.cost_of_goods`
+        ],
+        `CAD ${oracle.relieved}`,
       );
     });
   },
