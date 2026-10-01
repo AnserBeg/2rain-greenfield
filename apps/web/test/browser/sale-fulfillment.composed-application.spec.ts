@@ -153,7 +153,11 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
-  await expect(page.locator('.composition-header')).toContainText(/STK-\d{6}/u);
+  // Titled by the number the server gave it: a stock document's page
+  // declares no header of its own.
+  await expect(
+    page.getByRole('heading', { level: 1, name: /^STK-\d{6}$/u }),
+  ).toBeVisible();
   await command('Post');
 
   // The customer picker offers only parties with an active customer role, so

@@ -2179,7 +2179,35 @@ async function createScopedStockDocument(
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
-  await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
+  // Saved, not refused. The save opens the document's own page, whose
+  // sections render: its line, and Posted movements stating its declared
+  // empty state -- a draft has posted nothing. That empty state is the one
+  // message on the page; any other (a refusal, a failed section) is not.
+  const dataset = (local: string) =>
+    page.locator(
+      `[data-composition-dataset="${applicationNamespace}:dataset.inventory_transaction_${local}"]`,
+    );
+  await expect(dataset('inventory_transaction_line')).toHaveAttribute(
+    'data-resolution',
+    'ready',
+  );
+  await expect(dataset('inventory_movement')).toHaveAttribute(
+    'data-resolution',
+    'empty',
+  );
+  await expect(
+    dataset('inventory_movement').locator(
+      '[data-diagnostic-code="COMPOSITION_CHILD_EMPTY"]',
+    ),
+  ).toHaveCount(1);
+  await expect(
+    page.locator(
+      '[data-diagnostic-code]:not([data-diagnostic-code="COMPOSITION_CHILD_EMPTY"])',
+    ),
+  ).toHaveCount(0);
+  await expect(
+    page.locator('[data-diagnostic-code="COMPOSITION_CHILD_EMPTY"]'),
+  ).toHaveCount(1);
   // Titled by the number the server gave it: a stock document's page
   // declares no header of its own.
   const title = page.getByRole('heading', { level: 1, name: /^STK-\d{6}$/u });
