@@ -1,6 +1,6 @@
 # VALUATION — derived moving average, shipment cost and landed cost
 
-Status: active — resumed by the owner. Slice 1 implemented; checks refreshed after merging the PAYABLES dependency. Slices 2–3 await slice 1 CI. [Draft PR #12](https://github.com/AnserBeg/2rain-greenfield/pull/12) open; no integration or deployment.
+Status: active — resumed by the owner. Slice 1 CI green; slice 2 implemented, validation in progress. Slice 3 awaits slice 2 CI. [Draft PR #12](https://github.com/AnserBeg/2rain-greenfield/pull/12) open; no integration or deployment.
 Critical paths touched: none. Review: not owed — outside the Critical set.
 Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
@@ -9,7 +9,9 @@ Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 1. A registered canonical read capability computes item/company/currency moving averages from posted quantity movements and immutable actual receipt costs; there is no monetary storage or posting change.
 2. Unknown inflows remain unvalued; each currency relieves proportionately at the effective-time average, exact rational arithmetic rounds only for display, and compensations invert original effects.
 3. Complete transfers preserve company value; missing lineage, malformed paging and incomplete transfers refuse; negative coverage or residual value without covered quantity withholds monetary figures.
-4. The Inventory value List and item page use compiled metadata and shared runtimes; every input is read through declared plain queries under current company and permission authority; a denied cost read refuses rather than returning zero.
+4. The Inventory value List and item page use compiled metadata and shared runtimes; every input is read through declared plain queries under current company and permission authority; a denied item cost read refuses, while document cost/margin are explicitly withheld without suppressing authorized document facts.
+
+5. Posted shipment-line relief includes original-effect corrections; orders sum it and show shipped product margin; live partial invoices take proportional net-shipment coverage, withholding excess/unknown/foreign-currency margin. Internal figures stay off the customer invoice print.
 
 ## Decisions
 
@@ -21,7 +23,7 @@ Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 ## Slices
 
 1. Item cost, Inventory value and item facts: [checkpoint](VALUATION-test-it-yourself.md#1-stock-value).
-2. Shipment relief, order/invoice cost and read-only margin: pending slice 1 CI.
+2. Shipment relief, order/invoice cost and read-only margin: [checkpoint](VALUATION-test-it-yourself.md#2-shipment-cost-and-margin), CI pending.
 3. Bill charges allocated by actual billed receipt value: pending slice 2 CI.
 
 ## Controls
@@ -30,11 +32,11 @@ None owed: no Critical-set path changes.
 
 ## Gates
 
-- Focused moving-average unit cases 6/6; scoped/paged/current-policy integration 1/1; release freshness `--check` PASS.
+- Focused moving-average/shipment/invoice unit cases 9/9; scoped/paged/current-policy and shipment lineage integration 4/4; web metadata/print contracts 2/2; release freshness `--check` PASS.
 - Compiled from the PAYABLES base envelope: one added lineage entry (6 total), 102 surfaces, 17 navigation destinations, 573 verification scenarios; coverage re-derived: 2654 obligations / 811 observed, unchanged.
 - Local typecheck, lint and formatting PASS after merging `681f4675`; focused unit/workspace/surface grammar 44/44, compiler/integration/web contracts 237/237, List 6/6, numbering PostgreSQL 2/2, item contract 1/1 and suite inventory 1/1 pass. Stored-row oracle and valuation browser passed locally and in hosted CI.
-- CI [36785820975](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36785820975): all three PostgreSQL jobs, standard browser, performance, security and observability green. Quality failed the new file's alphabetic inventory position; operations failed a fuzzy Inventory group selector also matching More. Both corrected. Full green matrix remains pending.
-- Local full hygiene had an environmental red from another lane's container during its lock negative control; the focused suite inventory passes. The navigation browser never started: the exclusive lock stayed busy and exited 75. No readiness bound or timeout changed.
+- Slice 1 full CI [36801057149](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36801057149) green at `45b03f7f62103c5824b099c16dd4a2409de991a3`, all ten jobs including reachability. Slice 2 full CI pending.
+- Slice 2 local typecheck, lint, format and surface grammar (25/25) PASS. Its independent stored-row oracle and browser journey are registered for hosted PostgreSQL/operations jobs; local checks wait for the machine's exclusive container slot. Standalone coverage check lacks a reachability run token; the full CI run supplies it. No readiness bound or timeout changed.
 - Small bridges: PAYABLES numbering and composed navigation inventories measured from compilation; fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
 
 ## Test it yourself
@@ -50,7 +52,7 @@ None owed: no Critical-set path changes.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "VALUATION",
   "base": "681f46751b2a4c3cc9027956534b741c35dd4a03",
-  "head": "706d7f8126d92faf2280b288148908a1c20d5db3",
+  "head": "0bd80b5f7c3cb40b9e8f45cafd7c83995702ab64",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -65,6 +67,7 @@ None owed: no Critical-set path changes.
     "packages/domain/src/inventory/contracts.ts",
     "packages/domain/src/inventory/valuation.ts",
     "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/inventory-shipment-cost.ts",
     "packages/postgres-provider/src/inventory-valuation-read-model.ts",
     "packages/postgres-provider/src/inventory-valuation.ts",
     "test/architecture/repository-hygiene.test.ts",
@@ -93,6 +96,10 @@ None owed: no Critical-set path changes.
     {
       "path": "packages/domain/src/inventory/valuation.ts",
       "name": "valuationQueries"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-shipment-cost.ts",
+      "name": "deriveShipmentCosts"
     }
   ]
 }
