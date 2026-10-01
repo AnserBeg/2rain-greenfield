@@ -48,7 +48,9 @@ const barrierKey = 29;
 
 test(
   'customer returns are bounded by what shipped, serialized per order and read back before commit',
-  { timeout: 300_000 },
+  // Seven claims over one composed application, as order-pages runs its
+  // pages over one: the bound order-pages already declares.
+  { timeout: 600_000 },
   async (t) => {
     await withEphemeralPostgres(
       'customer-returns',
@@ -316,7 +318,9 @@ test(
                 effective_at: now,
                 location_id: locationId,
                 reason_code: options.reason ?? 'DAMAGED',
-                reason_narrative: options.notes ?? null,
+                // The composed tenant's posting configuration requires code
+                // and narrative, as the Receive return task does.
+                reason_narrative: options.notes ?? 'Came back unopened',
               },
               {
                 order: shipped.order,
@@ -898,7 +902,7 @@ test(
                 orderId: shipped.order,
                 locationId: locationB,
                 supersedesReturnId: null,
-                reason: { code: 'DAMAGED', narrative: null },
+                reason: { code: 'DAMAGED', narrative: 'Came back unopened' },
                 lines: [
                   {
                     returnLineId: draft.lineId,
@@ -954,6 +958,26 @@ test(
                   service.postCustomerReturn(context, actor, command('3')),
                   refusal('INVENTORY_POSTING_IDEMPOTENCY_CONFLICT'),
                   'the same key with a changed return quantity must conflict',
+                );
+                // A retry under a later policy revision: the gateway checks
+                // current grants first, and the digest is computed from the
+                // recorded invocation's own policy evidence, so it replays.
+                const later = command('2');
+                const retried = await service.postCustomerReturn(
+                  context,
+                  actor,
+                  {
+                    ...later,
+                    authorization: {
+                      ...later.authorization,
+                      policyVersion: `${later.authorization.policyVersion}+later`,
+                    },
+                  },
+                );
+                assert.equal(
+                  retried.replayed,
+                  true,
+                  'a return retry under a later policy revision must replay',
                 );
               } finally {
                 await directPool.end();

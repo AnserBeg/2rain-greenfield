@@ -166,6 +166,8 @@ const ENTITY_OWNED_QUERY_FAMILIES = new Set([
   'vendor_bill_line',
   'vendor_payment',
   'vendor_credit',
+  'vendor_return',
+  'vendor_return_line',
 ]);
 
 /** The payables documents: each is written as a draft and posted once. */
@@ -297,11 +299,18 @@ export function purchasingModuleDefinition(
      * bill takes each order line's frozen cost, discount and tax rate.
      */
     readonly payables?: boolean;
+    /**
+     * Vendor returns (RETURNS): goods received against an order line sent
+     * back to the supplier from a location. Only the product application
+     * passes it; a purchasing-only harness compiles what it always did.
+     */
+    readonly vendorReturns?: boolean;
   } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const commercialTerms = options.commercialTerms === true;
   const payables = options.payables === true;
+  const vendorReturns = options.vendorReturns === true;
   if (payables && !commercialTerms)
     throw new TypeError(
       'payables require the commercial terms a bill is priced from',
@@ -335,7 +344,18 @@ export function purchasingModuleDefinition(
           [local, label, `${namespace}:entity.${local}`] as const,
       )
     : [];
-  const entities = [...standardEntities, ...payablesEntities];
+  // RETURNS: a vendor return and its lines, posted by the receiving kernel.
+  const vendorReturnEntities = vendorReturns
+    ? VENDOR_RETURN_ENTITIES.map(
+        ([local, label]) =>
+          [local, label, `${namespace}:entity.${local}`] as const,
+      )
+    : [];
+  const entities = [
+    ...standardEntities,
+    ...payablesEntities,
+    ...vendorReturnEntities,
+  ];
 
   return {
     assertions: entities.map(([local]) => assertion(definitionIds, local)),
@@ -542,6 +562,7 @@ export function purchasingModuleDefinition(
       ),
       ...(commercialTerms ? commercialFields(definitionIds) : []),
       ...(payables ? payablesFields(definitionIds) : []),
+      ...(vendorReturns ? specFields(definitionIds, VENDOR_RETURN_FIELDS) : []),
     ],
     hashAlgorithm: 'sha256',
     impactAnalyses: [],
@@ -627,6 +648,7 @@ export function purchasingModuleDefinition(
         ),
       ),
       ...(payables ? payablesOperations(definitionIds) : []),
+      ...(vendorReturns ? vendorReturnOperations(definitionIds) : []),
     ],
     package: {
       kind: 'packageDefinition',
@@ -691,6 +713,25 @@ export function purchasingModuleDefinition(
             schemaVersion: version,
           }))
         : []),
+      // RETURNS: the vendor return's documents and its one command.
+      ...vendorReturnEntities.flatMap(([local, , entityId]) =>
+        permissions(definitionIds, local, entityId),
+      ),
+      ...(vendorReturns
+        ? [
+            {
+              action: 'transition',
+              kind: 'permissionDefinition',
+              label: 'vendor_return post',
+              permissionId: `${namespace}:permission.vendor_return_post`,
+              resource: reference(
+                'entityReference',
+                `${namespace}:entity.vendor_return`,
+              ),
+              schemaVersion: version,
+            },
+          ]
+        : []),
     ],
     queries: [
       ...standardEntities.flatMap(([local, , entityId]) =>
@@ -713,6 +754,18 @@ export function purchasingModuleDefinition(
             ([name]) => `${namespace}:field.${local}_${name}`,
           ),
           `${namespace}:field.${local}_${local === 'vendor_bill_line' ? 'item_id' : 'number'}`,
+        ),
+      ),
+      // A vendor return is found by its number; its line by the item.
+      ...vendorReturnEntities.flatMap(([local, , entityId]) =>
+        queries(
+          definitionIds,
+          local,
+          entityId,
+          (VENDOR_RETURN_FIELDS[local] ?? []).map(
+            ([name]) => `${namespace}:field.${local}_${name}`,
+          ),
+          `${namespace}:field.${local}_${local === 'vendor_return_line' ? 'item_id' : 'number'}`,
         ),
       ),
     ],
@@ -788,6 +841,21 @@ export function purchasingModuleDefinition(
                 `${namespace}:entity.${source}`,
                 `${namespace}:entity.${target}`,
                 80 + index * 10,
+              ),
+              ownership,
+            }),
+          )
+        : []),
+      // RETURNS: a vendor return belongs to its order and owns its lines;
+      // each line names the order line whose received units it sends back.
+      ...(vendorReturns
+        ? VENDOR_RETURN_RELATIONS.map(
+            ([local, source, target, ownership], index) => ({
+              ...relation(
+                `${namespace}:relation.${local}`,
+                `${namespace}:entity.${source}`,
+                `${namespace}:entity.${target}`,
+                140 + index * 10,
               ),
               ownership,
             }),
@@ -1113,8 +1181,115 @@ const PAYABLES_FIELDS: Readonly<
   ],
 };
 
+/** The vendor return entities (RETURNS), in declaration order. */
+const VENDOR_RETURN_ENTITIES = [
+  ['vendor_return', 'Vendor return'],
+  ['vendor_return_line', 'Vendor return line'],
+] as const;
+
+const VENDOR_RETURN_RELATIONS = [
+  ['vendor_return_order', 'vendor_return', 'purchase_order', 'reference'],
+  [
+    'vendor_return_line_return',
+    'vendor_return_line',
+    'vendor_return',
+    'parentScopedChild',
+  ],
+  [
+    'vendor_return_line_order_line',
+    'vendor_return_line',
+    'purchase_order_line',
+    'reference',
+  ],
+] as const;
+
+/**
+ * Vendor return fields (RETURNS; ruling R-A: a return is net of received).
+ * A return sends goods back from one location -- any active location (ruling
+ * R-C) -- for a reason; its lines carry the positive quantity sent back, and
+ * the receiving kernel posts each as one negative movement that lowers what
+ * the order line has received.
+ */
+const VENDOR_RETURN_FIELDS: Readonly<
+  Record<string, ReadonlyArray<PayablesFieldSpec>>
+> = {
+  vendor_return: [
+    [
+      'number',
+      'Vendor return number',
+      'text',
+      { length: 60, numberedAs: 'VRT' },
+    ],
+    [
+      'state',
+      'State',
+      'choice',
+      {
+        choices: [
+          ['draft', 'Draft'],
+          ['posted', 'Posted'],
+        ],
+      },
+    ],
+    ['effective_at', 'Returned at', 'instant', {}],
+    [
+      'location_id',
+      'Return-from location',
+      'text',
+      { length: 80, searchable: true },
+    ],
+    ['reason_code', 'Reason', 'text', { length: 80 }],
+    ['reason_narrative', 'Notes', 'text', { length: 1000, optional: true }],
+  ],
+  vendor_return_line: [
+    ['line_number', 'Line', 'integer', {}],
+    ['item_id', 'Item', 'text', { length: 80, searchable: true }],
+    ['quantity', 'Quantity returned', 'decimal', {}],
+    ['unit_id', 'Base unit', 'text', { length: 32, searchable: true }],
+  ],
+};
+
+/**
+ * The vendor return operations: the document changes only while a draft, its
+ * lines carry its guard through their parent-scoped relation, and it posts
+ * once through the receiving capability, which bounds it by what was received.
+ */
+function vendorReturnOperations(
+  ids: PurchasingIds,
+): Array<Record<string, unknown>> {
+  const { namespace } = ids;
+  const draft = fieldComparison(
+    `${namespace}:field.vendor_return_state`,
+    `${namespace}:option.vendor_return_state_draft`,
+  );
+  return [
+    ...operations(
+      ids,
+      'vendor_return',
+      `${namespace}:entity.vendor_return`,
+      draft,
+    ),
+    ...operations(
+      ids,
+      'vendor_return_line',
+      `${namespace}:entity.vendor_return_line`,
+    ),
+    {
+      ...receivingOperation(ids, 'vendor_return', 'post'),
+      precondition: draft,
+    },
+  ];
+}
+
 function payablesFields(ids: PurchasingIds): Array<Record<string, unknown>> {
-  return Object.entries(PAYABLES_FIELDS).flatMap(([local, specs]) =>
+  return specFields(ids, PAYABLES_FIELDS);
+}
+
+function specFields(
+  ids: PurchasingIds,
+  documents: Readonly<Record<string, ReadonlyArray<PayablesFieldSpec>>>,
+): Array<Record<string, unknown>> {
+  return Object.entries(documents).flatMap(([local, specs]) =>
     specs.map(([name, label, type, options], index) =>
       field(
         ids,

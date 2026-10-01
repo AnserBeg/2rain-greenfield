@@ -1180,8 +1180,9 @@ async function assertRealProductDefinition(
     // then the invoice, its lines, payments and credits (list, detail, form
     // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
     // vendor bill, its lines, payments and credits (list, detail, form each);
-    // RETURNS the customer return and its lines (list, detail, form each).
-    assert.equal(surfaces.length, 107);
+    // RETURNS the customer and vendor returns and their lines (list, detail,
+    // form each).
+    assert.equal(surfaces.length, 113);
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     for (const local of [
       'goods_receipt',
@@ -3524,12 +3525,12 @@ async function assertBoundedFreshTenantInstallEvidence(
   // compiled plan: vendor bill (23), bill line (17), vendor payment (17) and
   // vendor credit (15) -- the receivables documents' shapes; the supplier's
   // invoice number is searchable, so it adds no search exclusion. RETURNS
-  // adds 31, measured from the compiled plan: the customer return (18) and
-  // its lines (13).
+  // adds 58, measured from the compiled plan: the customer return (18) and
+  // its lines (13), the vendor return (15) and its lines (12).
   assert.equal(
     servingScenarioCount,
-    604,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, and 31 for customer returns',
+    631,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, and 58 for returns',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5865,12 +5866,12 @@ async function assertExactPartitionEvidence(
   // on the purchase order, its line, the goods receipt and the amendment
   // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
   // (each vendor document has a generic create, replayed by this oracle over
-  // the compiled head): 573, 496. RETURNS' 31 execute as well (the return
-  // and its line each have a generic create): 604, 527.
+  // the compiled head): 573, 496. RETURNS' 58 execute as well (each return
+  // and each return line has a generic create): 631, 554.
   assert.equal(
     evidence.results.length,
-    527,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, and customer returns 31',
+    554,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, and returns 58',
   );
   assert.equal(
     derivations.length,
@@ -6097,6 +6098,9 @@ function assertReceivingVerificationCoverage(
     // location.
     purchase_order: 22,
     purchase_order_line: 15,
+    // RETURNS (ruling R-A): the vendor return and its lines.
+    vendor_return: 15,
+    vendor_return_line: 12,
   })) {
     assert.equal(
       plan.scenarios.filter(

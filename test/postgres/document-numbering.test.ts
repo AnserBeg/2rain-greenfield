@@ -192,6 +192,8 @@ test(
           'vendor_bill_number',
           'vendor_credit_number',
           'vendor_payment_number',
+          // RETURNS (ruling R-A): a vendor return's VRT number.
+          'vendor_return_number',
         ].map((local) => `${ns}:field.${local}`),
       );
       const plan = (
@@ -239,7 +241,20 @@ test(
               numbered.some((entry) => entry.fieldId === scenario.subjectId),
           )
           .map((scenario) => executed.has(scenario.scenarioId)),
-        [true, true, true, true, true, true, true, true, true, true, true],
+        [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+        ],
         'each number’s uniqueness probe executed',
       );
       const derivationCodes = (

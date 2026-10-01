@@ -65,6 +65,7 @@ const MODULE_REGISTRY = Object.freeze([
       purchasingModuleDefinition(namespace, {
         commercialTerms: true,
         payables: true,
+        vendorReturns: true,
       }),
     moduleName: 'purchasing',
   }),

@@ -520,7 +520,9 @@ export function orderEntrySurfaces(
     const local = name.replace(/_(list|detail|form)$/, '');
     const editor = documents.get(local);
     const owner =
-      local.startsWith('purchase_order') || local.startsWith('goods_receipt')
+      local.startsWith('purchase_order') ||
+      local.startsWith('goods_receipt') ||
+      local.startsWith('vendor_return')
         ? 'purchase_order'
         : local.startsWith('sales_order') ||
             [

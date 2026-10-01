@@ -1070,11 +1070,14 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             },
           },
           {
+            // Posted as the return's narrative: a tenant whose posting
+            // configuration requires code and narrative refuses a return
+            // without one, so the task always asks (PaneFlow requires it too).
             inputId: id('input', 'return_notes'),
-            label: 'Notes',
+            label: 'What came back',
             orderKey: 40,
             type: 'text',
-            required: false,
+            required: true,
             presentation: { kind: 'multiline' },
           },
         ],

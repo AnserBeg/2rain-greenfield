@@ -553,6 +553,54 @@
       "schemaVersion": "v6"
     },
     {
+      "assertionId": "northstar.app:assertion.vendor_return_walking_slice",
+      "evidenceKinds": [
+        "structure",
+        "provider",
+        "userInterface",
+        "agent",
+        "migration",
+        "recovery"
+      ],
+      "expectedDiagnosticCode": null,
+      "expectedOutcome": "succeeds",
+      "invocation": {
+        "kind": "queryInvocation",
+        "query": {
+          "kind": "queryReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:query.vendor_return_get"
+        },
+        "schemaVersion": "v6"
+      },
+      "kind": "assertionDefinition",
+      "schemaVersion": "v6"
+    },
+    {
+      "assertionId": "northstar.app:assertion.vendor_return_line_walking_slice",
+      "evidenceKinds": [
+        "structure",
+        "provider",
+        "userInterface",
+        "agent",
+        "migration",
+        "recovery"
+      ],
+      "expectedDiagnosticCode": null,
+      "expectedOutcome": "succeeds",
+      "invocation": {
+        "kind": "queryInvocation",
+        "query": {
+          "kind": "queryReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:query.vendor_return_line_get"
+        },
+        "schemaVersion": "v6"
+      },
+      "kind": "assertionDefinition",
+      "schemaVersion": "v6"
+    },
+    {
       "assertionId": "northstar.app:assertion.legal_entity_walking_slice",
       "evidenceKinds": [
         "structure",
@@ -1432,6 +1480,40 @@
         "kind": "storageMappingReference",
         "schemaVersion": "v6",
         "targetId": "northstar.app:storage.vendor_credit"
+      }
+    },
+    {
+      "entityId": "northstar.app:entity.vendor_return",
+      "kind": "entityDefinition",
+      "label": "Vendor return",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "orderKey": 110,
+      "schemaVersion": "v6",
+      "storage": {
+        "kind": "storageMappingReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:storage.vendor_return"
+      }
+    },
+    {
+      "entityId": "northstar.app:entity.vendor_return_line",
+      "kind": "entityDefinition",
+      "label": "Vendor return line",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "orderKey": 120,
+      "schemaVersion": "v6",
+      "storage": {
+        "kind": "storageMappingReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:storage.vendor_return_line"
       }
     },
     {
@@ -6807,6 +6889,262 @@
     },
     {
       "businessKey": "tenantEnvironmentCaseInsensitiveUnique",
+      "numbering": {
+        "kind": "documentSequence",
+        "sequenceId": "northstar.app:document_sequence.vendor_return",
+        "prefix": "VRT",
+        "minimumDigits": 6,
+        "start": 1
+      },
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "fieldId": "northstar.app:field.vendor_return_number",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 60,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Vendor return number",
+      "orderKey": 10,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": true
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "fieldId": "northstar.app:field.vendor_return_state",
+      "fieldType": {
+        "kind": "enumFieldType",
+        "schemaVersion": "v6",
+        "options": [
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.vendor_return_state_draft",
+            "label": "Draft",
+            "orderKey": 10
+          },
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.vendor_return_state_posted",
+            "label": "Posted",
+            "orderKey": 20
+          }
+        ]
+      },
+      "kind": "fieldDefinition",
+      "label": "State",
+      "orderKey": 20,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "fieldId": "northstar.app:field.vendor_return_effective_at",
+      "fieldType": {
+        "kind": "dateTimeFieldType",
+        "precision": "millisecond",
+        "schemaVersion": "v6",
+        "timezoneSemantics": "utcInstant"
+      },
+      "kind": "fieldDefinition",
+      "label": "Returned at",
+      "orderKey": 30,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "fieldId": "northstar.app:field.vendor_return_location_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Return-from location",
+      "orderKey": 40,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": true
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "fieldId": "northstar.app:field.vendor_return_reason_code",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Reason",
+      "orderKey": 50,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "fieldId": "northstar.app:field.vendor_return_reason_narrative",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 1000,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Notes",
+      "orderKey": 60,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "fieldId": "northstar.app:field.vendor_return_line_line_number",
+      "fieldType": {
+        "kind": "integerFieldType",
+        "representation": "canonicalString",
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Line",
+      "orderKey": 10,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "fieldId": "northstar.app:field.vendor_return_line_item_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Item",
+      "orderKey": 20,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": true
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "fieldId": "northstar.app:field.vendor_return_line_quantity",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Quantity returned",
+      "orderKey": 30,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "fieldId": "northstar.app:field.vendor_return_line_unit_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 32,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Base unit",
+      "orderKey": 40,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": true
+    },
+    {
+      "businessKey": "tenantEnvironmentCaseInsensitiveUnique",
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "none",
@@ -7000,6 +7338,13 @@
             "label": "customerReturn",
             "optionId": "northstar.app:option.inventory_transaction_type_customer_return",
             "orderKey": 80,
+            "schemaVersion": "v6"
+          },
+          {
+            "kind": "enumOption",
+            "label": "vendorReturn",
+            "optionId": "northstar.app:option.inventory_transaction_type_vendor_return",
+            "orderKey": 90,
             "schemaVersion": "v6"
           }
         ],
@@ -8145,6 +8490,13 @@
             "label": "customerReturn",
             "optionId": "northstar.app:option.inventory_posting_role_customer_return",
             "orderKey": 80,
+            "schemaVersion": "v6"
+          },
+          {
+            "kind": "enumOption",
+            "label": "vendorReturn",
+            "optionId": "northstar.app:option.inventory_posting_role_vendor_return",
+            "orderKey": 90,
             "schemaVersion": "v6"
           }
         ],
@@ -14145,6 +14497,360 @@
         "entity": {
           "kind": "entityReference",
           "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.vendor_return"
+        },
+        "kind": "createRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.vendor_return_create",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_create"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.vendor_return_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.vendor_return_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.vendor_return"
+        },
+        "kind": "updateRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.vendor_return_update",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_update"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.vendor_return_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.vendor_return_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.vendor_return"
+        },
+        "kind": "archiveRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.vendor_return_archive",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_archive"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.vendor_return_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.vendor_return_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.vendor_return"
+        },
+        "kind": "restoreRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.vendor_return_restore",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_restore"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.vendor_return_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.vendor_return_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.vendor_return_line"
+        },
+        "kind": "createRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.vendor_return_line_create",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_line_create"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_line_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.vendor_return_line"
+        },
+        "kind": "updateRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.vendor_return_line_update",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_line_update"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_line_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.vendor_return_line"
+        },
+        "kind": "archiveRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.vendor_return_line_archive",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_line_archive"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_line_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.vendor_return_line"
+        },
+        "kind": "restoreRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.vendor_return_line_restore",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_line_restore"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_line_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "registeredCapabilityEffect",
+        "schemaVersion": "v6",
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.purchasing:capability.receiving"
+        }
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.vendor_return_post",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_post"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o1",
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.vendor_return_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.vendor_return_state_draft"
+        }
+      }
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
           "targetId": "northstar.app:entity.legal_entity"
         },
         "kind": "createRecordEffect",
@@ -17212,6 +17918,138 @@
         "kind": "entityReference",
         "schemaVersion": "v6",
         "targetId": "northstar.app:entity.vendor_credit"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "create",
+      "kind": "permissionDefinition",
+      "label": "vendor_return create",
+      "permissionId": "northstar.app:permission.vendor_return_create",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "read",
+      "kind": "permissionDefinition",
+      "label": "vendor_return read",
+      "permissionId": "northstar.app:permission.vendor_return_read",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "update",
+      "kind": "permissionDefinition",
+      "label": "vendor_return update",
+      "permissionId": "northstar.app:permission.vendor_return_update",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "archive",
+      "kind": "permissionDefinition",
+      "label": "vendor_return archive",
+      "permissionId": "northstar.app:permission.vendor_return_archive",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "restore",
+      "kind": "permissionDefinition",
+      "label": "vendor_return restore",
+      "permissionId": "northstar.app:permission.vendor_return_restore",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "create",
+      "kind": "permissionDefinition",
+      "label": "vendor_return_line create",
+      "permissionId": "northstar.app:permission.vendor_return_line_create",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "read",
+      "kind": "permissionDefinition",
+      "label": "vendor_return_line read",
+      "permissionId": "northstar.app:permission.vendor_return_line_read",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "update",
+      "kind": "permissionDefinition",
+      "label": "vendor_return_line update",
+      "permissionId": "northstar.app:permission.vendor_return_line_update",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "archive",
+      "kind": "permissionDefinition",
+      "label": "vendor_return_line archive",
+      "permissionId": "northstar.app:permission.vendor_return_line_archive",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "restore",
+      "kind": "permissionDefinition",
+      "label": "vendor_return_line restore",
+      "permissionId": "northstar.app:permission.vendor_return_line_restore",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "transition",
+      "kind": "permissionDefinition",
+      "label": "vendor_return post",
+      "permissionId": "northstar.app:permission.vendor_return_post",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
       },
       "schemaVersion": "v6"
     },
@@ -30807,6 +31645,818 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.vendor_return_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.vendor_return_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_read"
+      },
+      "queryId": "northstar.app:query.vendor_return_get",
+      "queryType": "get",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_get_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_state"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_get_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_effective_at"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_get_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_get_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_reason_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_get_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_reason_narrative"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_get_6"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.vendor_return_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.vendor_return_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_read"
+      },
+      "queryId": "northstar.app:query.vendor_return_list",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_list_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_state"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_list_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_effective_at"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_list_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_list_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_reason_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_list_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_reason_narrative"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_list_6"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.vendor_return_search_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.vendor_return_search_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_read"
+      },
+      "queryId": "northstar.app:query.vendor_return_search",
+      "queryType": "search",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_search_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_state"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_search_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_effective_at"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_search_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_search_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_reason_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_search_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_reason_narrative"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_search_6"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.vendor_return_resolve_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.vendor_return_resolve_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_read"
+      },
+      "queryId": "northstar.app:query.vendor_return_resolve",
+      "queryType": "resolve",
+      "resolveMatchKeys": [
+        {
+          "authority": "identifier",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_number"
+          },
+          "kind": "resolveMatchKey",
+          "matchKeyId": "northstar.app:resolve-key.vendor_return",
+          "orderKey": 10,
+          "schemaVersion": "v6"
+        }
+      ],
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_resolve_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_state"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_resolve_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_effective_at"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_resolve_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_resolve_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_reason_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_resolve_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_reason_narrative"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_resolve_6"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.vendor_return_line_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.vendor_return_line_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_line_read"
+      },
+      "queryId": "northstar.app:query.vendor_return_line_get",
+      "queryType": "get",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_line_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_get_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_get_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_get_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_get_4"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.vendor_return_line_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.vendor_return_line_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_line_read"
+      },
+      "queryId": "northstar.app:query.vendor_return_line_list",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_line_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_list_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_list_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_list_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_list_4"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.vendor_return_line_search_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.vendor_return_line_search_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_line_read"
+      },
+      "queryId": "northstar.app:query.vendor_return_line_search",
+      "queryType": "search",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_line_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_search_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_search_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_search_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_search_4"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.vendor_return_line_resolve_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.vendor_return_line_resolve_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.vendor_return_line_read"
+      },
+      "queryId": "northstar.app:query.vendor_return_line_resolve",
+      "queryType": "resolve",
+      "resolveMatchKeys": [
+        {
+          "authority": "identifier",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_item_id"
+          },
+          "kind": "resolveMatchKey",
+          "matchKeyId": "northstar.app:resolve-key.vendor_return_line",
+          "orderKey": 10,
+          "schemaVersion": "v6"
+        }
+      ],
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_line_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_resolve_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_resolve_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_resolve_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.vendor_return_line_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.vendor_return_line_resolve_4"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
@@ -40024,6 +41674,84 @@
       },
       "joinEligibility": "query",
       "kind": "relationDefinition",
+      "orderKey": 140,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.vendor_return_order",
+      "required": true,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
+      "orderKey": 150,
+      "ownership": "parentScopedChild",
+      "relationId": "northstar.app:relation.vendor_return_line_return",
+      "required": true,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
+      "orderKey": 160,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.vendor_return_line_order_line",
+      "required": true,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order_line"
+      }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
       "orderKey": 10,
       "ownership": "parentScopedChild",
       "relationId": "northstar.app:relation.inventory_transaction_line_transaction",
@@ -40827,6 +42555,28 @@
       "schemaVersion": "v6",
       "storageClass": "dedicatedTable",
       "storageMappingId": "northstar.app:storage.vendor_credit"
+    },
+    {
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return"
+      },
+      "kind": "storageMappingDefinition",
+      "schemaVersion": "v6",
+      "storageClass": "dedicatedTable",
+      "storageMappingId": "northstar.app:storage.vendor_return"
+    },
+    {
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.vendor_return_line"
+      },
+      "kind": "storageMappingDefinition",
+      "schemaVersion": "v6",
+      "storageClass": "dedicatedTable",
+      "storageMappingId": "northstar.app:storage.vendor_return_line"
     },
     {
       "entity": {
@@ -43243,10 +44993,10 @@
               },
               {
                 "inputId": "northstar.app:input.return_notes",
-                "label": "Notes",
+                "label": "What came back",
                 "orderKey": 40,
                 "type": "text",
-                "required": false,
+                "required": true,
                 "presentation": { "kind": "multiline" }
               }
             ],
@@ -50433,6 +52183,72 @@
                 "format": "money"
               }
             ]
+          },
+          {
+            "datasetId": "northstar.app:dataset.purchasing_vendor_returns",
+            "label": "Vendor returns",
+            "orderKey": 50,
+            "query": {
+              "kind": "queryReference",
+              "targetId": "northstar.app:query.vendor_return_list",
+              "schemaVersion": "v6"
+            },
+            "presentation": { "selection": "none", "compact": "scrollTable" },
+            "parent": {
+              "relationId": "northstar.app:relation.vendor_return_order",
+              "value": { "source": "record", "field": "recordId" },
+              "ownership": "reference"
+            },
+            "sort": [
+              {
+                "fieldId": "northstar.app:field.vendor_return_effective_at",
+                "direction": "ascending"
+              }
+            ],
+            "columns": [
+              {
+                "columnId": "northstar.app:column.purchasing_vendor_return",
+                "label": "Return",
+                "orderKey": 10,
+                "field": "northstar.app:field.vendor_return_number"
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_vendor_return_state",
+                "label": "State",
+                "orderKey": 20,
+                "field": "northstar.app:field.vendor_return_state"
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_vendor_returned_at",
+                "label": "Returned at",
+                "orderKey": 30,
+                "field": "northstar.app:field.vendor_return_effective_at"
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_vendor_return_location",
+                "label": "Returned from",
+                "orderKey": 40,
+                "field": "northstar.app:field.vendor_return_location_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "targetId": "northstar.app:query.location_get",
+                    "schemaVersion": "v6"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "targetId": "northstar.app:field.location_name",
+                    "schemaVersion": "v6"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.purchasing_vendor_return_reason",
+                "label": "Reason",
+                "orderKey": 50,
+                "field": "northstar.app:field.vendor_return_reason_code"
+              }
+            ]
           }
         ],
         "actions": [
@@ -52093,6 +53909,278 @@
                     "value": {
                       "source": "step",
                       "stepId": "northstar.app:step.receipt_absent",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.return_to_vendor",
+            "label": "Return to vendor",
+            "description": "Sends received goods back to the supplier from the location you choose. The line can then be received again, or its remainder closed for a refund.",
+            "orderKey": 27,
+            "datasetId": "northstar.app:dataset.purchasing_lines",
+            "presentation": { "placement": "selection" },
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.purchase_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.received"
+                },
+                "operator": "positive",
+                "compare": null
+              }
+            ],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.vendor_return_quantity",
+                "label": "Quantity to return",
+                "orderKey": 10,
+                "type": "quantity",
+                "required": true
+              },
+              {
+                "inputId": "northstar.app:input.vendor_return_unit",
+                "label": "Base unit",
+                "orderKey": 20,
+                "type": "text",
+                "required": true,
+                "presentation": {
+                  "kind": "derived",
+                  "column": {
+                    "datasetId": "northstar.app:dataset.purchasing_lines",
+                    "columnId": "northstar.app:column.purchasing_base_unit"
+                  }
+                }
+              },
+              {
+                "inputId": "northstar.app:input.vendor_return_location",
+                "label": "Return from location",
+                "orderKey": 30,
+                "type": "reference",
+                "required": true,
+                "query": {
+                  "kind": "queryReference",
+                  "targetId": "northstar.app:query.location_list",
+                  "schemaVersion": "v6"
+                },
+                "labelField": {
+                  "kind": "fieldReference",
+                  "targetId": "northstar.app:field.location_name",
+                  "schemaVersion": "v6"
+                },
+                "defaultFrom": {
+                  "source": "record",
+                  "field": "northstar.app:field.purchase_order_receiving_location_id"
+                }
+              },
+              {
+                "inputId": "northstar.app:input.vendor_return_reason",
+                "label": "Reason",
+                "orderKey": 40,
+                "type": "text",
+                "required": true,
+                "presentation": {
+                  "kind": "choice",
+                  "options": [
+                    { "value": "DEFECTIVE", "label": "Defective" },
+                    { "value": "DAMAGED", "label": "Damaged in transit" },
+                    { "value": "WRONG_ITEM", "label": "Wrong item" },
+                    { "value": "OVER_SHIPPED", "label": "Over-shipped" },
+                    { "value": "OTHER", "label": "Other" }
+                  ],
+                  "defaultValue": "DEFECTIVE"
+                }
+              },
+              {
+                "inputId": "northstar.app:input.vendor_return_notes",
+                "label": "What goes back",
+                "orderKey": 50,
+                "type": "text",
+                "required": true,
+                "presentation": { "kind": "multiline" }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.vendor_return_draft",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.vendor_return_create",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.vendor_return_state"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.vendor_return_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.vendor_return_effective_at"
+                    ],
+                    "value": { "source": "generated", "value": "instant" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.vendor_return_location_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.vendor_return_location"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.vendor_return_reason_code"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.vendor_return_reason"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.vendor_return_reason_narrative"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.vendor_return_notes"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.vendor_return_order"
+                    ],
+                    "value": { "source": "record", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.vendor_return_line",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.vendor_return_line_create",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.vendor_return_line_line_number"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.purchase_order_line_line_number"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.vendor_return_line_item_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.purchase_order_line_item_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.vendor_return_line_quantity"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.vendor_return_quantity"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.vendor_return_line_unit_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.vendor_return_unit"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.vendor_return_line_return"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.vendor_return_draft",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.vendor_return_line_order_line"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.vendor_return_post",
+                "operation": {
+                  "kind": "operationReference",
+                  "targetId": "northstar.app:operation.vendor_return_post",
+                  "schemaVersion": "v6"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.vendor_return_draft",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.vendor_return_draft",
                       "field": "revision"
                     }
                   }
@@ -56201,6 +58289,516 @@
           "activeStateId": "northstar.app:option.legal_entity_status_active",
           "policy": "authorizedSingleOrPreference",
           "authorizationQueryId": "northstar.app:query.vendor_bill_list"
+        }
+      }
+    },
+    {
+      "archetype": "list",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_list"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Vendor return list",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "title",
+          "slotId": "northstar.app:slot.vendor_return_list_title"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "dataGrid",
+          "slotId": "northstar.app:slot.vendor_return_list_data_grid"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "bulkActions",
+          "slotId": "northstar.app:slot.vendor_return_list_bulk_actions"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.vendor_return_list",
+      "surfaceRole": "list",
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.purchase_order_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.purchase_order_list"
+        }
+      }
+    },
+    {
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_get"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Vendor return detail",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "breadcrumb",
+          "slotId": "northstar.app:slot.vendor_return_detail_breadcrumb"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "titleStatus",
+          "slotId": "northstar.app:slot.vendor_return_detail_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.vendor_return_detail_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.vendor_return_detail_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.vendor_return_detail_sections"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.vendor_return_detail",
+      "surfaceRole": "record",
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.purchase_order_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.purchase_order_list"
+        }
+      }
+    },
+    {
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_get"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Vendor return form",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "breadcrumb",
+          "slotId": "northstar.app:slot.vendor_return_form_breadcrumb"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "titleStatus",
+          "slotId": "northstar.app:slot.vendor_return_form_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.vendor_return_form_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.vendor_return_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.vendor_return_form_sections"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.vendor_return_form",
+      "surfaceRole": "form",
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.purchase_order_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.purchase_order_list"
+        }
+      }
+    },
+    {
+      "archetype": "list",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_line_list"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Vendor return line list",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "title",
+          "slotId": "northstar.app:slot.vendor_return_line_list_title"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "dataGrid",
+          "slotId": "northstar.app:slot.vendor_return_line_list_data_grid"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "bulkActions",
+          "slotId": "northstar.app:slot.vendor_return_line_list_bulk_actions"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.vendor_return_line_list",
+      "surfaceRole": "list",
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.purchase_order_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.purchase_order_list"
+        }
+      }
+    },
+    {
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_line_get"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Vendor return line detail",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "breadcrumb",
+          "slotId": "northstar.app:slot.vendor_return_line_detail_breadcrumb"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "titleStatus",
+          "slotId": "northstar.app:slot.vendor_return_line_detail_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.vendor_return_line_detail_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.vendor_return_line_detail_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.vendor_return_line_detail_sections"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.vendor_return_line_detail",
+      "surfaceRole": "record",
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.purchase_order_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.purchase_order_list"
+        }
+      }
+    },
+    {
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.vendor_return_line_get"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Vendor return line form",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "breadcrumb",
+          "slotId": "northstar.app:slot.vendor_return_line_form_breadcrumb"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "titleStatus",
+          "slotId": "northstar.app:slot.vendor_return_line_form_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.vendor_return_line_form_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.vendor_return_line_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.vendor_return_line_form_sections"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.vendor_return_line_form",
+      "surfaceRole": "form",
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.purchase_order_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.purchase_order_list"
         }
       }
     },

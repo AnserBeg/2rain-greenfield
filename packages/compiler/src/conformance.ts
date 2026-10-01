@@ -68,6 +68,8 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'vendor_bill_line' },
   { classification: 'entityOwned', familyId: 'vendor_payment' },
   { classification: 'entityOwned', familyId: 'vendor_credit' },
+  { classification: 'entityOwned', familyId: 'vendor_return' },
+  { classification: 'entityOwned', familyId: 'vendor_return_line' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const);
@@ -315,6 +317,21 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'customer_return_line',
     targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_return',
+    targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_return_line',
+    targetFamilyId: 'vendor_return',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_return_line',
+    targetFamilyId: 'purchase_order_line',
   },
   {
     semantics: 'sameEntity',
@@ -584,6 +601,10 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
         {
           label: 'customerReturn',
           optionLocalId: 'inventory_posting_role_customer_return',
+        },
+        {
+          label: 'vendorReturn',
+          optionLocalId: 'inventory_posting_role_vendor_return',
         },
       ],
     },

@@ -30,6 +30,7 @@ import {
   quoteReceiptIdentifier as q,
   type GoodsReceiptCommand,
   type ReceiptBinding,
+  type VendorReturnCommand,
 } from './goods-receipt.js';
 import {
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
@@ -86,16 +87,20 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
       request.definition.operationId ===
       `${binding.receipt.entityId.split(':')[0]}:operation.goods_receipt_post`
         ? binding.receipt
-        : request.definition.operationId ===
-            `${binding.orderLine.entityId.split(':')[0]}:operation.purchase_order_line_amend`
-          ? binding.orderLine
-          : ['close', 'reopen', 'cancel'].some(
-                (action) =>
-                  request.definition.operationId ===
-                  `${binding.order.entityId.split(':')[0]}:operation.purchase_order_${action}`,
-              )
-            ? binding.order
-            : null;
+        : binding.vendorReturn &&
+            request.definition.operationId ===
+              `${binding.vendorReturn.entityId.split(':')[0]}:operation.vendor_return_post`
+          ? binding.vendorReturn
+          : request.definition.operationId ===
+              `${binding.orderLine.entityId.split(':')[0]}:operation.purchase_order_line_amend`
+            ? binding.orderLine
+            : ['close', 'reopen', 'cancel'].some(
+                  (action) =>
+                    request.definition.operationId ===
+                    `${binding.order.entityId.split(':')[0]}:operation.purchase_order_${action}`,
+                )
+              ? binding.order
+              : null;
     const input = request.input;
     const scope = request.readBackDefinition.legalEntityScope;
     if (
@@ -246,6 +251,17 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         'cancel',
         prepared.legalEntityId,
       );
+    // RETURNS (ruling R-A): a vendor return posts through the same kernel,
+    // bounded by what the order line has received.
+    if (
+      this.#binding.vendorReturn &&
+      request.definition.operationId.endsWith(
+        ':operation.vendor_return_post',
+      ) &&
+      request.readBackDefinition.sourceEntityId ===
+        this.#binding.vendorReturn.entityId
+    )
+      return this.#postVendorReturn(request, prepared);
     if (
       !request.definition.operationId.endsWith(
         ':operation.goods_receipt_post',
@@ -446,6 +462,152 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
     } catch (error) {
       // Only a typed, current-policy read denial after the committed kernel
       // result withholds data. Other failures must not be disguised as success.
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+    }
+    return {
+      kind: 'semanticOperationResult',
+      schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+      operationId: request.definition.operationId,
+      outcome: 'succeeded',
+      readBack: record,
+      trust: {
+        changeDocumentId: result.trust.changeDocumentId,
+        domainEventId: result.trust.domainEventId,
+        invocationId: result.trust.invocationId,
+        outboxId: result.trust.outboxId,
+      },
+      unsupportedReason: null,
+    };
+  }
+
+  /**
+   * RETURNS (ruling R-A). The posting command is hydrated from the stored
+   * draft as a proposal; the posting kernel re-reads and pins every field and
+   * line under the order's locks. A line stores the positive quantity sent
+   * back, and posts it as one negative movement.
+   */
+  async #postVendorReturn(
+    request: RegisteredCapabilityOperationExecutionRequest,
+    prepared: PreparedReceiving,
+  ): Promise<SemanticOperationResultEnvelope> {
+    const binding = this.#binding;
+    const entity = binding.vendorReturn!;
+    const lineEntity = binding.vendorReturnLine!;
+    const command = await withTrustedRequestTransaction(
+      this.context.pool,
+      request.context,
+      (client) =>
+        withModuleRuntimeRole(
+          client,
+          async (): Promise<VendorReturnCommand> => {
+            const headerResult = await client.query(
+              `SELECT * FROM ${receiptTable(entity)} WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3 AND archived_at IS NULL`,
+              [
+                request.context.tenantId,
+                request.context.environmentId,
+                prepared.recordId,
+              ],
+            );
+            const header = headerResult.rows[0] as
+              Record<string, unknown> | undefined;
+            if (!header || headerResult.rows.length !== 1)
+              throw receiptError(
+                'VENDOR_RETURN_INVALID',
+                'Vendor return is missing or outside the current scope',
+              );
+            const field = (name: string) =>
+              header[receiptColumn(entity, `vendor_return_${name}`)];
+            const legalEntityId = String(header[entity.legalEntity!.column]);
+            if (
+              legalEntityId !== prepared.legalEntityId ||
+              Number(header.revision) !== prepared.currentRevision
+            )
+              throw receiptError(
+                'INVENTORY_POSTING_INPUT_INVALID',
+                'Vendor return scope or revision changed after authorization preparation',
+              );
+            const rows = await client.query(
+              `SELECT * FROM ${receiptTable(lineEntity)} WHERE tenant_id=$1 AND environment_id=$2 AND ${q(lineEntity.legalEntity!.column)}=$3 AND ${q(receiptRelation(binding, lineEntity, 'vendor_return_line_return'))}=$4 AND archived_at IS NULL ORDER BY record_id`,
+              [
+                request.context.tenantId,
+                request.context.environmentId,
+                legalEntityId,
+                prepared.recordId,
+              ],
+            );
+            const effectiveAt = field('effective_at');
+            return {
+              authorization: {
+                decision: 'ALLOW',
+                evaluatorVersion: request.policyEvaluatorVersion,
+                policyVersion: request.policyVersion,
+              },
+              channel: request.channel,
+              idempotencyKey: request.idempotencyKey,
+              effectiveAt: (effectiveAt instanceof Date
+                ? effectiveAt
+                : new Date(String(effectiveAt))
+              ).toISOString(),
+              legalEntityId,
+              sourceId: prepared.recordId,
+              sourceRevision: prepared.expectedRevision,
+              sourceType: 'vendorReturn',
+              stockDimensionSetVersion: 'v1',
+              returnNumber: String(field('number')),
+              locationId: String(field('location_id')),
+              orderId: String(
+                header[receiptRelation(binding, entity, 'vendor_return_order')],
+              ),
+              reason: {
+                code: String(field('reason_code')),
+                narrative: field('reason_narrative') as string | null,
+              },
+              lines: rows.rows.map((row: Record<string, unknown>) => {
+                const value = (name: string) =>
+                  row[receiptColumn(lineEntity, `vendor_return_line_${name}`)];
+                return {
+                  returnLineId: String(row.record_id),
+                  orderLineId: String(
+                    row[
+                      receiptRelation(
+                        binding,
+                        lineEntity,
+                        'vendor_return_line_order_line',
+                      )
+                    ],
+                  ),
+                  sourceLine: String(value('line_number')),
+                  itemId: String(value('item_id')),
+                  unitId: String(value('unit_id')),
+                  quantityDelta: `-${String(value('quantity'))}`,
+                };
+              }),
+            };
+          },
+        ),
+    );
+    const result = await this.#posting.postVendorReturn(
+      request.context,
+      await this.context.actorIssuer.issue(request.context),
+      command,
+    );
+    let record: SemanticOperationResultEnvelope['readBack'] = null;
+    try {
+      const readBack = await this.context.queryGateway.invoke(request.view, {
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        queryId: request.readBackDefinition.queryId,
+        arguments: request.authorization.readBackArguments,
+      });
+      record =
+        readBack.records.find(
+          (candidate) => candidate.recordId === prepared.recordId,
+        ) ?? null;
+      if (readBack.outcome !== 'exact' || !record)
+        throw receiptError(
+          'INVENTORY_POSTING_INPUT_INVALID',
+          'Posted vendor return did not read back exactly',
+        );
+    } catch (error) {
       if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
     }
     return {

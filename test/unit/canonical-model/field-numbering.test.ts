@@ -105,6 +105,12 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
         'VPAY',
         `${ns}:document_sequence.vendor_payment`,
       ],
+      // RETURNS (ruling R-A): a vendor return's VRT number.
+      [
+        `${ns}:field.vendor_return_number`,
+        'VRT',
+        `${ns}:document_sequence.vendor_return`,
+      ],
     ],
   );
 });

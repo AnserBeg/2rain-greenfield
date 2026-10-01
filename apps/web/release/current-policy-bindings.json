@@ -849,6 +849,61 @@
       },
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.vendor_return_archive",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.vendor_return_create",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.vendor_return_post",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.vendor_return_read",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.vendor_return_restore",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.vendor_return_update",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.vendor_return_line_archive",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.vendor_return_line_create",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.vendor_return_line_read",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.vendor_return_line_restore",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.vendor_return_line_update",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.vendor_payment_archive",
         "resource": "northstar.app:entity.vendor_payment"
       },

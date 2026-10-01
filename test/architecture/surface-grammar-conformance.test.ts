@@ -272,9 +272,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // + Party's three ship-to address and Catalog's three tax code surfaces
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
-  // its lines, payments and credits (twelve), + RETURNS' customer return and
-  // its lines (six).
-  assert.equal(groupedManifest.surfaces.length, 107);
+  // its lines, payments and credits (twelve), + RETURNS' customer and vendor
+  // returns and their lines (twelve).
+  assert.equal(groupedManifest.surfaces.length, 113);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -937,11 +937,12 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   );
   composed = withoutModule(
     composed,
-    // As the product composes it: with its commercial terms (PURCHASING-PARITY)
-    // and its payables (PAYABLES).
+    // As the product composes it: with its commercial terms (PURCHASING-PARITY),
+    // its payables (PAYABLES) and its vendor returns (RETURNS).
     purchasingModuleDefinition('northstar.app', {
       commercialTerms: true,
       payables: true,
+      vendorReturns: true,
     }),
     'purchasing',
   );
