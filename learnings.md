@@ -732,3 +732,8 @@ How to apply: bind an immutable normalized preparation to a server-issued identi
 Date: 2026-09-30
 Why: APPROVALS ran dependency-boundary tests directly beside a locked schema replay; the file's PostgreSQL leak/cleanup controls briefly created additional Docker containers before cleaning them up.
 How to apply: run `test/architecture/dependency-boundaries.test.ts` under the exclusive test lock, just like PostgreSQL and browser suites; inspect a focused suite's subprocesses before treating it as container-free. See [APPROVALS](docs/execution/packets/APPROVALS.md).
+
+## Exercise declared Task inputs through the semantic gateway
+Date: 2026-09-30
+Why: APPROVALS rendered Place order correctly, but its scalar argument binding was refused by the compiled closed input contract; a gateway round trip reproduced the browser failure without PostgreSQL.
+How to apply: accompany new Task bindings with a compiled-surface prepare/confirm test using the real semantic gateway, including blank optional inputs; assert the admitted input and completion. See [APPROVALS](docs/execution/packets/APPROVALS.md).

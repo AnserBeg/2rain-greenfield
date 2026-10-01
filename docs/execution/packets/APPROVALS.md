@@ -19,6 +19,8 @@ Status: draft checkpoint; not integrated or deployed. Critical paths touched: no
 - A read-only, capability-owned entity may omit generic CRUD/forms only when its declared record-mutation capability and read-back match; partial generic families still fail compiler conformance.
 - ADR-0066 lineage is rebuilt from `origin/packet/PAYABLES`: five base entries plus exactly one APPROVALS entry. No storage transition or Critical substrate change was introduced.
 - Compile-derived pins: 106 surfaces, 18 navigation leaves, 605 verification scenarios (507 constructible, 98 derived). Language coverage and the fresh-tenant schema snapshot are re-derived, not guessed.
+- PAYABLES `681f4675` is merged. The compile still declares 10 assigned-number fields and 10 uniqueness probes; approval request IDs add no document-number assignment, so both numbering lists are retained unchanged.
+- A capability argument envelope is emitted only when canonical Task bindings declare it. Historical record/revision-only command contracts remain byte-identical; each executor refuses unknown inner arguments.
 
 ## Slices
 
@@ -28,7 +30,9 @@ Status: draft checkpoint; not integrated or deployed. Critical paths touched: no
 ## Gates
 
 - Local gates: format, lint, typecheck and release `--check`; purchasing/workspace 61/61, canonical 7/7, coverage 24/24, repaired integration cases 5/5, approval/inbox/demo contracts 3/3 and full web contracts 37/37. Full-lineage schema generation passed.
-- The approval PostgreSQL business test initially failed at the now-corrected indexed-reference replay; its corrected run and the browser journey remain pending an exclusive slot/CI. A queued retry exited lock-busy without starting either test.
+- Initial local PostgreSQL failed at the corrected indexed-reference replay. Subsequent local PostgreSQL/browser retries exited lock-busy without starting; fresh CI remains required.
+- The [first CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36787728753) exposed the demo request key, a Task contract refusal, two old fixture assumptions and stale List/PO pins; these are corrected. The composed rollback job also lost a PostgreSQL connection; the fresh matrix must settle it.
+- Post-CI focused gates: units 68/68, an observed-red-then-green Place order Task round trip 1/1, web contracts 37/37, typecheck, lint, changed-path formatting and rebuilt release `--check` passed.
 - The new PostgreSQL test is registered in `test:postgres:commercial` and repository hygiene; `purchase-approvals.spec.ts` is included in the operations browser job.
 - CI at the pushed PR SHA is the acceptance matrix. This draft is not accepted, merged or deployed; the owner requested a draft PR against PAYABLES only.
 - No timeout, threshold, existing action limit or PostgreSQL readiness bound has been raised. PostgreSQL/schema commands use the exclusive lock and browsers use one worker.
@@ -49,8 +53,8 @@ Review: not owed — outside the Critical set. No stage boundary is integrated b
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "APPROVALS",
-  "base": "a3b104db44b58382db48ad67687ec159d8c31bba",
-  "head": "8523e84a0333fb052c7aac195206424898ce7358",
+  "base": "681f46751b2a4c3cc9027956534b741c35dd4a03",
+  "head": "0a688b69c800f9604159477353e5e337cf8b2f46",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
@@ -67,6 +71,7 @@ Review: not owed — outside the Critical set. No stage boundary is integrated b
     "package.json",
     "packages/canonical-model/src/surface-composition.ts",
     "packages/compiler/src/conformance.ts",
+    "packages/compiler/src/projections.ts",
     "packages/domain/src/app/builder.ts",
     "packages/domain/src/app/list-declarations.ts",
     "packages/domain/src/app/order-entry.ts",
@@ -89,8 +94,11 @@ Review: not owed — outside the Critical set. No stage boundary is integrated b
     "test/integration/surface-data-binding.test.ts",
     "test/postgres/composed-application.test.ts",
     "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
+    "test/postgres/inventory-posting.test.ts",
+    "test/postgres/module-storage-transition.test.ts",
     "test/postgres/purchase-approvals.test.ts",
     "test/unit/canonical-model/surface-composition.test.ts",
+    "test/unit/canonical-model/surface-list.test.ts",
     "test/unit/purchasing-definition.test.ts",
     "test/unit/workspace-contract.test.ts"
   ],
