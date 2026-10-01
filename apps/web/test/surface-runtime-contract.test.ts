@@ -2370,3 +2370,95 @@ async function close(server: Server): Promise<void> {
     server.close((error) => (error ? reject(error) : resolve()));
   });
 }
+
+test('inventory value is a declared List and item cost is a compiled record composition', () => {
+  const definition = composedApplicationDefinition();
+  const surfaces = definition.surfaces as Record<string, unknown>[];
+  const list = surfaces.find(
+    (surface) =>
+      surface.surfaceId === 'northstar.app:surface.inventory_value_list',
+  )!;
+  const declaration = SurfaceListSchema.parse(list.list);
+  assert.deepEqual(
+    declaration.columns.map((column) => column.label),
+    ['Item', 'On hand', 'Average cost', 'Known value', 'Unvalued quantity'],
+  );
+  assert.ok(declaration.columns.slice(1).every((column) => !column.sortable));
+  const item = surfaces.find(
+    (surface) => surface.surfaceId === 'northstar.app:surface.item_detail',
+  )!;
+  const composition = SurfaceCompositionSchema.parse(item.composition);
+  assert.ok(
+    composition.fields.some(
+      (field) => field.field === 'northstar.app:metric.average_cost',
+    ),
+  );
+  assert.ok(
+    composition.fields.some(
+      (field) => field.field === 'northstar.app:metric.inventory_value',
+    ),
+  );
+  assert.deepEqual(composition.actions, []);
+});
+
+test('inventory shipment cost is declared separately from packed facts and customer invoice print fields', () => {
+  const app = composedApplicationDefinition();
+  const ns = 'northstar.app';
+  const surfaces = app.surfaces as Record<string, unknown>[];
+  const queries = app.queries as Record<string, unknown>[];
+  const shipment = SurfaceCompositionSchema.parse(
+    surfaces.find(
+      (surface) => surface.surfaceId === `${ns}:surface.shipment_detail`,
+    )!.composition,
+  );
+  const relief = shipment.children.find(
+    (child) => child.datasetId === `${ns}:dataset.shipment_relief`,
+  )!;
+  assert.equal(
+    relief.query.targetId,
+    `${ns}:query.valuation_shipment_line_list`,
+  );
+  assert.ok(
+    relief.columns.some(
+      (column) => column.field === `${ns}:metric.cost_of_goods`,
+    ),
+  );
+  const invoice = SurfaceCompositionSchema.parse(
+    surfaces.find(
+      (surface) =>
+        surface.surfaceId === `${ns}:surface.customer_invoice_detail`,
+    )!.composition,
+  );
+  const margin = invoice.fields.find(
+    (column) => column.field === `${ns}:metric.product_margin`,
+  )!;
+  const cost = invoice.fields.find(
+    (column) => column.field === `${ns}:metric.cost_of_goods`,
+  )!;
+  const printed = [
+    ...invoice.presentation!.header!.facts,
+    ...invoice.presentation!.print!.totals!,
+  ];
+  assert.ok(
+    !printed.includes(margin.columnId) && !printed.includes(cost.columnId),
+  );
+  for (const local of ['shipment_get', 'customer_invoice_get']) {
+    const model = queries.find(
+      (query) => query.queryId === `${ns}:query.${local}`,
+    )!.readModel as {
+      capability: { targetId: string };
+      queries: Record<string, { targetId: string }>;
+    };
+    assert.equal(
+      model.capability.targetId,
+      'northstar.inventory:capability.valuation',
+    );
+    assert.ok(
+      Object.values(model.queries).every(
+        (dependency) =>
+          !queries.find((query) => query.queryId === dependency.targetId)!
+            .readModel,
+      ),
+    );
+  }
+});
