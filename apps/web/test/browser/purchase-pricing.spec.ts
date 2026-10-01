@@ -152,7 +152,7 @@ test('a partly received order shows what is still open, closes its remainder wit
         .getByRole('dialog')
         .getByRole('button', { name: 'Confirm Place order', exact: true })
         .click();
-      await expect(page.getByRole('status').first()).toContainText(
+      await expect(page.locator('[data-composition-task]')).toContainText(
         'Place order: done',
       );
       await page.goto(orderUrl);

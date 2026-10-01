@@ -38,6 +38,7 @@ import {
   relationTargetPlans,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { commercialReadModel } from '../../packages/postgres-provider/src/commercial-read-model.js';
+import { purchaseOrderApprovalInput } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { encodeSharedListCursor } from '../../packages/runtime/src/list-behavior/index.js';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
@@ -10385,6 +10386,102 @@ test('ORDER-PARITY: an order page names the lines it is short and shows where it
     'stopped',
   ]);
   assert.doesNotMatch(stopped.html, /data-next-(?:action|operation)=/u);
+});
+
+test('APPROVAL-PO: Place order Task dispatches the exact record revision and optional supplier reference through the gateway', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const order = seedPurchaseOrder(f, ['5'], 'draft').order;
+  const path = `/?${new URLSearchParams({ surface: `${ns}:surface.purchase_order_detail`, record: order, [`${ns}:parameter.commercial_purchase_order_get_legal_entity_scope`]: scope })}`;
+  const calls: unknown[] = [];
+  let dispatchFailure: unknown;
+  class ObservedGateway extends SemanticOperationGateway {
+    override async invoke(
+      ...args: Parameters<SemanticOperationGateway['invoke']>
+    ) {
+      try {
+        return await super.invoke(...args);
+      } catch (error) {
+        dispatchFailure = error;
+        throw error;
+      }
+    }
+  }
+  const capability: RegisteredCapabilityOperationExecutor = {
+    capabilityId: 'northstar.purchasing:capability.order_approvals',
+    async prepareAuthorization(request) {
+      purchaseOrderApprovalInput(request.input, 'release');
+      return {
+        decisionInput: { legalEntityId: scope },
+        legalEntityReadScopeIds: [scope],
+        readBackArguments: { recordId: order },
+      };
+    },
+    async execute(request) {
+      calls.push(request.input);
+      return {
+        kind: 'semanticOperationResult',
+        schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+        operationId: request.definition.operationId,
+        outcome: 'succeeded',
+        readBack: f.executor.rows.get(order)!,
+        unsupportedReason: null,
+        trust: {
+          changeDocumentId: randomUUID(),
+          domainEventId: randomUUID(),
+          invocationId: randomUUID(),
+          outboxId: randomUUID(),
+        },
+      };
+    },
+  };
+  const base = statingGateways(f, {
+    commercial: (key) => (key === 'approval_ready' ? true : null),
+  });
+  const gateways = {
+    ...base,
+    operationGateway: new ObservedGateway(
+      f.policy,
+      f.executor,
+      base.operationMediation,
+      undefined,
+      [capability],
+    ),
+  };
+  for (const supplierReference of ['', 'SUP-UI']) {
+    const start = await submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      {
+        compositionAction: `${ns}:action.place_order`,
+      },
+      gateways,
+    );
+    const taskToken = hiddenValue(start.html, 'taskToken');
+    const submit = (values: Record<string, string>) =>
+      submitSurfaceRuntimeIntent(
+        f.view,
+        path,
+        { compositionAction: `${ns}:action.place_order`, taskToken, ...values },
+        gateways,
+      );
+    const review = await submit({
+      taskStage: 'prepare',
+      [`${ns}:input.place_supplier_reference`]: supplierReference,
+    });
+    const done = await submit({
+      taskStage: 'confirm',
+      preparedId: hiddenValue(review.html, 'preparedId'),
+    });
+    if (dispatchFailure) throw dispatchFailure;
+    assert.match(done.html, /Place order: done/u, done.html);
+    assert.deepEqual(calls.at(-1), {
+      recordId: order,
+      expectedRevision: f.executor.rows.get(order)!.revision,
+      arguments: { supplierReference: supplierReference || null },
+    });
+  }
 });
 
 test('APPROVAL-PO: declared Tasks gate Place order on current approval and suppress the unconditioned capability command', async () => {

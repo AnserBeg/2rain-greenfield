@@ -76,6 +76,7 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
       await expect(page.getByRole('status').first()).toContainText(
         `${label}: done`,
       );
+      await page.goto(orderUrl);
     };
     const finish = async (label: string) => {
       const dialog = page.getByRole('dialog');

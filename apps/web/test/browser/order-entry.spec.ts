@@ -326,6 +326,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       .getByRole('dialog')
       .getByRole('button', { name: 'Confirm Place order', exact: true })
       .click();
+    await expect(task()).toContainText('Place order: done');
     await page.goto(purchaseUrl);
     await expect(
       page.getByRole('link', { name: 'Edit', exact: true }),

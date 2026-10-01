@@ -6093,7 +6093,8 @@ function assertReceivingVerificationCoverage(
     // exclusion), tax code, freight and fee with codes and frozen rates;
     // the line's discount, tax code and frozen rate; then its receive-into
     // location.
-    purchase_order: 22,
+    // APPROVALS: the optional supplier reference adds one search exclusion.
+    purchase_order: 23,
     purchase_order_line: 15,
   })) {
     assert.equal(

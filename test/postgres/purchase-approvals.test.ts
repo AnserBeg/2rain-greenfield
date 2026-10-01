@@ -91,7 +91,7 @@ test(
             {
               recordId: id,
               expectedRevision: current.revision,
-              arguments: args,
+              ...(Object.keys(args).length ? { arguments: args } : {}),
             },
             key,
             actor,

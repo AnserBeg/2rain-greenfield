@@ -451,7 +451,7 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
         (proposals.rows.length > 1 && !closesOnly) ||
         ('quantity' in input && proposals.rows.length)
       )
-        conflict('Archive competing staged amendment requests first');
+        invalid('Archive competing staged amendment requests first');
       let staged = proposals.rows[0];
       if ('quantity' in input)
         staged = await this.#insert(

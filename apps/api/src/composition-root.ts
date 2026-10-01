@@ -145,7 +145,7 @@ export async function startComposedApplication(
             {
               schemaVersion: 'northstar.semantic-operation-request/v1',
               operationId: 'northstar.app:operation.purchasing_settings_create',
-              idempotencyKey: 'approval-demo-setting',
+              idempotencyKey: '74000000-0000-4000-8000-000000000098',
               confirmationGrant: null,
               input: {
                 recordId: '74000000-0000-4000-8000-000000000099',

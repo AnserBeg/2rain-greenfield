@@ -200,6 +200,40 @@ test('the approval inbox is a declared List and requests have no generic write p
 });
 
 const namespace = PURCHASING_IDS.namespace;
+test('only declared capability argument bindings extend a compiled command input contract', () => {
+  const compiled = mustCompile(compilerInput(composedApplicationDefinition()));
+  const catalog = projectionPayload<{ operations: CompiledOperation[] }>(
+    compiled,
+    PROJECTION_FAMILY_IDS.operationCatalog,
+  );
+  for (const local of [
+    'purchase_order_release',
+    'purchase_order_line_amend',
+    'purchase_order_approval_approve',
+    'purchase_order_approval_reject',
+  ]) {
+    assert.deepEqual(
+      catalog.operations.find(
+        (o) => o.operationId === `northstar.app:operation.${local}`,
+      )?.inputContract?.closedArgumentKeys,
+      ['arguments', 'expectedRevision', 'recordId'],
+    );
+  }
+  for (const local of [
+    'purchase_order_submit',
+    'goods_receipt_post',
+    'sales_order_release',
+    'vendor_bill_post',
+  ]) {
+    assert.deepEqual(
+      catalog.operations.find(
+        (o) => o.operationId === `northstar.app:operation.${local}`,
+      )?.inputContract?.closedArgumentKeys,
+      ['expectedRevision', 'recordId'],
+    );
+  }
+});
+
 test('capability-owned approval storage compiles without generic CRUD, but a partial generic path does not earn that exception', () => {
   const definition = composedApplicationDefinition() as Record<string, unknown>;
   assert.equal(
