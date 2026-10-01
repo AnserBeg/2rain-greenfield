@@ -10,6 +10,8 @@ Open the printed `ORDER_ENTRY_URL`. Ctrl-C closes the fixture and removes its
 disposable PostgreSQL container. The fixture opts into approval; an ordinary
 tenant with no setting does not require it. This laptop may fail PostgreSQL
 startup before the page is served; no readiness bound has been increased.
+After each completed task, choose **Close task** (×), then **Refresh record**
+before navigating or switching person.
 
 ## 1. Submit and reject (about three minutes)
 

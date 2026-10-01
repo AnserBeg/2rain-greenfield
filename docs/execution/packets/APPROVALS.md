@@ -1,6 +1,6 @@
 # APPROVALS — purchase-order approval, placement and staged amendments
 
-Status: draft checkpoint; not integrated or deployed. Critical paths touched: none. Inventory approvals (A6) are excluded.
+Status: [draft PR #14](https://github.com/AnserBeg/2rain-greenfield/pull/14); not integrated or deployed. Critical paths touched: none. Inventory approvals (A6) are excluded.
 
 ## Claims
 
@@ -30,9 +30,12 @@ Status: draft checkpoint; not integrated or deployed. Critical paths touched: no
 ## Gates
 
 - Local gates: format, lint, typecheck and release `--check`; purchasing/workspace 61/61, canonical 7/7, coverage 24/24, repaired integration cases 5/5, approval/inbox/demo contracts 3/3 and full web contracts 37/37. Full-lineage schema generation passed.
-- Initial local PostgreSQL failed at the corrected indexed-reference replay. Subsequent local PostgreSQL/browser retries exited lock-busy without starting; fresh CI remains required.
+- Initial local PostgreSQL failed at the corrected indexed-reference replay. Later focused retries exited lock-busy without starting. One browser run incorrectly overlapped release generation and pinned the PAYABLES base; it is not acceptance evidence. Release generation and consumers are now serialized.
 - The [first CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36787728753) exposed the demo request key, a Task contract refusal, two old fixture assumptions and stale List/PO pins; these are corrected. The composed rollback job also lost a PostgreSQL connection; the fresh matrix must settle it.
 - Post-CI focused gates: units 68/68, an observed-red-then-green Place order Task round trip 1/1, web contracts 37/37, typecheck, lint, changed-path formatting and rebuilt release `--check` passed.
+- The [second CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36802117405) passed commercial PostgreSQL 20/20 (including APPROVAL-PO), schema/isolation, the main browser suite, performance and security. Quality's executable gates passed; its final diff check found an extra design EOF blank line, now removed. The inbox browser locator and an old unconfirmed Place order fixture are corrected; the next full matrix remains required.
+- The rollback fixture lost a PostgreSQL connection twice with both synthetic tenants in one database. Its two discriminating claims now have separate database lifecycles, with unchanged 256 MiB capacity and 300 s bounds; this is a test isolation correction, not a change to release activation or verification.
+- Latest local checks: typecheck, lint, changed-test formatting, base-envelope rebuild/check and coverage re-derivation passed (2,654 obligations, 814 declaration/lowering observations). The final focused browser attempt was lock-busy and ran no test.
 - The new PostgreSQL test is registered in `test:postgres:commercial` and repository hygiene; `purchase-approvals.spec.ts` is included in the operations browser job.
 - CI at the pushed PR SHA is the acceptance matrix. This draft is not accepted, merged or deployed; the owner requested a draft PR against PAYABLES only.
 - No timeout, threshold, existing action limit or PostgreSQL readiness bound has been raised. PostgreSQL/schema commands use the exclusive lock and browsers use one worker.
@@ -54,7 +57,7 @@ Review: not owed — outside the Critical set. No stage boundary is integrated b
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "APPROVALS",
   "base": "681f46751b2a4c3cc9027956534b741c35dd4a03",
-  "head": "0a688b69c800f9604159477353e5e337cf8b2f46",
+  "head": "8b9824d5f34e135401451c0d0464342e2b4a8b28",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",

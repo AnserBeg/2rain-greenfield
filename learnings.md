@@ -737,3 +737,8 @@ How to apply: run `test/architecture/dependency-boundaries.test.ts` under the ex
 Date: 2026-09-30
 Why: APPROVALS rendered Place order correctly, but its scalar argument binding was refused by the compiled closed input contract; a gateway round trip reproduced the browser failure without PostgreSQL.
 How to apply: accompany new Task bindings with a compiled-surface prepare/confirm test using the real semantic gateway, including blank optional inputs; assert the admitted input and completion. See [APPROVALS](docs/execution/packets/APPROVALS.md).
+
+## Finish release generation before starting release consumers
+Date: 2026-10-01
+Why: an APPROVALS browser fixture started while the lineage was being rebuilt and pinned PAYABLES root `0f7ed4e6`, which lacks the approval setting operation, rather than the completed APPROVALS head.
+How to apply: serialize the complete base-envelope rebuild and its checks before launching fixtures, PostgreSQL tests or browser tests; a run that consumed an intermediate generated artifact is not acceptance evidence. See [APPROVALS](docs/execution/packets/APPROVALS.md).
