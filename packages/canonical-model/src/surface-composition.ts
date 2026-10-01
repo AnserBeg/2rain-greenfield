@@ -447,6 +447,13 @@ export function validateSurfaceCompositions(
       );
     };
     const previousChildren = new Set<string>();
+    // A record every company shares (an item) has no company of its own; a
+    // dataset of one company's rows reads the company its entry names.
+    const recordCompany = Boolean(
+      recordQuery &&
+      'legalEntityScope' in recordQuery &&
+      recordQuery.legalEntityScope,
+    );
     for (const child of [...composition.children].sort(
       (a, b) => a.orderKey - b.orderKey,
     )) {
@@ -454,9 +461,49 @@ export function validateSurfaceCompositions(
       if (
         child.query.kind !== 'queryReference' ||
         query?.queryType !== 'list' ||
-        !child.parent
+        (!child.parent && !child.fieldScope)
       )
         fail(surface.surfaceId, 'child datasets require a scoped list');
+      if (child.parent && child.fieldScope)
+        fail(
+          surface.surfaceId,
+          'a dataset is scoped by its parent relation or by a field, not both',
+        );
+      const listed = query!;
+      if (
+        'legalEntityScope' in listed &&
+        listed.legalEntityScope &&
+        !recordCompany &&
+        !('workspace' in surface && surface.workspace?.entry)
+      )
+        fail(
+          surface.surfaceId,
+          "a company's dataset on a record every company shares requires a workspace entry",
+        );
+      if (child.fieldScope) {
+        // The record's own id, held in a stored text field of the dataset's
+        // entity that its list selects: never a record identity, a revision,
+        // a read-model figure or another entity's field.
+        const fieldId = child.fieldScope.fieldId;
+        const scoped = model.fields.find((value) => value.fieldId === fieldId);
+        if (
+          !scoped ||
+          listed.queryType === 'aggregate' ||
+          scoped.entity.targetId !== listed.sourceEntity.targetId ||
+          scoped.fieldType.kind !== 'textFieldType' ||
+          scoped.fieldType.maximumLength < 36 ||
+          !listed.selections.some(
+            (selection) => selection.field.targetId === fieldId,
+          )
+        )
+          fail(
+            surface.surfaceId,
+            "a field scope reads a selected text field of the dataset's own entity that can hold a record id",
+          );
+        columns(child.columns, child.query.targetId);
+        previousChildren.add(child.datasetId);
+        continue;
+      }
       const relation = model.relations.find(
         (value) => value.relationId === child.parent!.relationId,
       );

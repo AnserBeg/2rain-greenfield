@@ -45,6 +45,15 @@ const compositionMessage = (
   role: 'alert' | 'status' | null = null,
 ) =>
   `<div ${role ? `role="${role}"` : ''} ${messageAttributes({ code })}>${messageBody({ code }, 'Workspace', 'h2')}</div>`;
+/**
+ * A section that did not load. One company's rows on a record every company
+ * shares say which choice is missing; any other failure stays the section
+ * failure, never an empty table.
+ */
+const childFailure = (error: CompositionData['children'][number]['error']) =>
+  error === 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED'
+    ? `<div role="status" ${messageAttributes({ code: error })}>${messageBody({ code: error }, 'Workspace', 'h2')}</div>`
+    : compositionMessage('COMPOSITION_CHILD_FAILED', 'alert');
 
 type Column = SurfaceComposition['fields'][number];
 type Action = SurfaceComposition['actions'][number];
@@ -61,7 +70,8 @@ export interface CompositionData {
     definition: SurfaceComposition['children'][number];
     rows: Row[];
     status: 'ready' | 'empty' | 'failed';
-    error?: string;
+    /** Why a section did not load: a failed read, or no company chosen yet. */
+    error?: 'COMPOSITION_CHILD_FAILED' | 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED';
   }[];
   selections: Record<string, SemanticRecordDto>;
   selected: SemanticRecordDto | null;
@@ -332,32 +342,56 @@ export async function loadSurfaceComposition(
     };
     data.children.push(child);
     try {
-      if (!definition.parent)
-        throw new Error('Child queries require an exact relation scope.');
+      const parent = definition.parent;
+      if (!parent === !definition.fieldScope)
+        throw new Error('Child queries require one exact record scope.');
       if (
-        definition.parent.value.source === 'selected' &&
-        !(definition.parent.value.datasetId
-          ? data.selections[definition.parent.value.datasetId]
+        parent?.value.source === 'selected' &&
+        !(parent.value.datasetId
+          ? data.selections[parent.value.datasetId]
           : data.selected)
       )
         continue;
-      const parentId = resolveValue(definition.parent.value, data, {}, {}, {});
       const registered = registeredSemanticQueryFromPinnedView(
         view,
         definition.query.targetId,
       );
       if (!registered || registered.queryType !== 'list')
         throw new Error('Child query must be a registered list.');
+      // One company's rows on a record every company shares wait for the
+      // company to be chosen; that is not a failed read.
+      if (registered.legalEntityScope && !scope) {
+        child.status = 'failed';
+        child.error = 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED';
+        continue;
+      }
+      // A declared relation to the record, or the record's own id held in a
+      // field of the dataset's entity: either way an exact restriction the
+      // executor applies before the count and the page, and must echo.
+      const restriction = parent
+        ? {
+            key:
+              parent.ownership === 'reference'
+                ? ('referenceScope' as const)
+                : ('parentScope' as const),
+            value: {
+              recordId: String(resolveValue(parent.value, data, {}, {}, {})),
+              relationId: parent.relationId,
+            },
+          }
+        : null;
+      const fieldFilters = definition.fieldScope
+        ? [
+            {
+              fieldId: definition.fieldScope.fieldId,
+              value: String(
+                resolveValue(definition.fieldScope.value, data, {}, {}, {}),
+              ),
+            },
+          ]
+        : null;
       let cursor: string | null = null;
       do {
-        const scopeKey =
-          definition.parent.ownership === 'reference'
-            ? 'referenceScope'
-            : 'parentScope';
-        const restriction = {
-          recordId: String(parentId),
-          relationId: definition.parent.relationId,
-        };
         const result: ReturnType<
           typeof requireSharedListResult<SemanticRecordDto>
         > = requireSharedListResult(
@@ -371,16 +405,33 @@ export async function loadSurfaceComposition(
               search: '',
               sort: definition.sort ?? [],
               relationLabels: [],
-              [scopeKey]: restriction,
+              ...(restriction ? { [restriction.key]: restriction.value } : {}),
+              ...(fieldFilters ? { fieldFilters } : {}),
             },
           }),
         );
-        const applied = result.listCoverage[scopeKey];
+        if (restriction) {
+          const applied = result.listCoverage[restriction.key];
+          if (
+            applied?.recordId !== restriction.value.recordId ||
+            applied.relationId !== restriction.value.relationId
+          )
+            throw new Error('The query did not apply its exact record scope.');
+        }
+        // An executor that ignored the field scope cannot echo it, so a
+        // broader list -- every record's rows -- is refused, never shown as
+        // this record's.
+        const echoed = result.listCoverage.fieldFilters;
         if (
-          applied?.recordId !== restriction.recordId ||
-          applied.relationId !== restriction.relationId
+          fieldFilters &&
+          (echoed?.length !== fieldFilters.length ||
+            fieldFilters.some(
+              (filter, index) =>
+                echoed[index]?.fieldId !== filter.fieldId ||
+                echoed[index]?.value !== filter.value,
+            ))
         )
-          throw new Error('The query did not apply its exact record scope.');
+          throw new Error('The query did not apply its exact field scope.');
         for (const row of result.records)
           child.rows.push(
             await present(view, gateways, scope, row, definition.columns),
@@ -792,7 +843,7 @@ function renderPresentedChild(
       .join('');
   const body =
     child.status === 'failed'
-      ? compositionMessage('COMPOSITION_CHILD_FAILED', 'alert')
+      ? childFailure(child.error)
       : child.status === 'empty'
         ? compositionMessage('COMPOSITION_CHILD_EMPTY')
         : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>`).join('')}${detail.length ? '<th scope="col">Details</th>' : ''}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
@@ -978,7 +1029,7 @@ export function renderCompositionChildren(
       const columns = ordered(child.definition.columns);
       return `<section class="panel data-panel" data-composition-dataset="${h(child.definition.datasetId)}" data-resolution="${child.status}"><h2>${h(child.definition.label)}</h2>${
         child.status === 'failed'
-          ? compositionMessage('COMPOSITION_CHILD_FAILED', 'alert')
+          ? childFailure(child.error)
           : child.status === 'empty'
             ? compositionMessage('COMPOSITION_CHILD_EMPTY')
             : `<div class="data-table-wrap"><table><thead><tr><th>Select</th>${columns.map((column) => `<th scope="col">${h(column.label)}</th>`).join('')}</tr></thead><tbody>${child.rows

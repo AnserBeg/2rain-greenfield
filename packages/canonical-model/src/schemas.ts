@@ -946,6 +946,23 @@ const compositionDataset = z.strictObject({
       ownership: z.enum(['parentScopedChild', 'reference']),
     })
     .optional(),
+  /**
+   * The rows of the dataset's own entity that hold the record's id in one of
+   * their text fields, where no declared relation reaches the record -- an
+   * item's stock balances and movements hold the item as plain text. Applied
+   * by the list query as an exact field filter before the count and the page,
+   * and echoed back. A dataset declares this or `parent`, never both.
+   * Optional v6 key (ADR-0047 §7).
+   */
+  fieldScope: z
+    .strictObject({
+      fieldId: CanonicalIdSchema,
+      value: z.strictObject({
+        source: z.literal('record'),
+        field: z.literal('recordId'),
+      }),
+    })
+    .optional(),
   columns: z.array(compositionColumn).min(1).max(30),
 });
 export const SurfaceCompositionSchema = z.strictObject({
@@ -1110,16 +1127,19 @@ const editorPresentation = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('multiline') }),
   z.strictObject({
     kind: z.literal('choice'),
+    // As long as a canonical id: a choice over an enumeration offers option
+    // ids. The workspace validator still holds each value to its field -- text
+    // that fits it, or an option it declares.
     options: z
       .array(
         z.strictObject({
-          value: z.string().min(1).max(64),
+          value: z.string().min(1).max(180),
           label: LabelSchema,
         }),
       )
       .min(1)
       .max(20),
-    defaultValue: z.string().min(1).max(64).optional(),
+    defaultValue: z.string().min(1).max(180).optional(),
   }),
   z.strictObject({
     kind: z.literal('derived'),
@@ -1239,6 +1259,14 @@ const editorField = z.strictObject({
    * stores. Optional v6 key (ADR-0047 §7).
    */
   defaultDaysFromToday: z.number().int().min(0).max(366).optional(),
+  /**
+   * A never-saved document's starting value for a UTC date-time field: the
+   * instant the draft opens, to the second -- a stock document's effective
+   * time, so stock received earlier that day is already on hand. The user may
+   * change it; a saved record keeps what it stores. Optional v6 key
+   * (ADR-0047 §7).
+   */
+  defaultNow: z.literal(true).optional(),
 });
 export const SurfaceDocumentEditorSchema = z.strictObject({
   headerLabel: LabelSchema.optional(),
@@ -1258,6 +1286,40 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
   lineFields: z.array(editorField).min(1).max(15),
   lineNumberFieldId: CanonicalIdSchema,
   saveMode: z.literal('sequential'),
+  /**
+   * Values a never-saved document's first create also writes, in header
+   * fields the editor does not offer: a literal (a draft state, a source
+   * type), the document's own record id (a stock document naming itself as
+   * its posting source), the save's instant, or the saving principal. An
+   * update never sends them. Optional v6 key (ADR-0047 §7).
+   */
+  createValues: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        value: z.discriminatedUnion('source', [
+          z.strictObject({
+            source: z.literal('literal'),
+            value: z.string().min(1).max(200),
+          }),
+          z.strictObject({
+            source: z.literal('record'),
+            field: z.literal('recordId'),
+          }),
+          z.strictObject({
+            source: z.literal('generated'),
+            value: z.literal('instant'),
+          }),
+          z.strictObject({
+            source: z.literal('actor'),
+            field: z.literal('principalId'),
+          }),
+        ]),
+      }),
+    )
+    .min(1)
+    .max(8)
+    .optional(),
 });
 export type SurfaceDocumentEditor = z.infer<typeof SurfaceDocumentEditorSchema>;
 export type SurfaceEditorField = SurfaceDocumentEditor['headerFields'][number];

@@ -630,8 +630,10 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
     throw new TypeError('composed application definition is unavailable');
   }
   const definition: unknown = Reflect.apply(applicationFactory, undefined, []);
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
   const inventory: unknown = Reflect.apply(factory, undefined, [
     applicationNamespace,
+    { documentEntry: true },
   ]);
   if (!isRecord(definition) || !isRecord(inventory)) {
     throw new TypeError('inventory definition factory returned a non-object');

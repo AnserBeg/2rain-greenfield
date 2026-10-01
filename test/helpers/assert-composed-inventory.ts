@@ -26,6 +26,12 @@ const LINE_OWNERS: Readonly<Record<string, string>> = {
   inventory_transaction_line: 'inventory_transaction',
   stock_count_line: 'stock_count',
 };
+/**
+ * Stock documents (INVENTORY-PARITY): an operational List of its own name,
+ * and the shared editor on the record and form pages, entered with a company.
+ */
+const STOCK_DOCUMENT = 'inventory_transaction';
+const STOCK_DOCUMENT_LIST_LABEL = 'Inventory transactions';
 /** Read-only document compositions: their line datasets, by parent relation. */
 const DOCUMENT_LINES: Readonly<Record<string, readonly [string, string][]>> = {
   inventory_transaction_detail: [
@@ -46,7 +52,7 @@ function expectedInventoryWorkspace(namespace: string, surface: Value): Value {
   const owner = LINE_OWNERS[document] ?? null;
   const list = surface.surfaceRole === 'list';
   const membership = list
-    ? document === 'posted_stock_balance'
+    ? document === 'posted_stock_balance' || document === STOCK_DOCUMENT
       ? 'operational'
       : owner
         ? 'contextual'
@@ -57,6 +63,7 @@ function expectedInventoryWorkspace(namespace: string, surface: Value): Value {
     ...(owner ? { ownerSurfaceId: `${namespace}:surface.${owner}_list` } : {}),
     ...(owner ||
     document === 'posted_stock_balance' ||
+    document === STOCK_DOCUMENT ||
     (list && COMPANY_SCOPED.has(document))
       ? {
           entry: {
@@ -143,8 +150,77 @@ function assertDocumentComposition(
 }
 
 /**
+ * The stock document editor, pinned by what makes it this document's: its
+ * pages, lines, draft state and the values its first save writes -- the draft
+ * state, the document itself as its posting source, the save's time and the
+ * saving person.
+ */
+function assertStockDocumentEditor(namespace: string, editor: unknown): void {
+  const id = (kind: string, local: string) => `${namespace}:${kind}.${local}`;
+  record(editor);
+  assert.deepEqual(
+    [
+      editor.kind,
+      editor.headerFormSurfaceId,
+      editor.recordSurfaceId,
+      editor.lineFormSurfaceId,
+      editor.lineQueryId,
+      editor.parentRelationId,
+      editor.stateFieldId,
+      editor.editableStateIds,
+      editor.lineNumberFieldId,
+      editor.saveMode,
+    ],
+    [
+      'draftDocumentEditor',
+      id('surface', 'inventory_transaction_form'),
+      id('surface', 'inventory_transaction_detail'),
+      id('surface', 'inventory_transaction_line_form'),
+      id('query', 'inventory_transaction_line_list'),
+      id('relation', 'inventory_transaction_line_transaction'),
+      id('field', 'inventory_transaction_state'),
+      [id('option', 'inventory_transaction_state_draft')],
+      id('field', 'inventory_transaction_line_line_number'),
+      'sequential',
+    ],
+    'the stock document editor edits inventory transactions and their lines',
+  );
+  assert.deepEqual(
+    editor.createValues,
+    [
+      {
+        fieldId: id('field', 'inventory_transaction_state'),
+        value: {
+          source: 'literal',
+          value: id('option', 'inventory_transaction_state_draft'),
+        },
+      },
+      {
+        fieldId: id('field', 'inventory_transaction_source_type'),
+        value: { source: 'literal', value: 'inventoryTransaction' },
+      },
+      {
+        fieldId: id('field', 'inventory_transaction_source_id'),
+        value: { source: 'record', field: 'recordId' },
+      },
+      {
+        fieldId: id('field', 'inventory_transaction_recorded_at'),
+        value: { source: 'generated', value: 'instant' },
+      },
+      {
+        fieldId: id('field', 'inventory_transaction_actor_id'),
+        value: { source: 'actor', field: 'principalId' },
+      },
+    ],
+    'a stock document is saved as a draft naming itself as its source, with when and by whom',
+  );
+}
+
+/**
  * Composition may add only the independently pinned workspace declaration to
- * inventory surfaces. Identity/count and every original binding stay exact.
+ * inventory surfaces -- and to stock documents their editor, List name and
+ * the editor's command bar placement. Identity/count and every original
+ * binding stay exact.
  */
 export function assertComposedInventoryCollection(
   collection: string,
@@ -180,12 +256,28 @@ export function assertComposedInventoryCollection(
     record(candidate);
     const local = String(source.surfaceId).split(':surface.')[1] ?? '';
     const document = Object.hasOwn(DOCUMENT_LINES, local);
-    const { workspace, composition, slots, ...protectedSurface } = candidate;
+    const stockDocument =
+      local.replace(/_(list|detail|form)$/, '') === STOCK_DOCUMENT;
+    const {
+      workspace,
+      composition,
+      slots,
+      documentEditor,
+      ...protectedSurface
+    } = candidate;
     // The one other addition the product makes to an inventory surface is its
     // declared List (SALES-PARITY), with the saved-views slot its views need.
     const declared = declareLists(namespace, [source])[0];
     record(declared);
     const { slots: sourceSlots, ...protectedSource } = declared;
+    if (stockDocument && source.surfaceRole !== 'list')
+      assertStockDocumentEditor(namespace, documentEditor);
+    else
+      assert.equal(
+        documentEditor,
+        undefined,
+        `editor added to ${String(source.surfaceId)}`,
+      );
     if (document)
       assertDocumentComposition(namespace, local, source, composition, slots);
     else {
@@ -194,15 +286,22 @@ export function assertComposedInventoryCollection(
         undefined,
         `composition added to ${String(source.surfaceId)}`,
       );
+      // The editor's form places its command bar after the lines.
       assert.deepEqual(
         slots,
-        sourceSlots,
+        stockDocument && source.surfaceRole === 'form'
+          ? (sourceSlots as Value[]).map((slot) =>
+              slot.slot === 'commandBar' ? { ...slot, orderKey: 90 } : slot,
+            )
+          : sourceSlots,
         `composition altered protected slots for ${String(source.surfaceId)}`,
       );
     }
     assert.deepEqual(
       protectedSurface,
-      protectedSource,
+      stockDocument && source.surfaceRole === 'list'
+        ? { ...protectedSource, label: STOCK_DOCUMENT_LIST_LABEL }
+        : protectedSource,
       `composition altered protected bindings for ${String(source.surfaceId)}`,
     );
     assert.deepEqual(

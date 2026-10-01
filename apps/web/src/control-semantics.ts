@@ -28,22 +28,30 @@ export type Presented = {
 /**
  * The declared default for a value nobody has entered yet: a field on a new,
  * never-saved row, or a field of a freshly opened create flow. Never applied
- * over an entered, stored, frozen or retried value.
+ * over an entered, stored, frozen or retried value. `now` is the request's
+ * clock, so a test fixes the instant.
  */
 export function declaredDefault(
-  field: Presented & { readonly defaultDaysFromToday?: number | undefined },
-  today: Date = new Date(),
+  field: Presented & {
+    readonly defaultDaysFromToday?: number | undefined;
+    readonly defaultNow?: true | undefined;
+  },
+  now: Date = new Date(),
 ): ImmutableJsonValue | undefined {
   if (field.defaultDaysFromToday !== undefined) {
     // Midnight UTC of the day that many days out: a date shown as its UTC
     // calendar date everywhere else in the application.
     const day = Date.UTC(
-      today.getUTCFullYear(),
-      today.getUTCMonth(),
-      today.getUTCDate() + field.defaultDaysFromToday,
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + field.defaultDaysFromToday,
     );
     return new Date(day).toISOString();
   }
+  if (field.defaultNow)
+    // The instant itself, to the second the editor's control shows: a stock
+    // document dated now is not dated before stock that arrived today.
+    return new Date(Math.floor(now.getTime() / 1000) * 1000).toISOString();
   return field.presentation?.kind === 'choice'
     ? field.presentation.defaultValue
     : undefined;

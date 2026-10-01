@@ -106,37 +106,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     await expect(page.getByRole('status')).toContainText(`${label} complete`);
   };
 
-  // Put stock on hand through the existing authored Inventory document and
-  // its registered posting command; fulfillment receives no setup shortcut.
-  await page.goto(url('inventory_transaction', 'form'));
-  await fill('inventory_transaction', 'number', `ADJ-FUL-${suffix}`);
-  await page
-    .locator(`[name="value:${namespace}:field.inventory_transaction_type"]`)
-    .fill(`${namespace}:option.inventory_transaction_type_adjustment`);
-  await choose('inventory_transaction', 'state', 'draft');
-  await fill('inventory_transaction', 'reason_code', 'fulfillment-setup');
-  await fill(
-    'inventory_transaction',
-    'reason_narrative',
-    'Stock for fulfillment walkthrough',
-  );
-  await fill('inventory_transaction', 'source_type', 'walkthrough');
-  await fill('inventory_transaction', 'source_id', `setup-${suffix}`);
-  await fill('inventory_transaction', 'effective_at', instant);
-  await fill('inventory_transaction', 'recorded_at', instant);
-  await fill('inventory_transaction', 'actor_id', 'walkthrough-user');
-  const transactionId = await save();
-  await page.goto(url('inventory_transaction_line', 'form'));
-  await fill('inventory_transaction_line', 'line_number', '1');
-  await fill('inventory_transaction_line', 'item_id', itemId);
-  await fill('inventory_transaction_line', 'to_location_id', locationId);
-  await fill('inventory_transaction_line', 'quantity', '10');
-  await fill('inventory_transaction_line', 'unit_id', 'EA');
-  await relate('inventory_transaction_line_transaction', transactionId);
-  await save();
-  await page.goto(url('inventory_transaction', 'detail', transactionId));
-  await command('Post');
-
   // Draft-editor pickers: type into the field's combobox and choose an offered
   // result -- in place with the owned script, as ordinary submits without it --
   // then wait for the field to show the selection before the next step.
@@ -166,6 +135,27 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     await page.getByLabel('Postal code', { exact: true }).fill('T2P 0A1');
     await page.getByLabel('Country', { exact: true }).fill('Canada');
   };
+  // Put stock on hand through the Inventory stock document and its registered
+  // posting command; fulfillment receives no setup shortcut. The document is
+  // numbered on save, and an adjustment is its type unless another is chosen.
+  await page.goto(url('inventory_transaction', 'form'));
+  await page
+    .getByLabel('Reason', { exact: true })
+    .selectOption({ label: 'Found' });
+  await page
+    .getByLabel('Narrative', { exact: true })
+    .fill('Stock for fulfillment walkthrough');
+  await page
+    .getByLabel('Effective date (UTC) *', { exact: true })
+    .fill(instant.slice(0, 19));
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
+  await pick('Line 1 to location', 'Calgary', 'Calgary warehouse');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/inventory_transaction_detail/u);
+  await expect(page.locator('.composition-header')).toContainText(/STK-\d{6}/u);
+  await command('Post');
+
   // The customer picker offers only parties with an active customer role, so
   // the role exists before the order. Reservation activation still checks the
   // current persisted party-role facts on the server.

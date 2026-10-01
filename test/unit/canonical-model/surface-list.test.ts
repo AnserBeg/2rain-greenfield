@@ -58,6 +58,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     `${ns}:surface.customer_invoice_list`,
     // PURCHASING-PARITY: what is still to arrive, beside Purchase orders.
     expectedList,
+    // INVENTORY-PARITY: stock documents, by state and type.
+    `${ns}:surface.inventory_transaction_list`,
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,

@@ -2748,7 +2748,6 @@ function invokeInventoryTransactionCreate(
             'northstar.app:field.inventory_transaction_actor_id': 'auth-test',
             'northstar.app:field.inventory_transaction_effective_at':
               '2026-09-04T12:00:00.000Z',
-            'northstar.app:field.inventory_transaction_number': `AUTH-SCOPE-${recordId.slice(0, 8)}`,
             'northstar.app:field.inventory_transaction_recorded_at':
               '2026-09-04T12:00:00.000Z',
             'northstar.app:field.inventory_transaction_source_id': 'auth-test',
@@ -4640,7 +4639,6 @@ async function assertEntityOwnedCreateInput(
     'northstar.app:field.inventory_transaction_actor_id': 'write-scope-control',
     'northstar.app:field.inventory_transaction_effective_at':
       '2026-08-01T12:00:00.000Z',
-    'northstar.app:field.inventory_transaction_number': 'DRAFT-SCOPE-001',
     'northstar.app:field.inventory_transaction_recorded_at':
       '2026-08-01T12:00:00.000Z',
     'northstar.app:field.inventory_transaction_source_id':
@@ -4790,10 +4788,8 @@ async function assertEntityOwnedCreateInput(
   assert.ok(inactiveStatus);
   const inactiveRecordId = randomUUID();
   const inactiveIdempotencyKey = randomUUID();
-  const inactiveValues = {
-    ...values,
-    'northstar.app:field.inventory_transaction_number': 'DRAFT-SCOPE-INACTIVE',
-  } as const;
+  // The server numbers each draft, so the twin needs no number of its own.
+  const inactiveValues = values;
   await pool.query(
     `UPDATE north_star_module.${master.physicalTableName}
         SET "${master.legalEntityMaster.fieldColumns.status}" = $1
@@ -4940,11 +4936,7 @@ async function assertEntityOwnedCreateInput(
       archiveFirstRecordId,
       { legalEntityId: archiveFirstLegalEntityId },
       archiveFirstIdempotencyKey,
-      {
-        ...values,
-        'northstar.app:field.inventory_transaction_number':
-          'DRAFT-SCOPE-ARCHIVE-FIRST',
-      },
+      values,
     );
     void archiveFirstCreate.catch(() => undefined);
     await waitForLegalEntityMasterLockWaiters(
@@ -5027,11 +5019,7 @@ async function assertEntityOwnedCreateInput(
       randomUUID(),
       { legalEntityId: createFirstLegalEntityId },
       randomUUID(),
-      {
-        ...values,
-        'northstar.app:field.inventory_transaction_number':
-          'DRAFT-SCOPE-CREATE-FIRST',
-      },
+      values,
     );
     void createFirstAttempt.catch(() => undefined);
     await waitForLegalEntityMasterLockWaiters(
@@ -5074,11 +5062,7 @@ async function assertEntityOwnedCreateInput(
       postArchiveRecordId,
       { legalEntityId: createFirstLegalEntityId },
       postArchiveIdempotencyKey,
-      {
-        ...values,
-        'northstar.app:field.inventory_transaction_number':
-          'DRAFT-SCOPE-POST-ARCHIVE',
-      },
+      values,
     ),
     (error: unknown) => {
       assert.ok(error instanceof ModuleRuntimeInterpreterError);
@@ -5189,7 +5173,8 @@ async function assertInventoryPostingCapabilityRoute(
   const lineId = randomUUID();
   const suffix = transactionId.slice(0, 8);
   const effectiveAt = new Date().toISOString();
-  const sourceId = `postroute-${suffix}`;
+  // A stock document posts as its own source (INVENTORY-PARITY).
+  const sourceId = transactionId;
 
   const create = (
     operationId: string,
@@ -5250,13 +5235,13 @@ async function assertInventoryPostingCapabilityRoute(
     {
       'northstar.app:field.inventory_transaction_actor_id': 'postroute-control',
       'northstar.app:field.inventory_transaction_effective_at': effectiveAt,
-      'northstar.app:field.inventory_transaction_number': `ADJ-${suffix}`,
       'northstar.app:field.inventory_transaction_reason_code': 'adjustment',
       'northstar.app:field.inventory_transaction_reason_narrative':
         'Registered capability route control',
       'northstar.app:field.inventory_transaction_recorded_at': effectiveAt,
       'northstar.app:field.inventory_transaction_source_id': sourceId,
-      'northstar.app:field.inventory_transaction_source_type': 'test',
+      'northstar.app:field.inventory_transaction_source_type':
+        'inventoryTransaction',
       'northstar.app:field.inventory_transaction_state':
         'northstar.app:option.inventory_transaction_state_draft',
       'northstar.app:field.inventory_transaction_type':
@@ -5462,7 +5447,8 @@ async function assertInventoryPostingAuthorizationBoundaries(
   const seedDraft = async (legalEntityId: string, label: string) => {
     const recordId = randomUUID();
     const lineId = randomUUID();
-    const sourceId = `auth-review-${label.toLowerCase()}-${recordId.slice(0, 8)}`;
+    // A stock document posts as its own source (INVENTORY-PARITY).
+    const sourceId = recordId;
     const effectiveAt = new Date().toISOString();
     await create(
       'northstar.app:operation.inventory_transaction_create',
@@ -5470,13 +5456,12 @@ async function assertInventoryPostingAuthorizationBoundaries(
       {
         'northstar.app:field.inventory_transaction_actor_id': 'auth-review',
         'northstar.app:field.inventory_transaction_effective_at': effectiveAt,
-        'northstar.app:field.inventory_transaction_number': `AUTH-${label}-${recordId.slice(0, 8)}`,
         'northstar.app:field.inventory_transaction_reason_code': 'adjustment',
-        'northstar.app:field.inventory_transaction_reason_narrative':
-          'Focused authorization review regression',
+        'northstar.app:field.inventory_transaction_reason_narrative': `Focused authorization review regression (${label})`,
         'northstar.app:field.inventory_transaction_recorded_at': effectiveAt,
         'northstar.app:field.inventory_transaction_source_id': sourceId,
-        'northstar.app:field.inventory_transaction_source_type': 'test',
+        'northstar.app:field.inventory_transaction_source_type':
+          'inventoryTransaction',
         'northstar.app:field.inventory_transaction_state':
           'northstar.app:option.inventory_transaction_state_draft',
         'northstar.app:field.inventory_transaction_type':

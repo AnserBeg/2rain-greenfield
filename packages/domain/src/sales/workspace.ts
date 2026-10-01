@@ -1,6 +1,9 @@
 export const FULFILLMENT_READ_MODEL_BINDINGS = Object.freeze({
   line: 'northstar.sales:read_model.line',
   reservation: 'northstar.sales:read_model.reservation',
+  // An item's posted stock at each location, less what reservations still
+  // hold there (INVENTORY-PARITY): the item page's Stock by location.
+  stock: 'northstar.sales:read_model.stock',
 });
 /** Line amounts and order totals, computed on read (owner ruling B). */
 export const COMMERCIAL_READ_MODEL_BINDINGS = Object.freeze({
@@ -1003,6 +1006,34 @@ export function salesWorkspaceQueries(
     'workspace_stock_reservations',
   );
   const stock = clone('posted_stock_balance_list', 'workspace_stock');
+  // An item's stock by location in one company, with what active reservations
+  // still hold there and what is left (INVENTORY-PARITY). A copy of the posted
+  // stock list -- the same selections, scope and read permission -- so that
+  // list and every inventory query stay exactly as they are.
+  const itemStock = {
+    ...clone('posted_stock_balance_list', 'item_stock_positions'),
+    readModel: {
+      capability: ref(
+        'capabilityReference',
+        'northstar.sales:capability.fulfillment',
+      ),
+      binding: FULFILLMENT_READ_MODEL_BINDINGS.stock,
+      queries: {
+        stockReservations: ref(
+          'queryReference',
+          `${namespace}:query.workspace_stock_reservations`,
+        ),
+        balances: ref(
+          'queryReference',
+          `${namespace}:query.reservation_balance_get`,
+        ),
+      },
+      resultFields: {
+        reserved: `${namespace}:metric.reserved`,
+        available: `${namespace}:metric.available`,
+      },
+    },
+  };
   // Commercial reads: priced order lines, and order totals over the lines
   // (read through a plain clone, as read models do not nest).
   const commercial = (
@@ -1171,6 +1202,7 @@ export function salesWorkspaceQueries(
     plain,
     stockReservations,
     stock,
+    itemStock,
     commercialLines,
     pricedLines,
     orderTotals,

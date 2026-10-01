@@ -83,6 +83,38 @@ export async function workspaceList(
   } while (cursor);
   return records;
 }
+/**
+ * The company an entry settles on (`authorizedSingleOrPreference`) once the
+ * offered companies are known. An explicit company must be exactly one of
+ * them. Without one, a surface that may default takes the only offered
+ * company, else the one this person chose last while it is still offered.
+ */
+export function entryCompanyChoice(input: {
+  readonly offered: readonly string[];
+  readonly explicit: readonly string[];
+  readonly preference: string | undefined;
+  readonly mayDefault: boolean;
+}): { readonly selected: string | null; readonly invalid: boolean } {
+  const { offered, explicit, preference } = input;
+  if (explicit.length)
+    return {
+      selected: explicit.length === 1 ? explicit[0]! : null,
+      invalid: explicit.length !== 1 || !offered.includes(explicit[0]!),
+    };
+  if (!input.mayDefault) return { selected: null, invalid: false };
+  return {
+    selected:
+      offered.length === 1
+        ? offered[0]!
+        : (offered.find((recordId) => recordId === preference) ?? null),
+    invalid: false,
+  };
+}
+
+export type WorkspaceEntry = NonNullable<
+  Awaited<ReturnType<typeof resolveWorkspaceEntry>>
+>;
+
 /** Preference never supplies an operation operand: entry materializes a URL. */
 export async function resolveWorkspaceEntry(
   view: RequestRuntimeView,
@@ -95,8 +127,18 @@ export async function resolveWorkspaceEntry(
     view,
     surface.dataSourceQueryId,
   );
-  if (!policy || !definition?.legalEntityScope) return null;
-  const parameter = definition.legalEntityScope.operand.parameterId;
+  if (!policy || !definition) return null;
+  // A record every company shares (an item) has no company of its own: its
+  // company-owned sections read the company its entry names, carried under
+  // the authorization List's own operand, as that List carries it.
+  const shared =
+    surface.surfaceRole === 'record' && !definition.legalEntityScope;
+  const scope = shared
+    ? registeredSemanticQueryFromPinnedView(view, policy.authorizationQueryId)
+        ?.legalEntityScope
+    : definition.legalEntityScope;
+  if (!scope) return null;
+  const parameter = scope.operand.parameterId;
   const candidates = await workspaceList(
     view,
     gateway,
@@ -124,38 +166,36 @@ export async function resolveWorkspaceEntry(
   }
   const explicit = url.searchParams.getAll(parameter);
   const key = workspacePrincipalKey(view);
+  const choice = entryCompanyChoice({
+    offered: options.map((option) => option.recordId),
+    explicit,
+    preference: preferences.get(key),
+    // Only workspace entry can default; existing documents and tasks require
+    // pinned URLs. A record every company shares may: it is the same record
+    // in each company, so the choice decides only whose sections it shows.
+    mayDefault:
+      shared ||
+      (surface.surfaceRole === 'list' && !url.searchParams.has('record')),
+  });
   if (explicit.length) {
     // Explicit context is validated against current active authorized membership.
-    if (
-      explicit.length === 1 &&
-      options.some((option) => option.recordId === explicit[0])
-    )
-      preferences.set(key, explicit[0]!);
+    if (!choice.invalid) preferences.set(key, explicit[0]!);
     return {
       options,
       parameter,
-      selected: explicit.length === 1 ? explicit[0]! : null,
+      shared,
+      selected: choice.selected,
       redirect: null,
-      invalid:
-        explicit.length !== 1 ||
-        !options.some((option) => option.recordId === explicit[0]),
+      invalid: choice.invalid,
     };
   }
-  // Only workspace entry can default. Existing documents/tasks require pinned URLs.
-  if (url.searchParams.has('record') || surface.surfaceRole !== 'list')
-    return { options, parameter, selected: null, redirect: null };
-  const preference = preferences.get(key);
-  const selected =
-    options.length === 1
-      ? options[0]!.recordId
-      : (options.find((option) => option.recordId === preference)?.recordId ??
-        null);
-  if (selected) url.searchParams.set(parameter, selected);
+  if (choice.selected) url.searchParams.set(parameter, choice.selected);
   return {
     options,
     parameter,
-    selected,
-    redirect: selected ? url.pathname + url.search : null,
+    shared,
+    selected: choice.selected,
+    redirect: choice.selected ? url.pathname + url.search : null,
   };
 }
 

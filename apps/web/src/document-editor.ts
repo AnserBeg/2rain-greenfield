@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import type {
-  RequestRuntimeView,
-  ImmutableJsonValue,
+import {
+  trustedContextForRequestRuntimeView,
+  type RequestRuntimeView,
+  type ImmutableJsonValue,
 } from '../../../packages/runtime/src/request-runtime-view.js';
 import {
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -180,17 +181,19 @@ function operationFor(
   return operations[0]!;
 }
 /**
- * A never-saved row takes each field's DECLARED default. A persisted row keeps
- * whatever it stores, including a value outside a choice set, so a default can
- * never overwrite existing data during an unrelated edit.
+ * A never-saved row takes each field's DECLARED default, as of the request's
+ * clock. A persisted row keeps whatever it stores, including a value outside a
+ * choice set, so a default can never overwrite existing data during an
+ * unrelated edit.
  */
 const withDefaults = (
   draft: DraftRow,
   fields: SurfaceDocumentEditor['headerFields'],
+  now: Date,
 ): DraftRow => {
   if (draft.record) return draft;
   for (const field of fields) {
-    const fallback = declaredDefault(field);
+    const fallback = declaredDefault(field, now);
     if (fallback !== undefined && draft.values[field.fieldId] === undefined)
       draft.values[field.fieldId] = fallback;
   }
@@ -262,6 +265,9 @@ async function editorResponse(
   mode: 'page' | 'fragment',
 ): Promise<EditorResponse | null> {
   const definition = surface.documentEditor!;
+  // The request clock, read once: every declared default this request fills
+  // -- today's date, or now -- is of the same instant.
+  const now = gateways.clock?.() ?? new Date();
   const recordSurface = surfaceFor(surfaces, definition.recordSurfaceId);
   // The editor reads its record through the header form's get: a record
   // workspace may read a read model's figures, which the editor never edits.
@@ -381,7 +387,7 @@ async function editorResponse(
       recordId,
       openedRecordId: recordId,
       completedLocation: null,
-      header: withDefaults(row(current), definition.headerFields),
+      header: withDefaults(row(current), definition.headerFields, now),
       lines: [],
       pending: null,
       acknowledged: [],
@@ -411,7 +417,7 @@ async function editorResponse(
           [{ fieldId: definition.lineNumberFieldId, direction: 'ascending' }],
         )
       ).map((value) => row(value));
-    else buffer.lines.push(withDefaults(row(), definition.lineFields));
+    else buffer.lines.push(withDefaults(row(), definition.lineFields, now));
     buffers.set(buffer.id, buffer);
   }
   const rowsOf = (fieldId: string) =>
@@ -524,7 +530,7 @@ async function editorResponse(
       : source
         ? record?.values[source]
         : undefined;
-    const fallback = declaredDefault(field) ?? null;
+    const fallback = declaredDefault(field, now) ?? null;
     if (!source || typeof value !== 'string' || !value) return fallback;
     const sourceOptions = enumerationOptions(source);
     const label = sourceOptions?.find(
@@ -1190,7 +1196,7 @@ async function editorResponse(
     ).trim();
     const values: Values = {};
     for (const collected of create.fields) {
-      const fallback = declaredDefault(collected);
+      const fallback = declaredDefault(collected, now);
       if (fallback !== undefined) values[collected.fieldId] = fallback;
     }
     const labelField = create.fields.find((collected) =>
@@ -2116,7 +2122,7 @@ async function editorResponse(
               submission.draftAction === 'add' &&
               buffer.lines.length < 40
             ) {
-              const added = withDefaults(row(), definition.lineFields);
+              const added = withDefaults(row(), definition.lineFields, now);
               buffer.lines.push(added);
               const first = definition.lineFields[0];
               if (first) buffer.focus = controlId(added.id, first.fieldId);
@@ -2548,6 +2554,38 @@ function snapshot(
         values.set(referenceKey(line.id, fieldId), line.values[fieldId]);
   return values;
 }
+/**
+ * The declared create values a row's save also writes: only the header's
+ * first create, never an update, a removal or a line. A literal is sent as
+ * declared; the record id is the header row's own, the id its create sends;
+ * the instant is the save's and the principal the saving person's. The save
+ * plan freezes them with the step, so a retry resends the same values.
+ */
+export function createValuesFor(
+  definition: SurfaceDocumentEditor,
+  row: {
+    readonly id: string;
+    readonly record: unknown;
+    readonly removed: boolean;
+  },
+  header: boolean,
+  save: { readonly instant: string; readonly principalId: string },
+): Readonly<Record<string, string>> {
+  if (!header || row.record || row.removed) return {};
+  return Object.fromEntries(
+    (definition.createValues ?? []).map((entry) => [
+      entry.fieldId,
+      entry.value.source === 'record'
+        ? row.id
+        : entry.value.source === 'generated'
+          ? save.instant
+          : entry.value.source === 'actor'
+            ? save.principalId
+            : entry.value.value,
+    ]),
+  );
+}
+
 function plan(
   view: RequestRuntimeView,
   surfaces: readonly CompiledSurfaceDefinition[],
@@ -2555,6 +2593,10 @@ function plan(
 ): SaveStep[] {
   const definition = buffer.definition;
   const steps: SaveStep[] = [];
+  const save = {
+    instant: new Date().toISOString(),
+    principalId: trustedContextForRequestRuntimeView(view).principalId,
+  };
   const append = (
     row: DraftRow,
     surfaceId: string,
@@ -2591,6 +2633,12 @@ function plan(
           value += temporal.precision === 'millisecond' ? '.000Z' : 'Z';
       }
       values[field.fieldId] = value;
+    }
+    for (const [fieldId, value] of Object.entries(
+      createValuesFor(definition, row, row === buffer.header, save),
+    )) {
+      if (!allowed.has(fieldId)) throw new Error('Editor field unavailable');
+      values[fieldId] = value;
     }
     const input: Values = row.record
       ? {
@@ -2634,7 +2682,7 @@ function plan(
     buffer.header,
     definition.headerFormSurfaceId,
     definition.headerFields,
-    'Order details',
+    definition.headerLabel ?? 'Order details',
   );
   let number = Math.max(
     0,

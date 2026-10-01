@@ -141,6 +141,8 @@ test(
         ['shipment_create', 'SHP'],
         // PURCHASING-PARITY: a goods receipt is numbered the same way.
         ['goods_receipt_create', 'RCV'],
+        // INVENTORY-PARITY: so is a stock document.
+        ['inventory_transaction_create', 'STK'],
       ] as const) {
         const inputContract = contract.find(
           (value) => value.operationId === `${ns}:operation.${operation}`,
@@ -183,6 +185,7 @@ test(
           'customer_invoice_number',
           'customer_payment_number',
           'goods_receipt_number',
+          'inventory_transaction_number',
           'purchase_order_number',
           'sales_order_number',
           'shipment_number',
@@ -237,7 +240,9 @@ test(
               numbered.some((entry) => entry.fieldId === scenario.subjectId),
           )
           .map((scenario) => executed.has(scenario.scenarioId)),
-        [true, true, true, true, true, true, true, true, true, true],
+        // Eleven, as the compile states: PAYABLES' ten and the stock
+        // document's (INVENTORY-PARITY).
+        [true, true, true, true, true, true, true, true, true, true, true],
         'each number’s uniqueness probe executed',
       );
       const derivationCodes = (
