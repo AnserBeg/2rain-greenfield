@@ -105,7 +105,8 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
         await nav.getByText('Purchasing', { exact: true }).click();
       await inbox.click();
       await page
-        .locator('.declared-list tbody tr')
+        .getByRole('table')
+        .locator('tbody tr')
         .filter({ hasText: order.number })
         .getByRole('link')
         .first()

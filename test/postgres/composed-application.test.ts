@@ -3943,11 +3943,13 @@ async function reopenServingRuntime(
 // second direction followed the first, the parent is back to its two
 // gateway-persistence tenants, and each direction has its own budget.
 //
-// They belong together anyway: each is the other's discriminating half. Direction
-// 1 alone is satisfied by a refusal that fires on every edge; direction 2 alone
-// is satisfied by one that fires on none.
+// Each direction is the other's discriminating half: the profile-only refusal
+// alone admits deny-every-edge, while source-changing success alone admits
+// deny-no-edge. Keep both claims, but use separate database lifecycles: APPROVALS
+// observed two CI connection losses with both synthetic tenants in one database.
+// Neither the 256 MiB harness nor the 300 s per-test bound is increased.
 test(
-  'ADR-0047 §6 refuses a profile-only rollback edge by name and leaves a source-changing one eligible',
+  'ADR-0047 §6 refuses a profile-only rollback edge by name',
   { timeout: 300_000 },
   async () => {
     await withEphemeralPostgres(
@@ -4004,7 +4006,23 @@ test(
           },
           'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
         );
+      },
+    );
+  },
+);
 
+test(
+  'ADR-0047 §6 leaves a source-changing rollback edge eligible',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'source-changing-rollback',
+      async ({ connection }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const databaseUrl = connectionUrl(connection);
+        const tenantSlug = 'composed-tenant-b';
         // ADR-0066: the source-changing synthetic edge has a usable target.
         // Actual successful rollback discriminates this from deny-every-edge.
         // The obsolete pre-search first-party target is no longer retained.
@@ -4025,12 +4043,8 @@ test(
         // fresh-install intermediate, so the index check at the FIRST refusal site
         // fires and control never reaches the authorization this direction is about.
         //
-        // `tenantSlug` already serves it. Until `LANG-ADOPT-v5` the artifact's head
-        // WAS a profile sibling, so this direction had to install a second tenant on
-        // a truncated lineage to find a source-changing edge; now the head is itself
-        // source-changing and the caller's tenant is already the right one. That
-        // matters beyond tidiness -- direction 1 needs a fresh install of its own now,
-        // and two fresh installs in one test exceed the 300 s budget.
+        // This fixture serves only the source-changing tenant; the profile-only
+        // discriminator above has its own database and the same unchanged bound.
         const sourceEdgeSlug = `${tenantSlug}-source-edge`;
         const sourceEdgeRuntime = await createRuntime(
           sourceChangingLineage,
@@ -4413,7 +4427,7 @@ async function assertPurchaseOrderParentGuard(
   assert.ok(legalEntityId);
 
   const purchasing = APPLICATION_IDS.purchasing;
-  // `confirmed` matters for `archive`, which declares `humanRequired`: the
+  // `confirmed` matters for Place order and `archive`, which declare `humanRequired`: the
   // gateway checks the confirmation grant BEFORE the interpreter evaluates any
   // precondition, so without a grant the archive arm would observe
   // `SemanticOperationConfirmationRequiredError` and prove nothing about the
@@ -4536,10 +4550,15 @@ async function assertPurchaseOrderParentGuard(
   assert.equal(admitted.revision, '2', 'the admission twin must have written');
   assert.equal(admitted.archived, false);
 
-  await invoke(purchasing.releaseOperationId, {
-    expectedRevision: 1,
-    recordId: orderId,
-  });
+  await invoke(
+    purchasing.releaseOperationId,
+    {
+      arguments: { supplierReference: null },
+      expectedRevision: 1,
+      recordId: orderId,
+    },
+    true,
+  );
 
   const refused = async (
     label: string,

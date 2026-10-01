@@ -58,4 +58,3 @@ Written by the orchestrator's research agents against `packet/PURCHASING-PARITY`
 **Packets and first slice.**
 - **APPROVAL-PO**, M. Smallest slice: Submit for approval → inbox Approve/Reject with a reason → "Place order" offered only on an approved current revision. It also carries the acting-as switch and amendment re-approval.
 - **APPROVAL-INVENTORY**, L, Critical.
-
