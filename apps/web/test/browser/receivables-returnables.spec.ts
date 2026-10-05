@@ -58,7 +58,10 @@ test('kegs go out to a customer against a deposit, come back or are forfeited, a
     const navigation = page.getByRole('navigation', {
       name: 'Release navigation',
     });
-    await navigation.getByText('Party', { exact: true }).click();
+    // The Party group's label, not the Party List inside it.
+    await navigation
+      .locator('summary .nav-group-label', { hasText: /^Party$/u })
+      .click();
     for (const name of [
       'Returnable type',
       'Returnables out',
