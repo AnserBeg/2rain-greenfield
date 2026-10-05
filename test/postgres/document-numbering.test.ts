@@ -39,13 +39,17 @@ import {
   releaseVerificationBinding,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { TrustedActorEnvelopeIssuer } from '../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
-import { projectionPayload } from '../fixtures/g2/party/compiler.js';
+import {
+  compilePartyFixture,
+  projectionPayload,
+} from '../fixtures/g2/party/compiler.js';
 import {
   PARTY_IDS,
   partyModuleDefinition,
 } from '../fixtures/g2/party/definition.js';
 import {
   PARTY_TEST_SCOPE,
+  invokePartyOperation,
   invokePartyQuery,
   withRealPartyRuntime,
   type RealPartyRuntime,
@@ -805,6 +809,123 @@ test(
   },
 );
 
+// A search the gateway executes need not be Q0: the gateway runs a Q1 query
+// through its compiled filter plan, and the search probe's positive read
+// needs the record back. Party's `party_search` is Q1 here with the literal
+// `true` filter, keeping its id and sorting first; `party_z_search`, a Q0 copy
+// filtered `false` with fresh ids, sorts after it. Party's gets and its
+// operations' read-backs are unchanged.
+const q1Search = `${PARTY_IDS.namespace}:query.party_search`;
+const unexecutedSearch = `${PARTY_IDS.namespace}:query.party_z_search`;
+
+test(
+  'release verification probes search through an executable Q1 search, ahead of a Q0 search the gateway does not run',
+  { timeout: 300_000 },
+  async () => {
+    const definition = q1SearchPartyDefinition();
+
+    // The premise, compiled: the Q1 search carries a lowering plan, the Q0
+    // search a filter the gateway's fence refuses, and every get is Q0.
+    type Query = {
+      filter: unknown;
+      filterPlan?: unknown;
+      queryId: string;
+      queryType: string;
+      sourceEntityId: string;
+      tier: string;
+    };
+    const queries = projectionPayload<{ queries: Query[] }>(
+      compilePartyFixture(definition).compiled,
+      PROJECTION_FAMILY_IDS.queryCatalog,
+    ).queries.filter(
+      (query) => query.sourceEntityId === PARTY_IDS.entityIds.party,
+    );
+    assert.deepEqual(
+      queries
+        .filter((query) => query.queryType === 'search')
+        .map((query) => [
+          query.queryId,
+          query.tier,
+          query.filterPlan !== undefined,
+          inspectPredicateForExecution(query.filter).outcome,
+        ]),
+      [
+        [q1Search, 'q1', true, 'accepted'],
+        [unexecutedSearch, 'q0', false, 'rejected'],
+      ],
+    );
+    assert.deepEqual(
+      queries
+        .filter((query) => query.queryType === 'get')
+        .map((query) => query.tier),
+      ['q0'],
+    );
+
+    await withRealPartyRuntime(
+      'verification-q1-search',
+      async (runtime) => {
+        // The Q1 search reads through the real gateway: it returns a party
+        // by its name. The Q0 search is answered without a read.
+        const partyId = randomUUID();
+        const created = await invokePartyOperation(
+          runtime,
+          runtime.views.a,
+          'party_create',
+          {
+            recordId: partyId,
+            values: {
+              [PARTY_IDS.fieldIds.contactSummary]: 'q1@example.test',
+              [PARTY_IDS.fieldIds.name]: 'Quarry Rentals',
+              [PARTY_IDS.fieldIds.number]: 'P-Q1',
+            },
+          },
+        );
+        assert.equal(created.outcome, 'succeeded');
+        const found = await invokePartyQuery(
+          runtime,
+          runtime.views.a,
+          'party_search',
+          { text: 'QUARRY' },
+        );
+        assert.ok(
+          found.records.some((record) => record.recordId === partyId),
+          `the Q1 search did not return the party: ${found.outcome}`,
+        );
+        const unexecuted = await invokePartyQuery(
+          runtime,
+          runtime.views.a,
+          'party_z_search',
+          { text: 'QUARRY' },
+        );
+        assert.deepEqual(
+          [unexecuted.outcome, unexecuted.unsupportedReason],
+          ['unsupported', 'query-filter-unsupported'],
+        );
+
+        // Activation's full release verification succeeded, executing every
+        // scenario, the party's search-exclusion probe included.
+        const plan = releaseVerificationBinding(runtime.compiled).plan;
+        assert.ok(
+          plan.scenarios.some(
+            (scenario) =>
+              scenario.kind === 'searchableExclusion' &&
+              scenario.entityId === PARTY_IDS.entityIds.party,
+          ),
+          'the plan probes the party search',
+        );
+        const executedIn = await admittedEvidence(runtime);
+        assert.equal(executedIn.execution_scope, 'FULL', 'nothing was derived');
+        assert.deepEqual(
+          executedIn.scenarioIds,
+          plan.scenarios.map((scenario) => scenario.scenarioId).toSorted(),
+          'release verification executed every scenario',
+        );
+      },
+      definition,
+    );
+  },
+);
+
 type StorageEntity = StorageTargetPayloadV1['entities'][number];
 
 /** Every record of an entity in one tenant environment, with field values. */
@@ -1087,6 +1208,39 @@ function numberedPartyDefinition({
       orderKey: Number(key.orderKey) + 10,
     })),
   ];
+  return definition;
+}
+
+/**
+ * Party's own definition with its search made Q1 (the literal `true` filter,
+ * its id and selections kept) and a later Q0 copy filtered `false` with fresh
+ * ids (see `q1Search` above).
+ */
+function q1SearchPartyDefinition(): Record<string, unknown> {
+  type Json = Record<string, unknown>;
+  type Query = Json & { queryId: string; selections: Json[] };
+  const definition = structuredClone(partyModuleDefinition()) as Json & {
+    queries: Query[];
+  };
+  const search = definition.queries.find(
+    (entry) => entry.queryId === q1Search,
+  )!;
+  const unexecuted = structuredClone(search);
+  unexecuted.queryId = unexecutedSearch;
+  unexecuted.selections = unexecuted.selections.map((selection) => ({
+    ...selection,
+    selectionId: String(selection.selectionId).replace(
+      '.party_search_',
+      '.party_z_search_',
+    ),
+  }));
+  unexecuted.filter = {
+    kind: 'booleanPredicate',
+    schemaVersion: 'v6',
+    value: false,
+  };
+  search.tier = 'q1';
+  definition.queries.push(unexecuted);
   return definition;
 }
 

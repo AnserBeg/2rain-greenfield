@@ -307,6 +307,24 @@
           "expected": "Missing expected rejection"
         }
       ]
+    },
+    {
+      "name": "verification-searches-through-an-executed-q1-search",
+      "claim": "Release verification's search-exclusion probe reads through the entity's first plain search its gateway executes (Q0 with a filter the gateway's fence accepts, or Q1 with a compiled filter plan, as SemanticQueryGateway.invoke decides), so a release whose plain search is an executable Q1 query ahead of a Q0 search the gateway does not run verifies instead of failing VERIFICATION_QUERY_MISSING.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      'search',\n      gatewayExecutes,\n",
+      "replacement": "      'search',\n      gatewayExecutesQ0,\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "an executable Q1 search"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification probes search through an executable Q1 search, ahead of a Q0 search the gateway does not run",
+          "expected": "compiled search query of northstar\\.party:entity\\.party that gatewayExecutesQ0 admits is missing"
+        }
+      ]
     }
   ]
 }
