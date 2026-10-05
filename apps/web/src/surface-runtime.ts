@@ -2363,7 +2363,7 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .launcher-scan__field input{min-height:56px;padding:0 var(--space-3);font-size:var(--text-section);font-family:var(--font-mono)}
 .launcher-scan__message{margin-top:var(--space-3)}
 .launcher-action button{min-height:56px}
-@media(max-width:800px){.launcher-tiles ul{grid-template-columns:minmax(0,1fr)}.launcher-tile{min-height:96px}.launcher-action{position:sticky;bottom:0;padding:var(--space-2) 0;background:var(--surface-page)}.launcher-action button{width:100%}}
+@media(max-width:800px){.launcher-tiles ul{grid-template-columns:minmax(0,1fr)}.launcher-tile{min-height:96px}.launcher-action button{width:100%}}
 .data-table-wrap{margin-top:var(--space-4);overflow-x:auto}
 .data-table-wrap table{width:100%;border-collapse:collapse;text-align:left;font-size:var(--text-body)}
 .data-table-wrap th{height:var(--row-header-height);padding:0 var(--space-3);border-bottom:1px solid var(--line);color:var(--ink-muted);font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.08em;vertical-align:middle}

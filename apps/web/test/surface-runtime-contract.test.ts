@@ -1845,7 +1845,10 @@ test('WAREHOUSE-MODE: a launcher renders large tiles and one scan field that wor
     '.launcher-tile{display:flex;flex-direction:column;gap:var(--space-1);min-height:144px',
     '.launcher-scan__field input{min-height:56px',
     '.launcher-action button{min-height:56px}',
-    '@media(max-width:800px){.launcher-tiles ul{grid-template-columns:minmax(0,1fr)}.launcher-tile{min-height:96px}.launcher-action{position:sticky;bottom:0',
+    '@media(max-width:800px){.launcher-tiles ul{grid-template-columns:minmax(0,1fr)}.launcher-tile{min-height:96px}.launcher-action button{width:100%}}',
+    // The action is a Task's primary action: at phone width it sticks above
+    // the bottom navigation, as every Task's does.
+    '.command-bar,.task-primary-action{position:sticky;z-index:3;bottom:80px;',
   ])
     assert.ok(source.includes(rule), rule);
 
