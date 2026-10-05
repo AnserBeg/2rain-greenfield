@@ -170,6 +170,8 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'tenantShared', familyId: 'item' },
   { classification: 'tenantShared', familyId: 'location' },
   { classification: 'tenantShared', familyId: 'tax_code' },
+  { classification: 'tenantShared', familyId: 'unit' },
+  { classification: 'entityOwned', familyId: 'unit_conversion' },
   { classification: 'entityOwned', familyId: 'inventory_movement' },
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
@@ -219,6 +221,11 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
   {
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'item',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'unit_conversion',
     targetFamilyId: 'item',
   },
   {

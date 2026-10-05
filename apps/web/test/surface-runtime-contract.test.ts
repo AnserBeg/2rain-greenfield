@@ -2651,3 +2651,68 @@ test('a document editor writes its declared create values on the header first cr
   void _declared;
   assert.deepEqual(createValuesFor(plain, header, true, save), {});
 });
+
+test('compiled unit setup offers shared forms with bounded precision choices and exact factor controls', async () => {
+  const { governedProjection } =
+    await import('../../../test/helpers/governed-storage-target.js');
+  const manifest = (
+    await governedProjection<{
+      surfaces: Array<{
+        surfaceId: string;
+        archetype: string;
+        slots: Array<{ slot: string }>;
+        fields: Array<{ fieldId: string; fieldKind: string }>;
+      }>;
+    }>('northstar.compiler:projection-family.surface-manifest')
+  ).payload;
+  const { parsePinnedOperationCatalog } =
+    await import('../../../packages/runtime/src/semantic-operation-gateway.js');
+  const operations = parsePinnedOperationCatalog(
+    (
+      await governedProjection(
+        'northstar.compiler:projection-family.operation-catalog',
+      )
+    ).payload,
+  );
+  for (const local of ['unit', 'unit_conversion']) {
+    const form = manifest.surfaces.find(
+      (surface) => surface.surfaceId === `northstar.app:surface.${local}_form`,
+    )!;
+    assert.equal(form.archetype, 'record');
+    assert.ok(form.slots.some((slot) => slot.slot === 'commandBar'));
+    assert.ok(form.slots.some((slot) => slot.slot === 'sections'));
+    const create = operations.find(
+      (operation) =>
+        operation.operationId === `northstar.app:operation.${local}_create`,
+    )!;
+    assert.equal(create.effect.kind, 'createRecordEffect');
+    assert.ok(
+      create.inputContract?.fields.some(
+        (field) =>
+          field.fieldId === `northstar.app:field.${local}_code` &&
+          field.required,
+      ),
+    );
+  }
+  const units = operations.find(
+    (operation) =>
+      operation.operationId === 'northstar.app:operation.unit_create',
+  )!;
+  assert.equal(
+    units.inputContract?.fields.find((field) =>
+      field.fieldId.endsWith('unit_decimals'),
+    )?.enumOptionIds.length,
+    19,
+  );
+  const conversions = operations.find(
+    (operation) =>
+      operation.operationId ===
+      'northstar.app:operation.unit_conversion_create',
+  )!;
+  const denominator = conversions.inputContract?.fields.find((field) =>
+    field.fieldId.endsWith('unit_conversion_denominator'),
+  )!;
+  assert.equal(denominator.fieldKind, 'exactDecimalFieldType');
+  assert.equal(denominator.bounds.scale, 0);
+  assert.equal(denominator.bounds.precision, 38);
+});

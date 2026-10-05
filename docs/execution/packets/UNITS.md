@@ -1,0 +1,60 @@
+# UNITS — enter document quantities in another unit without changing the ledger
+
+Status: active setup BUILD; document slice stopped on UNITS-VERIFICATION. Branch `packet/UNITS`, based on INVENTORY-PARITY `e3da0a39`.
+Review: not owed — the implemented diff excludes the Critical set. Draft PR only; no integration or deployment.
+
+## Design before implementation
+
+Unit masters use existing text codes, with a name and decimal precision (0–18).
+Items retain their existing required `item_base_unit` text field and its posted-movement immutability.
+Conversions belong to a company, optionally an item, and declare from/to codes and positive exact integer numerator/denominator.
+Lookup prefers a direct item factor, then a direct company factor, then the corresponding reverse factors; duplicate matches refuse as ambiguous.
+The selected destination must be the item's base unit. Identity conversions still check the base unit's declared precision.
+
+Sales order, purchase order and stock document lines add optional entered quantity and entered unit fields.
+Their existing quantity remains the base quantity and is the only quantity downstream operations consume.
+Canonical metadata declares the normalization on ordinary create/update operations; the compiler carries that declaration to the shared document mutation runtime.
+Normalization runs inside the existing accepted-mutation transaction, after idempotency lookup and before the base quantity is written.
+Dependency reads use registered queries, current policy and the same transaction's existing row scope.
+Exact rational arithmetic refuses a missing factor, ambiguous factor, unknown unit or a result not representable at the base unit precision by name; it never rounds.
+A saved line freezes both entered and base quantities. Configuration edits do not recalculate it; replay returns the original accepted mutation.
+Quantity edits either supply a complete entered pair or clear that pair and use base quantity. Unrelated edits keep the frozen pair.
+Lists, document lines and printed documents display entered quantity/unit alongside the base quantity through shared metadata/renderers.
+
+## Owner rulings
+
+Keep today's base quantity fields; add the entered pair; exact factors only; code-keyed unit masters; never restate the ledger.
+ADR-0068 selects UNITS as the consumer of the reserved document-boundary seam.
+PaneFlow schema and product-quantities are read-only reference material: direct/item/company/reverse precedence is retained; its floating-point rounding is not reused.
+No posting kernel, serializer, trust, activation/verification, migrations, RLS or grants change is authorized.
+
+## Slices
+
+1. Unit and conversion masters plus standalone exact arithmetic implemented; mutation declaration stopped.
+2. Entered quantities and entry/display/print paths stopped on UNITS-VERIFICATION.
+3. Persistence, browser and CI evidence; release and coverage re-derived from compilation.
+
+## Critical dependency and safe boundary
+
+The existing release-verification arranger synthesizes every writable field independently.
+It cannot arrange a valid entered pair and conversion dependency; changing it belongs to the Critical set.
+[UNITS-VERIFICATION](UNITS-VERIFICATION.md) splits that work with bounded claims and proposed expected-red controls.
+No conversion descriptor or entered field is mounted, and no verification bypass is added.
+The safe increment implements unit/conversion setup and standalone exact arithmetic only.
+Decimals use nineteen numeric-labelled enum choices (0–18), so generic validation and verification can represent them.
+Invalid factors are refused by the arithmetic helper; document-time factor validation remains in the stopped slice.
+
+## Gates
+
+Passed: typecheck; four changed-file unit/integration tests; unit setup web-contract; navigation and release checks.
+Measured from compilation: 107 surfaces, 18 navigation leaves, 596 scenarios; 23 new setup scenarios have generic creates; executed/derived pins are 519/77.
+No new grammar key is mounted; the surface reader floor remains 16. No numbered field is added.
+Language coverage re-derived: 2673 obligations, 832 observed (previously 831). Local coverage checking requires CI reachability receipts; no local full suite was run.
+Pending: PostgreSQL units test; operations browser; schema snapshot; full hosted CI; check-records.
+Local container work requires at least 1.2 GB Windows free memory before taking the exclusive test lock; browser uses one worker.
+
+## Test it yourself
+
+See [UNITS-test-it-yourself.md](UNITS-test-it-yourself.md), completed with the implemented slices.
+
+Program review: no stabilized new correctness domain or stage boundary at this setup checkpoint; none launched.

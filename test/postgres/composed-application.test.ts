@@ -1180,7 +1180,7 @@ async function assertRealProductDefinition(
     // then the invoice, its lines, payments and credits (list, detail, form
     // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
     // vendor bill, its lines, payments and credits (list, detail, form each).
-    assert.equal(surfaces.length, 101);
+    assert.equal(surfaces.length, 107);
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     for (const local of [
       'goods_receipt',
@@ -3524,7 +3524,7 @@ async function assertBoundedFreshTenantInstallEvidence(
   // invoice number is searchable, so it adds no search exclusion.
   assert.equal(
     servingScenarioCount,
-    573,
+    596,
     'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, and 72 for payables',
   );
   await assertFreshInstallLineageEvidence(
@@ -5847,11 +5847,12 @@ async function assertExactPartitionEvidence(
   // on the purchase order, its line, the goods receipt and the amendment
   // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
   // (each vendor document has a generic create, replayed by this oracle over
-  // the compiled head): 573, 496.
+  // the compiled head): 573, 496. UNITS setup adds 23 constructible scenarios:
+  // 11 unit and 12 conversion, measured by entity from the current plan.
   assert.equal(
     evidence.results.length,
-    496,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, and payables 72',
+    519,
+    'the compiled head adds 23 constructible unit setup scenarios to the prior 496',
   );
   assert.equal(
     derivations.length,
