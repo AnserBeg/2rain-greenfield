@@ -1,6 +1,6 @@
 # UNITS — enter document quantities in another unit without changing the ledger
 
-Status: paused for the owner's Windows restart; draft setup checkpoint, [PR #17](https://github.com/AnserBeg/2rain-greenfield/pull/17); document slice stopped on UNITS-VERIFICATION. Branch `packet/UNITS`, based on INVENTORY-PARITY `e3da0a39`.
+Status: draft setup checkpoint, [PR #17](https://github.com/AnserBeg/2rain-greenfield/pull/17); document slice stopped on UNITS-VERIFICATION. Branch `packet/UNITS`, based on INVENTORY-PARITY `e3da0a39`.
 Review: not owed — the implemented diff excludes the Critical set. Draft PR only; no integration or deployment.
 
 ## Design before implementation
@@ -66,11 +66,11 @@ See [UNITS-test-it-yourself.md](UNITS-test-it-yourself.md), completed with the i
 
 Program review: no stabilized new correctness domain or stage boundary at this setup checkpoint; none launched.
 
-## Restart handoff
+## Hosted fixture repairs
 
-Latest pushed tip: `9ff7115f`; run 37265336413 finished red. Commercial PostgreSQL, main browser, performance and security passed; the new stored-row unit witness passed in the main PostgreSQL job.
-Unpushed fixes: compiled inventory golden (`3303be16`), browser datalist assertion, Inventory-free transition fixture stripping unit setup, and split composed refusal/rollback lifecycles with every existing 300-second bound retained. Focused golden case, formatting and changed-file lint passed; typecheck and hosted CI have not run after the latest fixture edits.
-Resume only in the UNITS worktree: refresh the record claim to the checkpoint commit, validate changed files, obey the memory/exclusive-lock guards for any local container test, then push the existing draft and await its full CI. Never change Critical production files or increase bounds. No lane-owned test process or container was left running; the other lane's running container was left alone.
+Run 37265336413 finished red. Commercial PostgreSQL, main browser, performance and security passed; the new stored-row unit witness passed in the main PostgreSQL job.
+Corrected the compiled inventory golden, browser datalist assertion, and Inventory-free transition fixture stripping unit setup. Split composed refusal/rollback database lifecycles with every existing 300-second bound retained; production release services are unchanged.
+After the Windows restart: typecheck, formatting and changed-file lint pass. Local browser deferred before taking the lock at 873236 KB free memory; hosted CI must prove the repaired container fixtures. No lane-owned process or container was left running at restart.
 
 ## Claims at the setup boundary
 
@@ -83,7 +83,7 @@ Resume only in the UNITS worktree: refresh the record claim to the checkpoint co
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UNITS",
   "base": "e3da0a3918620c5ce3e494eba3fdf1b3f8c91c4a",
-  "head": "3303be1614f0432ea1353e25a622344852b17ad0",
+  "head": "6bf1b673f4d2604bf46139b46845d20065bedf73",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -110,6 +110,7 @@ Resume only in the UNITS worktree: refresh the record claim to the checkpoint co
     "test/integration/units.test.ts",
     "test/postgres/composed-application.test.ts",
     "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
+    "test/postgres/module-storage-transition.test.ts",
     "test/postgres/units.test.ts",
     "test/unit/units.test.ts"
   ],
