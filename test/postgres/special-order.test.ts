@@ -105,6 +105,7 @@ test(
         fixture.create(
           'reservation',
           {
+            number: `RSV-${randomUUID()}`,
             state: `${ns}:option.reservation_state_draft`,
             item_id: fixture.item,
             unit_id: 'EA',

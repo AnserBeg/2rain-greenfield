@@ -10,6 +10,7 @@ test('special-order purchase receipt offers the explicit received-quantity reser
   page,
 }) => {
   test.setTimeout(480_000);
+  page.setDefaultTimeout(5_000);
   await withOrderEntryFixture(async (fixture) => {
     const ns = 'northstar.app';
     const order = await fixture.create('sales_order', {
@@ -53,6 +54,7 @@ test('special-order purchase receipt offers the explicit received-quantity reser
     await page.goto(
       `${fixture.app.baseUrl}/?surface=${encodeURIComponent(`${ns}:surface.sales_order_list`)}`,
     );
+    console.info('SPECIAL_ORDER_BROWSER: open sales order');
     await page
       .getByRole('link', {
         name: `Open Sales orders ${order.values[`${ns}:field.sales_order_number`]}`,
@@ -67,6 +69,7 @@ test('special-order purchase receipt offers the explicit received-quantity reser
         .getByRole('link', { name: 'Select', exact: true })
         .click();
     await selectSales();
+    console.info('SPECIAL_ORDER_BROWSER: create linked purchase order');
     await expect(
       page.getByRole('button', {
         name: 'Reserve for the special order',
@@ -82,6 +85,7 @@ test('special-order purchase receipt offers the explicit received-quantity reser
     await page
       .getByRole('link', { name: 'Open purchase order', exact: true })
       .click();
+    console.info('SPECIAL_ORDER_BROWSER: place purchase order');
     const purchaseUrl = page.url();
     const disclosure = page.locator(
       '.composition-record-actions:not([open]) > summary',
@@ -97,6 +101,7 @@ test('special-order purchase receipt offers the explicit received-quantity reser
     const row = dataset('purchasing_lines').locator('tbody tr').first();
     await expect(row).toContainText('Special order');
     await row.getByRole('link', { name: 'Select', exact: true }).click();
+    console.info('SPECIAL_ORDER_BROWSER: receive linked supply');
     await page
       .getByRole('button', { name: 'Receive with cost absent', exact: true })
       .click();
@@ -118,6 +123,7 @@ test('special-order purchase receipt offers the explicit received-quantity reser
         .first(),
     ).toHaveText('2');
     await selectSales();
+    console.info('SPECIAL_ORDER_BROWSER: reserve arrived quantity');
     await page
       .getByRole('button', {
         name: 'Reserve for the special order',
@@ -145,5 +151,6 @@ test('special-order purchase receipt offers the explicit received-quantity reser
         exact: true,
       }),
     ).toHaveCount(0);
+    console.info('SPECIAL_ORDER_BROWSER: received quantity reserved');
   });
 });
