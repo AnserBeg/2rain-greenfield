@@ -95,3 +95,31 @@ test('special-order metadata reuses the commercial link and declares receipt-bac
     1,
   );
 });
+
+test('a rejected borrowed session is destroyed instead of returning to the pool', async () => {
+  const rejected = new Error('role cleanup failed');
+  let released: Error | boolean | undefined;
+  const client = {
+    query: async () => ({ rows: [{ unlocked: true }] }),
+    release: (error?: Error | boolean) => {
+      released = error;
+    },
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  await assert.rejects(
+    withSpecialOrderGate(
+      pool,
+      {
+        tenantId: 'tenant',
+        environmentId: 'environment',
+        legalEntityId: 'company',
+      },
+      async (borrowed) => {
+        (await borrowed.connect()).release(rejected);
+        return 1;
+      },
+    ),
+    (error) => error === rejected,
+  );
+  assert.equal(released, rejected);
+});

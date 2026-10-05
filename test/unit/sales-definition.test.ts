@@ -380,12 +380,12 @@ test('sales leads compiled business navigation and fulfillment is registered beh
   const salesOperations = composed.operations.filter((operation) =>
     operation.operationId.includes(':operation.sales_order'),
   );
-  // Close/cancel, reopen (ruling F), and Create drop-ship PO (D-C).
+  // Close/cancel, reopen, Create drop-ship PO and Create special-order PO.
   assert.equal(
     salesOperations.filter(
       (operation) => operation.effect.kind === 'registeredCapabilityEffect',
     ).length,
-    4,
+    5,
   );
   assert.match(JSON.stringify(salesModuleDefinition()), /reservation/gu);
   assert.match(JSON.stringify(salesModuleDefinition()), /shipment/gu);

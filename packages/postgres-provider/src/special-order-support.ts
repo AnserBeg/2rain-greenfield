@@ -48,7 +48,14 @@ export async function withSpecialOrderGate<T>(
     await client.query('SELECT pg_advisory_lock($1::bigint)', [key]);
     const borrowed = new Proxy(client, {
       get(target, property) {
-        if (property === 'release') return () => {};
+        if (property === 'release')
+          return (error?: Error | boolean) => {
+            if (error)
+              destroy =
+                error instanceof Error
+                  ? error
+                  : new Error('Borrowed writer connection was rejected');
+          };
         const value = Reflect.get(target, property);
         return typeof value === 'function' ? value.bind(target) : value;
       },
