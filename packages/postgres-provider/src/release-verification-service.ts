@@ -1393,7 +1393,7 @@ class SemanticVerificationExecutor {
   /**
    * Archives every record verification created, newest first, reading each
    * through its entity's first plain get that returns any live record by id
-   * (`gatewayExecutesQ0`). A record it cannot read -- no such get, or an
+   * (`returnsAnyLiveRecordById`). A record it cannot read -- no such get, or an
    * answer that is neither the record nor `not-found` -- is refused by name,
    * not skipped, once every record that can be read is archived.
    */
@@ -1403,7 +1403,7 @@ class SemanticVerificationExecutor {
       const get = this.#findQueryForEntity(
         record.entityId,
         'get',
-        gatewayExecutesQ0,
+        returnsAnyLiveRecordById,
       );
       if (!get) {
         unreadable.push(
@@ -1936,7 +1936,7 @@ class SemanticVerificationExecutor {
    * (`verificationSentinelNumber`); it is still read wherever the release lets
    * a caller read it by record id -- the create's read-back when that
    * projection selects the field, else a plain get that selects it and that
-   * returns any live record by id (`gatewayExecutesQ0`) -- and must be that
+   * returns any live record by id (`returnsAnyLiveRecordById`) -- and must be that
    * sentinel. A read-back is a declared projection, not the record: one that
    * omits the field says nothing about the assignment. Only when no such read
    * selects the field is the sentinel used unread.
@@ -1968,7 +1968,7 @@ class SemanticVerificationExecutor {
       source = 'read-back';
     } else {
       // The first plain get that selects the field and that returns any live
-      // record by id (`gatewayExecutesQ0`); one the gateway would answer
+      // record by id (`returnsAnyLiveRecordById`); one the gateway would answer
       // `unsupported` without reading is no reader, and a read-model get is
       // never the read (`#findQueryForEntity`). Once such a get has run,
       // anything but the record's sentinel fails.
@@ -1977,7 +1977,7 @@ class SemanticVerificationExecutor {
           candidate.sourceEntityId === record.entityId &&
           candidate.queryType === 'get' &&
           candidate.readModel === undefined &&
-          gatewayExecutesQ0(candidate) &&
+          returnsAnyLiveRecordById(candidate) &&
           candidate.selections.some(
             (selection) => selection.fieldId === fieldId,
           ),
@@ -2427,7 +2427,7 @@ class SemanticVerificationExecutor {
    * The entity's first plain query of the type that `admits` admits: one the
    * gateway executes (`gatewayExecutes`) for a probe that reads through the
    * query's own filter, or a get that returns any live record by id
-   * (`gatewayExecutesQ0`) for a read that must find its record.
+   * (`returnsAnyLiveRecordById`) for a read that must find its record.
    */
   #findQueryForEntity(
     entityId: string,
@@ -2863,14 +2863,18 @@ function gatewayExecutes(query: VerificationQueryContract): boolean {
 }
 
 /**
- * Whether the gateway executes this query as a Q0 read (`gatewayExecutes`):
- * its filter is then the literal `true` and the read applies no other, so a
- * get returns any live record by id. Cleanup and the number witness read only
- * through such gets; a Q1 get's filter could hide a live record, which cleanup
+ * Whether a get returns any live record by id: the gateway executes it
+ * (`gatewayExecutes`) and its filter is the literal `true`, which the
+ * gateway's execution fence accepts -- a Q0 get, or a Q1 get whose compiled
+ * plan then restricts nothing. Cleanup and the number witness read only
+ * through such gets: any other filter could hide a live record, which cleanup
  * would take as archived.
  */
-function gatewayExecutesQ0(query: VerificationQueryContract): boolean {
-  return query.tier === 'q0' && gatewayExecutes(query);
+function returnsAnyLiveRecordById(query: VerificationQueryContract): boolean {
+  return (
+    gatewayExecutes(query) &&
+    inspectPredicateForExecution(query.filter).outcome === 'accepted'
+  );
 }
 
 /** A query result's outcome, with the gateway's reason when it has one. */
