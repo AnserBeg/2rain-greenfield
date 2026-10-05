@@ -12312,7 +12312,8 @@ test('REPLENISHMENT: the item form chooses its preferred location from the locat
     [field('item_reorder_point')]: '10',
     [field('item_reorder_up_to')]: '40',
     [field('item_preferred_location_id')]: vancouver,
-    [field('item_standard_cost_cad')]: '12.5',
+    // As PostgreSQL states a numeric: at its column's scale.
+    [field('item_standard_cost_cad')]: '12.500000000000000000',
     [field('item_standard_cost_usd')]: null,
     [field('item_standard_cost_eur')]: null,
   });
@@ -12333,6 +12334,15 @@ test('REPLENISHMENT: the item form chooses its preferred location from the locat
   assert.equal(
     select(edit.html),
     `<option value="">None</option><option value="${calgary}">Calgary warehouse</option><option value="${vancouver}" selected>Vancouver warehouse</option>`,
+  );
+  // A stored decimal reads in canonical spelling, the one the write path
+  // admits: saved untouched, the form is not refused for trailing zeros.
+  assert.match(
+    edit.html,
+    new RegExp(
+      `name="value:${field('item_standard_cost_cad')}" value="12\\.5"`,
+      'u',
+    ),
   );
   // A new item starts with none chosen.
   const created = await form();

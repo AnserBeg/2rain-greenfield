@@ -24,6 +24,7 @@ import {
 } from '../../../packages/runtime/src/list-behavior/index.js';
 
 import { escapeHtml, shortIdentity } from './html.js';
+import { canonicalDecimal, DECIMAL_KINDS } from './control-semantics.js';
 import {
   renderReceivingSection,
   renderReceivingNavigation,
@@ -1872,11 +1873,23 @@ function renderFormFields(
       const value = record ? record.values[fieldId] : undefined;
       const field = fieldsById.get(fieldId);
       const inputField = inputFieldsById.get(fieldId);
+      // A stored decimal is shown in canonical spelling -- `12.5`, not
+      // `12.500000000000000000` -- as the draft editor shows it: the same
+      // exact value, in the one spelling the write path admits, so a form
+      // saved without touching it is not refused (REPLENISHMENT: an item's
+      // prices beside its new levels).
+      const kind = field?.kind ?? inputField?.kind;
+      const shown =
+        kind !== undefined &&
+        DECIMAL_KINDS.includes(kind) &&
+        typeof value === 'string'
+          ? (canonicalDecimal(value) ?? value)
+          : value;
       const choices = context.formReferences?.[fieldId];
       const control =
         choices?.status === 'ready'
           ? renderFormReferenceControl(choices.options, fieldId, value)
-          : renderFormControl(field, inputField, fieldId, index, value);
+          : renderFormControl(field, inputField, fieldId, index, shown);
       const emptyIntent = renderEmptyIntentControl(
         inputField,
         fieldId,
