@@ -8994,7 +8994,7 @@
       "kind": "fieldDefinition",
       "label": "Inventory status",
       "orderKey": 40,
-      "presence": "required",
+      "presence": "optional",
       "reportable": true,
       "schemaVersion": "v6",
       "searchable": false,

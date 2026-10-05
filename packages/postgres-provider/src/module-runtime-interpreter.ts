@@ -2538,7 +2538,8 @@ interface ListFiguresPlan {
  * caller input: each query the gateway authorized names its entity; the
  * match, quantity, state, date and value columns must be compiled columns of
  * the kind the figure needs; a parent is reached through the rows' compiled
- * relation to it and related rows through theirs to the rows; a listed row's
+ * relation to it, or through a compiled text column of the rows holding its
+ * record id, and related rows through theirs to the rows; a listed row's
  * operand is a compiled exact decimal of the queried entity. Anything else
  * fails closed rather than summing a column a request happened to name.
  */
@@ -2804,7 +2805,8 @@ const FIGURES_ALIAS = 'table_figures';
  * read the same figures and a kept band filters before both. Every joined row
  * is pinned to the listed row's tenant and environment, to the issued read
  * scope, and -- parent and related rows -- to its own row's company; the rows
- * that hold the listed record's id compare that id as text.
+ * that hold the listed record's id compare that id as text, as a parent
+ * reached through a reference field compares its own.
  */
 function listFiguresFromSql(
   entity: StorageEntity,

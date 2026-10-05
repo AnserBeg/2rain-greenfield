@@ -1897,11 +1897,12 @@ test('LOCATIONS: a location keeps an inventory status its page changes with a re
     normalizeApplicationPackage(structuredClone(source)),
   );
 
-  // Every location is usable until a status change says otherwise: a
-  // required status with a declared default, so a released location reads
-  // usable and a create need not state it.
+  // Every location is usable until a status change says otherwise: a status
+  // with a declared default, so a released location reads usable and a
+  // create need not state it (an input contract requires every required
+  // field of a create).
   const status = field(source, 'location_status');
-  assert.equal(status.presence, 'required');
+  assert.equal(status.presence, 'optional');
   assert.equal(status.defaultSemantics, 'declaredDefault');
   assert.deepEqual(status.defaultValue, {
     kind: 'textValue',

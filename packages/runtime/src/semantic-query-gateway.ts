@@ -948,8 +948,8 @@ async function authorizeSharedListProjection(
       entry.label ||= label;
       reads.set(queryId, entry);
     };
-    // A parent reached through a reference field is read by its record id
-    // alone: the rows must select the field that holds it.
+    // A parent reached through a reference field is joined on the record id
+    // the rows hold: the rows' query must select the field that holds it.
     const referenced = (within: { readonly referenceFieldId?: string }) =>
       within.referenceFieldId === undefined ? [] : [within.referenceFieldId];
     for (const sum of query.figures.sums) {

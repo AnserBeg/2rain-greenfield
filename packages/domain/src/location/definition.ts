@@ -167,8 +167,11 @@ export function locationModuleDefinition(
       ...(inventoryStatus
         ? [
             // Every location is usable until a declared status change with a
-            // reason says otherwise; a location released before this field
-            // existed reads usable (the column's declared default).
+            // reason says otherwise: the column's declared default fills a
+            // location released before this field existed and one created
+            // without it, as every generic create is (the form omits it).
+            // Optional, not required: an operation's input contract requires
+            // a create to state every required field, default or not.
             {
               ...enumField(
                 definitionIds,
@@ -178,6 +181,7 @@ export function locationModuleDefinition(
                 40,
                 STATUSES,
               ),
+              presence: 'optional',
               defaultSemantics: 'declaredDefault',
               defaultValue: {
                 kind: 'textValue',

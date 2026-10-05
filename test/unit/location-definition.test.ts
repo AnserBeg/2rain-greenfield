@@ -343,7 +343,7 @@ test('LOCATIONS: the product mounts Location with an inventory status, the reaso
   const status = product.fields.find(
     (value) => value.fieldId === LOCATION_IDS.fieldIds.status,
   )!;
-  assert.equal(status.presence, 'required');
+  assert.equal(status.presence, 'optional');
   assert.equal(status.defaultSemantics, 'declaredDefault');
   assert.equal(status.defaultValue?.value, LOCATION_IDS.statusOptionIds.usable);
   assert.deepEqual(
@@ -356,10 +356,12 @@ test('LOCATIONS: the product mounts Location with an inventory status, the reaso
       returnPending: LOCATION_IDS.statusOptionIds.returnPending,
     }),
   );
-  // Every query reads them; the reason and the instant are optional.
+  // Every query reads them; all three are optional, so a create need not
+  // state them.
   for (const query of product.queries)
     assert.equal(query.selections.length, 6, query.queryId);
   for (const fieldId of [
+    LOCATION_IDS.fieldIds.status,
     LOCATION_IDS.fieldIds.statusReason,
     LOCATION_IDS.fieldIds.statusChangedAt,
   ])
