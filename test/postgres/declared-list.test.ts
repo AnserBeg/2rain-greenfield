@@ -147,6 +147,8 @@ test(
           [salesView('released')]: byState('released'),
           [salesView('closed')]: byState('closed'),
           [salesView('cancelled')]: byState('cancelled'),
+          // No List order is a counter sale (SALES-EXTRAS).
+          [salesView('counter')]: 0,
         });
         assert.ok(byState('draft') > 0 && byState('released') > 0);
         // Customers are named through the party list, never shown as ids.

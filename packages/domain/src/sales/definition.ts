@@ -154,6 +154,7 @@ function ids(namespace: string) {
           'sales_order',
           'other_fee_tax_rate_percent',
         ),
+        counterSale: field('sales_order', 'counter_sale'),
       },
       salesOrderLine: {
         itemId: field('sales_order_line', 'item_id'),
@@ -432,6 +433,18 @@ export function salesModuleDefinition(
           type,
           { optional: true },
         ),
+      ),
+      // A counter sale (SALES-EXTRAS): an ordinary order, sold, shipped and
+      // invoiced at the counter in one Task, so every List and report shows
+      // it like any other.
+      field(
+        definitionIds,
+        entityIds.salesOrder,
+        fieldIds.salesOrder.counterSale,
+        'Counter sale',
+        230,
+        { kind: 'booleanFieldType', schemaVersion: version },
+        { optional: true },
       ),
       field(
         definitionIds,

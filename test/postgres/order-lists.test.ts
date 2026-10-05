@@ -277,6 +277,8 @@ test(
         [salesView('released')]: byState('released'),
         [salesView('closed')]: byState('closed'),
         [salesView('cancelled')]: byState('cancelled'),
+        // No order here is a counter sale (SALES-EXTRAS).
+        [salesView('counter')]: 0,
       });
       // 5 + 3 ordered, 3 of the first line shipped: 5 still to ship.
       const shipping = scenario.sales.shipping.recordId;

@@ -703,6 +703,44 @@ function surfaceManifestPayload(
   const relationIds = new Set<string>(
     original.relations.map((relation) => String(relation.relationId)),
   );
+  // Floor 15: ranked editor defaults (`tiers`), and Tasks of more than five
+  // steps or whose per-row step reads an earlier per-row step's read-back.
+  const rankedDefaultsOrChainedTasks =
+    original.surfaces.some((surface) => {
+      const editor =
+        'documentEditor' in surface
+          ? (surface.documentEditor as SurfaceDocumentEditor | undefined)
+          : undefined;
+      return [
+        ...(editor?.headerFields ?? []),
+        ...(editor?.lineFields ?? []),
+      ].some(
+        (field) =>
+          field.defaultFrom?.tiers !== undefined ||
+          (field.presentation?.kind === 'derived' &&
+            field.presentation.tiers !== undefined),
+      );
+    }) ||
+    [...compositions.values()].some((value) =>
+      value?.actions.some(
+        (action) =>
+          action.steps.length > 5 ||
+          action.steps.some(
+            (step) =>
+              step.each === true &&
+              step.bindings.some(
+                (binding) =>
+                  binding.value.source === 'step' &&
+                  action.steps.some(
+                    (candidate) =>
+                      binding.value.source === 'step' &&
+                      candidate.stepId === binding.value.stepId &&
+                      candidate.each === true,
+                  ),
+              ),
+          ),
+      ),
+    );
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -821,8 +859,10 @@ function surfaceManifestPayload(
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
       // 15: ranked editor defaults (`tiers`), such as a customer's price
-      // lists. A reader that dropped them would price every line at the
-      // item's list price -- a wrong price under an exact-looking figure.
+      // lists, and Tasks of up to twelve steps whose per-row steps read their
+      // own row's earlier read-backs (a counter sale). A reader that dropped
+      // them would price every line at the item's list price, or refuse or
+      // misroute a counter sale -- a wrong result, not a lesser one.
       // 14: record alerts and progression, multi-row Tasks (`rows`, `perRow`,
       // `each`) and a record column or link naming a relation of its record.
       // A reader that dropped them would hide an order's shortage, run a
@@ -845,21 +885,7 @@ function surfaceManifestPayload(
       // 9: picker eligibility and typed Task inputs. A reader that dropped
       // either would offer every party as a customer, or ask for free text
       // where a governed value is declared -- a wrong render, not a lesser one.
-      minimumVersion: original.surfaces.some((surface) => {
-        const editor =
-          'documentEditor' in surface
-            ? (surface.documentEditor as SurfaceDocumentEditor | undefined)
-            : undefined;
-        return [
-          ...(editor?.headerFields ?? []),
-          ...(editor?.lineFields ?? []),
-        ].some(
-          (field) =>
-            field.defaultFrom?.tiers !== undefined ||
-            (field.presentation?.kind === 'derived' &&
-              field.presentation.tiers !== undefined),
-        );
-      })
+      minimumVersion: rankedDefaultsOrChainedTasks
         ? 15
         : [...compositions.values()].some(
               (value) =>

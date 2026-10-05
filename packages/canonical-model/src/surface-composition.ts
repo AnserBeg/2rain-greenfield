@@ -904,10 +904,13 @@ export function validateSurfaceCompositions(
                 surface.surfaceId,
                 'step mapping must select an earlier operation read-back',
               );
-            if (sourceStep?.each)
+            // A per-row step reads an earlier per-row step's read-back of
+            // its own row -- the reservation it then reserves and ships from
+            // (SALES-EXTRAS); nothing else reads a per-row read-back.
+            if (sourceStep?.each && !step.each)
               fail(
                 surface.surfaceId,
-                'no step reads the read-back of a per-row step',
+                'no step reads the read-back of a per-row step but a later per-row step, of its own row',
               );
           }
           if (

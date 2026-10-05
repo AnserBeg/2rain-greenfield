@@ -894,7 +894,10 @@ const compositionAction = z.strictObject({
   datasetId: CanonicalIdSchema.optional(),
   conditions: z.array(compositionCondition).max(12),
   inputs: z.array(compositionInput).max(12),
-  steps: z.array(compositionStep).max(5),
+  // 12, widened from 5 (a Task the narrower bound admitted is still
+  // admitted): a counter sale confirms, reserves, ships, invoices and takes
+  // payment in one Task (SALES-EXTRAS).
+  steps: z.array(compositionStep).max(12),
   /**
    * The rows a multi-row Task works through: every loaded row of the dataset
    * whose conditions hold, each read as that row's `selected` values -- an

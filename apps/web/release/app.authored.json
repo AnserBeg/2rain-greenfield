@@ -4121,6 +4121,25 @@
     {
       "classification": "internal",
       "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "fieldId": "northstar.app:field.sales_order_counter_sale",
+      "fieldType": { "kind": "booleanFieldType", "schemaVersion": "v6" },
+      "kind": "fieldDefinition",
+      "label": "Counter sale",
+      "orderKey": 230,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
@@ -18321,6 +18340,17 @@
           "orderKey": 230,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_get_23"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_counter_sale"
+          },
+          "kind": "querySelection",
+          "orderKey": 240,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_get_24"
         }
       ],
       "sourceEntity": {
@@ -18618,6 +18648,17 @@
           "orderKey": 230,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_list_23"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_counter_sale"
+          },
+          "kind": "querySelection",
+          "orderKey": 240,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_list_24"
         }
       ],
       "sourceEntity": {
@@ -18914,6 +18955,17 @@
           "orderKey": 230,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_search_23"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_counter_sale"
+          },
+          "kind": "querySelection",
+          "orderKey": 240,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_search_24"
         }
       ],
       "sourceEntity": {
@@ -19224,6 +19276,17 @@
           "orderKey": 230,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_resolve_23"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_counter_sale"
+          },
+          "kind": "querySelection",
+          "orderKey": 240,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_resolve_24"
         }
       ],
       "sourceEntity": {
@@ -37791,6 +37854,17 @@
           "orderKey": 230,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.commercial_order_get_23"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_counter_sale"
+          },
+          "kind": "querySelection",
+          "orderKey": 240,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_get_24"
         }
       ],
       "sourceEntity": {
@@ -41378,6 +41452,17 @@
                 "value": "northstar.app:state.sales_order_cancelled"
               }
             ]
+          },
+          {
+            "viewId": "northstar.app:list_view.sales_order_list_counter",
+            "label": "Counter sales",
+            "orderKey": 70,
+            "filters": [
+              {
+                "field": "northstar.app:field.sales_order_counter_sale",
+                "value": "true"
+              }
+            ]
           }
         ],
         "filters": [
@@ -42000,6 +42085,12 @@
             "orderKey": 78,
             "field": "northstar.app:metric.customer_available_credit",
             "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.counter_sale",
+            "label": "Counter sale",
+            "orderKey": 79,
+            "field": "northstar.app:field.sales_order_counter_sale"
           }
         ],
         "children": [
@@ -43299,6 +43390,1251 @@
               },
               "record": { "source": "selected", "field": "recordId" }
             }
+          },
+          {
+            "actionId": "northstar.app:action.counter_sale_paid",
+            "label": "Counter sale: take payment",
+            "description": "Confirms this order, ships every line from one location, invoices it and records the payment of the whole balance. Each step uses the order’s own operations.",
+            "orderKey": 60,
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.sales_order_draft"
+              }
+            ],
+            "rows": {
+              "datasetId": "northstar.app:dataset.fulfillment_lines",
+              "conditions": [
+                {
+                  "value": {
+                    "source": "selected",
+                    "field": "northstar.app:field.sales_order_line_ordered_quantity"
+                  },
+                  "operator": "positive",
+                  "compare": null
+                }
+              ]
+            },
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.counter_location",
+                "label": "Ship from",
+                "orderKey": 10,
+                "type": "reference",
+                "required": true,
+                "query": {
+                  "kind": "queryReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:query.location_list"
+                },
+                "labelField": {
+                  "kind": "fieldReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:field.location_name"
+                }
+              },
+              {
+                "inputId": "northstar.app:input.counter_method",
+                "label": "Paid by",
+                "orderKey": 20,
+                "type": "text",
+                "required": true,
+                "presentation": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "value": "northstar.app:option.customer_payment_method_cash",
+                      "label": "Cash"
+                    },
+                    {
+                      "value": "northstar.app:option.customer_payment_method_cheque",
+                      "label": "Cheque"
+                    },
+                    {
+                      "value": "northstar.app:option.customer_payment_method_other",
+                      "label": "Other"
+                    }
+                  ],
+                  "defaultValue": "northstar.app:option.customer_payment_method_cash"
+                }
+              },
+              {
+                "inputId": "northstar.app:input.counter_reference",
+                "label": "Reference (cheque number)",
+                "orderKey": 30,
+                "type": "text",
+                "required": false
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.counter_mark",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.sales_order_update"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": [
+                      "patch",
+                      "northstar.app:field.sales_order_counter_sale"
+                    ],
+                    "value": { "source": "literal", "value": true }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_confirm",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.sales_order_release"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_mark",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_reserve_draft",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.reservation_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_number"
+                    ],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.reservation_state"],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.reservation_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_item_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_item_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_location_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.counter_location"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_quantity"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_ordered_quantity"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_unit_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_unit_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_reason"
+                    ],
+                    "value": { "source": "literal", "value": "Counter sale" }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.reservation_order_line"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  }
+                ],
+                "each": true
+              },
+              {
+                "stepId": "northstar.app:step.counter_reserve",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.reservation_reserve"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_reserve_draft",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_reserve_draft",
+                      "field": "revision"
+                    }
+                  }
+                ],
+                "each": true
+              },
+              {
+                "stepId": "northstar.app:step.counter_shipment",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.shipment_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.shipment_carrier"],
+                    "value": { "source": "literal", "value": "Counter" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_shipping_reference_kind"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_shipping_reference"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.shipment_state"],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.shipment_state_draft"
+                    }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.shipment_kind"],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.shipment_kind_initial"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_effective_at"
+                    ],
+                    "value": { "source": "generated", "value": "instant" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_location_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.counter_location"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_external_reference"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_reason_code"
+                    ],
+                    "value": { "source": "literal", "value": "SHIP" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_reason_narrative"
+                    ],
+                    "value": { "source": "literal", "value": "Counter sale" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_name"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_name"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_street"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_street"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_city"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_city"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_region"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_region"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_postal_code"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_postal_code"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_country"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_country"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.shipment_order"
+                    ],
+                    "value": { "source": "record", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_shipment_line",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.shipment_line_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_line_number"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_line_number"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_item_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_item_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_quantity"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_ordered_quantity"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_unit_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_unit_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_reversal_of_movement_id"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.shipment_line_shipment"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_shipment",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.shipment_line_order_line"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.shipment_line_reservation"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_reserve_draft",
+                      "field": "recordId"
+                    }
+                  }
+                ],
+                "each": true
+              },
+              {
+                "stepId": "northstar.app:step.counter_ship",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.shipment_post"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_shipment",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_shipment",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_invoice",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.customer_invoice_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.customer_invoice_state"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.customer_invoice_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.customer_invoice_invoice_date"
+                    ],
+                    "value": { "source": "generated", "value": "instant" }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.customer_invoice_order"
+                    ],
+                    "value": { "source": "record", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_invoice_post",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.customer_invoice_post"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_invoice",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_invoice",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_payment",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.customer_payment_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.customer_payment_state"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.customer_payment_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.customer_payment_payment_date"
+                    ],
+                    "value": { "source": "generated", "value": "instant" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.customer_payment_amount"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_invoice_post",
+                      "field": "northstar.app:field.customer_invoice_balance"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.customer_payment_method"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.counter_method"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.customer_payment_reference"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.counter_reference"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.customer_payment_invoice"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_invoice",
+                      "field": "recordId"
+                    }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_pay",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.customer_payment_post"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_payment",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_payment",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.counter_sale_account",
+            "label": "Counter sale: on account",
+            "description": "Confirms this order, ships every line from one location and invoices it on the customer’s account. Each step uses the order’s own operations.",
+            "orderKey": 61,
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.sales_order_draft"
+              }
+            ],
+            "rows": {
+              "datasetId": "northstar.app:dataset.fulfillment_lines",
+              "conditions": [
+                {
+                  "value": {
+                    "source": "selected",
+                    "field": "northstar.app:field.sales_order_line_ordered_quantity"
+                  },
+                  "operator": "positive",
+                  "compare": null
+                }
+              ]
+            },
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.counter_location",
+                "label": "Ship from",
+                "orderKey": 10,
+                "type": "reference",
+                "required": true,
+                "query": {
+                  "kind": "queryReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:query.location_list"
+                },
+                "labelField": {
+                  "kind": "fieldReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:field.location_name"
+                }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.counter_mark",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.sales_order_update"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": [
+                      "patch",
+                      "northstar.app:field.sales_order_counter_sale"
+                    ],
+                    "value": { "source": "literal", "value": true }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_confirm",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.sales_order_release"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_mark",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_reserve_draft",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.reservation_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_number"
+                    ],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.reservation_state"],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.reservation_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_item_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_item_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_location_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.counter_location"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_quantity"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_ordered_quantity"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_unit_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_unit_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_reason"
+                    ],
+                    "value": { "source": "literal", "value": "Counter sale" }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.reservation_order_line"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  }
+                ],
+                "each": true
+              },
+              {
+                "stepId": "northstar.app:step.counter_reserve",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.reservation_reserve"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_reserve_draft",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_reserve_draft",
+                      "field": "revision"
+                    }
+                  }
+                ],
+                "each": true
+              },
+              {
+                "stepId": "northstar.app:step.counter_shipment",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.shipment_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.shipment_carrier"],
+                    "value": { "source": "literal", "value": "Counter" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_shipping_reference_kind"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_shipping_reference"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.shipment_state"],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.shipment_state_draft"
+                    }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.shipment_kind"],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.shipment_kind_initial"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_effective_at"
+                    ],
+                    "value": { "source": "generated", "value": "instant" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_location_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.counter_location"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_external_reference"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_reason_code"
+                    ],
+                    "value": { "source": "literal", "value": "SHIP" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_reason_narrative"
+                    ],
+                    "value": { "source": "literal", "value": "Counter sale" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_name"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_name"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_street"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_street"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_city"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_city"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_region"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_region"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_postal_code"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_postal_code"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_ship_to_country"
+                    ],
+                    "value": {
+                      "source": "record",
+                      "field": "northstar.app:field.sales_order_ship_to_country"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.shipment_order"
+                    ],
+                    "value": { "source": "record", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_shipment_line",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.shipment_line_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_line_number"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_line_number"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_item_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_item_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_quantity"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_ordered_quantity"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_unit_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_unit_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.shipment_line_reversal_of_movement_id"
+                    ],
+                    "value": { "source": "literal", "value": null }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.shipment_line_shipment"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_shipment",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.shipment_line_order_line"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.shipment_line_reservation"
+                    ],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_reserve_draft",
+                      "field": "recordId"
+                    }
+                  }
+                ],
+                "each": true
+              },
+              {
+                "stepId": "northstar.app:step.counter_ship",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.shipment_post"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_shipment",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_shipment",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_invoice",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.customer_invoice_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.customer_invoice_state"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.customer_invoice_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.customer_invoice_invoice_date"
+                    ],
+                    "value": { "source": "generated", "value": "instant" }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.customer_invoice_order"
+                    ],
+                    "value": { "source": "record", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.counter_invoice_post",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.customer_invoice_post"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_invoice",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.counter_invoice",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              }
+            ]
           },
           {
             "actionId": "northstar.app:action.open_packing",

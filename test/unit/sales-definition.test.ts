@@ -80,8 +80,8 @@ test('sales fulfillment metadata is a complete order, reservation and shipment d
   // the order's tax code and two charges with codes and frozen rates, and the
   // line's list price, discount, tax code and frozen rate; then (ruling C)
   // 14 invoice, 9 invoice-line, 6 payment and 5 credit fields. SALES-EXTRAS
-  // adds the price list that priced a line.
-  assert.equal(authored.fields.length, 99);
+  // adds the price list that priced a line and the order's counter flag.
+  assert.equal(authored.fields.length, 100);
   // SALES-PARITY adds sales_order_reopen (ruling F), then the four
   // receivables documents' CRUD and their post and void commands.
   assert.equal(authored.operations.length, 48);

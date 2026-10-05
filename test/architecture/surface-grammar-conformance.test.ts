@@ -299,8 +299,56 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // List row actions and supplementary progress (ORDER-PARITY) require 13;
   // record alerts and progression, multi-row Tasks and record columns naming
   // a relation (ORDER-PARITY increment B) require 14; ranked editor defaults
-  // (SALES-EXTRAS price lists) require 15.
+  // (SALES-EXTRAS price lists) and Tasks of more than five steps whose
+  // per-row steps read their own row's read-backs (its counter sales)
+  // require 15.
   assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 15);
+  // Each half of 15 holds it alone: without the price lists' tiers the
+  // counter sale's Tasks still require it; without both, the floor is 14.
+  const floorWithout = (counterSales: boolean) => {
+    const source = composedApplicationWithInventory() as {
+      surfaces: Array<{
+        documentEditor?: Record<
+          'headerFields' | 'lineFields',
+          Array<{
+            defaultFrom?: { tiers?: unknown };
+            presentation?: {
+              kind?: string;
+              sourceFieldId?: string;
+              tiers?: unknown;
+            };
+          }>
+        >;
+        composition?: { actions: Array<{ actionId: string }> };
+      }>;
+    };
+    for (const surface of source.surfaces) {
+      const editor = surface.documentEditor;
+      if (editor)
+        for (const key of ['headerFields', 'lineFields'] as const) {
+          // A field the tiers alone derive (the line's price list) goes.
+          editor[key] = (editor[key] ?? []).filter(
+            (field) =>
+              !(
+                field.presentation?.tiers !== undefined &&
+                field.presentation.sourceFieldId === undefined
+              ),
+          );
+          for (const field of editor[key]) {
+            delete field.defaultFrom?.tiers;
+            delete field.presentation?.tiers;
+          }
+        }
+      if (counterSales && surface.composition)
+        surface.composition.actions = surface.composition.actions.filter(
+          (action) => !action.actionId.includes(':action.counter_sale_'),
+        );
+    }
+    return compiledSurfaceManifest(compileDefinition(source))
+      .requiredRuntimeCapability.minimumVersion;
+  };
+  assert.equal(floorWithout(false), 15);
+  assert.equal(floorWithout(true), 14);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.

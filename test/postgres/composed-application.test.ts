@@ -3533,11 +3533,12 @@ async function assertBoundedFreshTenantInstallEvidence(
   // SALES-EXTRAS adds 2, measured from the compiled plan: a search exclusion
   // for each of Party's credit limit and credit hold; then 35 for price
   // lists: the price list (14), its prices (11), its customers (9) and the
-  // search exclusion of the price list a sales line records (1).
+  // search exclusion of the price list a sales line records (1); then 1 for
+  // counter sales: the search exclusion of the order's counter flag.
   assert.equal(
     servingScenarioCount,
-    610,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 2 for credit control and 35 for price lists',
+    611,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 2 for credit control, 35 for price lists and 1 for counter sales',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5878,11 +5879,12 @@ async function assertExactPartitionEvidence(
   // (each vendor document has a generic create, replayed by this oracle over
   // the compiled head): 573, 496. SALES-EXTRAS' 2 search exclusions on
   // Party, which has a generic create, execute: 575, 498; so do its price
-  // lists' 35 (each entity has a generic create): 610, 533.
+  // lists' 35 (each entity has a generic create): 610, 533; and the counter
+  // flag's search exclusion on the sales order: 611, 534.
   assert.equal(
     evidence.results.length,
-    533,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, credit control 2 and price lists 35',
+    534,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, credit control 2, price lists 35 and counter sales 1',
   );
   assert.equal(
     derivations.length,
@@ -5922,8 +5924,8 @@ async function assertExactPartitionEvidence(
   const salesScenarioIds = binding.plan.scenarios
     .filter((scenario) => salesEntityIds.has(scenario.entityId))
     .map((scenario) => scenario.scenarioId);
-  // 29 + 17, as `assertSalesVerificationCoverage` pins them per entity.
-  assert.equal(salesScenarioIds.length, 46);
+  // 30 + 17, as `assertSalesVerificationCoverage` pins them per entity.
+  assert.equal(salesScenarioIds.length, 47);
   assert.equal(
     salesScenarioIds.every((scenarioId) =>
       executedScenarioIdSet.has(scenarioId),
@@ -6137,8 +6139,9 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
     reservation: 14,
     reservation_balance: 10,
     // SALES-PARITY: salesperson, terms, ship-to address and six ship-to lines,
-    // then the tax code and two charges with codes and frozen rates.
-    sales_order: 29,
+    // then the tax code and two charges with codes and frozen rates;
+    // SALES-EXTRAS: the counter flag.
+    sales_order: 30,
     // SALES-PARITY: list price, discount, tax code and frozen rate;
     // SALES-EXTRAS: the price list that priced it.
     sales_order_line: 17,

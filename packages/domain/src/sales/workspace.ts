@@ -133,7 +133,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     }));
   const selected = (name: string) => ({ source: 'selected', field: name });
   const record = (name: string) => ({ source: 'record', field: name });
-  const literal = (value: string | number | null) => ({
+  const literal = (value: string | number | boolean | null) => ({
     source: 'literal',
     value,
   });
@@ -274,6 +274,195 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     type: 'quantity',
     required: true,
   };
+  /**
+   * A counter sale (SALES-EXTRAS) in one Task, through the operations the
+   * order already has: it marks the draft as a counter sale, confirms it
+   * (credit is checked as for any order), reserves and ships every line in
+   * full from one location (the fulfillment route posts it), invoices it
+   * and, when paid at the counter, records the payment of the whole balance.
+   * No payment provider: cash, cheque or other, as recorded.
+   */
+  const counterSale = (paid: boolean) => ({
+    actionId: id('action', paid ? 'counter_sale_paid' : 'counter_sale_account'),
+    label: paid ? 'Counter sale: take payment' : 'Counter sale: on account',
+    description: paid
+      ? 'Confirms this order, ships every line from one location, invoices it and records the payment of the whole balance. Each step uses the order’s own operations.'
+      : 'Confirms this order, ships every line from one location and invoices it on the customer’s account. Each step uses the order’s own operations.',
+    orderKey: paid ? 60 : 61,
+    conditions: [inState('draft')],
+    rows: {
+      datasetId: lines,
+      conditions: [
+        {
+          value: selected(field('sales_order_line_ordered_quantity')),
+          operator: 'positive',
+          compare: null,
+        },
+      ],
+    },
+    inputs: [
+      {
+        inputId: id('input', 'counter_location'),
+        label: 'Ship from',
+        orderKey: 10,
+        type: 'reference',
+        required: true,
+        query: q('location_list'),
+        labelField: ref('fieldReference', field('location_name')),
+      },
+      ...(paid
+        ? [
+            {
+              inputId: id('input', 'counter_method'),
+              label: 'Paid by',
+              orderKey: 20,
+              type: 'text',
+              required: true,
+              presentation: {
+                kind: 'choice',
+                options: (
+                  [
+                    ['cash', 'Cash'],
+                    ['cheque', 'Cheque'],
+                    ['other', 'Other'],
+                  ] as const
+                ).map(([value, label]) => ({
+                  value: id('option', `customer_payment_method_${value}`),
+                  label,
+                })),
+                defaultValue: id('option', 'customer_payment_method_cash'),
+              },
+            },
+            {
+              inputId: id('input', 'counter_reference'),
+              label: 'Reference (cheque number)',
+              orderKey: 30,
+              type: 'text',
+              required: false,
+            },
+          ]
+        : []),
+    ],
+    steps: [
+      step('counter_mark', 'sales_order_update', [
+        bind(['recordId'], record('recordId')),
+        bind(['expectedRevision'], record('revision')),
+        bind(['patch', field('sales_order_counter_sale')], literal(true)),
+      ]),
+      step('counter_confirm', 'sales_order_release', [
+        bind(['recordId'], record('recordId')),
+        bind(['expectedRevision'], stepValue('counter_mark', 'revision')),
+      ]),
+      {
+        ...create(
+          'counter_reserve_draft',
+          'reservation',
+          {
+            number: generated('uuid'),
+            state: literal(id('option', 'reservation_state_draft')),
+            item_id: selected(field('sales_order_line_item_id')),
+            location_id: input('counter_location'),
+            quantity: selected(field('sales_order_line_ordered_quantity')),
+            unit_id: selected(field('sales_order_line_unit_id')),
+            reason: literal('Counter sale'),
+          },
+          { order_line: selected('recordId') },
+        ),
+        each: true as const,
+      },
+      {
+        ...step('counter_reserve', 'reservation_reserve', [
+          bind(['recordId'], stepValue('counter_reserve_draft', 'recordId')),
+          bind(
+            ['expectedRevision'],
+            stepValue('counter_reserve_draft', 'revision'),
+          ),
+        ]),
+        each: true as const,
+      },
+      create(
+        'counter_shipment',
+        'shipment',
+        {
+          // The shipment number is assigned on create (SHP-000001).
+          carrier: literal('Counter'),
+          shipping_reference_kind: literal(null),
+          shipping_reference: literal(null),
+          state: literal(id('option', 'shipment_state_draft')),
+          kind: literal(id('option', 'shipment_kind_initial')),
+          effective_at: generated('instant'),
+          location_id: input('counter_location'),
+          external_reference: literal(null),
+          reason_code: literal('SHIP'),
+          reason_narrative: literal('Counter sale'),
+          ...Object.fromEntries(
+            SHIP_TO_LINES.map(([name]) => [
+              name,
+              record(field(`sales_order_${name}`)),
+            ]),
+          ),
+        },
+        { order: record('recordId') },
+      ),
+      {
+        ...create(
+          'counter_shipment_line',
+          'shipment_line',
+          {
+            line_number: selected(field('sales_order_line_line_number')),
+            item_id: selected(field('sales_order_line_item_id')),
+            quantity: selected(field('sales_order_line_ordered_quantity')),
+            unit_id: selected(field('sales_order_line_unit_id')),
+            reversal_of_movement_id: literal(null),
+          },
+          {
+            shipment: stepValue('counter_shipment', 'recordId'),
+            order_line: selected('recordId'),
+            reservation: stepValue('counter_reserve_draft', 'recordId'),
+          },
+        ),
+        each: true as const,
+      },
+      command('counter_ship', 'shipment_post', 'counter_shipment'),
+      create(
+        'counter_invoice',
+        'customer_invoice',
+        {
+          // The invoice number is assigned on create (INV-000001).
+          state: literal(id('option', 'customer_invoice_state_draft')),
+          invoice_date: generated('instant'),
+        },
+        { order: record('recordId') },
+      ),
+      command(
+        'counter_invoice_post',
+        'customer_invoice_post',
+        'counter_invoice',
+      ),
+      ...(paid
+        ? [
+            create(
+              'counter_payment',
+              'customer_payment',
+              {
+                // The payment number is assigned on create (PAY-000001).
+                state: literal(id('option', 'customer_payment_state_draft')),
+                payment_date: generated('instant'),
+                // The whole balance the invoice just posted.
+                amount: stepValue(
+                  'counter_invoice_post',
+                  field('customer_invoice_balance'),
+                ),
+                method: input('counter_method'),
+                reference: input('counter_reference'),
+              },
+              { invoice: stepValue('counter_invoice', 'recordId') },
+            ),
+            command('counter_pay', 'customer_payment_post', 'counter_payment'),
+          ]
+        : []),
+    ],
+  });
   return {
     kind: 'surfaceComposition',
     schemaVersion: 'v6',
@@ -493,6 +682,13 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           78,
           id('metric', 'customer_available_credit'),
         ),
+      ),
+      // A counter sale (SALES-EXTRAS) is an ordinary order with this flag.
+      column(
+        'counter_sale',
+        'Counter sale',
+        79,
+        field('sales_order_counter_sale'),
       ),
     ],
     children: [
@@ -1014,6 +1210,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           record: selected('recordId'),
         },
       },
+      counterSale(true),
+      counterSale(false),
       {
         actionId: id('action', 'open_packing'),
         presentation: { placement: 'row' },
