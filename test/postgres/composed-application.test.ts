@@ -1105,7 +1105,7 @@ test(
             }),
             (error: unknown) => {
               assert.ok(error instanceof ModuleRuntimeInterpreterError);
-              assert.equal(error.code, 'MODULE_RELATION_TARGET_NOT_FOUND');
+              assert.equal(error.code, 'MODULE_RELATION_VIOLATION');
               return true;
             },
           );
