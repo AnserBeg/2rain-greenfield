@@ -1,0 +1,82 @@
+# RELATION-INSTALL — install relation columns on existing company tables
+
+Status: draft PR #20 against PAYABLES; Critical; owner-run review owed; no merge or deployment.
+Base: PAYABLES `96ac234122322b2cbe18349299664f56c8f5190a` (upstream review/CI refresh; app envelope unchanged).
+Critical scope: relation-column resolution and existing column-grant admission in `module-storage-materializer.ts`; no other Critical path changed.
+Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner selected 2026-10-04).
+
+## Claims
+
+1. A relation-backed `addColumn` resolves its unique declared relation from the pinned storage target, installs a nullable UUID with no default on its source table, and leaves existing rows unlinked.
+2. The installed FK and index use the compiled deterministic names and scoped columns; the FK retains tenant/environment/company scope and refuses a foreign-company target independently of gateway validation.
+3. The added relation column receives creation-equivalent column privileges without table UPDATE; a governed operation-gateway create persists a valid link.
+
+## Design and decisions
+
+- Owner ruling: build the reusable platform capability; no re-baseline and no plain-text link substitution.
+- `locateColumn` retains field lookup, then matches a non-field relation by relation ID and physical column name; ambiguous or absent targets still refuse.
+- Return relation storage attributes with nullable default semantics through the existing `applyDdlElement` inertness and grant checks; FK/index installers and creation-time grant enumeration are unchanged.
+- No app definition, release output or lineage change; no posting kernel, serializer, trigger/rebuild, activation, verification, trust, migration or RLS change.
+- Evidence lives in the CI-reachable composed PostgreSQL test: a synthetic initial release of the recorded head definition, persisted base rows, then a relation successor on that same tenant. Neither fixture release is written to the app artifacts; product lineage is unchanged.
+
+## Controls
+
+- `relation-install-target-missing` -> claim 1: disable the new relation lookup branch.
+- `relation-install-foreign-company-target` -> claim 2: provide a matching unscoped target key, then remove company columns at the synthetic relation's FK installer.
+- `relation-install-column-write-grant-absent` -> claim 3: omit add-column UPDATE admission.
+- Manifest: `test/evidence/RELATION-INSTALL.expected-red.json`; committed controls run through owner-approved evidence-on-demand CI. Local controls remain behind AC and >=2 GB free Windows memory checks.
+- First target-missing attempt ran but failed the restored-green prerequisite; no discriminating red is claimed. Its container was removed and source restored. Further unmutated diagnosis expired at the lock before starting. The test now exposes typed preparation codes and isolates this transition from unrelated historical installs; bounds unchanged.
+
+## Gates
+
+- Typecheck PASS; focused Prettier PASS.
+- Full hosted [earlier CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37268185759) at `66cf178a`. [Refreshed CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277958211) at `8505c168` has passing composed PostgreSQL and schema jobs; full completion remains pending.
+- [Controls at `8505c168`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277961005): target-missing and column-write-grant-absent each killed one declared test for its declared reason, then restored one passing test. Foreign-company-target survived because its mutation did not reach the FK installer. [Rerun at `85a3763e`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37279569402) again passed the other two controls; company scope failed for undeclared SQL `42830`, not accepted as a red. The adjusted mutation supplies the matching target key before weakening scope; its valid evidence follows.
+- [Expected-red controls on CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37280700983), head `540023a413ee12db054d13080bf111569ade95f7`:
+- `relation-install-target-missing` at 540023a413ee: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing).
+- `relation-install-foreign-company-target` at 540023a413ee: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing).
+- `relation-install-column-write-grant-absent` at 540023a413ee: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing).
+- Static expected-red validation PASS (165 entries / 14 manifests) at `540023a4`; typecheck, focused lint and formatting PASS. Record-claim names executable `d3d1812b`; the diff to refreshed PAYABLES remains the same 17-line production addition.
+- [Full CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37280700984/attempts/2) at `540023a413ee12db054d13080bf111569ade95f7`: all 11 jobs, including executed-file reachability. Attempt 1's indeterminate performance (85.7% idle vs unchanged 90% minimum) received exactly one whole-workflow rerun, not `--failed`. All three controls are valid; owner Critical review remains owed. Local control checks were below 2 GB; the owner-approved hosted workflow supplied the evidence.
+
+## Test it yourself
+
+After checking Windows memory outside the lock, run:
+`node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test --test-name-pattern='^relation install advances' test/postgres/composed-application.test.ts`
+Observe a released base with no new column; the upgraded table has a nullable UUID, the named scoped FK/index and column-only UPDATE; the old line stays null; a gateway create stores a valid link; a foreign-company gateway create and direct FK write leave rows unchanged.
+DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint after this bridge's draft PR and owner-review prompt.
+
+## Filed
+
+- Review prompt is owner-run only; this lane does not review its own work.
+- No stage boundary or new posting correctness domain is introduced by this bridge.
+
+## Review prompt
+
+`RELATION-INSTALL-review-prompt.md` names executable `d3d1812b`; facts and questions only. Owner-run review pending; no self-review.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "RELATION-INSTALL",
+  "base": "96ac234122322b2cbe18349299664f56c8f5190a",
+  "head": "d3d1812bc121937418180f3acfd7151d49ff1ce3",
+  "changedPaths": [
+    "packages/postgres-provider/src/module-storage-materializer.ts",
+    "test/postgres/composed-application.test.ts",
+    "test/evidence/RELATION-INSTALL.expected-red.json"
+  ],
+  "symbols": [
+    { "path": "packages/postgres-provider/src/module-storage-materializer.ts", "name": "locateColumn" },
+    { "path": "packages/postgres-provider/src/module-storage-materializer.ts", "name": "applyDdlElement" },
+    { "path": "test/postgres/composed-application.test.ts", "name": "appendRelationSuccessor" },
+    { "path": "test/postgres/composed-application.test.ts", "name": "relationInstallBase" },
+    { "path": "test/postgres/composed-application.test.ts", "name": "copyRelationFixtureRow" }
+  ]
+}
+```
+
+## Continuation checkpoint — 2026-10-05
+
+- Checkpoint: full CI and all three controls PASS; facts-only owner prompt written. No application artifact, deadline or readiness change; no owner review, merge or deployment inferred.
+- Authorized step 6 is active: DROP-SHIP merged the refreshed PAYABLES and bridge at `76a3628c`; draft PR #19 continues on its own worktree. Schema regeneration, PostgreSQL/browser and full green CI remain owed.
