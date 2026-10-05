@@ -15,7 +15,10 @@ import { governedStorageTarget } from '../helpers/governed-storage-target.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
 const ns = 'northstar.app';
-/** The demo seed's Vancouver warehouse: a second location holding stock. */
+/**
+ * The demo seed's Vancouver warehouse: a second location, holding nothing
+ * until the test finds stock there.
+ */
 const VANCOUVER_WAREHOUSE = '71000000-0000-4000-8000-000000000023';
 
 type Fixture = Parameters<Parameters<typeof withOrderEntryFixture>[0]>[0];
@@ -286,6 +289,58 @@ function counts(fixture: Fixture) {
   return { command, create, enter, found };
 }
 
+/**
+ * A stock document posted through its own route: one line of the demo item,
+ * into `location` when the quantity is positive and out of it when negative,
+ * effective at `effectiveAt`.
+ */
+async function postAdjustment(
+  fixture: Fixture,
+  input: {
+    readonly location: string;
+    readonly quantity: string;
+    readonly effectiveAt: string;
+    readonly reason: string;
+    readonly narrative: string;
+  },
+): Promise<void> {
+  const adjustment = randomUUID();
+  const negative = input.quantity.startsWith('-');
+  const header = await fixture.create(
+    'inventory_transaction',
+    {
+      actor_id: 'stock-count-test',
+      effective_at: input.effectiveAt,
+      recorded_at: new Date().toISOString(),
+      reason_code: input.reason,
+      reason_narrative: input.narrative,
+      source_type: 'inventoryTransaction',
+      source_id: adjustment,
+      state: `${ns}:option.inventory_transaction_state_draft`,
+      type: `${ns}:option.inventory_transaction_type_adjustment`,
+    },
+    {},
+    true,
+    adjustment,
+  );
+  await fixture.create(
+    'inventory_transaction_line',
+    {
+      from_location_id: negative ? input.location : null,
+      to_location_id: negative ? null : input.location,
+      item_id: fixture.item,
+      line_number: '1',
+      quantity: input.quantity,
+      unit_id: 'EA',
+    },
+    { transaction: adjustment },
+  );
+  await fixture.invoke('inventory_transaction_post', {
+    recordId: adjustment,
+    expectedRevision: header.revision,
+  });
+}
+
 test(
   'STOCK-COUNTS: a count of one location starts from posted stock, takes what was found, reviews against the ledger and posts the difference',
   { timeout: 300_000 },
@@ -297,6 +352,19 @@ test(
       const before = await read.onHand(main);
       const book = before.get(fixture.item);
       assert.ok(book !== undefined && book !== '0', 'Calgary holds the item');
+      // Vancouver warehouse holds none of the demo item until six are found
+      // there, well before any count below is reviewed.
+      assert.equal(
+        (await read.onHand(VANCOUVER_WAREHOUSE)).get(fixture.item) ?? '0',
+        '0',
+      );
+      await postAdjustment(fixture, {
+        location: VANCOUVER_WAREHOUSE,
+        quantity: '6',
+        effectiveAt: new Date().toISOString(),
+        reason: 'FOUND',
+        narrative: 'Found in the Vancouver warehouse',
+      });
 
       // A new count is numbered by the server, a draft, with no lines.
       const created = await count.create(main);
@@ -491,39 +559,12 @@ test(
         secondStarted.readBack!.revision,
       );
       const countedAt = String((await read.stored(second.recordId))!.countedAt);
-      const adjustment = randomUUID();
-      const header = await fixture.create(
-        'inventory_transaction',
-        {
-          actor_id: 'stock-count-test',
-          effective_at: new Date(Date.parse(countedAt) - 1000).toISOString(),
-          recorded_at: new Date().toISOString(),
-          reason_code: 'DAMAGED',
-          reason_narrative: 'Damaged before the count was posted',
-          source_type: 'inventoryTransaction',
-          source_id: adjustment,
-          state: `${ns}:option.inventory_transaction_state_draft`,
-          type: `${ns}:option.inventory_transaction_type_adjustment`,
-        },
-        {},
-        true,
-        adjustment,
-      );
-      await fixture.create(
-        'inventory_transaction_line',
-        {
-          from_location_id: VANCOUVER_WAREHOUSE,
-          to_location_id: null,
-          item_id: fixture.item,
-          line_number: '1',
-          quantity: '-1',
-          unit_id: 'EA',
-        },
-        { transaction: adjustment },
-      );
-      await fixture.invoke('inventory_transaction_post', {
-        recordId: adjustment,
-        expectedRevision: header.revision,
+      await postAdjustment(fixture, {
+        location: VANCOUVER_WAREHOUSE,
+        quantity: '-1',
+        effectiveAt: new Date(Date.parse(countedAt) - 1000).toISOString(),
+        reason: 'DAMAGED',
+        narrative: 'Damaged before the count was posted',
       });
       await assert.rejects(
         count.command(
