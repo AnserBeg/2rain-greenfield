@@ -548,6 +548,7 @@ async function seed(
         number: String(order.values[`${ns}:field.sales_order_number`]),
         recordId: order.recordId,
         customer,
+        scope,
         observed: true,
       };
     }

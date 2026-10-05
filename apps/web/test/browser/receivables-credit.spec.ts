@@ -9,6 +9,7 @@ interface Seeded {
   readonly number: string;
   readonly recordId: string;
   readonly customer: string;
+  readonly scope: string;
 }
 
 // SALES-EXTRAS credit control through the declared workspaces: the
@@ -23,6 +24,7 @@ test('a customer on credit hold or over its limit has no order confirmed; both p
     const order = await seed();
     const dialog = page.getByRole('dialog');
     const customerPage = new URL(url);
+    customerPage.search = '';
     customerPage.searchParams.set('surface', `${ns}:surface.party_detail`);
     customerPage.searchParams.set('record', order.customer);
     const fact = (label: string) =>
@@ -70,8 +72,14 @@ test('a customer on credit hold or over its limit has no order confirmed; both p
     await capture(page, testInfo, 'customer-credit');
 
     // The order's 52.50 would take the customer 12.50 over its limit.
+    // A document is opened in its company, as its List links it.
     const orderPage = new URL(url);
+    orderPage.search = '';
     orderPage.searchParams.set('surface', `${ns}:surface.sales_order_detail`);
+    orderPage.searchParams.set(
+      `${ns}:parameter.commercial_order_get_legal_entity_scope`,
+      order.scope,
+    );
     orderPage.searchParams.set('record', order.recordId);
     await page.goto(orderPage.toString());
     await expect(page.locator('.composition-header h1')).toHaveText(
