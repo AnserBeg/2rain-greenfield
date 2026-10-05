@@ -463,6 +463,94 @@ test(
         [created.type, created.status],
         [option('location_type_yard'), status('usable')],
       );
+
+      // Slice 2: a bin inside Calgary warehouse, placed when it is created.
+      const bin = await fixture.create(
+        'location',
+        {
+          code: 'CAL-A1',
+          name: 'Aisle 1',
+          type: option('location_type_storage'),
+        },
+        { parent: scenario.warehouse },
+        false,
+      );
+      const parents = new Map(
+        (
+          await stored(fixture, 'location', {
+            parent: 'relation.location_parent',
+          })
+        ).map((row) => [row.record_id, row.parent]),
+      );
+      assert.equal(parents.get(bin.recordId), scenario.warehouse);
+      assert.equal(parents.get(scenario.warehouse), null);
+      // The bin names its warehouse; the warehouse lists the bin inside it.
+      const binPage = await read(
+        url(fixture, 'location_detail', { record: bin.recordId }),
+      );
+      assert.match(
+        binPage.html,
+        /<dt>Inside<\/dt><dd>Calgary warehouse<\/dd>/u,
+      );
+      const inside = rows(
+        (
+          await read(
+            url(fixture, 'location_detail', { record: scenario.warehouse }),
+          )
+        ).html,
+        'location_children',
+      );
+      assert.deepEqual(
+        [...inside.values()].map((row) => [row.Code, row.Type]),
+        [['CAL-A1', 'Storage']],
+      );
+      // Containment never loops: a location names only one that exists when
+      // it is created -- not itself, not one that is not there -- and never
+      // changes it after.
+      const refused = (input: Record<string, unknown>) =>
+        fixture.invoke('location_create', input as never).then(
+          (result) => result.outcome,
+          () => 'refused',
+        );
+      const self = '72000000-0000-4000-8000-0000000000aa';
+      for (const target of [self, '72000000-0000-4000-8000-0000000000ab'])
+        assert.notEqual(
+          await refused({
+            recordId: self,
+            values: {
+              [`${ns}:field.location_code`]: `LOOP-${target.slice(-2)}`,
+              [`${ns}:field.location_name`]: 'Loop',
+              [`${ns}:field.location_type`]: option('location_type_storage'),
+            },
+            relations: { [`${ns}:relation.location_parent`]: target },
+          }),
+          'succeeded',
+        );
+      // A warehouse holding a location cannot be archived first.
+      const warehouseRevision = Number(
+        (
+          await fixture.pool.query<{ revision: string }>(
+            `SELECT revision::text AS revision FROM ${fulfillmentTable(
+              (await governedStorageTarget()).entities.find(
+                (value) => value.entityId === `${ns}:entity.location`,
+              )!,
+            )} WHERE record_id = $1`,
+            [scenario.warehouse],
+          )
+        ).rows[0]!.revision,
+      );
+      assert.notEqual(
+        await fixture
+          .invoke('location_archive', {
+            recordId: scenario.warehouse,
+            expectedRevision: warehouseRevision,
+          })
+          .then(
+            (result) => result.outcome,
+            () => 'refused',
+          ),
+        'succeeded',
+      );
     });
   },
 );

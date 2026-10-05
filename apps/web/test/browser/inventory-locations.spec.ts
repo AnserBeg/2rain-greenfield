@@ -166,6 +166,35 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
         'projected',
       ]),
     ).toEqual(['10', '10', '2']);
+
+    // Slice 2: a bin placed inside Calgary warehouse when it is created.
+    await open(more, 'More', 'Location');
+    await page.getByRole('link', { name: 'New', exact: true }).click();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'New Location' }),
+    ).toBeVisible();
+    await page.getByLabel('Code', { exact: true }).fill('CAL-A1');
+    await page.getByLabel('Name', { exact: true }).fill('Aisle 1');
+    await page
+      .getByRole('combobox', { name: 'Type', exact: true })
+      .selectOption({ label: 'Storage' });
+    await page
+      .getByRole('combobox', { name: 'Parent', exact: true })
+      .selectOption(scenario.warehouse);
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByRole('status')).toContainText('Create complete');
+    // The warehouse's page lists the bin inside it.
+    await open(more, 'More', 'Location');
+    await page
+      .locator(`tr[data-record-id="${scenario.warehouse}"]`)
+      .locator('a.record-link')
+      .click();
+    const inside = page.locator(
+      `[data-composition-dataset="${ns}:dataset.location_children"]`,
+    );
+    await expect(inside).toContainText('CAL-A1');
+    await expect(inside).toContainText('Storage');
+    await capture(page, testInfo, 'location-warehouse');
   });
 });
 

@@ -2088,3 +2088,69 @@ test('LOCATIONS: a location keeps an inventory status its page changes with a re
     );
   }, /a form omits only fields a Task of its record's page sets/);
 });
+
+test('LOCATIONS slice 2: a location page names the location it is inside and lists the locations inside it', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  const ns = 'northstar.app';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const page = (source.surfaces as Loose[]).find(
+    (value) => value.surfaceId === id('surface', 'location_detail'),
+  ) as Loose & {
+    composition: {
+      presentation: { header: { facts: string[] } };
+      fields: Array<{
+        columnId: string;
+        field: string;
+        reference?: {
+          query: { targetId: string };
+          labelField: { targetId: string };
+        };
+      }>;
+      children: Array<{
+        datasetId: string;
+        label: string;
+        query: { targetId: string };
+        parent?: { relationId: string; value: Loose; ownership: string };
+        columns: Array<{ field: string }>;
+      }>;
+    };
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  const inside = page.composition.fields.find(
+    (value) => value.columnId === id('column', 'location_parent'),
+  )!;
+  assert.equal(inside.field, id('relation', 'location_parent'));
+  assert.equal(inside.reference?.query.targetId, id('query', 'location_get'));
+  assert.equal(
+    inside.reference?.labelField.targetId,
+    id('field', 'location_name'),
+  );
+  assert.ok(
+    page.composition.presentation.header.facts.includes(
+      id('column', 'location_parent'),
+    ),
+  );
+  const [children] = page.composition.children;
+  assert.equal(children!.label, 'Locations inside');
+  assert.equal(children!.query.targetId, id('query', 'location_list'));
+  assert.deepEqual(children!.parent, {
+    relationId: id('relation', 'location_parent'),
+    value: { source: 'record', field: 'recordId' },
+    ownership: 'reference',
+  });
+  assert.deepEqual(
+    children!.columns.map((value) => value.field),
+    ['location_code', 'location_name', 'location_type', 'location_status'].map(
+      (local) => id('field', local),
+    ),
+  );
+  // Both copies of the pinned relation semantics name the pair, shared by
+  // every company on both sides.
+  const relation = (source.relations as Loose[]).find(
+    (value) => value.relationId === id('relation', 'location_parent'),
+  ) as Loose & { required: boolean };
+  assert.equal(relation.required, false);
+});

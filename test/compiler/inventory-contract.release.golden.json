@@ -433,6 +433,11 @@
         "semantics": "sameEntity",
         "sourceFamilyId": "stock_count_line",
         "targetFamilyId": "inventory_transaction_line"
+      },
+      {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "location",
+        "targetFamilyId": "location"
       }
     ],
     "undeclaredFamily": {
@@ -515,7 +520,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "dc5aca3914279f4088a007e0d1be25064b58fa3061a2127154ca5e519f65ab04",
+  "releaseRoot": "2a888b66e5f5e142a2f05a28ac62f30e6437445261d9ac2f8f90b7e6bb2e1122",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

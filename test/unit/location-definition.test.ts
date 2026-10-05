@@ -370,3 +370,43 @@ test('LOCATIONS: the product mounts Location with an inventory status, the reaso
       'optional',
     );
 });
+
+test('LOCATIONS slice 2: the product mounts Location with an optional parent location, chosen at creation; the harness has no relation', () => {
+  type Relation = {
+    relationId: string;
+    required: boolean;
+    ownership: string;
+    archiveBehavior: string;
+    sourceEntity: { targetId: string };
+    targetEntity: { targetId: string };
+  };
+  const ns = LOCATION_IDS.namespace;
+  const plain = locationModuleDefinition() as { relations: Relation[] };
+  const product = locationModuleDefinition(ns, {
+    hierarchy: true,
+    inventoryStatus: true,
+  }) as { relations: Relation[] };
+  assert.deepEqual(plain.relations, []);
+  assert.deepEqual(
+    product.relations.map((relation) => [
+      relation.relationId,
+      relation.sourceEntity.targetId,
+      relation.targetEntity.targetId,
+      relation.required,
+      relation.ownership,
+      relation.archiveBehavior,
+    ]),
+    [
+      [
+        `${ns}:relation.location_parent`,
+        LOCATION_IDS.entityIds.location,
+        LOCATION_IDS.entityIds.location,
+        // A top-level warehouse names none.
+        false,
+        'reference',
+        // A location holding others cannot be archived first.
+        'restrict',
+      ],
+    ],
+  );
+});

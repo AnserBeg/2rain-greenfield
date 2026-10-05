@@ -12468,6 +12468,8 @@ test('LOCATIONS: a location changes its status with a reason in one update, its 
       [field('location_status_changed_at')]: reason
         ? '2026-10-01T09:30:00.000Z'
         : null,
+      // A get states every relation, null when unset (slice 2).
+      [id('relation', 'location_parent')]: null,
     });
   const main = location('WH-1', 'Main warehouse', 'usable');
   const hold = location('QA-1', 'Quality hold', 'quarantine', 'Water damage');
@@ -12879,4 +12881,84 @@ test('LOCATIONS: a location changes its status with a reason in one update, its 
     saved[field('location_type')],
     id('option', 'location_type_quarantine'),
   );
+});
+
+test('LOCATIONS slice 2: a location names the location it is inside, its container lists it, and the create form offers the parent', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const parent = id('relation', 'location_parent');
+  const location = (
+    code: string,
+    name: string,
+    type: string,
+    container: string | null,
+  ) =>
+    f.executor.seed('location', {
+      [field('location_code')]: code,
+      [field('location_name')]: name,
+      [field('location_type')]: id('option', type),
+      [field('location_status')]: id('option', 'location_status_usable'),
+      [field('location_status_reason')]: null,
+      [field('location_status_changed_at')]: null,
+      [parent]: container,
+    });
+  const warehouse = location('CAL-WH', 'Calgary warehouse', 'warehouse', null);
+  const bin = location('CAL-A1', 'Aisle 1', 'location_type_storage', warehouse);
+  location('VAN-WH', 'Vancouver warehouse', 'warehouse', null);
+  const page = (recordId: string) =>
+    renderSurfaceRuntimeWithData(
+      f.view,
+      `/?${new URLSearchParams({ surface: id('surface', 'location_detail'), record: recordId }).toString()}`,
+      f.gateways,
+    );
+  // The bin names its warehouse by name.
+  const binPage = await page(bin);
+  assert.equal(binPage.statusCode, 200);
+  assert.match(binPage.html, /<dt>Inside<\/dt><dd>Calgary warehouse<\/dd>/u);
+  // The warehouse names no container and lists its bin, never the other
+  // warehouse.
+  const warehousePage = await page(warehouse);
+  assert.match(warehousePage.html, /<dt>Inside<\/dt><dd>—<\/dd>/u);
+  const inside =
+    new RegExp(
+      `<section id="${id('dataset', 'location_children').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}"[\\s\\S]*?</section>`,
+      'u',
+    ).exec(warehousePage.html)?.[0] ?? '';
+  assert.match(inside, /Locations inside/u);
+  assert.match(inside, new RegExp(`data-record-id="${bin}"`, 'u'));
+  assert.match(inside, /CAL-A1/u);
+  assert.doesNotMatch(inside, /VAN-WH/u);
+  // Read through the location list scoped by the parent relation, under
+  // current policy.
+  assert.ok(
+    f.policy.calls.some(
+      (call) =>
+        (call.decisionInput as { queryId?: string }).queryId ===
+        id('query', 'location_list'),
+    ),
+  );
+  // The create form offers every location as the parent, chosen once.
+  const form = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'location_form') }).toString()}`,
+    f.gateways,
+  );
+  const picker =
+    new RegExp(
+      `<select name="relation:${parent.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}"[^>]*>([\\s\\S]*?)</select>`,
+      'u',
+    ).exec(form.html)?.[1] ?? '';
+  assert.match(picker, /<option value="">None<\/option>/u);
+  for (const recordId of [warehouse, bin])
+    assert.match(picker, new RegExp(`<option value="${recordId}">`, 'u'));
+  // An existing location's form states the parent is locked.
+  const editing = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'location_form'), record: bin }).toString()}`,
+    f.gateways,
+  );
+  assert.match(editing.html, /Locked after creation/u);
+  assert.doesNotMatch(editing.html, /name="relation:/u);
 });
