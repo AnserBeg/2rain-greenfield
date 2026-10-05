@@ -77,7 +77,10 @@ place; a new immutable revision is produced.
    and then fails with `CANON_REFERENCE_CROSS_PACKAGE_UNSUPPORTED`.
 10. The version fixes maximum family counts, collection sizes, expression
     depth, string scalar counts, authored bytes, and normalized bytes. Breach
-    is a deterministic diagnostic.
+    is a deterministic diagnostic. The package-byte maximums are
+    **4,194,304 authored and 4,194,304 normalized bytes (4 MiB each)**,
+    raised from 2,097,152 by owner ruling — **PENDING**, see the correction
+    note below and [ADR-0070](../decisions/ADR-0070-the-v0-package-byte-maximums-are-4-mib.md).
 11. Every v0 property is consumed by G1/G2, is traceable to plan §5.1/§5.8 or
     inherited reviewed design, or is the explicit unsupported composition
     seam. No speculative family breadth is admitted.
@@ -91,6 +94,26 @@ pipeline phase (precompiler canonical-model diagnostics use
 `canonicalModel`), and `occurrenceIndex` disambiguates repeated structural
 coordinates. This is a bridge/reopen correction inside the explicitly
 experimental Freeze A contract, not production-v1 ratification.
+
+### Experimental correction note — package-byte maximums raised to 4 MiB
+
+**PENDING OWNER RULING. Date: `PENDING (YYYY-MM-DD)`. Owner's words:
+"`PENDING`".** Until both are filled in and ADR-0070 is accepted, this note and
+the T10 values above describe the prepared serial bridge packet
+`STRUCTURAL-LIMITS-RAISE`, not the language in force on `main`.
+
+`STRUCTURAL_LIMITS_V0.maximumAuthoredBytes` and `maximumNormalizedBytes` move
+from 2,097,152 to 4,194,304. Nothing else in T10 moves: the family,
+collection, expression-depth and string-scalar bounds are unchanged, and so is
+the compiler's 16 MiB output cap, which is the only size limit inside
+`limitsDigest`. The two byte maximums are one table shared by every readable
+version, so this is a bridge correction inside Freeze A, not a language
+version event. It only admits more: every package that decoded under 2 MiB
+decodes identically, and no recorded release root, golden vector or digest
+moves. Breach keeps its deterministic diagnostics
+(`CANON_LIMIT_PACKAGE_BYTES`, `CANON_LIMIT_NORMALIZED_BYTES`), with the new
+value in the rule text. The compile budget was re-measured at the new ceiling
+as [`compiler-slos.md`](../operations/compiler-slos.md) requires.
 
 ## Determinism profile
 
