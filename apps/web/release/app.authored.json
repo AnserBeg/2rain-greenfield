@@ -54108,15 +54108,180 @@
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
-          "orderKey": 30,
+          "orderKey": 90,
           "schemaVersion": "v6",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.inventory_period_lock_detail_key_facts"
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.inventory_period_lock_detail_sections",
+          "orderKey": 50,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.inventory_period_lock_detail_command_bar",
+          "orderKey": 30,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "childTables",
+          "slotId": "northstar.app:slot.inventory_period_lock_detail_children",
+          "orderKey": 60,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
         }
       ],
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_period_lock_detail",
       "surfaceRole": "record",
+      "composition": {
+        "kind": "surfaceComposition",
+        "schemaVersion": "v6",
+        "presentation": {
+          "header": {
+            "title": "northstar.app:column.inventory_period_lock_closed_through",
+            "subtitle": [],
+            "facts": []
+          },
+          "context": {
+            "label": "Posting period",
+            "description": "Postings dated at or before Closed through are refused in this company. Closing moves it later and reopening moves it earlier; each is confirmed before it changes anything."
+          },
+          "recordActions": "progressive",
+          "technicalDetails": "progressive"
+        },
+        "fields": [
+          {
+            "columnId": "northstar.app:column.inventory_period_lock_closed_through",
+            "label": "Closed through",
+            "orderKey": 10,
+            "field": "northstar.app:field.inventory_period_lock_closed_through"
+          }
+        ],
+        "children": [],
+        "actions": [
+          {
+            "actionId": "northstar.app:action.inventory_period_lock_close",
+            "label": "Close period through",
+            "description": "Postings dated at or before this time will be refused in this company. Nothing already posted changes.",
+            "orderKey": 10,
+            "conditions": [],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.inventory_period_lock_close_through",
+                "label": "Close through",
+                "orderKey": 10,
+                "type": "instant",
+                "required": true
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.inventory_period_lock_close",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.advance_period_lock"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": [
+                      "patch",
+                      "northstar.app:field.inventory_period_lock_closed_through"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.inventory_period_lock_close_through"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.inventory_period_lock_reopen",
+            "label": "Reopen to",
+            "description": "Postings dated after this time will be accepted again in this company. Nothing already posted changes.",
+            "orderKey": 20,
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:field.inventory_period_lock_closed_through"
+                },
+                "operator": "notEquals",
+                "compare": null
+              }
+            ],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.inventory_period_lock_reopen_through",
+                "label": "Reopen to",
+                "orderKey": 10,
+                "type": "instant",
+                "required": true
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.inventory_period_lock_reopen",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.reopen_period"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": [
+                      "patch",
+                      "northstar.app:field.inventory_period_lock_closed_through"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.inventory_period_lock_reopen_through"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
       "workspace": { "membership": "contextual" }
     },
     {
@@ -57599,6 +57764,133 @@
             "done": "northstar.app:list_output.expected_receipt_list_received",
             "open": "northstar.app:list_output.expected_receipt_list_open"
           }
+        }
+      }
+    },
+    {
+      "archetype": "task",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.inventory_movement_on_hand"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Warehouse",
+      "launcher": {
+        "kind": "surfaceLauncher",
+        "schemaVersion": "v6",
+        "tiles": [
+          {
+            "tileId": "northstar.app:launcher_tile.inventory_warehouse_receive",
+            "label": "Receive",
+            "description": "Purchase orders with something still to arrive. Open one to receive its lines.",
+            "orderKey": 10,
+            "surface": "northstar.app:surface.expected_receipt_list",
+            "view": "northstar.app:list_view.expected_receipt_list_to_receive"
+          },
+          {
+            "tileId": "northstar.app:launcher_tile.inventory_warehouse_put_away",
+            "label": "Put away",
+            "description": "Transfers that move stock to where it is kept. New starts a transfer document.",
+            "orderKey": 20,
+            "surface": "northstar.app:surface.inventory_transaction_list",
+            "view": "northstar.app:list_view.inventory_transaction_list_transfers"
+          },
+          {
+            "tileId": "northstar.app:launcher_tile.inventory_warehouse_pick_ship",
+            "label": "Pick and ship",
+            "description": "Sales orders with something still to ship. Open one to reserve and ship its lines.",
+            "orderKey": 30,
+            "surface": "northstar.app:surface.sales_order_list",
+            "view": "northstar.app:list_view.sales_order_list_to_ship"
+          }
+        ],
+        "scan": {
+          "label": "Scan or type a SKU or document number",
+          "actionLabel": "Open",
+          "targets": [
+            {
+              "query": "northstar.app:query.purchase_order_resolve",
+              "surface": "northstar.app:surface.purchase_order_detail"
+            },
+            {
+              "query": "northstar.app:query.sales_order_resolve",
+              "surface": "northstar.app:surface.sales_order_detail"
+            },
+            {
+              "query": "northstar.app:query.goods_receipt_resolve",
+              "surface": "northstar.app:surface.goods_receipt_detail"
+            },
+            {
+              "query": "northstar.app:query.shipment_resolve",
+              "surface": "northstar.app:surface.shipment_detail"
+            },
+            {
+              "query": "northstar.app:query.inventory_transaction_resolve",
+              "surface": "northstar.app:surface.inventory_transaction_detail"
+            },
+            {
+              "query": "northstar.app:query.item_resolve",
+              "surface": "northstar.app:surface.item_detail"
+            }
+          ]
+        }
+      },
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "decision",
+          "slotId": "northstar.app:slot.inventory_warehouse_decision"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "scanInput",
+          "slotId": "northstar.app:slot.inventory_warehouse_scan_input"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "primaryAction",
+          "slotId": "northstar.app:slot.inventory_warehouse_primary_action"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.inventory_warehouse",
+      "workspace": {
+        "membership": "operational",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "authorizationQueryId": "northstar.app:query.posted_stock_balance_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference"
         }
       }
     }

@@ -174,7 +174,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // columns and links that name a relation of their record.
     // 15 adds composition datasets scoped by a field of their own entity.
     // 16 adds a draft editor's create values.
-    maximumSupportedVersion: 16,
+    // 18 adds a launcher Task's tiles and scan box (17 is REPLENISHMENT's,
+    // landing beside it).
+    maximumSupportedVersion: 18,
   },
 });
 

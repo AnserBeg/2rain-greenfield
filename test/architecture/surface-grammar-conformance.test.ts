@@ -272,8 +272,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // + Party's three ship-to address and Catalog's three tax code surfaces
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
-  // its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 101);
+  // its lines, payments and credits (twelve), + WAREHOUSE-MODE's Warehouse.
+  assert.equal(groupedManifest.surfaces.length, 102);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -296,16 +296,18 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // record alerts and progression, multi-row Tasks and record columns naming
   // a relation (ORDER-PARITY increment B) require 14; the item page's
   // field-scoped stock and movements (INVENTORY-PARITY) require 15; a stock
-  // document's create values require 16.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 16);
+  // document's create values require 16; the Warehouse launcher's tiles and
+  // scan box require 18 (WAREHOUSE-MODE; 17 is REPLENISHMENT's).
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 18);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
   // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
   // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
-  // the Bills list.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 16);
+  // the Bills list. WAREHOUSE-MODE: the Warehouse launcher joins Inventory,
+  // the one Task navigation names.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 17);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -337,6 +339,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     'northstar.app:surface.inventory_movement_list',
     'northstar.app:surface.inventory_period_lock_list',
     'northstar.app:surface.inventory_transaction_list',
+    'northstar.app:surface.inventory_warehouse',
     'northstar.app:surface.legal_entity_list',
     'northstar.app:surface.posted_stock_balance_list',
     'northstar.app:surface.stock_count_list',

@@ -11,6 +11,11 @@ import {
 } from './workspace-entry.js';
 import { documentEditor } from './document-editor.js';
 import {
+  launcherTiles,
+  resolveLauncherScan,
+  type LauncherRenderData,
+} from './surface-launcher.js';
+import {
   declaredListArguments,
   declaredListCsv,
   exportFileName,
@@ -273,6 +278,57 @@ export async function renderSurfaceRuntimeWithData(
         code: queryMessageCode(error),
       });
     }
+  }
+  // A launcher Task (WAREHOUSE-MODE) asks its tiles' List counts and resolves
+  // a scanned code; it never asks the lookup its archetype binds.
+  const launcher = selection.selected.launcher;
+  if (launcher) {
+    const company =
+      legalEntitySelection.length === 1 ? legalEntitySelection[0]! : null;
+    const code = url.searchParams.get('scan') ?? '';
+    let scan: LauncherRenderData['scan'] = null;
+    if (code.trim() !== '') {
+      const resolved = await resolveLauncherScan(
+        view,
+        launcher,
+        selection.surfaces,
+        company,
+        gateways.queryGateway,
+        code,
+      );
+      if ('location' in resolved)
+        return { html: '', statusCode: 303, location: resolved.location };
+      scan = { code, outcome: resolved.outcome };
+    }
+    const scopeParameterId =
+      binding.query.legalEntityScope?.operand.parameterId;
+    return renderSelectedSurface(
+      view,
+      selection,
+      {
+        launcher: {
+          scan,
+          scope:
+            scopeParameterId && company
+              ? { parameterId: scopeParameterId, value: company }
+              : null,
+          tiles: await launcherTiles(
+            view,
+            launcher,
+            selection.surfaces,
+            company,
+            gateways.queryGateway,
+            gateways.clock?.() ?? new Date(),
+          ),
+        },
+        status: 'LAUNCHER_READY',
+      },
+      feedback,
+      binding.operations,
+      scan ? 422 : 200,
+      legalEntitySelection,
+      workspaceContext,
+    );
   }
   if (binding.query.queryType === 'aggregate') {
     const scopeParameterId =
@@ -2294,6 +2350,20 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .task-decision output{display:block;margin:var(--space-3) 0;font-family:var(--font-sans);font-size:var(--text-title);font-weight:var(--weight-emphasis)}
 .task-primary-action{display:flex;justify-content:flex-end}
 .task-primary-action button{min-width:192px;min-height:44px}
+/* WAREHOUSE-MODE: a launcher's tiles and scan box are large targets read at arm's length on a warehouse tablet. */
+.launcher-tiles ul{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-3);margin:0;padding:0;list-style:none}
+.launcher-tile{display:flex;flex-direction:column;gap:var(--space-1);min-height:144px;height:100%;padding:var(--space-4);border:1px solid var(--line-strong);border-radius:var(--radius-container);background:var(--surface-panel);color:var(--ink);text-decoration:none}
+.launcher-tile:hover{background:var(--accent-soft)}
+.launcher-tile:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
+.launcher-tile__label{color:var(--accent-ink);font-size:var(--text-section)}
+.launcher-tile__count{font-size:var(--text-title);font-weight:var(--weight-emphasis);font-variant-numeric:tabular-nums}
+.launcher-tile__view{color:var(--ink-muted);font-size:var(--text-micro);font-weight:var(--weight-emphasis);text-transform:uppercase;letter-spacing:.07em}
+.launcher-tile__description{margin-top:auto;color:var(--ink-muted);font-size:var(--text-body)}
+.launcher-scan__field{display:grid;gap:var(--space-2);font-size:var(--text-section)}
+.launcher-scan__field input{min-height:56px;padding:0 var(--space-3);font-size:var(--text-section);font-family:var(--font-mono)}
+.launcher-scan__message{margin-top:var(--space-3)}
+.launcher-action button{min-height:56px}
+@media(max-width:800px){.launcher-tiles ul{grid-template-columns:minmax(0,1fr)}.launcher-tile{min-height:96px}.launcher-action button{width:100%}}
 .data-table-wrap{margin-top:var(--space-4);overflow-x:auto}
 .data-table-wrap table{width:100%;border-collapse:collapse;text-align:left;font-size:var(--text-body)}
 .data-table-wrap th{height:var(--row-header-height);padding:0 var(--space-3);border-bottom:1px solid var(--line);color:var(--ink-muted);font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.08em;vertical-align:middle}

@@ -573,6 +573,13 @@ async function prepareMutation(
       { ...prior.values, ...input.patch },
       'projected',
     );
+    if (entity.periodLock)
+      requirePeriodLockDirection(
+        entity,
+        request.definition.operationId,
+        prior.values,
+        input.patch,
+      );
   }
   const changes =
     kind === 'updateRecordEffect'
@@ -637,6 +644,56 @@ function requirePrecondition(
       `operation precondition does not hold on the ${imageLabel} image`,
     );
   }
+}
+
+/**
+ * A period lock moves one way per operation (WAREHOUSE-MODE). Its advance and
+ * its reopen are both updates of the one closed-through instant, told apart
+ * only by their permissions, so without this an advance to an earlier instant
+ * would reopen a closed period without the reopen permission or its human
+ * confirmation. The compiled period-lock target names both operations; the
+ * revision compare-and-increment keeps the prior image read here the one the
+ * update replaces.
+ *
+ * An advance closes through a later instant than the lock holds, or through
+ * any instant when nothing is closed yet. A reopen moves a closed lock to an
+ * earlier instant, or opens it entirely.
+ */
+function requirePeriodLockDirection(
+  entity: StorageEntity,
+  operationId: string,
+  prior: Readonly<Record<string, ImmutableJsonValue>>,
+  patch: Readonly<Record<string, ImmutableJsonValue>>,
+): void {
+  const lock = entity.periodLock;
+  if (!lock) return;
+  const fieldId = entity.columns.find(
+    (column) => column.physicalName === lock.closedThroughColumn,
+  )?.canonicalFieldId;
+  if (
+    !fieldId ||
+    (operationId !== lock.advanceOperationId &&
+      operationId !== lock.reopenOperationId)
+  )
+    return;
+  const instant = (value: ImmutableJsonValue | undefined) =>
+    typeof value === 'string' ? Date.parse(value) : null;
+  const before = instant(prior[fieldId]);
+  const after = Object.hasOwn(patch, fieldId)
+    ? instant(patch[fieldId])
+    : before;
+  const moves =
+    operationId === lock.advanceOperationId
+      ? after !== null && (before === null || after > before)
+      : before !== null && (after === null || after < before);
+  if (!moves)
+    throw failure(
+      'MODULE_PERIOD_LOCK_DIRECTION_INVALID',
+      operationId === lock.advanceOperationId
+        ? 'a period lock advances only to a later closed-through instant'
+        : 'a period lock reopens only a closed period, to an earlier closed-through instant',
+      entity.entityId,
+    );
 }
 
 function acceptedCommand(

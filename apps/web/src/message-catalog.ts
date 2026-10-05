@@ -484,6 +484,26 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Route not found',
     subject: null,
   },
+  // WAREHOUSE-MODE: what a launcher's scan box answers when the code it was
+  // given opens nothing. The code stays in the box; nothing was opened.
+  SCAN_NO_MATCH: {
+    consequence: 'advisory',
+    detail:
+      'No document number or SKU you can read in this company matches the code.',
+    nextAction: 'Check the code, then scan or type it again.',
+    placements: ['slot'],
+    sentence: 'Nothing matches that code',
+    subject: null,
+  },
+  SCAN_NOT_EXACT: {
+    consequence: 'advisory',
+    detail:
+      'The code matches a name, or more than one record, rather than exactly one number or SKU.',
+    nextAction: 'Scan the barcode, or type the full SKU or document number.',
+    placements: ['slot'],
+    sentence: 'Code is not exact',
+    subject: null,
+  },
   UNKNOWN_SURFACE: {
     consequence: 'blocking',
     detail: 'The requested surface is not present in this pinned release.',

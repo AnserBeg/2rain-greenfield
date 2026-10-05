@@ -1499,11 +1499,58 @@ export type SurfaceListProgress = NonNullable<SurfaceList['progress']>;
 export type SurfaceListRowAction = NonNullable<
   SurfaceList['rowActions']
 >[number];
+/**
+ * A launcher on a Task surface: large tiles, each opening a declared List at
+ * one of its views and showing that view's count, and a scan box that opens
+ * the record a scanned or typed code names -- the first target, in declared
+ * order, whose resolve query matches the code exactly as an identifier. The
+ * launcher reads only through declared queries under current policy, posts
+ * nothing, and every destination re-authorizes itself: the warehouse view
+ * floor staff open first. Optional v6 key (ADR-0047 §7).
+ */
+export const SurfaceLauncherSchema = z.strictObject({
+  kind: z.literal('surfaceLauncher'),
+  schemaVersion: v6NodeVersion,
+  tiles: z
+    .array(
+      z.strictObject({
+        tileId: CanonicalIdSchema,
+        label: LabelSchema,
+        description: LabelSchema,
+        orderKey: boundedOrderKey,
+        /** A List surface with a declared List. */
+        surface: CanonicalIdSchema,
+        /** One of that List's declared views, opened and counted. */
+        view: CanonicalIdSchema.optional(),
+      }),
+    )
+    .min(1)
+    .max(6),
+  scan: z
+    .strictObject({
+      label: LabelSchema,
+      actionLabel: LabelSchema,
+      targets: z
+        .array(
+          z.strictObject({
+            /** A resolve query with an identifier match key. */
+            query: CanonicalIdSchema,
+            /** The record page that opens the resolved record. */
+            surface: CanonicalIdSchema,
+          }),
+        )
+        .min(1)
+        .max(8),
+    })
+    .optional(),
+});
+export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
   composition: SurfaceCompositionSchema.optional(),
   workspace: SurfaceWorkspaceSchema.optional(),
   documentEditor: SurfaceDocumentEditorSchema.optional(),
   list: SurfaceListSchema.optional(),
+  launcher: SurfaceLauncherSchema.optional(),
 });
 const authoredV6SurfaceDefinition = normalizedV6SurfaceDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
