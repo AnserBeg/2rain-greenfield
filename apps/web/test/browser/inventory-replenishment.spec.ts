@@ -93,10 +93,7 @@ test('an item keeps its reorder levels, Stock by item names what is short and th
       .locator('.navigation-tree > li')
       .getByRole('group')
       .filter({ hasText: 'Inventory' });
-    await inventory.getByText('Inventory', { exact: true }).click();
-    await inventory
-      .getByRole('link', { name: 'Stock by item', exact: true })
-      .click();
+    await open(inventory, 'Inventory', 'Stock by item');
     await expect(
       page.getByRole('heading', { level: 1, name: 'Stock by item' }),
     ).toBeVisible();
@@ -142,9 +139,7 @@ test('an item keeps its reorder levels, Stock by item names what is short and th
     ).toHaveCount(0);
 
     // Inventory -> Buying worklist: what is due, back up to its level.
-    await inventory
-      .getByRole('link', { name: 'Buying worklist', exact: true })
-      .click();
+    await open(inventory, 'Inventory', 'Buying worklist');
     await expect(
       page.getByRole('heading', { level: 1, name: 'Buying worklist' }),
     ).toBeVisible();
@@ -191,6 +186,17 @@ test('an item keeps its reorder levels, Stock by item names what is short and th
     ).toHaveValue('4.5');
   });
 });
+
+/**
+ * A destination inside a navigation group, which renders collapsed even on
+ * its own pages: opened first unless it already shows the link.
+ */
+async function open(group: Locator, label: string, destination: string) {
+  const link = group.getByRole('link', { name: destination, exact: true });
+  if (!(await link.isVisible()))
+    await group.getByText(label, { exact: true }).click();
+  await link.click();
+}
 
 /** A row's cells by column, as shown. */
 async function cells(
