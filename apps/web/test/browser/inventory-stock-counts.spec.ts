@@ -81,7 +81,8 @@ test('a count of one location starts from posted stock, is reviewed against the 
     });
     await command(page, 'Post');
     await page.goto(count.url);
-    expect(await movements(page)).toEqual([['Field notebook', '-1', 'Count']]);
+    // The role reads as the posting role's option, as on the item page.
+    expect(await movements(page)).toEqual([['Field notebook', '-1', 'count']]);
     await page.screenshot({
       path: testInfo.outputPath('stock-count-posted.png'),
       fullPage: true,
