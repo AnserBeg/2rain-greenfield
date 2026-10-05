@@ -6,7 +6,7 @@ AGENTS.md §5). Tier: Behavioral, outside the AGENTS.md §4 Critical set.
 Stops: 1 — STOP list (a), a one-way door once a release above 2 MiB is
 recorded; the owner rules ([ADR-0070](../../decisions/ADR-0070-the-v0-package-byte-maximums-are-4-mib.md),
 status Proposed). Base `fe97b63b`, executable head `0bc34b6d`, draft PR
-PR_PENDING.
+[#30](https://github.com/AnserBeg/2rain-greenfield/pull/30).
 
 ## Claims
 
@@ -62,10 +62,16 @@ PR_PENDING.
   limit.
 - Performance (best of five cold compiles; budget 5,000 ms, unchanged):
   package-byte envelope 4,186,810 bytes (99.8%), 8 copies + 3 modules —
-  local 1,977.4 ms at `0bc34b6d` (indicative), 2,071.6 ms on an INTEGRATION
-  trial merge, CI CI_PENDING. Field envelope local 1,818.9 ms, CI
-  CI_PENDING. Table in `compiler-slos.md`.
-- CI: CI_RUN_PENDING. `scripts/check-records.sh`: PASS.
+  **CI 1,429.5 ms** (official), local 1,977.4 ms at `0bc34b6d` and
+  2,071.6 ms on an INTEGRATION trial merge (indicative). Field envelope CI
+  1,327.2 ms, local 1,818.9 ms. Table in `compiler-slos.md`.
+- Local controls (evidence only): limit -1 on each constant, both back to
+  2 MiB, and `>` -> `>=` at each of the four checks — all 7 red the boundary
+  tests; restored clean.
+- CI: performance job PASS in run
+  [37365925021](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37365925021)
+  at `cb0f51a2`; the full matrix is the run at the PR tip.
+  `scripts/check-records.sh`: PASS.
 
 ## Test it yourself
 

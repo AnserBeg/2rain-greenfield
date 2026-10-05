@@ -86,10 +86,10 @@ cold full-compile budget is unchanged and must hold at the new ceiling.
   can add roughly three-quarters of Rain's own size again. Option 2 later
   widens that further. If G6 measures that tenants need more, the next lever is
   compaction or package composition, not another raise past the output cap.
-- **Compile time grows with the package.** Measured cold, best of five, the
-  package-byte envelope at 99.8% of the ceiling compiled in 2,015.9 ms
-  locally (indicative); the official GitHub figure is in `compiler-slos.md`.
-  Both are under the 5,000 ms budget.
+- **Compile time grows with the package, and stays inside the budget.**
+  Measured cold, best of five, a package at 99.8% of the new ceiling compiled
+  in 1,429.5 ms on the GitHub runner (official) and 1,977.4 ms locally
+  (indicative), against the unchanged 5,000 ms budget (`compiler-slos.md`).
 - **Historical releases are unaffected.** Every recorded package is at most
   2 MiB and decodes byte-identically; `check:app-release`,
   `check:demo-release` and the compiler goldens did not move.
