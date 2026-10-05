@@ -96,6 +96,7 @@ const suiteDefinitions = [
       'test/architecture/canonical-contracts-purity.test.ts',
       'test/architecture/compiler-hermeticity.test.ts',
       'test/architecture/dependency-boundaries.test.ts',
+      'test/architecture/evidence-on-demand.test.ts',
       'test/architecture/module-conformance-runtime.test.ts',
       'test/architecture/module-press-law.test.ts',
       'test/architecture/record-claim-fidelity.test.ts',
