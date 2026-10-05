@@ -40,6 +40,7 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'tenantShared', familyId: 'item' },
   { classification: 'tenantShared', familyId: 'location' },
   { classification: 'tenantShared', familyId: 'tax_code' },
+  { classification: 'tenantShared', familyId: 'returnable_asset_type' },
   { classification: 'entityOwned', familyId: 'inventory_movement' },
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
@@ -66,6 +67,8 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'vendor_bill_line' },
   { classification: 'entityOwned', familyId: 'vendor_payment' },
   { classification: 'entityOwned', familyId: 'vendor_credit' },
+  { classification: 'entityOwned', familyId: 'returnable_custody' },
+  { classification: 'entityOwned', familyId: 'returnable_event' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const);
@@ -343,6 +346,16 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'vendor_credit',
     targetFamilyId: 'vendor_bill',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'returnable_custody',
+    targetFamilyId: 'party',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'returnable_event',
+    targetFamilyId: 'returnable_custody',
   },
   {
     semantics: 'sameEntity',

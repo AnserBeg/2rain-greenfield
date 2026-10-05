@@ -136,6 +136,10 @@
         "familyId": "tax_code"
       },
       {
+        "classification": "tenantShared",
+        "familyId": "returnable_asset_type"
+      },
+      {
         "classification": "entityOwned",
         "familyId": "inventory_movement"
       },
@@ -238,6 +242,14 @@
       {
         "classification": "entityOwned",
         "familyId": "vendor_credit"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "returnable_custody"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "returnable_event"
       },
       {
         "classification": "entityOwned",
@@ -410,6 +422,16 @@
         "targetFamilyId": "vendor_bill"
       },
       {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "returnable_custody",
+        "targetFamilyId": "party"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "returnable_event",
+        "targetFamilyId": "returnable_custody"
+      },
+      {
         "semantics": "sameEntity",
         "sourceFamilyId": "inventory_transaction_line",
         "targetFamilyId": "inventory_transaction"
@@ -515,7 +537,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "dc5aca3914279f4088a007e0d1be25064b58fa3061a2127154ca5e519f65ab04",
+  "releaseRoot": "05fc9ffb208f32faa3000dcd6134ced4bb7c5618671acbd880ee0443337d4774",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

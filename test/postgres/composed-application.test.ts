@@ -1179,8 +1179,10 @@ async function assertRealProductDefinition(
     // SALES-PARITY adds Party's ship-to address book and Catalog's tax codes,
     // then the invoice, its lines, payments and credits (list, detail, form
     // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
-    // vendor bill, its lines, payments and credits (list, detail, form each).
-    assert.equal(surfaces.length, 101);
+    // vendor bill, its lines, payments and credits (list, detail, form each);
+    // RETURNABLE-ASSETS the returnable type, custody and event (list, detail,
+    // form each) and the Returnables held List.
+    assert.equal(surfaces.length, 111);
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     for (const local of [
       'goods_receipt',
@@ -3489,6 +3491,7 @@ async function assertBoundedFreshTenantInstallEvidence(
   assertReceivingVerificationCoverage(compiledApplication);
   assertSalesVerificationCoverage(compiledApplication);
   assertPayablesVerificationCoverage(compiledApplication);
+  assertReturnablesVerificationCoverage(compiledApplication);
   // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
   // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
   // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
@@ -3523,10 +3526,12 @@ async function assertBoundedFreshTenantInstallEvidence(
   // compiled plan: vendor bill (23), bill line (17), vendor payment (17) and
   // vendor credit (15) -- the receivables documents' shapes; the supplier's
   // invoice number is searchable, so it adds no search exclusion.
+  // RETURNABLE-ASSETS adds 61, measured from the compiled plan: returnable
+  // type (14), custody (27) and event (20).
   assert.equal(
     servingScenarioCount,
-    573,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, and 72 for payables',
+    634,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, and 61 for returnables',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5862,11 +5867,13 @@ async function assertExactPartitionEvidence(
   // on the purchase order, its line, the goods receipt and the amendment
   // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
   // (each vendor document has a generic create, replayed by this oracle over
-  // the compiled head): 573, 496.
+  // the compiled head): 573, 496. RETURNABLE-ASSETS' 61 execute as well (the
+  // returnable type, custody record and event each have a generic create):
+  // 634, 557.
   assert.equal(
     evidence.results.length,
-    496,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, and payables 72',
+    557,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, and returnables 61',
   );
   assert.equal(
     derivations.length,
@@ -6171,6 +6178,28 @@ function assertPayablesVerificationCoverage(
       ).length,
       count,
       `the payables entity ${local} contributes its measured verifier scenarios`,
+    );
+  }
+}
+
+function assertReturnablesVerificationCoverage(
+  compiledApplication: unknown,
+): void {
+  const { plan } = releaseVerificationBinding(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  for (const [local, count] of Object.entries({
+    // RETURNABLE-ASSETS: the returnable type, custody record and event.
+    returnable_asset_type: 14,
+    returnable_custody: 27,
+    returnable_event: 20,
+  })) {
+    assert.equal(
+      plan.scenarios.filter(
+        (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
+      ).length,
+      count,
+      `the returnables entity ${local} contributes its measured verifier scenarios`,
     );
   }
 }

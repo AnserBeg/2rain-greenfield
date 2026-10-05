@@ -386,7 +386,12 @@ export async function renderSurfaceRuntimeWithData(
             selection.selected,
             data.records[0],
             requestUrl,
-            legalEntitySelection[0] ?? null,
+            // A tenant-level record's page reads its company-owned children
+            // in the company its entry resolved (a party's returnables).
+            legalEntitySelection[0] ??
+              (binding.query.legalEntityScope
+                ? null
+                : (entry?.selected ?? null)),
             gateways,
           ),
         };

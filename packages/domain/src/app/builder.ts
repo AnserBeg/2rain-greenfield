@@ -8,7 +8,10 @@ import { catalogModuleDefinition } from '../catalog/definition.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
-import { partyWorkspace } from '../party/workspace.js';
+import {
+  partyWorkspace,
+  returnableCustodyWorkspace,
+} from '../party/workspace.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
 import { orderEntrySurfaces } from './order-entry.js';
@@ -70,7 +73,10 @@ const MODULE_REGISTRY = Object.freeze([
   Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
   Object.freeze({
     create: (namespace: string) =>
-      partyModuleDefinition(namespace, { salesMasterData: true }),
+      partyModuleDefinition(namespace, {
+        salesMasterData: true,
+        returnables: true,
+      }),
     moduleName: 'party',
   }),
   Object.freeze({
@@ -91,6 +97,7 @@ const RECORD_COMPOSITIONS: Readonly<
   shipment_detail: packingWorkspace,
   customer_invoice_detail: invoiceWorkspace,
   vendor_bill_detail: billWorkspace,
+  returnable_custody_detail: returnableCustodyWorkspace,
   inventory_transaction_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
   stock_count_detail: (namespace: string) =>

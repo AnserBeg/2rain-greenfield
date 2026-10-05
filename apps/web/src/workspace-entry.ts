@@ -83,6 +83,37 @@ export async function workspaceList(
   } while (cursor);
   return records;
 }
+/**
+ * The company scope parameter a surface's entry resolves: its own query's,
+ * or -- for a tenant-level record page, such as a party, whose entry names a
+ * company-owned authorization List -- that List's, which its company-owned
+ * children are read in. `null` when the surface enters no company.
+ */
+export function workspaceEntryParameter(
+  view: RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+): { readonly parameter: string; readonly tenantRecord: boolean } | null {
+  const policy = surface.workspace?.entry;
+  const definition = registeredSemanticQueryFromPinnedView(
+    view,
+    surface.dataSourceQueryId,
+  );
+  if (!policy || !definition) return null;
+  if (definition.legalEntityScope)
+    return {
+      parameter: definition.legalEntityScope.operand.parameterId,
+      tenantRecord: false,
+    };
+  if (surface.surfaceRole === 'list') return null;
+  const authorization = registeredSemanticQueryFromPinnedView(
+    view,
+    policy.authorizationQueryId,
+  )?.legalEntityScope;
+  return authorization
+    ? { parameter: authorization.operand.parameterId, tenantRecord: true }
+    : null;
+}
+
 /** Preference never supplies an operation operand: entry materializes a URL. */
 export async function resolveWorkspaceEntry(
   view: RequestRuntimeView,
@@ -91,12 +122,9 @@ export async function resolveWorkspaceEntry(
   gateway: SemanticQueryGateway,
 ) {
   const policy = surface.workspace?.entry;
-  const definition = registeredSemanticQueryFromPinnedView(
-    view,
-    surface.dataSourceQueryId,
-  );
-  if (!policy || !definition?.legalEntityScope) return null;
-  const parameter = definition.legalEntityScope.operand.parameterId;
+  const entered = workspaceEntryParameter(view, surface);
+  if (!policy || !entered) return null;
+  const { parameter, tenantRecord } = entered;
   const candidates = await workspaceList(
     view,
     gateway,
@@ -141,8 +169,13 @@ export async function resolveWorkspaceEntry(
         !options.some((option) => option.recordId === explicit[0]),
     };
   }
-  // Only workspace entry can default. Existing documents/tasks require pinned URLs.
-  if (url.searchParams.has('record') || surface.surfaceRole !== 'list')
+  // Only workspace entry can default. Existing documents/tasks require pinned
+  // URLs; a tenant-level record is no company's, so its page enters one for
+  // its company-owned children the way a List does, and pins it in the URL.
+  if (
+    !tenantRecord &&
+    (url.searchParams.has('record') || surface.surfaceRole !== 'list')
+  )
     return { options, parameter, selected: null, redirect: null };
   const preference = preferences.get(key);
   const selected =

@@ -824,6 +824,86 @@
       },
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.returnable_asset_type_archive",
+        "resource": "northstar.app:entity.returnable_asset_type"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.returnable_asset_type_create",
+        "resource": "northstar.app:entity.returnable_asset_type"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.returnable_asset_type_read",
+        "resource": "northstar.app:entity.returnable_asset_type"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.returnable_asset_type_restore",
+        "resource": "northstar.app:entity.returnable_asset_type"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.returnable_asset_type_update",
+        "resource": "northstar.app:entity.returnable_asset_type"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.returnable_custody_archive",
+        "resource": "northstar.app:entity.returnable_custody"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.returnable_custody_create",
+        "resource": "northstar.app:entity.returnable_custody"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.returnable_custody_read",
+        "resource": "northstar.app:entity.returnable_custody"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.returnable_custody_restore",
+        "resource": "northstar.app:entity.returnable_custody"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.returnable_custody_update",
+        "resource": "northstar.app:entity.returnable_custody"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.returnable_event_archive",
+        "resource": "northstar.app:entity.returnable_event"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.returnable_event_create",
+        "resource": "northstar.app:entity.returnable_event"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.returnable_event_post",
+        "resource": "northstar.app:entity.returnable_event"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.returnable_event_read",
+        "resource": "northstar.app:entity.returnable_event"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.returnable_event_restore",
+        "resource": "northstar.app:entity.returnable_event"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.returnable_event_update",
+        "resource": "northstar.app:entity.returnable_event"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.stock_count_archive",
         "resource": "northstar.app:entity.stock_count"
       },

@@ -30,6 +30,7 @@ import {
 } from './surface-contract.js';
 import { escapeHtml as h } from './html.js';
 import { moneyText } from './list-declaration.js';
+import { workspaceEntryParameter } from './workspace-entry.js';
 import {
   DECIMAL_KINDS,
   admitsChoice,
@@ -301,6 +302,10 @@ export async function loadSurfaceComposition(
 ): Promise<CompositionData> {
   const composition = surface.composition!;
   const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const pageScoped = Boolean(
+    registeredSemanticQueryFromPinnedView(view, surface.dataSourceQueryId)
+      ?.legalEntityScope,
+  );
   const data: CompositionData = {
     record,
     fields: { record, cells: {} },
@@ -348,6 +353,9 @@ export async function loadSurfaceComposition(
       );
       if (!registered || registered.queryType !== 'list')
         throw new Error('Child query must be a registered list.');
+      // A tenant-level page entered in no company has no company-owned
+      // children to show: nothing is read, and nothing failed.
+      if (registered.legalEntityScope && !scope && !pageScoped) continue;
       let cursor: string | null = null;
       do {
         const scopeKey =
@@ -1514,9 +1522,14 @@ export async function submitCompositionAction(
       view,
       surface.dataSourceQueryId,
     );
+    // A tenant-level record's page acts in the company its URL pins for its
+    // company-owned children (a party's returnables); entry validated it.
+    const entered = workspaceEntryParameter(view, surface);
     const scope = definition?.legalEntityScope
       ? url.searchParams.get(definition.legalEntityScope.operand.parameterId)
-      : null;
+      : entered?.tenantRecord
+        ? url.searchParams.get(entered.parameter)
+        : null;
     const result = await query(
       view,
       gateways,

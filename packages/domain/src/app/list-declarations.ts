@@ -569,6 +569,120 @@ function expectedReceiptList(namespace: string): ListSpec {
 export const EXPECTED_RECEIPT_LIST = 'expected_receipt_list';
 
 /**
+ * Returnables (RETURNABLE-ASSETS): custody records of one direction -- what
+ * customers hold of ours ("Returnables out"), or what we hold of suppliers'
+ * ("Returnables held") -- each with what is outstanding and the deposit held.
+ * Every view keeps its direction, so neither List shows the other's records.
+ */
+function returnablesList(
+  namespace: string,
+  direction: 'out' | 'held',
+): ListSpec {
+  const field = (local: string) =>
+    `${namespace}:field.returnable_custody_${local}`;
+  const option = (name: string, value: string) =>
+    `${namespace}:option.returnable_custody_${name}_${value}`;
+  const way = { [field('direction')]: option('direction', direction) };
+  return {
+    pageSize: 50,
+    columns: [
+      {
+        local: 'number',
+        label: 'Number',
+        field: field('number'),
+        role: 'title',
+      },
+      {
+        local: 'party',
+        label: direction === 'out' ? 'Customer' : 'Supplier',
+        field: field('party_id'),
+        reference: {
+          query: `${namespace}:query.party_list`,
+          labelField: `${namespace}:field.party_name`,
+        },
+      },
+      {
+        local: 'type',
+        label: 'Returnable type',
+        field: field('asset_type_id'),
+        reference: {
+          query: `${namespace}:query.returnable_asset_type_list`,
+          labelField: `${namespace}:field.returnable_asset_type_name`,
+        },
+      },
+      { local: 'issued', label: 'Issued', field: field('issued_quantity') },
+      {
+        local: 'outstanding',
+        label: 'Outstanding',
+        field: field('outstanding_quantity'),
+      },
+      {
+        local: 'held',
+        label: 'Deposit held',
+        field: field('deposit_held'),
+        format: 'money',
+      },
+      {
+        local: 'refundable',
+        label: 'Refundable now',
+        field: field('deposit_refundable'),
+        format: 'money',
+      },
+      { local: 'currency', label: 'Currency', field: field('currency') },
+      {
+        local: 'status',
+        label: 'Status',
+        field: field('state'),
+        role: 'status',
+        statusRoles: {
+          [option('state', 'open')]: 'inProgress',
+          [option('state', 'awaiting_refund')]: 'attention',
+          [option('state', 'closed')]: 'success',
+        },
+      },
+    ],
+    defaultSort: [{ column: 'number', direction: 'descending' }],
+    views: [
+      {
+        local: 'open',
+        label: 'Open',
+        filters: { ...way, [field('state')]: option('state', 'open') },
+      },
+      {
+        local: 'awaiting_refund',
+        label: 'Awaiting refund',
+        filters: {
+          ...way,
+          [field('state')]: option('state', 'awaiting_refund'),
+        },
+      },
+      {
+        local: 'closed',
+        label: 'Closed',
+        filters: { ...way, [field('state')]: option('state', 'closed') },
+      },
+      { local: 'all', label: 'All', filters: way },
+    ],
+    filters: [
+      {
+        local: 'currency',
+        label: 'Currency',
+        field: field('currency'),
+        options: [
+          [option('currency', 'cad'), 'CAD'],
+          [option('currency', 'usd'), 'USD'],
+          [option('currency', 'eur'), 'EUR'],
+        ],
+      },
+    ],
+    export: true,
+  };
+}
+
+/** The Returnables held List surface and the query it reads, by local id. */
+export const RETURNABLES_HELD_LIST = 'returnables_held_list';
+
+/**
  * A worklist is a second List over a document's records beside the
  * document's own List, read through its own clone of that List's query so its
  * company entry, its cursor and its agent preset are its own. The clone keeps
@@ -581,6 +695,11 @@ const WORKLISTS: Readonly<
   [EXPECTED_RECEIPT_LIST]: {
     source: 'purchase_order_list',
     label: 'Expected receipts',
+  },
+  // What we hold of suppliers', beside what customers hold of ours.
+  [RETURNABLES_HELD_LIST]: {
+    source: 'returnable_custody_list',
+    label: 'Returnables held',
   },
 });
 
@@ -723,6 +842,9 @@ export function composedListSpecs(
     // Payables (PAYABLES): each vendor bill the same way, with the supplier's
     // own invoice number.
     vendor_bill_list: settlementList(namespace, BILL_LIST),
+    // Returnables (RETURNABLE-ASSETS): out with customers, held of suppliers.
+    returnable_custody_list: returnablesList(namespace, 'out'),
+    [RETURNABLES_HELD_LIST]: returnablesList(namespace, 'held'),
     // A balance, not a document: no lifecycle, so no saved views; item and
     // location are named through their own lists rather than shown as ids.
     posted_stock_balance_list: {
