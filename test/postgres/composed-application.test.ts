@@ -1252,9 +1252,12 @@ test(
     await withEphemeralPostgres(
       'g2-1g-release-advancement',
       async ({ connection, pool }) => {
-        const compiledApplication = JSON.parse(
-          await readFile(compiledArtifactPath, 'utf8'),
-        ) as unknown;
+        // This test exercises successors and rollback from the exact head
+        // definition, not unrelated historical installation. The full
+        // recorded lineage is exercised by the fresh-tenant replay test.
+        const compiledApplication = relationInstallBase(
+          JSON.parse(await readFile(compiledArtifactPath, 'utf8')) as unknown,
+        );
         const authoredApplication = JSON.parse(
           await readFile(authoredArtifactPath, 'utf8'),
         ) as Record<string, unknown>;
