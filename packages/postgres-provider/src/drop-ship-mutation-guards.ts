@@ -30,12 +30,25 @@ export async function assertDropShipMutation(
   const ns = target.entityId.split(':entity.')[0];
   const local = target.entityId.split(':entity.')[1];
   const effect = request.definition.effect.kind;
+  const headerFieldPrefix = `${ns}:field.${local}_`;
+  const protectedHeaderFields = new Set(
+    target.columns
+      .filter((column) => {
+        if (!column.canonicalFieldId.startsWith(headerFieldPrefix))
+          return false;
+        const name = column.canonicalFieldId.slice(headerFieldPrefix.length);
+        return (
+          name === 'supplier_party_id' ||
+          name === 'currency' ||
+          name.startsWith('ship_to_')
+        );
+      })
+      .map((column) => column.canonicalFieldId),
+  );
   if (
     local === 'purchase_order' &&
     effect === 'updateRecordEffect' &&
-    Object.keys(input.patch).some((key) =>
-      /:field\.purchase_order_(supplier_party_id|currency|ship_to_)/u.test(key),
-    )
+    Object.keys(input.patch).some((key) => protectedHeaderFields.has(key))
   ) {
     // Serialize with link creation before deciding whether this header is frozen.
     const header = await client.query<DropShipRow>(
@@ -49,12 +62,7 @@ export async function assertDropShipMutation(
     );
     if (linked.rowCount) {
       const changed = Object.entries(input.patch).some(([key, value]) => {
-        if (
-          !/:field\.purchase_order_(supplier_party_id|currency|ship_to_)/u.test(
-            key,
-          )
-        )
-          return false;
+        if (!protectedHeaderFields.has(key)) return false;
         const physical = target.columns.find(
           (column) => column.canonicalFieldId === key,
         )?.physicalName;

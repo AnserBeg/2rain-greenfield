@@ -2453,7 +2453,6 @@ function listProgressFromSql(
       quote: quoted,
       column: qualified,
       bind: (value) => parameter(values, value),
-      visible: visibleFieldExpression,
       scope: (target, alias) =>
         legalEntityReadScopeJoinConjunction(target, readScope, values, alias),
       sameCompany,

@@ -22,7 +22,6 @@ export function additionalListProgressSql(
     readonly quote: (name: string) => string;
     readonly column: (alias: string, name: string) => string;
     readonly bind: (value: unknown) => string;
-    readonly visible: (column: Column, alias: string) => string;
     readonly scope: (entity: Entity, alias: string) => string;
     readonly sameCompany: (
       alias: string,
@@ -44,6 +43,6 @@ export function additionalListProgressSql(
      AND ${q(fact, plan.lineColumn)}=${q(line, lines.recordIdentity.column)}
      AND ${q(fact, plan.entity.archive.archivedAtColumn)} IS NULL
      ${sql.sameCompany(fact, plan.entity, line, lines)}${sql.scope(plan.entity, fact)}
-     ${plan.filters.map((filter) => `AND ${sql.visible(filter.column, fact)}::text=${sql.bind(filter.value)}::text`).join('\n')}
+     ${plan.filters.map((filter) => `AND ${q(fact, filter.column.physicalName)}::text=${sql.bind(filter.value)}::text`).join('\n')}
     WHERE ${activeLines})`;
 }

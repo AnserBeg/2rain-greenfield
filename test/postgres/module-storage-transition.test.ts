@@ -5751,6 +5751,21 @@ function withoutModuleForTransition(
       (entry) => entry.entityId,
     ),
   );
+  const retainsEntity = (reference: unknown) =>
+    reference === undefined ||
+    (reference !== null &&
+      typeof reference === 'object' &&
+      entities.has(String((reference as { targetId?: unknown }).targetId)));
+  for (const [collection, owner] of [
+    ['fields', 'entity'],
+    ['permissions', 'resource'],
+    ['queries', 'sourceEntity'],
+    ['stateMachines', 'entity'],
+    ['storageMappings', 'entity'],
+  ] as const)
+    application[collection] = (
+      application[collection] as Record<string, unknown>[]
+    ).filter((entry) => retainsEntity(entry[owner]));
   application.relations = (
     application.relations as {
       sourceEntity: { targetId: string };
@@ -5766,6 +5781,12 @@ function withoutModuleForTransition(
     readModel?: { queries: Record<string, { targetId: string }> };
   }[];
   const queryIds = new Set(queries.map((entry) => entry.queryId));
+  application.assertions = (
+    application.assertions as { invocation: { query?: { targetId: string } } }[]
+  ).filter(
+    (entry) =>
+      !entry.invocation.query || queryIds.has(entry.invocation.query.targetId),
+  );
   for (const query of queries)
     if (
       query.readModel &&

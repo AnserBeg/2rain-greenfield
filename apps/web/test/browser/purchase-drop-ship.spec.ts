@@ -55,13 +55,13 @@ test('a supplier delivery appears on both linked orders and reverses with its re
       await dialog
         .getByRole('button', { name: `Review ${label}`, exact: true })
         .click();
+      const reviewText = await dialog.innerText();
       await dialog
         .getByRole('button', { name: `Confirm ${label}`, exact: true })
         .click();
-      await expect(
-        page.getByRole('status').first(),
-        await dialog.innerText(),
-      ).toContainText(`${label}: done`);
+      await expect(page.getByRole('status').first(), reviewText).toContainText(
+        `${label}: done`,
+      );
     };
     const dataset = (local: string) =>
       page.locator(`[data-composition-dataset$="dataset.${local}"]`);

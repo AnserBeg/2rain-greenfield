@@ -380,6 +380,17 @@ test('consolidated guard red: the previously omitted Platform module is observed
   );
 });
 
+test('drop-ship header selectors introduce no purchasing identity debt in the shared press', () => {
+  const path = 'packages/postgres-provider/src/drop-ship-mutation-guards.ts';
+  assert.ok(readFileSync(path, 'utf8').length > 0);
+  const result = checkModulePressLaw(process.cwd());
+  assert.ok(result.scannedFiles > 0);
+  assert.deepEqual(
+    result.violations.filter((violation) => violation.file === path),
+    [],
+  );
+});
+
 test('consolidated guard red: an absent module corpus cannot pass vacuously', () => {
   const root = createArchitectureFixture({
     'apps/web/src/app.ts': 'export const app = true;\n',

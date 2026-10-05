@@ -6315,8 +6315,8 @@ async function assertExactPartitionEvidence(
   const salesScenarioIds = binding.plan.scenarios
     .filter((scenario) => salesEntityIds.has(scenario.entityId))
     .map((scenario) => scenario.scenarioId);
-  // 29 + 16, as `assertSalesVerificationCoverage` pins them per entity.
-  assert.equal(salesScenarioIds.length, 45);
+  // 29 + 19, measured from the compiled verification plan and pinned per entity.
+  assert.equal(salesScenarioIds.length, 48);
   assert.equal(
     salesScenarioIds.every((scenarioId) =>
       executedScenarioIdSet.has(scenarioId),
@@ -6798,11 +6798,9 @@ async function createRuntime(
 ) {
   // Recycle test-cluster WAL between installs within its existing 256 MB
   // tmpfs. The recorded application lineage and every verifier still run.
-  const checkpoint = new pg.Client({ connectionString: databaseUrl });
-  await checkpoint.connect();
+  const checkpoint = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   try {
-    await checkpoint.query('CHECKPOINT');
-    return await createComposedApplicationRuntime({
+    const runtime = await createComposedApplicationRuntime({
       ...(monotonicMilliseconds ? { monotonicMilliseconds } : {}),
       afterFreshTenantIntermediateActivation: async (observation) => {
         await afterFreshTenantIntermediateActivation?.(observation);
@@ -6822,6 +6820,13 @@ async function createRuntime(
       ...(releaseSelection ? { releaseSelection } : {}),
       tenantSlug,
     });
+    try {
+      await checkpoint.query('CHECKPOINT');
+      return runtime;
+    } catch (error) {
+      await runtime.close();
+      throw error;
+    }
   } finally {
     await checkpoint.end();
   }
