@@ -1,6 +1,6 @@
 # RELATION-INSTALL — install relation columns on existing company tables
 
-Status: unfinished, paused for the owner's Windows restart; Critical; owner-run review owed; no push, PR, merge or deployment.
+Status: resumed after the owner's Windows restart; Critical; owner-run review owed; no push, PR, merge or deployment.
 Base: PAYABLES `b91c5284e163d19a834802479dd2dc1e3a1201d1`.
 Critical scope: relation-column resolution and existing column-grant admission in `module-storage-materializer.ts`; no other Critical path changed.
 Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner selected 2026-10-04).
@@ -29,9 +29,9 @@ Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner se
 ## Gates
 
 - Typecheck PASS; focused Prettier PASS.
-- Focused real PostgreSQL transition: never started; cancelled while waiting for another lane's exclusive lock before the owner's Windows restart.
-- Static expected-red validation refused the uncommitted candidate (`EXPECTED_RED_TREE_NOT_FROZEN`); rerun after this checkpoint commit. No mutation control was run or file mutated by a control.
-- Check-records: not run; the record-claim block and frozen review prompt remain to be written at completion.
+- Focused real PostgreSQL transition: fixture correction after first run refused re-normalization of normalized bytes; corrected run pending. Production lookup unchanged.
+- Static expected-red validation PASS (161 entries / 14 manifests) on saved checkpoint. Mutation controls pending; no file mutated by a control yet.
+- Check-records PASS (162 records, 17 declaring; 534 paths and 152 symbols observed); focused lint and formatting PASS. The record-claim names executable `a87e719d`.
 - Full hosted CI and owner Critical review: pending.
 
 ## Test it yourself
@@ -48,11 +48,31 @@ DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint afte
 
 ## Review prompt
 
-`RELATION-INSTALL-review-prompt.md` (to be frozen after CI).
+`RELATION-INSTALL-review-prompt.md` names executable `a87e719d`; facts and questions only, 19 lines. Owner-run review pending; no self-review.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "RELATION-INSTALL",
+  "base": "b91c5284e163d19a834802479dd2dc1e3a1201d1",
+  "head": "a87e719d0c02907132a7accb843f6b82ce9061b6",
+  "changedPaths": [
+    "packages/postgres-provider/src/module-storage-materializer.ts",
+    "test/postgres/composed-application.test.ts",
+    "test/evidence/RELATION-INSTALL.expected-red.json"
+  ],
+  "symbols": [
+    { "path": "packages/postgres-provider/src/module-storage-materializer.ts", "name": "locateColumn" },
+    { "path": "packages/postgres-provider/src/module-storage-materializer.ts", "name": "applyDdlElement" },
+    { "path": "test/postgres/composed-application.test.ts", "name": "appendRelationSuccessor" },
+    { "path": "test/postgres/composed-application.test.ts", "name": "copyRelationFixtureRow" }
+  ]
+}
+```
 
 ## Restart checkpoint — 2026-10-04
 
 - Saved paths: the materializer's 17-line relation lookup, the composed PostgreSQL transition test, the three-control manifest and this record.
 - Next: run static controls on the committed tree, then the focused PostgreSQL test after checking free Windows memory outside the exclusive lock; fix any real failure; freeze and run each Critical control on AC with >=2 GB free Windows memory.
-- Still owed: control outcomes, record-claim, facts/questions-only review prompt, draft RELATION-INSTALL PR against PAYABLES and full green CI. No app release or lineage artifact changed.
+- Resume progress: fixture correction committed as `a87e719d`; record-claim and facts/questions-only prompt written. Still owed: PostgreSQL result, control outcomes, draft RELATION-INSTALL PR and full green CI. No app release or lineage artifact changed.
 - DROP-SHIP worktree was not touched. Its saved tip is `4000c48663aca79b4ac5e5c87b72f7b0bdb772f3`, draft PR #19. Return there only at authorized step 6 to merge this bridge, regenerate the schema snapshot and run its PostgreSQL/browser gates.
