@@ -1089,6 +1089,11 @@ test(
           await runtime.close();
         }
       },
+      // Every install and activation here keeps its release artifacts and their
+      // write-ahead log. At lineage entry 6 they filled the default 256 MB
+      // volume (sqlstate 53100), so this parent runs on the full-replay
+      // generator's 1 GB volume.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
@@ -4064,6 +4069,9 @@ test(
           await reversed.close();
         }
       },
+      // As the advancement parent: at lineage entry 6 its installs filled the
+      // default 256 MB volume (sqlstate 53100).
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
