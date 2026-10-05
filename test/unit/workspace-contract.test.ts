@@ -1667,7 +1667,7 @@ test('REPLENISHMENT: an item keeps its reorder levels, preferred location and st
     ]),
   );
   for (const fieldId of replenishment) {
-    const declared = fields.get(fieldId) as Loose & {
+    const declared = fields.get(fieldId) as unknown as Loose & {
       presence: string;
       fieldType: { kind: string; maximumLength?: number };
     };
@@ -1809,7 +1809,7 @@ test('REPLENISHMENT: an item keeps its reorder levels, preferred location and st
   }, /a form field is chosen by one reference/);
   refuse((candidate) => {
     surface(candidate, 'item_detail').form = structuredClone(
-      surface(candidate, 'item_form').form,
+      surface(candidate, 'item_form').form!,
     );
   }, /form references belong to a Record form/);
   refuse((candidate) => {

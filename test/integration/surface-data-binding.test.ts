@@ -4755,8 +4755,153 @@ class OrderEntryExecutor
             : 0;
         return { ordered, done, open };
       };
+      // Like the PostgreSQL statement (REPLENISHMENT): each figure adds up
+      // rows of its own query's entity that hold the listed row's id, in the
+      // List's company; totals, bands and the latest parent follow, and a
+      // kept band narrows the set before paging. Echoed like progress.
+      const listed = request.list?.figures;
+      const figured = new Map<
+        string,
+        {
+          values: Record<string, string | null>;
+          labels: Record<string, string | null>;
+        }
+      >();
+      const figuresOf = (row: SemanticRecordDto) => {
+        if (!listed) return null;
+        const known = figured.get(row.recordId);
+        if (known) return known;
+        const entityOf = (queryId: string) => listed.entityIds[queryId]!;
+        const live = (candidate: SemanticRecordDto, queryId: string) =>
+          candidate.entityId === entityOf(queryId) &&
+          !candidate.archived &&
+          this.owners.get(candidate.recordId) === scope;
+        const matching = (rows: { queryId: string; matchFieldId: string }) =>
+          [...this.rows.values()].filter(
+            (candidate) =>
+              live(candidate, rows.queryId) &&
+              candidate.values[rows.matchFieldId] === row.recordId,
+          );
+        const parentOf = (
+          candidate: SemanticRecordDto,
+          within: {
+            fieldId: string;
+            queryId: string;
+            relationId: string;
+            values: readonly string[];
+          },
+        ) => {
+          const parent = this.rows.get(
+            String(candidate.values[within.relationId]),
+          );
+          return parent &&
+            live(parent, within.queryId) &&
+            within.values.includes(String(parent.values[within.fieldId]))
+            ? parent
+            : null;
+        };
+        const values: Record<string, string | null> = {};
+        const labels: Record<string, string | null> = {};
+        const numbers = new Map<string, number | null>();
+        for (const sum of listed.figures.sums) {
+          let total = 0;
+          for (const candidate of matching(sum.rows)) {
+            if (sum.within && !parentOf(candidate, sum.within)) continue;
+            const quantity = sum.rows.quantityFieldId
+              ? Number(candidate.values[sum.rows.quantityFieldId])
+              : 0;
+            const related = sum.related
+              ? [...this.rows.values()]
+                  .filter(
+                    (pointing) =>
+                      live(pointing, sum.related!.queryId) &&
+                      pointing.values[sum.related!.relationId] ===
+                        candidate.recordId,
+                  )
+                  .reduce(
+                    (added, pointing) =>
+                      added + Number(pointing.values[sum.related!.fieldId]),
+                    0,
+                  )
+              : 0;
+            total +=
+              sum.sum === 'rows'
+                ? quantity
+                : sum.sum === 'related'
+                  ? related
+                  : Math.max(quantity - related, 0);
+          }
+          numbers.set(sum.figureId, total);
+        }
+        const operand = (value: { figureId: string } | { fieldId: string }) => {
+          if ('figureId' in value) return numbers.get(value.figureId) ?? null;
+          const stated = row.values[value.fieldId];
+          return stated === null || stated === undefined
+            ? null
+            : Number(stated);
+        };
+        for (const total of listed.figures.totals ?? []) {
+          const parts = [
+            ...total.plus.map((value) => operand(value)),
+            ...total.minus.map((value) => {
+              const part = operand(value);
+              return part === null ? null : -part;
+            }),
+          ];
+          // An unstated field leaves the total unstated, never 0.
+          const added = parts.some((part) => part === null)
+            ? null
+            : parts.reduce<number>((sum, part) => sum + part!, 0);
+          numbers.set(
+            total.figureId,
+            added !== null && total.floor === 'zero'
+              ? Math.max(added, 0)
+              : added,
+          );
+        }
+        for (const [figureId, number] of numbers)
+          values[figureId] = number === null ? null : String(number);
+        for (const band of listed.figures.bands ?? []) {
+          const of = numbers.get(band.of) ?? null;
+          const hit = band.cases.find((entry) => {
+            const compared = entry.below ?? entry.atMost!;
+            const threshold =
+              'value' in compared ? Number(compared.value) : operand(compared);
+            if (of === null || threshold === null) return false;
+            return entry.below ? of < threshold : of <= threshold;
+          });
+          values[band.figureId] = hit ? hit.value : band.otherwise;
+        }
+        for (const latest of listed.figures.latest ?? []) {
+          const parents = matching(latest.rows)
+            .map((candidate) => parentOf(candidate, latest.within))
+            .filter((parent): parent is SemanticRecordDto => parent !== null)
+            .sort(
+              (left, right) =>
+                String(right.values[latest.byFieldId] ?? '').localeCompare(
+                  String(left.values[latest.byFieldId] ?? ''),
+                ) || right.recordId.localeCompare(left.recordId),
+            );
+          const value = parents[0]?.values[latest.valueFieldId];
+          const labelled =
+            typeof value === 'string' ? this.rows.get(value) : undefined;
+          values[latest.figureId] = typeof value === 'string' ? value : null;
+          labels[latest.figureId] =
+            labelled?.entityId === entityOf(latest.label.queryId)
+              ? displayValue(labelled.values[latest.label.fieldId])
+              : null;
+        }
+        const answer = { values, labels };
+        figured.set(row.recordId, answer);
+        return answer;
+      };
+      const kept = request.list?.query.figures?.keep;
       const narrowed = selected.filter(
         (row) =>
+          (!kept ||
+            kept.values.includes(
+              String(figuresOf(row)?.values[kept.figureId]),
+            )) &&
           (!progress?.openOnly || (figures(row)?.open ?? 0) > 0) &&
           (beforeFilters ?? []).every((filter) => {
             const value = row.values[filter.fieldId];
@@ -4767,6 +4912,18 @@ class OrderEntryExecutor
           }),
       );
       const project = (row: SemanticRecordDto) => {
+        const listedFigures = figuresOf(row);
+        if (listedFigures) {
+          const projected = projectedListRecord(request, row);
+          return {
+            ...projected,
+            values: { ...projected.values, ...listedFigures.values },
+            displayValues: {
+              ...projected.displayValues,
+              ...listedFigures.labels,
+            },
+          };
+        }
         const projected = projectedListRecord(request, row);
         const summed = figures(row);
         return summed && progress
@@ -4789,6 +4946,9 @@ class OrderEntryExecutor
           : {}),
         ...(request.list?.query.progress
           ? { progress: request.list.query.progress }
+          : {}),
+        ...(request.list?.query.figures
+          ? { figures: request.list.query.figures }
           : {}),
         ...(beforeFilters ? { beforeFilters } : {}),
         ...(request.list?.query.outputMode
@@ -11629,5 +11789,564 @@ test('INVENTORY-PARITY: a new stock document is dated the instant it opens, not 
       field('inventory_transaction_effective_at')
     ],
     '2026-09-30T14:03:27.000Z',
+  );
+});
+
+test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in one company in the statement, keep a band per tab and refuse a denied figure query by its name', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope, foreign] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const relation = (local: string) => id('relation', local);
+  const stockList = id('surface', 'item_stock_list');
+  const buyingList = id('surface', 'item_buying_list');
+  const parameter = (list: string) =>
+    id('parameter', `${list}_legal_entity_scope`);
+  // Items as the providers return them: every field their lists select.
+  const item = (
+    sku: string,
+    name: string,
+    reorderPoint: string | null,
+    reorderUpTo: string | null,
+  ) =>
+    f.executor.seed('item', {
+      [field('item_sku')]: sku,
+      [field('item_name')]: name,
+      [field('item_description')]: null,
+      [field('item_base_unit')]: 'EA',
+      [field('item_price_cad')]: null,
+      [field('item_price_usd')]: null,
+      [field('item_price_eur')]: null,
+      [field('item_reorder_point')]: reorderPoint,
+      [field('item_reorder_up_to')]: reorderUpTo,
+      [field('item_preferred_location_id')]: null,
+      [field('item_standard_cost_cad')]: '12.5',
+      [field('item_standard_cost_usd')]: null,
+      [field('item_standard_cost_eur')]: null,
+    });
+  const valve = item('VALVE-10', 'Valve', '10', '40');
+  const bolt = item('BOLT-20', 'Bolt', '5', null);
+  const nut = item('NUT-30', 'Nut', null, null);
+  const balance = (itemId: string, quantity: string, company = scope) =>
+    f.executor.seed(
+      'posted_stock_balance',
+      {
+        [field('posted_stock_balance_item_id')]: itemId,
+        [field('posted_stock_balance_location_id')]: randomUUID(),
+        [field('posted_stock_balance_posted_quantity')]: quantity,
+        [field('posted_stock_balance_unit_id')]: 'EA',
+      },
+      company,
+    );
+  balance(valve, '8');
+  balance(valve, '4');
+  balance(valve, '50', foreign);
+  balance(bolt, '2');
+  balance(nut, '100');
+  // What each reservation still holds: a released one nothing, a draft one
+  // has no balance yet.
+  const reservation = (
+    itemId: string,
+    state: string,
+    remaining: string | null,
+  ) => {
+    const reservationId = f.executor.seed(
+      'reservation',
+      {
+        [field('reservation_number')]: `RSV-${randomUUID()}`,
+        [field('reservation_state')]: id(
+          'option',
+          `reservation_state_${state}`,
+        ),
+        [field('reservation_item_id')]: itemId,
+        [field('reservation_location_id')]: randomUUID(),
+        [field('reservation_quantity')]: '3',
+        [field('reservation_unit_id')]: 'EA',
+        [field('reservation_reason')]: null,
+      },
+      scope,
+    );
+    if (remaining !== null)
+      f.executor.seed(
+        'reservation_balance',
+        {
+          [field('reservation_balance_remaining_quantity')]: remaining,
+          [field('reservation_balance_unit_id')]: 'EA',
+          [relation('reservation_balance_reservation')]: reservationId,
+        },
+        scope,
+      );
+  };
+  reservation(valve, 'active', '3');
+  reservation(valve, 'released', '0');
+  reservation(valve, 'draft', null);
+  // Purchase orders: a line points at its order, a received row at its line.
+  const supplier = (name: string) =>
+    f.executor.seedParty({ [field('party_name')]: name }, ['supplier']);
+  const acme = supplier('Acme Supply');
+  const brightway = supplier('Brightway Parts');
+  const cobalt = supplier('Cobalt Trading');
+  const purchase = (
+    state: string,
+    supplierId: string,
+    ordered: string,
+    lines: readonly (readonly [
+      itemId: string,
+      quantity: string,
+      received: string,
+    ])[],
+    company = scope,
+  ) => {
+    const orderId = f.executor.seed(
+      'purchase_order',
+      {
+        [field('purchase_order_number')]: `PO-${randomUUID().slice(0, 8)}`,
+        [field('purchase_order_supplier_party_id')]: supplierId,
+        [field('purchase_order_order_date')]: ordered,
+        [field('purchase_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.purchase_order_lifecycle')]: id(
+          'state',
+          `purchase_order_${state}`,
+        ),
+      },
+      company,
+    );
+    for (const [itemId, quantity, received] of lines) {
+      const lineId = f.executor.seed(
+        'purchase_order_line',
+        {
+          [field('purchase_order_line_item_id')]: itemId,
+          [field('purchase_order_line_ordered_quantity')]: quantity,
+          [relation('purchase_order_line_order')]: orderId,
+        },
+        company,
+      );
+      if (received !== '0')
+        f.executor.seed(
+          'purchase_order_received',
+          {
+            [field('purchase_order_received_received_quantity')]: received,
+            [relation('purchase_order_received_order_line')]: lineId,
+          },
+          company,
+        );
+    }
+  };
+  // Incoming is what released orders still have to receive, line by line:
+  // 10 - 4, and nothing from a line received beyond its order.
+  purchase('released', acme, '2026-09-20T09:00:00.000Z', [
+    [valve, '10', '4'],
+    [valve, '3', '5'],
+  ]);
+  // A closed order adds nothing incoming but names the latest supplier; a
+  // draft, however recent, does neither.
+  purchase('closed', brightway, '2026-09-25T09:00:00.000Z', [
+    [valve, '5', '5'],
+  ]);
+  purchase('draft', cobalt, '2026-09-28T09:00:00.000Z', [[valve, '20', '0']]);
+  purchase(
+    'released',
+    cobalt,
+    '2026-09-29T09:00:00.000Z',
+    [[valve, '30', '0']],
+    foreign,
+  );
+  // Open demand is what confirmed sales orders still have to ship.
+  const sale = (
+    state: string,
+    lines: readonly (readonly [
+      itemId: string,
+      quantity: string,
+      shipped: string,
+    ])[],
+    company = scope,
+  ) => {
+    const orderId = f.executor.seed(
+      'sales_order',
+      {
+        [field('sales_order_number')]: `SO-${randomUUID().slice(0, 8)}`,
+        [field('sales_order_customer_party_id')]: f.party,
+        [field('sales_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+          'state',
+          `sales_order_${state}`,
+        ),
+      },
+      company,
+    );
+    for (const [itemId, quantity, shipped] of lines) {
+      const lineId = f.executor.seed(
+        'sales_order_line',
+        {
+          [field('sales_order_line_item_id')]: itemId,
+          [field('sales_order_line_ordered_quantity')]: quantity,
+          [relation('sales_order_line_order')]: orderId,
+        },
+        company,
+      );
+      if (shipped !== '0')
+        f.executor.seed(
+          'sales_order_shipped',
+          {
+            [field('sales_order_shipped_shipped_quantity')]: shipped,
+            [relation('sales_order_shipped_order_line')]: lineId,
+          },
+          company,
+        );
+    }
+  };
+  sale('released', [
+    [valve, '15', '5'],
+    [bolt, '6', '0'],
+  ]);
+  sale('draft', [[valve, '7', '0']]);
+  sale('released', [[bolt, '40', '0']], foreign);
+
+  const url = (
+    list: string,
+    local: string,
+    parameters: Record<string, string> = {},
+  ) =>
+    `/?${new URLSearchParams({ surface: list, [parameter(local)]: scope, ...parameters }).toString()}`;
+  const counts = (html: string) =>
+    Object.fromEntries(
+      [
+        ...html.matchAll(
+          /data-view-id="([^"]+)"[^>]*>(?:<span>[^<]*<\/span>)<span class="list-view__count" data-view-count="(\d+)"/gu,
+        ),
+      ].map((match) => [match[1]!, Number(match[2]!)]),
+    );
+  const cell = (html: string, recordId: string, list: string, local: string) =>
+    new RegExp(
+      `data-record-id="${recordId}"[\\s\\S]*?data-column-id="${id('list_column', `${list}_${local}`)}">([\\s\\S]*?)</td>`,
+      'u',
+    ).exec(html)?.[1];
+  const view = (list: string, local: string) =>
+    id('list_view', `${list}_${local}`);
+  const figureCalls = () =>
+    f.policy.calls.filter(
+      (call) =>
+        (call.decisionInput as { kind?: string }).kind ===
+        'registeredSemanticListFiguresPolicyInput',
+    );
+
+  // Stock by item: every item, its figures from this company's rows alone.
+  const before = figureCalls().length;
+  const stock = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(stockList, 'item_stock_list'),
+    f.gateways,
+  );
+  assert.equal(stock.statusCode, 200);
+  assert.match(stock.html, /data-list-total="4"/u);
+  assert.deepEqual(counts(stock.html), {
+    [view('item_stock_list', 'all')]: 4,
+    [view('item_stock_list', 'shortage')]: 1,
+    [view('item_stock_list', 'reorder')]: 1,
+  });
+  const stockCell = (recordId: string, local: string) =>
+    cell(stock.html, recordId, 'item_stock_list', local);
+  // On hand 8 + 4 (the other company's 50 is not this company's), reserved
+  // what the active reservation still holds, incoming 6, open demand 10:
+  // projected 12 + 6 - 10 = 8, at or below its reorder point of 10.
+  assert.deepEqual(
+    [
+      'on_hand',
+      'reserved',
+      'available',
+      'incoming',
+      'open_demand',
+      'projected',
+      'reorder_point',
+    ].map((local) => stockCell(valve, local)),
+    ['12', '3', '9', '6', '10', '8', '10'],
+  );
+  assert.equal(
+    stockCell(valve, 'status'),
+    '<span class="status-pill" data-status-role="attention">Reorder</span>',
+  );
+  // Projected below zero is a shortage whatever the reorder point.
+  assert.equal(stockCell(bolt, 'projected'), '-4');
+  assert.equal(
+    stockCell(bolt, 'status'),
+    '<span class="status-pill" data-status-role="blocked">Shortage</span>',
+  );
+  // An item without a reorder point is never due.
+  assert.equal(stockCell(nut, 'reorder_point'), '<span class="muted">—</span>');
+  assert.equal(
+    stockCell(nut, 'status'),
+    '<span class="status-pill" data-status-role="success">Healthy</span>',
+  );
+  // Figures are shown, never offered as a sort.
+  assert.doesNotMatch(
+    stock.html,
+    new RegExp(
+      `data-sort-column="${id('list_column', 'item_stock_list_projected')}"`,
+      'u',
+    ),
+  );
+  // Every figure query passed current policy, per request, for this List's
+  // company alone; the label query reads no company.
+  const stockCalls = figureCalls().slice(before);
+  assert.deepEqual(
+    [
+      ...new Set(
+        stockCalls.map(
+          (call) => (call.decisionInput as { queryId: string }).queryId,
+        ),
+      ),
+    ].sort(),
+    [
+      'commercial_lines',
+      'posted_stock_balance_list',
+      'purchase_order_line_list',
+      'purchase_order_list',
+      'purchase_order_received_list',
+      'reservation_balance_list',
+      'sales_order_list',
+      'sales_order_shipped_list',
+      'workspace_stock_reservations',
+    ].map((local) => id('query', local)),
+  );
+  assert.ok(
+    stockCalls.every(
+      (call) =>
+        JSON.stringify(
+          (call.decisionInput as { arguments: Record<string, unknown> })
+            .arguments[parameter('item_stock_list')],
+        ) === JSON.stringify([scope]),
+    ),
+  );
+
+  // A tab counts and pages the rows its band keeps.
+  const shortage = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(stockList, 'item_stock_list', {
+      view: view('item_stock_list', 'shortage'),
+    }),
+    f.gateways,
+  );
+  assert.match(shortage.html, /data-list-total="1"/u);
+  assert.match(shortage.html, /BOLT-20/u);
+  assert.doesNotMatch(shortage.html, /VALVE-10|NUT-30/u);
+
+  // The Buying worklist: what is due, back up to its level, from whom last.
+  const buying = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(buyingList, 'item_buying_list'),
+    f.gateways,
+  );
+  assert.equal(buying.statusCode, 200);
+  assert.match(buying.html, /data-list-total="2"/u);
+  assert.deepEqual(counts(buying.html), {
+    [view('item_buying_list', 'to_buy')]: 2,
+  });
+  assert.doesNotMatch(buying.html, /NUT-30|SKU-WITNESS/u);
+  const buyingCell = (recordId: string, local: string) =>
+    cell(buying.html, recordId, 'item_buying_list', local);
+  assert.deepEqual(
+    [
+      'available',
+      'projected',
+      'reorder_point',
+      'reorder_up_to',
+      'suggested',
+      'last_supplier',
+    ].map((local) => buyingCell(valve, local)),
+    ['9', '8', '10', '40', '32', 'Brightway Parts'],
+  );
+  // Without a level the suggestion is unstated, and without a purchase
+  // order there is no last supplier: "—", never 0.
+  assert.equal(buyingCell(bolt, 'suggested'), '<span class="muted">—</span>');
+  assert.equal(
+    buyingCell(bolt, 'last_supplier'),
+    '<span class="muted">—</span>',
+  );
+  const labelCalls = figureCalls().filter(
+    (call) =>
+      (call.decisionInput as { queryId: string }).queryId ===
+      id('query', 'party_list'),
+  );
+  assert.ok(labelCalls.length > 0);
+  assert.ok(
+    labelCalls.every(
+      (call) =>
+        Object.keys(
+          (call.decisionInput as { arguments: Record<string, unknown> })
+            .arguments,
+        ).join() === 'fieldIds,relationIds',
+    ),
+  );
+
+  // The export reads the same figures and names each band by its label.
+  const exported = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(stockList, 'item_stock_list', { export: 'csv' }),
+    f.gateways,
+  );
+  assert.equal(exported.statusCode, 200);
+  const rows = exported
+    .download!.body.replace(/^\uFEFF/u, '')
+    .trimEnd()
+    .split('\r\n');
+  assert.equal(
+    rows[0],
+    'SKU,Item,Unit,On hand,Reserved,Available,Incoming,Open demand,Projected,Reorder point,Status',
+  );
+  assert.equal(rows.length - 1, 4);
+  assert.ok(rows.includes('VALVE-10,Valve,EA,12,3,9,6,10,8,10,Reorder'));
+  // A negative figure is guarded like any cell a spreadsheet would read as a
+  // formula.
+  assert.ok(rows.includes("BOLT-20,Bolt,EA,2,0,2,0,6,'-4,5,Shortage"));
+  // An item with neither level reads empty, never 0.
+  assert.ok(rows.includes('NUT-30,Nut,EA,100,0,100,0,0,100,,Healthy'));
+
+  // The agent reads the same List through its published preset: the
+  // figures argument the web sends, each view's band as `keep`.
+  const preset = (
+    f.view.projections.agent.payload as {
+      listPresets: Array<{
+        surfaceId: string;
+        figures?: { sums: unknown[] };
+        figureLabels?: Record<string, Record<string, string>>;
+        views: Array<{
+          viewId: string;
+          band?: { figureId: string; values: string[] };
+        }>;
+      }>;
+    }
+  ).listPresets.find((value) => value.surfaceId === stockList)!;
+  assert.equal(preset.figures?.sums.length, 4);
+  assert.deepEqual(
+    preset.figureLabels?.[id('list_figure', 'item_stock_list_status')],
+    {
+      [id('list_band', 'item_stock_list_shortage')]: 'Shortage',
+      [id('list_band', 'item_stock_list_reorder')]: 'Reorder',
+      [id('list_band', 'item_stock_list_healthy')]: 'Healthy',
+    },
+  );
+  assert.deepEqual(
+    preset.views.map((value) => value.band?.values),
+    [
+      undefined,
+      [id('list_band', 'item_stock_list_shortage')],
+      [id('list_band', 'item_stock_list_reorder')],
+    ],
+  );
+
+  // Without reservation balances the List is refused by that query's name:
+  // a figure is the List's purpose, never omitted.
+  f.deniedReads.add(id('permission', 'reservation_balance_read'));
+  const denied = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(stockList, 'item_stock_list'),
+    f.gateways,
+  );
+  assert.match(denied.html, /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u);
+  assert.doesNotMatch(denied.html, /VALVE-10/u);
+  const refused = await f.gateways.queryGateway
+    .invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', 'item_stock_list'),
+      arguments: {
+        includeArchived: false,
+        [parameter('item_stock_list')]: scope,
+        list: {
+          cursor: null,
+          matchMode: 'substring',
+          pageSize: 10,
+          relationLabels: [],
+          schemaVersion: 'northstar.shared-list-query/v1',
+          search: '',
+          sort: [],
+          figures: {
+            sums: [
+              {
+                figureId: id('list_figure', 'item_stock_list_reserved'),
+                rows: {
+                  matchFieldId: field('reservation_item_id'),
+                  queryId: id('query', 'workspace_stock_reservations'),
+                },
+                related: {
+                  fieldId: field('reservation_balance_remaining_quantity'),
+                  queryId: id('query', 'reservation_balance_list'),
+                  relationId: relation('reservation_balance_reservation'),
+                },
+                sum: 'related',
+              },
+            ],
+          },
+        },
+      },
+    })
+    .then(
+      () => null,
+      (error: unknown) => error,
+    );
+  assert.ok(refused instanceof SemanticQueryPolicyDeniedError);
+  assert.equal(refused.queryId, id('query', 'reservation_balance_list'));
+});
+
+test('REPLENISHMENT: the item form chooses its preferred location from the location list by name and keeps the plain control when that list cannot be read', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const location = (code: string, name: string) =>
+    f.executor.seed('location', {
+      [field('location_code')]: code,
+      [field('location_name')]: name,
+      [field('location_type')]: id('option', 'warehouse'),
+    });
+  const vancouver = location('VAN-WH', 'Vancouver warehouse');
+  const calgary = location('CAL-WH', 'Calgary warehouse');
+  const valve = f.executor.seed('item', {
+    [field('item_sku')]: 'VALVE-10',
+    [field('item_name')]: 'Valve',
+    [field('item_description')]: null,
+    [field('item_base_unit')]: 'EA',
+    [field('item_price_cad')]: null,
+    [field('item_price_usd')]: null,
+    [field('item_price_eur')]: null,
+    [field('item_reorder_point')]: '10',
+    [field('item_reorder_up_to')]: '40',
+    [field('item_preferred_location_id')]: vancouver,
+    [field('item_standard_cost_cad')]: '12.5',
+    [field('item_standard_cost_usd')]: null,
+    [field('item_standard_cost_eur')]: null,
+  });
+  const form = (record?: string) =>
+    renderSurfaceRuntimeWithData(
+      f.view,
+      `/?${new URLSearchParams({ surface: id('surface', 'item_form'), ...(record ? { record } : {}) }).toString()}`,
+      f.gateways,
+    );
+  const select = (html: string) =>
+    new RegExp(
+      `<select name="value:${field('item_preferred_location_id')}"[^>]*data-form-reference="${field('item_preferred_location_id')}"[^>]*>([\\s\\S]*?)</select>`,
+      'u',
+    ).exec(html)?.[1];
+  // Offered by name, sorted; the stored id is the one selected and submitted.
+  const edit = await form(valve);
+  assert.equal(edit.statusCode, 200);
+  assert.equal(
+    select(edit.html),
+    `<option value="">None</option><option value="${calgary}">Calgary warehouse</option><option value="${vancouver}" selected>Vancouver warehouse</option>`,
+  );
+  // A new item starts with none chosen.
+  const created = await form();
+  assert.match(select(created.html) ?? '', /<option value="" selected>None/u);
+  // A location list the principal may not read leaves the plain control:
+  // the stored id is kept, never replaced by a partial choice.
+  f.deniedReads.add(id('permission', 'location_read'));
+  const plain = await form(valve);
+  assert.equal(select(plain.html), undefined);
+  assert.match(
+    plain.html,
+    new RegExp(
+      `name="value:${field('item_preferred_location_id')}" value="${vancouver}"`,
+      'u',
+    ),
   );
 });
