@@ -926,6 +926,145 @@ test(
   },
 );
 
+// A Q1 get whose filter is the literal `true` returns any live record by id:
+// the gateway executes it through its compiled plan, and the plan restricts
+// nothing. Party's only plain get, `party_get`, is such a get here (its id
+// kept). The operation gateway reads a write back only through a Q0 get, so
+// Party's operations read back through `party_read_back_get`, a Q0 copy of
+// `party_get` with a read model, which verification never reads through.
+const q1Get = `${PARTY_IDS.namespace}:query.party_get`;
+const readModelGet = `${PARTY_IDS.namespace}:query.party_read_back_get`;
+
+test(
+  'release verification archives its probe records through a literal-true Q1 get when the entity has no plain Q0 get',
+  { timeout: 300_000 },
+  async () => {
+    const definition = q1GetPartyDefinition();
+
+    // The premise, compiled: Party's plain get is Q1 with a lowering plan and
+    // a filter the gateway's fence accepts; its only Q0 get has a read model,
+    // and every Party operation reads back through it.
+    type Query = {
+      filter: unknown;
+      filterPlan?: unknown;
+      queryId: string;
+      queryType: string;
+      readModel?: unknown;
+      sourceEntityId: string;
+      tier: string;
+    };
+    const compiled = compilePartyFixture(definition).compiled;
+    assert.deepEqual(
+      projectionPayload<{ queries: Query[] }>(
+        compiled,
+        PROJECTION_FAMILY_IDS.queryCatalog,
+      )
+        .queries.filter(
+          (query) =>
+            query.sourceEntityId === PARTY_IDS.entityIds.party &&
+            query.queryType === 'get',
+        )
+        .map((query) => [
+          query.queryId,
+          query.tier,
+          query.filterPlan !== undefined,
+          inspectPredicateForExecution(query.filter).outcome,
+          query.readModel !== undefined,
+        ]),
+      [
+        [q1Get, 'q1', true, 'accepted', false],
+        [readModelGet, 'q0', false, 'accepted', true],
+      ],
+    );
+    assert.deepEqual(
+      [
+        ...new Set(
+          projectionPayload<{
+            operations: { operationId: string; readBackQueryId: string }[];
+          }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog)
+            .operations.filter((operation) =>
+              /:operation\.party_(create|update|archive|restore)$/u.test(
+                operation.operationId,
+              ),
+            )
+            .map((operation) => operation.readBackQueryId),
+        ),
+      ],
+      [readModelGet],
+    );
+
+    await withRealPartyRuntime(
+      'verification-q1-get',
+      async (runtime) => {
+        const party = storageEntity(runtime.storage, PARTY_IDS.entityIds.party);
+        const role = storageEntity(runtime.storage, PARTY_IDS.entityIds.role);
+
+        // The Q1 get reads a live party by id through the real gateway.
+        const partyId = randomUUID();
+        const created = await invokePartyOperation(
+          runtime,
+          runtime.views.a,
+          'party_create',
+          {
+            recordId: partyId,
+            values: {
+              [PARTY_IDS.fieldIds.contactSummary]: 'q1-get@example.test',
+              [PARTY_IDS.fieldIds.name]: 'Quarry Freight',
+              [PARTY_IDS.fieldIds.number]: 'P-Q1G',
+            },
+          },
+        );
+        assert.equal(created.outcome, 'succeeded');
+        const read = await invokePartyQuery(
+          runtime,
+          runtime.views.a,
+          'party_get',
+          { recordId: partyId },
+        );
+        assert.deepEqual(
+          [read.outcome, read.records.map((record) => record.recordId)],
+          ['exact', [partyId]],
+        );
+
+        // Activation's release verification succeeded, executing every
+        // scenario, and archived every record it arranged.
+        const plan = releaseVerificationBinding(runtime.compiled).plan;
+        const executedIn = await admittedEvidence(runtime);
+        assert.equal(executedIn.execution_scope, 'FULL', 'nothing was derived');
+        assert.deepEqual(
+          executedIn.scenarioIds,
+          plan.scenarios.map((scenario) => scenario.scenarioId).toSorted(),
+          'release verification executed every scenario',
+        );
+        for (const [entity, fieldId] of [
+          [party, PARTY_IDS.fieldIds.name],
+          [role, PARTY_IDS.fieldIds.roleKind],
+        ] as const) {
+          const records = await storedRecords(
+            runtime,
+            entity,
+            executedIn.executed_tenant_id,
+            executedIn.executed_environment_id,
+            [fieldId],
+          );
+          assert.ok(
+            records.length > 0,
+            `verification arranged ${entity.entityId}`,
+          );
+          assert.deepEqual(
+            records
+              .filter((record) => !record.archived)
+              .map((record) => record.recordId),
+            [],
+            `verification left no ${entity.entityId} record live`,
+          );
+        }
+      },
+      definition,
+    );
+  },
+);
+
 type StorageEntity = StorageTargetPayloadV1['entities'][number];
 
 /** Every record of an entity in one tenant environment, with field values. */
@@ -1241,6 +1380,54 @@ function q1SearchPartyDefinition(): Record<string, unknown> {
   };
   search.tier = 'q1';
   definition.queries.push(unexecuted);
+  return definition;
+}
+
+/**
+ * Party's own definition with its plain get made Q1 (the literal `true`
+ * filter, its id and selections kept) and Party's operations reading back
+ * through a Q0 copy with a read model (see `q1Get` above).
+ */
+function q1GetPartyDefinition(): Record<string, unknown> {
+  type Json = Record<string, unknown>;
+  type Query = Json & { queryId: string; selections: Json[] };
+  type Operation = Json & { effect: Json & { entity?: { targetId: string } } };
+  const definition = structuredClone(partyModuleDefinition()) as Json & {
+    operations: Operation[];
+    queries: Query[];
+  };
+  const get = definition.queries.find((entry) => entry.queryId === q1Get)!;
+  const readBack = structuredClone(get);
+  readBack.queryId = readModelGet;
+  readBack.selections = readBack.selections.map((selection) => ({
+    ...selection,
+    selectionId: String(selection.selectionId).replace(
+      '.party_get_',
+      '.party_read_back_get_',
+    ),
+  }));
+  readBack.readModel = {
+    binding: `${PARTY_IDS.namespace}:binding.party_read_back`,
+    capability: {
+      kind: 'capabilityReference',
+      schemaVersion: 'v6',
+      targetId: `${PARTY_IDS.namespace}:capability.standard_surface_content`,
+    },
+    queries: {},
+    resultFields: {},
+  };
+  get.tier = 'q1';
+  definition.queries.push(readBack);
+  for (const operation of definition.operations) {
+    if (operation.effect.entity?.targetId !== PARTY_IDS.entityIds.party) {
+      continue;
+    }
+    operation.readBack = {
+      kind: 'queryReference',
+      schemaVersion: 'v6',
+      targetId: readModelGet,
+    };
+  }
   return definition;
 }
 

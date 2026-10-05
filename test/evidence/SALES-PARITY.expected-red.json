@@ -274,9 +274,9 @@
     },
     {
       "name": "verification-witness-reads-through-executed-gets",
-      "claim": "Release verification reads an assigned number the create's read-back omits only through a plain get the query gateway executes (active, Q0, a filter the gateway's execution fence accepts), else uses the record's sentinel unread, so a compiler-admitted get the gateway answers unsupported cannot make a stored number read as missing.",
+      "claim": "Release verification reads an assigned number the create's read-back omits only through a plain get that returns any live record by id (the gateway executes it and its filter is the literal true, Q0 or Q1), else uses the record's sentinel unread, so a compiler-admitted get the gateway answers unsupported cannot make a stored number read as missing.",
       "file": "packages/postgres-provider/src/release-verification-service.ts",
-      "original": "          gatewayExecutesQ0(candidate) &&\n",
+      "original": "          returnsAnyLiveRecordById(candidate) &&\n",
       "replacement": "          candidate.lifecycle === 'active' &&\n          candidate.tier === 'q0' &&\n",
       "test": {
         "files": ["test/postgres/document-numbering.test.ts"],
@@ -313,7 +313,7 @@
       "claim": "Release verification's search-exclusion probe reads through the entity's first plain search its gateway executes (Q0 with a filter the gateway's fence accepts, or Q1 with a compiled filter plan, as SemanticQueryGateway.invoke decides), so a release whose plain search is an executable Q1 query ahead of a Q0 search the gateway does not run verifies instead of failing VERIFICATION_QUERY_MISSING.",
       "file": "packages/postgres-provider/src/release-verification-service.ts",
       "original": "      'search',\n      gatewayExecutes,\n",
-      "replacement": "      'search',\n      gatewayExecutesQ0,\n",
+      "replacement": "      'search',\n      function q0Only(query: VerificationQueryContract) {\n        return query.tier === 'q0' && gatewayExecutes(query);\n      },\n",
       "test": {
         "files": ["test/postgres/document-numbering.test.ts"],
         "namePattern": "an executable Q1 search"
@@ -322,7 +322,25 @@
         {
           "file": "test/postgres/document-numbering.test.ts",
           "name": "release verification probes search through an executable Q1 search, ahead of a Q0 search the gateway does not run",
-          "expected": "compiled search query of northstar\\.party:entity\\.party that gatewayExecutesQ0 admits is missing"
+          "expected": "compiled search query of northstar\\.party:entity\\.party that q0Only admits is missing"
+        }
+      ]
+    },
+    {
+      "name": "verification-archives-through-literal-true-q1-gets",
+      "claim": "Release verification's cleanup and number witness read through a plain get that returns any live record by id -- one the gateway executes whose filter is the literal true, a Q1 get included -- so an entity whose only plain get is a literal-true Q1 get (its operations reading back through a Q0 read-model get) has its probe records archived instead of refused as VERIFICATION_PROBE_RECORD_UNREADABLE.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    gatewayExecutes(query) &&\n    inspectPredicateForExecution(query.filter).outcome === 'accepted'\n",
+      "replacement": "    query.tier === 'q0' &&\n    gatewayExecutes(query) &&\n    inspectPredicateForExecution(query.filter).outcome === 'accepted'\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "a literal-true Q1 get"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification archives its probe records through a literal-true Q1 get when the entity has no plain Q0 get",
+          "expected": "of northstar\\.party:entity\\.party, which has no get that returns any live record by id"
         }
       ]
     }
