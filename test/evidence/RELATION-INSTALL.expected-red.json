@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "packet": "RELATION-INSTALL",
+  "entries": [
+    {
+      "name": "relation-install-target-missing",
+      "claim": "Claim 1: an added declared relation column is resolved from the pinned relation target and installed on the existing source table.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "  if (relations.length === 1) {\n",
+      "replacement": "  if (relations.length === -1) {\n",
+      "test": {
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "^relation install advances"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/composed-application.test.ts",
+          "name": "relation install advances a released company table with nullable storage, scoped FK and index, exact grants and governed writes",
+          "expected": "ELEMENT_TARGET_MISSING"
+        }
+      ]
+    },
+    {
+      "name": "relation-install-foreign-company-target",
+      "claim": "Claim 2: the installed foreign key retains tenant, environment and company scope and refuses a foreign-company target.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "    const relation = relations[0]!;\n",
+      "replacement": "    const relation = relations[0]!;\n    relation.foreignKey.sourceColumns = relation.foreignKey.sourceColumns.filter((column) => column !== 'legal_entity_id');\n    relation.foreignKey.targetColumns = relation.foreignKey.targetColumns.filter((column) => column !== 'legal_entity_id');\n",
+      "test": {
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "^relation install advances"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/composed-application.test.ts",
+          "name": "relation install advances a released company table with nullable storage, scoped FK and index, exact grants and governed writes",
+          "expected": "altered managed constraint|the added FK retains company scope"
+        }
+      ]
+    },
+    {
+      "name": "relation-install-column-write-grant-absent",
+      "claim": "Claim 3: the added relation column receives creation-equivalent column privileges without a table-level UPDATE grant.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "      if (\n        entity.legalEntity &&\n        !entity.factStorage &&\n        !entity.periodLock &&\n        entityOwnedMutableColumnNames(target, entity).includes(\n          column.physicalName,\n        )\n      ) {\n        await client.query(\n          `GRANT UPDATE (${quoted(column.physicalName)})\n             ON north_star_module.${quoted(entity.physicalTableName)}\n             TO north_star_module_runtime`,\n        );\n      }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "^relation install advances"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/composed-application.test.ts",
+          "name": "relation install advances a released company table with nullable storage, scoped FK and index, exact grants and governed writes",
+          "expected": "missing managed column grant"
+        }
+      ]
+    }
+  ]
+}
